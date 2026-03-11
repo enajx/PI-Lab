@@ -1,0 +1,11 @@
+{
+  "name": "@skipper/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'desktop dev: implemented at P3'",
+    "build": "echo 'desktop build: implemented at P3'",
+    "typecheck": "tsc --noEmit"
+  }
+}
