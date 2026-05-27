@@ -1,0 +1,7 @@
+{
+  "extends": "../../tooling/typescript/react.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
+}

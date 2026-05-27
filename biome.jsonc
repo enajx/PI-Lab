@@ -15,7 +15,8 @@
       "e2e/**/*",
       "*.ts",
       "*.json",
-      "*.jsonc"
+      "*.jsonc",
+      "!**/drizzle"
     ]
   },
   "formatter": {

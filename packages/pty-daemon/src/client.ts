@@ -1,0 +1,275 @@
+// Typed client for the PTY daemon's Unix socket. Used by the Electron main
+// process (later) and by the integration tests. Requests are correlated by an
+// auto-generated `cid`; the returned promise settles when the matching reply
+// arrives. Unsolicited `data`/`exit` events are surfaced both via an
+// EventEmitter and via an async-iterator subscription per session.
+
+import { randomUUID } from "node:crypto"
+import { EventEmitter } from "node:events"
+import { connect, type Socket } from "node:net"
+import {
+  type ClientRequest,
+  type DaemonEvent,
+  type DaemonFrame,
+  type DaemonReply,
+  type DataEvent,
+  type ErrorReply,
+  type ExitEvent,
+  encodeFrame,
+  FrameDecoder,
+  parseDaemonFrame,
+  type SessionInfo,
+} from "./protocol"
+
+/** Raised when the daemon answers a request with an `error` reply. */
+export class DaemonError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = "DaemonError"
+  }
+}
+
+interface PendingRequest {
+  resolve: (reply: Exclude<DaemonReply, ErrorReply>) => void
+  reject: (error: Error) => void
+}
+
+export interface SpawnParams {
+  command: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  cols?: number
+  rows?: number
+}
+
+export interface AttachResult {
+  session: SessionInfo
+  scrollback: string
+}
+
+/** Listener signatures for the client's session-scoped events. */
+export interface DaemonClientEvents {
+  data: (event: DataEvent) => void
+  exit: (event: ExitEvent) => void
+  /** Emitted when the underlying socket closes. */
+  close: () => void
+}
+
+export class DaemonClient extends EventEmitter {
+  private socket: Socket | null = null
+  private readonly decoder = new FrameDecoder()
+  private readonly pending = new Map<string, PendingRequest>()
+
+  constructor(private readonly socketPath: string) {
+    super()
+  }
+
+  /** Open the connection. Resolves once the socket is connected. */
+  connect(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const socket = connect(this.socketPath)
+      socket.setEncoding("utf8")
+      const onConnect = () => {
+        socket.removeListener("error", onError)
+        this.socket = socket
+        socket.on("data", (raw: string) => this.ingest(raw))
+        socket.on("close", () => this.handleClose())
+        resolve()
+      }
+      const onError = (error: Error) => {
+        socket.removeListener("connect", onConnect)
+        reject(error)
+      }
+      socket.once("connect", onConnect)
+      socket.once("error", onError)
+    })
+  }
+
+  private ingest(raw: string): void {
+    let decoded: unknown[]
+    try {
+      decoded = this.decoder.push(raw)
+    } catch {
+      return
+    }
+    for (const value of decoded) {
+      const frame = parseDaemonFrame(value)
+      if (frame) this.dispatch(frame)
+    }
+  }
+
+  private dispatch(frame: DaemonFrame): void {
+    if (frame.kind === "data" || frame.kind === "exit") {
+      this.emit(frame.kind, frame)
+      this.emit(`session:${frame.sessionId}`, frame)
+      return
+    }
+    const pending = this.pending.get(frame.cid)
+    if (!pending) return
+    this.pending.delete(frame.cid)
+    if (frame.kind === "error") {
+      pending.reject(new DaemonError(frame.code, frame.message))
+    } else {
+      pending.resolve(frame)
+    }
+  }
+
+  private handleClose(): void {
+    const closeError = new Error("daemon connection closed")
+    for (const pending of this.pending.values()) pending.reject(closeError)
+    this.pending.clear()
+    this.socket = null
+    this.emit("close")
+  }
+
+  private request<R extends Exclude<DaemonReply, ErrorReply>>(
+    build: (cid: string) => ClientRequest,
+  ): Promise<R> {
+    const socket = this.socket
+    if (!socket) return Promise.reject(new Error("client is not connected"))
+    const cid = randomUUID()
+    return new Promise<R>((resolve, reject) => {
+      this.pending.set(cid, {
+        resolve: resolve as PendingRequest["resolve"],
+        reject,
+      })
+      socket.write(encodeFrame(build(cid)))
+    })
+  }
+
+  async spawn(params: SpawnParams): Promise<SessionInfo> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "spawn-ok" }>>((cid) => ({
+      kind: "spawn",
+      cid,
+      command: params.command,
+      args: params.args,
+      cwd: params.cwd,
+      env: params.env,
+      cols: params.cols,
+      rows: params.rows,
+    }))
+    return reply.session
+  }
+
+  async attach(sessionId: string): Promise<AttachResult> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "attach-ok" }>>((cid) => ({
+      kind: "attach",
+      cid,
+      sessionId,
+    }))
+    return { session: reply.session, scrollback: reply.scrollback }
+  }
+
+  async detach(sessionId: string): Promise<void> {
+    await this.request<Extract<DaemonReply, { kind: "detach-ok" }>>((cid) => ({
+      kind: "detach",
+      cid,
+      sessionId,
+    }))
+  }
+
+  async write(sessionId: string, data: string): Promise<void> {
+    await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({
+      kind: "write",
+      cid,
+      sessionId,
+      data,
+    }))
+  }
+
+  async resize(sessionId: string, cols: number, rows: number): Promise<void> {
+    await this.request<Extract<DaemonReply, { kind: "resize-ok" }>>((cid) => ({
+      kind: "resize",
+      cid,
+      sessionId,
+      cols,
+      rows,
+    }))
+  }
+
+  async kill(sessionId: string, signal?: string): Promise<void> {
+    await this.request<Extract<DaemonReply, { kind: "kill-ok" }>>((cid) => ({
+      kind: "kill",
+      cid,
+      sessionId,
+      signal,
+    }))
+  }
+
+  async list(): Promise<SessionInfo[]> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "list-ok" }>>((cid) => ({
+      kind: "list",
+      cid,
+    }))
+    return reply.sessions
+  }
+
+  /**
+   * Async iterator over a single session's events. Yields `data` events and a
+   * final `exit` event, after which it completes. Convenient for tests and for
+   * draining a session to completion.
+   */
+  events(sessionId: string): AsyncIterableIterator<DaemonEvent> {
+    const queue: DaemonEvent[] = []
+    let resolveNext: ((result: IteratorResult<DaemonEvent>) => void) | null = null
+    let done = false
+
+    const onEvent = (event: DaemonEvent) => {
+      if (resolveNext) {
+        resolveNext({ value: event, done: false })
+        resolveNext = null
+      } else {
+        queue.push(event)
+      }
+      if (event.kind === "exit") finish()
+    }
+
+    const finish = () => {
+      done = true
+      this.off(`session:${sessionId}`, onEvent)
+      if (resolveNext) {
+        resolveNext({ value: undefined, done: true })
+        resolveNext = null
+      }
+    }
+
+    this.on(`session:${sessionId}`, onEvent)
+
+    const iterator: AsyncIterableIterator<DaemonEvent> = {
+      next(): Promise<IteratorResult<DaemonEvent>> {
+        const queued = queue.shift()
+        if (queued) return Promise.resolve({ value: queued, done: false })
+        if (done) return Promise.resolve({ value: undefined, done: true })
+        return new Promise((resolve) => {
+          resolveNext = resolve
+        })
+      },
+      return(): Promise<IteratorResult<DaemonEvent>> {
+        finish()
+        return Promise.resolve({ value: undefined, done: true })
+      },
+      [Symbol.asyncIterator]() {
+        return iterator
+      },
+    }
+    return iterator
+  }
+
+  /** Close the socket. Pending requests reject. */
+  close(): void {
+    this.socket?.end()
+    this.socket?.destroy()
+    this.socket = null
+  }
+
+  // Narrow the inherited emitter typings for the events we actually emit.
+  override on<E extends keyof DaemonClientEvents>(event: E, listener: DaemonClientEvents[E]): this
+  override on(event: string, listener: (...args: never[]) => void): this
+  override on(event: string, listener: (...args: never[]) => void): this {
+    return super.on(event, listener as (...args: unknown[]) => void)
+  }
+}
