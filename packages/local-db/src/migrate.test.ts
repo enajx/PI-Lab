@@ -58,6 +58,7 @@ describe("runMigrations", () => {
       "workspace_sections",
       "settings",
       "browser_history",
+      "machines",
       "automations",
       "automation_runs",
       "automation_prompt_versions",
@@ -120,7 +121,14 @@ describe("runMigrations", () => {
     }
 
     const settingsCols = columnNames(dbPath, "settings")
-    for (const c of ["id", "theme", "agent_presets", "confirm_on_quit", "known_teams"]) {
+    for (const c of [
+      "id",
+      "theme",
+      "agent_presets",
+      "confirm_on_quit",
+      "known_teams",
+      "worktree_per_agent",
+    ]) {
       expect(settingsCols, `settings.${c}`).toContain(c)
     }
 

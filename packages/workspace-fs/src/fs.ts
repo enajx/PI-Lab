@@ -1,5 +1,5 @@
-import { readdir, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 /** A single entry produced when listing a directory's immediate children. */
 export interface DirEntry {
@@ -39,9 +39,57 @@ export const DEFAULT_IGNORED_DIRS: readonly string[] = [
   ".cache",
 ]
 
+/** A file's identity-on-disk fingerprint, used to detect out-of-band edits. */
+export interface FileStat {
+  /** Whether the path exists. `false` ⇒ the other fields are zero. */
+  exists: boolean
+  /** Last-modified time as epoch milliseconds. */
+  mtimeMs: number
+  /** Size in bytes. */
+  size: number
+}
+
 /** Read a file as UTF-8 text. */
 export async function readTextFile(absPath: string): Promise<string> {
   return readFile(absPath, "utf8")
+}
+
+/**
+ * Fingerprint a file for change detection (the built-in editor polls this to
+ * spot agent/git edits). A missing file is a normal answer (`exists: false`)
+ * rather than an error, mirroring {@link readTextFile}'s caller expectations;
+ * anything that exists but is not a regular file also reports `exists: false`.
+ */
+export async function statFile(absPath: string): Promise<FileStat> {
+  try {
+    const info = await stat(absPath)
+    if (!info.isFile()) return { exists: false, mtimeMs: 0, size: 0 }
+    return { exists: true, mtimeMs: info.mtimeMs, size: info.size }
+  } catch (error) {
+    if (isEnoent(error)) return { exists: false, mtimeMs: 0, size: 0 }
+    throw error
+  }
+}
+
+/** Whether an error is Node's "no such file or directory". */
+function isEnoent(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  )
+}
+
+/**
+ * Write UTF-8 text to a file, creating any missing parent directories first.
+ * The mirror of {@link readTextFile}: the built-in editor and the file-backed
+ * tRPC procedures use this so an agent-authored doc (e.g. `RESEARCH.md`) can be
+ * created in one call even when its folder doesn't exist yet.
+ */
+export async function writeTextFile(absPath: string, content: string): Promise<void> {
+  await mkdir(dirname(absPath), { recursive: true })
+  await writeFile(absPath, content, "utf8")
 }
 
 /**

@@ -1,6 +1,47 @@
 import { join } from "node:path"
 import { BrowserWindow } from "electron"
-import { rendererDevServerUrl } from "../runtime/env"
+import { isTestMode, rendererDevServerUrl } from "../runtime/env"
+
+/**
+ * Test seams (AGENTS.md §14): in test mode the E2E harness drives the app through
+ * renderer URL query params (read from `window.location.search`, which hash
+ * routing leaves untouched). We translate a small set of env vars into those
+ * params so the harness can act deterministically without native dialogs or
+ * synthetic keystrokes. All are ignored entirely outside test mode.
+ *
+ *   - `SKIPPER_TEST_TERMINAL_CMD` (+ JSON `SKIPPER_TEST_TERMINAL_ARGS`) → the
+ *     index terminal spawns this deterministic program (`?termcmd`/`?termargs`).
+ *   - `SKIPPER_TEST_OPEN_PROJECT` → the sidebar opens this absolute path as a
+ *     project on load (`?openProject`), so the harness needn't drive the native
+ *     folder picker.
+ *   - `SKIPPER_TEST_AGENT_ID` → the project view launches this agent id
+ *     (`?agentId`), so the harness can pick the deterministic test agent.
+ *   - `SKIPPER_TEST_SSH_CONFIG` → the Cluster science tab imports machines from
+ *     this ssh-config path on mount (`?sshConfigPath`), so the harness seeds
+ *     deterministic machines from a fixture instead of the real `~/.ssh/config`.
+ */
+function testSeamQuery(): string {
+  if (!isTestMode) return ""
+  const params = new URLSearchParams()
+
+  const command = process.env.SKIPPER_TEST_TERMINAL_CMD?.trim()
+  if (command) {
+    params.set("termcmd", command)
+    const rawArgs = process.env.SKIPPER_TEST_TERMINAL_ARGS?.trim()
+    if (rawArgs) params.set("termargs", rawArgs)
+  }
+
+  const openProject = process.env.SKIPPER_TEST_OPEN_PROJECT?.trim()
+  if (openProject) params.set("openProject", openProject)
+
+  const agentId = process.env.SKIPPER_TEST_AGENT_ID?.trim()
+  if (agentId) params.set("agentId", agentId)
+
+  const sshConfig = process.env.SKIPPER_TEST_SSH_CONFIG?.trim()
+  if (sshConfig) params.set("sshConfigPath", sshConfig)
+
+  return params.toString()
+}
 
 /**
  * Create the single application window and load the renderer.
@@ -28,10 +69,12 @@ export function createMainWindow(): BrowserWindow {
 
   window.once("ready-to-show", () => window.show())
 
+  const query = testSeamQuery()
   if (rendererDevServerUrl) {
-    void window.loadURL(rendererDevServerUrl)
+    const url = query ? `${rendererDevServerUrl}?${query}` : rendererDevServerUrl
+    void window.loadURL(url)
   } else {
-    void window.loadFile(join(__dirname, "../renderer/index.html"))
+    void window.loadFile(join(__dirname, "../renderer/index.html"), query ? { search: query } : {})
   }
 
   return window

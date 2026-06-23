@@ -15,6 +15,48 @@
       "when": 1782151786822,
       "tag": "0001_branch_workspace_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782204868518,
+      "tag": "0002_clear_silver_fox",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1782216882991,
+      "tag": "0003_worried_gravity",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1782230368321,
+      "tag": "0004_high_demogoblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1782233954870,
+      "tag": "0005_spicy_king_cobra",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1782235805064,
+      "tag": "0006_abandoned_paibok",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1782238672294,
+      "tag": "0007_omniscient_sumo",
+      "breakpoints": true
     }
   ]
 }

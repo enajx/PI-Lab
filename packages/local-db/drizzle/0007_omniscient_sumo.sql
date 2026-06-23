@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `editor` text DEFAULT '{"autosave":false,"vim":false,"typeChecker":"ty","formatOnSave":false}' NOT NULL;

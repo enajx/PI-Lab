@@ -16,7 +16,8 @@
       "*.ts",
       "*.json",
       "*.jsonc",
-      "!**/drizzle"
+      "!**/drizzle",
+      "!**/routeTree.gen.ts"
     ]
   },
   "formatter": {
@@ -43,6 +44,13 @@
     "formatter": {
       "quoteStyle": "double",
       "semicolons": "asNeeded"
+    }
+  },
+  "css": {
+    "parser": {
+      // Recognize Tailwind v4 at-rules (@theme, @custom-variant, @source, …) so
+      // the shared UI globals parse/format cleanly.
+      "tailwindDirectives": true
     }
   }
 }

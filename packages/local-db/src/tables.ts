@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 /**
  * Skipper's local store. Every row lives on the user's own machine in
@@ -73,6 +73,56 @@ export interface KnownTeam {
   color?: string
 }
 
+/**
+ * Built-in editor preferences (AGENTS.md §1, TODO "Built-in editor" — "Editor
+ * settings group"). Persisted as a JSON blob on the singleton `settings` row so
+ * the whole group travels as one column and gains new keys without a migration.
+ * Every field is local-only and has a default that matches the spec ("off by
+ * default" for the toggles; `ty` as the default type checker).
+ */
+export interface EditorSettings {
+  /** Save on debounce/blur instead of requiring an explicit ⌘S (default off). */
+  autosave: boolean
+  /** Enable the CodeMirror Vim keymap (default off). */
+  vim: boolean
+  /** Which Python type checker the diagnostics run uses (default `ty`). */
+  typeChecker: "ty" | "pyrefly"
+  /** Run `ruff format` on ⌘S, then reload the buffer (default off). */
+  formatOnSave: boolean
+}
+
+/** Spec defaults for {@link EditorSettings} (TODO "Built-in editor"). */
+export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
+  autosave: false,
+  vim: false,
+  typeChecker: "ty",
+  formatOnSave: false,
+}
+
+/**
+ * Stored Zotero Web API credentials for the Library science tab (AGENTS.md §1
+ * "Science tabs"). Persisted in the singleton `settings` row as a JSON blob,
+ * local-only like everything else — the `apiKey` lives on the user's machine and
+ * is never logged or synced. `null` (the column default) means "not connected".
+ */
+export interface ZoteroConnection {
+  /** Personal Zotero Web API key (zotero.org/settings/keys). */
+  apiKey: string
+  /** Whether `libraryId` addresses a personal ("user") or shared ("group") library. */
+  libraryType: "user" | "group"
+  /** Numeric Zotero library id, as a string (it's used verbatim in the API path). */
+  libraryId: string
+}
+
+/**
+ * Where a monitored machine came from:
+ *   - "ssh-config": imported from the user's OpenSSH client config (one row per
+ *                   concrete Host alias). Re-importing refreshes these in place.
+ *   - "manual":     hand-added in the Cluster tab for a box that isn't (or isn't
+ *                   yet) in `~/.ssh/config`.
+ */
+export type MachineSource = "ssh-config" | "manual"
+
 // ---------------------------------------------------------------------------
 // projects — a local git repo opened as a research unit.
 // ---------------------------------------------------------------------------
@@ -89,6 +139,14 @@ export const projects = sqliteTable(
     defaultBranch: text("default_branch"),
     /** Accent color for cards / sidebar (hex or token name). */
     color: text("color"),
+    /**
+     * Dashboard card header image, stored as a self-contained `data:` URL (the
+     * user drag-and-drops an image onto the card). Null ⇒ the card falls back to
+     * a deterministic gradient seeded from the project id (md/02 — "Dashboard &
+     * project cards"). Kept inline rather than as a file path so the thumbnail
+     * travels with the row and never dangles.
+     */
+    thumbnail: text("thumbnail"),
     /** Manual ordering in the sidebar; lower sorts first. */
     sortIndex: integer("sort_index").notNull().default(0),
     /** Archived projects are hidden from the active list but never deleted. */
@@ -225,8 +283,31 @@ export const settings = sqliteTable("settings", {
     .default([]),
   /** Whether to prompt before quitting with live sessions. */
   confirmOnQuit: integer("confirm_on_quit", { mode: "boolean" }).notNull().default(true),
+  /**
+   * Worktree policy for the "start agent session" flow (AGENTS.md §8). When ON,
+   * every agent session gets its own fresh git worktree. When OFF (default), an
+   * agent opens in the project's main checkout (its single branch workspace) and
+   * only spills into a fresh worktree once a second concurrent agent would
+   * otherwise clobber that shared checkout.
+   */
+  worktreePerAgent: integer("worktree_per_agent", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Built-in editor preferences (autosave / vim / type checker / format-on-save),
+   * stored as a JSON blob so the group grows without a migration (AGENTS.md §1,
+   * TODO "Built-in editor"). Defaults to the spec's all-off / `ty` shape.
+   */
+  editor: text("editor", { mode: "json" })
+    .notNull()
+    .$type<EditorSettings>()
+    .default(DEFAULT_EDITOR_SETTINGS),
   /** Locally-known v2 Teams (names/colors only — no remote identity). */
   knownTeams: text("known_teams", { mode: "json" }).notNull().$type<KnownTeam[]>().default([]),
+  /**
+   * Stored Zotero Web API credentials for the Library science tab, or `null`
+   * when not connected (AGENTS.md §1). Local-only; the API key never leaves the
+   * machine and is never logged.
+   */
+  zotero: text("zotero", { mode: "json" }).$type<ZoteroConnection>(),
   updatedAt: integer("updated_at")
     .notNull()
     .$defaultFn(() => Date.now()),
@@ -249,6 +330,57 @@ export const browserHistory = sqliteTable(
       .$defaultFn(() => Date.now()),
   },
   (t) => [index("ix_browser_history_visited").on(t.visitedAt)],
+)
+
+// ---------------------------------------------------------------------------
+// machines — a remote compute box the user monitors from the Cluster science
+// tab (AGENTS.md §1 "Science tabs"). v1 is *monitoring only*: rows are imported
+// from `~/.ssh/config` or added by hand, annotated, hidden, and reachability-
+// probed over the `ssh` CLI. Job dispatch / experiment runs are v2 and have no
+// table here. Connection metadata only — never key material or secrets.
+// ---------------------------------------------------------------------------
+
+export const machines = sqliteTable(
+  "machines",
+  {
+    id: primaryId(),
+    /**
+     * The ssh Host alias (for ssh-config rows) or the user-typed handle (for
+     * manual rows). This is what the `ssh` CLI is invoked with, so it must round-
+     * trip whatever the user already configured. Unique so a re-import upserts
+     * rather than duplicates.
+     */
+    host: text("host").notNull().unique(),
+    /** Resolved `HostName` from ssh config (the real address), when known. */
+    hostname: text("hostname"),
+    /** ssh login user (`User` directive), when set. */
+    user: text("user"),
+    /** ssh port (`Port` directive); null ⇒ ssh's own default (22). */
+    port: integer("port"),
+    source: text("source").notNull().$type<MachineSource>().default("manual"),
+    /**
+     * Hidden machines are filtered from the default Cluster list (ssh-config
+     * often holds git hosts / jump boxes that aren't compute), never deleted —
+     * surfaced again via the "Show hidden (N)" toggle.
+     */
+    hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
+    /** Free-text user annotation / display label (e.g. "8×A100 Slurm box"). */
+    label: text("label"),
+    /**
+     * Last reachability result from a status probe: true/false once probed, null
+     * before the first probe. Drives the status dot on the machine card.
+     */
+    reachable: integer("reachable", { mode: "boolean" }),
+    /** When the last probe ran (epoch ms); null until first probed. */
+    lastCheckedAt: integer("last_checked_at"),
+    /** Probe detail — trimmed `uptime` output on success, error text on failure. */
+    statusDetail: text("status_detail"),
+    createdAt: createdNow(),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [index("ix_machines_hidden").on(t.hidden), index("ix_machines_source").on(t.source)],
 )
 
 // ---------------------------------------------------------------------------
@@ -316,6 +448,10 @@ export const automationRuns = sqliteTable(
   (t) => [
     index("ix_automation_runs_automation").on(t.automationId, t.createdAt),
     index("ix_automation_runs_workspace").on(t.workspaceId),
+    // One run per scheduled occurrence: the scheduler's overlap/double-fire guard
+    // claims an occurrence by inserting a run with `onConflictDoNothing` against
+    // this index, so a slow/overlapping tick can't fire the same instant twice.
+    uniqueIndex("ux_automation_run_occurrence").on(t.automationId, t.scheduledFor),
   ],
 )
 
@@ -354,6 +490,8 @@ export type Settings = typeof settings.$inferSelect
 export type NewSettings = typeof settings.$inferInsert
 export type BrowserHistoryEntry = typeof browserHistory.$inferSelect
 export type NewBrowserHistoryEntry = typeof browserHistory.$inferInsert
+export type Machine = typeof machines.$inferSelect
+export type NewMachine = typeof machines.$inferInsert
 export type Automation = typeof automations.$inferSelect
 export type NewAutomation = typeof automations.$inferInsert
 export type AutomationRun = typeof automationRuns.$inferSelect

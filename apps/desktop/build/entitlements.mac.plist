@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS hardened-runtime entitlements for Skipper (AGENTS.md §13).
+
+  Electron needs the JIT / unsigned-executable-memory entitlements to run the V8
+  engine under hardened runtime. Skipper also spawns child processes (the
+  pty-daemon, CLI agents, git), so `allow-dyld-environment-variables` +
+  `disable-library-validation` let it launch helpers (e.g. the unpacked
+  node-pty spawn-helper) that aren't signed by the same team.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.inherit</key>
+    <true/>
+  </dict>
+</plist>

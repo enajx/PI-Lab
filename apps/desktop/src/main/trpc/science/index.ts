@@ -1,0 +1,1 @@
+export { scienceRouter } from "./science"

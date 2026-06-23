@@ -1,4 +1,6 @@
 export * from "./agents/catalog"
 export * from "./agents/command"
+export * from "./analysis/file-kind"
+export * from "./automations/recurrence"
 export * from "./names/slugify"
 export * from "./terminal/links"

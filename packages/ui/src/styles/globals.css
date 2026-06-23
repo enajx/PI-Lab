@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/*
+ * Scan both the renderer app and this shared UI package for utility classes.
+ * `@tailwindcss/vite` auto-detects via the module graph, but these explicit
+ * sources make the shared-package classes deterministic regardless of import
+ * order. Paths are relative to this CSS file.
+ */
+@source "../../../../apps/desktop/src/renderer";
+@source "../components";
+
+/*
+ * Skipper shared design tokens (AGENTS.md §7, md/02-ux-and-design.md).
+ *
+ * Calm "analog/scandi" palette: minimal, never a pure-black background. Two
+ * themes — dark (default) and light — expressed as CSS custom properties on
+ * :root / .dark, then mapped into Tailwind's token namespace via @theme inline
+ * so `bg-background`, `text-foreground`, `border-border`, … resolve. Switching
+ * theme is one class toggle on <html> (handled by the renderer ThemeProvider);
+ * no rebuild, no duplicate utilities.
+ *
+ * Colors are OKLCH so lightness/chroma read predictably and the two themes stay
+ * perceptually balanced. The dark background is a warm near-black (NOT #000).
+ */
+
+/* Tell Tailwind v4 that `.dark` on an ancestor is the dark-variant signal. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Light theme — soft warm paper, never stark white-on-pure-black inverse. */
+  --background: oklch(0.985 0.002 95);
+  --foreground: oklch(0.255 0.006 90);
+
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.36 0.008 90);
+  --primary-foreground: oklch(0.985 0.002 95);
+  --secondary: oklch(0.95 0.003 95);
+  --secondary-foreground: oklch(0.3 0.006 90);
+  --muted: oklch(0.95 0.003 95);
+  --muted-foreground: oklch(0.55 0.004 90);
+  --accent: oklch(0.93 0.004 95);
+  --accent-foreground: oklch(0.3 0.006 90);
+
+  --destructive: oklch(0.58 0.2 27);
+  --destructive-foreground: oklch(0.985 0.002 95);
+
+  --border: oklch(0.9 0.003 95);
+  --input: oklch(0.9 0.003 95);
+  --ring: oklch(0.72 0.05 80);
+
+  --sidebar: oklch(0.965 0.003 95);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: oklch(0.91 0.003 95);
+
+  /* Warm brand accent (sail/sunset orange) — used sparingly. */
+  --accent-brand: oklch(0.7 0.16 55);
+
+  --radius: 0.5rem;
+}
+
+.dark {
+  /* Dark theme — warm near-black, NOT pure black (AGENTS.md §7). */
+  --background: oklch(0.18 0.005 75);
+  --foreground: oklch(0.92 0.004 85);
+
+  --card: oklch(0.215 0.006 75);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.215 0.006 75);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.92 0.004 85);
+  --primary-foreground: oklch(0.2 0.005 75);
+  --secondary: oklch(0.26 0.006 75);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.26 0.006 75);
+  --muted-foreground: oklch(0.66 0.005 80);
+  --accent: oklch(0.29 0.007 75);
+  --accent-foreground: var(--foreground);
+
+  --destructive: oklch(0.62 0.18 27);
+  --destructive-foreground: oklch(0.96 0.01 27);
+
+  --border: oklch(0.3 0.006 75);
+  --input: oklch(0.3 0.006 75);
+  --ring: oklch(0.5 0.03 80);
+
+  --sidebar: oklch(0.205 0.006 75);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: oklch(0.28 0.006 75);
+
+  --accent-brand: oklch(0.72 0.16 55);
+}
+
+/* Map CSS variables into Tailwind's token namespace (utilities + arbitrary). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-brand: var(--accent-brand);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    /* App chrome shouldn't be selectable; error/code surfaces opt back in
+       (AGENTS.md §12.7). */
+    user-select: none;
+  }
+}

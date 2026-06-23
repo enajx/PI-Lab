@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { runMigrations } from "@skipper/local-db"
+import { runMigrations, type SkipperDatabase } from "@skipper/local-db"
 import { resolveBundledMigrationsDir } from "./migrationsDir"
 
 /**
@@ -17,6 +17,7 @@ export interface DbStatus {
 }
 
 let status: DbStatus | null = null
+let dbHandle: SkipperDatabase | null = null
 
 /**
  * Newest migration tag from `meta/_journal.json`. The applied *count* is the
@@ -44,6 +45,7 @@ export function initDatabase(): DbStatus {
   // Pass the resolved folder explicitly — the bundled package's own default
   // resolves relative to the build output, which has no migrations.
   const result = runMigrations(undefined, migrationsFolder)
+  dbHandle = result.db
   status = {
     appliedCount: result.appliedCount,
     recovered: result.recovered,
@@ -58,4 +60,16 @@ export function getDbStatus(): DbStatus {
     throw new Error("Database not initialized — call initDatabase() during boot")
   }
   return status
+}
+
+/**
+ * The migrated Drizzle handle opened at boot, shared by every router that
+ * touches the local store. Throws if read before {@link initDatabase} so a
+ * mis-ordered boot fails loudly rather than opening a second connection.
+ */
+export function getDb(): SkipperDatabase {
+  if (!dbHandle) {
+    throw new Error("Database not initialized — call initDatabase() during boot")
+  }
+  return dbHandle
 }

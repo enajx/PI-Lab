@@ -1,0 +1,332 @@
+// Integration tests for the automations router (AGENTS.md §1 / §14): createCaller
+// over a temp SQLite DB with real migrations, a real temp git repo, and the
+// in-process pty-daemon + fake agent. Covers CRUD, prompt-version snapshotting,
+// the computed nextRunAt, runNow firing through the real session-start flow, and
+// the scheduler firing a due automation via the SAME dispatch path.
+import { automations } from "@skipper/local-db"
+import { eq } from "drizzle-orm"
+import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { dispatchAutomation } from "../../automations/dispatch"
+import { AutomationScheduler } from "../../automations/scheduler"
+import type { AppContext } from "../context"
+import { createHarness, FAKE_AGENT, type Harness } from "../testHarness"
+
+const DAILY_9 = "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
+
+let h: Harness
+let projectId: string
+
+beforeEach(async () => {
+  h = await createHarness([FAKE_AGENT])
+  const project = await h.caller.projects.open({ path: h.repoDir })
+  projectId = project.id
+})
+
+afterEach(async () => {
+  await h.dispose()
+})
+
+/** The AppContext the harness built, for direct dispatch/scheduler tests. */
+function harnessContext(): AppContext {
+  return {
+    db: h.db,
+    getDaemonClient: async () => h.client,
+    agentCatalog: [FAKE_AGENT],
+    liveAgents: h.liveAgents,
+    sshExec: async () => ({ ok: true, detail: "" }),
+    httpFetch: async () => {
+      throw new Error("no network in tests")
+    },
+    pyToolsExec: async () => ({ stdout: "", stderr: "", code: null, notFound: true }),
+  }
+}
+
+describe("automations CRUD", () => {
+  test("create validates the rule, computes nextRunAt, and snapshots the prompt", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Nightly",
+      prompt: "do the nightly thing",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    expect(created.name).toBe("Nightly")
+    expect(created.enabled).toBe(true)
+    expect(created.nextRunAt).toBeGreaterThan(Date.now())
+    expect(created.scheduleSummary).toContain("Daily")
+
+    // The prompt was snapshotted as the first version.
+    const versions = await h.caller.automations.listPromptVersions({ automationId: created.id })
+    expect(versions).toHaveLength(1)
+    expect(versions[0]?.prompt).toBe("do the nightly thing")
+    expect(versions[0]?.origin).toBe("edit")
+  })
+
+  test("create rejects an invalid recurrence rule", async () => {
+    await expect(
+      h.caller.automations.create({
+        projectId,
+        agentId: "fake-agent",
+        name: "Bad",
+        recurrenceRule: "not-a-rule",
+        timezone: "UTC",
+      }),
+    ).rejects.toThrow(/recurrence/i)
+  })
+
+  test("create with enabled:false leaves nextRunAt null", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Paused",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+      enabled: false,
+    })
+    expect(created.enabled).toBe(false)
+    expect(created.nextRunAt).toBeNull()
+  })
+
+  test("list returns created automations newest-first", async () => {
+    const first = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "First",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    // Bump the second row's createdAt so the desc(createdAt) order is stable even
+    // when both inserts land in the same millisecond.
+    h.db
+      .update(automations)
+      .set({ createdAt: first.createdAt + 1000 })
+      .where(eq(automations.id, first.id))
+      .run()
+    await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Second",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    const list = await h.caller.automations.list()
+    expect(list).toHaveLength(2)
+    // "First" was pushed to the newest createdAt above, so it sorts first.
+    expect(list[0]?.name).toBe("First")
+    expect(list.map((a) => a.name).sort()).toEqual(["First", "Second"])
+  })
+
+  test("update re-snapshots the prompt and recomputes nextRunAt on rule change", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Job",
+      prompt: "v1",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const updated = await h.caller.automations.update({
+      id: created.id,
+      prompt: "v2",
+      recurrenceRule: "FREQ=HOURLY",
+    })
+    expect(updated.prompt).toBe("v2")
+    expect(updated.scheduleSummary).toBe("Hourly")
+    expect(updated.nextRunAt).toBeGreaterThan(Date.now())
+
+    const versions = await h.caller.automations.listPromptVersions({ automationId: created.id })
+    expect(versions.map((v) => v.prompt)).toEqual(["v2", "v1"]) // newest first
+  })
+
+  test("setEnabled toggles and recomputes nextRunAt on resume", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Toggle",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const off = await h.caller.automations.setEnabled({ id: created.id, enabled: false })
+    expect(off.enabled).toBe(false)
+    expect(off.nextRunAt).toBeNull()
+
+    const on = await h.caller.automations.setEnabled({ id: created.id, enabled: true })
+    expect(on.enabled).toBe(true)
+    expect(on.nextRunAt).toBeGreaterThan(Date.now())
+  })
+
+  test("delete removes the automation (and cascades its runs/versions)", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Doomed",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    await h.caller.automations.delete({ id: created.id })
+    await expect(h.caller.automations.get({ id: created.id })).rejects.toThrow(/No automation/)
+    const list = await h.caller.automations.list()
+    expect(list).toHaveLength(0)
+  })
+
+  test("previewSchedule returns a summary and upcoming occurrences", async () => {
+    const preview = await h.caller.automations.previewSchedule({
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    expect(preview.valid).toBe(true)
+    expect(preview.summary).toContain("Daily")
+    expect(preview.upcoming).toHaveLength(5)
+    // strictly increasing
+    const sorted = [...preview.upcoming].sort((a, b) => a - b)
+    expect(preview.upcoming).toEqual(sorted)
+    expect(new Set(preview.upcoming).size).toBe(preview.upcoming.length)
+
+    const invalid = await h.caller.automations.previewSchedule({
+      recurrenceRule: "garbage",
+      timezone: "UTC",
+    })
+    expect(invalid.valid).toBe(false)
+    expect(invalid.upcoming).toHaveLength(0)
+  })
+})
+
+describe("runNow — fires via the real session-start flow", () => {
+  test("launches the agent, records a 'launched' run with a workspace id", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Manual",
+      prompt: "go",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const { runId } = await h.caller.automations.runNow({ id: created.id })
+    expect(runId).toBeTruthy()
+
+    const runs = await h.caller.automations.listRuns({ automationId: created.id })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]?.state).toBe("launched")
+    expect(runs[0]?.workspaceId).toBeTruthy()
+
+    // runNow uses a fresh scheduledFor and never touches the cadence.
+    const after = await h.caller.automations.get({ id: created.id })
+    expect(after.nextRunAt).toBe(created.nextRunAt)
+  })
+
+  test("a failed launch (unknown agent) records a 'failed' run", async () => {
+    // Seed an automation referencing an agent not in the catalog.
+    const row = h.db
+      .insert(automations)
+      .values({
+        projectId,
+        agentId: "missing-agent",
+        name: "BadAgent",
+        recurrenceRule: DAILY_9,
+        startAt: Date.now(),
+        timezone: "UTC",
+      })
+      .returning()
+      .get()
+
+    const { runId } = await h.caller.automations.runNow({ id: row.id })
+    expect(runId).toBeTruthy()
+
+    const runs = await h.caller.automations.listRuns({ automationId: row.id })
+    expect(runs[0]?.state).toBe("failed")
+    expect(runs[0]?.error).toMatch(/agent/i)
+  })
+})
+
+describe("dispatch overlap guard", () => {
+  test("a second dispatch for the same scheduledFor is a no-op", async () => {
+    const ctx = harnessContext()
+    const automation = h.db
+      .insert(automations)
+      .values({
+        projectId,
+        agentId: "fake-agent",
+        name: "Once",
+        recurrenceRule: DAILY_9,
+        startAt: Date.now(),
+        timezone: "UTC",
+      })
+      .returning()
+      .get()
+
+    const scheduledFor = 1_900_000_000_000
+    const first = await dispatchAutomation(ctx, { automation, scheduledFor })
+    const second = await dispatchAutomation(ctx, { automation, scheduledFor })
+
+    expect(first).not.toBeNull()
+    expect(second).toBeNull() // claimed already
+
+    const runs = await h.caller.automations.listRuns({ automationId: automation.id })
+    expect(runs).toHaveLength(1)
+  })
+})
+
+describe("scheduler fires a due automation end-to-end", () => {
+  test("with an injected clock + the real dispatch fire, fires once and advances nextRunAt", async () => {
+    const ctx = harnessContext()
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Due",
+      prompt: "tick",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    const due = created.nextRunAt
+    expect(due).not.toBeNull()
+
+    // A clock just past the due instant; fire is the real dispatcher.
+    const scheduler = new AutomationScheduler({
+      db: h.db,
+      fire: (args) => dispatchAutomation(ctx, args),
+      now: () => (due ?? 0) + 60_000,
+    })
+
+    const fired = await scheduler.tick()
+    expect(fired).toBe(1)
+
+    // A run was recorded and launched against the fake agent. tick() awaited the
+    // fire, so the run row is already terminal — read it directly.
+    const runs = await h.caller.automations.listRuns({ automationId: created.id })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]?.state).toBe("launched")
+    expect(runs[0]?.scheduledFor).toBe(due)
+
+    // nextRunAt advanced past the fired occurrence.
+    const reloaded = h.db.select().from(automations).where(eq(automations.id, created.id)).get()
+    expect(reloaded?.nextRunAt).toBeGreaterThan(due ?? 0)
+  })
+
+  test("a disabled automation is never fired by the scheduler", async () => {
+    const ctx = harnessContext()
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "Off",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+      enabled: false,
+    })
+
+    const scheduler = new AutomationScheduler({
+      db: h.db,
+      fire: (args) => dispatchAutomation(ctx, args),
+      now: () => Date.now() + 10 * 24 * 60 * 60 * 1000, // far in the future
+    })
+    const fired = await scheduler.tick()
+    expect(fired).toBe(0)
+
+    const runs = await h.caller.automations.listRuns({ automationId: created.id })
+    expect(runs).toHaveLength(0)
+  })
+})

@@ -8,5 +8,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@date-fns/tz": "1.4.1",
+    "rrule": "2.8.1"
   }
 }

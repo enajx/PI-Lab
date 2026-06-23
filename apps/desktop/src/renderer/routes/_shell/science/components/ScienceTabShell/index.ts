@@ -1,0 +1,1 @@
+export { ScienceTabShell } from "./ScienceTabShell"

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `ux_automation_run_occurrence` ON `automation_runs` (`automation_id`,`scheduled_for`);

@@ -1,14 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Lock the renderer down: no remote code, scripts/styles from self only. -->
+    <!-- Lock the renderer down: no remote code, scripts/styles from self only.
+         `unsafe-inline` style is required by Tailwind/Vite injected styles. -->
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
     />
     <title>Skipper</title>
+    <!-- Pre-paint fallback only (warm near-black, matches the dark theme bg) so
+         there's no white flash before the Tailwind theme variables load. The
+         real background comes from @skipper/ui globals.css. -->
     <style>
       html,
       body,
@@ -17,7 +21,7 @@
       }
       body {
         margin: 0;
-        background: #101014;
+        background-color: oklch(0.18 0.005 75);
       }
     </style>
   </head>

@@ -103,3 +103,11 @@ apps/docs/.source/
 
 # Coverage
 coverage
+
+# Desktop packaging
+# - `release/` (electron-builder output) is already covered by the `release` rule above.
+# - App icons are generated from icons/icon.png by `bun run --cwd apps/desktop build:icons`
+#   (electron-builder buildResources). The hand-authored entitlements plist IS tracked.
+apps/desktop/build/icon.png
+apps/desktop/build/icon.icns
+apps/desktop/build/icon.ico

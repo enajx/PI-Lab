@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `worktree_per_agent` integer DEFAULT false NOT NULL;

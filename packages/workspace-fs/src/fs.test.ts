@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import { listDir, readTextFile, walkFiles } from "./fs"
+import { listDir, readTextFile, statFile, walkFiles, writeTextFile } from "./fs"
 
 let root: string
 
@@ -44,6 +44,50 @@ describe("readTextFile", () => {
 
   test("rejects for a missing file", async () => {
     await expect(readTextFile(join(root, "nope.md"))).rejects.toThrow()
+  })
+})
+
+describe("writeTextFile", () => {
+  test("writes UTF-8 content that round-trips through readTextFile", async () => {
+    const target = join(root, "RESEARCH.md")
+    await writeTextFile(target, "# notes\n")
+    expect(await readTextFile(target)).toBe("# notes\n")
+  })
+
+  test("creates missing parent directories", async () => {
+    const target = join(root, "deep", "nested", "doc.md")
+    await writeTextFile(target, "hi")
+    expect(await readTextFile(target)).toBe("hi")
+  })
+
+  test("overwrites an existing file", async () => {
+    const target = join(root, "README.md")
+    await writeTextFile(target, "replaced\n")
+    expect(await readTextFile(target)).toBe("replaced\n")
+  })
+})
+
+describe("statFile", () => {
+  test("reports exists, byte size, and a positive mtime for a real file", async () => {
+    const stat = await statFile(join(root, "README.md"))
+    expect(stat.exists).toBe(true)
+    expect(stat.size).toBe(Buffer.byteLength("# hello\n"))
+    expect(stat.mtimeMs).toBeGreaterThan(0)
+  })
+
+  test("reports exists:false for a missing path (not an error)", async () => {
+    expect(await statFile(join(root, "nope.md"))).toEqual({ exists: false, mtimeMs: 0, size: 0 })
+  })
+
+  test("reports exists:false for a directory (not a regular file)", async () => {
+    expect(await statFile(join(root, "src"))).toEqual({ exists: false, mtimeMs: 0, size: 0 })
+  })
+
+  test("changes size after the file is rewritten", async () => {
+    const before = await statFile(join(root, "README.md"))
+    await writeTextFile(join(root, "README.md"), "# hello world, longer now\n")
+    const after = await statFile(join(root, "README.md"))
+    expect(after.size).toBeGreaterThan(before.size)
   })
 })
 
