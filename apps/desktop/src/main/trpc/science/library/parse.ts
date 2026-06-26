@@ -1,19 +1,17 @@
 /**
- * Pure parsers + result types for the Library science tab (AGENTS.md §1 "Science
+ * Pure parsers + result types for the Library science tab (AGENTS.md "Scope" "Science
  * tabs"). Kept free of tRPC, I/O, and credentials so they are example- and
  * property-testable in isolation: each takes already-decoded JSON (`unknown`)
  * and returns a typed, UI-ready shape, defensively coping with the loose,
- * partially-typed payloads the Zotero Web API and Semantic Scholar Graph API
- * actually return.
+ * partially-typed payloads the Zotero Web API actually returns.
  */
 
 /**
- * One paper in a parsed list, normalized across both sources so the UI renders a
- * single card shape. Optional fields are omitted (not empty strings) when the
- * source lacks them, so the UI can branch on presence.
+ * One paper in a parsed list. Optional fields are omitted (not empty strings) when
+ * the source lacks them, so the UI can branch on presence.
  */
 export interface LibraryPaper {
-  /** Stable id for React keys: Zotero item key, or the S2 paperId / DOI / index. */
+  /** Stable id for React keys: the Zotero item key (or a synthesized index fallback). */
   id: string
   title: string
   /** Author display names, in source order; empty when none are listed. */
@@ -26,8 +24,44 @@ export interface LibraryPaper {
   doi?: string
   /** Canonical URL, when present. */
   url?: string
-  /** Abstract, when present (Semantic Scholar provides it; Zotero usually not). */
+  /** Abstract, when present (Zotero's `abstractNote`, when set). */
   abstract?: string
+}
+
+/**
+ * One Zotero collection in a parsed list. `itemCount`/`subcollectionCount` come from
+ * the API's `meta` block so the browser can show counts and whether to offer drill-in.
+ */
+export interface LibraryCollection {
+  /** Stable Zotero collection key (used in the items/subcollections paths). */
+  key: string
+  name: string
+  /** Top-level items directly in this collection (from `meta.numItems`). */
+  itemCount: number
+  /** Number of immediate subcollections (from `meta.numCollections`). */
+  subcollectionCount: number
+}
+
+/**
+ * Parse a Zotero `/collections` response into {@link LibraryCollection}s. The API
+ * returns an array of `{ key, data: { name }, meta: { numItems, numCollections } }`;
+ * a non-array payload parses to an empty list rather than throwing.
+ */
+export function parseZoteroCollections(payload: unknown): LibraryCollection[] {
+  if (!Array.isArray(payload)) return []
+  return payload.map((row, index) => {
+    const r = (row ?? {}) as {
+      key?: string
+      data?: { name?: string }
+      meta?: { numItems?: number; numCollections?: number }
+    }
+    return {
+      key: nonEmpty(r.key) ?? `collection-${index}`,
+      name: nonEmpty(r.data?.name) ?? "(untitled collection)",
+      itemCount: typeof r.meta?.numItems === "number" ? r.meta.numItems : 0,
+      subcollectionCount: typeof r.meta?.numCollections === "number" ? r.meta.numCollections : 0,
+    }
+  })
 }
 
 /** A single Zotero creator entry (either a structured name or a one-field name). */
@@ -91,47 +125,6 @@ export function parseZoteroItems(payload: unknown): LibraryPaper[] {
       doi: nonEmpty(data.DOI),
       url: nonEmpty(data.url),
       abstract: nonEmpty(data.abstractNote),
-    }
-  })
-}
-
-/** A single Semantic Scholar author sub-object. */
-interface S2Author {
-  name?: string
-}
-
-/**
- * Parse a Semantic Scholar `/paper/search` response into {@link LibraryPaper}s.
- * The API returns `{ total, data: [{ paperId, title, year, authors, abstract,
- * externalIds: { DOI, ... }, url }] }`. A missing/!-array `data` parses to an
- * empty list. `itemType` is fixed to "paper" since S2 doesn't model one.
- */
-export function parseSemanticScholarPapers(payload: unknown): LibraryPaper[] {
-  const rows = (payload as { data?: unknown })?.data
-  if (!Array.isArray(rows)) return []
-  return rows.map((row, index) => {
-    const r = (row ?? {}) as {
-      paperId?: string
-      title?: string
-      year?: number
-      abstract?: string
-      url?: string
-      authors?: S2Author[]
-      externalIds?: { DOI?: string }
-    }
-    const authors = (r.authors ?? [])
-      .map((author) => nonEmpty(author?.name))
-      .filter((name): name is string => Boolean(name))
-    const doi = nonEmpty(r.externalIds?.DOI)
-    return {
-      id: nonEmpty(r.paperId) ?? doi ?? `s2-${index}`,
-      title: nonEmpty(r.title) ?? "(untitled)",
-      authors,
-      year: typeof r.year === "number" && Number.isFinite(r.year) ? r.year : undefined,
-      itemType: "paper",
-      doi,
-      url: nonEmpty(r.url),
-      abstract: nonEmpty(r.abstract),
     }
   })
 }

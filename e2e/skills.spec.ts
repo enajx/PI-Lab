@@ -8,14 +8,14 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (AGENTS.md §14, P8b): launch the real Electron build, open a
+ * Whole-app E2E (docs/testing-and-build.md, P8b): launch the real Electron build, open a
  * temp git repo as a project via the `?openProject` seam (no native dialog),
  * navigate to the Skills science tab, and prove the read-only catalog is wired
  * end to end — a `SKILL.md` written into the repo's `.agents/skills` appears as a
  * card with its frontmatter name and source badge.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (AGENTS.md §13); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun (docs/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -98,4 +98,10 @@ test("skills tab lists a SKILL.md discovered in the opened project", async () =>
   await expect(card).toBeVisible({ timeout: 30_000 })
   await expect(card.getByTestId("skill-name")).toHaveText(SKILL_NAME)
   await expect(card.getByTestId("skill-source")).toHaveText(".agents/skills")
+
+  // ⌘F on the Skills tab opens a context finder over the SKILLS here (not the project finder),
+  // proving the shell defers ⌘F to the science tab.
+  await window.keyboard.press("ControlOrMeta+f")
+  await expect(window.getByTestId("quick-find")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("quick-find-item").first()).toContainText(SKILL_NAME)
 })

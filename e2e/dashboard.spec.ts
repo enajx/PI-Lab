@@ -8,7 +8,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (AGENTS.md §14, P7b): launch the real Electron build, boot to
+ * Whole-app E2E (docs/testing-and-build.md, P7b): launch the real Electron build, boot to
  * `app-ready`, and prove the project-cards Dashboard is wired end-to-end:
  *
  *   1. the `?openProject` seam opens a temp repo on load (via the sidebar),
@@ -20,7 +20,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * `SKIPPER_TEST_OPEN_PROJECT`. No native dialog, no agent launch needed here.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (AGENTS.md §13).
+ * Bun (docs/testing-and-build.md (build & ship)).
  */
 
 const execFileAsync = promisify(execFile)

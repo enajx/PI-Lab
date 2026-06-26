@@ -10,10 +10,10 @@
 @source "../components";
 
 /*
- * Skipper shared design tokens (AGENTS.md §7, md/02-ux-and-design.md).
+ * Skipper shared design tokens (docs/architecture.md (renderer), md/02-ux-and-design.md).
  *
  * Calm "analog/scandi" palette: minimal, never a pure-black background. Two
- * themes — dark (default) and light — expressed as CSS custom properties on
+ * themes — light (default) and dark — expressed as CSS custom properties on
  * :root / .dark, then mapped into Tailwind's token namespace via @theme inline
  * so `bg-background`, `text-foreground`, `border-border`, … resolve. Switching
  * theme is one class toggle on <html> (handled by the renderer ThemeProvider);
@@ -27,8 +27,9 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* Light theme — soft warm paper, never stark white-on-pure-black inverse. */
-  --background: oklch(0.985 0.002 95);
+  /* Light theme (default) — central/app surface is white; the left panel is a
+     soft neutral grey (see --sidebar below). */
+  --background: #ffffff;
   --foreground: oklch(0.255 0.006 90);
 
   --card: oklch(1 0 0);
@@ -52,7 +53,7 @@
   --input: oklch(0.9 0.003 95);
   --ring: oklch(0.72 0.05 80);
 
-  --sidebar: oklch(0.965 0.003 95);
+  --sidebar: #f3f3f3;
   --sidebar-foreground: var(--foreground);
   --sidebar-border: oklch(0.91 0.003 95);
 
@@ -63,7 +64,7 @@
 }
 
 .dark {
-  /* Dark theme — warm near-black, NOT pure black (AGENTS.md §7). */
+  /* Dark theme — warm near-black, NOT pure black (docs/architecture.md (renderer)). */
   --background: oklch(0.18 0.005 75);
   --foreground: oklch(0.92 0.004 85);
 
@@ -145,7 +146,45 @@
     font-family:
       ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     /* App chrome shouldn't be selectable; error/code surfaces opt back in
-       (AGENTS.md §12.7). */
+       (AGENTS.md Pitfalls #7). */
     user-select: none;
+  }
+}
+
+/* Native window drag regions for the frameless (hiddenInset) macOS title bar:
+   `app-drag` makes a surface draggable; `app-no-drag` re-enables clicks on the
+   interactive children inside it. */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* No-thumbnail project-card gradient morph (apps/desktop … ProjectCard). A slow,
+   transform-only ping-pong (translate/scale/rotate) so the seeded gradient feels
+   subtly alive while staying GPU-composited — only `transform` is animated, never
+   paint properties. Timing comes from per-project CSS vars; the oversized layer
+   it runs on (inset-[-25%]) keeps the box covered under any rotate/scale. */
+@keyframes skipper-gradient-morph {
+  from {
+    transform: translate3d(-2%, 1%, 0) scale(1.05) rotate(-4deg);
+  }
+  to {
+    transform: translate3d(2%, -1%, 0) scale(1.12) rotate(4deg);
+  }
+}
+
+.project-gradient-anim {
+  animation: skipper-gradient-morph var(--grad-duration, 40s) ease-in-out infinite alternate;
+  animation-delay: var(--grad-delay, 0s);
+  will-change: transform;
+}
+
+/* Respect the OS "reduce motion" setting: hold the layer perfectly still. */
+@media (prefers-reduced-motion: reduce) {
+  .project-gradient-anim {
+    animation: none;
+    transform: none;
   }
 }

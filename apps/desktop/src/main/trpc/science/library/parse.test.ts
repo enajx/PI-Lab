@@ -1,10 +1,10 @@
-// Unit + property tests for the Library parsers (AGENTS.md §14). These are pure
+// Unit + property tests for the Library parsers (docs/testing-and-build.md). These are pure
 // transforms over loose JSON, so they get example tests for the real API shapes
 // plus fast-check properties for totality (never throw, always well-formed) on
 // arbitrary inputs.
 import fc from "fast-check"
 import { describe, expect, test } from "vitest"
-import { type LibraryPaper, parseSemanticScholarPapers, parseZoteroItems } from "./parse"
+import { type LibraryPaper, parseZoteroCollections, parseZoteroItems } from "./parse"
 
 describe("parseZoteroItems", () => {
   test("maps the real item shape into papers", () => {
@@ -55,47 +55,24 @@ describe("parseZoteroItems", () => {
   })
 })
 
-describe("parseSemanticScholarPapers", () => {
-  test("maps the real search shape into papers", () => {
-    const papers = parseSemanticScholarPapers({
-      total: 1,
-      data: [
-        {
-          paperId: "P1",
-          title: "T",
-          year: 2021,
-          abstract: "abs",
-          url: "https://u",
-          authors: [{ name: "Grace Hopper" }],
-          externalIds: { DOI: "10.2/y" },
-        },
-      ],
-    })
-    expect(papers).toEqual([
-      {
-        id: "P1",
-        title: "T",
-        authors: ["Grace Hopper"],
-        year: 2021,
-        itemType: "paper",
-        doi: "10.2/y",
-        url: "https://u",
-        abstract: "abs",
-      },
+describe("parseZoteroCollections", () => {
+  test("maps the real collection shape with counts", () => {
+    const cols = parseZoteroCollections([
+      { key: "C1", data: { name: "Methods" }, meta: { numItems: 3, numCollections: 1 } },
     ])
+    expect(cols[0]).toEqual({
+      key: "C1",
+      name: "Methods",
+      itemCount: 3,
+      subcollectionCount: 1,
+    })
   })
 
-  test("falls back to the DOI then an index for the id", () => {
-    expect(
-      parseSemanticScholarPapers({ data: [{ title: "x", externalIds: { DOI: "10.3/z" } }] })[0]?.id,
-    ).toBe("10.3/z")
-    expect(parseSemanticScholarPapers({ data: [{ title: "x" }] })[0]?.id).toBe("s2-0")
-  })
-
-  test("a payload without a data array parses to an empty list", () => {
-    expect(parseSemanticScholarPapers(null)).toEqual([])
-    expect(parseSemanticScholarPapers({})).toEqual([])
-    expect(parseSemanticScholarPapers({ data: "no" })).toEqual([])
+  test("degrades gracefully and parses non-arrays to an empty list", () => {
+    const [col] = parseZoteroCollections([{ key: "C2", data: {} }])
+    expect(col).toMatchObject({ key: "C2", name: "(untitled collection)", itemCount: 0 })
+    expect(parseZoteroCollections(null)).toEqual([])
+    expect(parseZoteroCollections("nope")).toEqual([])
   })
 })
 
@@ -115,16 +92,6 @@ describe("parsers are total (property-based)", () => {
     fc.assert(
       fc.property(fc.anything(), (input) => {
         const papers = parseZoteroItems(input)
-        expect(Array.isArray(papers)).toBe(true)
-        for (const paper of papers) assertWellFormed(paper)
-      }),
-    )
-  })
-
-  test("parseSemanticScholarPapers never throws and always yields well-formed papers", () => {
-    fc.assert(
-      fc.property(fc.anything(), (input) => {
-        const papers = parseSemanticScholarPapers(input)
         expect(Array.isArray(papers)).toBe(true)
         for (const paper of papers) assertWellFormed(paper)
       }),

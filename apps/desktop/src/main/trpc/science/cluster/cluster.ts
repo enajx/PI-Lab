@@ -2,11 +2,16 @@ import { type Machine, machines, type NewMachine, type SkipperDatabase } from "@
 import { TRPCError } from "@trpc/server"
 import { asc, eq } from "drizzle-orm"
 import { z } from "zod"
-import { defaultSshConfigPath, readSshConfig, type SshExec } from "../../../lib/ssh-config"
+import {
+  defaultSshConfigPath,
+  type GpuSnapshot,
+  readSshConfig,
+  type SshExec,
+} from "../../../lib/ssh-config"
 import { publicProcedure, router } from "../../trpc"
 
 /**
- * Cluster science tab — v1 is **monitoring only** (AGENTS.md §1 "Science tabs"):
+ * Cluster science tab — v1 is **monitoring only** (AGENTS.md "Scope" "Science tabs"):
  * import compute boxes from `~/.ssh/config`, add a few by hand, annotate / hide
  * them, and probe reachability over the `ssh` CLI. Job dispatch and experiment
  * runs are explicitly v2 and have no procedures here.
@@ -22,6 +27,21 @@ export interface MachineListResult {
   machines: Machine[]
   /** Count of hidden machines, so the tab can render "Show hidden (N)". */
   hiddenCount: number
+}
+
+/**
+ * What a probe returns to the UI: the persisted machine row (with its refreshed
+ * reachability) plus the **transient** telemetry collected this probe. The
+ * telemetry is deliberately not on the row — it's point-in-time and ages
+ * immediately, so the DB keeps only reachability and the renderer holds the
+ * telemetry in component state keyed by host.
+ */
+export interface MachineProbeResult {
+  machine: Machine
+  /** Per-GPU usage when reachable; empty array when reachable but no GPUs; undefined when unreachable. */
+  gpus?: GpuSnapshot[]
+  /** Overall CPU-busy percentage (0–100) when it could be read. */
+  cpuUsage?: number
 }
 
 const idInput = z.object({ id: z.string().min(1) })
@@ -194,40 +214,44 @@ export const clusterRouter = router({
   }),
 
   /**
-   * Probe one machine's reachability over the injected `ssh` exec and persist the
-   * result on the row. Never throws on an unreachable host — that's a normal
-   * recorded outcome (`reachable: false` + a detail), not an error.
+   * Probe one machine over the injected `ssh` exec: persist the reachability on
+   * the row and return it together with this probe's transient GPU / CPU
+   * telemetry. Never throws on an unreachable host — that's a normal recorded
+   * outcome (`reachable: false` + a detail), not an error.
    */
   refreshStatus: publicProcedure
     .input(idInput)
-    .mutation(async ({ ctx, input }): Promise<Machine> => {
+    .mutation(async ({ ctx, input }): Promise<MachineProbeResult> => {
       const machine = ctx.db.select().from(machines).where(eq(machines.id, input.id)).get()
       if (!machine) throw new TRPCError({ code: "NOT_FOUND", message: `No machine ${input.id}` })
       return probeAndRecord(ctx.db, ctx.sshExec, machine)
     }),
 
   /**
-   * Probe every non-hidden machine concurrently and persist each result. Returns
-   * the refreshed rows (hidden machines are left untouched).
+   * Probe every non-hidden machine concurrently, persist each reachability, and
+   * return the refreshed rows with their per-probe telemetry (hidden machines are
+   * left untouched).
    */
-  refreshAll: publicProcedure.mutation(async ({ ctx }): Promise<Machine[]> => {
+  refreshAll: publicProcedure.mutation(async ({ ctx }): Promise<MachineProbeResult[]> => {
     const targets = ctx.db.select().from(machines).where(eq(machines.hidden, false)).all()
     return Promise.all(targets.map((m) => probeAndRecord(ctx.db, ctx.sshExec, m)))
   }),
 })
 
 /**
- * Probe a single machine and write the outcome back to its row. Factored out so
- * `refreshStatus` and `refreshAll` share one code path (and one place to evolve
- * the probe contract).
+ * Probe a single machine, write only the (persisted) reachability back to its
+ * row, and return that row alongside this probe's transient telemetry. Factored
+ * out so `refreshStatus` and `refreshAll` share one code path (and one place to
+ * evolve the probe contract). Telemetry is never written to the DB — it is
+ * point-in-time and surfaced through the return value only.
  */
 async function probeAndRecord(
   db: SkipperDatabase,
   sshExec: SshExec,
   machine: Machine,
-): Promise<Machine> {
+): Promise<MachineProbeResult> {
   const result = await sshExec(machine.host)
-  return db
+  const row = db
     .update(machines)
     .set({
       reachable: result.ok,
@@ -238,4 +262,5 @@ async function probeAndRecord(
     .where(eq(machines.id, machine.id))
     .returning()
     .get()
+  return { machine: row, gpus: result.gpus, cpuUsage: result.cpuUsage }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
 /**
- * Restore the desktop's native modules to the *Node* ABI (AGENTS.md §13).
+ * Restore the desktop's native modules to the *Node* ABI (docs/testing-and-build.md (build & ship)).
  *
  * The inverse of `rebuild-native-electron.cjs`: after building/running the
  * Electron app (which flips better-sqlite3 to the Electron ABI), `bun run test`

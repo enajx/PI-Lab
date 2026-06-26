@@ -1,16 +1,68 @@
-import { Button } from "@skipper/ui"
+import { Button, cn } from "@skipper/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { DownloadCloud, Eye, EyeOff, Plus, RefreshCw, Server } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import {
+  CLUSTER_CARD_MAX_SIZE,
+  CLUSTER_CARD_MIN_SIZE,
+  useClusterCardSize,
+  useClusterOrder,
+} from "../../../../../preferences/preferences"
+import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
+import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
+import type { RouterOutputs } from "../../../../../trpc/types"
 import { readSshConfigPathOverride } from "../../../utils/sshConfigPathOverride"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AddMachineForm, type AddMachineValues } from "./components/AddMachineForm"
 import { ImportOptions } from "./components/ImportOptions"
-import { MachineCard } from "./components/MachineCard"
+import { MachineCard, type MachineTelemetry } from "./components/MachineCard"
+
+/** Transient probe telemetry keyed by machine host (never persisted to the DB). */
+type TelemetryByHost = Map<string, MachineTelemetry>
+
+/** Pull the telemetry fields out of a probe result for the per-host store. */
+function telemetryFrom(
+  result: RouterOutputs["science"]["cluster"]["refreshStatus"],
+): MachineTelemetry {
+  return { gpus: result.gpus, cpuUsage: result.cpuUsage }
+}
+
+/** The element type of a cluster-list machine row (live, from the router). */
+type ClusterMachine = RouterOutputs["science"]["cluster"]["list"]["machines"][number]
+
+/** A machine's display name: its trimmed annotation label, else the ssh host. */
+function displayNameOf(machine: ClusterMachine): string {
+  return machine.label?.trim() || machine.host
+}
+
+/** Case-insensitive A→Z comparator on the machines' display names. */
+function byDisplayName(a: ClusterMachine, b: ClusterMachine): number {
+  return displayNameOf(a).localeCompare(displayNameOf(b), undefined, { sensitivity: "base" })
+}
 
 /**
- * Cluster science tab (AGENTS.md §1 "Science tabs") — v1 monitoring: list
+ * Order machines for display: any id in the persisted drag order comes first (in
+ * that order), then every remaining machine alphabetically by display name — so
+ * the default (no stored order) is a clean case-insensitive A→Z list.
+ */
+function orderMachines(machines: ClusterMachine[], order: string[]): ClusterMachine[] {
+  const byId = new Map(machines.map((machine) => [machine.id, machine] as const))
+  const seen = new Set<string>()
+  const ranked: ClusterMachine[] = []
+  for (const id of order) {
+    const machine = byId.get(id)
+    if (machine && !seen.has(id)) {
+      ranked.push(machine)
+      seen.add(id)
+    }
+  }
+  const rest = machines.filter((machine) => !seen.has(machine.id)).sort(byDisplayName)
+  return [...ranked, ...rest]
+}
+
+/**
+ * Cluster science tab (AGENTS.md "Scope" "Science tabs") — v1 monitoring: list
  * compute machines (imported from `~/.ssh/config` or added by hand), probe each
  * one's reachability, annotate and hide them. No job dispatch / experiment runs —
  * that is v2 and intentionally absent.
@@ -18,7 +70,7 @@ import { MachineCard } from "./components/MachineCard"
  * Reads `science.cluster.list` (hidden excluded by default, with a hidden tally
  * for the "Show hidden (N)" toggle) and drives import / add / hide / annotate /
  * refresh through the matching mutations, invalidating the list on success. The
- * body owns its own scroll per §12.3.
+ * body owns its own scroll per AGENTS.md Pitfalls #3.
  */
 export function ScienceCluster() {
   const trpc = useTRPC()
@@ -28,6 +80,17 @@ export function ScienceCluster() {
   const [adding, setAdding] = useState(false)
   const [importOptionsOpen, setImportOptionsOpen] = useState(false)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
+  // Context-aware ⌘F machine finder + the card it last scrolled to (a transient ring).
+  const [findOpen, setFindOpen] = useState(false)
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Transient GPU / CPU telemetry from the latest probe of each host. Held only
+  // in component state (not persisted) since it ages the moment it's read.
+  const [telemetry, setTelemetry] = useState<TelemetryByHost>(() => new Map())
+  // Persisted custom card order (machine ids) + the live drag-source id.
+  const [order, setOrder] = useClusterOrder()
+  const [cardSize, setCardSize] = useClusterCardSize()
+  const [dragId, setDragId] = useState<string | null>(null)
 
   const listQuery = useQuery(trpc.science.cluster.list.queryOptions({ includeHidden: showHidden }))
 
@@ -60,6 +123,9 @@ export function ScienceCluster() {
   )
   const refreshStatus = useMutation(
     trpc.science.cluster.refreshStatus.mutationOptions({
+      onSuccess: (result) => {
+        setTelemetry((prev) => new Map(prev).set(result.machine.host, telemetryFrom(result)))
+      },
       onSettled: () => {
         setRefreshingId(null)
         void invalidateList()
@@ -67,7 +133,7 @@ export function ScienceCluster() {
     }),
   )
 
-  // Test seam (AGENTS.md §14): on mount, when loaded with `?sshConfigPath`,
+  // Test seam (docs/testing-and-build.md): on mount, when loaded with `?sshConfigPath`,
   // import once from that fixture path so the E2E seeds deterministic machines
   // without touching the real `~/.ssh/config`. A ref guard survives React 19
   // StrictMode's double effect so the import never fires twice.
@@ -81,10 +147,72 @@ export function ScienceCluster() {
     importMutate({ path })
   }, [importMutate])
 
+  // Context-aware ⌘F: the quick-open shortcut opens the machine finder. The shell skips every
+  // `/science/*` route, so this tab is the sole ⌘F owner while Cluster is on screen.
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (eventMatchesShortcut(event, "quick-open")) {
+        event.preventDefault()
+        setFindOpen(true)
+      }
+    }
+    window.addEventListener("keydown", onWindowKeyDown)
+    return () => window.removeEventListener("keydown", onWindowKeyDown)
+  }, [])
+
+  // Clear the post-find ring after a beat so the highlight reads as "I jumped you here", not a
+  // persistent selection (the Cluster grid has no selected-machine concept of its own).
+  useEffect(() => {
+    if (!focusedId) return
+    const timer = setTimeout(() => setFocusedId(null), 1500)
+    return () => clearTimeout(timer)
+  }, [focusedId])
+
   const machines = listQuery.data?.machines ?? []
   const hiddenCount = listQuery.data?.hiddenCount ?? 0
+  const orderedMachines = orderMachines(machines, order)
+
+  // Finder rows: the visible machines (the same set rendered as cards), name-searchable with
+  // the connection address as a muted hint. Picking one scrolls its card into view + rings it.
+  const findItems: QuickFindItem[] = orderedMachines.map((machine) => {
+    const name = displayNameOf(machine)
+    const address = machine.hostname ?? machine.host
+    return {
+      id: machine.id,
+      label: name,
+      hint: address !== name ? address : undefined,
+      icon: Server,
+    }
+  })
+
+  const focusMachine = (id: string) => {
+    setFocusedId(id)
+    scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-machine-id="${id}"]`)
+      ?.scrollIntoView({ block: "nearest" })
+  }
 
   const addMachineFromForm = (values: AddMachineValues) => addMachine.mutate(values)
+
+  // Drop the dragged card onto the target's slot, persisting the full visible
+  // order (every card becomes "stored", so the arrangement stays stable after).
+  const reorderOnto = (targetId: string) => {
+    if (!dragId || dragId === targetId) {
+      setDragId(null)
+      return
+    }
+    const ids = orderedMachines.map((machine) => machine.id)
+    const from = ids.indexOf(dragId)
+    const to = ids.indexOf(targetId)
+    if (from === -1 || to === -1) {
+      setDragId(null)
+      return
+    }
+    ids.splice(from, 1)
+    ids.splice(to, 0, dragId)
+    setOrder(ids)
+    setDragId(null)
+  }
 
   return (
     <ScienceTabShell
@@ -93,6 +221,19 @@ export function ScienceCluster() {
       subtitle="Monitor compute machines from your ssh config"
       actions={
         <>
+          <label className="flex items-center gap-2 text-muted-foreground text-xs">
+            Card size
+            <input
+              data-testid="cluster-card-size"
+              type="range"
+              min={CLUSTER_CARD_MIN_SIZE}
+              max={CLUSTER_CARD_MAX_SIZE}
+              value={cardSize}
+              onChange={(event) => setCardSize(Number(event.target.value))}
+              className="w-32 accent-muted-foreground"
+              aria-label="Card size"
+            />
+          </label>
           {hiddenCount > 0 ? (
             <Button
               data-testid="show-hidden"
@@ -143,7 +284,7 @@ export function ScienceCluster() {
         </>
       }
     >
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3 p-6">
           {importOptionsOpen ? (
             <ImportOptions
@@ -168,26 +309,73 @@ export function ScienceCluster() {
               importing={importConfig.isPending}
             />
           ) : (
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {machines.map((machine) => (
-                <MachineCard
+            <ul
+              data-testid="cluster-grid"
+              className="grid gap-3"
+              style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize}px, 1fr))` }}
+            >
+              {orderedMachines.map((machine) => (
+                <li
                   key={machine.id}
-                  machine={machine}
-                  isRefreshing={refreshStatus.isPending && refreshingId === machine.id}
-                  onRefresh={() => {
-                    setRefreshingId(machine.id)
-                    refreshStatus.mutate({ id: machine.id })
+                  data-testid="machine-card-drag"
+                  data-machine-id={machine.id}
+                  data-focused={focusedId === machine.id}
+                  draggable
+                  onDragStart={(event) => {
+                    const target = event.target as HTMLElement
+                    // Let buttons, inputs and the selectable error text behave
+                    // normally — only a bare card body starts a reorder drag.
+                    if (target.closest("input, textarea, button, .select-text")) {
+                      event.preventDefault()
+                      return
+                    }
+                    setDragId(machine.id)
+                    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"
                   }}
-                  onToggleHidden={() =>
-                    setHidden.mutate({ id: machine.id, hidden: !machine.hidden })
-                  }
-                  onAnnotate={(label) => annotate.mutate({ id: machine.id, label })}
-                />
+                  onDragOver={(event) => {
+                    if (dragId && dragId !== machine.id) event.preventDefault()
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    reorderOnto(machine.id)
+                  }}
+                  onDragEnd={() => setDragId(null)}
+                  className={cn(
+                    "rounded-lg",
+                    dragId === machine.id && "opacity-50",
+                    focusedId === machine.id && "ring-2 ring-ring",
+                  )}
+                >
+                  <MachineCard
+                    machine={machine}
+                    telemetry={telemetry.get(machine.host)}
+                    isRefreshing={refreshStatus.isPending && refreshingId === machine.id}
+                    onRefresh={() => {
+                      setRefreshingId(machine.id)
+                      refreshStatus.mutate({ id: machine.id })
+                    }}
+                    onToggleHidden={() =>
+                      setHidden.mutate({ id: machine.id, hidden: !machine.hidden })
+                    }
+                    onAnnotate={(label) => annotate.mutate({ id: machine.id, label })}
+                  />
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
       </div>
+
+      {findOpen ? (
+        <QuickFind
+          ariaLabel="Find a machine"
+          placeholder="Find a machine…"
+          items={findItems}
+          emptyText="No matching machines"
+          onSelect={(item) => focusMachine(item.id)}
+          onClose={() => setFindOpen(false)}
+        />
+      ) : null}
     </ScienceTabShell>
   )
 }

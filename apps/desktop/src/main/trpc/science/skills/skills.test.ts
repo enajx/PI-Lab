@@ -1,6 +1,6 @@
 // Integration tests for the science.skills router via createCallerFactory over a
 // temp SQLite DB with the real migrations and a real temp git repo (AGENTS.md
-// §14). Skills are read off real files written into the repo's `.claude/skills`
+// docs/testing-and-build.md). Skills are read off real files written into the repo's `.claude/skills`
 // and `.agents/skills` directories — no mocking of the filesystem.
 import { mkdir, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"

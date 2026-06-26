@@ -8,23 +8,25 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (AGENTS.md §14) for the projects/workspaces feature: launch the
+ * Whole-app E2E (docs/testing-and-build.md) for the projects/workspaces feature: launch the
  * real Electron build, open a temp git repo as a project via the `?openProject`
  * seam (so no native dialog is needed), then exercise the full flow —
- *   1. the project shows in the sidebar and opens its route,
- *   2. "Open agent" starts the deterministic test agent (`test-echo`), whose
- *      marker (`AGENT-UI-OK`) reaches the *attached* terminal, with a kind badge
- *      surfacing the §8 policy outcome,
- *   3. the right-sidebar Research panel shows the repo's `RESEARCH.md` (read via
- *      the `files` router from the workspace's working dir),
- *   4. a file written into the repo is reflected by the Changes panel.
+ *   1. the project shows in the sidebar and opens DIRECTLY into the rich project
+ *      view (right sidebar + central launcher — no intermediate "open agent" page),
+ *   2. the right-sidebar Research panel shows the repo's `RESEARCH.md` (read via
+ *      the `files` router from the project's main checkout),
+ *   3. the central "Open agent" launcher starts the deterministic test agent
+ *      (`test-echo`), whose marker (`AGENT-UI-OK`) reaches the *attached* terminal,
+ *      with a kind badge on the agent tab surfacing the policy outcome,
+ *   4. revealing the (default-hidden) Code changes panel via its gear reflects a
+ *      file written into the repo.
  *
  * Driven entirely through the test seams in `mainWindow.ts` (env → renderer query
  * params): `SKIPPER_TEST_OPEN_PROJECT` and `SKIPPER_TEST_AGENT_ID`. No native
  * dialogs, no synthetic keystrokes, no credentials.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (AGENTS.md §13); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun (docs/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const AGENT_MARKER = "AGENT-UI-OK"
@@ -92,19 +94,27 @@ test("open a project, launch an agent, and see its changes", async () => {
   await expect(projectItem).toBeVisible({ timeout: 30_000 })
   await expect(projectItem).toContainText("repo")
 
-  // Navigate to the project route.
+  // Clicking the project lands DIRECTLY on the rich project view — no intermediate
+  // "open agent" page. The right sidebar and the central launcher are both visible.
   await projectItem.click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("right-sidebar")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("central-launcher")).toBeVisible({ timeout: 30_000 })
 
-  // Launch the agent. With no prior live agent the §8 policy keeps it in the
-  // project's main checkout → kind "branch".
-  await window.getByTestId("open-agent").click()
+  // The Research panel (the default right-sidebar tab) reads RESEARCH.md from the
+  // project's main checkout via the `files` router and renders it as markdown.
+  const research = window.getByTestId("panel-research")
+  await expect(research).toBeVisible()
+  await expect(research).toContainText(RESEARCH_HEADING, { timeout: 30_000 })
+  await expect(research).toContainText(RESEARCH_BODY)
 
-  // The session view renders: attached terminal + kind badge + right sidebar.
-  await expect(window.getByTestId("session-view")).toBeVisible({ timeout: 30_000 })
+  // Open the agent from the central launcher. With no prior live agent the
+  // docs/architecture.md (agent runtime) policy keeps it in the main checkout → kind "branch",
+  // surfaced on the agent tab.
+  await window.getByTestId("launcher-agent").click()
 
   const kindBadge = window.getByTestId("kind-badge")
-  await expect(kindBadge).toBeVisible()
+  await expect(kindBadge).toBeVisible({ timeout: 30_000 })
   await expect(kindBadge).toHaveAttribute("data-kind", "branch")
 
   // The agent's marker reaches the ATTACHED terminal — proving sessions.start →
@@ -113,28 +123,17 @@ test("open a project, launch an agent, and see its changes", async () => {
   await expect(terminal).toBeVisible()
   await expect(terminal).toContainText(AGENT_MARKER, { timeout: 30_000 })
 
-  // The right sidebar renders with the Research panel active by default. It reads
-  // RESEARCH.md from the workspace's working dir (the repo root, since this is a
-  // branch workspace) via the `files` router and renders it as markdown.
-  await expect(window.getByTestId("right-sidebar")).toBeVisible()
-  const research = window.getByTestId("panel-research")
-  await expect(research).toBeVisible()
-  await expect(research).toContainText(RESEARCH_HEADING, { timeout: 30_000 })
-  await expect(research).toContainText(RESEARCH_BODY)
-
-  // Write a new file in the repo so the Changes panel has something to show.
-  await writeFile(join(repoDir, "scratch.txt"), "hello from the agent\n")
-
-  // Go back to the project and start a fresh session so its changes query runs
-  // after the file was written (the first session's panel was fetched before).
-  await window.getByTestId("session-back").click()
-  await expect(window.getByTestId("project-view")).toBeVisible()
-  await window.getByTestId("open-agent").click()
-  await expect(window.getByTestId("session-view")).toBeVisible({ timeout: 30_000 })
-
-  // Switch to the Changes tab; the new file appears as an untracked change.
+  // The Code changes panel is hidden by default — reveal it via the View-options
+  // menu (gear → toggle "Code changes"), close the menu, then open its tab and
+  // write a file the polling panel will pick up as untracked.
+  await window.getByTestId("right-sidebar-settings").click()
+  await window.getByTestId("right-sidebar-toggle-changes").click()
+  await window.keyboard.press("Escape")
   await window.getByTestId("panel-tab-changes").click()
   await expect(window.getByTestId("panel-changes")).toBeVisible()
+
+  await writeFile(join(repoDir, "scratch.txt"), "hello from the agent\n")
+
   const change = window.getByTestId("change-item").filter({ hasText: "scratch.txt" })
   await expect(change).toBeVisible({ timeout: 30_000 })
   await expect(change).toHaveAttribute("data-status", "untracked")

@@ -1,5 +1,5 @@
 // Integration tests for the science.cluster router via createCallerFactory over
-// a temp SQLite DB with the real migrations (AGENTS.md §14). The ssh probe is the
+// a temp SQLite DB with the real migrations (docs/testing-and-build.md). The ssh probe is the
 // injected fake (FAKE_SSH_EXEC) so `refreshStatus` never touches the network.
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -137,16 +137,58 @@ describe("science.cluster.refreshStatus (injected fake ssh-exec)", () => {
   test("records reachable: true for a reachable host", async () => {
     const m = await h.caller.science.cluster.addMachine({ host: "up-box" })
     const probed = await h.caller.science.cluster.refreshStatus({ id: m.id })
-    expect(probed.reachable).toBe(true)
-    expect(probed.statusDetail).toContain("up")
-    expect(probed.lastCheckedAt).toBeTypeOf("number")
+    expect(probed.machine.reachable).toBe(true)
+    expect(probed.machine.statusDetail).toContain("up")
+    expect(probed.machine.lastCheckedAt).toBeTypeOf("number")
   })
 
   test("records reachable: false for an unreachable host (no throw)", async () => {
     const m = await h.caller.science.cluster.addMachine({ host: "down-box" })
     const probed = await h.caller.science.cluster.refreshStatus({ id: m.id })
-    expect(probed.reachable).toBe(false)
-    expect(probed.statusDetail).toContain("refused")
+    expect(probed.machine.reachable).toBe(false)
+    expect(probed.machine.statusDetail).toContain("refused")
+  })
+
+  test("threads transient GPU / CPU telemetry through without persisting it", async () => {
+    const gpuExec: SshExec = async () => ({
+      ok: true,
+      detail: "10:00 up",
+      gpus: [
+        { index: 0, name: "A100", utilization: 5, memUsed: 1000, memTotal: 81920 },
+        { index: 1, name: "A100", utilization: 95, memUsed: 70000, memTotal: 81920 },
+      ],
+      cpuUsage: 42,
+    })
+    const custom = await createHarness([FAKE_AGENT], { sshExec: gpuExec })
+    try {
+      const m = await custom.caller.science.cluster.addMachine({ host: "gpu" })
+      const probed = await custom.caller.science.cluster.refreshStatus({ id: m.id })
+      expect(probed.machine.reachable).toBe(true)
+      expect(probed.cpuUsage).toBe(42)
+      expect(probed.gpus?.map((g) => g.index)).toEqual([0, 1])
+      expect(probed.gpus?.[1]).toMatchObject({ name: "A100", utilization: 95, memTotal: 81920 })
+
+      // Telemetry is transient: nothing about GPUs/CPU lands on the persisted row.
+      const persisted = await custom.caller.science.cluster.list()
+      expect(persisted.machines[0]).not.toHaveProperty("gpus")
+      expect(persisted.machines[0]).not.toHaveProperty("cpuUsage")
+    } finally {
+      await custom.dispose()
+    }
+  })
+
+  test("a reachable host with no nvidia-smi reports no gpus (still ok)", async () => {
+    const noGpuExec: SshExec = async () => ({ ok: true, detail: "reachable", gpus: [] })
+    const custom = await createHarness([FAKE_AGENT], { sshExec: noGpuExec })
+    try {
+      const m = await custom.caller.science.cluster.addMachine({ host: "cpu-only" })
+      const probed = await custom.caller.science.cluster.refreshStatus({ id: m.id })
+      expect(probed.machine.reachable).toBe(true)
+      expect(probed.gpus).toEqual([])
+      expect(probed.cpuUsage).toBeUndefined()
+    } finally {
+      await custom.dispose()
+    }
   })
 
   test("refreshAll probes every non-hidden machine and skips hidden ones", async () => {
@@ -156,9 +198,9 @@ describe("science.cluster.refreshStatus (injected fake ssh-exec)", () => {
     await h.caller.science.cluster.setHidden({ id: hidden.id, hidden: true })
 
     const refreshed = await h.caller.science.cluster.refreshAll()
-    expect(refreshed.map((m) => m.host).sort()).toEqual(["down-b", "up-a"])
-    expect(refreshed.find((m) => m.host === "up-a")?.reachable).toBe(true)
-    expect(refreshed.find((m) => m.host === "down-b")?.reachable).toBe(false)
+    expect(refreshed.map((r) => r.machine.host).sort()).toEqual(["down-b", "up-a"])
+    expect(refreshed.find((r) => r.machine.host === "up-a")?.machine.reachable).toBe(true)
+    expect(refreshed.find((r) => r.machine.host === "down-b")?.machine.reachable).toBe(false)
 
     // The hidden machine was never probed.
     const all = await h.caller.science.cluster.list({ includeHidden: true })
@@ -177,12 +219,12 @@ describe("science.cluster with a custom injected ssh-exec", () => {
     try {
       const yes = await custom.caller.science.cluster.addMachine({ host: "yes" })
       const no = await custom.caller.science.cluster.addMachine({ host: "no" })
-      expect((await custom.caller.science.cluster.refreshStatus({ id: yes.id })).reachable).toBe(
-        true,
-      )
-      expect((await custom.caller.science.cluster.refreshStatus({ id: no.id })).reachable).toBe(
-        false,
-      )
+      expect(
+        (await custom.caller.science.cluster.refreshStatus({ id: yes.id })).machine.reachable,
+      ).toBe(true)
+      expect(
+        (await custom.caller.science.cluster.refreshStatus({ id: no.id })).machine.reachable,
+      ).toBe(false)
       expect(calls).toEqual(["yes", "no"])
     } finally {
       await custom.dispose()

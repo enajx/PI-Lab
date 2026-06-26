@@ -1,6 +1,6 @@
 import { relative } from "node:path"
+import { fuzzyScore } from "@skipper/shared"
 import { type WalkOptions, walkFiles } from "./fs"
-import { fuzzyScore } from "./fuzzy"
 
 /** A single ranked search hit. */
 export interface SearchHit {

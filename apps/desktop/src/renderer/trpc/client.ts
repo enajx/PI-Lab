@@ -10,7 +10,7 @@ import type { AppRouter } from "../../main/trpc/appRouter"
  * the main process's `initTRPC` transformer.
  *
  * Constructed via a factory (not a module singleton) so component tests can
- * inject a fake client (AGENTS.md §14).
+ * inject a fake client (docs/testing-and-build.md).
  */
 export function createSkipperTrpcClient() {
   return createTRPCClient<AppRouter>({

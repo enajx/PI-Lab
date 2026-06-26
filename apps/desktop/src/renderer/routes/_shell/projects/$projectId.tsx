@@ -1,52 +1,113 @@
-import type { Workspace } from "@skipper/local-db"
-import { Button } from "@skipper/ui"
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { GitBranch, GitFork, Play } from "lucide-react"
-import { useTRPC } from "../../../trpc/react"
-import { readAgentIdOverride } from "../utils/agentIdOverride"
+import type { EditorSettings } from "@skipper/local-db"
+import { cn } from "@skipper/ui"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import { useEffect, useRef, useState } from "react"
+import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
+import { DEFAULT_EDITOR_SETTINGS } from "../../../Editor/hooks/useEditorBuffers"
+import {
+  RIGHT_SIDEBAR_MAX_WIDTH,
+  RIGHT_SIDEBAR_MIN_WIDTH,
+  useRightSidebarWidth,
+  useSidebarCollapsed,
+} from "../../../preferences/preferences"
+import { useTRPC, useTRPCClient } from "../../../trpc/react"
+import { titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
+import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
+import { RightSidebar } from "./components/RightSidebar"
 
 /**
- * Project route (AGENTS.md §7) — a project is an opened local git repo. It shows
- * the project's name + path, lists its workspaces (branch / worktree), and offers
- * an "Open agent" action that starts an external CLI agent session via
- * `sessions.start` (which applies the §8 worktree policy: main checkout by
- * default, a fresh worktree on concurrency / when `worktreePerAgent` is on).
+ * Project route (md/02; plan "Settings panel, project-view rework") — the rich
+ * workspace surface a project card opens directly into. The central panel holds
+ * whatever the user opens (an agent, a plain terminal, or a file in the built-in
+ * editor) as tabs; the right sidebar (Research / TODOs / Files, + an optional
+ * Code changes panel) sits alongside it, and can be collapsed away to give the
+ * central panel the full width (a slim affordance brings it back).
  *
- * On a successful start we navigate to the session view keyed by the returned
- * `sessionId`, carrying the `workspaceId` + chosen `kind` as search params so that
- * view can render the attached terminal, the changes panel, and a kind badge
- * (so the policy is visible). The agent id comes from the default agent, with a
- * `?agentId` test seam (AGENTS.md §14) so the E2E can launch the deterministic
- * test agent.
+ * TanStack reuses the route component across `/projects/A → /projects/B`, so the
+ * actual view is keyed on `projectId` ({@link ProjectWorkspace}) — a fresh mount
+ * per project resets the central panel's open tabs/sessions and editor buffers so
+ * one project's state never leaks into another.
  */
 export const Route = createFileRoute("/_shell/projects/$projectId")({
-  component: ProjectView,
+  component: ProjectRoute,
 })
 
-function ProjectView() {
+function ProjectRoute() {
   const { projectId } = Route.useParams()
+  return <ProjectWorkspace key={projectId} projectId={projectId} />
+}
+
+/**
+ * Everything binds to the project's **main checkout** — a `kind:"branch"`
+ * workspace ensured once on mount via `workspaces.ensureMain` (idempotent). Files
+ * read/write through the `files` router against that workspace with no agent
+ * required; opening an agent (`sessions.start`) or a terminal
+ * (`workspaces.spawnTerminal`) attaches a session pane in the central panel.
+ */
+function ProjectWorkspace({ projectId }: { projectId: string }) {
   const trpc = useTRPC()
-  const navigate = useNavigate()
+  const client = useTRPCClient()
+  const queryClient = useQueryClient()
 
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
-  const workspacesQuery = useQuery(trpc.workspaces.list.queryOptions({ projectId }))
+  const settingsQuery = useQuery(trpc.settings.get.queryOptions())
+  const editorSettings: EditorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
 
-  const startSession = useMutation(
-    trpc.sessions.start.mutationOptions({
-      onSuccess: (result) => {
-        void navigate({
-          to: "/sessions/$sessionId",
-          params: { sessionId: result.sessionId },
-          search: { workspaceId: result.workspaceId, kind: result.kind, projectId },
-        })
+  const updateEditor = useMutation(
+    trpc.settings.updateEditor.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
       },
     }),
   )
+  const onUpdateEditorSettings = (patch: Partial<EditorSettings>) => updateEditor.mutate(patch)
 
-  const openAgent = () => {
-    startSession.mutate({ projectId, agentId: readAgentIdOverride() })
-  }
+  // The right sidebar defaults to EXPANDED on every project open (session state, keyed by
+  // project — not persisted), so opening a project always shows it. Collapsing it (the
+  // sidebar's collapse button or the central panel's expand button) lasts for this project
+  // view; switching/reopening a project shows it expanded again. Its width when expanded is a
+  // separately-persisted, edge-resizable preference.
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
+  const [rightSidebarWidth, setRightSidebarWidth] = useRightSidebarWidth()
+
+  // When the left sidebar is collapsed, the traffic lights ride this view's title-bar
+  // strip, so the header clears + drags around them (the path text stays selectable).
+  const [collapsed] = useSidebarCollapsed()
+
+  // Ensure the project's main-checkout (branch) workspace exists, once on mount
+  // (this component is keyed by project, so a switch remounts and re-ensures).
+  const ensureMain = useMutation(trpc.workspaces.ensureMain.mutationOptions())
+  const ensureMainRef = useRef(ensureMain.mutateAsync)
+  ensureMainRef.current = ensureMain.mutateAsync
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const firedRef = useRef(false)
+
+  useEffect(() => {
+    if (firedRef.current) return
+    firedRef.current = true
+    let cancelled = false
+    ensureMainRef
+      .current({ projectId })
+      .then((workspace) => {
+        if (!cancelled) setWorkspaceId(workspace.id)
+      })
+      .catch(() => {
+        // Surfaced below via ensureMain.isError; nothing to do here.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
+  // Hooks are unconditional; the central panel does no file I/O until a workspace
+  // id is set and the panel is rendered, so an empty id pre-resolve is inert.
+  const controller = useCentralPanel({
+    client,
+    workspaceId: workspaceId ?? "",
+    projectId,
+    settings: editorSettings,
+  })
 
   if (projectQuery.isError) {
     return (
@@ -59,90 +120,69 @@ function ProjectView() {
   }
 
   const project = projectQuery.data
-  const workspaces = workspacesQuery.data ?? []
 
   return (
-    <div data-testid="project-view" className="flex h-full flex-col gap-6 p-8">
-      <header className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-1">
-          <h1 className="truncate font-semibold text-foreground text-xl tracking-tight">
+    <div data-testid="project-view" className="flex h-full flex-col gap-3 p-4">
+      <header
+        className={cn(
+          "flex items-center justify-between gap-3",
+          titleBarInsetHeaderClass(collapsed),
+        )}
+      >
+        <div className={cn("flex min-w-0 flex-col", titleBarControlClass(collapsed))}>
+          <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
             {project?.name ?? "Loading…"}
           </h1>
           {project ? (
-            <p className="cursor-text select-text truncate text-muted-foreground text-sm">
+            <p className="cursor-text select-text truncate text-muted-foreground text-xs">
               {project.repoPath}
             </p>
           ) : null}
         </div>
-        <Button
-          data-testid="open-agent"
-          onClick={openAgent}
-          disabled={startSession.isPending || !project}
-        >
-          <Play aria-hidden />
-          Open agent
-        </Button>
       </header>
 
-      {startSession.isError ? (
-        <p className="cursor-text select-text text-destructive text-sm">
-          {startSession.error.message}
-        </p>
-      ) : null}
-
-      <section className="flex min-h-0 flex-1 flex-col gap-2">
-        <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          Workspaces
-        </h2>
-        <ul
-          data-testid="workspaces-list"
-          className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
-        >
-          {workspaces.length === 0 ? (
-            <li data-testid="workspaces-empty" className="text-muted-foreground text-sm">
-              No workspaces yet — open an agent to create one.
-            </li>
-          ) : (
-            workspaces.map((workspace) => <WorkspaceRow key={workspace.id} workspace={workspace} />)
+      {workspaceId ? (
+        <div className="flex min-h-0 flex-1 gap-3">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <CentralPanel
+              controller={controller}
+              client={client}
+              workspaceId={workspaceId}
+              settings={editorSettings}
+              onUpdateEditorSettings={onUpdateEditorSettings}
+              rightSidebarCollapsed={rightSidebarCollapsed}
+              onExpandRightSidebar={() => setRightSidebarCollapsed(false)}
+            />
+          </div>
+          {rightSidebarCollapsed ? null : (
+            <div className="relative flex min-h-0 shrink-0" style={{ width: rightSidebarWidth }}>
+              <EdgeResizeHandle
+                side="left"
+                width={rightSidebarWidth}
+                onResize={setRightSidebarWidth}
+                min={RIGHT_SIDEBAR_MIN_WIDTH}
+                max={RIGHT_SIDEBAR_MAX_WIDTH}
+                testId="right-sidebar-edge-drag"
+              />
+              <RightSidebar
+                workspaceId={workspaceId}
+                onOpenFile={controller.openFile}
+                onCollapse={() => setRightSidebarCollapsed(true)}
+              />
+            </div>
           )}
-        </ul>
-      </section>
-    </div>
-  )
-}
-
-/** One workspace row: its name, branch, and a kind badge (branch vs worktree). */
-function WorkspaceRow({ workspace }: { workspace: Workspace }) {
-  return (
-    <li
-      data-testid="workspace-item"
-      data-kind={workspace.kind}
-      className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
-    >
-      <KindBadge kind={workspace.kind} />
-      <span className="min-w-0 flex-1 truncate text-foreground text-sm">{workspace.name}</span>
-      {workspace.branch ? (
-        <span className="shrink-0 text-muted-foreground text-xs">{workspace.branch}</span>
-      ) : null}
-    </li>
-  )
-}
-
-/** Small badge surfacing the §8 policy outcome — branch (main checkout) vs worktree. */
-export function KindBadge({ kind }: { kind: Workspace["kind"] }) {
-  const isWorktree = kind === "worktree"
-  return (
-    <span
-      data-testid="kind-badge"
-      data-kind={kind}
-      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-secondary-foreground text-xs"
-    >
-      {isWorktree ? (
-        <GitFork className="size-3" aria-hidden />
+        </div>
       ) : (
-        <GitBranch className="size-3" aria-hidden />
+        <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground text-sm">
+          {ensureMain.isError ? (
+            <span data-testid="project-error" className="cursor-text select-text text-destructive">
+              {ensureMain.error.message}
+            </span>
+          ) : (
+            "Opening project…"
+          )}
+        </div>
       )}
-      {isWorktree ? "worktree" : "branch"}
-    </span>
+    </div>
   )
 }

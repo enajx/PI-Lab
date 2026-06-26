@@ -2,7 +2,7 @@ import type { DaemonClient, ExitEvent } from "@skipper/pty-daemon"
 
 /**
  * Per-project tally of *live* agent sessions, the input the start-agent-session
- * policy (AGENTS.md §8) needs to decide a workspace kind: the second concurrent
+ * policy (docs/architecture.md (agent runtime)) needs to decide a workspace kind: the second concurrent
  * agent for a project must get its own worktree so it can't clobber the shared
  * main checkout.
  *

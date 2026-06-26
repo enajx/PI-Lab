@@ -15,11 +15,11 @@ interface EditorSettingsMenuProps {
 }
 
 /**
- * Self-contained editor-settings popover (AGENTS.md §7; spec: TODO "Built-in
+ * Self-contained editor-settings popover (docs/architecture.md (renderer); spec: TODO "Built-in
  * editor" — "Editor settings group"). A gear button in the editor toolbar that
- * opens a small menu toggling the four v1 preferences: autosave, vim mode, the
- * Python type checker (`ty` ↔ `pyrefly`), and ruff format-on-save. There is no
- * global settings page yet, so this lives next to the buffer it configures.
+ * opens a small menu toggling the three v1 preferences: autosave, vim mode, and
+ * ruff format-on-save. The Python type checker (`ty` ↔ `pyrefly`) lives in
+ * Settings → Editor instead, so it is intentionally absent here.
  *
  * Each toggle writes just its own field through {@link onChange} so a click
  * round-trips one `settings.updateEditor` patch; the parent re-reads settings
@@ -95,24 +95,6 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
             checked={settings.formatOnSave}
             onToggle={() => onChange?.({ formatOnSave: !settings.formatOnSave })}
           />
-
-          <div className="my-1 border-border/60 border-t" />
-
-          <p className="px-2 py-1 text-muted-foreground text-xs">Type checker</p>
-          <div className="flex gap-1 px-1 pb-1">
-            <CheckerOption
-              testId="editor-settings-checker-ty"
-              label="ty"
-              active={settings.typeChecker === "ty"}
-              onSelect={() => onChange?.({ typeChecker: "ty" })}
-            />
-            <CheckerOption
-              testId="editor-settings-checker-pyrefly"
-              label="pyrefly"
-              active={settings.typeChecker === "pyrefly"}
-              onSelect={() => onChange?.({ typeChecker: "pyrefly" })}
-            />
-          </div>
         </div>
       ) : null}
     </div>
@@ -151,35 +133,6 @@ function ToggleRow({ testId, label, description, checked, onToggle }: ToggleRowP
         <span className="block text-foreground text-xs">{label}</span>
         <span className="block text-muted-foreground text-[11px]">{description}</span>
       </span>
-    </button>
-  )
-}
-
-interface CheckerOptionProps {
-  testId: string
-  label: string
-  active: boolean
-  onSelect: () => void
-}
-
-/** A segmented-control style choice for the active type checker. */
-function CheckerOption({ testId, label, active, onSelect }: CheckerOptionProps) {
-  return (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={active}
-      data-testid={testId}
-      data-active={active}
-      onClick={onSelect}
-      className={cn(
-        "flex-1 rounded-md px-2 py-1 text-center font-medium text-xs transition-colors",
-        active
-          ? "bg-primary text-primary-foreground"
-          : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-    >
-      {label}
     </button>
   )
 }

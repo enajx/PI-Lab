@@ -1,8 +1,10 @@
+import { cn } from "@skipper/ui"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronDown, ChevronRight, File as FileIcon } from "lucide-react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { useState } from "react"
 import { useTRPC } from "../../../trpc/react"
 import type { FileTreeEntry } from "../../../trpc/types"
+import { fileIconUrl, folderIconUrl } from "./fileIcons"
 
 interface FileTreeProps {
   workspaceId: string
@@ -11,13 +13,13 @@ interface FileTreeProps {
 }
 
 /**
- * Lazy workspace file tree (AGENTS.md §7). The root level is listed via
+ * Lazy workspace file tree (docs/architecture.md (renderer)). The root level is listed via
  * `files.tree` with an empty path; each directory expands on click, fetching its
  * own children on demand so a large repo never walks the whole tree up front.
  * Files open into the editor on click.
  *
  * Scrolling is a native bounded `min-h-0 flex-1 overflow-y-auto` column
- * (AGENTS.md §12.3) — no Radix ScrollArea.
+ * (AGENTS.md Pitfalls #3) — no Radix ScrollArea.
  */
 export function FileTree({ workspaceId, onOpenFile }: FileTreeProps) {
   return (
@@ -113,6 +115,7 @@ function TreeNode({ workspaceId, entry, depth, onOpenFile }: TreeNodeProps) {
           ) : (
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
           )}
+          <CodIcon src={folderIconUrl(expanded)} className="size-4" />
           <span className="truncate">{entry.name}</span>
         </button>
         {expanded ? (
@@ -137,10 +140,35 @@ function TreeNode({ workspaceId, entry, depth, onOpenFile }: TreeNodeProps) {
         style={indent}
         className="flex w-full cursor-pointer items-center gap-1 py-1 pr-2 text-left text-muted-foreground text-xs transition-colors hover:bg-accent/60 hover:text-foreground"
       >
-        <FileIcon className="size-3.5 shrink-0 opacity-60" aria-hidden />
+        {/* Spacer the width of the dir chevron so files align under directories. */}
+        <span className="size-3.5 shrink-0" aria-hidden />
+        <CodIcon src={fileIconUrl(entry.name)} className="size-4 opacity-80" />
         <span className="truncate">{entry.name}</span>
       </button>
     </li>
+  )
+}
+
+/**
+ * Render a monochrome codicon SVG via a CSS mask so it paints in `currentColor` —
+ * the icon adapts to the row's text colour and to the light/dark theme from one set.
+ */
+function CodIcon({ src, className }: { src: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("inline-block shrink-0 bg-current", className)}
+      style={{
+        maskImage: `url("${src}")`,
+        WebkitMaskImage: `url("${src}")`,
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskPosition: "center",
+        WebkitMaskPosition: "center",
+        maskSize: "contain",
+        WebkitMaskSize: "contain",
+      }}
+    />
   )
 }
 

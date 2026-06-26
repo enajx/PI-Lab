@@ -1,4 +1,4 @@
-// Integration tests for the workspaces router (AGENTS.md §14): createCaller over
+// Integration tests for the workspaces router (docs/testing-and-build.md): createCaller over
 // a temp SQLite DB with real migrations, real temp git repos, an in-process
 // pty-daemon for launchAgent, and an injected fake agent. Full cleanup per test.
 import { existsSync } from "node:fs"
@@ -166,6 +166,69 @@ describe("workspaces.launchAgent", () => {
     })
     await expect(
       h.caller.workspaces.launchAgent({ workspaceId: workspace.id, agentId: "ghost" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+})
+
+describe("workspaces.ensureMain", () => {
+  test("is idempotent: a second call returns the same branch workspace", async () => {
+    const first = await h.caller.workspaces.ensureMain({ projectId })
+    expect(first.kind).toBe("branch")
+    expect(first.projectId).toBe(projectId)
+
+    const second = await h.caller.workspaces.ensureMain({ projectId })
+    expect(second.id).toBe(first.id)
+
+    // Exactly one branch workspace exists for the project.
+    const all = await h.caller.workspaces.list({ projectId })
+    expect(all.filter((w) => w.kind === "branch")).toHaveLength(1)
+  })
+})
+
+describe("workspaces.spawnTerminal", () => {
+  test("returns a session id and spawns a shell in the workspace's working dir", async () => {
+    const main = await h.caller.workspaces.ensureMain({ projectId })
+
+    const { sessionId } = await h.caller.workspaces.spawnTerminal({
+      workspaceId: main.id,
+      cols: 80,
+      rows: 24,
+    })
+    expect(sessionId).toBeTruthy()
+
+    // The daemon records the spawn cwd; assert it is the branch workspace's
+    // working dir (the project repo root).
+    const sessions = await h.caller.terminal.list()
+    const spawned = sessions.find((s) => s.id === sessionId)
+    expect(spawned?.cwd).toBe(h.repoDir)
+
+    await h.caller.terminal.kill({ sessionId })
+  })
+
+  test("uses the worktree path for a worktree workspace", async () => {
+    const { workspace, worktree } = await h.caller.workspaces.create({
+      projectId,
+      kind: "worktree",
+      name: "Term",
+      branch: "feature/term",
+    })
+
+    const { sessionId } = await h.caller.workspaces.spawnTerminal({
+      workspaceId: workspace.id,
+      cols: 80,
+      rows: 24,
+    })
+
+    const sessions = await h.caller.terminal.list()
+    const spawned = sessions.find((s) => s.id === sessionId)
+    expect(spawned?.cwd).toBe(worktree?.path)
+
+    await h.caller.terminal.kill({ sessionId })
+  })
+
+  test("an unknown workspace id is NOT_FOUND", async () => {
+    await expect(
+      h.caller.workspaces.spawnTerminal({ workspaceId: "ghost", cols: 80, rows: 24 }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 })

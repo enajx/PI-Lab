@@ -1,6 +1,6 @@
 /**
  * Normalized diagnostics model for the built-in editor's Python code intelligence
- * (AGENTS.md §1 / TODO "Built-in editor"). v1 runs the Astral tools as **one-shot
+ * (AGENTS.md "Scope" / TODO "Built-in editor"). v1 runs the Astral tools as **one-shot
  * CLIs** — a type checker (`ty`, toggleable to `pyrefly`) and the linter `ruff` —
  * and maps their disparate outputs into the single {@link Diagnostic} shape below
  * so the editor renders squiggles, gutter markers, and a status count from one
@@ -8,7 +8,7 @@
  *
  * These types are I/O-free on purpose: the per-tool parsers that produce them are
  * pure (`string`/`unknown` → `Diagnostic[]`), so they are example- and
- * property-testable without `uv` installed (AGENTS.md §14).
+ * property-testable without `uv` installed (docs/testing-and-build.md).
  */
 
 /** Which tool emitted a diagnostic — drives the badge/source label in the gutter. */
@@ -44,7 +44,7 @@ export interface Diagnostic {
   code?: string
 }
 
-/** The type checker the diagnostics run uses (AGENTS.md §1 — settings toggle). */
+/** The type checker the diagnostics run uses (AGENTS.md "Scope" — settings toggle). */
 export type TypeChecker = "ty" | "pyrefly"
 
 /**

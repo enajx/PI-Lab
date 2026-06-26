@@ -1,1 +1,1 @@
-export { MachineCard } from "./MachineCard"
+export { MachineCard, type MachineTelemetry } from "./MachineCard"

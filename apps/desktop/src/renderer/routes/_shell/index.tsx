@@ -6,7 +6,7 @@ import { Dashboard } from "./index/components/Dashboard"
 import { readTerminalSpawnOverride } from "./utils/terminalSpawnOverride"
 
 /**
- * Shell home (AGENTS.md §7/§11 P7). Behind the boot/health gate (`HealthBanner`,
+ * Shell home (docs/architecture.md (renderer); git history (build phases), P7). Behind the boot/health gate (`HealthBanner`,
  * which mounts the `app-ready` marker once the renderer→main→SQLite path is
  * proven) it renders the project-cards **Dashboard** — the default surface.
  *
@@ -32,7 +32,7 @@ function IndexView() {
   )
 }
 
-/** The standalone-terminal test seam (AGENTS.md §14), gated to `?termcmd` runs. */
+/** The standalone-terminal test seam (docs/testing-and-build.md), gated to `?termcmd` runs. */
 function TerminalSeam({ termSpawn }: { termSpawn: { command?: string; args?: string[] } }) {
   // Reuse the ONE app-wide tRPC client (the same instance backing TanStack
   // Query). A second `ipcLink` over the same channel cross-wires responses, so

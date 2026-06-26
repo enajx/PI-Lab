@@ -8,13 +8,13 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (AGENTS.md §14, P8c): launch the real Electron build, open a
+ * Whole-app E2E (docs/testing-and-build.md, P8c): launch the real Electron build, open a
  * temp git repo as a project via the `?openProject` seam (no native dialog),
  * navigate to the Analysis science tab, select the CSV the repo contains, and
  * prove the preview table renders end to end.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (AGENTS.md §13); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun (docs/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -25,7 +25,10 @@ const ELECTRON_PATH = createRequire(join(DESKTOP_DIR, "package.json"))("electron
 const execFileAsync = promisify(execFile)
 
 const CSV_REL_PATH = "data/metrics.csv"
-const CSV_BODY = "epoch,loss\n0,1.5\n1,0.9\n2,0.4\n"
+// A non-metric CSV (second column non-numeric) so the preview renders as a TABLE.
+// A two-numeric-column series like `epoch,loss` is now auto-detected as a metric
+// chart (see discover.ts detectScalarChart), which renders a chart, not a table.
+const CSV_BODY = "epoch,label\n0,start\n1,middle\n2,end\n"
 
 let app: ElectronApplication
 let dataDir: string

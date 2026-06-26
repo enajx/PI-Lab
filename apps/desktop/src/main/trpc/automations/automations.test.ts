@@ -1,4 +1,4 @@
-// Integration tests for the automations router (AGENTS.md §1 / §14): createCaller
+// Integration tests for the automations router (AGENTS.md "Scope" / docs/testing-and-build.md): createCaller
 // over a temp SQLite DB with real migrations, a real temp git repo, and the
 // in-process pty-daemon + fake agent. Covers CRUD, prompt-version snapshotting,
 // the computed nextRunAt, runNow firing through the real session-start flow, and
@@ -37,6 +37,7 @@ function harnessContext(): AppContext {
     httpFetch: async () => {
       throw new Error("no network in tests")
     },
+    openPath: async () => "",
     pyToolsExec: async () => ({ stdout: "", stderr: "", code: null, notFound: true }),
   }
 }

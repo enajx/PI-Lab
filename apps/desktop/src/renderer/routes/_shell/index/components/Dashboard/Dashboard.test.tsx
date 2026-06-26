@@ -6,14 +6,14 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { Dashboard } from "./Dashboard"
 
 /**
- * Component test for the project-cards Dashboard (AGENTS.md §14). Mounts it under
+ * Component test for the project-cards Dashboard (docs/testing-and-build.md). Mounts it under
  * the real providers + a router (so the card's `useNavigate` resolves) with a
  * faked tRPC client. jsdom suffices — the cards render plain DOM (no Radix), and
  * we only assert structure: cards-by-name, the status badge, the size slider, and
@@ -36,22 +36,23 @@ function renderDashboard(handlers: FakeHandlers) {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   })
 
-  return render(
+  const result = render(
     <AppProviders client={client} queryClient={queryClient}>
       {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
       <RouterProvider router={router as any} />
     </AppProviders>,
   )
+  return { ...result, router }
 }
 
-function project(id: string, name: string) {
+function project(id: string, name: string, thumbnail: string | null = null) {
   return {
     id,
     repoPath: `/tmp/${id}`,
     name,
     defaultBranch: "main",
     color: null,
-    thumbnail: null,
+    thumbnail,
     sortIndex: 0,
     archivedAt: null,
     createdAt: 0,
@@ -98,6 +99,59 @@ describe("Dashboard", () => {
       expect(screen.getByTestId("card-size-slider")).toBeTruthy()
     })
     expect((screen.getByTestId("card-size-slider") as HTMLInputElement).type).toBe("range")
+  })
+
+  test("a no-thumbnail card renders the animated gradient layer with seeded timing vars", async () => {
+    renderDashboard({
+      "projects.list": () => [project("p1", "Gradient Project")],
+      "workspaces.list": () => [],
+    })
+
+    const layer = await screen.findByTestId("project-card-gradient")
+    expect(layer.classList.contains("project-gradient-anim")).toBe(true)
+    // Per-project animation timing is applied as inline CSS custom properties.
+    expect(layer.style.getPropertyValue("--grad-duration")).toMatch(/^\d+s$/)
+    expect(layer.style.getPropertyValue("--grad-delay")).toMatch(/^-?\d+s$/)
+  })
+
+  test("a card with a thumbnail renders no gradient layer", async () => {
+    renderDashboard({
+      "projects.list": () => [project("p1", "Pictured Project", "data:image/png;base64,AAAA")],
+      "workspaces.list": () => [],
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("project-card")).toBeTruthy()
+    })
+    expect(screen.queryByTestId("project-card-gradient")).toBeNull()
+  })
+
+  test("clicking the card's thumbnail region opens the project", async () => {
+    const { router } = renderDashboard({
+      "projects.list": () => [project("p1", "Photon Drift")],
+      "workspaces.list": () => [],
+    })
+
+    const image = await screen.findByTestId("project-card-image")
+    fireEvent.click(image)
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/projects/p1")
+    })
+  })
+
+  test("clicking the info region opens the project", async () => {
+    const { router } = renderDashboard({
+      "projects.list": () => [project("p1", "Photon Drift")],
+      "workspaces.list": () => [],
+    })
+
+    const info = await screen.findByTestId("project-card-open")
+    fireEvent.click(info)
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/projects/p1")
+    })
   })
 
   test("shows the empty state when there are no projects", async () => {

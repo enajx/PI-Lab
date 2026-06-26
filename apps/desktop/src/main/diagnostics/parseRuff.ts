@@ -1,5 +1,5 @@
 /**
- * Pure parser for `ruff check <file> --output-format json` (AGENTS.md §1, TODO
+ * Pure parser for `ruff check <file> --output-format json` (AGENTS.md "Scope", TODO
  * "Built-in editor"). Ruff prints a JSON **array**; each entry has a `code`, a
  * 1-based `location` ({ row, column }), an optional `end_location`, a `message`,
  * and (newer ruff) a `severity`. We map each into the normalized {@link Diagnostic}.
@@ -7,7 +7,7 @@
  * Defensive by contract: this takes the *raw stdout string*, decodes it itself,
  * and **never throws** — malformed JSON, a non-array payload, or individual
  * entries missing fields all degrade to an empty list / skipped entry. That
- * totality is what the property tests assert (AGENTS.md §14), and it means a
+ * totality is what the property tests assert (docs/testing-and-build.md), and it means a
  * future ruff output tweak can't crash the editor's save path.
  */
 

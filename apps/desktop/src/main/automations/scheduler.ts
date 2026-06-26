@@ -4,14 +4,14 @@ import { and, asc, eq, isNotNull, lte } from "drizzle-orm"
 import type { FireAutomation } from "./dispatch"
 
 /**
- * Local scheduled-agent-run engine, in the Electron main process (AGENTS.md §1
- * — Automations, §6 — boot sequence).
+ * Local scheduled-agent-run engine, in the Electron main process (AGENTS.md "Scope"
+ * — Automations, docs/architecture.md (process model) — boot sequence).
  *
  * "When" lives here — the timer, the due-sweep, and `nextRunAt` advancement.
  * "What happens on fire" lives in `dispatch.ts` (record a run row, launch the
  * agent through the shared session-start flow). Keeping that split lets the
  * scheduler be unit-tested with an *injected clock* and an *injected fire*, so
- * no real time, agents, or PTYs are involved (AGENTS.md §14).
+ * no real time, agents, or PTYs are involved (docs/testing-and-build.md).
  *
  * Persistence is the local SQLite DB, so a schedule survives a restart: on
  * `start()` we reconcile (recompute every enabled automation's `nextRunAt` from

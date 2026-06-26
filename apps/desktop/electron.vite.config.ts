@@ -176,7 +176,7 @@ export default defineConfig({
       }),
       react(),
       // Tailwind v4 via its first-party Vite plugin — scans the renderer and the
-      // shared `@skipper/ui` package for utility classes (AGENTS.md §7).
+      // shared `@skipper/ui` package for utility classes (docs/architecture.md (renderer)).
       tailwindcss(),
     ],
     build: {

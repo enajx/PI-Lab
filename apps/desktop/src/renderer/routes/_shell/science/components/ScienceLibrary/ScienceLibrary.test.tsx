@@ -1,19 +1,15 @@
 import { QueryClient } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test } from "vitest"
-import type { LibraryPaper } from "../../../../../../main/trpc/science/library"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ScienceLibrary } from "./ScienceLibrary"
 
-// The renderer-facing paper shape, kept in step with the router's `LibraryPaper`.
-type Paper = LibraryPaper
-
 /**
- * Component test for the Library science tab (AGENTS.md §14). The tab renders
- * plain DOM + the hand-authored UI primitives, so jsdom suffices; we assert
- * structure only (the connect form vs. the library list + scholar search) — never
- * copy text or shadcn classes.
+ * Component test for the Library science tab (docs/testing-and-build.md). The tab renders
+ * plain DOM + the hand-authored UI primitives, so jsdom suffices; we assert structure
+ * only — the source chooser (disconnected) vs. the collections browser (connected).
+ * Item/navigation detail lives in the LibraryBrowser test.
  */
 function renderLibrary(handlers: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -25,68 +21,96 @@ function renderLibrary(handlers: FakeHandlers) {
   )
 }
 
-function paper(overrides: Partial<Paper> & Pick<Paper, "id" | "title">): Paper {
-  return { authors: [], ...overrides }
+function collection(key: string, name: string, itemCount = 0, subcollectionCount = 0) {
+  return { key, name, itemCount, subcollectionCount }
 }
 
 describe("ScienceLibrary", () => {
-  test("shows the Zotero connect form when not connected", async () => {
+  test("shows the source chooser (three sources) when not connected", async () => {
     renderLibrary({
       "science.library.getStatus": () => ({ connected: false }),
+      "science.library.detectLocal": () => ({ reachable: true }),
     })
     await waitFor(() => {
-      expect(screen.getByTestId("zotero-connect")).toBeTruthy()
+      expect(screen.getByTestId("library-source-chooser")).toBeTruthy()
     })
-    // The library list is absent while disconnected; the scholar search is always present.
-    expect(screen.queryByTestId("library-item")).toBeNull()
-    expect(screen.getByTestId("scholar-search")).toBeTruthy()
+    expect(screen.getByTestId("zotero-chooser-local")).toBeTruthy()
+    expect(screen.getByTestId("zotero-chooser-web")).toBeTruthy()
+    expect(screen.getByTestId("library-source-folder")).toBeTruthy()
+    // No browser while disconnected.
+    expect(screen.queryByTestId("library-breadcrumb")).toBeNull()
   })
 
-  test("renders the library list + a disconnect affordance when connected", async () => {
+  test("renders the collections browser + a disconnect affordance when connected", async () => {
     renderLibrary({
       "science.library.getStatus": () => ({
         connected: true,
+        kind: "zotero",
+        mode: "web",
+        libraryType: "user",
+        libraryId: "1",
+        canWrite: false,
+      }),
+      "science.library.listCollections": () => ({
+        ok: true,
+        collections: [collection("C1", "Methods", 3), collection("C2", "Results")],
+      }),
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("library-collection")).toHaveLength(2)
+    })
+    expect(screen.getByTestId("library-breadcrumb")).toBeTruthy()
+    expect(screen.getByTestId("library-disconnect")).toBeTruthy()
+    expect(screen.queryByTestId("library-source-chooser")).toBeNull()
+    // Default view = collections (+ an "All items" entry), not a flat item list.
+    expect(screen.getByTestId("library-all-items")).toBeTruthy()
+    expect(screen.queryByTestId("library-item")).toBeNull()
+  })
+
+  test("labels the breadcrumb root with the folder name for a folder source", async () => {
+    renderLibrary({
+      "science.library.getStatus": () => ({
+        connected: true,
+        kind: "folder",
+        folderPath: "/papers/neuro",
+        canWrite: false,
+      }),
+      "science.library.listCollections": () => ({ ok: true, collections: [] }),
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("library-crumb-root").textContent).toBe("neuro")
+    })
+  })
+
+  test("shows the collections-empty hint when the library has no collections", async () => {
+    renderLibrary({
+      "science.library.getStatus": () => ({
+        connected: true,
+        kind: "zotero",
+        mode: "web",
         libraryType: "user",
         libraryId: "1",
       }),
-      "science.library.listItems": () => ({
-        ok: true,
-        items: [
-          paper({
-            id: "a",
-            title: "Attention Is All You Need",
-            authors: ["Vaswani"],
-            year: 2017,
-            itemType: "conferencePaper",
-          }),
-          paper({ id: "b", title: "Another Paper" }),
-        ],
+      "science.library.listCollections": () => ({ ok: true, collections: [] }),
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("library-collections-empty")).toBeTruthy()
+    })
+    // "All items" remains available even with no collections.
+    expect(screen.getByTestId("library-all-items")).toBeTruthy()
+  })
+
+  test("surfaces a collections error", async () => {
+    renderLibrary({
+      "science.library.getStatus": () => ({
+        connected: true,
+        kind: "zotero",
+        mode: "web",
+        libraryType: "user",
+        libraryId: "1",
       }),
-    })
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("library-item")).toHaveLength(2)
-    })
-    expect(screen.getByTestId("zotero-disconnect")).toBeTruthy()
-    expect(screen.queryByTestId("zotero-connect")).toBeNull()
-    const titles = screen.getAllByTestId("library-item-title").map((el) => el.textContent)
-    expect(titles).toContain("Attention Is All You Need")
-  })
-
-  test("shows the empty state when the connected library has no items", async () => {
-    renderLibrary({
-      "science.library.getStatus": () => ({ connected: true, libraryType: "user", libraryId: "1" }),
-      "science.library.listItems": () => ({ ok: true, items: [] }),
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId("science-library-empty")).toBeTruthy()
-    })
-  })
-
-  test("surfaces a Zotero list error", async () => {
-    renderLibrary({
-      "science.library.getStatus": () => ({ connected: true, libraryType: "user", libraryId: "1" }),
-      "science.library.listItems": () => ({
+      "science.library.listCollections": () => ({
         ok: false,
         reason: "error",
         message: "Zotero API 500",

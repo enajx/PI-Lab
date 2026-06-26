@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron"
+import { app, BrowserWindow, shell } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
 import { dispatchAutomation } from "./automations/dispatch"
 import { AutomationScheduler } from "./automations/scheduler"
@@ -14,12 +14,14 @@ import {
   DEFAULT_PY_TOOLS_EXEC,
   DEFAULT_SSH_EXEC,
 } from "./trpc/context"
+import { seedWritableTemplate } from "./trpc/template"
+import { installAppMenu } from "./window/appMenu"
 import { createMainWindow } from "./window/mainWindow"
 
 export type { AppRouter } from "./trpc/appRouter"
 
 /**
- * Main-process boot (a foundation slice of the sequence in AGENTS.md §6):
+ * Main-process boot (a foundation slice of the sequence in docs/architecture.md (process model)):
  *
  *   1. point `userData` at the resolved data dir   (must precede any disk/DB IO)
  *   2. acquire the single-instance lock            (skipped in test mode)
@@ -29,13 +31,19 @@ export type { AppRouter } from "./trpc/appRouter"
  *   5. create the window
  *
  * The PTY daemon itself is started lazily on first terminal use (adopt-or-spawn,
- * AGENTS.md §6) so an app that never opens a terminal pays nothing. Later phases
+ * docs/architecture.md (process model)) so an app that never opens a terminal pays nothing. Later phases
  * insert science-state, eager pty-daemon session reconciliation, the automations
  * scheduler, and tray/menu between steps 3 and 5.
  */
 
+// The product name — also the basename of Electron's default userData dir
+// (→ ~/Library/Application Support/Skipper). Without this, Electron derives the
+// name from package.json `name` (`@skipper/desktop`) and scatters Chromium state
+// under an `@skipper/` folder. Must precede any getPath("userData") access.
+app.setName("Skipper")
+
 // Step 1 — redirect on-disk state before Electron (or the DB) touches the
-// default userData path. Honors SKIPPER_DATA_DIR (AGENTS.md §14).
+// default userData path. Honors SKIPPER_DATA_DIR (docs/testing-and-build.md).
 if (dataDirOverride) {
   app.setPath("userData", dataDirOverride)
 }
@@ -47,22 +55,28 @@ if (!isTestMode && !app.requestSingleInstanceLock()) {
 }
 
 // In test mode there is no auto-update or telemetry to disable yet; the seam is
-// reserved here so future wiring stays gated behind one flag (AGENTS.md §14).
+// reserved here so future wiring stays gated behind one flag (docs/testing-and-build.md).
 
 let ipcHandler: ReturnType<typeof createIPCHandler> | null = null
 
 // The PTY daemon supervisor is created once and shared across the app's life.
-// It adopts a daemon a prior run left detached, or spawns one (AGENTS.md §6); it
+// It adopts a daemon a prior run left detached, or spawns one (docs/architecture.md (process model)); it
 // is NOT torn down with windows so terminals survive a reload.
-const terminalSupervisor = new TerminalSupervisor()
+//
+// Test mode is the exception: each E2E run gets a throwaway daemon on a unique
+// socket, so we reap it on quit — otherwise the orphaned daemon + its node-pty
+// children wedge Playwright's `app.close()` on Linux (it waits on the Electron
+// child's stdio-pipe EOF). Production keeps the daemon detached so sessions
+// survive a restart.
+const terminalSupervisor = new TerminalSupervisor(isTestMode ? { reapDaemonOnDispose: true } : {})
 
 // Per-project tally of live agent sessions, shared across requests for the app's
-// lifetime so the start-agent-session policy (AGENTS.md §8) sees a stable count.
+// lifetime so the start-agent-session policy (docs/architecture.md (agent runtime)) sees a stable count.
 // It drains itself via the daemon's `exit` stream.
 const liveAgents = new LiveAgentRegistry()
 
 // The launchable agent catalog. In test mode it includes the deterministic
-// test-echo agent so the E2E can launch an assertable agent (AGENTS.md §14).
+// test-echo agent so the E2E can launch an assertable agent (docs/testing-and-build.md).
 const agentCatalog = buildAgentCatalog(isTestMode)
 
 // Context built per request (after boot has migrated the DB). The terminal +
@@ -77,11 +91,13 @@ function createAppContext(): AppContext {
     liveAgents,
     sshExec: DEFAULT_SSH_EXEC,
     httpFetch: DEFAULT_HTTP_FETCH,
+    // Library folder source opens PDFs with the OS default app (docs/architecture.md).
+    openPath: (path) => shell.openPath(path),
     pyToolsExec: DEFAULT_PY_TOOLS_EXEC,
   }
 }
 
-// The automations scheduler (AGENTS.md §1 / §6). Its "fire" builds the same
+// The automations scheduler (AGENTS.md "Scope" / docs/architecture.md (process model)). Its "fire" builds the same
 // AppContext the routers use and dispatches the due automation through the
 // shared session-start flow, so a scheduled run is identical to a manual one.
 // Created on first boot (after the DB is migrated) and stopped on quit.
@@ -119,10 +135,21 @@ app
       `[skipper] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
     )
 
+    // First-run seed of the writable project template (data dir is already set in
+    // step 1). Fire-and-forget + graceful: a failure logs but never aborts boot,
+    // and the template router re-seeds lazily as a safety net.
+    void seedWritableTemplate().catch((error) => {
+      console.warn("[skipper] template seed skipped:", error)
+    })
+
     // Start the automations scheduler timer (reconciles schedules on boot, then
     // ticks). Done before the window so a due automation fires even if the
-    // renderer is slow to mount (AGENTS.md §6).
+    // renderer is slow to mount (docs/architecture.md (process model)).
     startAutomationScheduler()
+
+    // Own the application menu so ⌘W is NOT bound to "Close Window" — the project
+    // view handles ⌘W to close the active tab instead (see appMenu.ts / CentralPanel).
+    installAppMenu()
 
     // Steps 4 + 5 — wire tRPC, then open the window.
     const window = createMainWindow()
@@ -146,9 +173,11 @@ app.on("window-all-closed", () => {
   }
 })
 
-// Close our client to the daemon on quit, but deliberately leave the *detached*
-// daemon process running so live terminals/agents survive the app restarting —
-// the whole reason it is a separate process (AGENTS.md §6).
+// Stop the scheduler and dispose the supervisor on quit. In production the
+// supervisor closes its client but deliberately leaves the *detached* daemon
+// running so live terminals/agents survive the app restarting — the whole reason
+// it is a separate process (docs/architecture.md (process model)). In test mode
+// dispose also reaps that daemon (see TerminalSupervisor construction above).
 app.on("before-quit", () => {
   automationScheduler?.stop()
   terminalSupervisor.dispose()

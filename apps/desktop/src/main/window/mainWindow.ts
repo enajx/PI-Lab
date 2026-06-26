@@ -3,7 +3,7 @@ import { BrowserWindow } from "electron"
 import { isTestMode, rendererDevServerUrl } from "../runtime/env"
 
 /**
- * Test seams (AGENTS.md §14): in test mode the E2E harness drives the app through
+ * Test seams (docs/testing-and-build.md): in test mode the E2E harness drives the app through
  * renderer URL query params (read from `window.location.search`, which hash
  * routing leaves untouched). We translate a small set of env vars into those
  * params so the harness can act deterministically without native dialogs or
@@ -46,7 +46,7 @@ function testSeamQuery(): string {
 /**
  * Create the single application window and load the renderer.
  *
- * Security posture (AGENTS.md §6): context isolation ON, node integration OFF,
+ * Security posture (docs/architecture.md (process model)): context isolation ON, node integration OFF,
  * sandboxed renderer; the only main↔renderer bridge is the preload's
  * `exposeElectronTRPC()`. In dev the renderer comes from the Vite dev server
  * (`ELECTRON_RENDERER_URL`); in a packaged build it's the built HTML that sits
@@ -57,8 +57,20 @@ export function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
+    // Floor on the window size so the sidebar + main panes can't be crushed to a
+    // broken layout (the icon rail + a usable pane need this much room).
+    minWidth: 900,
+    minHeight: 600,
     show: false,
-    backgroundColor: "#101014",
+    // Light by default; this is only the pre-paint flash color before the
+    // renderer mounts its theme.
+    backgroundColor: "#ffffff",
+    // macOS: hide the title bar and inset the traffic lights so the app's own
+    // surface (the sidebar) extends to the top edge and the chrome "blends" —
+    // no separate title-bar strip. The renderer marks a drag region at the top.
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 18 } }
+      : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,

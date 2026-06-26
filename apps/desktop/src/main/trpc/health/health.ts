@@ -5,7 +5,7 @@ import { publicProcedure, router } from "../trpc"
 
 /**
  * Liveness + DB-version probe. This is the contract the renderer's `app-ready`
- * marker and the smoke harness (AGENTS.md §14) assert against — proving the
+ * marker and the smoke harness (docs/testing-and-build.md) assert against — proving the
  * whole path (renderer → IPC → main → SQLite) is wired before any feature
  * lands.
  */
@@ -28,7 +28,7 @@ export const healthRouter = router({
 
   /**
    * Subscriptions over `trpc-electron` MUST return an `observable`, never an
-   * async generator — the IPC link throws on generators (AGENTS.md §12.1). This
+   * async generator — the IPC link throws on generators (AGENTS.md Pitfalls #1). This
    * stub documents the shape; it emits once and completes. Real subscriptions
    * (terminal bytes, port changes) land in later phases following this pattern.
    */

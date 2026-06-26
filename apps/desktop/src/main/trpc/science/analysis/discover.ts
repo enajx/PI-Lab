@@ -93,6 +93,8 @@ export async function discoverDataFiles(repoPath: string): Promise<DataFileListi
   for (const abs of kept) {
     const relPath = toPosix(relative(repoPath, abs))
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
+    // Dotfiles (`.env`, `.gitignore`, …) are config/noise, not data — skip them.
+    if (name.startsWith(".")) continue
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
@@ -176,11 +178,57 @@ export interface MetadataPreview {
   note?: string
 }
 
+/** One labelled series of points for a {@link ChartPreview} line chart. */
+export interface ChartSeries {
+  /** Series name (column header / array column label), used as the legend key. */
+  label: string
+  /** Y values aligned 1:1 with the chart's shared x axis; `null` = a gap. */
+  values: Array<number | null>
+}
+
+/**
+ * A numeric file detected as a line-chartable scalar series — a shared,
+ * monotonic x axis (an index/step column) plus one or more y series. Produced
+ * for numeric CSV/TSV that look like metric logs and for 1-D `.npy` arrays.
+ */
+export interface ChartPreview {
+  type: "chart"
+  /** Axis label for the shared x values (the step/index column header). */
+  xLabel: string
+  /** The shared, monotonic x values (one per plotted point). */
+  x: number[]
+  /** One or more y series, each aligned 1:1 with {@link x}. */
+  series: ChartSeries[]
+  /** True iff the source had more points than were sampled into the chart. */
+  truncated: boolean
+}
+
+/**
+ * A decoded numeric array (a `.npy` 1-D/2-D array, or any array-shaped data)
+ * rendered as a bounded grid. 1-D arrays become a single column; 2-D arrays
+ * keep their row/column layout. Cells are stringified for transport.
+ */
+export interface ArrayPreview {
+  type: "array"
+  /** Reported dtype string (e.g. `<f8`), for the header chip. */
+  dtype: string
+  /** Full array shape, e.g. `[1000]` or `[64, 8]` (pre-truncation). */
+  shape: number[]
+  /** Column headers (`c0`, `c1`, … or a single value column for 1-D). */
+  columns: string[]
+  /** Up to {@link MAX_ARRAY_ROWS} rows, each aligned to `columns`. */
+  rows: string[][]
+  /** True iff more than {@link MAX_ARRAY_ROWS} rows exist. */
+  truncated: boolean
+}
+
 export type DataFilePreview =
   | TablePreview
   | JsonPreview
   | ImagePreview
   | TextPreview
+  | ChartPreview
+  | ArrayPreview
   | MetadataPreview
 
 /** Max body rows returned for a CSV/TSV preview. */
@@ -189,6 +237,14 @@ export const MAX_TABLE_ROWS = 50
 export const MAX_TEXT_BYTES = 512 * 1024
 /** Max bytes for an inline image (over this → metadata fallback). */
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+/** Max plotted points per chart (longer series are downsampled to this). */
+export const MAX_CHART_POINTS = 1000
+/** Max rows shown in an {@link ArrayPreview} grid. */
+export const MAX_ARRAY_ROWS = 200
+/** Max columns shown in an {@link ArrayPreview} grid (a 2-D array's width). */
+export const MAX_ARRAY_COLS = 32
+/** Max bytes read when decoding a `.npy` array (over this → metadata fallback). */
+export const MAX_NPY_BYTES = 16 * 1024 * 1024
 
 const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
   ".png": "image/png",
@@ -239,8 +295,10 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     case "markdown":
     case "text":
       return previewText(abs)
+    case "npy":
+      return previewNpy(abs, relPath, info.size, meta)
     default:
-      // parquet / notebook / plot / other — no safe inline preview in v1.
+      // npz / parquet / notebook / plot / other — no safe inline preview in v1.
       return meta()
   }
 }
@@ -295,12 +353,20 @@ async function previewTable(
   if (lines.length === 0) return meta("Empty file")
 
   const headers = parseDelimited(lines[0] ?? "", delimiter)
-
-  // Body rows = everything after the header. We sample the first MAX_TABLE_ROWS;
-  // totalRows is the full count when we read the whole file, otherwise it is an
-  // estimate flagged via `truncated`.
   const bodyLines = lines.slice(1)
-  const sampled = bodyLines.slice(0, MAX_TABLE_ROWS).map((line) => parseDelimited(line, delimiter))
+  const allRows = bodyLines.map((line) => parseDelimited(line, delimiter))
+
+  // A numeric, metric-log-shaped table (monotonic x column + ≥1 numeric series)
+  // renders as a line chart instead of a grid. We only attempt this when the
+  // whole file was read, so the monotonicity check sees every row.
+  if (!bytesTruncated) {
+    const chart = detectScalarChart(headers, allRows)
+    if (chart) return chart
+  }
+
+  // Otherwise a sampled table: first MAX_TABLE_ROWS rows; totalRows is exact
+  // when we read the whole file, else an estimate flagged via `truncated`.
+  const sampled = allRows.slice(0, MAX_TABLE_ROWS)
   const truncated = bytesTruncated || bodyLines.length > MAX_TABLE_ROWS
 
   return {
@@ -312,11 +378,317 @@ async function previewTable(
   }
 }
 
+// ── Scalar-curve detection (CSV/TSV → line chart) ──────────────────────────────
+
+/**
+ * Fraction of a numeric column's non-empty cells that must parse as finite
+ * numbers for the column to count as "numeric". Tolerates the odd `NaN`/blank.
+ */
+const NUMERIC_COLUMN_THRESHOLD = 0.8
+/**
+ * Fraction of a candidate x column's steps that must be non-decreasing for it to
+ * read as a monotonic index/step axis (≈ allows a couple of out-of-order rows).
+ */
+const MONOTONIC_THRESHOLD = 0.95
+
+/** Whether at least {@link NUMERIC_COLUMN_THRESHOLD} of column `col` is numeric. */
+function isNumericColumn(rows: string[][], col: number): boolean {
+  let numeric = 0
+  let nonEmpty = 0
+  for (const row of rows) {
+    const cell = row[col]
+    if (cell === undefined || cell === "") continue
+    nonEmpty++
+    if (!Number.isNaN(Number(cell))) numeric++
+  }
+  return nonEmpty > 0 && numeric / nonEmpty >= NUMERIC_COLUMN_THRESHOLD
+}
+
+/** Whether column `col` is monotonically non-decreasing (skipping non-numbers). */
+function isMonotonicColumn(rows: string[][], col: number): boolean {
+  let prev = Number.NEGATIVE_INFINITY
+  let seen = 0
+  let ordered = 0
+  for (const row of rows) {
+    const value = Number(row[col])
+    if (!Number.isFinite(value)) continue
+    seen++
+    if (value >= prev) ordered++
+    prev = value
+  }
+  return seen > 1 && ordered / seen >= MONOTONIC_THRESHOLD
+}
+
+/**
+ * Decide whether a parsed CSV/TSV looks like a scalar metric log — a monotonic
+ * first numeric column (the step/index axis) followed by ≥1 further numeric
+ * column (the plotted series) — and if so build a {@link ChartPreview}. Pure;
+ * returns `null` (→ fall back to a table) when the heuristic rejects.
+ */
+function detectScalarChart(headers: string[], rows: string[][]): ChartPreview | null {
+  if (headers.length < 2 || rows.length < 2) return null
+
+  const numericCols: number[] = []
+  for (let col = 0; col < headers.length; col++) {
+    if (isNumericColumn(rows, col)) numericCols.push(col)
+  }
+  if (numericCols.length < 2) return null
+
+  const xCol = numericCols[0] ?? 0
+  if (!isMonotonicColumn(rows, xCol)) return null
+  const seriesCols = numericCols.slice(1)
+
+  return buildChart({
+    rows,
+    xCol,
+    xLabel: headers[xCol] ?? "step",
+    seriesCols,
+    seriesLabels: seriesCols.map((col) => headers[col] ?? `col${col}`),
+  })
+}
+
+/**
+ * Assemble a {@link ChartPreview} from string rows: read the x column and each
+ * series column as numbers, drop rows whose x is not finite, and downsample to
+ * {@link MAX_CHART_POINTS} by striding so a long log still charts cheaply.
+ */
+function buildChart(args: {
+  rows: string[][]
+  xCol: number
+  xLabel: string
+  seriesCols: number[]
+  seriesLabels: string[]
+}): ChartPreview {
+  const { rows, xCol, xLabel, seriesCols, seriesLabels } = args
+
+  const xAll: number[] = []
+  const seriesAll: Array<Array<number | null>> = seriesCols.map(() => [])
+  for (const row of rows) {
+    const x = Number(row[xCol])
+    if (!Number.isFinite(x)) continue
+    xAll.push(x)
+    seriesCols.forEach((col, s) => {
+      const value = Number(row[col])
+      seriesAll[s]?.push(Number.isFinite(value) ? value : null)
+    })
+  }
+
+  return downsampleChart(xLabel, xAll, seriesLabels, seriesAll)
+}
+
+/** Stride a chart's x + series down to at most {@link MAX_CHART_POINTS} points. */
+function downsampleChart(
+  xLabel: string,
+  xAll: number[],
+  seriesLabels: string[],
+  seriesAll: Array<Array<number | null>>,
+): ChartPreview {
+  const truncated = xAll.length > MAX_CHART_POINTS
+  const stride = truncated ? Math.ceil(xAll.length / MAX_CHART_POINTS) : 1
+
+  const x: number[] = []
+  const sampled: Array<Array<number | null>> = seriesAll.map(() => [])
+  for (let i = 0; i < xAll.length; i += stride) {
+    x.push(xAll[i] ?? 0)
+    seriesAll.forEach((values, s) => {
+      sampled[s]?.push(values[i] ?? null)
+    })
+  }
+
+  return {
+    type: "chart",
+    xLabel,
+    x,
+    series: seriesLabels.map((label, s) => ({ label, values: sampled[s] ?? [] })),
+    truncated,
+  }
+}
+
+// ── NumPy (.npy) decoding ──────────────────────────────────────────────────────
+
+/** The 6 magic bytes that prefix every `.npy` file: `\x93NUMPY`. */
+const NPY_MAGIC = [0x93, 0x4e, 0x55, 0x4d, 0x50, 0x59] as const
+
+/** Reader for one supported little/big-endian dtype, keyed by its descr suffix. */
+interface NpyDtype {
+  /** Byte width of one element. */
+  width: number
+  /** Read one element from `view` at `offset`. */
+  read: (view: DataView, offset: number, littleEndian: boolean) => number
+}
+
+/** The numeric dtypes we decode (float + signed/unsigned int, 1–8 bytes). */
+const NPY_DTYPES: Readonly<Record<string, NpyDtype>> = {
+  f8: { width: 8, read: (v, o, le) => v.getFloat64(o, le) },
+  f4: { width: 4, read: (v, o, le) => v.getFloat32(o, le) },
+  i8: { width: 8, read: (v, o, le) => Number(v.getBigInt64(o, le)) },
+  i4: { width: 4, read: (v, o, le) => v.getInt32(o, le) },
+  i2: { width: 2, read: (v, o, le) => v.getInt16(o, le) },
+  i1: { width: 1, read: (v, o) => v.getInt8(o) },
+  u8: { width: 8, read: (v, o, le) => Number(v.getBigUint64(o, le)) },
+  u4: { width: 4, read: (v, o, le) => v.getUint32(o, le) },
+  u2: { width: 2, read: (v, o, le) => v.getUint16(o, le) },
+  u1: { width: 1, read: (v, o) => v.getUint8(o) },
+}
+
+/** A successfully decoded `.npy` 1-D/2-D numeric array (row-major values). */
+interface DecodedNpy {
+  /** Row-major flattened values (length = product of `shape`). */
+  values: Float64Array
+  /** Array shape: `[n]` for 1-D, `[rows, cols]` for 2-D. */
+  shape: number[]
+  /** Original dtype descr (e.g. `<f8`). */
+  dtype: string
+}
+
+/** Parse the `.npy` header dict text into descr / fortran_order / shape. */
+function parseNpyHeader(
+  header: string,
+): { descr: string; fortranOrder: boolean; shape: number[] } | null {
+  const descr = header.match(/'descr'\s*:\s*'([^']+)'/)
+  const fortran = header.match(/'fortran_order'\s*:\s*(True|False)/)
+  const shapeText = header.match(/'shape'\s*:\s*\(([^)]*)\)/)
+  if (!descr || !fortran || !shapeText) return null
+  const shape = (shapeText[1] ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .map((part) => Number.parseInt(part, 10))
+    .filter((n) => Number.isFinite(n))
+  return { descr: descr[1] ?? "", fortranOrder: fortran[1] === "True", shape }
+}
+
+/**
+ * Decode a `.npy` buffer into a 1-D/2-D numeric array. Pure and total: any
+ * malformed/unsupported input (bad magic, an unsupported dtype, >2 dimensions,
+ * a scalar, or truncated data) yields `null` rather than throwing, so the caller
+ * can degrade to a metadata card.
+ *
+ * Format spec: https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html
+ */
+export function decodeNpy(buf: Buffer): DecodedNpy | null {
+  if (buf.length < 10) return null
+  for (let i = 0; i < NPY_MAGIC.length; i++) {
+    if (buf[i] !== NPY_MAGIC[i]) return null
+  }
+
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+  const major = buf[6]
+  let headerLen: number
+  let headerStart: number
+  if (major === 1) {
+    headerLen = view.getUint16(8, true)
+    headerStart = 10
+  } else if (major === 2 || major === 3) {
+    headerLen = view.getUint32(8, true)
+    headerStart = 12
+  } else {
+    return null
+  }
+
+  const dataOffset = headerStart + headerLen
+  const header = buf.toString("utf8", headerStart, dataOffset)
+  const parsed = parseNpyHeader(header)
+  if (!parsed) return null
+  // Only 1-D / 2-D numeric arrays are renderable; scalars and N-D arrays fall back.
+  if (parsed.shape.length === 0 || parsed.shape.length > 2) return null
+
+  const littleEndian = parsed.descr.startsWith("<") || parsed.descr.startsWith("|")
+  const dtype = NPY_DTYPES[parsed.descr.slice(1)]
+  if (!dtype) return null
+
+  const total = parsed.shape.reduce((a, b) => a * b, 1)
+  if (dataOffset + total * dtype.width > buf.length) return null
+
+  const values = new Float64Array(total)
+  if (parsed.fortranOrder && parsed.shape.length === 2) {
+    // Column-major source → row-major destination.
+    const [rows = 0, cols = 0] = parsed.shape
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        const offset = dataOffset + (c * rows + r) * dtype.width
+        values[r * cols + c] = dtype.read(view, offset, littleEndian)
+      }
+    }
+  } else {
+    for (let i = 0; i < total; i++) {
+      values[i] = dtype.read(view, dataOffset + i * dtype.width, littleEndian)
+    }
+  }
+
+  return { values, shape: parsed.shape, dtype: parsed.descr }
+}
+
+/**
+ * Preview a `.npy` array. A 1-D array becomes a {@link ChartPreview} (value vs.
+ * row index — the common loss/fitness curve); a 2-D array becomes a bounded
+ * {@link ArrayPreview} grid. Oversized files and any decode failure degrade to a
+ * metadata card with a note (no throw).
+ */
+async function previewNpy(
+  abs: string,
+  relPath: string,
+  size: number,
+  meta: (note?: string) => MetadataPreview,
+): Promise<DataFilePreview> {
+  if (size > MAX_NPY_BYTES) return meta("Array too large to decode inline")
+  const decoded = decodeNpy(await readFile(abs))
+  if (!decoded) return meta("Could not decode .npy array")
+
+  if (decoded.shape.length === 1) return npyChart(decoded, relPath)
+  return npyArray(decoded)
+}
+
+/** A 1-D `.npy` array → a single-series line chart over its row index. */
+function npyChart(decoded: DecodedNpy, relPath: string): ChartPreview {
+  const label = baseNameWithoutExt(relPath)
+  const xAll = Array.from(decoded.values, (_, i) => i)
+  const values = Array.from(decoded.values, (v) => (Number.isFinite(v) ? v : null))
+  return downsampleChart("index", xAll, [label], [values])
+}
+
+/** A 2-D `.npy` array → a bounded grid (rows × columns, both capped). */
+function npyArray(decoded: DecodedNpy): ArrayPreview {
+  const [rowCount = 0, colCount = 0] = decoded.shape
+  const shownCols = Math.min(colCount, MAX_ARRAY_COLS)
+  const shownRows = Math.min(rowCount, MAX_ARRAY_ROWS)
+
+  const columns = Array.from({ length: shownCols }, (_, c) => `c${c}`)
+  const rows: string[][] = []
+  for (let r = 0; r < shownRows; r++) {
+    const row: string[] = []
+    for (let c = 0; c < shownCols; c++) row.push(formatCell(decoded.values[r * colCount + c]))
+    rows.push(row)
+  }
+
+  return {
+    type: "array",
+    dtype: decoded.dtype,
+    shape: decoded.shape,
+    columns,
+    rows,
+    truncated: rowCount > MAX_ARRAY_ROWS || colCount > MAX_ARRAY_COLS,
+  }
+}
+
 // ── Small pure helpers ───────────────────────────────────────────────────────
 
 /** Normalize native (Windows) separators to POSIX for stable relPaths. */
 function toPosix(p: string): string {
   return p.replaceAll("\\", "/")
+}
+
+/** Final path segment with its extension stripped (e.g. `runs/loss.npy` → `loss`). */
+function baseNameWithoutExt(relPath: string): string {
+  const base = relPath.slice(relPath.lastIndexOf("/") + 1)
+  const dot = base.lastIndexOf(".")
+  return dot > 0 ? base.slice(0, dot) : base
+}
+
+/** Stringify one array cell: a finite number is trimmed to 6 sig-figs, else `""`. */
+function formatCell(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return ""
+  return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)))
 }
 
 /** Split into lines on `\n`/`\r\n`, dropping a single trailing empty line. */

@@ -24,7 +24,7 @@ interface EditorStatusBarProps {
 }
 
 /**
- * The editor's bottom status bar (AGENTS.md §1, TODO "Built-in editor" — "a small
+ * The editor's bottom status bar (AGENTS.md "Scope", TODO "Built-in editor" — "a small
  * error/warning count in the status bar"). For a Python file it surfaces the last
  * diagnostics run as a compact error/warning/info count (or a clean check), and
  * when the Astral tools are absent it shows a subtle, non-alarming hint to install

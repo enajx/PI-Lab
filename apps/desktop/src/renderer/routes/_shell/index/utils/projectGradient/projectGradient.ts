@@ -6,16 +6,30 @@
  * different projects get visibly different gradients.
  *
  * Pure and self-contained: returns a CSS `background` value (a soft three-stop
- * linear gradient between two hues) and an inline SVG noise `data:` URL for the
- * grain overlay. No randomness, no I/O — the same id always yields the same
- * gradient, which keeps the dashboard deterministic for snapshot/E2E.
+ * linear gradient between two hues), an inline SVG noise `data:` URL for the
+ * grain overlay, and the seeded parameters for a slow transform-only morph (so
+ * the no-thumbnail header feels subtly alive). No randomness, no I/O — the same
+ * id always yields the same gradient and the same animation timing, which keeps
+ * the dashboard deterministic for snapshot/E2E.
  */
+
+export interface ProjectGradientAnimation {
+  /** Full morph cycle length in seconds (slow; varies per project). */
+  durationSec: number
+  /**
+   * Negative phase offset in seconds, so cards starting at the same time are not
+   * synchronized (each appears mid-cycle). Always `<= 0`.
+   */
+  delaySec: number
+}
 
 export interface ProjectGradient {
   /** CSS `background` value: the smooth multi-stop gradient. */
   background: string
   /** A `data:` URL of an SVG noise tile, layered over the gradient for grain. */
   grainUrl: string
+  /** Seeded timing for the transform-only morph animation. */
+  animation: ProjectGradientAnimation
 }
 
 /** A small, stable 32-bit hash of a string (FNV-1a). Deterministic, no deps. */
@@ -36,11 +50,13 @@ function hsl(hue: number, saturation: number, lightness: number): string {
 
 /**
  * The grain overlay: a tiny SVG that draws fractal noise, base64-free (plain
- * `utf8` data URL) so it stays readable and needs no encoding step. Low opacity
- * keeps it "subtle" per the spec.
+ * `utf8` data URL) so it stays readable and needs no encoding step. Tuned for a
+ * retro film-grain look — a high `baseFrequency` gives fine, dense grain and the
+ * extra octaves add fibrous detail; the strong rect opacity lets the speckle read
+ * clearly once layered (the overlay element controls the final intensity/blend).
  */
 const GRAIN_SVG =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E"
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.6' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.85'/%3E%3C/svg%3E"
 
 export function projectGradient(projectId: string): ProjectGradient {
   const seed = hashString(projectId)
@@ -55,5 +71,11 @@ export function projectGradient(projectId: string): ProjectGradient {
     42,
   )} 55%, ${hsl(baseHue, 40, 22)} 100%)`
 
-  return { background, grainUrl: GRAIN_SVG }
+  // Transform-only morph timing, derived from the SAME seed as the palette so the
+  // animation stays deterministic. A slow ~28–52s cycle, started at a negative
+  // (mid-cycle) phase offset so a grid of cards never beats in lockstep.
+  const durationSec = 28 + (seed % 25)
+  const delaySec = -(seed % Math.round(durationSec))
+
+  return { background, grainUrl: GRAIN_SVG, animation: { durationSec, delaySec } }
 }

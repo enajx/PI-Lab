@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, skipper_new]
+    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -84,6 +84,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbfile-dev
       # Full install (WITH scripts) so native modules build prebuilt for Node ABI.
       - run: bun install --frozen-lockfile
+      # Normalize node-pty's build/Release (seeds it from the macOS prebuild +
+      # restores spawn-helper's exec bit; no-op on Linux). ABI-neutral — node-pty
+      # is N-API — so it never disturbs the Node-ABI install this job relies on.
+      - name: Setup native modules (node-pty)
+        run: bun run --cwd apps/desktop setup:native
       - run: bun run test
 
   # ── Whole-app E2E (ELECTRON ABI) ────────────────────────────────────────────
@@ -119,6 +124,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbfile-dev xvfb
       - run: bun install --frozen-lockfile
+      # Seed node-pty's build/Release from the macOS prebuild (+restore spawn-helper
+      # exec bit) so it's the single source of truth electron-builder packages and
+      # validate:native checks. No-op on Linux (node-gyp already built pty.node).
+      - name: Setup native modules (node-pty)
+        run: bun run --cwd apps/desktop setup:native
       # Flip native modules to the Electron ABI (better-sqlite3 recompiles; node-pty
       # is N-API and unaffected). MUST come before building/launching the app.
       - name: Rebuild native modules (Electron ABI)

@@ -36,11 +36,11 @@ function localTimezone(): string {
 }
 
 /**
- * Create-workflow form (AGENTS.md §1): pick a project + agent, write the prompt
+ * Create-workflow form (AGENTS.md "Scope"): pick a project + agent, write the prompt
  * the agent is launched on, and choose a recurrence via the {@link ScheduleBuilder}
  * (simple presets or raw RRULE with a live human-readable preview). A plain
  * inline panel (not a Radix dialog) so it renders and is assertable under jsdom
- * (AGENTS.md §14). The schedule is evaluated in the user's local timezone.
+ * (docs/testing-and-build.md). The schedule is evaluated in the user's local timezone.
  */
 export function CreateAutomationForm({
   projects,

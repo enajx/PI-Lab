@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * electron-builder configuration for the Skipper desktop app (AGENTS.md §13, P11).
+ * electron-builder configuration for the Skipper desktop app (docs/testing-and-build.md (build & ship), P11).
  *
  * This is a `.cjs` (not JSON) so we can *gate code-signing/notarization behind
  * env*: a local developer with no Apple cert must still get a launchable build.
@@ -8,7 +8,7 @@
  * notarization skipped); when they're set, electron-builder signs + notarizes.
  *
  * Native modules (`better-sqlite3`, `node-pty`) are the load-bearing concern
- * (AGENTS.md §12.4): the compiled main bundle does a bare `require("better-sqlite3")`
+ * (AGENTS.md Pitfalls #4): the compiled main bundle does a bare `require("better-sqlite3")`
  * / `require("node-pty")`, and the pty-daemon child (run via ELECTRON_RUN_AS_NODE)
  * loads node-pty's `pty.node` + its sibling `spawn-helper` from disk. Native `.node`
  * files cannot be read from inside an asar archive, so both modules are listed in
@@ -53,8 +53,9 @@ const config = {
     "!**/*.{ts,tsx,map,md}",
     "!**/{test,tests,__tests__,example,examples,docs,doc}/**",
     // node-pty ships prebuilds for every platform + a node-gyp-build `bin/` copy;
-    // only the locally rebuilt `build/Release` is loaded (see node-pty utils.js),
-    // so trim the rest to keep the package lean and the loaded ABI unambiguous.
+    // only `build/Release` is loaded (see node-pty utils.js) — `setup:native` seeds
+    // it from the macOS prebuild / Linux builds it from source — so trim the rest to
+    // keep the package lean and the loaded ABI unambiguous.
     "!**/node_modules/node-pty/prebuilds/**",
     "!**/node_modules/node-pty/bin/**",
     "!**/node_modules/node-pty/build/Release/{obj.target,.deps}/**",
@@ -62,6 +63,12 @@ const config = {
   // Native `.node` addons + node-pty's `spawn-helper` executable MUST live outside
   // the asar so they can be dlopen'd / exec'd at runtime.
   asarUnpack: ["**/node_modules/better-sqlite3/**", "**/node_modules/node-pty/**"],
+  // Ship the bundled project template alongside the app (exempt from the `files`
+  // md/ts exclusion globs) so packaged builds can first-run-seed the writable copy
+  // at `<process.resourcesPath>/template`. NB: copying through `extraResources` may
+  // dereference the `CLAUDE.md` -> `AGENTS.md` symlink in the packaged copy —
+  // verify the seeded copy still writes CLAUDE.md through to AGENTS.md on macOS.
+  extraResources: [{ from: "resources/template", to: "template" }],
   // Keep node-pty's spawn-helper executable bit after it's copied into the package
   // (asar packing can drop it; node-pty exec()s this file for every PTY).
   afterPack: "./scripts/electron-builder-after-pack.cjs",
@@ -93,7 +100,7 @@ const config = {
     // time (we don't generate .ico locally — no Windows tooling on the dev host).
     icon: "build/icon.png",
   },
-  // No auto-update / publishing surface (local-only, AGENTS.md §4 / §12.6).
+  // No auto-update / publishing surface (local-only, AGENTS.md "Dropped surfaces" / Pitfalls #6).
   publish: null,
 }
 

@@ -1,4 +1,4 @@
-// Unit tests for the one-shot diagnostics runners (AGENTS.md §14). The runners'
+// Unit tests for the one-shot diagnostics runners (docs/testing-and-build.md). The runners'
 // only I/O is the injected exec, so we drive them with a deterministic fake
 // returning canned ruff-JSON / ty / pyrefly output — and a "binary missing"
 // branch — and assert the parse + graceful-absence contract with no `uv`.

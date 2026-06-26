@@ -42,7 +42,7 @@ function toHHMM(hour: number, minute: number): string {
 }
 
 /**
- * Schedule builder for the create/edit form (AGENTS.md §1): a simple preset
+ * Schedule builder for the create/edit form (AGENTS.md "Scope"): a simple preset
  * picker (Hourly / Daily / Weekdays / Weekly with a time, or a specific weekday)
  * that compiles to an RRULE, plus a Custom mode for raw RRULE editing. A live,
  * human-readable preview ("Daily at 9:00 AM") and the next few fire times are

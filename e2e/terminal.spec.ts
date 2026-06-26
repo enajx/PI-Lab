@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (AGENTS.md §14): launch the real Electron build, boot to
+ * Whole-app E2E (docs/testing-and-build.md): launch the real Electron build, boot to
  * `app-ready`, then prove the terminal pane is wired end-to-end — spawn a PTY in
  * the daemon running a deterministic program, stream its bytes through tRPC into
  * xterm.js, and assert the marker shows in the terminal DOM.
@@ -17,7 +17,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * without needing synthetic keystrokes.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * the Bun runtime (AGENTS.md §13). The repo `e2e` script invokes Playwright's CLI
+ * the Bun runtime (docs/testing-and-build.md (build & ship)). The repo `e2e` script invokes Playwright's CLI
  * through `node` for exactly this reason.
  */
 
@@ -39,7 +39,7 @@ let dataDir: string
 test.beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "skipper-e2e-term-"))
   // Each run gets its own throwaway data dir + socket so parallel/repeat runs
-  // never collide and never adopt a stale daemon (AGENTS.md §14).
+  // never collide and never adopt a stale daemon (docs/testing-and-build.md).
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
     args: [MAIN_ENTRY],

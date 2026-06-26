@@ -10,7 +10,7 @@
  *   ---
  *   # body...
  *
- * The Skills science tab (AGENTS.md §1 "Science tabs") only surfaces the two
+ * The Skills science tab (AGENTS.md "Scope" "Science tabs") only surfaces the two
  * scalar fields it displays (name and description), so a YAML dependency is
  * unwarranted; a tiny line parser covers the shape we author. The parser is
  * total: any input (no block, an unterminated block, blank values, CRLF) yields

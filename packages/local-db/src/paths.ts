@@ -4,7 +4,7 @@ import { join } from "node:path"
 /**
  * Root directory for all of Skipper's on-disk state.
  *
- * Overridable via `SKIPPER_DATA_DIR` (AGENTS.md §14) so tests and parallel
+ * Overridable via `SKIPPER_DATA_DIR` (docs/testing-and-build.md) so tests and parallel
  * instances can point at a throwaway directory; defaults to `~/.skipper`.
  */
 export function resolveDataDir(): string {

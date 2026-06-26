@@ -11,8 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ShellIndexRouteImport } from './routes/_shell/index'
+import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
 import { Route as ShellAutomationsRouteImport } from './routes/_shell/automations'
-import { Route as ShellSessionsSessionIdRouteImport } from './routes/_shell/sessions/$sessionId'
 import { Route as ShellScienceSkillsRouteImport } from './routes/_shell/science/skills'
 import { Route as ShellScienceLibraryRouteImport } from './routes/_shell/science/library'
 import { Route as ShellScienceClusterRouteImport } from './routes/_shell/science/cluster'
@@ -28,14 +28,14 @@ const ShellIndexRoute = ShellIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellSettingsRoute = ShellSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellAutomationsRoute = ShellAutomationsRouteImport.update({
   id: '/automations',
   path: '/automations',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellSessionsSessionIdRoute = ShellSessionsSessionIdRouteImport.update({
-  id: '/sessions/$sessionId',
-  path: '/sessions/$sessionId',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellScienceSkillsRoute = ShellScienceSkillsRouteImport.update({
@@ -67,67 +67,67 @@ const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/automations': typeof ShellAutomationsRoute
+  '/settings': typeof ShellSettingsRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/science/analysis': typeof ShellScienceAnalysisRoute
   '/science/cluster': typeof ShellScienceClusterRoute
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
-  '/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
 }
 export interface FileRoutesByTo {
   '/automations': typeof ShellAutomationsRoute
+  '/settings': typeof ShellSettingsRoute
   '/': typeof ShellIndexRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/science/analysis': typeof ShellScienceAnalysisRoute
   '/science/cluster': typeof ShellScienceClusterRoute
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
-  '/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_shell': typeof ShellRouteWithChildren
   '/_shell/automations': typeof ShellAutomationsRoute
+  '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/science/analysis': typeof ShellScienceAnalysisRoute
   '/_shell/science/cluster': typeof ShellScienceClusterRoute
   '/_shell/science/library': typeof ShellScienceLibraryRoute
   '/_shell/science/skills': typeof ShellScienceSkillsRoute
-  '/_shell/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/automations'
+    | '/settings'
     | '/projects/$projectId'
     | '/science/analysis'
     | '/science/cluster'
     | '/science/library'
     | '/science/skills'
-    | '/sessions/$sessionId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/automations'
+    | '/settings'
     | '/'
     | '/projects/$projectId'
     | '/science/analysis'
     | '/science/cluster'
     | '/science/library'
     | '/science/skills'
-    | '/sessions/$sessionId'
   id:
     | '__root__'
     | '/_shell'
     | '/_shell/automations'
+    | '/_shell/settings'
     | '/_shell/'
     | '/_shell/projects/$projectId'
     | '/_shell/science/analysis'
     | '/_shell/science/cluster'
     | '/_shell/science/library'
     | '/_shell/science/skills'
-    | '/_shell/sessions/$sessionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -150,18 +150,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellIndexRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/settings': {
+      id: '/_shell/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof ShellSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/automations': {
       id: '/_shell/automations'
       path: '/automations'
       fullPath: '/automations'
       preLoaderRoute: typeof ShellAutomationsRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/sessions/$sessionId': {
-      id: '/_shell/sessions/$sessionId'
-      path: '/sessions/$sessionId'
-      fullPath: '/sessions/$sessionId'
-      preLoaderRoute: typeof ShellSessionsSessionIdRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/science/skills': {
@@ -204,24 +204,24 @@ declare module '@tanstack/react-router' {
 
 interface ShellRouteChildren {
   ShellAutomationsRoute: typeof ShellAutomationsRoute
+  ShellSettingsRoute: typeof ShellSettingsRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellScienceAnalysisRoute: typeof ShellScienceAnalysisRoute
   ShellScienceClusterRoute: typeof ShellScienceClusterRoute
   ShellScienceLibraryRoute: typeof ShellScienceLibraryRoute
   ShellScienceSkillsRoute: typeof ShellScienceSkillsRoute
-  ShellSessionsSessionIdRoute: typeof ShellSessionsSessionIdRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
   ShellAutomationsRoute: ShellAutomationsRoute,
+  ShellSettingsRoute: ShellSettingsRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellScienceAnalysisRoute: ShellScienceAnalysisRoute,
   ShellScienceClusterRoute: ShellScienceClusterRoute,
   ShellScienceLibraryRoute: ShellScienceLibraryRoute,
   ShellScienceSkillsRoute: ShellScienceSkillsRoute,
-  ShellSessionsSessionIdRoute: ShellSessionsSessionIdRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)

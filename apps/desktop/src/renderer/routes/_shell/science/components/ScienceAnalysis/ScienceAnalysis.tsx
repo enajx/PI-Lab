@@ -1,24 +1,39 @@
-import { ALL_DATA_FILE_KINDS, DATA_FILE_KIND_LABELS, type DataFileKind } from "@skipper/shared"
+import {
+  ALL_DATA_FILE_CATEGORIES,
+  ALL_DATA_FILE_KINDS,
+  categoryOf,
+  DATA_FILE_CATEGORY_LABELS,
+  DATA_FILE_KIND_LABELS,
+  type DataFileCategory,
+  type DataFileKind,
+} from "@skipper/shared"
 import { badgeVariants, cn, Input } from "@skipper/ui"
 import { useQuery } from "@tanstack/react-query"
 import { ChartArea, FileText, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
+import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
+import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
 
 /**
- * Analysis science tab (AGENTS.md §1 "Science tabs", P8c) — a **read-only data
+ * Analysis science tab (AGENTS.md "Scope" "Science tabs", P8c) — a **read-only data
  * browser**: pick a project, browse the data/analysis files discovered in its
- * repo (grouped by kind, filtered by a search box), and preview a selected file
- * in a side pane. CSV/TSV render as a sampled table, images inline, JSON pretty-
- * printed, text as a head; everything else shows a metadata card. Interactive
- * charting/plotting is deliberately out of v1 scope.
+ * repo (grouped by category, filtered by a search box), and preview a selected
+ * file in a side pane. CSV/TSV render as a sampled table (or a line chart when
+ * they look like a metric log), NumPy arrays as a chart (1-D) or grid (2-D),
+ * images inline, JSON pretty-printed, text as a head; everything else shows a
+ * metadata card.
+ *
+ * Top-level filter chips are coarse {@link DataFileCategory}s (Data, Images, …);
+ * selecting a category that spans more than one sub-format reveals a second row
+ * of sub-format bubbles (e.g. CSV / NumPy under Data) to narrow further.
  *
  * The project defaults to the most-recently-opened (`projects.list` is ordered
- * that way), with a selector to switch. The two columns each own their own
- * scroll per §12.3.
+ * that way), with a selector at the top of the left column. The two columns each
+ * own their own scroll per AGENTS.md Pitfalls #3.
  */
 export function ScienceAnalysis() {
   const trpc = useTRPC()
@@ -40,8 +55,11 @@ export function ScienceAnalysis() {
   }, [projects, selectedProjectId])
 
   const [query, setQuery] = useState("")
-  const [kindFilter, setKindFilter] = useState<DataFileKind | "all">("all")
+  // Top-level filter is a category; an optional sub-kind narrows within it.
+  const [categoryFilter, setCategoryFilter] = useState<DataFileCategory | "all">("all")
+  const [kindFilter, setKindFilter] = useState<DataFileKind | null>(null)
   const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
 
   const listing = useQuery({
     ...trpc.science.analysis.listFiles.queryOptions({ projectId: selectedProjectId ?? "" }),
@@ -62,56 +80,91 @@ export function ScienceAnalysis() {
     }
   }, [allFiles, selectedRelPath])
 
-  const kindsPresent = useMemo(() => {
-    const set = new Set<DataFileKind>(allFiles.map((f) => f.kind))
-    return ALL_DATA_FILE_KINDS.filter((k) => set.has(k))
+  // Context-aware ⌘F: while Analysis is open, the quick-open shortcut opens a fuzzy
+  // finder over this project's data files (the shell skips /science/* so this tab is
+  // the sole ⌘F owner here). The finder runs its own filter — the inline substring box
+  // stays independent.
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (eventMatchesShortcut(event, "quick-open")) {
+        event.preventDefault()
+        setFindOpen(true)
+      }
+    }
+    window.addEventListener("keydown", onWindowKeyDown)
+    return () => window.removeEventListener("keydown", onWindowKeyDown)
+  }, [])
+
+  // The full file list as quick-find items (intentionally not narrowed by the inline
+  // substring box or category chips — QuickFind does its own fuzzy match). The label is
+  // the basename; the hint is the containing directory, if any.
+  const findItems = useMemo<QuickFindItem[]>(
+    () =>
+      allFiles.map((file) => {
+        const slash = file.relPath.lastIndexOf("/")
+        return {
+          id: file.relPath,
+          label: file.name,
+          hint: slash >= 0 ? file.relPath.slice(0, slash) : undefined,
+          icon: FileText,
+        }
+      }),
+    [allFiles],
+  )
+
+  // Categories present, in canonical order (the top-level filter chips).
+  const categoriesPresent = useMemo(() => {
+    const set = new Set<DataFileCategory>(allFiles.map((f) => categoryOf(f.kind)))
+    return ALL_DATA_FILE_CATEGORIES.filter((c) => set.has(c))
   }, [allFiles])
+
+  // Sub-kinds present within the selected category, in canonical order. Only a
+  // category with more than one is offered as a row of sub-format bubbles.
+  const subKindsPresent = useMemo(() => {
+    if (categoryFilter === "all") return []
+    const set = new Set<DataFileKind>(
+      allFiles.filter((f) => categoryOf(f.kind) === categoryFilter).map((f) => f.kind),
+    )
+    return ALL_DATA_FILE_KINDS.filter((k) => set.has(k))
+  }, [allFiles, categoryFilter])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return allFiles.filter((file) => {
-      if (kindFilter !== "all" && file.kind !== kindFilter) return false
+      if (categoryFilter !== "all" && categoryOf(file.kind) !== categoryFilter) return false
+      if (kindFilter !== null && file.kind !== kindFilter) return false
       if (needle && !file.relPath.toLowerCase().includes(needle)) return false
       return true
     })
-  }, [allFiles, query, kindFilter])
+  }, [allFiles, query, categoryFilter, kindFilter])
 
-  // Re-group the filtered files in canonical kind order for sectioned rendering.
+  // Re-group the filtered files by category in canonical order for sectioned
+  // rendering — the header reads "Data", not the raw sub-format.
   const filteredGroups = useMemo(() => {
-    const byKind = new Map<DataFileKind, DataFileEntry[]>()
+    const byCategory = new Map<DataFileCategory, DataFileEntry[]>()
     for (const file of filtered) {
-      const bucket = byKind.get(file.kind)
+      const category = categoryOf(file.kind)
+      const bucket = byCategory.get(category)
       if (bucket) bucket.push(file)
-      else byKind.set(file.kind, [file])
+      else byCategory.set(category, [file])
     }
-    return ALL_DATA_FILE_KINDS.filter((k) => byKind.has(k)).map((kind) => ({
-      kind,
-      files: byKind.get(kind) ?? [],
+    return ALL_DATA_FILE_CATEGORIES.filter((c) => byCategory.has(c)).map((category) => ({
+      category,
+      files: byCategory.get(category) ?? [],
     }))
   }, [filtered])
 
-  const selector =
-    projects.length > 0 ? (
-      <select
-        data-testid="analysis-project-select"
-        value={selectedProjectId ?? ""}
-        onChange={(event) => setSelectedProjectId(event.target.value)}
-        className="h-8 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-      >
-        {projects.map((project) => (
-          <option key={project.id} value={project.id}>
-            {project.name}
-          </option>
-        ))}
-      </select>
-    ) : null
+  // Selecting a category clears any narrower sub-kind; "All" clears both.
+  const selectCategory = (category: DataFileCategory | "all") => {
+    setCategoryFilter(category)
+    setKindFilter(null)
+  }
 
   return (
     <ScienceTabShell
       testId="science-analysis"
       title="Analysis"
       subtitle="Browse and preview the data files in a project's repo"
-      actions={selector}
     >
       {projects.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
@@ -119,8 +172,23 @@ export function ScienceAnalysis() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          {/* Left column: search + kind filter + grouped file list. */}
+          {/* Left column: project selector + search + category filter + file list. */}
           <div className="flex w-80 shrink-0 flex-col border-border border-r">
+            <div className="flex shrink-0 items-center border-border border-b px-4 py-2">
+              <select
+                data-testid="analysis-project-select"
+                value={selectedProjectId ?? ""}
+                onChange={(event) => setSelectedProjectId(event.target.value)}
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
               <div className="relative">
                 <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
@@ -133,21 +201,40 @@ export function ScienceAnalysis() {
                   disabled={allFiles.length === 0}
                 />
               </div>
-              {kindsPresent.length > 0 ? (
-                <div className="flex flex-wrap gap-1" data-testid="analysis-kind-filters">
-                  <KindChip
+              {categoriesPresent.length > 0 ? (
+                <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                  <FilterChip
                     label="All"
-                    active={kindFilter === "all"}
-                    onClick={() => setKindFilter("all")}
-                    testId="analysis-kind-all"
+                    active={categoryFilter === "all"}
+                    onClick={() => selectCategory("all")}
+                    testId="analysis-category-all"
                   />
-                  {kindsPresent.map((kind) => (
-                    <KindChip
+                  {categoriesPresent.map((category) => (
+                    <FilterChip
+                      key={category}
+                      label={DATA_FILE_CATEGORY_LABELS[category]}
+                      active={categoryFilter === category}
+                      onClick={() => selectCategory(category)}
+                      testId={`analysis-category-${category}`}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {subKindsPresent.length > 1 ? (
+                <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
+                  <FilterChip
+                    label="All"
+                    active={kindFilter === null}
+                    onClick={() => setKindFilter(null)}
+                    testId="analysis-subkind-all"
+                  />
+                  {subKindsPresent.map((kind) => (
+                    <FilterChip
                       key={kind}
                       label={DATA_FILE_KIND_LABELS[kind]}
                       active={kindFilter === kind}
                       onClick={() => setKindFilter(kind)}
-                      testId={`analysis-kind-${kind}`}
+                      testId={`analysis-subkind-${kind}`}
                     />
                   ))}
                 </div>
@@ -178,10 +265,10 @@ export function ScienceAnalysis() {
                   </div>
 
                   {filteredGroups.map((group) => (
-                    <div key={group.kind} className="flex flex-col gap-1">
+                    <div key={group.category} className="flex flex-col gap-1">
                       <div className="flex items-center gap-2 px-1">
                         <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                          {DATA_FILE_KIND_LABELS[group.kind]}
+                          {DATA_FILE_CATEGORY_LABELS[group.category]}
                         </span>
                         <span className="text-[10px] text-muted-foreground/50">
                           {group.files.length}
@@ -221,6 +308,17 @@ export function ScienceAnalysis() {
           </div>
         </div>
       )}
+
+      {findOpen ? (
+        <QuickFind
+          ariaLabel="Find a file"
+          placeholder="Find a file…"
+          items={findItems}
+          emptyText="No matching files"
+          onSelect={(item) => setSelectedRelPath(item.id)}
+          onClose={() => setFindOpen(false)}
+        />
+      ) : null}
     </ScienceTabShell>
   )
 }
@@ -264,8 +362,8 @@ function FileRow({
   )
 }
 
-/** A clickable filter chip for a kind (or "All"). */
-function KindChip({
+/** A clickable filter chip for a category, sub-kind, or "All". */
+function FilterChip({
   label,
   active,
   onClick,
@@ -330,8 +428,8 @@ function EmptyState() {
         <div className="flex flex-col gap-1">
           <p className="font-medium text-foreground text-sm">No data files found</p>
           <p className="max-w-xs text-muted-foreground text-xs leading-relaxed">
-            Analysis lists CSV/TSV, JSON, images, notebooks, and other data files discovered in the
-            project's repo.
+            Analysis lists the data files, images, notebooks, and plots discovered in the project's
+            repo.
           </p>
         </div>
       </div>

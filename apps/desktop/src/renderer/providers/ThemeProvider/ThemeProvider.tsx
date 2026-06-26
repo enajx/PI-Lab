@@ -20,11 +20,11 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 const STORAGE_KEY = "skipper.theme"
 
-/** Read the persisted theme, defaulting to dark (AGENTS.md §7 — dark default). */
+/** Read the persisted theme, defaulting to light. */
 function readInitialTheme(): ThemeMode {
-  if (typeof window === "undefined") return "dark"
+  if (typeof window === "undefined") return "light"
   const stored = window.localStorage.getItem(STORAGE_KEY)
-  return stored === "light" ? "light" : "dark"
+  return stored === "dark" ? "dark" : "light"
 }
 
 /** Reflect the active theme onto <html> so the `.dark` CSS-variable set applies. */
@@ -36,7 +36,7 @@ function applyTheme(theme: ThemeMode) {
 }
 
 /**
- * Theme provider (AGENTS.md §7): dark default + light, driven by the CSS
+ * Theme provider (docs/architecture.md (renderer)): light default + dark, driven by the CSS
  * variables in `@skipper/ui` globals. State is the single source of truth; an
  * effect mirrors it onto `<html class="dark">` and `localStorage`. Kept minimal
  * this pass — no per-theme palettes, just the two built-ins.

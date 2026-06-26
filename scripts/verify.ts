@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Skipper smoke harness — the autonomous build → launch → assert gate (AGENTS.md §14).
+ * Skipper smoke harness — the autonomous build → launch → assert gate (docs/testing-and-build.md).
  *
  * It grows phase by phase. At P0 it only proves the toolchain is wired and exits 0.
  * From P3 it will: build the app, launch it headless via Playwright `_electron`, then

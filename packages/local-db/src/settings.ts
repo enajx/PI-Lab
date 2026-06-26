@@ -11,7 +11,7 @@ import { DEFAULT_EDITOR_SETTINGS, type Settings, settings } from "./tables"
  * {@link getSettingsOrDefaults} is that source: it reads row 1 and, when absent,
  * returns the same default shape Drizzle would insert. It performs no write — a
  * pure read so it is safe to call from anywhere (including read-only flows like
- * the start-agent-session policy in AGENTS.md §8). The returned object is a
+ * the start-agent-session policy in docs/architecture.md (agent runtime)). The returned object is a
  * fully-typed {@link Settings} row regardless of whether one exists on disk.
  */
 

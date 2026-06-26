@@ -2,7 +2,7 @@
 // @ts-check
 /**
  * Run `validate-native.cjs` under the *Electron* runtime so the ABI it checks is
- * Electron's (AGENTS.md §12.4). electron-builder packages for whatever ABI the
+ * Electron's (AGENTS.md Pitfalls #4). electron-builder packages for whatever ABI the
  * `.node` files were compiled to; this asserts they actually load under Electron
  * before the build is allowed to proceed.
  *

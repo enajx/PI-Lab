@@ -67,14 +67,14 @@ export interface AgentPreset {
   cwd?: string
 }
 
-/** A locally-known v2 Team (names only — no remote ids, see AGENTS.md §5). */
+/** A locally-known v2 Team (names only — no remote ids, see docs/architecture.md (local DB)). */
 export interface KnownTeam {
   name: string
   color?: string
 }
 
 /**
- * Built-in editor preferences (AGENTS.md §1, TODO "Built-in editor" — "Editor
+ * Built-in editor preferences (AGENTS.md "Scope", TODO "Built-in editor" — "Editor
  * settings group"). Persisted as a JSON blob on the singleton `settings` row so
  * the whole group travels as one column and gains new keys without a migration.
  * Every field is local-only and has a default that matches the spec ("off by
@@ -89,6 +89,13 @@ export interface EditorSettings {
   typeChecker: "ty" | "pyrefly"
   /** Run `ruff format` on ⌘S, then reload the buffer (default off). */
   formatOnSave: boolean
+  /**
+   * Stored id of the editor color theme (default `"default"` — the editor's
+   * built-in highlighting). Kept a plain string so the DB never couples to the
+   * renderer's theme registry; the renderer resolves it to a CodeMirror extension
+   * and treats an unknown/legacy id as the default.
+   */
+  editorTheme: string
 }
 
 /** Spec defaults for {@link EditorSettings} (TODO "Built-in editor"). */
@@ -97,21 +104,112 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   vim: false,
   typeChecker: "ty",
   formatOnSave: false,
+  editorTheme: "default",
+}
+
+/** Personal-library id for local (zero-config) mode: `/users/0`. */
+export const LOCAL_LIBRARY_ID = "0" as const
+
+/** Which library a Zotero source addresses, shared by both Zotero modes. */
+interface ZoteroLibraryRef {
+  /** Whether `libraryId` addresses a personal ("user") or shared ("group") library. */
+  libraryType: "user" | "group"
+  /** Numeric Zotero library id, as a string (used verbatim in the API path; "0" = local personal). */
+  libraryId: string
 }
 
 /**
- * Stored Zotero Web API credentials for the Library science tab (AGENTS.md §1
- * "Science tabs"). Persisted in the singleton `settings` row as a JSON blob,
- * local-only like everything else — the `apiKey` lives on the user's machine and
- * is never logged or synced. `null` (the column default) means "not connected".
+ * Local Zotero desktop reachable at `http://localhost:23119/api` — the
+ * same v3 read API, served from the on-disk database, no API key. Reads need only
+ * the app running; writes additionally need {@link ZoteroLocalSource.bridgeToken}.
  */
-export interface ZoteroConnection {
-  /** Personal Zotero Web API key (zotero.org/settings/keys). */
+export interface ZoteroLocalSource extends ZoteroLibraryRef {
+  kind: "zotero"
+  mode: "local"
+  /**
+   * Debug-bridge token (`extensions.zotero.debug-bridge.token` in Zotero's Config
+   * Editor) — required for WRITES only (it authorizes privileged JS execution on
+   * localhost). Absent ⇒ reads work, file attachment is disabled. Never logged.
+   */
+  bridgeToken?: string
+}
+
+/**
+ * Zotero Web API (`https://api.zotero.org`) — the cloud library, keyed by a personal
+ * API key. Works without the desktop app; writes need a key with library write access.
+ */
+export interface ZoteroWebSource extends ZoteroLibraryRef {
+  kind: "zotero"
+  mode: "web"
+  /** Personal Zotero Web API key (zotero.org/settings/keys). Never logged or synced. */
   apiKey: string
-  /** Whether `libraryId` addresses a personal ("user") or shared ("group") library. */
-  libraryType: "user" | "group"
-  /** Numeric Zotero library id, as a string (it's used verbatim in the API path). */
-  libraryId: string
+}
+
+/**
+ * A plain local folder of papers (no Zotero) — for researchers who keep PDFs in a
+ * directory tree. Subfolders are browsed as collections, `.pdf` files as items. Read
+ * only (no attach). `folderPath` is absolute and is validated to exist on connect.
+ */
+export interface FolderSource {
+  kind: "folder"
+  folderPath: string
+}
+
+/** The two Zotero-backed sources, narrowed for the Zotero-only read/write helpers. */
+export type ZoteroSource = ZoteroLocalSource | ZoteroWebSource
+
+/**
+ * Stored Library source for the Library science tab (AGENTS.md "Scope" "Science tabs").
+ * Persisted in the singleton `settings` row as a JSON blob (still in the historically
+ * named `zotero` column), local-only like everything else — any credentials live on the
+ * user's machine and are never logged or synced. `null` (the column default) means "not
+ * connected". `kind` discriminates Zotero from a local folder; within Zotero, `mode`
+ * discriminates the local desktop API from the cloud Web API.
+ */
+export type LibrarySource = ZoteroSource | FolderSource
+
+/**
+ * Normalize a persisted source blob to {@link LibrarySource}. Folder rows carry
+ * `kind: "folder"` + a `folderPath`. Everything else is Zotero: rows written before
+ * `kind`/`mode` existed have neither and always carried an `apiKey`, so they coerce to
+ * Zotero web; `mode: "local"` rows coerce to Zotero local (defaulting to `/users/0`).
+ * Returns `null` for null/garbage so callers treat it as "not connected". Read-time
+ * coercion only — there is no migration.
+ */
+export function coerceLibrarySource(raw: unknown): LibrarySource | null {
+  if (!raw || typeof raw !== "object") return null
+  const r = raw as Record<string, unknown>
+
+  // Folder source: explicit `kind`, or a bare `folderPath` with no Zotero markers.
+  if (
+    r.kind === "folder" ||
+    (typeof r.folderPath === "string" && r.mode == null && r.apiKey == null)
+  ) {
+    return typeof r.folderPath === "string" && r.folderPath.trim().length > 0
+      ? { kind: "folder", folderPath: r.folderPath }
+      : null
+  }
+
+  // Otherwise Zotero (explicit `kind: "zotero"` or a legacy row predating `kind`).
+  const libraryType = r.libraryType === "group" ? "group" : "user"
+  const libraryId = typeof r.libraryId === "string" ? r.libraryId : ""
+  if (r.mode === "local") {
+    return {
+      kind: "zotero",
+      mode: "local",
+      libraryType,
+      libraryId: libraryId || LOCAL_LIBRARY_ID,
+      ...(typeof r.bridgeToken === "string" && r.bridgeToken.length > 0
+        ? { bridgeToken: r.bridgeToken }
+        : {}),
+    }
+  }
+  // Explicit "web", or a legacy row (no `mode`) that carried an apiKey. Both a key
+  // and a library id are required — a row missing either is treated as not connected.
+  if (typeof r.apiKey === "string" && r.apiKey.length > 0 && libraryId.length > 0) {
+    return { kind: "zotero", mode: "web", apiKey: r.apiKey, libraryType, libraryId }
+  }
+  return null
 }
 
 /**
@@ -284,7 +382,7 @@ export const settings = sqliteTable("settings", {
   /** Whether to prompt before quitting with live sessions. */
   confirmOnQuit: integer("confirm_on_quit", { mode: "boolean" }).notNull().default(true),
   /**
-   * Worktree policy for the "start agent session" flow (AGENTS.md §8). When ON,
+   * Worktree policy for the "start agent session" flow (docs/architecture.md (agent runtime)). When ON,
    * every agent session gets its own fresh git worktree. When OFF (default), an
    * agent opens in the project's main checkout (its single branch workspace) and
    * only spills into a fresh worktree once a second concurrent agent would
@@ -293,7 +391,7 @@ export const settings = sqliteTable("settings", {
   worktreePerAgent: integer("worktree_per_agent", { mode: "boolean" }).notNull().default(false),
   /**
    * Built-in editor preferences (autosave / vim / type checker / format-on-save),
-   * stored as a JSON blob so the group grows without a migration (AGENTS.md §1,
+   * stored as a JSON blob so the group grows without a migration (AGENTS.md "Scope",
    * TODO "Built-in editor"). Defaults to the spec's all-off / `ty` shape.
    */
   editor: text("editor", { mode: "json" })
@@ -303,11 +401,14 @@ export const settings = sqliteTable("settings", {
   /** Locally-known v2 Teams (names/colors only — no remote identity). */
   knownTeams: text("known_teams", { mode: "json" }).notNull().$type<KnownTeam[]>().default([]),
   /**
-   * Stored Zotero Web API credentials for the Library science tab, or `null`
-   * when not connected (AGENTS.md §1). Local-only; the API key never leaves the
-   * machine and is never logged.
+   * Stored Library source for the Library science tab — a Zotero connection (local
+   * desktop API or cloud Web API) or a local folder of PDFs (see {@link LibrarySource})
+   * — or `null` when not connected (AGENTS.md "Scope"). Local-only; credentials never
+   * leave the machine or get logged. The column keeps its historical name `zotero`, but
+   * holds any source. Freeform JSON, so the union widened (modes, then a folder kind)
+   * without a migration — rows are normalized at read time by `coerceLibrarySource`.
    */
-  zotero: text("zotero", { mode: "json" }).$type<ZoteroConnection>(),
+  zotero: text("zotero", { mode: "json" }).$type<LibrarySource>(),
   updatedAt: integer("updated_at")
     .notNull()
     .$defaultFn(() => Date.now()),
@@ -334,7 +435,7 @@ export const browserHistory = sqliteTable(
 
 // ---------------------------------------------------------------------------
 // machines — a remote compute box the user monitors from the Cluster science
-// tab (AGENTS.md §1 "Science tabs"). v1 is *monitoring only*: rows are imported
+// tab (AGENTS.md "Scope" "Science tabs"). v1 is *monitoring only*: rows are imported
 // from `~/.ssh/config` or added by hand, annotated, hidden, and reachability-
 // probed over the `ssh` CLI. Job dispatch / experiment runs are v2 and have no
 // table here. Connection metadata only — never key material or secrets.

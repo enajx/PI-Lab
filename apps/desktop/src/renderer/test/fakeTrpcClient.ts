@@ -15,7 +15,7 @@ export type FakeHandlers = Record<string, FakeHandler>
 /**
  * Build a *real* tRPC client backed by an in-memory terminating link instead of
  * the IPC link, so component tests can drive `useTRPC()` reads/mutations without
- * a main process (AGENTS.md §14). The `@trpc/tanstack-react-query` integration
+ * a main process (docs/testing-and-build.md). The `@trpc/tanstack-react-query` integration
  * resolves calls through the untyped client, so a hand-rolled plain object won't
  * do — this returns a genuine client whose link dispatches each operation to the
  * handler registered for its path, erroring clearly on an unhandled path.

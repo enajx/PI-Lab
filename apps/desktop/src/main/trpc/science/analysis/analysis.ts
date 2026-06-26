@@ -12,7 +12,7 @@ import {
 } from "./discover"
 
 /**
- * Analysis science tab (AGENTS.md §1 "Science tabs", P8c) — v1 is a **read-only
+ * Analysis science tab (AGENTS.md "Scope" "Science tabs", P8c) — v1 is a **read-only
  * data browser**: discover and classify the data/analysis files in a project's
  * repo, list them grouped by kind, and render a bounded preview of a selected
  * file (a sampled CSV/TSV table, a pretty-printed JSON, an inline image, or a
@@ -22,7 +22,7 @@ import {
  * Both procedures resolve the project's repo path from the injected Drizzle
  * handle, then delegate to the plain, filesystem-only functions in `./discover`.
  * `preview` jails its `relPath` to the repo via the shared {@link resolveInsideDir}
- * guard (AGENTS.md §6 — path-traversal). Mounted as `science.analysis.*`.
+ * guard (docs/architecture.md (process model) — path-traversal). Mounted as `science.analysis.*`.
  */
 
 const listInput = z.object({

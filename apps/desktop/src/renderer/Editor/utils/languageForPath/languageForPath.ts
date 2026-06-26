@@ -3,7 +3,7 @@ import type { Extension } from "@codemirror/state"
 
 /**
  * Pick a CodeMirror language extension from a file's path. v1 ships Python
- * highlighting only (AGENTS.md §1 / TODO "Built-in editor" — Python first); any
+ * highlighting only (AGENTS.md "Scope" / TODO "Built-in editor" — Python first); any
  * other extension returns `null`, leaving the buffer as plain text. Kept a pure
  * function (no view, no I/O) so the by-extension mapping is unit-testable in
  * isolation and the integrate stage can extend it with more `lang-*` packages.

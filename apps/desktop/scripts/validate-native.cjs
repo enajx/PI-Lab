@@ -2,13 +2,13 @@
 // @ts-check
 /**
  * Validate that the desktop's native modules are present and loadable under the
- * Electron ABI (AGENTS.md §12.4). Native-module ABI mismatches fail at *runtime*,
+ * Electron ABI (AGENTS.md Pitfalls #4). Native-module ABI mismatches fail at *runtime*,
  * not at build time, so this is a hard gate before/after packaging: it loads each
  * `.node` addon the way the app does and exits nonzero (loudly) on any failure.
  *
  * Two run modes:
  *   - default (no arg): validate the modules resolved from `apps/desktop`
- *     (the rebuilt-in-place store copies). Used by `build:local` after
+ *     (the rebuilt-in-place store copies). Used by `package` / `package:prod` after
  *     `@electron/rebuild`, before electron-builder packs.
  *   - `--app <path-to-.app-or-appOutDir>`: validate the `.node` binaries INSIDE a
  *     packaged app's `app.asar.unpacked/node_modules`, proving the unpacked native
@@ -67,13 +67,15 @@ function checkBetterSqlite3(fromPaths) {
   if (row?.x !== 1) throw new Error("better-sqlite3 query returned unexpected result")
 }
 
-/** Load + smoke-test node-pty (and assert its spawn-helper is executable). */
+/** Load + smoke-test node-pty (and, on macOS, assert its spawn-helper is executable). */
 function checkNodePty(fromPaths) {
   const ptyPath = require.resolve("node-pty", { paths: fromPaths })
   const pty = require(ptyPath)
   if (typeof pty.spawn !== "function") throw new Error("node-pty has no spawn()")
-  // spawn-helper must exist and be executable on POSIX (node-pty exec()s it).
-  if (process.platform !== "win32") {
+  // spawn-helper is a macOS-only concern: binding.gyp builds it under OS=="mac"
+  // only, and node-pty exec()s it solely on the __APPLE__ posix_spawn path (Linux
+  // uses forkpty directly, with no helper). So require it on darwin, not all POSIX.
+  if (process.platform === "darwin") {
     const moduleDir = join(ptyPath, "..", "..") // lib/index.js → node-pty/
     const helper = join(moduleDir, "build", "Release", "spawn-helper")
     if (!existsSync(helper)) throw new Error(`spawn-helper missing at ${helper}`)
@@ -118,7 +120,9 @@ function runPackaged(appPath) {
     const ptyNode = join(nm, "node-pty", "build", "Release", "pty.node")
     if (!existsSync(ptyNode)) throw new Error(`missing ${ptyNode}`)
     require(ptyNode) // throws on ABI mismatch
-    if (process.platform !== "win32") {
+    // spawn-helper is macOS-only (gyp OS=="mac" + __APPLE__ runtime path); Linux
+    // packs only pty.node and uses forkpty, so don't require a helper there.
+    if (process.platform === "darwin") {
       const helper = join(nm, "node-pty", "build", "Release", "spawn-helper")
       if (!existsSync(helper)) throw new Error(`spawn-helper missing at ${helper}`)
       if ((statSync(helper).mode & 0o111) === 0) {

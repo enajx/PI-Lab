@@ -17,14 +17,14 @@ import { workspaceWorkingDir } from "../workspaces/workspaces"
 
 /**
  * Diagnostics router — the built-in editor's Python code intelligence over tRPC
- * (AGENTS.md §1, TODO "Built-in editor"). v1 runs the Astral tools as **one-shot
+ * (AGENTS.md "Scope", TODO "Built-in editor"). v1 runs the Astral tools as **one-shot
  * CLIs** (NOT LSP): on save the editor calls `check` to type-check (`ty`,
  * toggleable to `pyrefly`) and optionally lint (`ruff`), and `format` for
  * format-on-save. Diagnostics come back in the normalized {@link Diagnostic}
  * shape so the editor draws squiggles / gutter markers / a status count from one
  * list.
  *
- * The router stays thin (AGENTS.md §14): it resolves the workspace working dir,
+ * The router stays thin (docs/testing-and-build.md): it resolves the workspace working dir,
  * jails `relPath` to it (reusing the files router's traversal guard), and
  * delegates to the pure runners over the injected {@link PyToolsExec}. It operates
  * on the **saved file on disk** — the editor saves before/at check and passes the
@@ -37,7 +37,7 @@ const checkInput = z.object({
   workspaceId: z.string().min(1),
   /** Path (relative to the workspace working dir) of the *saved* file to check. */
   relPath: z.string().min(1),
-  /** Which type checker to run (AGENTS.md §1 — settings toggle). */
+  /** Which type checker to run (AGENTS.md "Scope" — settings toggle). */
   typeChecker: z.enum(["ty", "pyrefly"]),
   /** Whether to also run the ruff linter. */
   lint: z.boolean(),
@@ -137,7 +137,7 @@ export const diagnosticsRouter = router({
     }),
 
   /**
-   * Format the saved file in place with `ruff format` (AGENTS.md §1, TODO
+   * Format the saved file in place with `ruff format` (AGENTS.md "Scope", TODO
    * "Built-in editor" — format-on-save, off by default). Reports whether the
    * file changed so the editor reloads its buffer only when needed. Graceful
    * when ruff/`uv` is absent (`toolsAvailable: false`, `missing: ["ruff"]`).

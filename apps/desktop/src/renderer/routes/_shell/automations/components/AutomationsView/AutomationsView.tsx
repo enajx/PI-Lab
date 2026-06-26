@@ -1,14 +1,16 @@
-import { Button } from "@skipper/ui"
+import { Button, cn } from "@skipper/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Workflow } from "lucide-react"
 import { useState } from "react"
+import { useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 import { AutomationRow } from "./components/AutomationRow"
 import { AutomationsEmptyState } from "./components/AutomationsEmptyState"
 import { CreateAutomationForm } from "./components/CreateAutomationForm"
 
 /**
- * Automations / Workflows view (AGENTS.md §1 — scheduled & looping agent runs).
+ * Automations / Workflows view (AGENTS.md "Scope" — scheduled & looping agent runs).
  * Lists every automation (name, cadence summary, next run, enabled toggle),
  * offers a create form, and per-row run-now / enable-disable / delete plus an
  * expandable run history. v1 is launch-only: an automation fires a fresh agent
@@ -16,13 +18,14 @@ import { CreateAutomationForm } from "./components/CreateAutomationForm"
  * and intentionally absent.
  *
  * The body owns its own scroll via a bounded `min-h-0 overflow-y-auto` child
- * (AGENTS.md §12.3 — never a nested Radix ScrollArea). All assertion-worthy
- * elements carry stable `data-testid`s (§14).
+ * (AGENTS.md Pitfalls #3 — never a nested Radix ScrollArea). All assertion-worthy
+ * elements carry stable `data-testid`s (docs/testing-and-build.md).
  */
 export function AutomationsView() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
+  const [collapsed] = useSidebarCollapsed()
 
   const listQuery = useQuery(trpc.automations.list.queryOptions())
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
@@ -47,7 +50,12 @@ export function AutomationsView() {
 
   return (
     <div data-testid="automations-view" className="flex h-full w-full flex-col overflow-hidden">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-border border-b px-6 py-3">
+      <header
+        className={cn(
+          "flex shrink-0 items-center justify-between gap-4 border-border border-b py-3",
+          titleBarHeaderClass(collapsed),
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <Workflow className="size-4 shrink-0 text-brand" aria-hidden />
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -62,6 +70,7 @@ export function AutomationsView() {
         <Button
           data-testid="new-automation"
           size="sm"
+          className={titleBarControlClass(collapsed)}
           disabled={!canCreate || creating}
           onClick={() => setCreating(true)}
           title={canCreate ? undefined : "Open a project first"}

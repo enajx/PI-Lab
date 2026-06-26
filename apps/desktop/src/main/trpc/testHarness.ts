@@ -1,5 +1,5 @@
 // Shared test plumbing for the projects/workspaces router suites (AGENTS.md
-// §14): a `createCaller` over a temp-file SQLite handle with the *real* generated
+// docs/testing-and-build.md): a `createCaller` over a temp-file SQLite handle with the *real* generated
 // migrations, a throwaway git repo, an in-process pty-daemon, and an injectable
 // fake agent catalog. Everything is created with real tools (git init, real
 // DaemonServer) — only the transport (caller vs IPC) and the daemon's home
@@ -18,7 +18,7 @@ import type { PyToolsExec } from "../diagnostics"
 import type { SshExec } from "../lib/ssh-config"
 import { LiveAgentRegistry } from "../sessions/liveAgentRegistry"
 import { appRouter } from "./appRouter"
-import type { AppContext, HttpFetch } from "./context"
+import type { AppContext, HttpFetch, OpenPath } from "./context"
 import { createCallerFactory } from "./trpc"
 
 const execFileAsync = promisify(execFile)
@@ -27,7 +27,7 @@ const createCaller = createCallerFactory(appRouter)
 export type Caller = ReturnType<typeof createCaller>
 
 /**
- * A deterministic, credential-free fake agent (AGENTS.md §14): it runs the test
+ * A deterministic, credential-free fake agent (docs/testing-and-build.md): it runs the test
  * runner's own Node and prints a known marker, so launchAgent exercises the real
  * PTY/launch/stream path with zero network and zero paid credentials.
  */
@@ -42,8 +42,8 @@ export const FAKE_AGENT: TerminalAgent = {
 /**
  * A *long-lived* fake agent: it prints its marker then stays alive on an
  * interval until killed, so a test can keep a session "live" while it starts a
- * second concurrent agent (exercising the §8 concurrency-spills-to-worktree
- * branch of the policy). Killing the PTY (or closing the daemon) ends it.
+ * second concurrent agent (exercising the concurrency-spills-to-worktree
+ * branch of the policy; docs/architecture.md, agent runtime). Killing the PTY (or closing the daemon) ends it.
  */
 export const LONG_FAKE_AGENT: TerminalAgent = {
   id: "long-fake-agent",
@@ -68,7 +68,7 @@ export interface Harness {
 
 /**
  * A deterministic, network-free ssh probe for the cluster router's status tests
- * (AGENTS.md §14): every host is reachable unless its alias starts with `down-`,
+ * (docs/testing-and-build.md): every host is reachable unless its alias starts with `down-`,
  * so a suite can assert both branches without any real `ssh` / network.
  */
 export const FAKE_SSH_EXEC: SshExec = async (host) =>
@@ -79,18 +79,25 @@ export const FAKE_SSH_EXEC: SshExec = async (host) =>
 /**
  * Default outbound-HTTP fake for the harness: any unexpected URL is a hard error
  * so a test that hits the network by accident fails loudly rather than reaching
- * the real Zotero / Semantic Scholar APIs. Library router suites pass their own
- * `httpFetch` to stub specific responses (AGENTS.md §14).
+ * the real Zotero API. Library router suites pass their own `httpFetch` to stub
+ * specific responses (docs/testing-and-build.md).
  */
 export const FAKE_HTTP_FETCH: HttpFetch = async (input) => {
   throw new Error(`Unexpected network call in tests: ${String(input)}`)
 }
 
 /**
+ * Default file-open fake for the harness: a no-op that reports success (empty string,
+ * like `shell.openPath`) without touching the OS. The library router suite passes its
+ * own to record which path `science.library.openItem` resolved.
+ */
+export const FAKE_OPEN_PATH: OpenPath = async () => ""
+
+/**
  * Default Python-tools exec for the harness: reports every tool as **absent**
  * (`notFound: true`) so an unrelated router suite never spawns a real `uvx`
  * process. The diagnostics suite passes its own exec returning canned tool output
- * to exercise the parse + merge path (AGENTS.md §14).
+ * to exercise the parse + merge path (docs/testing-and-build.md).
  */
 export const FAKE_PY_TOOLS_EXEC: PyToolsExec = async () => ({
   stdout: "",
@@ -106,6 +113,8 @@ export interface HarnessOptions {
   sshExec?: SshExec
   /** Outbound HTTP for the library router (defaults to {@link FAKE_HTTP_FETCH}). */
   httpFetch?: HttpFetch
+  /** File-open for the library router's folder source (defaults to {@link FAKE_OPEN_PATH}). */
+  openPath?: OpenPath
   /** Python-tools exec for the diagnostics router (defaults to {@link FAKE_PY_TOOLS_EXEC}). */
   pyToolsExec?: PyToolsExec
 }
@@ -128,7 +137,7 @@ async function initRepo(dir: string): Promise<void> {
  */
 export async function createHarness(
   agentCatalog: readonly TerminalAgent[] = [FAKE_AGENT],
-  options: Pick<HarnessOptions, "sshExec" | "httpFetch" | "pyToolsExec"> = {},
+  options: Pick<HarnessOptions, "sshExec" | "httpFetch" | "openPath" | "pyToolsExec"> = {},
 ): Promise<Harness> {
   // Canonicalize: on macOS `mkdtemp` hands back `/var/...` but git reports the
   // realpath `/private/var/...`; resolving here keeps repoPath assertions exact.
@@ -156,6 +165,7 @@ export async function createHarness(
     liveAgents,
     sshExec: options.sshExec ?? FAKE_SSH_EXEC,
     httpFetch: options.httpFetch ?? FAKE_HTTP_FETCH,
+    openPath: options.openPath ?? FAKE_OPEN_PATH,
     pyToolsExec: options.pyToolsExec ?? FAKE_PY_TOOLS_EXEC,
   }
   const caller = createCaller(context)

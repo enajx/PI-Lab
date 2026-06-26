@@ -18,17 +18,17 @@ import { workspaceWorkingDir } from "../workspaces/workspaces"
  * Files router — read/write a single text file *inside a workspace's working
  * directory*, addressed by a path relative to that dir. This is the file I/O
  * primitive the right-sidebar doc panels read through (`RESEARCH.md`,
- * `TODO.md`) and that the built-in editor reuses for save (AGENTS.md §6).
+ * `TODO.md`) and that the built-in editor reuses for save (docs/architecture.md (process model)).
  *
  * Beyond read/write it exposes three editor primitives:
  *   - `stat` — a cheap fingerprint (mtime+size) the editor polls to notice
  *     out-of-band edits by agents/git and reload (clean) or warn (dirty).
  *   - `tree` — the immediate children of one directory, for a lazy file tree.
- *   - `search` — a fuzzy file-name search backing the `⌘P` quick-open palette.
+ *   - `search` — a fuzzy file-name search backing the `⌘F` quick-open palette.
  *
  * The router stays thin: it resolves the workspace's working dir, jails every
  * requested path to that dir, and delegates the real work to
- * `@skipper/workspace-fs`. Everything is `createCaller`-testable (AGENTS.md §14).
+ * `@skipper/workspace-fs`. Everything is `createCaller`-testable (docs/testing-and-build.md).
  */
 
 const readInput = z.object({
@@ -94,7 +94,7 @@ function requireWorkspace(db: SkipperDatabase, workspaceId: string): Workspace {
 
 /**
  * Resolve `relPath` against a workspace's working `dir`, guaranteeing the result
- * stays *inside* `dir` (AGENTS.md §6 — guard against path traversal). Absolute
+ * stays *inside* `dir` (docs/architecture.md (process model) — guard against path traversal). Absolute
  * inputs and any `..` escape (or a symlink-free `../outside`) are rejected with
  * a FORBIDDEN error rather than silently reading arbitrary disk.
  *
@@ -164,7 +164,7 @@ export const filesRouter = router({
   /**
    * Fingerprint a file (mtime + size) without reading its bytes. The editor
    * polls this to detect agent/git edits on disk: a clean buffer auto-reloads,
-   * a dirty buffer warns (AGENTS.md §0 — never silently clobber). A missing file
+   * a dirty buffer warns (AGENTS.md "What Skipper is" — never silently clobber). A missing file
    * is a normal answer (`exists: false`), matching `read`.
    */
   stat: publicProcedure.input(readInput).query(async ({ ctx, input }): Promise<FileStat> => {
@@ -199,7 +199,7 @@ export const filesRouter = router({
   }),
 
   /**
-   * Fuzzy file-name search backing the `⌘P` quick-open palette. Scores every
+   * Fuzzy file-name search backing the `⌘F` quick-open palette. Scores every
    * file under the working dir against `query` (noise dirs like `.git` /
    * `node_modules` are pruned by `walkFiles`) and returns the best matches with
    * workspace-relative POSIX paths. An empty query yields no hits.

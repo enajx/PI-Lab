@@ -4,7 +4,7 @@ import type { RouterOutputs } from "../../../trpc/types"
 
 /**
  * Renderer-side Python diagnostics integration for the built-in editor (AGENTS.md
- * §1, TODO "Built-in editor"). The diagnostics *engine* runs in main as one-shot
+ * AGENTS.md "Scope", TODO "Built-in editor"). The diagnostics *engine* runs in main as one-shot
  * CLIs over `diagnostics.check`; this module is the thin glue that
  *   1. decides whether a file is even a Python file (no diagnostics otherwise),
  *   2. calls the router for the **saved** file, and

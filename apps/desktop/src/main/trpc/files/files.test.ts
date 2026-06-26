@@ -1,4 +1,4 @@
-// Integration tests for the files router (AGENTS.md §14): createCaller over a
+// Integration tests for the files router (docs/testing-and-build.md): createCaller over a
 // temp SQLite DB with real migrations + a real temp git repo. They prove the
 // read/write round-trip inside a workspace's working dir and that a path
 // escaping that dir (`../outside`) is rejected. Plus a pure unit on the jailing

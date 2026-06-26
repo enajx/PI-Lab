@@ -4,10 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Lock the renderer down: no remote code, scripts/styles from self only.
-         `unsafe-inline` style is required by Tailwind/Vite injected styles. -->
+         `unsafe-inline` style is required by Tailwind/Vite injected styles.
+         `img-src` allows `data:`/`blob:` so dropped thumbnails (read into a
+         data URL) and the inline SVG grain overlay render. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
     />
     <title>Skipper</title>
     <!-- Pre-paint fallback only (warm near-black, matches the dark theme bg) so

@@ -19,8 +19,15 @@
     "test:watch": "vitest",
     "e2e": "node node_modules/@playwright/test/cli.js test",
     "verify": "bun run scripts/verify.ts",
+    "package": "bun run --cwd apps/desktop package",
+    "package:prod": "bun run --cwd apps/desktop package:prod",
     "clean": "rm -rf node_modules"
   },
+  "trustedDependencies": [
+    "better-sqlite3",
+    "electron",
+    "node-pty"
+  ],
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
     "@playwright/test": "^1.49.0",

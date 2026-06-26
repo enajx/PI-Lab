@@ -9,7 +9,7 @@ import { publicProcedure, router } from "../../trpc"
 import { parseSkillFrontmatter } from "./frontmatter"
 
 /**
- * Skills science tab (AGENTS.md §1 "Science tabs") — v1 is a **read-only
+ * Skills science tab (AGENTS.md "Scope" "Science tabs") — v1 is a **read-only
  * catalog**: discover the agent skills declared in a project's repo and display
  * them. Triggering a skill from the GUI is a later (v2) concern and has no
  * procedure here.

@@ -1,8 +1,12 @@
 import fc from "fast-check"
 import { describe, expect, test } from "vitest"
 import {
+  ALL_DATA_FILE_CATEGORIES,
   ALL_DATA_FILE_KINDS,
+  categoryOf,
   classifyDataFile,
+  DATA_FILE_CATEGORY_LABELS,
+  type DataFileCategory,
   type DataFileKind,
   isPreviewableKind,
 } from "./file-kind"
@@ -29,6 +33,11 @@ describe("classifyDataFile", () => {
     expect(classifyDataFile("table.parquet")).toBe("parquet")
     expect(classifyDataFile("table.feather")).toBe("parquet")
     expect(classifyDataFile("figure.pdf")).toBe("plot")
+  })
+
+  test("classifies NumPy arrays", () => {
+    expect(classifyDataFile("runs/loss.npy")).toBe("npy")
+    expect(classifyDataFile("checkpoints/weights.npz")).toBe("npz")
   })
 
   test("classifies markdown and text/log", () => {
@@ -97,6 +106,8 @@ describe("classifyDataFile", () => {
       ["png", "image"],
       ["ipynb", "notebook"],
       ["parquet", "parquet"],
+      ["npy", "npy"],
+      ["npz", "npz"],
       ["pdf", "plot"],
       ["md", "markdown"],
       ["log", "text"],
@@ -120,6 +131,54 @@ describe("classifyDataFile", () => {
   })
 })
 
+describe("categoryOf", () => {
+  test("collapses tabular/structured/array kinds into 'data'", () => {
+    expect(categoryOf("csv")).toBe("data")
+    expect(categoryOf("tsv")).toBe("data")
+    expect(categoryOf("json")).toBe("data")
+    expect(categoryOf("parquet")).toBe("data")
+    expect(categoryOf("npy")).toBe("data")
+    expect(categoryOf("npz")).toBe("data")
+  })
+
+  test("maps the remaining kinds to their own categories", () => {
+    expect(categoryOf("image")).toBe("image")
+    expect(categoryOf("notebook")).toBe("notebook")
+    expect(categoryOf("plot")).toBe("plot")
+    expect(categoryOf("markdown")).toBe("text")
+    expect(categoryOf("text")).toBe("text")
+    expect(categoryOf("other")).toBe("other")
+  })
+
+  test("returns a category in the enum for every kind", () => {
+    const categories = new Set<DataFileCategory>(ALL_DATA_FILE_CATEGORIES)
+    for (const kind of ALL_DATA_FILE_KINDS) {
+      expect(categories.has(categoryOf(kind))).toBe(true)
+    }
+  })
+})
+
+describe("category metadata", () => {
+  test("'other' is the last category in canonical order", () => {
+    expect(ALL_DATA_FILE_CATEGORIES[ALL_DATA_FILE_CATEGORIES.length - 1]).toBe("other")
+  })
+
+  test("every category present via categoryOf is in ALL_DATA_FILE_CATEGORIES", () => {
+    const ordered = new Set<DataFileCategory>(ALL_DATA_FILE_CATEGORIES)
+    for (const kind of ALL_DATA_FILE_KINDS) {
+      expect(ordered.has(categoryOf(kind))).toBe(true)
+    }
+  })
+
+  test("labels exist for every category", () => {
+    for (const category of ALL_DATA_FILE_CATEGORIES) {
+      expect(DATA_FILE_CATEGORY_LABELS[category]).toBeTruthy()
+    }
+    expect(DATA_FILE_CATEGORY_LABELS.data).toBe("Data")
+    expect(DATA_FILE_CATEGORY_LABELS.image).toBe("Images")
+  })
+})
+
 describe("isPreviewableKind", () => {
   test("previewable kinds render inline; others are metadata-only", () => {
     expect(isPreviewableKind("csv")).toBe(true)
@@ -128,8 +187,10 @@ describe("isPreviewableKind", () => {
     expect(isPreviewableKind("image")).toBe(true)
     expect(isPreviewableKind("markdown")).toBe(true)
     expect(isPreviewableKind("text")).toBe(true)
+    expect(isPreviewableKind("npy")).toBe(true)
 
     expect(isPreviewableKind("parquet")).toBe(false)
+    expect(isPreviewableKind("npz")).toBe(false)
     expect(isPreviewableKind("plot")).toBe(false)
     expect(isPreviewableKind("notebook")).toBe(false)
     expect(isPreviewableKind("other")).toBe(false)

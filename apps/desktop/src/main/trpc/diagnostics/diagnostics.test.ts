@@ -1,4 +1,4 @@
-// Integration tests for the diagnostics router (AGENTS.md §14): createCaller over
+// Integration tests for the diagnostics router (docs/testing-and-build.md): createCaller over
 // a temp SQLite DB with real migrations + a real temp git repo, with the Python
 // tools exec injected as a deterministic fake returning canned ruff-JSON / ty /
 // pyrefly output (plus a "binary missing" branch). No `uv` is required. They

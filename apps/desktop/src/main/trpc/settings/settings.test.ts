@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { createHarness, type Harness } from "../testHarness"
 
 // Integration tests for the settings router over a real migrated SQLite DB
-// (AGENTS.md §14): a `get` against a fresh DB yields the editor defaults, and
+// (docs/testing-and-build.md): a `get` against a fresh DB yields the editor defaults, and
 // `updateEditor` upserts + merges the singleton row.
 
 let harness: Harness
@@ -31,6 +31,7 @@ describe("settings.updateEditor", () => {
       vim: true,
       typeChecker: "pyrefly",
       formatOnSave: false,
+      editorTheme: "default",
     })
 
     // The patch persisted and `get` reflects it.
@@ -46,6 +47,31 @@ describe("settings.updateEditor", () => {
       vim: false,
       typeChecker: "ty",
       formatOnSave: true,
+      editorTheme: "default",
     })
+  })
+})
+
+describe("settings.updateGeneral", () => {
+  it("round-trips worktreePerAgent and confirmOnQuit", async () => {
+    const updated = await harness.caller.settings.updateGeneral({
+      worktreePerAgent: true,
+      confirmOnQuit: false,
+    })
+    expect(updated.worktreePerAgent).toBe(true)
+    expect(updated.confirmOnQuit).toBe(false)
+
+    // The patch persisted and `get` reflects it.
+    const after = await harness.caller.settings.get()
+    expect(after.worktreePerAgent).toBe(true)
+    expect(after.confirmOnQuit).toBe(false)
+  })
+
+  it("patches one field without clobbering the other", async () => {
+    await harness.caller.settings.updateGeneral({ worktreePerAgent: true })
+    const merged = await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    // worktreePerAgent stays on (default confirmOnQuit was true, now flipped off).
+    expect(merged.worktreePerAgent).toBe(true)
+    expect(merged.confirmOnQuit).toBe(false)
   })
 })

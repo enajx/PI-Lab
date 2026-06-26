@@ -86,3 +86,20 @@ describe("adopt branch", () => {
     await expect(supervisor.ensureClient()).rejects.toThrow(/disposed/)
   })
 })
+
+describe("reapDaemonOnDispose", () => {
+  // The spawn+SIGTERM reap itself is exercised end-to-end by the E2E teardown
+  // (it is what lets Playwright's app.close() complete on Linux). Here we cover
+  // the one branch a unit test can reach: with reaping ON but the daemon
+  // *adopted* (no child handle), dispose must be a safe no-op — it must not
+  // throw and must still close the client.
+  test("dispose is a safe no-op when reaping is on but the daemon was adopted", async () => {
+    server = new DaemonServer({ socketPath })
+    await server.listen()
+    supervisor = new TerminalSupervisor({ socketPath, reapDaemonOnDispose: true })
+    await supervisor.ensureClient()
+
+    expect(() => supervisor?.dispose()).not.toThrow()
+    await expect(supervisor.ensureClient()).rejects.toThrow(/disposed/)
+  })
+})

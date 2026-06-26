@@ -7,7 +7,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { ScienceSkills } from "./ScienceSkills"
 
 /**
- * Component test for the Skills science tab (AGENTS.md §14). The tab renders
+ * Component test for the Skills science tab (docs/testing-and-build.md). The tab renders
  * plain DOM + hand-authored UI primitives, so jsdom suffices and we assert
  * structure only: skill cards, the source badge, the project selector, the
  * search filter, and the empty / no-projects states — never copy text or
@@ -121,5 +121,41 @@ describe("ScienceSkills", () => {
       expect(screen.getAllByTestId("skill-card")).toHaveLength(1)
     })
     expect(screen.getByTestId("skill-name").textContent).toBe("ticket-format")
+  })
+
+  test("⌘F opens a finder over the skills; picking one highlights its card", async () => {
+    renderSkills({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.skills.list": () => [
+        skill("deslop", ".claude/skills", "Clean up code."),
+        skill("ticket-format", ".agents/skills", "Ticket spec."),
+      ],
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("skill-card")).toHaveLength(2)
+    })
+
+    // The quick-open shortcut (⌘F) opens the finder over this tab's skills (not projects).
+    fireEvent.keyDown(window, { key: "f", metaKey: true })
+    expect(screen.getByTestId("quick-find")).toBeTruthy()
+    const finderItems = screen.getAllByTestId("quick-find-item")
+    expect(finderItems.map((el) => el.getAttribute("data-find-id"))).toEqual([
+      ".claude/skills:deslop",
+      ".agents/skills:ticket-format",
+    ])
+
+    // Picking a skill closes the finder and highlights that card.
+    const pick = finderItems.find(
+      (el) => el.getAttribute("data-find-id") === ".agents/skills:ticket-format",
+    )
+    if (!pick) throw new Error("expected the ticket-format skill in the finder")
+    fireEvent.click(pick)
+
+    expect(screen.queryByTestId("quick-find")).toBeNull()
+    const cards = screen.getAllByTestId("skill-card")
+    const selected = cards.filter((el) => el.getAttribute("data-selected") === "true")
+    expect(selected).toHaveLength(1)
+    expect(selected[0]?.getAttribute("data-skill")).toBe("ticket-format")
   })
 })

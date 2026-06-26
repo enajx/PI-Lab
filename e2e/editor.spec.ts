@@ -8,10 +8,12 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (AGENTS.md §14) for the built-in editor (spec: TODO "Built-in
+ * Whole-app E2E (docs/testing-and-build.md) for the built-in editor (spec: TODO "Built-in
  * editor"). Launch the real Electron build, open a temp git repo as a project via
- * the `?openProject` seam, start a session, then exercise the editor end-to-end:
- *   1. open a seeded text file from the file tree,
+ * the `?openProject` seam (landing directly on the rich project view), then
+ * exercise the editor end-to-end:
+ *   1. open a seeded text file from the right-sidebar **Files** tab (the tree now
+ *      lives there; files open as tabs in the central panel),
  *   2. edit it and ⌘S,
  *   3. assert the save reached disk (the file on disk holds the new content) and
  *      the editor reflects it (clean buffer, no dirty dot),
@@ -26,7 +28,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * + `SKIPPER_TEST_AGENT_ID` (env → renderer query params). No native dialogs.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (AGENTS.md §13); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun (docs/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const SEED_FILE = "edit-me.txt"
@@ -89,44 +91,44 @@ test("open a file, edit, ⌘S, and the save reaches disk", async () => {
 
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
 
-  // Open the project and start a session (the editor lives in the session view).
+  // Land directly on the rich project view; open the Files tab (the tree now
+  // lives in the right sidebar) and open the seeded text file from it.
   const projectItem = window.getByTestId("project-item")
   await expect(projectItem).toBeVisible({ timeout: 30_000 })
   await projectItem.click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
-  await window.getByTestId("open-agent").click()
-  await expect(window.getByTestId("session-view")).toBeVisible({ timeout: 30_000 })
 
-  // The editor and its file tree render.
-  await expect(window.getByTestId("editor")).toBeVisible()
-  await expect(window.getByTestId("file-tree")).toBeVisible()
-
-  // Open the seeded text file from the tree.
+  await window.getByTestId("panel-tab-files").click()
   const fileEntry = window.getByTestId("file-tree-file").filter({ hasText: SEED_FILE })
   await expect(fileEntry).toBeVisible({ timeout: 30_000 })
   await fileEntry.click()
 
-  // The buffer mounts and shows the file's content + a (non-dirty) tab.
+  // The buffer mounts in the central panel and shows the file's content + a
+  // (non-dirty) tab.
   const buffer = window.getByTestId("editor-buffer")
   await expect(buffer).toBeVisible({ timeout: 30_000 })
   await expect(buffer).toContainText("original line", { timeout: 30_000 })
-  await expect(window.getByTestId("editor-tab")).toBeVisible()
-  await expect(window.getByTestId("editor-dirty")).toHaveCount(0)
+  await expect(window.getByTestId("central-tab")).toBeVisible()
+  await expect(window.getByTestId("central-tab-dirty")).toHaveCount(0)
 
   // Edit: focus the CodeMirror editable area, jump to the document end, and type
   // the marker, then ⌘S. (Clicking the wrapper isn't enough — the contenteditable
   // `.cm-content` must hold focus for keystrokes to land.)
   const content = buffer.locator(".cm-content")
   await content.click()
-  await window.keyboard.press("Meta+ArrowDown")
+  // Platform-aware keys: ControlOrMeta resolves to Cmd on macOS and Ctrl
+  // elsewhere. Use `End` (not ArrowDown) for doc-end — CodeMirror's
+  // Cmd-ArrowDown binding is mac-only, but `Mod-End` (Cmd/Ctrl-End) is
+  // cross-platform — so the same press lands on Linux CI too.
+  await window.keyboard.press("ControlOrMeta+End")
   await window.keyboard.type(APPENDED)
   // The tab is now dirty.
-  await expect(window.getByTestId("editor-dirty")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("central-tab-dirty")).toBeVisible({ timeout: 30_000 })
 
-  await window.keyboard.press("Meta+s")
+  await window.keyboard.press("ControlOrMeta+s")
 
   // The save clears the dirty indicator…
-  await expect(window.getByTestId("editor-dirty")).toHaveCount(0, { timeout: 30_000 })
+  await expect(window.getByTestId("central-tab-dirty")).toHaveCount(0, { timeout: 30_000 })
 
   // …and the file on disk holds the new content (proves files.write end-to-end).
   await expect
@@ -145,10 +147,8 @@ test("the editor settings menu opens and toggles a preference", async () => {
   await expect(projectItem).toBeVisible({ timeout: 30_000 })
   await projectItem.click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
-  await window.getByTestId("open-agent").click()
-  await expect(window.getByTestId("session-view")).toBeVisible({ timeout: 30_000 })
 
-  // Open the in-toolbar settings menu.
+  // Open the in-toolbar settings menu (the gear lives in the central panel).
   await expect(window.getByTestId("editor-settings")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("editor-settings").click()
   await expect(window.getByTestId("editor-settings-menu")).toBeVisible()
@@ -169,10 +169,9 @@ test("opening a Python file renders the status bar without crashing", async () =
   await expect(projectItem).toBeVisible({ timeout: 30_000 })
   await projectItem.click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
-  await window.getByTestId("open-agent").click()
-  await expect(window.getByTestId("session-view")).toBeVisible({ timeout: 30_000 })
 
-  // Open the seeded Python file.
+  // Open the seeded Python file from the Files tab.
+  await window.getByTestId("panel-tab-files").click()
   const pyEntry = window.getByTestId("file-tree-file").filter({ hasText: PY_FILE })
   await expect(pyEntry).toBeVisible({ timeout: 30_000 })
   await pyEntry.click()

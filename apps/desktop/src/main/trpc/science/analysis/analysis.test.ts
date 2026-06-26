@@ -1,13 +1,13 @@
 // Integration tests for the science.analysis router via createCallerFactory over
 // a temp SQLite DB with the real migrations and a real temp git repo (AGENTS.md
-// §14). Data files are written into the repo and classified/previewed off real
+// docs/testing-and-build.md). Data files are written into the repo and classified/previewed off real
 // bytes — no filesystem mocking.
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { createHarness, type Harness } from "../../testHarness"
-import { MAX_LISTED_FILES, MAX_TABLE_ROWS } from "./discover"
+import { MAX_CHART_POINTS, MAX_LISTED_FILES, MAX_TABLE_ROWS } from "./discover"
 
 let h: Harness
 
@@ -31,6 +31,35 @@ const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
 )
+
+/**
+ * Build a little-endian float64 `.npy` (version 1.0) for the given shape from a
+ * flat, row-major value list — enough to exercise the real decoder off real
+ * bytes, mirroring what `np.save` would write.
+ */
+function makeNpy(shape: number[], values: number[]): Buffer {
+  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ")
+  let header = `{'descr': '<f8', 'fortran_order': False, 'shape': (${shapeText}), }`
+  // The header (incl. its trailing newline) is padded so the data starts on a
+  // 64-byte boundary, exactly as the NumPy format requires.
+  const unpadded = 10 + header.length + 1
+  const pad = (64 - (unpadded % 64)) % 64
+  header += `${" ".repeat(pad)}\n`
+
+  const prefix = Buffer.alloc(10)
+  prefix[0] = 0x93
+  prefix.write("NUMPY", 1, "ascii")
+  prefix[6] = 1 // major
+  prefix[7] = 0 // minor
+  prefix.writeUInt16LE(header.length, 8)
+
+  const data = Buffer.alloc(values.length * 8)
+  values.forEach((v, i) => {
+    data.writeDoubleLE(v, i * 8)
+  })
+
+  return Buffer.concat([prefix, Buffer.from(header, "ascii"), data])
+}
 
 describe("science.analysis.listFiles", () => {
   test("discovers and classifies data files, grouped by kind", async () => {
@@ -57,6 +86,17 @@ describe("science.analysis.listFiles", () => {
     // The `.py` file is not a data kind → "other".
     expect(kindByRel.get("analysis/explore.py")).toBe("other")
 
+    // NumPy arrays get their own kinds.
+    await writeRepoFile("runs/loss.npy", makeNpy([3], [0.5, 0.3, 0.1]))
+    await writeRepoFile("checkpoints/weights.npz", Buffer.from([0x50, 0x4b]))
+    const withNpy = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const npyKind = new Map<string, string>()
+    for (const group of withNpy.groups) {
+      for (const file of group.files) npyKind.set(file.relPath, group.kind)
+    }
+    expect(npyKind.get("runs/loss.npy")).toBe("npy")
+    expect(npyKind.get("checkpoints/weights.npz")).toBe("npz")
+
     expect(listing.truncated).toBe(false)
     // README.md from the fixture commit is also discovered (markdown).
     expect(listing.total).toBeGreaterThanOrEqual(6)
@@ -75,6 +115,24 @@ describe("science.analysis.listFiles", () => {
     expect(allRel.some((r) => r.includes("node_modules"))).toBe(false)
     expect(allRel.some((r) => r.includes("__pycache__"))).toBe(false)
     expect(allRel.some((r) => r.startsWith(".git/"))).toBe(false)
+  })
+
+  test("hides dotfiles (basename starting with a dot)", async () => {
+    await writeRepoFile("real.csv", "a\n1\n")
+    await writeRepoFile(".env", "SECRET=1\n")
+    await writeRepoFile("config/.hidden.json", "{}")
+    await writeRepoFile(".secret.csv", "a\n1\n")
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+
+    const allRel = listing.groups.flatMap((g) => g.files.map((f) => f.relPath))
+    expect(allRel).toContain("real.csv")
+    expect(allRel).not.toContain(".env")
+    expect(allRel).not.toContain("config/.hidden.json")
+    expect(allRel).not.toContain(".secret.csv")
+    // No discovered file's basename starts with a dot.
+    expect(allRel.every((r) => !r.slice(r.lastIndexOf("/") + 1).startsWith("."))).toBe(true)
   })
 
   test("flags truncation when over the cap", async () => {
@@ -221,6 +279,112 @@ describe("science.analysis.preview", () => {
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
     expect(preview.kind).toBe("parquet")
+  })
+
+  test("numeric metric CSV → a line chart (monotonic step + series)", async () => {
+    await writeRepoFile("metrics.csv", "step,loss,reward\n0,1.0,0.1\n1,0.6,0.4\n2,0.3,0.7\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "metrics.csv",
+    })
+    expect(preview.type).toBe("chart")
+    if (preview.type !== "chart") throw new Error("expected chart")
+    expect(preview.xLabel).toBe("step")
+    expect(preview.x).toEqual([0, 1, 2])
+    expect(preview.series.map((s) => s.label)).toEqual(["loss", "reward"])
+    expect(preview.series[0]?.values).toEqual([1.0, 0.6, 0.3])
+    expect(preview.truncated).toBe(false)
+  })
+
+  test("a non-metric CSV (single numeric column) stays a table", async () => {
+    await writeRepoFile("people.csv", "name,age\nalice,30\nbob,41\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "people.csv",
+    })
+    expect(preview.type).toBe("table")
+  })
+
+  test("1-D .npy → a single-series line chart over the row index", async () => {
+    await writeRepoFile("runs/loss.npy", makeNpy([4], [0.9, 0.6, 0.4, 0.2]))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "runs/loss.npy",
+    })
+    expect(preview.type).toBe("chart")
+    if (preview.type !== "chart") throw new Error("expected chart")
+    expect(preview.xLabel).toBe("index")
+    expect(preview.x).toEqual([0, 1, 2, 3])
+    expect(preview.series).toHaveLength(1)
+    expect(preview.series[0]?.label).toBe("loss")
+    expect(preview.series[0]?.values).toEqual([0.9, 0.6, 0.4, 0.2])
+  })
+
+  test("a long 1-D .npy is downsampled and flagged truncated", async () => {
+    const n = MAX_CHART_POINTS * 3
+    await writeRepoFile(
+      "big.npy",
+      makeNpy(
+        [n],
+        Array.from({ length: n }, (_, i) => i),
+      ),
+    )
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "big.npy",
+    })
+    if (preview.type !== "chart") throw new Error("expected chart")
+    expect(preview.truncated).toBe(true)
+    expect(preview.x.length).toBeLessThanOrEqual(MAX_CHART_POINTS)
+  })
+
+  test("2-D .npy → a bounded array grid", async () => {
+    // 2×3 row-major: [[1,2,3],[4,5,6]]
+    await writeRepoFile("mat.npy", makeNpy([2, 3], [1, 2, 3, 4, 5, 6]))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "mat.npy",
+    })
+    expect(preview.type).toBe("array")
+    if (preview.type !== "array") throw new Error("expected array")
+    expect(preview.shape).toEqual([2, 3])
+    expect(preview.dtype).toBe("<f8")
+    expect(preview.columns).toEqual(["c0", "c1", "c2"])
+    expect(preview.rows).toEqual([
+      ["1", "2", "3"],
+      ["4", "5", "6"],
+    ])
+    expect(preview.truncated).toBe(false)
+  })
+
+  test("a malformed .npy → metadata fallback with a note", async () => {
+    await writeRepoFile("bad.npy", Buffer.from("not a numpy array"))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "bad.npy",
+    })
+    expect(preview.type).toBe("metadata")
+    if (preview.type !== "metadata") throw new Error("expected metadata")
+    expect(preview.kind).toBe("npy")
+    expect(preview.note).toBeTruthy()
+  })
+
+  test(".npz is metadata-only (zips are not unpacked)", async () => {
+    await writeRepoFile("arrays.npz", Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "arrays.npz",
+    })
+    expect(preview.type).toBe("metadata")
+    if (preview.type !== "metadata") throw new Error("expected metadata")
+    expect(preview.kind).toBe("npz")
   })
 
   test("path traversal is rejected with FORBIDDEN", async () => {

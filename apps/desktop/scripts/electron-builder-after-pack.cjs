@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * electron-builder `afterPack` hook (AGENTS.md §12.4).
+ * electron-builder `afterPack` hook (AGENTS.md Pitfalls #4).
  *
  * node-pty exec()s a small `spawn-helper` binary for every PTY it opens. The
  * executable bit can be lost when the file is copied into the packaged app
@@ -48,7 +48,9 @@ exports.default = async function afterPack(context) {
       console.warn(`[after-pack] could not chmod ${helper}: ${String(err)}`)
     }
   }
-  if (helpers.length === 0) {
+  // Only macOS ships a spawn-helper (gyp OS=="mac"); on Linux its absence is normal
+  // (node-pty uses forkpty), so don't cry wolf there.
+  if (helpers.length === 0 && context.electronPlatformName === "darwin") {
     console.warn("[after-pack] no node-pty spawn-helper found to chmod (check asarUnpack)")
   }
 }

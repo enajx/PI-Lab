@@ -9,5 +9,4 @@ export {
   walkFiles,
   writeTextFile,
 } from "./fs"
-export { fuzzyScore } from "./fuzzy"
 export { type SearchHit, type SearchOptions, searchFiles } from "./search"

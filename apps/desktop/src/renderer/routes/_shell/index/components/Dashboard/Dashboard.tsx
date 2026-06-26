@@ -1,11 +1,14 @@
+import { cn } from "@skipper/ui"
 import { useQuery } from "@tanstack/react-query"
+import { useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 import { MAX_CARD_SIZE, MIN_CARD_SIZE, useCardSize } from "../../hooks/useCardSize"
 import { ProjectCard } from "../ProjectCard"
 
 /**
  * The project-cards dashboard — the shell home (md/02 — "Dashboard & project
- * cards", AGENTS.md §7/§11 P7). A responsive grid of large project cards, one per
+ * cards", docs/architecture.md (renderer); git history (build phases), P7). A responsive grid of large project cards, one per
  * opened project (most-recently-opened first, mirroring the sidebar), with a
  * toolbar size slider that scales the cards and persists to localStorage.
  *
@@ -17,14 +20,25 @@ export function Dashboard() {
   const trpc = useTRPC()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const { size, setSize } = useCardSize()
+  const [collapsed] = useSidebarCollapsed()
 
   const projects = projectsQuery.data ?? []
 
   return (
     <div data-testid="dashboard" className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-border border-b px-6 py-3">
+      <header
+        className={cn(
+          "flex shrink-0 items-center justify-between gap-4 border-border border-b py-3",
+          titleBarHeaderClass(collapsed),
+        )}
+      >
         <h1 className="font-semibold text-foreground text-sm tracking-tight">Dashboard</h1>
-        <label className="flex items-center gap-2 text-muted-foreground text-xs">
+        <label
+          className={cn(
+            "flex items-center gap-2 text-muted-foreground text-xs",
+            titleBarControlClass(collapsed),
+          )}
+        >
           Card size
           <input
             data-testid="card-size-slider"
@@ -33,7 +47,7 @@ export function Dashboard() {
             max={MAX_CARD_SIZE}
             value={size}
             onChange={(event) => setSize(Number(event.target.value))}
-            className="w-32 accent-brand"
+            className="w-32 accent-muted-foreground"
             aria-label="Card size"
           />
         </label>

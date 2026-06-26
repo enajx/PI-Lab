@@ -11,7 +11,7 @@ if (!rootElement) {
 }
 
 // The router is created once at module scope; providers wrap it so Query/tRPC and
-// theme context are available to every route (AGENTS.md §7).
+// theme context are available to every route (docs/architecture.md (renderer)).
 const router = createAppRouter()
 
 createRoot(rootElement).render(

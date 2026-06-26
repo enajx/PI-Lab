@@ -14,6 +14,7 @@ import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { addWorktree, type GitChange, GitError, removeWorktree, status } from "../../git"
+import { getOrCreateBranchWorkspace } from "../sessions/sessions"
 import { publicProcedure, router } from "../trpc"
 import { managedWorktreePath } from "./worktreePath"
 
@@ -47,6 +48,16 @@ const launchAgentInput = z.object({
   rows: z.number().int().positive().default(24),
 })
 
+const spawnTerminalInput = z.object({
+  workspaceId: z.string().min(1),
+  /** Cols/rows for the PTY the shell runs in. */
+  cols: z.number().int().positive(),
+  rows: z.number().int().positive(),
+})
+
+/** A login shell is the sensible default when spawning a plain workspace terminal. */
+const DEFAULT_SHELL = process.env.SHELL ?? "/bin/bash"
+
 /** A workspace plus the worktree row backing it (null for branch workspaces). */
 export interface WorkspaceWithWorktree {
   workspace: Workspace
@@ -76,7 +87,7 @@ export interface CreateWorkspaceArgs {
 
 /**
  * Create a workspace and its backing git checkout — the choreography shared by
- * the `create` procedure and the start-agent-session flow (AGENTS.md §8).
+ * the `create` procedure and the start-agent-session flow (docs/architecture.md (agent runtime)).
  *
  * For `kind: "worktree"` we compute a managed worktree path under the data dir,
  * `git worktree add` a fresh branch there, and insert matching `worktrees` +
@@ -276,10 +287,10 @@ export const workspacesRouter = router({
    * Launch an external CLI agent in the workspace's working directory. Resolves
    * the agent from the injected catalog (default `BUILTIN_AGENTS`), builds its
    * argv with the pure `buildLaunchArgv`, and spawns it in a PTY via the shared
-   * daemon client (the same path terminals use — AGENTS.md §8). Returns the new
+   * daemon client (the same path terminals use — docs/architecture.md (agent runtime)). Returns the new
    * session id; the renderer subscribes to `terminal.onData` to render it.
    *
-   * Authentication is the agent's own (AGENTS.md §8): we set the agent's `env`
+   * Authentication is the agent's own (docs/architecture.md (agent runtime)): we set the agent's `env`
    * if it declares any, but inject no credentials and read none.
    */
   launchAgent: publicProcedure
@@ -314,6 +325,57 @@ export const workspacesRouter = router({
         args,
         cwd: dir,
         env: agent.env,
+        cols: input.cols,
+        rows: input.rows,
+      })
+
+      // Mark the workspace active so "recent" ordering reflects the launch.
+      ctx.db
+        .update(workspaces)
+        .set({ lastActiveAt: Date.now() })
+        .where(eq(workspaces.id, workspace.id))
+        .run()
+
+      return { sessionId: session.id }
+    }),
+
+  /**
+   * Get-or-create the project's single branch-kind workspace (its main checkout).
+   * Idempotent: the schema enforces one branch workspace per project, so repeated
+   * calls return the same row. Delegates to the shared
+   * {@link getOrCreateBranchWorkspace} so the start-agent-session policy and the
+   * renderer agree on what "the main checkout" is.
+   */
+  ensureMain: publicProcedure
+    .input(projectIdInput)
+    .mutation(
+      ({ ctx, input }): Promise<Workspace> => getOrCreateBranchWorkspace(ctx.db, input.projectId),
+    ),
+
+  /**
+   * Spawn a plain shell PTY in the workspace's working directory. Working-dir
+   * resolution stays server-side (the renderer never handles raw paths): we look
+   * up the workspace, resolve its cwd by kind via {@link workspaceWorkingDir}, and
+   * start the user's login shell in it through the shared daemon client — the same
+   * path `terminal.spawn` uses when given no command. Returns the new session id.
+   */
+  spawnTerminal: publicProcedure
+    .input(spawnTerminalInput)
+    .mutation(async ({ ctx, input }): Promise<{ sessionId: string }> => {
+      const workspace = ctx.db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.id, input.workspaceId))
+        .get()
+      if (!workspace) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No workspace ${input.workspaceId}` })
+      }
+
+      const dir = workspaceWorkingDir(ctx.db, workspace)
+      const client = await ctx.getDaemonClient()
+      const session = await client.spawn({
+        command: DEFAULT_SHELL,
+        cwd: dir,
         cols: input.cols,
         rows: input.rows,
       })

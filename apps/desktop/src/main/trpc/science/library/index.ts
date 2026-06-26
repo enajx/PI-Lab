@@ -1,3 +1,10 @@
-export type { LibraryStatus, ListItemsResult, SearchResult } from "./library"
+export type {
+  AttachFileResult,
+  DetectLocalResult,
+  LibraryStatus,
+  ListCollectionsResult,
+  ListItemsResult,
+  OpenItemResult,
+} from "./library"
 export { libraryRouter } from "./library"
-export type { LibraryPaper } from "./parse"
+export type { LibraryCollection, LibraryPaper } from "./parse"

@@ -1,1 +1,5 @@
-export { type ProjectGradient, projectGradient } from "./projectGradient"
+export {
+  type ProjectGradient,
+  type ProjectGradientAnimation,
+  projectGradient,
+} from "./projectGradient"

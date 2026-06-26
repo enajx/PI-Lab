@@ -1,1 +1,0 @@
-export { ScholarSearch } from "./ScholarSearch"

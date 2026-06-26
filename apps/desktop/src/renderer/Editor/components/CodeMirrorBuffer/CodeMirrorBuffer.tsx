@@ -5,6 +5,7 @@ import { vim } from "@replit/codemirror-vim"
 import { basicSetup } from "codemirror"
 import { useEffect, useRef } from "react"
 import { languageForPath } from "../../utils/languageForPath"
+import { editorThemeExtension } from "../editorThemes"
 
 /**
  * Source of diagnostics for one buffer. Given the current document text it
@@ -43,6 +44,13 @@ interface CodeMirrorBufferProps {
    */
   vim?: boolean
   /**
+   * Optional color-theme id (the stored `EditorSettings.editorTheme`). Resolved to
+   * a CodeMirror extension via {@link editorThemeExtension} and layered on top of
+   * the structural height/scroll theme. Omitted / `"default"` / unknown ⇒ the
+   * registry's default theme. Changing it reconfigures live (no remount).
+   */
+  theme?: string
+  /**
    * Optional diagnostics source (Python `ty`/`ruff` in the integrate stage).
    * Omitted in the editor core ⇒ no linting is attached. Re-supplying a new
    * function re-runs the linter.
@@ -51,7 +59,7 @@ interface CodeMirrorBufferProps {
 }
 
 /**
- * Thin React wrapper around a CodeMirror 6 `EditorView` (AGENTS.md §7; spec:
+ * Thin React wrapper around a CodeMirror 6 `EditorView` (docs/architecture.md (renderer); spec:
  * TODO "Built-in editor"). It owns exactly one view for its lifetime: the doc,
  * language, ⌘S keybinding, and change listener are wired once on mount, and
  * mutable concerns (the language for the current path, vim, the diagnostics
@@ -72,6 +80,7 @@ export function CodeMirrorBuffer({
   onChange,
   onSave,
   vim: vimEnabled = false,
+  theme,
   diagnostics,
 }: CodeMirrorBufferProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -87,6 +96,7 @@ export function CodeMirrorBuffer({
   // Reconfigurable slices of the config. Created once per mount.
   const languageCompartment = useRef(new Compartment()).current
   const vimCompartment = useRef(new Compartment()).current
+  const themeCompartment = useRef(new Compartment()).current
   const lintCompartment = useRef(new Compartment()).current
 
   // Build the view exactly once. Deps are intentionally empty: live changes flow
@@ -118,10 +128,21 @@ export function CodeMirrorBuffer({
         vimCompartment.of(vimEnabled ? vim() : []),
         basicSetup,
         languageCompartment.of(languageForPath(relPath) ?? []),
+        // Color theme (chrome + syntax highlighting) chosen in Settings → Editor.
+        // Layered over basicSetup's default highlight; the structural height theme
+        // below only sets layout, so the two never conflict on color.
+        themeCompartment.of(editorThemeExtension(theme)),
         lintCompartment.of(lintExtension(diagnostics)),
         saveKeymap,
         changeListener,
         EditorView.lineWrapping,
+        // Constrain the view to its bounded host so it scrolls internally instead of
+        // growing past the (overflow-hidden) container and being clipped — the
+        // canonical CodeMirror fixed-height setup (AGENTS.md Pitfalls #3, native scroll).
+        EditorView.theme({
+          "&": { height: "100%" },
+          ".cm-scroller": { overflow: "auto" },
+        }),
       ],
     })
 
@@ -150,6 +171,13 @@ export function CodeMirrorBuffer({
       effects: vimCompartment.reconfigure(vimEnabled ? vim() : []),
     })
   }, [vimEnabled, vimCompartment])
+
+  // Swap the color theme live.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: themeCompartment.reconfigure(editorThemeExtension(theme)),
+    })
+  }, [theme, themeCompartment])
 
   // Swap the diagnostics source live.
   useEffect(() => {

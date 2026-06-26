@@ -6,14 +6,15 @@ import { fileURLToPath } from "node:url"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (AGENTS.md §14, P8d): launch the real Electron build, boot to
+ * Whole-app E2E (docs/testing-and-build.md, P8d): launch the real Electron build, boot to
  * `app-ready`, navigate to the Library science tab, and prove it is wired — with
- * a fresh (unconfigured) data dir the **Zotero connect form** renders. We do NOT
- * exercise Zotero / Semantic Scholar here (no network in E2E); the router's
- * fetch path is covered by the integration suite with an injected fake.
+ * a fresh (unconfigured) data dir the **library source chooser** renders its three
+ * sources (Zotero local, Zotero cloud, folder). We do NOT exercise the live Zotero API
+ * or the native folder dialog here (no network / no driveable native dialog in E2E); the
+ * router's fetch + folder-read paths are covered by the integration suite.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (AGENTS.md §13); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun (docs/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -44,7 +45,7 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
-test("library tab shows the Zotero connect form when unconfigured", async () => {
+test("library tab shows the source chooser (three sources) when unconfigured", async () => {
   const window = await app.firstWindow()
 
   // Boot gate.
@@ -58,11 +59,15 @@ test("library tab shows the Zotero connect form when unconfigured", async () => 
   // The tab renders.
   await expect(window.getByTestId("science-library")).toBeVisible({ timeout: 30_000 })
 
-  // A fresh data dir has no stored Zotero connection, so the connect form shows.
-  await expect(window.getByTestId("zotero-connect")).toBeVisible({ timeout: 30_000 })
+  // A fresh data dir has no stored connection, so the source chooser shows — the Zotero
+  // local + cloud cards and the folder card.
+  await expect(window.getByTestId("library-source-chooser")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("zotero-chooser-local")).toBeVisible()
+  await expect(window.getByTestId("zotero-chooser-web")).toBeVisible()
+  await expect(window.getByTestId("library-source-folder")).toBeVisible()
+
+  // The Cloud card reveals the API key form on demand.
+  await window.getByTestId("zotero-use-web").click()
   await expect(window.getByTestId("zotero-api-key-input")).toBeVisible()
   await expect(window.getByTestId("zotero-connect-submit")).toBeVisible()
-
-  // The Semantic Scholar search box is present even without a Zotero connection.
-  await expect(window.getByTestId("scholar-search")).toBeVisible()
 })

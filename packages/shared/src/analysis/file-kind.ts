@@ -1,11 +1,13 @@
 /**
- * Data/analysis file classifier for the Science → Analysis tab (AGENTS.md §1
+ * Data/analysis file classifier for the Science → Analysis tab (AGENTS.md "Scope"
  * "Science tabs", P8c). A **pure, total, deterministic** function from a file
- * path to one of a fixed set of {@link DataFileKind} categories — the single
+ * path to one of a fixed set of {@link DataFileKind} sub-formats — the single
  * source of truth shared by the main-side walker (which tags every file it
  * discovers) and the renderer (which dispatches each preview to the right
  * sub-renderer). Keeping classification here means the two surfaces can never
- * disagree about what a file *is*.
+ * disagree about what a file *is*. A coarser {@link DataFileCategory} layer
+ * ({@link categoryOf}) groups related sub-formats (csv/json/npy/… → "data") for
+ * the UI's top-level filter chips and group headers.
  *
  * The kind is derived from the filename's extension only (case-insensitive); no
  * filesystem access and no content sniff happen here, so the function is safe to
@@ -22,6 +24,8 @@ export type DataFileKind =
   | "image"
   | "notebook"
   | "parquet"
+  | "npy"
+  | "npz"
   | "plot"
   | "markdown"
   | "text"
@@ -57,6 +61,9 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   pq: "parquet",
   feather: "parquet",
   arrow: "parquet",
+  // NumPy arrays (raw `.npy` + zipped `.npz`)
+  npy: "npy",
+  npz: "npz",
   // Static plot/figure outputs (rendered, not raw images)
   pdf: "plot",
   eps: "plot",
@@ -89,13 +96,15 @@ export const ALL_DATA_FILE_KINDS: readonly DataFileKind[] = [
   "image",
   "notebook",
   "parquet",
+  "npy",
+  "npz",
   "plot",
   "markdown",
   "text",
   "other",
 ] as const
 
-/** Human-readable labels for each kind (filter chips / group headers). */
+/** Sub-format labels for each kind (kept for per-file classification + sub-bubbles). */
 export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
   csv: "CSV",
   tsv: "TSV",
@@ -103,8 +112,63 @@ export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
   image: "Images",
   notebook: "Notebooks",
   parquet: "Parquet",
+  npy: "NumPy",
+  npz: "NumPy (zip)",
   plot: "Plots",
   markdown: "Markdown",
+  text: "Text",
+  other: "Other",
+}
+
+/**
+ * The coarser categories the Analysis UI groups kinds under. Several tabular /
+ * structured / array kinds (csv, tsv, json, parquet, npy, npz) collapse into a
+ * single `"data"` category so the top-level filter chips and group headers read
+ * "Data" rather than enumerating raw formats; the per-kind {@link DataFileKind}
+ * machinery still drives sub-format bubbles and per-file classification.
+ */
+export type DataFileCategory = "data" | "image" | "notebook" | "plot" | "text" | "other"
+
+/** Kind → category lookup; the authoritative map {@link categoryOf} reads. */
+const CATEGORY_BY_KIND: Readonly<Record<DataFileKind, DataFileCategory>> = {
+  csv: "data",
+  tsv: "data",
+  json: "data",
+  parquet: "data",
+  npy: "data",
+  npz: "data",
+  image: "image",
+  notebook: "notebook",
+  plot: "plot",
+  markdown: "text",
+  text: "text",
+  other: "other",
+}
+
+/** Map a {@link DataFileKind} to its coarser {@link DataFileCategory}. Total. */
+export function categoryOf(kind: DataFileKind): DataFileCategory {
+  return CATEGORY_BY_KIND[kind]
+}
+
+/**
+ * Ordered list of every category — the canonical order for filter chips /
+ * grouping headers in the Analysis UI (most analysis-relevant first, `other` last).
+ */
+export const ALL_DATA_FILE_CATEGORIES: readonly DataFileCategory[] = [
+  "data",
+  "image",
+  "notebook",
+  "plot",
+  "text",
+  "other",
+] as const
+
+/** Human-readable labels for each category (filter chips / group headers). */
+export const DATA_FILE_CATEGORY_LABELS: Readonly<Record<DataFileCategory, string>> = {
+  data: "Data",
+  image: "Images",
+  notebook: "Notebooks",
+  plot: "Plots",
   text: "Text",
   other: "Other",
 }
@@ -136,8 +200,10 @@ export function classifyDataFile(filePath: string): DataFileKind {
 
 /**
  * Whether a kind is one Analysis can render a meaningful inline preview for
- * (table / image / pretty-JSON / text head). `parquet`, `plot`, `notebook`, and
- * `other` fall back to a metadata-only card — the UI uses this to decide.
+ * (table / chart / array / image / pretty-JSON / text head). A raw `.npy` array
+ * is decoded into a chart or array view, so it is previewable; `.npz` (a zip of
+ * arrays we don't unpack), `parquet`, `plot`, `notebook`, and `other` fall back
+ * to a metadata-only card — the UI uses this to decide.
  */
 export function isPreviewableKind(kind: DataFileKind): boolean {
   return (
@@ -146,6 +212,7 @@ export function isPreviewableKind(kind: DataFileKind): boolean {
     kind === "json" ||
     kind === "image" ||
     kind === "markdown" ||
-    kind === "text"
+    kind === "text" ||
+    kind === "npy"
   )
 }

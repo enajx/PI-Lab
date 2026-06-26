@@ -4,7 +4,7 @@ import type { AppContext } from "../trpc/context"
 import { startAgentSession } from "../trpc/sessions/sessions"
 
 /**
- * Fire one automation once (AGENTS.md §1 — Automations). Launch-only semantics
+ * Fire one automation once (AGENTS.md "Scope" — Automations). Launch-only semantics
  * for v1: we record the run as `launched` (with the spun-up workspace id) the
  * moment the agent starts, or `failed` with the error — we do *not* track the
  * agent's eventual outcome. This is the single "what happens on fire" step the

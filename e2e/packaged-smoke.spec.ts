@@ -8,7 +8,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Packaged-app smoke (AGENTS.md §11 P11 / §12.4): launch the REAL packaged
+ * Packaged-app smoke (git history (build phases) P11 / AGENTS.md Pitfalls #4): launch the REAL packaged
  * `Skipper.app` — not `out/main/index.js` — and assert it boots to `app-ready`.
  *
  * This is the only test that proves native modules load from the *packaged* app:
@@ -19,10 +19,10 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  *
  * It's GATED on the packaged build existing (`release/mac-arm64/Skipper.app`) and
  * skips otherwise, so it never breaks `bun run e2e` on a checkout that only ran
- * `bun run build`. Build it with `bun run --cwd apps/desktop build:local:fast`.
+ * `bun run build`. Build it with `bun run package` (or `--cwd apps/desktop package`).
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * the Bun runtime (AGENTS.md §13).
+ * the Bun runtime (docs/testing-and-build.md (build & ship)).
  */
 
 const execFileAsync = promisify(execFile)
@@ -57,7 +57,7 @@ async function initRepo(dir: string): Promise<void> {
 // Only meaningful once the packaged app exists; otherwise skip (don't fail).
 test.skip(
   !existsSync(PACKAGED_BINARY),
-  `packaged app not built (run: bun run --cwd apps/desktop build:local:fast) — ${PACKAGED_BINARY}`,
+  `packaged app not built (run: bun run package) — ${PACKAGED_BINARY}`,
 )
 
 test.beforeEach(async () => {

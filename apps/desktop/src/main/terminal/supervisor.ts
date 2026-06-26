@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { connect } from "node:net"
 import { join } from "node:path"
@@ -8,10 +8,12 @@ import { resolveDaemonSocketPath } from "./socketPath"
 /**
  * Keeps exactly one PTY daemon reachable for the lifetime of the app.
  *
- * The daemon is a *separate, detached* process on purpose (AGENTS.md §6): live
+ * The daemon is a *separate, detached* process on purpose (docs/architecture.md (process model)): live
  * terminals and agent sessions must outlive an Electron reload or a full app
- * quit, so the supervisor never owns the daemon's lifecycle — it only ensures
- * one is listening and holds a client to it.
+ * quit, so in normal use the supervisor never owns the daemon's lifecycle — it
+ * only ensures one is listening and holds a client to it. (The one exception is
+ * {@link SupervisorOptions.reapDaemonOnDispose}, enabled under test mode, which
+ * reaps the spawned daemon on dispose so E2E runs don't orphan one.)
  *
  * Adopt-or-spawn:
  *   - If something is already listening on the resolved socket (a daemon a prior
@@ -46,6 +48,15 @@ export interface SupervisorOptions {
   reconnectBaseMs?: number
   /** Cap on reconnect backoff. */
   reconnectMaxMs?: number
+  /**
+   * Reap the daemon we spawned (and, via its shutdown handler, its PTY children)
+   * when the supervisor is disposed, instead of leaving it detached. Off in
+   * production — the daemon is meant to outlive an app restart. On under test
+   * mode so each E2E run's throwaway daemon dies with the app; otherwise the
+   * orphaned process tree keeps Playwright's `app.close()` from completing on
+   * Linux (it waits on the Electron child's stdio-pipe EOF).
+   */
+  reapDaemonOnDispose?: boolean
 }
 
 const DEFAULT_SPAWN_TIMEOUT_MS = 5_000
@@ -111,11 +122,14 @@ export class TerminalSupervisor {
   private readonly spawnTimeoutMs: number
   private readonly reconnectBaseMs: number
   private readonly reconnectMaxMs: number
+  private readonly reapDaemonOnDispose: boolean
 
   private client: DaemonClient | null = null
   private starting: Promise<DaemonClient> | null = null
   private disposed = false
   private reconnecting = false
+  /** The daemon child we spawned (null when we adopted an existing one). */
+  private child: ChildProcess | null = null
 
   constructor(options: SupervisorOptions = {}) {
     this.socketPath = options.socketPath ?? resolveDaemonSocketPath()
@@ -123,6 +137,7 @@ export class TerminalSupervisor {
     this.spawnTimeoutMs = options.spawnTimeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS
     this.reconnectBaseMs = options.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS
     this.reconnectMaxMs = options.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS
+    this.reapDaemonOnDispose = options.reapDaemonOnDispose ?? false
   }
 
   /**
@@ -165,6 +180,9 @@ export class TerminalSupervisor {
       stdio: "ignore",
     })
     child.unref()
+    // Retain the handle for an opt-in reap on dispose (test mode). unref() keeps
+    // it from holding the event loop open but does not prevent signalling by pid.
+    this.child = child
 
     // Wait for the freshly-spawned daemon to start accepting connections, or for
     // the child to die early. Poll the socket rather than sleep a fixed time.
@@ -216,13 +234,36 @@ export class TerminalSupervisor {
   }
 
   /**
-   * Tear down the *supervisor*, not the daemon. We close our client but
-   * deliberately leave the detached daemon running so sessions survive the app
-   * quitting — that is the entire reason the daemon is a separate process.
+   * Tear down the *supervisor*. By default we close our client but deliberately
+   * leave the detached daemon running so sessions survive the app quitting —
+   * that is the entire reason the daemon is a separate process. When
+   * {@link reapDaemonOnDispose} is set (test mode), we also reap the daemon we
+   * spawned so it cannot outlive the app.
    */
   dispose(): void {
     this.disposed = true
     this.client?.close()
     this.client = null
+    if (this.reapDaemonOnDispose) {
+      this.reapDaemon()
+    }
+  }
+
+  /**
+   * Kill the daemon we spawned. SIGTERM (not SIGKILL) so the daemon runs its
+   * shutdown handler — which SIGKILLs every PTY child and unlinks the socket —
+   * before exiting; SIGKILLing the daemon directly would orphan those children
+   * (each node-pty shell is its own session leader, so a group kill wouldn't
+   * cascade). No-op when we adopted an existing daemon (no child handle).
+   */
+  private reapDaemon(): void {
+    const pid = this.child?.pid
+    this.child = null
+    if (pid === undefined) return
+    try {
+      process.kill(pid, "SIGTERM")
+    } catch {
+      // Already gone (ESRCH) or not ours (EPERM) — nothing to reap.
+    }
   }
 }

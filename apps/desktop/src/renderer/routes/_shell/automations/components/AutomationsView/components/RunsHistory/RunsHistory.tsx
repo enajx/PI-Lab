@@ -18,7 +18,7 @@ function formatInstant(ms: number): string {
 }
 
 /**
- * Run history for one automation (AGENTS.md §1): the launch log, newest first.
+ * Run history for one automation (AGENTS.md "Scope"): the launch log, newest first.
  * v1 records launch-only outcomes — `launched` (with the spun-up workspace),
  * `failed` (with the error), or `pending` (claimed but not yet launched). No
  * agent-completion tracking.

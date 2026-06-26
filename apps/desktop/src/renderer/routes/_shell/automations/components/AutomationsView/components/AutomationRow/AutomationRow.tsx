@@ -26,7 +26,7 @@ function formatNextRun(nextRunAt: number | null): string {
 }
 
 /**
- * One automation in the Workflows list (AGENTS.md §1): name + cadence summary +
+ * One automation in the Workflows list (AGENTS.md "Scope"): name + cadence summary +
  * next run + an enabled toggle, with run-now / delete actions and an expandable
  * run history. Mutations call back to the parent to refresh the list.
  */

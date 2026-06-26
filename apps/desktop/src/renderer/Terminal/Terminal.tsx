@@ -1,12 +1,12 @@
 import { FitAddon } from "@xterm/addon-fit"
-import { Terminal as XTerm } from "@xterm/xterm"
+import { type ITheme, Terminal as XTerm } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { type CSSProperties, useEffect, useRef } from "react"
+import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { createSkipperTrpcClient, type SkipperTrpcClient } from "../trpc/client"
 
 /**
- * Live terminal pane (AGENTS.md §7) wired end-to-end to the `terminal` tRPC
- * router (AGENTS.md §6, §8). It streams a PTY session's bytes into xterm.js,
+ * Live terminal pane (docs/architecture.md (renderer)) wired end-to-end to the `terminal` tRPC
+ * router (docs/architecture.md (process model), docs/architecture.md (agent runtime)). It streams a PTY session's bytes into xterm.js,
  * forwards keystrokes back, and keeps the PTY sized to the viewport.
  *
  * Two modes, picked by props:
@@ -22,14 +22,14 @@ import { createSkipperTrpcClient, type SkipperTrpcClient } from "../trpc/client"
  * Lifecycle ownership is deliberate: on unmount we unsubscribe and **detach**
  * (the subscription's teardown calls the daemon's `detach`) — we never `kill`.
  * The session lives in the separate pty-daemon process so it survives an Electron
- * reload (AGENTS.md §6); killing here would defeat that survival contract.
+ * reload (docs/architecture.md (process model)); killing here would defeat that survival contract.
  *
- * Scrolling is xterm's own viewport, not Radix `ScrollArea` (AGENTS.md §12.3).
+ * Scrolling is xterm's own viewport, not Radix `ScrollArea` (AGENTS.md Pitfalls #3).
  */
 
 interface TerminalProps {
   /**
-   * Injectable tRPC client for tests (AGENTS.md §14); defaults to the real IPC
+   * Injectable tRPC client for tests (docs/testing-and-build.md); defaults to the real IPC
    * client. A fresh client per pane keeps subscriptions independent.
    */
   client?: SkipperTrpcClient
@@ -62,6 +62,20 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
   const optionsRef = useRef({ client, sessionId, cwd, command, args })
   optionsRef.current = { client, sessionId, cwd, command, args }
 
+  // Track the app theme (the <html> .dark class) so the terminal matches light/
+  // dark without re-attaching the session.
+  const xtermRef = useRef<XTerm | null>(null)
+  const [isDark, setIsDark] = useState(currentIsDark)
+  useEffect(() => {
+    const root = document.documentElement
+    const observer = new MutationObserver(() => setIsDark(root.classList.contains("dark")))
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] })
+    return () => observer.disconnect()
+  }, [])
+  useEffect(() => {
+    if (xtermRef.current) xtermRef.current.options.theme = terminalTheme(isDark)
+  }, [isDark])
+
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -75,8 +89,9 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
       fontFamily:
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
-      theme: { background: "#101014", foreground: "#e6e6ea" },
+      theme: terminalTheme(currentIsDark()),
     })
+    xtermRef.current = xterm
     const fitAddon = new FitAddon()
     xterm.loadAddon(fitAddon)
     xterm.open(container)
@@ -178,21 +193,67 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
       resizeObserver?.disconnect()
       inputDisposable?.dispose()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
-      // session (it is NOT killed), so the PTY persists across reload (§6).
+      // session (it is NOT killed), so the PTY persists across reload (docs/architecture.md (process model)).
       unsubscribe?.()
       xterm.dispose()
+      xtermRef.current = null
     }
   }, [])
 
-  return <div ref={containerRef} data-testid="terminal" style={paneStyle} />
+  return (
+    <div
+      ref={containerRef}
+      data-testid="terminal"
+      style={{ ...paneStyle, background: isDark ? "#101014" : "#ffffff" }}
+    />
+  )
+}
+
+/** Whether the app is currently in dark mode (the `<html>` `.dark` class). */
+function currentIsDark(): boolean {
+  return typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+}
+
+const DARK_TERMINAL_THEME: ITheme = {
+  background: "#101014",
+  foreground: "#e6e6ea",
+  cursor: "#e6e6ea",
+}
+
+/** A clean light terminal palette (GitHub-light-ish) for the app's light theme. */
+const LIGHT_TERMINAL_THEME: ITheme = {
+  background: "#ffffff",
+  foreground: "#1f2328",
+  cursor: "#1f2328",
+  cursorAccent: "#ffffff",
+  selectionBackground: "#bcdcff",
+  black: "#1f2328",
+  red: "#cf222e",
+  green: "#116329",
+  yellow: "#7d4e00",
+  blue: "#0969da",
+  magenta: "#8250df",
+  cyan: "#1b7c83",
+  white: "#6e7781",
+  brightBlack: "#57606a",
+  brightRed: "#a40e26",
+  brightGreen: "#1a7f37",
+  brightYellow: "#633c01",
+  brightBlue: "#218bff",
+  brightMagenta: "#a475f9",
+  brightCyan: "#3192aa",
+  brightWhite: "#8c959f",
+}
+
+function terminalTheme(isDark: boolean): ITheme {
+  return isDark ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME
 }
 
 // xterm manages its own scrollback viewport; the pane just needs to be a bounded
-// box that fills its parent (AGENTS.md §12.3 — no Radix ScrollArea).
+// box that fills its parent (AGENTS.md Pitfalls #3 — no Radix ScrollArea).
 const paneStyle: CSSProperties = {
   width: "100%",
   height: "100%",
   minHeight: 0,
-  background: "#101014",
   overflow: "hidden",
 }

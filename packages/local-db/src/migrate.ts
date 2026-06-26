@@ -108,7 +108,7 @@ function readJournal(migrationsFolder: string): JournalEntry[] {
  *
  * This never drops or truncates user data. If a DB is so corrupt it can't even
  * be read, the caller (Electron main) is expected to move the file aside —
- * never `rm` (AGENTS.md §12.2).
+ * never `rm` (AGENTS.md Pitfalls #2).
  */
 function reconcileJournal(
   db: SkipperDatabase,

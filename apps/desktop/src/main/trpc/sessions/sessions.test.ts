@@ -1,4 +1,4 @@
-// Integration tests for the start-agent-session policy (AGENTS.md §8, P5b):
+// Integration tests for the start-agent-session policy (docs/architecture.md (agent runtime), P5b):
 // createCaller over a temp SQLite DB with real migrations, real temp git repos,
 // an in-process pty-daemon, and injected fake agents (one short-lived, one
 // long-lived so a session can be held open across a second start). Full cleanup

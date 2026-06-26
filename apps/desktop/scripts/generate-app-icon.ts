@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Generate electron-builder app icons from the brand asset `icons/icon.png`
- * (AGENTS.md §13 — "generate the app icon from `icons/`").
+ * (docs/testing-and-build.md (build & ship) — "generate the app icon from `icons/`").
  *
  * Outputs into `apps/desktop/build/`:
  *   - `icon.png`  — 1024×1024 master, used directly for Linux + as electron-builder's

@@ -1,1 +1,1 @@
-export { settingsRouter, writeEditorSettings } from "./settings"
+export { settingsRouter, writeEditorSettings, writeGeneralSettings } from "./settings"

@@ -1,4 +1,4 @@
-// Unit + property tests for the ty concise-format parser (AGENTS.md §14). Pure
+// Unit + property tests for the ty concise-format parser (docs/testing-and-build.md). Pure
 // line-based transform, so example tests against the real `ty check
 // --output-format concise` shape plus fast-check totality properties.
 import fc from "fast-check"

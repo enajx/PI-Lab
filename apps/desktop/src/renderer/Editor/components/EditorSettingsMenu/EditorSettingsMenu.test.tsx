@@ -16,6 +16,7 @@ const SETTINGS: EditorSettings = {
   vim: false,
   typeChecker: "ty",
   formatOnSave: false,
+  editorTheme: "default",
 }
 
 describe("EditorSettingsMenu", () => {
@@ -31,19 +32,21 @@ describe("EditorSettingsMenu", () => {
   })
 
   test("toggles reflect the current settings", () => {
-    render(<EditorSettingsMenu settings={{ ...SETTINGS, vim: true, typeChecker: "pyrefly" }} />)
+    render(<EditorSettingsMenu settings={{ ...SETTINGS, vim: true }} />)
     fireEvent.click(screen.getByTestId("editor-settings"))
 
     expect(screen.getByTestId("editor-settings-vim").getAttribute("data-checked")).toBe("true")
     expect(screen.getByTestId("editor-settings-autosave").getAttribute("data-checked")).toBe(
       "false",
     )
-    expect(screen.getByTestId("editor-settings-checker-pyrefly").getAttribute("data-active")).toBe(
-      "true",
-    )
-    expect(screen.getByTestId("editor-settings-checker-ty").getAttribute("data-active")).toBe(
-      "false",
-    )
+  })
+
+  test("the type checker is not offered here (it lives in Settings → Editor)", () => {
+    render(<EditorSettingsMenu settings={SETTINGS} />)
+    fireEvent.click(screen.getByTestId("editor-settings"))
+
+    expect(screen.queryByTestId("editor-settings-checker-ty")).toBeNull()
+    expect(screen.queryByTestId("editor-settings-checker-pyrefly")).toBeNull()
   })
 
   test("toggling autosave patches just that field", () => {
@@ -64,14 +67,5 @@ describe("EditorSettingsMenu", () => {
     fireEvent.click(screen.getByTestId("editor-settings-format-on-save"))
     expect(onChange).toHaveBeenNthCalledWith(1, { vim: true })
     expect(onChange).toHaveBeenNthCalledWith(2, { formatOnSave: true })
-  })
-
-  test("selecting a type checker patches typeChecker", () => {
-    const onChange = vi.fn()
-    render(<EditorSettingsMenu settings={SETTINGS} onChange={onChange} />)
-    fireEvent.click(screen.getByTestId("editor-settings"))
-
-    fireEvent.click(screen.getByTestId("editor-settings-checker-pyrefly"))
-    expect(onChange).toHaveBeenCalledWith({ typeChecker: "pyrefly" })
   })
 })

@@ -2,10 +2,11 @@ import type { Project } from "@skipper/local-db"
 import { cn } from "@skipper/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTRPC } from "../../../../../trpc/react"
 import { deriveProjectState, type ProjectState } from "../../utils/deriveProjectState"
 import { projectGradient } from "../../utils/projectGradient"
+import { useGradientPlayState } from "./hooks/useGradientPlayState"
 import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
 
 /**
@@ -78,6 +79,11 @@ export function ProjectCard({ project }: ProjectCardProps) {
   }
 
   const gradient = projectGradient(project.id)
+  // The animated gradient layer (no-thumbnail header only). The play-state hook
+  // pauses its morph while off-screen or while the window is unfocused/hidden,
+  // toggling the element's `animation-play-state` directly (no re-render).
+  const gradientRef = useRef<HTMLDivElement | null>(null)
+  useGradientPlayState(gradientRef)
 
   return (
     <div
@@ -91,20 +97,19 @@ export function ProjectCard({ project }: ProjectCardProps) {
     >
       {/*
        * Header image + drop zone: the project's thumbnail, or a deterministic
-       * grainy gradient when none is set. Dropping an image file here sets the
-       * thumbnail. The drag handlers live on this presentational region (not the
-       * card root or the info button) so the keyboard-activable target stays the
-       * info button below.
+       * grainy gradient when none is set. A plain click here opens the project
+       * (mirroring the info button below, so the whole card is clickable);
+       * dropping an image file here sets the thumbnail instead (a drop fires
+       * `onDrop`, not a click, so a completed drag never navigates). The
+       * keyboard-activable target stays the info button below.
        */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop has no keyboard equivalent and no single semantic element; this region is purely a visual drop target — the card's actions live in the info button. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop has no keyboard equivalent and no single semantic element; this region is a visual drop target that also opens the project on click, mirroring the keyboard-reachable info button. */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the click only mirrors the info button's navigation, which is the real keyboard-activable control; a key handler / extra tab stop here would be a redundant duplicate target. */}
       <div
         data-testid="project-card-image"
         className="relative h-32 w-full shrink-0 overflow-hidden"
-        style={
-          project.thumbnail
-            ? undefined
-            : { backgroundImage: gradient.background, backgroundColor: "var(--muted)" }
-        }
+        style={project.thumbnail ? undefined : { backgroundColor: "var(--muted)" }}
+        onClick={openProject}
         onDragOver={(event) => {
           event.preventDefault()
           setIsDragOver(true)
@@ -115,15 +120,40 @@ export function ProjectCard({ project }: ProjectCardProps) {
         {project.thumbnail ? (
           <img src={project.thumbnail} alt="" className="size-full object-cover" />
         ) : (
-          // Subtle grain overlay over the gradient (md/02 — "grainy").
-          <div
-            aria-hidden
-            className="absolute inset-0 opacity-20 mix-blend-overlay"
-            style={{
-              backgroundImage: `url("${gradient.grainUrl}")`,
-              backgroundSize: "120px 120px",
-            }}
-          />
+          <>
+            {/*
+             * The seeded gradient on an oversized layer that slowly morphs
+             * (transform-only, GPU-composited — see globals.css). `inset-[-25%]`
+             * (~150% box) keeps the container covered as the layer rotates/scales/
+             * translates under `overflow-hidden`. The per-project duration/delay
+             * vars drive `.project-gradient-anim`; the play-state hook pauses it
+             * off-screen/unfocused via the ref.
+             */}
+            <div
+              data-testid="project-card-gradient"
+              aria-hidden
+              ref={gradientRef}
+              className="absolute inset-[-25%] project-gradient-anim"
+              style={
+                {
+                  backgroundImage: gradient.background,
+                  "--grad-duration": `${gradient.animation.durationSec}s`,
+                  "--grad-delay": `${gradient.animation.delaySec}s`,
+                } as React.CSSProperties
+              }
+            />
+            {/* Retro film-grain over the gradient (md/02 — "grainy"): a static
+                sibling rendered on top. A denser tile + hard-light blend at ~35%
+                reads as vintage speckle rather than a faint wash. */}
+            <div
+              aria-hidden
+              className="absolute inset-0 opacity-35 mix-blend-hard-light"
+              style={{
+                backgroundImage: `url("${gradient.grainUrl}")`,
+                backgroundSize: "80px 80px",
+              }}
+            />
+          </>
         )}
         {isDragOver ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-foreground text-xs">

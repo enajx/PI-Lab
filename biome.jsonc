@@ -17,7 +17,8 @@
       "*.json",
       "*.jsonc",
       "!**/drizzle",
-      "!**/routeTree.gen.ts"
+      "!**/routeTree.gen.ts",
+      "!**/*.svg"
     ]
   },
   "formatter": {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
 /**
- * Rebuild the desktop's native modules for the *Electron* ABI (AGENTS.md §13).
+ * Rebuild the desktop's native modules for the *Electron* ABI (docs/testing-and-build.md (build & ship)).
  *
  * better-sqlite3 is a node-gyp addon: on `bun install` it's prebuilt for the
  * host *Node* ABI (what `bun run test` needs), so it won't load inside Electron.
@@ -12,8 +12,8 @@
  * need rebuilding, but we let @electron/rebuild see the whole tree; only
  * better-sqlite3 is actually recompiled (`-o better-sqlite3`).
  *
- * Run via `bun install` scripts? No — explicitly, as part of `build:local` /
- * `build:local:fast` and in CI's Electron-ABI job, so the Node-ABI install stays
+ * Run via `bun install` scripts? No — explicitly, as part of `package` /
+ * `package:prod` and in CI's Electron-ABI job, so the Node-ABI install stays
  * intact for the unit-test job.
  */
 

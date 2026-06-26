@@ -1,25 +1,33 @@
 import { Badge } from "@skipper/ui"
+import type { ReactNode } from "react"
 import type { LibraryPaper } from "../../../../../../../../main/trpc/science/library"
 
 interface LibraryItemProps {
   paper: LibraryPaper
-  /** Stable test id for the card (`library-item` for Zotero, `scholar-result` for S2). */
+  /** Stable test id for the card (`library-item`). */
   testId: string
+  /** Optional per-item action slot (Zotero passes "Attach file…"; a folder passes "Open"). */
+  action?: ReactNode
+  /** Highlighted as the keyboard-navigation cursor (also marked `data-selected`). */
+  selected?: boolean
 }
 
 /**
- * One paper card, shared by the Zotero library list and the Semantic Scholar
- * results so both render identically (AGENTS.md §9 — co-locate the shared piece).
- * Shows the title, authors, year, and item type; the abstract (when present) is
- * clamped to two lines. The title links out when the paper carries a URL.
+ * One paper card in the library browser. Shows the title, authors, year, and item type;
+ * the abstract (when present) is clamped to two lines. The title links out when the paper
+ * carries a URL. An optional `action` slot carries the per-source affordance (Zotero
+ * "Attach", folder "Open").
  */
-export function LibraryItem({ paper, testId }: LibraryItemProps) {
+export function LibraryItem({ paper, testId, action, selected }: LibraryItemProps) {
   const authors = paper.authors.join(", ")
   return (
     <article
       data-testid={testId}
       data-paper-id={paper.id}
-      className="flex flex-col gap-1.5 rounded-lg border border-border bg-card/40 p-3"
+      data-selected={selected || undefined}
+      className={`flex flex-col gap-1.5 rounded-lg border p-3 ${
+        selected ? "border-primary bg-accent/60 ring-1 ring-primary" : "border-border bg-card/40"
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         {paper.url ? (
@@ -40,11 +48,14 @@ export function LibraryItem({ paper, testId }: LibraryItemProps) {
             {paper.title}
           </span>
         )}
-        {paper.itemType ? (
-          <Badge variant="muted" className="shrink-0 text-[10px]">
-            {paper.itemType}
-          </Badge>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {paper.itemType ? (
+            <Badge variant="muted" className="text-[10px]">
+              {paper.itemType}
+            </Badge>
+          ) : null}
+          {action}
+        </div>
       </div>
 
       {authors || paper.year ? (

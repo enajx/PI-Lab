@@ -2,13 +2,16 @@ import { DATA_FILE_KIND_LABELS } from "@skipper/shared"
 import { useQuery } from "@tanstack/react-query"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTRPC } from "../../../../../../../trpc/react"
+import { ArrayGrid } from "../ArrayGrid"
+import { MetricChart } from "../MetricChart"
 
 /**
  * Preview pane for a single selected data file (P8c). Fetches
  * `science.analysis.preview` and dispatches on the returned payload's `type`:
- * a sampled CSV/TSV table, an inline image, pretty-printed JSON, a text head, or
- * a metadata card for kinds with no inline renderer. The pane owns its own
- * vertical scroll (§12.3); the fetch is keyed on the project + path so switching
+ * a sampled CSV/TSV table, a line chart (metric logs / 1-D NumPy arrays), a
+ * NumPy 2-D array grid, an inline image, pretty-printed JSON, a text head, or a
+ * metadata card for kinds with no inline renderer. The pane owns its own
+ * vertical scroll (AGENTS.md Pitfalls #3); the fetch is keyed on the project + path so switching
  * files re-fetches cleanly.
  */
 export function AnalysisPreview({ projectId, relPath }: { projectId: string; relPath: string }) {
@@ -52,6 +55,10 @@ function PreviewBody({ preview }: { preview: DataFilePreview }) {
   switch (preview.type) {
     case "table":
       return <TableBody preview={preview} />
+    case "chart":
+      return <MetricChart preview={preview} />
+    case "array":
+      return <ArrayGrid preview={preview} />
     case "image":
       return (
         <img

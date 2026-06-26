@@ -1,12 +1,14 @@
-import { Badge, Input } from "@skipper/ui"
+import { Badge, cn, Input } from "@skipper/ui"
 import { useQuery } from "@tanstack/react-query"
 import { FlaskConical, Search } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
+import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { ScienceTabShell } from "../ScienceTabShell"
 
 /**
- * Skills science tab (AGENTS.md §1 "Science tabs") — a **read-only catalog**:
+ * Skills science tab (AGENTS.md "Scope" "Science tabs") — a **read-only catalog**:
  * pick a project, then browse the agent skills declared in its repo. Each skill
  * is a `<dir>/SKILL.md` discovered under the repo's `.claude/skills` /
  * `.agents/skills` directories (see `science.skills.list`) and shown as a card
@@ -15,7 +17,13 @@ import { ScienceTabShell } from "../ScienceTabShell"
  *
  * The project defaults to the most-recently-opened (`projects.list` is ordered
  * that way), with a selector to switch. A client-side search narrows the list;
- * the body owns its own scroll per §12.3.
+ * the body owns its own scroll per AGENTS.md Pitfalls #3.
+ *
+ * Context-aware ⌘F (the quick-open shortcut): opens a {@link QuickFind} over the
+ * skills currently shown in this tab (not projects — the shell skips `/science/*`,
+ * so this tab is the sole ⌘F owner here). Since skills are a read-only catalog with
+ * no per-item action (triggering is a v2 concern), picking one highlights and scrolls
+ * its card into view.
  */
 export function ScienceSkills() {
   const trpc = useTRPC()
@@ -56,12 +64,41 @@ export function ScienceSkills() {
     )
   }, [skills, query])
 
+  // Context-aware ⌘F finder over the skills shown in this tab, plus the card it
+  // highlights once a result is picked (skills have no open/trigger action — v2).
+  const [findOpen, setFindOpen] = useState(false)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // The quick-open shortcut opens the finder; mount-once so the binding is read live.
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (eventMatchesShortcut(event, "quick-open")) {
+        event.preventDefault()
+        setFindOpen(true)
+      }
+    }
+    window.addEventListener("keydown", onWindowKeyDown)
+    return () => window.removeEventListener("keydown", onWindowKeyDown)
+  }, [])
+
+  // Scroll the picked card into view after the finder selects it.
+  useEffect(() => {
+    if (!selectedKey) return
+    listRef.current
+      ?.querySelector<HTMLElement>('[data-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" })
+  }, [selectedKey])
+
   const selector =
     projects.length > 0 ? (
       <select
         data-testid="skills-project-select"
         value={selectedId ?? ""}
-        onChange={(event) => setSelectedId(event.target.value)}
+        onChange={(event) => {
+          setSelectedId(event.target.value)
+          setSelectedKey(null) // drop a stale finder highlight when the skill list changes
+        }}
         className="h-8 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
       >
         {projects.map((project) => (
@@ -93,7 +130,7 @@ export function ScienceSkills() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3 p-6">
           {projects.length === 0 ? (
             <NoProjectsState />
@@ -108,9 +145,10 @@ export function ScienceSkills() {
                 {filtered.length} of {skills.length} skills
               </div>
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                {filtered.map((skill) => (
-                  <SkillCard key={`${skill.source}:${skill.slug}`} skill={skill} />
-                ))}
+                {filtered.map((skill) => {
+                  const key = `${skill.source}:${skill.slug}`
+                  return <SkillCard key={key} skill={skill} selected={key === selectedKey} />
+                })}
               </div>
               {filtered.length === 0 && skills.length > 0 ? (
                 <p data-testid="skills-no-matches" className="text-muted-foreground text-xs">
@@ -121,6 +159,26 @@ export function ScienceSkills() {
           )}
         </div>
       </div>
+
+      {findOpen ? (
+        <QuickFind
+          ariaLabel="Find a skill"
+          placeholder="Find a skill…"
+          // The skills currently shown in this tab (narrowed by the search box, if any).
+          items={filtered.map(
+            (skill): QuickFindItem => ({
+              id: `${skill.source}:${skill.slug}`,
+              label: skill.name,
+              hint: skill.source,
+              icon: FlaskConical,
+            }),
+          )}
+          emptyText="No matching skills"
+          // No open/trigger action for a skill yet (v2) — highlight + scroll its card.
+          onSelect={(item) => setSelectedKey(item.id)}
+          onClose={() => setFindOpen(false)}
+        />
+      ) : null}
     </ScienceTabShell>
   )
 }
@@ -128,14 +186,21 @@ export function ScienceSkills() {
 /** A single skill, rendered as a card (name, source badge, description). */
 function SkillCard({
   skill,
+  selected,
 }: {
   skill: { name: string; description: string; slug: string; source: string; path: string }
+  /** Highlighted by the ⌘F finder (the picked result). */
+  selected: boolean
 }) {
   return (
     <div
       data-testid="skill-card"
       data-skill={skill.slug}
-      className="flex flex-col gap-1.5 rounded-lg border border-border bg-card/40 p-3"
+      data-selected={selected}
+      className={cn(
+        "flex flex-col gap-1.5 rounded-lg border bg-card/40 p-3",
+        selected ? "border-ring ring-1 ring-ring" : "border-border",
+      )}
     >
       <div className="flex items-center gap-2">
         <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
