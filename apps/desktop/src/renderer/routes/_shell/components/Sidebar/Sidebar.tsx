@@ -1,18 +1,22 @@
-import type { Project } from "@skipper/local-db"
-import { Button, cn } from "@skipper/ui"
+import type { Project } from "@pi-lab/local-db"
+import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, useParams, useRouterState } from "@tanstack/react-router"
+import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router"
 import {
+  Bot,
+  ChevronDown,
   FilePlus2,
   FolderOpen,
   FolderPlus,
   GitFork,
+  Info,
   LayoutDashboard,
   PanelLeft,
   PanelLeftClose,
   Settings,
   Trash2,
   Waypoints,
+  X,
 } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import {
@@ -21,23 +25,20 @@ import {
   useNavOrder,
   useProjectOrder,
   useSidebarCollapsed,
+  useSidebarFeatureHelp,
   useSidebarWidth,
 } from "../../../../preferences/preferences"
-import { useTheme } from "../../../../providers/ThemeProvider"
 import { useTRPC } from "../../../../trpc/react"
+import { rememberSettingsReturnRoute } from "../../-settingsReturnRoute"
+import {
+  type ProjectWorkspaceState,
+  readProjectWorkspaceState,
+  subscribeProjectWorkspaceState,
+  writeProjectWorkspaceState,
+} from "../../projects/-workspaceState"
+import { KindBadge } from "../../projects/components/KindBadge"
 import { type ScienceNavItem, scienceNavItems } from "../../science/components/scienceNavItems"
 import { readOpenProjectOverride } from "../../utils/openProjectOverride"
-
-/**
- * The Skipper app mark shown in the sidebar's draggable title-bar band. Two
- * monochrome variants — the dark-on-light glyph for the light theme and its
- * negative (light-on-dark) for the dark theme — so the mark always reads against
- * the sidebar. Loaded as asset URLs via the `new URL(..., import.meta.url)` pattern
- * Vite resolves in dev and in the packaged `file://` renderer.
- */
-const APP_LOGO = new URL("../../../../assets/icon_bw_alpha.png", import.meta.url).href
-const APP_LOGO_NEGATIVE = new URL("../../../../assets/icon_bw_negative_alpha.png", import.meta.url)
-  .href
 
 /**
  * Shared layout/typography for every sidebar nav row (Dashboard, Science tabs,
@@ -61,8 +62,89 @@ const navStateClass = (isActive: boolean): string =>
  */
 const navItems: ScienceNavItem[] = [
   ...scienceNavItems,
-  { id: "workflows", label: "Workflows", icon: Waypoints, ready: true, to: "/automations" },
+  {
+    id: "workflows",
+    label: "Workflows",
+    description: "Create and monitor scheduled automations across your projects.",
+    icon: Waypoints,
+    ready: true,
+    to: "/automations",
+  },
 ]
+
+export interface FeatureHelp {
+  label: string
+  description: string
+}
+
+const FEATURE_HELP_SELECTOR = [
+  "[data-feature-help]",
+  "button",
+  "a[href]",
+  "input",
+  "select",
+  "textarea",
+  '[role="button"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="tab"]',
+].join(",")
+
+function featureElement(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null
+  const match = target.closest(FEATURE_HELP_SELECTOR)
+  return match instanceof HTMLElement ? match : null
+}
+
+function featureHelpFromElement(element: HTMLElement): FeatureHelp | null {
+  const ariaLabel = element.getAttribute("aria-label")?.trim() ?? ""
+  const title = element.getAttribute("title")?.trim() ?? ""
+  const text = element.textContent?.replace(/\s+/g, " ").trim() ?? ""
+  const input = element instanceof HTMLInputElement ? element.placeholder.trim() : ""
+  const label = element.dataset.featureLabel?.trim() || ariaLabel || title || input || text
+  if (!label) return null
+  const description =
+    element.dataset.featureHelp?.trim() ||
+    element.getAttribute("aria-description")?.trim() ||
+    (title !== label ? title : "") ||
+    label
+  return { label, description }
+}
+
+export function useFeatureHelp(active: boolean): FeatureHelp | null {
+  const [help, setHelp] = useState<FeatureHelp | null>(null)
+
+  useEffect(() => {
+    if (!active) {
+      setHelp(null)
+      return
+    }
+
+    const show = (event: Event) => {
+      const element = featureElement(event.target)
+      setHelp(element ? featureHelpFromElement(element) : null)
+    }
+    const clear = (event: FocusEvent | PointerEvent) => {
+      const current = featureElement(event.target)
+      const related = featureElement(event.relatedTarget)
+      if (current && current === related) return
+      setHelp(related ? featureHelpFromElement(related) : null)
+    }
+
+    document.addEventListener("pointerover", show)
+    document.addEventListener("pointerout", clear)
+    document.addEventListener("focusin", show)
+    document.addEventListener("focusout", clear)
+    return () => {
+      document.removeEventListener("pointerover", show)
+      document.removeEventListener("pointerout", clear)
+      document.removeEventListener("focusin", show)
+      document.removeEventListener("focusout", clear)
+    }
+  }, [active])
+
+  return help
+}
 
 /** Drag props applied to a reorderable row (native HTML5 drag-and-drop). */
 type RowDragProps = Pick<
@@ -184,7 +266,7 @@ interface ProjectMenuState {
 }
 
 /**
- * Left sidebar (docs/architecture.md (renderer), md/02 — projects are the ground unit).
+ * Left sidebar (md/engineering/architecture.md (renderer), md/02 — projects are the ground unit).
  * Top to bottom: a "Dashboard" entry (carrying the divider below it), one unified
  * workspace nav (Library, Analysis, Cluster, Tasks, Skills, Workflows) rendered as a
  * single `gap-0.5` list, a divider-topped "Projects" label + the opened projects (the
@@ -192,7 +274,7 @@ interface ProjectMenuState {
  * divider. Both the workspace nav and the project list are drag-reorderable within
  * themselves (`useNavOrder` / `useProjectOrder`); reordering never crosses between the
  * two, shows a move cursor (not a copy "+"), and marks the drop slot with a line.
- * Right-clicking a project offers "Remove from Skipper" (removes the row only, never the
+ * Right-clicking a project offers "Remove from PI Lab" (removes the row only, never the
  * files on disk).
  *
  * The sidebar collapses to a narrow icon-only rail (toggled via `useSidebarCollapsed`):
@@ -208,7 +290,7 @@ interface ProjectMenuState {
  * existing folder (`system.pickDirectory` → `projects.open`), clone a git repo
  * (`projects.clone`), or start from a template (`projects.createFromTemplate`); each
  * invalidates the project list. The E2E can't drive a native dialog, so a
- * `?openProject=<abs path>` seam (docs/testing-and-build.md) opens a known path once
+ * `?openProject=<abs path>` seam (md/engineering/testing-and-build.md) opens a known path once
  * on mount instead.
  *
  * The list is a bounded flex child with its own scroll (`min-h-0 overflow-y-auto`,
@@ -218,8 +300,11 @@ export function Sidebar() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  const agentActivityQuery = useQuery(trpc.sessions.activity.queryOptions())
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const [width, setWidth] = useSidebarWidth()
+  const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
+  const featureHelp = useFeatureHelp(showFeatureHelp && !collapsed)
 
   const invalidateProjects = () =>
     queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
@@ -232,6 +317,12 @@ export function Sidebar() {
     trpc.projects.remove.mutationOptions({ onSuccess: () => void invalidateProjects() }),
   )
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
+  const [, setWorkspaceRevision] = useState(0)
+
+  useEffect(
+    () => subscribeProjectWorkspaceState(() => setWorkspaceRevision((revision) => revision + 1)),
+    [],
+  )
 
   useOpenProjectSeam((path) => {
     void openProject.mutateAsync({ path })
@@ -255,52 +346,46 @@ export function Sidebar() {
       )}
       style={collapsed ? undefined : { width }}
     >
-      {/* Window top-left: the draggable title-bar region (`app-drag`) that clears the
-          macOS traffic lights (x16,y18). It also hosts the decorative Skipper app mark
-          (`SidebarLogo`, theme-aware): EXPANDED it sits flush at the right edge (`ml-auto`,
-          just inside `pr-2`, at the main-panel boundary) with the collapse toggle inline
-          just right of the lights; COLLAPSED the 56px rail is too narrow for the toggle at
-          the traffic-light level, so the logo is centered in the rail here and the toggle
-          drops into the rail below (first nav item). Either way the header lives inside the
-          sidebar, so it's one continuous gray column at a single header level — no
-          full-width bar stacked over the page. */}
+      {/* Window top-left: the draggable title-bar region (`app-drag`). EXPANDED it
+          clears the macOS traffic lights (x16,y18) and places the collapse control at
+          the far-right edge. COLLAPSED, the traffic lights move into the route header
+          and the expand control is centered at the top of the 56px rail. The control
+          opts out of window dragging while the rest of this band remains draggable. */}
       <div
+        data-testid="sidebar-titlebar"
         className={cn(
           "app-drag flex h-11 shrink-0 items-center",
           collapsed ? "justify-center px-2" : "pl-20 pr-2",
         )}
       >
-        {collapsed ? (
-          <SidebarLogo />
-        ) : (
-          <>
-            <CollapseToggle collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-            <SidebarLogo className="ml-auto" />
-          </>
-        )}
+        <CollapseToggle
+          collapsed={collapsed}
+          className={collapsed ? undefined : "ml-auto"}
+          onToggle={() => setCollapsed(!collapsed)}
+        />
       </div>
 
       {/* Nav body — padded; the header above is full-bleed for the traffic lights. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
-        {collapsed ? (
-          <div className="flex justify-center">
-            <CollapseToggle collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-          </div>
-        ) : null}
-        <DashboardNav collapsed={collapsed} />
+      <div data-testid="sidebar-nav-body" className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
+        <ProjectDashboardNav collapsed={collapsed} />
 
         <WorkspaceNav collapsed={collapsed} />
 
-        {/* Projects — a divider line above the section (Task 1) separates it from the
-          workspace nav; the list itself is the scroll region. */}
+        {/* The project list is the scroll region. */}
         <nav
           aria-label="Projects"
           className="-mr-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto border-sidebar-border border-t pr-1 pt-3"
         >
           {collapsed ? null : (
-            <span className="px-2 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+            <Link
+              to="/"
+              data-testid="nav-project-dashboard"
+              data-feature-label="Projects Dashboard"
+              data-feature-help="Open Projects Dashboard to see every project at a glance"
+              className="rounded px-2 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground focus-visible:text-foreground"
+            >
               Projects
-            </span>
+            </Link>
           )}
           {orderedProjects.length === 0 ? (
             collapsed ? null : (
@@ -317,6 +402,8 @@ export function Sidebar() {
                 key={project.id}
                 project={project}
                 collapsed={collapsed}
+                workspaceState={readProjectWorkspaceState(project.id)}
+                agentStatus={projectAgentStatus(project.id, agentActivityQuery.data ?? [])}
                 reorder={collapsed ? null : projectRowProps(project.id)}
                 onContextMenu={(event) => {
                   event.preventDefault()
@@ -332,10 +419,20 @@ export function Sidebar() {
           )}
         </nav>
 
+        {!collapsed && showFeatureHelp ? (
+          <FeatureHelpPanel help={featureHelp} onHide={() => setShowFeatureHelp(false)} />
+        ) : null}
+
         {/* Bottom cluster: "Add project" then Settings, under a top divider and with a
           compact divider between the two as well (no large blank). Add project is a
           dropdown with three ways in (folder / clone / template). */}
         <div className="flex shrink-0 flex-col gap-1.5 border-sidebar-border border-t pt-3">
+          {!showFeatureHelp ? (
+            <FeatureHelpRestoreButton
+              collapsed={collapsed}
+              onRestore={() => setShowFeatureHelp(true)}
+            />
+          ) : null}
           <AddProjectMenu collapsed={collapsed} onAdded={invalidateProjects} />
           <SettingsNav collapsed={collapsed} />
         </div>
@@ -360,12 +457,89 @@ export function Sidebar() {
   )
 }
 
+export function FeatureHelpPanel({
+  help,
+  onHide,
+}: {
+  help: FeatureHelp | null
+  onHide: () => void
+}) {
+  const label = help?.label ?? "What’s this?"
+  const description = help?.description ?? "Hover over or focus a control to learn what it does."
+  const showDescription = description !== label
+
+  return (
+    <section
+      aria-label="Feature help"
+      data-testid="sidebar-feature-help"
+      className="min-h-20 shrink-0 rounded-md border border-sidebar-border bg-sidebar-accent/35 p-2"
+    >
+      <div className="flex items-start gap-1">
+        <p
+          data-testid="sidebar-feature-help-label"
+          className="min-w-0 flex-1 truncate font-medium text-sidebar-foreground text-xs"
+        >
+          {label}
+        </p>
+        <button
+          type="button"
+          aria-label="Hide feature help"
+          title="Hide feature help"
+          data-feature-help="Hide this help panel; a compact Info button will remain to restore it"
+          onClick={onHide}
+          className="-mr-1 -mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
+      </div>
+      <p
+        data-testid="sidebar-feature-help-description"
+        className="mt-1 line-clamp-3 text-[11px] text-muted-foreground leading-relaxed"
+      >
+        {showDescription ? description : label}
+      </p>
+    </section>
+  )
+}
+
+export function FeatureHelpRestoreButton({
+  collapsed,
+  onRestore,
+}: {
+  collapsed: boolean
+  onRestore: () => void
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-label="Show feature help"
+      title="Show feature help"
+      data-feature-help="Restore the lower-left panel that explains hovered controls"
+      onClick={onRestore}
+      className={cn("text-muted-foreground", collapsed ? "justify-center px-0" : "justify-start")}
+    >
+      <Info aria-hidden />
+      {collapsed ? null : "Show help"}
+    </Button>
+  )
+}
+
 /**
- * The sidebar collapse/expand toggle. Shared between the header (expanded, inline after
- * the traffic lights) and the rail's first slot (collapsed, where it cannot sit at the
- * traffic-light level without overflowing into the page header).
+ * The sidebar collapse/expand toggle. It always lives in the draggable sidebar header,
+ * at the far right when expanded and centered in the collapsed rail. `app-no-drag`
+ * preserves click handling inside that draggable region.
  */
-function CollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+function CollapseToggle({
+  collapsed,
+  className,
+  onToggle,
+}: {
+  collapsed: boolean
+  className: string | undefined
+  onToggle: () => void
+}) {
   return (
     <Button
       type="button"
@@ -374,35 +548,17 @@ function CollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       data-testid="sidebar-collapse-toggle"
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      data-feature-help={
+        collapsed
+          ? "Expand the sidebar to show navigation labels"
+          : "Collapse the sidebar to its compact icon rail"
+      }
       aria-pressed={collapsed}
-      className="app-no-drag size-7 text-sidebar-foreground"
+      className={cn("app-no-drag size-7 text-sidebar-foreground", className)}
       onClick={onToggle}
     >
       {collapsed ? <PanelLeft aria-hidden /> : <PanelLeftClose aria-hidden />}
     </Button>
-  )
-}
-
-/**
- * The decorative Skipper app mark in the title-bar band. Picks the theme-matched
- * variant from the live resolved mode (`useTheme().theme` is only `light`/`dark`, so
- * it is the resolved mode directly): the dark-on-light glyph in light, its negative in
- * dark. Purely decorative — `aria-hidden` with an empty `alt`, no link or handler.
- * `draggable={false}` stops the native image drag from hijacking the window drag, and
- * it deliberately carries NO `app-no-drag` so window dragging passes straight through.
- */
-function SidebarLogo({ className }: { className?: string }) {
-  const { theme } = useTheme()
-  const src = theme === "dark" ? APP_LOGO_NEGATIVE : APP_LOGO
-  return (
-    <img
-      src={src}
-      alt=""
-      aria-hidden
-      draggable={false}
-      data-testid="sidebar-app-logo"
-      className={cn("size-5 select-none", className)}
-    />
   )
 }
 
@@ -453,11 +609,13 @@ function ProjectContextMenu({
         type="button"
         role="menuitem"
         data-testid="project-remove"
+        data-feature-label="Remove project"
+        data-feature-help="Remove this project from PI Lab without deleting any files from disk."
         onClick={() => onRemove(menu.id)}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-destructive/10"
       >
         <Trash2 className="size-4 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">Remove from Skipper</span>
+        <span className="min-w-0 truncate">Remove from PI Lab</span>
       </button>
       <p className="cursor-text select-text px-2 py-1 text-[11px] text-muted-foreground leading-snug">
         Removes “{menu.name}” from the app only — the files on disk are left untouched.
@@ -561,6 +719,8 @@ function AddProjectMenu({ collapsed, onAdded }: { collapsed: boolean; onAdded: (
         aria-expanded={open}
         className={cn("w-full text-sm", collapsed ? "justify-center px-0" : "justify-start px-2")}
         title={collapsed ? "Add project" : undefined}
+        data-feature-label="Add project"
+        data-feature-help="Open a folder, clone a repository, or create a project from the template"
         onClick={() => setOpen((value) => !value)}
       >
         <FolderPlus aria-hidden />
@@ -584,6 +744,7 @@ function AddProjectMenu({ collapsed, onAdded }: { collapsed: boolean; onAdded: (
                 testId="add-project-folder"
                 icon={FolderOpen}
                 label="Open from folder"
+                description="Add an existing local project folder to PI Lab."
                 onClick={() => void openFromFolder()}
                 disabled={pending}
               />
@@ -591,6 +752,7 @@ function AddProjectMenu({ collapsed, onAdded }: { collapsed: boolean; onAdded: (
                 testId="add-project-clone"
                 icon={GitFork}
                 label="Clone from git repo"
+                description="Clone a Git repository into a folder and add it as a project."
                 onClick={() => setMode("clone")}
                 disabled={pending}
               />
@@ -598,6 +760,7 @@ function AddProjectMenu({ collapsed, onAdded }: { collapsed: boolean; onAdded: (
                 testId="add-project-template"
                 icon={FilePlus2}
                 label="Start from template"
+                description="Create a new project folder from PI Lab's configured template."
                 onClick={() => void startFromTemplate()}
                 disabled={pending}
               />
@@ -622,13 +785,21 @@ function AddProjectMenu({ collapsed, onAdded }: { collapsed: boolean; onAdded: (
               <input
                 id={`${labelId}-url`}
                 data-testid="add-project-clone-url"
+                data-feature-label="Git repository URL"
+                data-feature-help="Enter the Git repository to clone into a new local project folder."
                 type="text"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 placeholder="https://github.com/owner/repo.git"
                 className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-ring"
               />
-              <Button type="submit" size="sm" disabled={pending || url.trim().length === 0}>
+              <Button
+                type="submit"
+                size="sm"
+                data-feature-label="Choose folder and clone"
+                data-feature-help="Choose a destination folder, clone the repository, and add it to PI Lab."
+                disabled={pending || url.trim().length === 0}
+              >
                 Choose folder & clone
               </Button>
             </form>
@@ -653,12 +824,14 @@ function MenuItem({
   testId,
   icon: Icon,
   label,
+  description,
   onClick,
   disabled,
 }: {
   testId: string
   icon: typeof FolderOpen
   label: string
+  description: string
   onClick: () => void
   disabled: boolean
 }) {
@@ -667,6 +840,8 @@ function MenuItem({
       type="button"
       role="menuitem"
       data-testid={testId}
+      data-feature-label={label}
+      data-feature-help={description}
       onClick={onClick}
       disabled={disabled}
       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
@@ -739,12 +914,9 @@ function EdgeResizeHandle({
 }
 
 /**
- * Dashboard entry — the top-of-sidebar link to the project-cards Dashboard ("/"),
- * active only on an exact "/" match. It carries the single divider that separates
- * it from the science/nav group below (Task 6): a `border-b` + bottom padding, so
- * Dashboard reads as its own block above the Library/Analysis/Cluster/… group.
+ * Projects Dashboard entry — the top-of-sidebar link to the project cards ("/").
  */
-function DashboardNav({ collapsed }: { collapsed: boolean }) {
+function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
   const { location } = useRouterState()
   const isActive = location.pathname === "/"
   return (
@@ -753,18 +925,20 @@ function DashboardNav({ collapsed }: { collapsed: boolean }) {
         to="/"
         data-testid="nav-dashboard"
         data-active={isActive}
-        title={collapsed ? "Dashboard" : undefined}
+        title={collapsed ? "Projects Dashboard" : undefined}
+        data-feature-label="Projects Dashboard"
+        data-feature-help="See every open project and its current activity at a glance"
         className={cn(navRowClass, collapsed && "justify-center", navStateClass(isActive))}
       >
         <LayoutDashboard className="size-4" aria-hidden />
-        {collapsed ? null : <span className="flex-1 truncate">Dashboard</span>}
+        {collapsed ? null : <span className="flex-1 truncate">Projects Dashboard</span>}
       </Link>
     </div>
   )
 }
 
 /**
- * Unified workspace nav (AGENTS.md "Scope" / docs/architecture.md (renderer)): the
+ * Unified workspace nav (AGENTS.md "Scope" / md/engineering/architecture.md (renderer)): the
  * `scienceNavItems` registry plus Workflows, rendered as ONE `gap-0.5` list so every
  * row — Workflows included — sits flush with its peers (Task 2/6: the old gap-3
  * between two separate `<nav>`s was what made Workflows read as a detached block).
@@ -805,6 +979,8 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
               data-ready={false}
               aria-disabled
               title={collapsed ? `${item.label} (soon)` : undefined}
+              data-feature-label={item.label}
+              data-feature-help={item.description}
               className={cn(
                 navRowClass,
                 "text-muted-foreground/50",
@@ -833,6 +1009,8 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
             data-ready={true}
             data-active={isActive}
             title={collapsed ? item.label : undefined}
+            data-feature-label={item.label}
+            data-feature-help={item.description}
             className={cn(
               navRowClass,
               collapsed ? "justify-center" : "cursor-grab",
@@ -864,6 +1042,9 @@ function SettingsNav({ collapsed }: { collapsed: boolean }) {
         data-testid="nav-settings"
         data-active={isActive}
         title={collapsed ? "Settings" : undefined}
+        data-feature-label="Settings"
+        data-feature-help="Configure PI Lab appearance, agents, editor behavior, and integrations"
+        onClick={() => rememberSettingsReturnRoute(location)}
         className={cn(navRowClass, collapsed && "justify-center", navStateClass(isActive))}
       >
         <Settings className="size-4" aria-hidden />
@@ -875,24 +1056,31 @@ function SettingsNav({ collapsed }: { collapsed: boolean }) {
 
 /**
  * A single project row that links to its route and highlights when active. When
- * the sidebar is collapsed it renders an icon-sized first-letter badge with a
- * `title` tooltip carrying the full name; expanded it shows the name and is
+ * the sidebar is collapsed it renders an icon-sized thumbnail or first-letter badge with a
+ * `title` tooltip carrying the full name; expanded it keeps that same badge beside the name and is
  * drag-reorderable via {@link reorder} (the collapsed rail passes none). Right-clicking
  * opens the remove menu via {@link onContextMenu} in either state.
  */
 function ProjectItem({
   project,
   collapsed,
+  workspaceState,
+  agentStatus,
   reorder,
   onContextMenu,
 }: {
   project: Project
   collapsed: boolean
+  workspaceState: ProjectWorkspaceState | undefined
+  agentStatus: ProjectAgentStatus
   reorder?: RowReorder | null
   onContextMenu: (event: React.MouseEvent) => void
 }) {
   const params = useParams({ strict: false }) as { projectId?: string }
   const isActive = params.projectId === project.id
+  const navigate = useNavigate()
+  const [sessionsExpanded, setSessionsExpanded] = useState(true)
+  const agentSessions = workspaceState?.sessions.filter((session) => session.kind === "agent") ?? []
 
   if (collapsed) {
     return (
@@ -908,46 +1096,147 @@ function ProjectItem({
           navStateClass(isActive),
         )}
         title={project.name}
+        data-feature-label={project.name}
+        data-feature-help={`Open the ${project.name} project workspace`}
       >
-        <span
-          aria-hidden
-          className={cn(
-            "flex size-6 items-center justify-center rounded-md text-xs font-medium uppercase",
-            isActive ? "bg-accent-foreground/10" : "bg-accent",
-          )}
-        >
-          {project.name.trim().charAt(0) || "?"}
-        </span>
+        <ProjectBadge project={project} isActive={isActive} />
         <span className="sr-only">{project.name}</span>
       </Link>
     )
   }
 
+  const openSession = (id: string) => {
+    if (workspaceState) {
+      writeProjectWorkspaceState(project.id, { ...workspaceState, active: { type: "session", id } })
+    }
+    void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+  }
+
   return (
-    <Link
-      to="/projects/$projectId"
-      params={{ projectId: project.id }}
-      data-testid="project-item"
-      data-project-id={project.id}
-      data-active={isActive}
-      onContextMenu={onContextMenu}
+    <div className={cn(reorder && "cursor-grab", reorder?.dropClass)} {...reorder?.dragProps}>
+      <div
+        className={cn("flex items-center gap-1.5 rounded-md px-2 py-1.5", navStateClass(isActive))}
+      >
+        <button
+          type="button"
+          data-testid="project-sessions-toggle"
+          aria-label={`${sessionsExpanded ? "Collapse" : "Expand"} ${project.name} sessions`}
+          aria-expanded={sessionsExpanded}
+          title={`${sessionsExpanded ? "Collapse" : "Expand"} sessions`}
+          onClick={() => setSessionsExpanded((expanded) => !expanded)}
+          className="group relative size-6 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="block transition-all duration-150 group-hover:scale-75 group-hover:opacity-0">
+            <ProjectBadge project={project} isActive={isActive} />
+          </span>
+          <ChevronDown
+            className={cn(
+              "absolute inset-0 m-auto size-4 transition-all duration-150",
+              "scale-75 opacity-0 group-hover:scale-100 group-hover:opacity-100",
+              !sessionsExpanded && "-rotate-90",
+            )}
+            aria-hidden
+          />
+        </button>
+        <Link
+          to="/projects/$projectId"
+          params={{ projectId: project.id }}
+          data-testid="project-item"
+          data-project-id={project.id}
+          data-active={isActive}
+          onContextMenu={onContextMenu}
+          className="min-w-0 flex-1 truncate text-left text-sm"
+          title={project.repoPath}
+          data-feature-label={project.name}
+          data-feature-help={`Open the ${project.name} project workspace at ${project.repoPath}`}
+        >
+          {project.name}
+        </Link>
+        <ProjectAgentStatusRing status={agentStatus} />
+      </div>
+      {sessionsExpanded && agentSessions.length > 0 ? (
+        <div data-testid="project-sessions" className="ml-6 flex flex-col gap-0.5 py-1">
+          {agentSessions.map((session) => (
+            <button
+              type="button"
+              key={session.id}
+              data-testid="project-session"
+              onClick={() => openSession(session.id)}
+              className="flex min-w-0 items-center gap-2 rounded-md py-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <Bot className="size-3.5 shrink-0" aria-hidden />
+              <span className="truncate">{session.label}</span>
+              {session.wsKind ? <KindBadge kind={session.wsKind} /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+type ProjectAgentStatus = "empty" | "working" | "paused"
+
+function projectAgentStatus(
+  projectId: string,
+  activity: ReadonlyArray<{ projectId: string; state: "working" | "waiting" | "exited" }>,
+): ProjectAgentStatus {
+  const states = activity
+    .filter((record) => record.projectId === projectId)
+    .map((record) => record.state)
+  if (states.includes("working")) return "working"
+  if (states.includes("waiting")) return "paused"
+  return "empty"
+}
+
+function ProjectAgentStatusRing({ status }: { status: ProjectAgentStatus }) {
+  const title =
+    status === "empty"
+      ? "No active agents"
+      : status === "working"
+        ? "Agent working"
+        : "Agent paused"
+  return (
+    <span
+      data-testid="project-agent-status"
+      data-status={status}
+      title={title}
+      role="img"
+      aria-label={title}
       className={cn(
-        "truncate rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-        reorder && "cursor-grab",
-        reorder?.dropClass,
-        navStateClass(isActive),
+        "size-2 shrink-0 rounded-full border",
+        status === "empty" && "border-muted-foreground/50",
+        status === "working" && "border-emerald-500 bg-emerald-500",
+        status === "paused" && "border-red-500 bg-red-500",
       )}
-      title={project.repoPath}
-      {...reorder?.dragProps}
-    >
-      {project.name}
-    </Link>
+    />
+  )
+}
+
+function ProjectBadge({ project, isActive }: { project: Project; isActive: boolean }) {
+  const badgeClassName = cn(
+    "flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-medium uppercase",
+    isActive ? "bg-accent-foreground/10" : "bg-accent",
+  )
+
+  if (project.thumbnail) {
+    return (
+      <span aria-hidden className={badgeClassName}>
+        <img src={project.thumbnail} alt="" className="size-full object-cover" />
+      </span>
+    )
+  }
+
+  return (
+    <span aria-hidden className={badgeClassName}>
+      {project.name.trim().charAt(0) || "?"}
+    </span>
   )
 }
 
 /**
  * Fire the open-project test seam exactly once on mount when `?openProject` is
- * present (docs/testing-and-build.md). A ref guard survives React 19 StrictMode's double
+ * present (md/engineering/testing-and-build.md). A ref guard survives React 19 StrictMode's double
  * effect so the project is never opened twice.
  */
 function useOpenProjectSeam(open: (path: string) => void): void {

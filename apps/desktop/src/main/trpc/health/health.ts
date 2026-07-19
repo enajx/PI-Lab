@@ -5,7 +5,7 @@ import { publicProcedure, router } from "../trpc"
 
 /**
  * Liveness + DB-version probe. This is the contract the renderer's `app-ready`
- * marker and the smoke harness (docs/testing-and-build.md) assert against — proving the
+ * marker and the smoke harness (md/engineering/testing-and-build.md) assert against — proving the
  * whole path (renderer → IPC → main → SQLite) is wired before any feature
  * lands.
  */

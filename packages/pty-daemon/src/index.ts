@@ -1,4 +1,4 @@
-// Public surface of @skipper/pty-daemon. The server internals (SessionStore,
+// Public surface of @pi-lab/pty-daemon. The server internals (SessionStore,
 // Connection) are intentionally not exported; consumers use the client to talk
 // to a daemon, the protocol types to type their own frames, and `startDaemon`
 // to supervise one in-process when needed.

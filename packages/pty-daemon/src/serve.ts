@@ -1,10 +1,10 @@
 // Standalone entry point: run the PTY daemon as its own process so terminals
 // and agent sessions survive an Electron reload or restart. The Electron main
-// process spawns this as a child (passing SKIPPER_SOCKET_PATH), and tests run
+// process spawns this as a child (passing PI_LAB_SOCKET_PATH), and tests run
 // it the same way against a temp socket.
 //
-//   SKIPPER_SOCKET_PATH=/tmp/skipper.sock bun packages/pty-daemon/src/serve.ts
-//   node packages/pty-daemon/src/serve.ts /tmp/skipper.sock   (explicit arg wins)
+//   PI_LAB_SOCKET_PATH=/tmp/pi-lab.sock bun packages/pty-daemon/src/serve.ts
+//   node packages/pty-daemon/src/serve.ts /tmp/pi-lab.sock   (explicit arg wins)
 
 import { DaemonServer, resolveSocketPath } from "./server"
 

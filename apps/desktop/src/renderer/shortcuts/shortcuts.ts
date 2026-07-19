@@ -51,9 +51,16 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     defaultBinding: "Mod+s",
     editable: false,
   },
+  {
+    id: "run-python",
+    label: "Run Python file",
+    description: "Save and run the focused Python editor buffer",
+    defaultBinding: "Mod+Enter",
+    editable: false,
+  },
 ]
 
-const STORAGE_KEY = "skipper.shortcuts"
+const STORAGE_KEY = "pi-lab.shortcuts"
 type Bindings = Record<string, string>
 
 function readBindings(): Bindings {

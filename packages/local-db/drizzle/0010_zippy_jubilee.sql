@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `python_environment_path` text;

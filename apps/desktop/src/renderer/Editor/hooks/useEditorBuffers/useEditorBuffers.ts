@@ -1,6 +1,7 @@
-import type { EditorSettings } from "@skipper/local-db"
+import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { SkipperTrpcClient } from "../../../trpc/client"
+import type { PiLabTrpcClient } from "../../../trpc/client"
+import type { RouterOutputs } from "../../../trpc/types"
 import type { DiagnosticsSource } from "../../components/CodeMirrorBuffer"
 import {
   countDiagnostics,
@@ -38,25 +39,34 @@ interface DiagnosticsState {
   hasRun: boolean
 }
 
+export interface PythonRuntimeState {
+  runtime: RouterOutputs["python"]["resolve"] | null
+  checking: boolean
+  error: string | null
+}
+
 const STAT_POLL_MS = 1_500
+const PYTHON_ENV_RECHECK_MS = 3_000
 const AUTOSAVE_DEBOUNCE_MS = 800
 
-export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  autosave: false,
-  vim: false,
-  typeChecker: "ty",
-  formatOnSave: false,
-  editorTheme: "default",
-}
+export { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 
 const EMPTY_DIAGNOSTICS: DiagnosticsState = { result: null, checking: false, hasRun: false }
 const EMPTY_COUNTS: DiagnosticCounts = { errors: 0, warnings: 0, infos: 0 }
+const EMPTY_PYTHON_RUNTIME: PythonRuntimeState = {
+  runtime: null,
+  checking: false,
+  error: null,
+}
 
 export interface UseEditorBuffersArgs {
-  client: SkipperTrpcClient
+  client: PiLabTrpcClient
   workspaceId: string
   settings: EditorSettings
   onSaved?: (relPath: string) => void
+  /** In-memory buffers restored after temporarily leaving this project view. */
+  initialBuffers?: OpenBuffer[]
+  initialActiveRelPath?: string | null
 }
 
 export interface EditorBuffersApi {
@@ -68,13 +78,17 @@ export interface EditorBuffersApi {
   openFile: (relPath: string) => Promise<void>
   closeFile: (relPath: string) => void
   onEdit: (relPath: string, content: string) => void
-  saveFile: (relPath: string) => Promise<void>
+  saveFile: (relPath: string) => Promise<boolean>
   error: string | null
   tabs: { relPath: string; dirty: boolean }[]
   diagnosticsSource: DiagnosticsSource | undefined
   statusCounts: DiagnosticCounts
   statusMissing: string[]
   activeDiagnostics: DiagnosticsState
+  pythonRuntime: PythonRuntimeState
+  listPythonEnvironments: () => Promise<RouterOutputs["python"]["options"]>
+  selectPythonEnvironment: (path: string | null) => Promise<boolean>
+  choosePythonEnvironment: (kind: "directory" | "interpreter") => Promise<boolean>
   /** Save the active buffer on blur when autosave is on (tab/focus loss). */
   onBlurCapture: () => void
 }
@@ -85,18 +99,23 @@ export interface EditorBuffersApi {
  * project view's central panel hosts file tabs at the top level (with the file
  * tree in the right-sidebar Files panel) — both drive one buffer set through this
  * hook. Reads/writes go through the injected tRPC client so it stays testable with
- * the fake client (docs/testing-and-build.md).
+ * the fake client (md/engineering/testing-and-build.md).
  */
 export function useEditorBuffers({
   client,
   workspaceId,
   settings,
   onSaved,
+  initialBuffers,
+  initialActiveRelPath,
 }: UseEditorBuffersArgs): EditorBuffersApi {
-  const [buffers, setBuffers] = useState<OpenBuffer[]>([])
-  const [activeRelPath, setActiveRelPath] = useState<string | null>(null)
+  const [buffers, setBuffers] = useState<OpenBuffer[]>(() => initialBuffers ?? [])
+  const [activeRelPath, setActiveRelPath] = useState<string | null>(
+    () => initialActiveRelPath ?? null,
+  )
   const [error, setError] = useState<string | null>(null)
   const [diagnostics, setDiagnostics] = useState<Record<string, DiagnosticsState>>({})
+  const [pythonRuntime, setPythonRuntime] = useState<PythonRuntimeState>(EMPTY_PYTHON_RUNTIME)
 
   const buffersRef = useRef(buffers)
   buffersRef.current = buffers
@@ -104,8 +123,15 @@ export function useEditorBuffers({
   activeRef.current = activeRelPath
   const typeCheckerRef = useRef(settings.typeChecker)
   typeCheckerRef.current = settings.typeChecker
+  const diagnosticsEnabledRef = useRef(settings.diagnosticsEnabled)
+  diagnosticsEnabledRef.current = settings.diagnosticsEnabled
   const formatOnSaveRef = useRef(settings.formatOnSave)
   formatOnSaveRef.current = settings.formatOnSave
+  const wasPythonActiveRef = useRef(false)
+  const pythonRuntimeWorkspaceRef = useRef<string | null>(null)
+  const pythonRuntimeRequestRef = useRef(0)
+  const pythonLocalCheckInFlightRef = useRef(false)
+  const diagnosticsEpochRef = useRef(0)
 
   const active = buffers.find((buffer) => buffer.relPath === activeRelPath) ?? null
 
@@ -118,7 +144,8 @@ export function useEditorBuffers({
 
   const runDiagnostics = useCallback(
     async (relPath: string) => {
-      if (!isPythonPath(relPath)) return
+      if (!diagnosticsEnabledRef.current || !isPythonPath(relPath)) return
+      const epoch = diagnosticsEpochRef.current
       patchDiagnostics(relPath, { checking: true })
       try {
         const result = await runPythonCheck(client, {
@@ -126,14 +153,31 @@ export function useEditorBuffers({
           relPath,
           typeChecker: typeCheckerRef.current,
         })
+        // A check may finish after the user turns diagnostics off. Ignore that
+        // stale response; the disabling effect below has already cleared state.
+        if (!diagnosticsEnabledRef.current || diagnosticsEpochRef.current !== epoch) return
         if (result) patchDiagnostics(relPath, { result, checking: false, hasRun: true })
         else patchDiagnostics(relPath, { checking: false })
       } catch {
+        if (!diagnosticsEnabledRef.current || diagnosticsEpochRef.current !== epoch) return
         patchDiagnostics(relPath, { checking: false })
       }
     },
     [client, workspaceId, patchDiagnostics],
   )
+
+  // Turning diagnostics off removes existing lint markers/counts immediately.
+  // Turning them on checks the already-focused Python buffer without requiring
+  // the user to close/reopen or save it first.
+  useEffect(() => {
+    if (!settings.diagnosticsEnabled) {
+      diagnosticsEpochRef.current += 1
+      setDiagnostics({})
+      return
+    }
+    const relPath = activeRef.current
+    if (relPath && isPythonPath(relPath)) void runDiagnostics(relPath)
+  }, [settings.diagnosticsEnabled, runDiagnostics])
 
   const openFile = useCallback(
     async (relPath: string) => {
@@ -196,7 +240,7 @@ export function useEditorBuffers({
   const saveFile = useCallback(
     async (relPath: string) => {
       const buffer = buffersRef.current.find((b) => b.relPath === relPath)
-      if (!buffer) return
+      if (!buffer) return false
       setError(null)
       try {
         await client.files.write.mutate({ workspaceId, relPath, content: buffer.content })
@@ -243,11 +287,121 @@ export function useEditorBuffers({
 
         onSaved?.(relPath)
         void runDiagnostics(relPath)
+        return true
       } catch (cause) {
         setError(`Could not save ${relPath}: ${String(cause)}`)
+        return false
       }
     },
     [client, workspaceId, onSaved, runDiagnostics],
+  )
+
+  const refreshPythonRuntime = useCallback(async (): Promise<void> => {
+    pythonRuntimeRequestRef.current += 1
+    const requestId = pythonRuntimeRequestRef.current
+    setPythonRuntime((current) => ({ ...current, checking: true, error: null }))
+    try {
+      const runtime = await client.python.resolve.query({ workspaceId })
+      if (pythonRuntimeRequestRef.current === requestId) {
+        setPythonRuntime({ runtime, checking: false, error: null })
+      }
+    } catch (cause) {
+      if (pythonRuntimeRequestRef.current === requestId) {
+        setPythonRuntime({
+          runtime: null,
+          checking: false,
+          error: `Could not detect Python environment: ${String(cause)}`,
+        })
+      }
+    }
+  }, [client, workspaceId])
+
+  // Cache one full runtime result for this workspace while Python editing
+  // remains active. Leaving Python and returning triggers a fresh resolution.
+  useEffect(() => {
+    const pythonActive = activeRelPath !== null && isPythonPath(activeRelPath)
+    const shouldResolve =
+      pythonActive &&
+      (!wasPythonActiveRef.current || pythonRuntimeWorkspaceRef.current !== workspaceId)
+    wasPythonActiveRef.current = pythonActive
+    if (shouldResolve) {
+      pythonRuntimeWorkspaceRef.current = workspaceId
+      void refreshPythonRuntime()
+    }
+  }, [activeRelPath, refreshPythonRuntime, workspaceId])
+
+  // While a Python file stays open without an environment, cheaply check only
+  // the usual workspace directories. This notices a newly-created `.venv`
+  // without repeatedly running manager/PATH probes.
+  useEffect(() => {
+    const pythonActive = activeRelPath !== null && isPythonPath(activeRelPath)
+    if (!pythonActive || pythonRuntime.runtime?.source !== null || pythonRuntime.checking) return
+    const id = window.setInterval(() => {
+      if (pythonLocalCheckInFlightRef.current) return
+      pythonLocalCheckInFlightRef.current = true
+      const requestId = pythonRuntimeRequestRef.current
+      void client.python.resolveLocal
+        .query({ workspaceId })
+        .then((runtime) => {
+          if (runtime && pythonRuntimeRequestRef.current === requestId) {
+            setPythonRuntime({ runtime, checking: false, error: null })
+          }
+        })
+        .catch((cause) => {
+          if (pythonRuntimeRequestRef.current === requestId) {
+            setPythonRuntime((current) => ({
+              ...current,
+              error: `Could not recheck Python environment: ${String(cause)}`,
+            }))
+          }
+        })
+        .finally(() => {
+          pythonLocalCheckInFlightRef.current = false
+        })
+    }, PYTHON_ENV_RECHECK_MS)
+    return () => window.clearInterval(id)
+  }, [activeRelPath, client, pythonRuntime.checking, pythonRuntime.runtime?.source, workspaceId])
+
+  const listPythonEnvironments = useCallback(
+    () => client.python.options.query({ workspaceId }),
+    [client, workspaceId],
+  )
+
+  const selectPythonEnvironment = useCallback(
+    async (path: string | null): Promise<boolean> => {
+      pythonRuntimeRequestRef.current += 1
+      const requestId = pythonRuntimeRequestRef.current
+      setPythonRuntime((current) => ({ ...current, checking: true, error: null }))
+      try {
+        const runtime = await client.python.select.mutate({ workspaceId, path })
+        if (pythonRuntimeRequestRef.current === requestId) {
+          setPythonRuntime({ runtime, checking: false, error: null })
+        }
+        return true
+      } catch (cause) {
+        if (pythonRuntimeRequestRef.current === requestId) {
+          setPythonRuntime((current) => ({
+            ...current,
+            checking: false,
+            error: `Could not select Python environment: ${String(cause)}`,
+          }))
+        }
+        return false
+      }
+    },
+    [client, workspaceId],
+  )
+
+  const choosePythonEnvironment = useCallback(
+    async (kind: "directory" | "interpreter"): Promise<boolean> => {
+      const path =
+        kind === "directory"
+          ? await client.system.pickDirectory.mutate()
+          : await client.system.pickFile.mutate()
+      if (!path) return true
+      return selectPythonEnvironment(path)
+    },
+    [client, selectPythonEnvironment],
   )
 
   // Poll the active file's fingerprint to spot agent/git edits.
@@ -290,14 +444,17 @@ export function useEditorBuffers({
 
   const activeResult = active ? (diagnostics[active.relPath]?.result ?? null) : null
   const diagnosticsSource = useMemo<DiagnosticsSource | undefined>(() => {
-    if (!active || !isPythonPath(active.relPath) || !activeResult) return undefined
+    if (!settings.diagnosticsEnabled || !active || !isPythonPath(active.relPath) || !activeResult) {
+      return undefined
+    }
     const list = activeResult.diagnostics
     return (doc: string) => toCmDiagnostics(doc, list)
-  }, [active, activeResult])
+  }, [active, activeResult, settings.diagnosticsEnabled])
 
-  const activeDiagnostics = active
-    ? (diagnostics[active.relPath] ?? EMPTY_DIAGNOSTICS)
-    : EMPTY_DIAGNOSTICS
+  const activeDiagnostics =
+    settings.diagnosticsEnabled && active
+      ? (diagnostics[active.relPath] ?? EMPTY_DIAGNOSTICS)
+      : EMPTY_DIAGNOSTICS
   const statusCounts = activeDiagnostics.result
     ? countDiagnostics(activeDiagnostics.result.diagnostics)
     : EMPTY_COUNTS
@@ -318,6 +475,10 @@ export function useEditorBuffers({
     statusCounts,
     statusMissing,
     activeDiagnostics,
+    pythonRuntime,
+    listPythonEnvironments,
+    selectPythonEnvironment,
+    choosePythonEnvironment,
     onBlurCapture,
   }
 }
@@ -328,7 +489,7 @@ export function useEditorBuffers({
  * doc (bump `epoch` to remount the view). Changed + dirty ⇒ flag `externalChange`.
  */
 async function reconcileExternal(
-  client: SkipperTrpcClient,
+  client: PiLabTrpcClient,
   workspaceId: string,
   buffer: OpenBuffer,
   setBuffers: React.Dispatch<React.SetStateAction<OpenBuffer[]>>,

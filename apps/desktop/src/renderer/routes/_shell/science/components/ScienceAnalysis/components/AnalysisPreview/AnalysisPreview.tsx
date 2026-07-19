@@ -1,4 +1,4 @@
-import { DATA_FILE_KIND_LABELS } from "@skipper/shared"
+import { DATA_FILE_KIND_LABELS } from "@pi-lab/shared"
 import { useQuery } from "@tanstack/react-query"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTRPC } from "../../../../../../../trpc/react"

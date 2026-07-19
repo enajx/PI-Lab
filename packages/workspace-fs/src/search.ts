@@ -1,5 +1,5 @@
 import { relative } from "node:path"
-import { fuzzyScore } from "@skipper/shared"
+import { fuzzyScore } from "@pi-lab/shared"
 import { type WalkOptions, walkFiles } from "./fs"
 
 /** A single ranked search hit. */

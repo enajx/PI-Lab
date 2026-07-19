@@ -7,13 +7,14 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
+import { writeProjectWorkspaceState } from "../../projects/-workspaceState"
 import { Sidebar } from "./Sidebar"
 
 /**
- * Component test for the left sidebar (docs/testing-and-build.md). Mounts the
+ * Component test for the left sidebar (md/engineering/testing-and-build.md). Mounts the
  * real `Sidebar` under the app providers + a memory router (so its `<Link>`s
  * resolve) with a faked tRPC client. jsdom suffices — the sidebar is plain DOM
  * (no Radix). We cover the unified workspace nav (Workflows still reachable), the
@@ -42,18 +43,20 @@ function renderSidebar(handlers: FakeHandlers = {}) {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   })
 
-  return render(
+  const result = render(
     <AppProviders client={client} queryClient={queryClient}>
       {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
       <RouterProvider router={router as any} />
     </AppProviders>,
   )
+  return { ...result, router }
 }
 
 describe("Sidebar", () => {
   // Reset persisted layout prefs (nav/project order) so tests don't bleed order.
   beforeEach(() => {
     window.localStorage.clear()
+    vi.unstubAllGlobals()
   })
 
   test("the Add-project trigger opens a menu with three options", async () => {
@@ -124,8 +127,85 @@ describe("Sidebar", () => {
     expect(screen.getAllByTestId("science-nav-item").length).toBeGreaterThan(0)
   })
 
+  test("Projects Dashboard navigation uses the home route", async () => {
+    const { router } = renderSidebar({
+      "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],
+    })
+    await waitFor(() => expect(screen.getByTestId("project-item")).toBeTruthy())
+
+    const projectsDashboard = screen.getByTestId("nav-dashboard")
+    expect(projectsDashboard.textContent).toContain("Projects Dashboard")
+    expect(projectsDashboard.parentElement?.className).toContain("border-b")
+    expect(screen.getByTestId("project-agent-status").getAttribute("data-status")).toBe("empty")
+    fireEvent.click(screen.getByTestId("project-item"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/a"))
+
+    fireEvent.click(screen.getByTestId("nav-project-dashboard"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"))
+  })
+
+  test("a project’s sidebar ring reflects its active agent state", async () => {
+    renderSidebar({
+      "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],
+      "sessions.activity": () => [{ projectId: "a", state: "working" }],
+    })
+    await waitFor(() => expect(screen.getByTestId("project-agent-status")).toBeTruthy())
+
+    expect(screen.getByTestId("project-agent-status").getAttribute("data-status")).toBe("working")
+  })
+
+  test("an expanded project row uses its thumbnail as the project badge", async () => {
+    const { container } = renderSidebar({
+      "projects.list": () => [
+        {
+          id: "a",
+          name: "Alpha",
+          repoPath: "/a",
+          thumbnail: "data:image/png;base64,AA==",
+        },
+      ],
+    })
+    await waitFor(() => expect(screen.getByTestId("project-item")).toBeTruthy())
+
+    const thumbnail = container.querySelector('[data-testid="project-sessions-toggle"] img')
+    expect(thumbnail?.getAttribute("src")).toBe("data:image/png;base64,AA==")
+  })
+
+  test("the project badge toggles direct session links and a session opens in its project", async () => {
+    writeProjectWorkspaceState("sessions-project", {
+      buffers: [],
+      activeRelPath: null,
+      sessions: [
+        {
+          id: "pane-1",
+          kind: "agent",
+          sessionId: "session-1",
+          label: "Claude Code",
+          wsKind: "branch",
+        },
+        { id: "pane-2", kind: "terminal", sessionId: "session-2", label: "Terminal" },
+      ],
+      active: null,
+      belowEditorRun: null,
+    })
+    const { router } = renderSidebar({
+      "projects.list": () => [{ id: "sessions-project", name: "Alpha", repoPath: "/a" }],
+    })
+    await waitFor(() => expect(screen.getByTestId("project-session")).toBeTruthy())
+    expect(screen.getByTestId("project-sessions").textContent).toContain("Claude Code")
+    expect(screen.getByTestId("project-sessions").textContent).toContain("main")
+    expect(screen.getByTestId("project-sessions").textContent).not.toContain("Terminal")
+
+    fireEvent.click(screen.getByTestId("project-sessions-toggle"))
+    expect(screen.queryByTestId("project-sessions")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("project-sessions-toggle"))
+    fireEvent.click(screen.getByTestId("project-session"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/sessions-project"))
+  })
+
   test("projects render in the persisted order, with new ids appended", async () => {
-    window.localStorage.setItem("skipper.sidebar.projectOrder", JSON.stringify(["c", "a"]))
+    window.localStorage.setItem("pi-lab.sidebar.projectOrder", JSON.stringify(["c", "a"]))
     renderSidebar({
       "projects.list": () => [
         { id: "a", name: "Alpha", repoPath: "/a" },
@@ -142,32 +222,103 @@ describe("Sidebar", () => {
     expect(ids).toEqual(["c", "a", "b"])
   })
 
-  test("the theme-aware app logo renders in the title bar (light theme by default)", async () => {
-    renderSidebar()
-    await waitFor(() => expect(screen.getByTestId("sidebar-app-logo")).toBeTruthy())
-
-    const src = screen.getByTestId("sidebar-app-logo").getAttribute("src") ?? ""
-    // Light theme picks the dark-on-light glyph, not its negative.
-    expect(src).toContain("icon_bw")
-    expect(src).not.toContain("negative")
+  test("the title-bar app icon is absent across all theme modes", async () => {
+    for (const mode of ["light", "dark", "system"] as const) {
+      window.localStorage.setItem("pi-lab.theme", mode)
+      const { unmount } = renderSidebar()
+      await waitFor(() => expect(screen.getByTestId("app-sidebar")).toBeTruthy())
+      expect(screen.queryByTestId("sidebar-app-logo")).toBeNull()
+      unmount()
+    }
   })
 
-  test("the app logo swaps to the negative variant in the dark theme", async () => {
-    window.localStorage.setItem("skipper.theme", "dark")
-    renderSidebar()
-    await waitFor(() => expect(screen.getByTestId("sidebar-app-logo")).toBeTruthy())
-
-    const src = screen.getByTestId("sidebar-app-logo").getAttribute("src") ?? ""
-    expect(src).toContain("icon_bw_negative")
-  })
-
-  test("the app logo still renders when the sidebar is collapsed", async () => {
-    window.localStorage.setItem("skipper.sidebar.collapsed", "true")
+  test("the title-bar app icon stays absent when the sidebar is collapsed", async () => {
+    window.localStorage.setItem("pi-lab.sidebar.collapsed", "true")
     renderSidebar()
     await waitFor(() => expect(screen.getByTestId("app-sidebar")).toBeTruthy())
 
     expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("true")
-    expect(screen.getByTestId("sidebar-app-logo")).toBeTruthy()
+    expect(screen.queryByTestId("sidebar-app-logo")).toBeNull()
+  })
+
+  test("keeps one accessible collapse control in the old logo position for both layouts", async () => {
+    renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("sidebar-titlebar")).toBeTruthy())
+
+    const titlebar = screen.getByTestId("sidebar-titlebar")
+    const navBody = screen.getByTestId("sidebar-nav-body")
+    const collapse = screen.getByRole("button", { name: "Collapse sidebar" })
+
+    expect(screen.getAllByTestId("sidebar-collapse-toggle")).toHaveLength(1)
+    expect(titlebar.contains(collapse)).toBe(true)
+    expect(navBody.contains(collapse)).toBe(false)
+    expect(titlebar.className).not.toContain("justify-center")
+    expect(collapse.className).toContain("ml-auto")
+    expect(collapse.className).toContain("app-no-drag")
+
+    fireEvent.click(collapse)
+    const expand = await screen.findByRole("button", { name: "Expand sidebar" })
+
+    expect(screen.getAllByTestId("sidebar-collapse-toggle")).toHaveLength(1)
+    expect(screen.getByTestId("sidebar-titlebar").contains(expand)).toBe(true)
+    expect(screen.getByTestId("sidebar-nav-body").contains(expand)).toBe(false)
+    expect(screen.getByTestId("sidebar-titlebar").className).toContain("justify-center")
+    expect(expand.className).not.toContain("ml-auto")
+    expect(expand.className).toContain("app-no-drag")
+    expect(expand.getAttribute("aria-pressed")).toBe("true")
+  })
+
+  test("shows app-wide feature help for hovered and focused controls by default", async () => {
+    renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("sidebar-feature-help")).toBeTruthy())
+
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Hover over or focus a control to learn what it does.",
+    )
+
+    const cluster = screen
+      .getAllByTestId("science-nav-item")
+      .find((item) => item.getAttribute("data-science-tab") === "cluster")
+    if (!cluster) throw new Error("Cluster nav item missing")
+
+    fireEvent.pointerOver(cluster)
+    expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe("Cluster")
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Monitor compute machines from your SSH config, including reachability and hardware usage.",
+    )
+
+    fireEvent.pointerOut(cluster)
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Hover over or focus a control to learn what it does.",
+    )
+
+    const collapse = screen.getByTestId("sidebar-collapse-toggle")
+    fireEvent.focus(collapse)
+    expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe("Collapse sidebar")
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Collapse the sidebar to its compact icon rail",
+    )
+  })
+
+  test("persists hiding feature help and leaves a compact restore control", async () => {
+    renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("sidebar-feature-help")).toBeTruthy())
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide feature help" }))
+    expect(screen.queryByTestId("sidebar-feature-help")).toBeNull()
+    expect(window.localStorage.getItem("pi-lab.sidebar.showFeatureHelp")).toBe("false")
+
+    fireEvent.click(screen.getByRole("button", { name: "Show feature help" }))
+    expect(screen.getByTestId("sidebar-feature-help")).toBeTruthy()
+    expect(window.localStorage.getItem("pi-lab.sidebar.showFeatureHelp")).toBe("true")
+  })
+
+  test("keeps the feature-help card out of the collapsed icon rail", async () => {
+    window.localStorage.setItem("pi-lab.sidebar.collapsed", "true")
+    renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("app-sidebar")).toBeTruthy())
+
+    expect(screen.queryByTestId("sidebar-feature-help")).toBeNull()
   })
 
   test("right-clicking a project opens a menu that removes it from the app", async () => {

@@ -1,6 +1,6 @@
 // Integration tests for the template router via createCallerFactory over a temp
-// data dir (SKIPPER_DATA_DIR points at the harness temp). The writable template is
-// seeded lazily from the bundled `apps/desktop/resources/template` (docs/testing-and-build.md).
+// data dir (PI_LAB_DATA_DIR points at the harness temp). The writable template is
+// seeded lazily from the bundled `apps/desktop/resources/template` (md/engineering/testing-and-build.md).
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"

@@ -1,5 +1,5 @@
 // Integration tests for the projects router via createCallerFactory over a temp
-// SQLite DB with real migrations and a real temp git repo (docs/testing-and-build.md).
+// SQLite DB with real migrations and a real temp git repo (md/engineering/testing-and-build.md).
 import { execFile } from "node:child_process"
 import {
   lstat,
@@ -25,13 +25,13 @@ const execFileAsync = promisify(execFile)
 /**
  * A self-contained git identity for `createFromTemplate`'s seed commit so the
  * suite is hermetic — it never reads (or needs) a global `git config user.*`,
- * which CI does not set (docs/testing-and-build.md).
+ * which CI does not set (md/engineering/testing-and-build.md).
  */
 const GIT_IDENTITY = {
-  GIT_AUTHOR_NAME: "Skipper Test",
-  GIT_AUTHOR_EMAIL: "test@skipper.local",
-  GIT_COMMITTER_NAME: "Skipper Test",
-  GIT_COMMITTER_EMAIL: "test@skipper.local",
+  GIT_AUTHOR_NAME: "PI Lab Test",
+  GIT_AUTHOR_EMAIL: "test@pi-lab.local",
+  GIT_COMMITTER_NAME: "PI Lab Test",
+  GIT_COMMITTER_EMAIL: "test@pi-lab.local",
 }
 
 /**
@@ -40,12 +40,12 @@ const GIT_IDENTITY = {
  * a conventional `.git` suffix); it lands inside a fresh temp parent.
  */
 async function makeSourceRepo(name = "source"): Promise<string> {
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "skipper-src-")))
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-src-")))
   const dir = join(parent, name)
   await execFileAsync("git", ["init", "-b", "main", dir])
   const run = (args: string[]) => execFileAsync("git", ["-C", dir, ...args])
-  await run(["config", "user.email", "test@skipper.local"])
-  await run(["config", "user.name", "Skipper Test"])
+  await run(["config", "user.email", "test@pi-lab.local"])
+  await run(["config", "user.name", "PI Lab Test"])
   await writeFile(join(dir, "README.md"), "# source\n")
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
@@ -59,7 +59,7 @@ async function makeSourceRepo(name = "source"): Promise<string> {
  * Returns its canonical path.
  */
 async function makeTemplate(): Promise<string> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "skipper-tpl-src-")))
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-tpl-src-")))
   await writeFile(join(dir, "README.md"), "# template\n")
   await writeFile(join(dir, "AGENTS.md"), "# agents\n")
   await symlink("AGENTS.md", join(dir, "CLAUDE.md"))
@@ -102,7 +102,7 @@ describe("projects.open", () => {
   })
 
   test("a non-git directory is a clean BAD_REQUEST", async () => {
-    const plain = await mkdtemp(join(tmpdir(), "skipper-plain-"))
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-"))
     await expect(h.caller.projects.open({ path: plain })).rejects.toMatchObject({
       code: "BAD_REQUEST",
     })
@@ -120,7 +120,7 @@ describe("projects.open", () => {
 describe("projects.clone", () => {
   test("clones a local source repo and stores the project", async () => {
     const source = await makeSourceRepo()
-    const parentDir = await mkdtemp(join(tmpdir(), "skipper-clones-"))
+    const parentDir = await mkdtemp(join(tmpdir(), "pi-lab-clones-"))
 
     const project = await h.caller.projects.clone({ url: source, parentDir })
 
@@ -136,7 +136,7 @@ describe("projects.clone", () => {
     // A source whose directory name ends in `.git` (the conventional remote
     // form) so the derived folder name must have that suffix stripped.
     const source = await makeSourceRepo("study.git")
-    const parentDir = await mkdtemp(join(tmpdir(), "skipper-clones-"))
+    const parentDir = await mkdtemp(join(tmpdir(), "pi-lab-clones-"))
 
     const project = await h.caller.projects.clone({ url: source, parentDir })
     expect(project.name).toBe("study")
@@ -145,7 +145,7 @@ describe("projects.clone", () => {
 
   test("refuses to clobber an existing target directory", async () => {
     const source = await makeSourceRepo()
-    const parentDir = await mkdtemp(join(tmpdir(), "skipper-clones-"))
+    const parentDir = await mkdtemp(join(tmpdir(), "pi-lab-clones-"))
     await h.caller.projects.clone({ url: source, parentDir })
 
     await expect(h.caller.projects.clone({ url: source, parentDir })).rejects.toMatchObject({
@@ -156,7 +156,7 @@ describe("projects.clone", () => {
   })
 
   test("a bad remote is a clean BAD_REQUEST", async () => {
-    const parentDir = await mkdtemp(join(tmpdir(), "skipper-clones-"))
+    const parentDir = await mkdtemp(join(tmpdir(), "pi-lab-clones-"))
     await expect(
       h.caller.projects.clone({
         url: join(parentDir, "does-not-exist-repo"),
@@ -170,7 +170,7 @@ describe("projects.clone", () => {
 describe("projects.createFromTemplate", () => {
   test("copies the template in, skips cruft, inits a repo, and stores the project", async () => {
     const templateDir = await makeTemplate()
-    const parent = await mkdtemp(join(tmpdir(), "skipper-tpl-"))
+    const parent = await mkdtemp(join(tmpdir(), "pi-lab-tpl-"))
     const targetDir = join(parent, "study")
 
     const project = await h.caller.projects.createFromTemplate({ targetDir, templateDir })
@@ -203,7 +203,7 @@ describe("projects.createFromTemplate", () => {
   test("accepts an existing empty target directory", async () => {
     const templateDir = await makeTemplate()
     // mkdtemp yields a real, empty directory — copying into it is allowed.
-    const targetDir = await mkdtemp(join(tmpdir(), "skipper-tpl-"))
+    const targetDir = await mkdtemp(join(tmpdir(), "pi-lab-tpl-"))
 
     const project = await h.caller.projects.createFromTemplate({ targetDir, templateDir })
     expect(await isGitRepo(project.repoPath)).toBe(true)
@@ -212,7 +212,7 @@ describe("projects.createFromTemplate", () => {
 
   test("refuses to clobber a non-empty target", async () => {
     const templateDir = await makeTemplate()
-    const targetDir = await mkdtemp(join(tmpdir(), "skipper-tpl-"))
+    const targetDir = await mkdtemp(join(tmpdir(), "pi-lab-tpl-"))
     await writeFile(join(targetDir, "keep.txt"), "do not overwrite me")
 
     await expect(
@@ -222,7 +222,7 @@ describe("projects.createFromTemplate", () => {
   })
 
   test("a missing template directory is a clean NOT_FOUND", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "skipper-tpl-"))
+    const parent = await mkdtemp(join(tmpdir(), "pi-lab-tpl-"))
 
     await expect(
       h.caller.projects.createFromTemplate({
@@ -241,7 +241,7 @@ describe("projects.createFromTemplate", () => {
     await mkdir(writable, { recursive: true })
     await writeFile(join(writable, "MARKER.md"), "# from writable template\n")
 
-    const parent = await mkdtemp(join(tmpdir(), "skipper-tpl-"))
+    const parent = await mkdtemp(join(tmpdir(), "pi-lab-tpl-"))
     const targetDir = join(parent, "study")
 
     const project = await h.caller.projects.createFromTemplate({ targetDir })

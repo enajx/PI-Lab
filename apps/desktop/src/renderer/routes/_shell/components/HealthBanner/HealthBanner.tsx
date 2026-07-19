@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 import { useTRPC } from "../../../../trpc/react"
 
 /**
- * Boot/health gate (git history (build phases) P3, docs/testing-and-build.md). Proves the full path — renderer →
+ * Boot/health gate (git history (build phases) P3, md/engineering/testing-and-build.md). Proves the full path — renderer →
  * TanStack Query → tRPC-React → IPC → main → SQLite — by reading `health.ping`
  * and `health.dbVersion` through the Query layer, then **gates the home content
  * on it**: until both reads resolve it shows a loading/error state; once ready it
@@ -21,7 +21,7 @@ export function HealthBanner({ children }: { children?: ReactNode }) {
     const message = (ping.error ?? dbVersion.error)?.message ?? "Unknown error"
     return (
       <section data-testid="app-error" className="flex flex-col gap-2 p-8">
-        <h1 className="font-semibold text-xl">Skipper failed to start</h1>
+        <h1 className="font-semibold text-xl">PI Lab failed to start</h1>
         {/* Error text must stay selectable (AGENTS.md Pitfalls #7). */}
         <pre className="cursor-text select-text whitespace-pre-wrap text-destructive text-sm">
           {message}
@@ -33,7 +33,7 @@ export function HealthBanner({ children }: { children?: ReactNode }) {
   if (ping.isPending || dbVersion.isPending) {
     return (
       <section data-testid="app-loading" className="p-8 text-muted-foreground text-sm">
-        Starting Skipper…
+        Starting PI Lab…
       </section>
     )
   }
@@ -55,7 +55,7 @@ export function HealthBanner({ children }: { children?: ReactNode }) {
         data-health-echo={ping.data.echo}
         className="sr-only"
       >
-        Skipper ready
+        PI Lab ready
       </span>
       {children}
     </div>

@@ -1,4 +1,4 @@
-import { projects, type SkipperDatabase } from "@skipper/local-db"
+import { type PiLabDatabase, projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
@@ -22,7 +22,7 @@ import {
  * Both procedures resolve the project's repo path from the injected Drizzle
  * handle, then delegate to the plain, filesystem-only functions in `./discover`.
  * `preview` jails its `relPath` to the repo via the shared {@link resolveInsideDir}
- * guard (docs/architecture.md (process model) — path-traversal). Mounted as `science.analysis.*`.
+ * guard (md/engineering/architecture.md (process model) — path-traversal). Mounted as `science.analysis.*`.
  */
 
 const listInput = z.object({
@@ -37,7 +37,7 @@ const previewInput = z.object({
 })
 
 /** Resolve a project's repo path from the store or throw a clean NOT_FOUND. */
-function requireRepoPath(db: SkipperDatabase, projectId: string): string {
+function requireRepoPath(db: PiLabDatabase, projectId: string): string {
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get()
   if (!project) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${projectId}` })

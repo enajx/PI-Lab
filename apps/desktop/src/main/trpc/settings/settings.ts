@@ -1,22 +1,30 @@
 import {
+  type AgentSettings,
+  agentSettings,
+  type CaffeineSettings,
+  DEFAULT_CAFFEINE_SETTINGS,
   DEFAULT_EDITOR_SETTINGS,
+  DEFAULT_NOTIFICATION_SETTINGS,
   type EditorSettings,
+  getAgentSettingsOrDefaults,
   getSettingsOrDefaults,
+  type NotificationEventSettings,
+  type NotificationSettings,
+  type PiLabDatabase,
   SETTINGS_ROW_ID,
   type Settings,
-  type SkipperDatabase,
   settings,
-} from "@skipper/local-db"
+} from "@pi-lab/local-db"
 import { z } from "zod"
 import { publicProcedure, router } from "../trpc"
 
 /**
- * Settings router — read/write the singleton app-config row (docs/architecture.md (renderer)
+ * Settings router — read/write the singleton app-config row (md/engineering/architecture.md (renderer)
  * "Settings"). v1 exposes the editor-preferences slice the built-in editor needs
  * (autosave / vim / type checker / format-on-save; AGENTS.md "Scope", TODO "Built-in
  * editor"); other settings groups mount here as later phases wire their UIs.
  *
- * The router stays thin (docs/testing-and-build.md): `get` reads through
+ * The router stays thin (md/engineering/testing-and-build.md): `get` reads through
  * {@link getSettingsOrDefaults} (defaults when no row exists yet, never writes),
  * and `updateEditor` upserts the single row with the new `editor` blob. The logic
  * lives in the plain {@link writeEditorSettings} function so it is
@@ -24,12 +32,42 @@ import { publicProcedure, router } from "../trpc"
  */
 
 /** Validation for an editor-settings patch — all fields optional, merged onto current. */
+const importedThemeColor = z.string().regex(/^#[0-9a-f]{3,4}(?:[0-9a-f]{3,4})?$/iu)
+const importedTheme = z.object({
+  id: z.string().startsWith("custom:").max(160),
+  name: z.string().min(1).max(100),
+  mode: z.enum(["light", "dark"]),
+  colors: z.object({
+    background: importedThemeColor,
+    foreground: importedThemeColor,
+    caret: importedThemeColor.optional(),
+    selection: importedThemeColor.optional(),
+    selectionMatch: importedThemeColor.optional(),
+    lineHighlight: importedThemeColor.optional(),
+    gutterBackground: importedThemeColor.optional(),
+    gutterForeground: importedThemeColor.optional(),
+    activeLineNumber: importedThemeColor.optional(),
+  }),
+  tokenColors: z
+    .array(
+      z.object({
+        scopes: z.array(z.string().min(1).max(160)).max(64),
+        foreground: importedThemeColor.optional(),
+        fontStyle: z.string().max(32).optional(),
+      }),
+    )
+    .max(512),
+})
+
 const editorPatch = z.object({
   autosave: z.boolean().optional(),
   vim: z.boolean().optional(),
+  diagnosticsEnabled: z.boolean().optional(),
   typeChecker: z.enum(["ty", "pyrefly"]).optional(),
   formatOnSave: z.boolean().optional(),
   editorTheme: z.string().optional(),
+  customEditorThemes: z.array(importedTheme).max(100).optional(),
+  pythonRunDestination: z.enum(["central", "below-editor"]).optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */
@@ -38,6 +76,45 @@ const generalPatch = z.object({
   confirmOnQuit: z.boolean().optional(),
 })
 
+const agentsPatch = z.object({
+  projectConfigStorage: z.enum(["app", "project", "both"]).optional(),
+  executableOverrides: z.record(z.string(), z.string().trim()).optional(),
+  setupCompleted: z.boolean().optional(),
+})
+
+/** Runtime validation for one notification event's partial settings patch. */
+const notificationEventPatch = z.object({
+  enabled: z.boolean().optional(),
+  sound: z.enum(["chime", "pulse", "success", "alert", "silent"]).optional(),
+})
+
+/**
+ * Validation for notification settings. Event objects are partial too, so a
+ * toggle or sound picker can update its own value without clobbering the other.
+ */
+const notificationsPatch = z.object({
+  muted: z.boolean().optional(),
+  agentInput: notificationEventPatch.optional(),
+  agentTurnCompletion: notificationEventPatch.optional(),
+  terminalCompletion: notificationEventPatch.optional(),
+  workflowStart: notificationEventPatch.optional(),
+  workflowCompletion: notificationEventPatch.optional(),
+  workflowFailure: notificationEventPatch.optional(),
+})
+
+type NotificationEventPatch = Partial<NotificationEventSettings>
+
+/** A deep partial of the notification settings group. */
+export interface NotificationSettingsPatch {
+  muted?: boolean
+  agentInput?: NotificationEventPatch
+  agentTurnCompletion?: NotificationEventPatch
+  terminalCompletion?: NotificationEventPatch
+  workflowStart?: NotificationEventPatch
+  workflowCompletion?: NotificationEventPatch
+  workflowFailure?: NotificationEventPatch
+}
+
 /**
  * Merge an editor-settings patch onto the current row and persist it, upserting
  * the singleton row (id=1) so a fresh DB with no settings row still saves. The
@@ -45,7 +122,7 @@ const generalPatch = z.object({
  * Returns the full, persisted {@link EditorSettings}.
  */
 export function writeEditorSettings(
-  db: SkipperDatabase,
+  db: PiLabDatabase,
   patch: Partial<EditorSettings>,
 ): EditorSettings {
   const current = getSettingsOrDefaults(db).editor ?? DEFAULT_EDITOR_SETTINGS
@@ -70,10 +147,7 @@ export type GeneralSettings = Pick<Settings, "worktreePerAgent" | "confirmOnQuit
  * are written and any omitted field keeps its current value. Returns the full,
  * persisted {@link Settings} row.
  */
-export function writeGeneralSettings(
-  db: SkipperDatabase,
-  patch: Partial<GeneralSettings>,
-): Settings {
+export function writeGeneralSettings(db: PiLabDatabase, patch: Partial<GeneralSettings>): Settings {
   const current = getSettingsOrDefaults(db)
   const next: GeneralSettings = {
     worktreePerAgent: patch.worktreePerAgent ?? current.worktreePerAgent,
@@ -89,9 +163,84 @@ export function writeGeneralSettings(
   return getSettingsOrDefaults(db)
 }
 
+export function writeAgentSettings(
+  db: PiLabDatabase,
+  patch: Partial<AgentSettings>,
+): AgentSettings {
+  const current = getAgentSettingsOrDefaults(db)
+  const next: AgentSettings = {
+    projectConfigStorage: patch.projectConfigStorage ?? current.projectConfigStorage,
+    executableOverrides: patch.executableOverrides ?? current.executableOverrides,
+    setupCompleted: patch.setupCompleted ?? current.setupCompleted,
+  }
+  db.insert(agentSettings)
+    .values({ id: SETTINGS_ROW_ID, ...next, updatedAt: Date.now() })
+    .onConflictDoUpdate({
+      target: agentSettings.id,
+      set: { ...next, updatedAt: Date.now() },
+    })
+    .run()
+  return next
+}
+
+/**
+ * Deep-merge and persist notification preferences on the singleton settings
+ * row. The event-level merge is intentional: changing a sound must retain that
+ * event's enablement and vice versa.
+ */
+export function writeNotificationSettings(
+  db: PiLabDatabase,
+  patch: NotificationSettingsPatch,
+): NotificationSettings {
+  const current = getSettingsOrDefaults(db).notifications ?? DEFAULT_NOTIFICATION_SETTINGS
+  const next: NotificationSettings = {
+    muted: patch.muted ?? current.muted,
+    agentInput: { ...current.agentInput, ...patch.agentInput },
+    agentTurnCompletion: {
+      ...current.agentTurnCompletion,
+      ...patch.agentTurnCompletion,
+    },
+    terminalCompletion: { ...current.terminalCompletion, ...patch.terminalCompletion },
+    workflowStart: { ...current.workflowStart, ...patch.workflowStart },
+    workflowCompletion: { ...current.workflowCompletion, ...patch.workflowCompletion },
+    workflowFailure: { ...current.workflowFailure, ...patch.workflowFailure },
+  }
+  db.insert(settings)
+    .values({ id: SETTINGS_ROW_ID, notifications: next, updatedAt: Date.now() })
+    .onConflictDoUpdate({
+      target: settings.id,
+      set: { notifications: next, updatedAt: Date.now() },
+    })
+    .run()
+  return next
+}
+
+/**
+ * Merge and persist caffeine preferences. Exported so the caffeine controller's
+ * mutation can save the choice before immediately reconciling its blocker.
+ */
+export function writeCaffeineSettings(
+  db: PiLabDatabase,
+  patch: Partial<CaffeineSettings>,
+): CaffeineSettings {
+  const current = getSettingsOrDefaults(db).caffeine ?? DEFAULT_CAFFEINE_SETTINGS
+  const next: CaffeineSettings = { ...current, ...patch }
+  db.insert(settings)
+    .values({ id: SETTINGS_ROW_ID, caffeine: next, updatedAt: Date.now() })
+    .onConflictDoUpdate({
+      target: settings.id,
+      set: { caffeine: next, updatedAt: Date.now() },
+    })
+    .run()
+  return next
+}
+
 export const settingsRouter = router({
   /** The current settings row, or schema defaults when none has been persisted. */
-  get: publicProcedure.query(({ ctx }): Settings => getSettingsOrDefaults(ctx.db)),
+  get: publicProcedure.query(({ ctx }): Settings & { agents: AgentSettings } => ({
+    ...getSettingsOrDefaults(ctx.db),
+    agents: getAgentSettingsOrDefaults(ctx.db),
+  })),
 
   /**
    * Patch the built-in editor preferences (TODO "Built-in editor"). Returns the
@@ -109,4 +258,16 @@ export const settingsRouter = router({
   updateGeneral: publicProcedure
     .input(generalPatch)
     .mutation(({ ctx, input }): Settings => writeGeneralSettings(ctx.db, input)),
+
+  updateAgents: publicProcedure
+    .input(agentsPatch)
+    .mutation(({ ctx, input }): AgentSettings => writeAgentSettings(ctx.db, input)),
+
+  /**
+   * Patch global notification mute, per-event enablement, and bundled sound
+   * choices. Returns the full persisted notification group.
+   */
+  updateNotifications: publicProcedure
+    .input(notificationsPatch)
+    .mutation(({ ctx, input }): NotificationSettings => writeNotificationSettings(ctx.db, input)),
 })

@@ -1,1 +1,8 @@
-export { settingsRouter, writeEditorSettings, writeGeneralSettings } from "./settings"
+export {
+  type NotificationSettingsPatch,
+  settingsRouter,
+  writeCaffeineSettings,
+  writeEditorSettings,
+  writeGeneralSettings,
+  writeNotificationSettings,
+} from "./settings"

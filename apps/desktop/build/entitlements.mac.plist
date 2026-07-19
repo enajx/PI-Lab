@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  macOS hardened-runtime entitlements for Skipper (docs/testing-and-build.md (build & ship)).
+  macOS hardened-runtime entitlements for PI Lab (md/engineering/testing-and-build.md (build & ship)).
 
   Electron needs the JIT / unsigned-executable-memory entitlements to run the V8
-  engine under hardened runtime. Skipper also spawns child processes (the
+  engine under hardened runtime. PI Lab also spawns child processes (the
   pty-daemon, CLI agents, git), so `allow-dyld-environment-variables` +
   `disable-library-validation` let it launch helpers (e.g. the unpacked
   node-pty spawn-helper) that aren't signed by the same team.

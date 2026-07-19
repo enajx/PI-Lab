@@ -1,5 +1,6 @@
-import { cn } from "@skipper/ui"
+import { cn } from "@pi-lab/ui"
 import type { ReactNode } from "react"
+import { CaffeineControl } from "../../../../../caffeine"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 
@@ -43,11 +44,10 @@ export function ScienceTabShell({
           <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">{title}</h1>
           {subtitle ? <p className="truncate text-muted-foreground text-xs">{subtitle}</p> : null}
         </div>
-        {actions ? (
-          <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
-            {actions}
-          </div>
-        ) : null}
+        <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
+          {actions}
+          <CaffeineControl />
+        </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
     </div>

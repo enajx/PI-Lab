@@ -44,7 +44,7 @@ export interface SshProbeResult {
  * Probe one host: reachability **plus** transient GPU / CPU telemetry, in a
  * single ssh invocation. Injected into the cluster router's context as
  * {@link SshExec} so tests can substitute a deterministic fake and never touch
- * the network (docs/testing-and-build.md); this is the live path the app wires in.
+ * the network (md/engineering/testing-and-build.md); this is the live path the app wires in.
  *
  * Uses batch-mode ssh so it fails fast instead of blocking on a password / host-
  * key prompt, with a short connect timeout. Any clean exit is treated as
@@ -71,12 +71,12 @@ const MAX_DETAIL_LENGTH = 200
 // Sentinel markers fence each section's output so parsing survives login noise
 // (MOTD, ~/.bashrc echoes, stray CSV-shaped lines): only text *between* a pair
 // of markers is from the command we ran, everything else is ignored.
-const UP_START = "__SKIPPER_UP_START__"
-const UP_END = "__SKIPPER_UP_END__"
-const GPU_START = "__SKIPPER_GPU_START__"
-const GPU_END = "__SKIPPER_GPU_END__"
-const CPU_START = "__SKIPPER_CPU_START__"
-const CPU_END = "__SKIPPER_CPU_END__"
+const UP_START = "__PI_LAB_UP_START__"
+const UP_END = "__PI_LAB_UP_END__"
+const GPU_START = "__PI_LAB_GPU_START__"
+const GPU_END = "__PI_LAB_GPU_END__"
+const CPU_START = "__PI_LAB_CPU_START__"
+const CPU_END = "__PI_LAB_CPU_END__"
 
 /**
  * One remote command run in a fresh login shell: a sentinel-fenced `uptime` (the
@@ -159,7 +159,7 @@ function reachabilityDetail(stdout: string): string {
 }
 
 /**
- * The live ssh probe (docs/architecture.md (agent runtime)): a single
+ * The live ssh probe (md/engineering/architecture.md (agent runtime)): a single
  * `ssh -o BatchMode=yes … <host> '<reachability + sentinel-fenced telemetry>'`.
  * Resolves to a typed result either way; an unreachable host loses the telemetry
  * fields, a reachable one without `nvidia-smi` reports `gpus: []`.

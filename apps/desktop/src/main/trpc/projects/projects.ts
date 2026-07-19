@@ -1,7 +1,7 @@
 import type { Stats } from "node:fs"
 import { cp, mkdir, readdir, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
-import { type Project, projects, type SkipperDatabase } from "@skipper/local-db"
+import { type PiLabDatabase, type Project, projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { desc, eq } from "drizzle-orm"
 import { z } from "zod"
@@ -10,8 +10,8 @@ import { resolveWritableTemplateDir, seedWritableTemplate } from "../template"
 import { publicProcedure, router } from "../trpc"
 
 /**
- * Projects router — a Skipper "project" is a local git repository opened as a
- * research unit (AGENTS.md "What Skipper is", "Glossary"). The router is thin: each procedure validates
+ * Projects router — a PI Lab "project" is a local git repository opened as a
+ * research unit (AGENTS.md "What PI Lab is", "Glossary"). The router is thin: each procedure validates
  * input, calls the git layer and the injected Drizzle handle, and returns rows.
  * No orchestration, no cloud — just the local store.
  */
@@ -59,7 +59,7 @@ const createFromTemplateInput = z.object({
  * three entry points agree on a single verify-and-store path. Throws a clean
  * `BAD_REQUEST` when `dir` is not a repo.
  */
-async function upsertProjectFromRepo(db: SkipperDatabase, dir: string): Promise<Project> {
+async function upsertProjectFromRepo(db: PiLabDatabase, dir: string): Promise<Project> {
   if (!(await isGitRepo(dir))) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `Not a git repository: ${dir}` })
   }
@@ -259,7 +259,7 @@ export const projectsRouter = router({
   /**
    * Delete a project row (cascades to its worktrees/workspaces via the schema's
    * `onDelete: "cascade"`). The on-disk repo is the user's own and is never
-   * touched — Skipper only forgets it.
+   * touched — PI Lab only forgets it.
    */
   remove: publicProcedure.input(idInput).mutation(({ ctx, input }) => {
     ctx.db.delete(projects).where(eq(projects.id, input.id)).run()

@@ -1,9 +1,9 @@
-import { DEFAULT_AGENT_ID } from "@skipper/shared"
+import { DEFAULT_AGENT_ID } from "@pi-lab/shared"
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 
 /**
  * Renderer-only user preferences (the local, layout/appearance kind) persisted to
- * `localStorage` — mirroring the existing `ThemeProvider` and `useCardSize`
+ * `localStorage` — mirroring the existing `ThemeProvider` and shared card-grid
  * patterns. The DB `settings` table stays the home for anything the *main
  * process* needs (worktree policy, confirm-on-quit, editor diagnostics); these
  * are pure-UI toggles the renderer owns, so they live here with no migration.
@@ -87,21 +87,34 @@ function useNumberPref(key: string, fallback: number): [number, (next: number) =
 }
 
 // --- Project view: show the "Code changes" panel (hidden by default) ----------
-const SHOW_CODE_CHANGES_KEY = "skipper.projectView.showCodeChanges"
+const SHOW_CODE_CHANGES_KEY = "pi-lab.projectView.showCodeChanges"
 export const readShowCodeChanges = (): boolean => readBoolean(SHOW_CODE_CHANGES_KEY, false)
 export const useShowCodeChanges = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_CODE_CHANGES_KEY, false)
 
+// --- Skills: shared scope visibility across the science tab + project panel --
+const SHOW_PROJECT_SKILLS_KEY = "pi-lab.skills.showProjectLocal"
+const SHOW_GLOBAL_SKILLS_KEY = "pi-lab.skills.showGlobal"
+export const useShowProjectSkills = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_PROJECT_SKILLS_KEY, true)
+export const useShowGlobalSkills = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_GLOBAL_SKILLS_KEY, true)
+
+// --- Project view: optional Skills visualization in the right sidebar --------
+const SHOW_SKILLS_PANEL_KEY = "pi-lab.projectView.showSkillsPanel"
+export const useShowSkillsPanel = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_SKILLS_PANEL_KEY, false)
+
 // --- Project view: show the file tree as a left panel (off by default) --------
 // When on, the file tree moves out of the right sidebar into a column on the
 // left of the central panel; the right sidebar drops its "Files" tab.
-const SHOW_FILES_PANEL_KEY = "skipper.projectView.showFilesPanel"
+const SHOW_FILES_PANEL_KEY = "pi-lab.projectView.showFilesPanel"
 export const readShowFilesPanel = (): boolean => readBoolean(SHOW_FILES_PANEL_KEY, false)
 export const useShowFilesPanel = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_FILES_PANEL_KEY, false)
 
 // --- Project view: right sidebar width (px), continuously resizable from its edge
-const RIGHT_SIDEBAR_WIDTH_KEY = "skipper.projectView.rightSidebarWidth"
+const RIGHT_SIDEBAR_WIDTH_KEY = "pi-lab.projectView.rightSidebarWidth"
 export const RIGHT_SIDEBAR_MIN_WIDTH = 240
 export const RIGHT_SIDEBAR_MAX_WIDTH = 560
 export const RIGHT_SIDEBAR_DEFAULT_WIDTH = 320
@@ -109,7 +122,7 @@ export const useRightSidebarWidth = (): [number, (next: number) => void] =>
   useNumberPref(RIGHT_SIDEBAR_WIDTH_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH)
 
 // --- Project view: left Files panel width (px), continuously resizable ---------
-const FILES_PANEL_WIDTH_KEY = "skipper.projectView.filesPanelWidth"
+const FILES_PANEL_WIDTH_KEY = "pi-lab.projectView.filesPanelWidth"
 export const FILES_PANEL_MIN_WIDTH = 160
 export const FILES_PANEL_MAX_WIDTH = 480
 export const FILES_PANEL_DEFAULT_WIDTH = 224
@@ -117,7 +130,7 @@ export const useFilesPanelWidth = (): [number, (next: number) => void] =>
   useNumberPref(FILES_PANEL_WIDTH_KEY, FILES_PANEL_DEFAULT_WIDTH)
 
 // --- Left sidebar: collapsed to an icon-only rail (expanded by default) -------
-const SIDEBAR_COLLAPSED_KEY = "skipper.sidebar.collapsed"
+const SIDEBAR_COLLAPSED_KEY = "pi-lab.sidebar.collapsed"
 export const readSidebarCollapsed = (): boolean => readBoolean(SIDEBAR_COLLAPSED_KEY, false)
 export const useSidebarCollapsed = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SIDEBAR_COLLAPSED_KEY, false)
@@ -125,13 +138,21 @@ export const useSidebarCollapsed = (): [boolean, (next: boolean) => void] =>
 // --- Left sidebar: expanded width (px), continuously resizable from the edge ---
 // Dragging the edge below SIDEBAR_MIN_WIDTH snaps to the collapsed icon rail (so
 // labels never get cramped); the width is clamped to [MIN, MAX] otherwise.
-const SIDEBAR_WIDTH_KEY = "skipper.sidebar.width"
+const SIDEBAR_WIDTH_KEY = "pi-lab.sidebar.width"
 export const SIDEBAR_MIN_WIDTH = 180
 export const SIDEBAR_MAX_WIDTH = 360
 export const SIDEBAR_DEFAULT_WIDTH = 240
 export const readSidebarWidth = (): number => readNumber(SIDEBAR_WIDTH_KEY, SIDEBAR_DEFAULT_WIDTH)
 export const useSidebarWidth = (): [number, (next: number) => void] =>
   useNumberPref(SIDEBAR_WIDTH_KEY, SIDEBAR_DEFAULT_WIDTH)
+
+// --- Left sidebar: app-wide hover/focus feature help (shown by default) -------
+// The compact lower-left panel explains the interactive element under the
+// pointer or keyboard focus. It is renderer-only and can be dismissed/restored
+// directly from the sidebar.
+const SIDEBAR_SHOW_FEATURE_HELP_KEY = "pi-lab.sidebar.showFeatureHelp"
+export const useSidebarFeatureHelp = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SIDEBAR_SHOW_FEATURE_HELP_KEY, true)
 
 // --- Ordered-id preferences (drag-to-reorder lists) ---------------------------
 // Stored as a JSON array of ids; the consuming list renders known ids in this
@@ -167,30 +188,22 @@ function useOrderPref(key: string): [string[], (next: string[]) => void] {
 
 /** Persisted drag order for the sidebar science/Workflows nav (by item id). */
 export const useNavOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("skipper.sidebar.navOrder")
+  useOrderPref("pi-lab.sidebar.navOrder")
 /** Persisted drag order for the sidebar project list (by project id). */
 export const useProjectOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("skipper.sidebar.projectOrder")
+  useOrderPref("pi-lab.sidebar.projectOrder")
 /** Persisted drag order for the cluster machine list (by machine id). */
 export const useClusterOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("skipper.cluster.machineOrder")
-
-// --- Cluster: machine-card size (min column width px), like the dashboard -----
-const CLUSTER_CARD_SIZE_KEY = "skipper.cluster.cardSize"
-export const CLUSTER_CARD_MIN_SIZE = 280
-export const CLUSTER_CARD_MAX_SIZE = 620
-export const CLUSTER_CARD_DEFAULT_SIZE = 380
-export const useClusterCardSize = (): [number, (next: number) => void] =>
-  useNumberPref(CLUSTER_CARD_SIZE_KEY, CLUSTER_CARD_DEFAULT_SIZE)
+  useOrderPref("pi-lab.cluster.machineOrder")
 
 // --- Experimental: gate v2 surfaces (integrations / teams) --------------------
-const EXPERIMENTAL_V2_KEY = "skipper.experimentalV2"
+const EXPERIMENTAL_V2_KEY = "pi-lab.experimentalV2"
 export const readExperimentalV2 = (): boolean => readBoolean(EXPERIMENTAL_V2_KEY, false)
 export const useExperimentalV2 = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(EXPERIMENTAL_V2_KEY, false)
 
 // --- Default agent for new sessions ------------------------------------------
-const DEFAULT_AGENT_KEY = "skipper.defaultAgentId"
+const DEFAULT_AGENT_KEY = "pi-lab.defaultAgentId"
 
 /** The user's preferred default agent id (falls back to the built-in default). */
 export function readDefaultAgentId(): string {
@@ -210,7 +223,7 @@ export function useDefaultAgentId(): [string, (next: string) => void] {
 
 /**
  * The agent id to launch a session with: the deterministic `?agentId` E2E seam
- * (docs/testing-and-build.md) wins, otherwise the user's stored default. Keeps the
+ * (md/engineering/testing-and-build.md) wins, otherwise the user's stored default. Keeps the
  * test seam working while honouring the Settings → Agents default.
  */
 export function resolveLaunchAgentId(): string {

@@ -1,8 +1,8 @@
 /**
- * Registry of external CLI coding agents Skipper can launch.
+ * Registry of external CLI coding agents PI Lab can launch.
  *
  * An "agent" here is nothing more than a command run inside a PTY terminal (see
- * docs/architecture.md (agent runtime)): Skipper does not wrap these tools, parse their output, or read
+ * md/engineering/architecture.md (agent runtime)): PI Lab does not wrap these tools, parse their output, or read
  * their credentials — they run as their own processes and authenticate
  * themselves. This registry is **pure data** so the UI can offer a choice of
  * agents and remember a default; supporting another tool is a new entry here,

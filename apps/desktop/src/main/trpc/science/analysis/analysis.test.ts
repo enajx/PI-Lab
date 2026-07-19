@@ -1,13 +1,13 @@
 // Integration tests for the science.analysis router via createCallerFactory over
 // a temp SQLite DB with the real migrations and a real temp git repo (AGENTS.md
-// docs/testing-and-build.md). Data files are written into the repo and classified/previewed off real
+// md/engineering/testing-and-build.md). Data files are written into the repo and classified/previewed off real
 // bytes — no filesystem mocking.
-import { mkdir, writeFile } from "node:fs/promises"
+import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { createHarness, type Harness } from "../../testHarness"
-import { MAX_CHART_POINTS, MAX_LISTED_FILES, MAX_TABLE_ROWS } from "./discover"
+import { MAX_CHART_POINTS, MAX_LISTED_FILES, MAX_TABLE_ROWS, MAX_TEXT_BYTES } from "./discover"
 
 let h: Harness
 
@@ -83,8 +83,7 @@ describe("science.analysis.listFiles", () => {
     expect(kindByRel.get("config.json")).toBe("json")
     expect(kindByRel.get("figs/plot.png")).toBe("image")
     expect(kindByRel.get("notes.md")).toBe("markdown")
-    // The `.py` file is not a data kind → "other".
-    expect(kindByRel.get("analysis/explore.py")).toBe("other")
+    expect(kindByRel.has("analysis/explore.py")).toBe(false)
 
     // NumPy arrays get their own kinds.
     await writeRepoFile("runs/loss.npy", makeNpy([3], [0.5, 0.3, 0.1]))
@@ -99,7 +98,50 @@ describe("science.analysis.listFiles", () => {
 
     expect(listing.truncated).toBe(false)
     // README.md from the fixture commit is also discovered (markdown).
-    expect(listing.total).toBeGreaterThanOrEqual(6)
+    expect(listing.total).toBeGreaterThanOrEqual(5)
+  })
+
+  test("lists the scientific artifact whitelist and excludes source/unknown files", async () => {
+    for (const relPath of [
+      "data/table.arrow",
+      "data/table.feather",
+      "data/experiment.h5",
+      "data/climate.nc",
+      "data/results.sqlite",
+      "data/results.xlsx",
+      "reports/summary.html",
+      "artifacts/model.pkl",
+    ]) {
+      await writeRepoFile(relPath, "fixture")
+    }
+    for (const relPath of [
+      "src/analysis.py",
+      "scripts/run.sh",
+      "scripts/run.ps1",
+      "scripts/run.bat",
+      "build/native.dylib",
+      "mystery.xyz",
+    ]) {
+      await writeRepoFile(relPath, "not an analysis artifact")
+    }
+    await mkdir(join(h.repoDir, "runs", "arrays.zarr"), { recursive: true })
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const kindByRel = new Map(
+      listing.groups.flatMap((group) =>
+        group.files.map((file) => [file.relPath, file.kind] as const),
+      ),
+    )
+
+    expect(kindByRel.get("data/experiment.h5")).toBe("dataset")
+    expect(kindByRel.get("data/climate.nc")).toBe("dataset")
+    expect(kindByRel.get("reports/summary.html")).toBe("report")
+    expect(kindByRel.get("artifacts/model.pkl")).toBe("other")
+    expect(kindByRel.get("runs/arrays.zarr")).toBe("dataset")
+    expect([...kindByRel.keys()].some((path) => /\.(?:py|sh|ps1|bat|dylib|xyz)$/i.test(path))).toBe(
+      false,
+    )
   })
 
   test("skips .git and noise directories", async () => {
@@ -147,6 +189,23 @@ describe("science.analysis.listFiles", () => {
 
     expect(listing.truncated).toBe(true)
     expect(listing.total).toBe(MAX_LISTED_FILES)
+  })
+
+  test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", async () => {
+    await Promise.all(
+      Array.from({ length: MAX_LISTED_FILES + 5 }, (_, i) =>
+        writeRepoFile(`source-${i}.py`, "print('source')\n"),
+      ),
+    )
+    await writeRepoFile("deep/results/metrics.csv", "metric,value\nloss,0.1\n")
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const paths = listing.groups.flatMap((group) => group.files.map((file) => file.relPath))
+
+    expect(paths).toContain("deep/results/metrics.csv")
+    expect(paths.some((path) => path.endsWith(".py"))).toBe(false)
+    expect(listing.truncated).toBe(false)
   })
 
   test("an unknown projectId is a clean NOT_FOUND", async () => {
@@ -214,6 +273,21 @@ describe("science.analysis.preview", () => {
     if (preview.type !== "table") throw new Error("expected table")
     expect(preview.rows).toHaveLength(MAX_TABLE_ROWS)
     expect(preview.totalRows).toBe(MAX_TABLE_ROWS + 10)
+    expect(preview.truncated).toBe(true)
+  })
+
+  test("large text preview returns only the bounded head", async () => {
+    await writeRepoFile("run.log", "x".repeat(MAX_TEXT_BYTES + 4_096))
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "run.log",
+    })
+
+    expect(preview.type).toBe("text")
+    if (preview.type !== "text") throw new Error("expected text")
+    expect(Buffer.byteLength(preview.text)).toBe(MAX_TEXT_BYTES)
     expect(preview.truncated).toBe(true)
   })
 
@@ -385,6 +459,38 @@ describe("science.analysis.preview", () => {
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
     expect(preview.kind).toBe("npz")
+  })
+
+  test("pickle is metadata-only and is never opened for preview", async () => {
+    const relPath = "model.pkl"
+    const absPath = join(h.repoDir, relPath)
+    await writeRepoFile(relPath, "unsafe pickle bytes")
+    await chmod(absPath, 0)
+    const project = await h.caller.projects.open({ path: h.repoDir })
+
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath,
+    })
+
+    expect(preview.type).toBe("metadata")
+    if (preview.type !== "metadata") throw new Error("expected metadata")
+    expect(preview.kind).toBe("other")
+  })
+
+  test("Zarr directories use the metadata-only preview", async () => {
+    const relPath = "arrays.zarr"
+    await mkdir(join(h.repoDir, relPath), { recursive: true })
+    const project = await h.caller.projects.open({ path: h.repoDir })
+
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath,
+    })
+
+    expect(preview.type).toBe("metadata")
+    if (preview.type !== "metadata") throw new Error("expected metadata")
+    expect(preview.kind).toBe("dataset")
   })
 
   test("path traversal is rejected with FORBIDDEN", async () => {

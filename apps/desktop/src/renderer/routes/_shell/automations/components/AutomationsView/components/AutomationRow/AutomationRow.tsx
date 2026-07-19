@@ -1,7 +1,7 @@
-import { Badge, Button } from "@skipper/ui"
+import { Badge, Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight, Play, Trash2 } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../../../../../trpc/react"
 import type { AutomationListItem } from "../../../../../../../trpc/types"
 import { RunsHistory } from "../RunsHistory"
@@ -12,6 +12,8 @@ interface AutomationRowProps {
   projectName?: string
   /** Called after any mutation that changes the list (toggle / delete / run). */
   onChanged: () => void
+  /** Exact run targeted by a native-notification click. */
+  targetRunId?: string
 }
 
 /** Format an epoch-ms next-run instant for the row, or a dash when none. */
@@ -27,16 +29,30 @@ function formatNextRun(nextRunAt: number | null): string {
 
 /**
  * One automation in the Workflows list (AGENTS.md "Scope"): name + cadence summary +
- * next run + an enabled toggle, with run-now / delete actions and an expandable
- * run history. Mutations call back to the parent to refresh the list.
+ * next run + enabled and execution-mode controls, with run-now / delete actions
+ * and an expandable run history. Mutations call back to refresh the list.
  */
-export function AutomationRow({ automation, projectName, onChanged }: AutomationRowProps) {
+export function AutomationRow({
+  automation,
+  projectName,
+  onChanged,
+  targetRunId,
+}: AutomationRowProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
+  const rowRef = useRef<HTMLLIElement>(null)
+  useEffect(() => {
+    if (!targetRunId) return
+    setExpanded(true)
+    rowRef.current?.scrollIntoView?.({ block: "center" })
+  }, [targetRunId])
 
   const setEnabled = useMutation(
     trpc.automations.setEnabled.mutationOptions({ onSuccess: () => onChanged() }),
+  )
+  const setExecutionMode = useMutation(
+    trpc.automations.update.mutationOptions({ onSuccess: () => onChanged() }),
   )
   const remove = useMutation(
     trpc.automations.delete.mutationOptions({ onSuccess: () => onChanged() }),
@@ -62,16 +78,22 @@ export function AutomationRow({ automation, projectName, onChanged }: Automation
 
   return (
     <li
+      ref={rowRef}
       data-testid="automation-row"
       data-automation-id={automation.id}
       data-enabled={automation.enabled}
-      className="flex flex-col rounded-lg border border-border bg-card/40"
+      data-highlighted={Boolean(targetRunId)}
+      className={cn(
+        "flex flex-col rounded-lg border border-border bg-card/40",
+        targetRunId && "ring-2 ring-brand/70",
+      )}
     >
       <div className="flex items-center gap-3 px-4 py-3">
         <button
           type="button"
           data-testid="toggle-runs"
           aria-label={expanded ? "Hide runs" : "Show runs"}
+          data-feature-help="Expand or collapse this workflow's recent run history"
           className="shrink-0 text-muted-foreground hover:text-foreground"
           onClick={() => setExpanded((v) => !v)}
         >
@@ -99,6 +121,25 @@ export function AutomationRow({ automation, projectName, onChanged }: Automation
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground text-xs">
             <span data-testid="schedule-summary">{automation.scheduleSummary}</span>
             {projectName ? <span className="truncate">· {projectName}</span> : null}
+            <label className="flex items-center gap-1">
+              <span>· Execution:</span>
+              <select
+                data-testid="automation-row-execution-mode"
+                aria-label={`Execution mode for ${automation.name}`}
+                value={automation.executionMode}
+                disabled={setExecutionMode.isPending}
+                onChange={(event) =>
+                  setExecutionMode.mutate({
+                    id: automation.id,
+                    executionMode: event.target.value as "interactive" | "noninteractive",
+                  })
+                }
+                className="rounded border border-input bg-transparent px-1 py-0.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <option value="interactive">Interactive</option>
+                <option value="noninteractive">Run to completion</option>
+              </select>
+            </label>
             <span data-testid="next-run">
               · Next: {automation.enabled ? formatNextRun(automation.nextRunAt) : "paused"}
             </span>
@@ -113,6 +154,7 @@ export function AutomationRow({ automation, projectName, onChanged }: Automation
           disabled={runNow.isPending}
           onClick={() => runNow.mutate({ id: automation.id })}
           title="Run now"
+          data-feature-help="Start one run immediately without changing the workflow schedule"
         >
           <Play aria-hidden />
         </Button>
@@ -124,6 +166,8 @@ export function AutomationRow({ automation, projectName, onChanged }: Automation
           <input
             type="checkbox"
             data-testid="enabled-checkbox"
+            aria-label={automation.enabled ? "Pause workflow" : "Resume workflow"}
+            data-feature-help="Pause or resume future scheduled runs for this workflow"
             className="size-3.5 accent-brand"
             checked={automation.enabled}
             disabled={setEnabled.isPending}
@@ -140,6 +184,7 @@ export function AutomationRow({ automation, projectName, onChanged }: Automation
           disabled={remove.isPending}
           onClick={() => remove.mutate({ id: automation.id })}
           title="Delete"
+          data-feature-help="Remove this scheduled workflow from PI Lab"
         >
           <Trash2 aria-hidden className="text-destructive" />
         </Button>
@@ -147,7 +192,11 @@ export function AutomationRow({ automation, projectName, onChanged }: Automation
 
       {expanded ? (
         <div className="border-border border-t px-4 py-3">
-          <RunsHistory automationId={automation.id} timezone={automation.timezone} />
+          <RunsHistory
+            automationId={automation.id}
+            timezone={automation.timezone}
+            targetRunId={targetRunId}
+          />
         </div>
       ) : null}
     </li>

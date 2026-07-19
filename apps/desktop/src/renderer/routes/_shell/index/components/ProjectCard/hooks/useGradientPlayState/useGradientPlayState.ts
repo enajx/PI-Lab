@@ -28,7 +28,10 @@ export function useGradientPlayState(ref: RefObject<HTMLDivElement | null>): voi
         : true
 
     const apply = () => {
-      el.style.animationPlayState = isIntersecting && isFocused && isVisible ? "running" : "paused"
+      const playState = isIntersecting && isFocused && isVisible ? "running" : "paused"
+      el.style.animationPlayState = playState
+      el.style.setProperty("--gradient-play-state", playState)
+      el.style.setProperty("--gradient-will-change", playState === "running" ? "transform" : "auto")
     }
     apply()
 

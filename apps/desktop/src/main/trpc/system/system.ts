@@ -1,18 +1,19 @@
-import { BrowserWindow, dialog } from "electron"
+import { BrowserWindow, dialog, type OpenDialogOptions } from "electron"
 import { z } from "zod"
 import { applyTrafficLightInset } from "../../window/trafficLights"
 import { publicProcedure, router } from "../trpc"
+import { type EditorThemeImportResult, readEditorThemeFiles } from "./themeImport"
 
 /**
  * System router — small bridges to native OS surfaces that only the main process
- * can reach (docs/architecture.md (process model)). Kept thin: each procedure validates nothing it
+ * can reach (md/engineering/architecture.md (process model)). Kept thin: each procedure validates nothing it
  * doesn't own and returns a plain, serializable result the renderer can act on.
  *
  * `pickDirectory` is the OS folder picker that backs the sidebar's "Add project"
  * action: the renderer asks for a directory, the user chooses one in the native
  * dialog, and the path flows back to `projects.open`. There is no automated way
  * to drive a native dialog, so the E2E never calls this — it uses the
- * `?openProject` seam in the renderer (docs/testing-and-build.md) to open a known path
+ * `?openProject` seam in the renderer (md/engineering/testing-and-build.md) to open a known path
  * directly. This procedure stays for real, human use.
  */
 export const systemRouter = router({
@@ -43,6 +44,23 @@ export const systemRouter = router({
       : await dialog.showOpenDialog({ properties: ["openFile"] })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0] ?? null
+  }),
+
+  /**
+   * Pick one or more VS Code JSON color themes and parse them inside main.
+   * Absolute paths remain main-only; the renderer receives copied sanitized data.
+   */
+  importEditorThemes: publicProcedure.mutation(async (): Promise<EditorThemeImportResult> => {
+    const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
+    const options: OpenDialogOptions = {
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "VS Code color themes", extensions: ["json"] }],
+    }
+    const result = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return { themes: [], errors: [] }
+    return readEditorThemeFiles(result.filePaths)
   }),
 
   /**

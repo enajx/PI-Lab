@@ -1,13 +1,9 @@
-import { Button, cn } from "@skipper/ui"
+import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { DownloadCloud, Eye, EyeOff, Plus, RefreshCw, Server } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import {
-  CLUSTER_CARD_MAX_SIZE,
-  CLUSTER_CARD_MIN_SIZE,
-  useClusterCardSize,
-  useClusterOrder,
-} from "../../../../../preferences/preferences"
+import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
+import { useClusterOrder } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
@@ -89,10 +85,13 @@ export function ScienceCluster() {
   const [telemetry, setTelemetry] = useState<TelemetryByHost>(() => new Map())
   // Persisted custom card order (machine ids) + the live drag-source id.
   const [order, setOrder] = useClusterOrder()
-  const [cardSize, setCardSize] = useClusterCardSize()
   const [dragId, setDragId] = useState<string | null>(null)
 
   const listQuery = useQuery(trpc.science.cluster.list.queryOptions({ includeHidden: showHidden }))
+  // Span validity follows every live machine, not just the current visible
+  // filter. Hiding a machine therefore preserves its layout, while deletion
+  // removes its stale persisted span.
+  const allMachinesQuery = useQuery(trpc.science.cluster.list.queryOptions({ includeHidden: true }))
 
   const invalidateList = () =>
     queryClient.invalidateQueries({
@@ -133,7 +132,7 @@ export function ScienceCluster() {
     }),
   )
 
-  // Test seam (docs/testing-and-build.md): on mount, when loaded with `?sshConfigPath`,
+  // Test seam (md/engineering/testing-and-build.md): on mount, when loaded with `?sshConfigPath`,
   // import once from that fixture path so the E2E seeds deterministic machines
   // without touching the real `~/.ssh/config`. A ref guard survives React 19
   // StrictMode's double effect so the import never fires twice.
@@ -221,24 +220,12 @@ export function ScienceCluster() {
       subtitle="Monitor compute machines from your ssh config"
       actions={
         <>
-          <label className="flex items-center gap-2 text-muted-foreground text-xs">
-            Card size
-            <input
-              data-testid="cluster-card-size"
-              type="range"
-              min={CLUSTER_CARD_MIN_SIZE}
-              max={CLUSTER_CARD_MAX_SIZE}
-              value={cardSize}
-              onChange={(event) => setCardSize(Number(event.target.value))}
-              className="w-32 accent-muted-foreground"
-              aria-label="Card size"
-            />
-          </label>
           {hiddenCount > 0 ? (
             <Button
               data-testid="show-hidden"
               variant="ghost"
               size="sm"
+              data-feature-help="Temporarily include machines hidden from the cluster grid"
               className="h-8 gap-1.5 text-muted-foreground"
               onClick={() => setShowHidden((v) => !v)}
             >
@@ -252,6 +239,7 @@ export function ScienceCluster() {
             size="sm"
             className="h-8 gap-1.5"
             disabled={machines.length === 0}
+            data-feature-help="Refresh reachability and CPU/GPU telemetry for every visible machine"
             onClick={() => {
               for (const machine of machines) {
                 if (!machine.hidden) refreshStatus.mutate({ id: machine.id })
@@ -267,6 +255,7 @@ export function ScienceCluster() {
             size="sm"
             className="h-8 gap-1.5"
             disabled={importConfig.isPending}
+            data-feature-help="Import hosts from your SSH config into Cluster monitoring"
             onClick={() => setImportOptionsOpen((v) => !v)}
           >
             <DownloadCloud />
@@ -275,6 +264,7 @@ export function ScienceCluster() {
           <Button
             data-testid="add-machine"
             size="sm"
+            data-feature-help="Register a machine manually when it is not in your SSH config"
             className="h-8 gap-1.5"
             onClick={() => setAdding((v) => !v)}
           >
@@ -308,61 +298,71 @@ export function ScienceCluster() {
               onImport={() => importConfig.mutate({})}
               importing={importConfig.isPending}
             />
-          ) : (
-            <ul
-              data-testid="cluster-grid"
-              className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize}px, 1fr))` }}
-            >
-              {orderedMachines.map((machine) => (
-                <li
-                  key={machine.id}
-                  data-testid="machine-card-drag"
-                  data-machine-id={machine.id}
-                  data-focused={focusedId === machine.id}
-                  draggable
-                  onDragStart={(event) => {
-                    const target = event.target as HTMLElement
-                    // Let buttons, inputs and the selectable error text behave
-                    // normally — only a bare card body starts a reorder drag.
-                    if (target.closest("input, textarea, button, .select-text")) {
-                      event.preventDefault()
-                      return
-                    }
-                    setDragId(machine.id)
-                    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"
-                  }}
-                  onDragOver={(event) => {
-                    if (dragId && dragId !== machine.id) event.preventDefault()
-                  }}
-                  onDrop={(event) => {
+          ) : null}
+          <CardGrid
+            as="ul"
+            surface="cluster"
+            cardIds={
+              allMachinesQuery.data === undefined
+                ? null
+                : allMachinesQuery.data.machines.map((machine) => machine.id)
+            }
+            testId="cluster-grid"
+            className="gap-3"
+            hidden={machines.length === 0}
+          >
+            {orderedMachines.map((machine) => (
+              <ResizableCardGridItem
+                as="li"
+                key={machine.id}
+                cardId={machine.id}
+                label={displayNameOf(machine)}
+                testId="machine-card-drag"
+                data-machine-id={machine.id}
+                data-focused={focusedId === machine.id}
+                draggable
+                onDragStart={(event) => {
+                  const target = event.target as HTMLElement
+                  // Let buttons, inputs and the selectable error text behave
+                  // normally — only a bare card body starts a reorder drag.
+                  if (target.closest("input, textarea, button, .select-text")) {
                     event.preventDefault()
-                    reorderOnto(machine.id)
+                    return
+                  }
+                  setDragId(machine.id)
+                  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"
+                }}
+                onDragOver={(event) => {
+                  if (dragId && dragId !== machine.id) event.preventDefault()
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  reorderOnto(machine.id)
+                }}
+                onDragEnd={() => setDragId(null)}
+                className={cn(
+                  "rounded-lg",
+                  dragId === machine.id && "opacity-50",
+                  focusedId === machine.id && "ring-2 ring-ring",
+                )}
+              >
+                <MachineCard
+                  machine={machine}
+                  telemetry={telemetry.get(machine.host)}
+                  runningProjects={[]}
+                  isRefreshing={refreshStatus.isPending && refreshingId === machine.id}
+                  onRefresh={() => {
+                    setRefreshingId(machine.id)
+                    refreshStatus.mutate({ id: machine.id })
                   }}
-                  onDragEnd={() => setDragId(null)}
-                  className={cn(
-                    "rounded-lg",
-                    dragId === machine.id && "opacity-50",
-                    focusedId === machine.id && "ring-2 ring-ring",
-                  )}
-                >
-                  <MachineCard
-                    machine={machine}
-                    telemetry={telemetry.get(machine.host)}
-                    isRefreshing={refreshStatus.isPending && refreshingId === machine.id}
-                    onRefresh={() => {
-                      setRefreshingId(machine.id)
-                      refreshStatus.mutate({ id: machine.id })
-                    }}
-                    onToggleHidden={() =>
-                      setHidden.mutate({ id: machine.id, hidden: !machine.hidden })
-                    }
-                    onAnnotate={(label) => annotate.mutate({ id: machine.id, label })}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
+                  onToggleHidden={() =>
+                    setHidden.mutate({ id: machine.id, hidden: !machine.hidden })
+                  }
+                  onAnnotate={(label) => annotate.mutate({ id: machine.id, label })}
+                />
+              </ResizableCardGridItem>
+            ))}
+          </CardGrid>
         </div>
       </div>
 

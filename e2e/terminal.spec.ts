@@ -3,21 +3,27 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  type Locator,
+  test,
+} from "@playwright/test"
 
 /**
- * Whole-app E2E (docs/testing-and-build.md): launch the real Electron build, boot to
+ * Whole-app E2E (md/engineering/testing-and-build.md): launch the real Electron build, boot to
  * `app-ready`, then prove the terminal pane is wired end-to-end — spawn a PTY in
  * the daemon running a deterministic program, stream its bytes through tRPC into
  * xterm.js, and assert the marker shows in the terminal DOM.
  *
  * The terminal is driven by the test seam in `mainWindow.ts`/`App.tsx`: in test
- * mode `SKIPPER_TEST_TERMINAL_CMD` (+ JSON `SKIPPER_TEST_TERMINAL_ARGS`) become
+ * mode `PI_LAB_TEST_TERMINAL_CMD` (+ JSON `PI_LAB_TEST_TERMINAL_ARGS`) become
  * the renderer's `?termcmd=…&termargs=…`, so the pane spawns our marker program
  * without needing synthetic keystrokes.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * the Bun runtime (docs/testing-and-build.md (build & ship)). The repo `e2e` script invokes Playwright's CLI
+ * the Bun runtime (md/engineering/testing-and-build.md (build & ship)). The repo `e2e` script invokes Playwright's CLI
  * through `node` for exactly this reason.
  */
 
@@ -37,21 +43,30 @@ let app: ElectronApplication
 let dataDir: string
 
 test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "skipper-e2e-term-"))
+  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-term-"))
   // Each run gets its own throwaway data dir + socket so parallel/repeat runs
-  // never collide and never adopt a stale daemon (docs/testing-and-build.md).
+  // never collide and never adopt a stale daemon (md/engineering/testing-and-build.md).
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
     args: [MAIN_ENTRY],
     env: {
       ...process.env,
-      SKIPPER_TEST_MODE: "1",
-      SKIPPER_DATA_DIR: dataDir,
-      SKIPPER_SOCKET_PATH: join(dataDir, "daemon.sock"),
-      // Spawn a tiny Node program that writes the marker then exits — fully
-      // deterministic, no network, no credentials.
-      SKIPPER_TEST_TERMINAL_CMD: process.execPath,
-      SKIPPER_TEST_TERMINAL_ARGS: JSON.stringify(["-e", `process.stdout.write('${MARKER}\\n')`]),
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      // Spawn a tiny raw-input probe: it writes the boot marker, then reports
+      // every renderer → xterm → IPC → real-PTY input chunk as hex.
+      PI_LAB_TEST_TERMINAL_CMD: process.execPath,
+      PI_LAB_TEST_TERMINAL_ARGS: JSON.stringify([
+        "-e",
+        [
+          `process.stdout.write('${MARKER}\\n')`,
+          "process.stdin.setRawMode?.(true)",
+          "process.stdin.resume()",
+          "let received = Buffer.alloc(0)",
+          "process.stdin.on('data', chunk => { received = Buffer.concat([received, chunk]); process.stdout.write('\\r\\nE2E-INPUT-' + received.toString('hex') + '-COUNT-' + received.length + '\\r\\n') })",
+        ].join(";"),
+      ]),
     },
   })
 })
@@ -76,3 +91,43 @@ test("terminal pane streams PTY output into xterm", async () => {
   // write all work over the real IPC link.
   await expect(terminal).toContainText(MARKER, { timeout: 30_000 })
 })
+
+test("terminal pane sends macOS editing keys to the real PTY exactly once", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const terminal = window.getByTestId("terminal")
+  await expect(terminal).toContainText(MARKER, { timeout: 30_000 })
+  const input = terminal.locator(".xterm-helper-textarea")
+  await input.focus()
+
+  await input.press("Shift+Enter")
+  await expectLatestInput(terminal, process.platform === "darwin" ? "160a" : "0d")
+
+  if (process.platform !== "darwin") return
+  await input.press("Alt+Backspace")
+  await expectLatestInput(terminal, "160a1b7f")
+  await input.press("Meta+Backspace")
+  await expectLatestInput(terminal, "160a1b7f15")
+
+  const agentUrl = new URL(window.url())
+  agentUrl.searchParams.set("termkind", "agent")
+  await window.goto(agentUrl.toString())
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const agentTerminal = window.getByTestId("terminal")
+  await expect(agentTerminal).toContainText(MARKER, { timeout: 30_000 })
+  const agentInput = agentTerminal.locator(".xterm-helper-textarea")
+  await agentInput.focus()
+
+  await agentInput.press("Shift+Enter")
+  await expectLatestInput(agentTerminal, process.platform === "darwin" ? "1b5b31333b3275" : "0d")
+})
+
+async function expectLatestInput(terminal: Locator, expectedHex: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      const text = (await terminal.textContent()) ?? ""
+      const matches = Array.from(text.matchAll(/E2E-INPUT-([0-9a-f]+)-COUNT-(\d+)/gu))
+      return matches.at(-1)?.[0] ?? null
+    })
+    .toBe(`E2E-INPUT-${expectedHex}-COUNT-${expectedHex.length / 2}`)
+}

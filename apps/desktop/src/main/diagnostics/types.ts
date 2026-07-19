@@ -8,7 +8,7 @@
  *
  * These types are I/O-free on purpose: the per-tool parsers that produce them are
  * pure (`string`/`unknown` → `Diagnostic[]`), so they are example- and
- * property-testable without `uv` installed (docs/testing-and-build.md).
+ * property-testable without `uv` installed (md/engineering/testing-and-build.md).
  */
 
 /** Which tool emitted a diagnostic — drives the badge/source label in the gutter. */

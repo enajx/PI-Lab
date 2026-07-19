@@ -1,11 +1,12 @@
 // @ts-check
 /**
- * electron-builder configuration for the Skipper desktop app (docs/testing-and-build.md (build & ship), P11).
+ * electron-builder configuration for the PI Lab desktop app (md/engineering/testing-and-build.md (build & ship), P11).
  *
  * This is a `.cjs` (not JSON) so we can *gate code-signing/notarization behind
  * env*: a local developer with no Apple cert must still get a launchable build.
- * When the signing env vars are unset we emit an UNSIGNED build (`identity: null`,
- * notarization skipped); when they're set, electron-builder signs + notarizes.
+ * When the signing env vars are unset we emit an ad-hoc-signed local build
+ * (`identity: "-"`, notarization skipped); when they're set, electron-builder
+ * uses the configured Developer ID identity and notarizes.
  *
  * Native modules (`better-sqlite3`, `node-pty`) are the load-bearing concern
  * (AGENTS.md Pitfalls #4): the compiled main bundle does a bare `require("better-sqlite3")`
@@ -23,7 +24,7 @@
 const SIGN =
   Boolean(process.env.CSC_LINK) ||
   Boolean(process.env.CSC_KEY_PASSWORD) ||
-  Boolean(process.env.SKIPPER_FORCE_SIGN)
+  Boolean(process.env.PI_LAB_FORCE_SIGN)
 
 const NOTARIZE = Boolean(
   process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID,
@@ -31,8 +32,8 @@ const NOTARIZE = Boolean(
 
 /** @type {import("electron-builder").Configuration} */
 const config = {
-  appId: "com.skipper.desktop",
-  productName: "Skipper",
+  appId: "com.pi-lab.desktop",
+  productName: "PI Lab",
   // Avoid rebuilding native deps via node-gyp during packaging — we drive the
   // Electron-ABI rebuild ourselves (@electron/rebuild) in the build scripts so
   // the ABI is explicit and validated (validate:native).
@@ -65,10 +66,13 @@ const config = {
   asarUnpack: ["**/node_modules/better-sqlite3/**", "**/node_modules/node-pty/**"],
   // Ship the bundled project template alongside the app (exempt from the `files`
   // md/ts exclusion globs) so packaged builds can first-run-seed the writable copy
-  // at `<process.resourcesPath>/template`. NB: copying through `extraResources` may
-  // dereference the `CLAUDE.md` -> `AGENTS.md` symlink in the packaged copy —
-  // verify the seeded copy still writes CLAUDE.md through to AGENTS.md on macOS.
-  extraResources: [{ from: "resources/template", to: "template" }],
+  // at `<process.resourcesPath>/template`.
+  extraResources: [
+    { from: "resources/template", to: "template" },
+    // Runtime window/Dock/notification identity. `build:icons` copies the
+    // canonical `icons/icon.png` here before every package command.
+    { from: "build/icon.png", to: "pi-lab-icon.png" },
+  ],
   // Keep node-pty's spawn-helper executable bit after it's copied into the package
   // (asar packing can drop it; node-pty exec()s this file for every PTY).
   afterPack: "./scripts/electron-builder-after-pack.cjs",
@@ -81,10 +85,10 @@ const config = {
     icon: "build/icon.icns",
     hardenedRuntime: true,
     gatekeeperAssess: false,
-    // Gate signing on env: unsigned (identity:null) locally, real identity in CI
-    // when a cert is provided. `identity: null` makes electron-builder ad-hoc /
-    // skip signing instead of failing on a missing cert.
-    identity: SIGN ? undefined : null,
+    // Electron's macOS Notification API requires a code-signed application.
+    // Ad-hoc signing keeps local packages notification-capable without requiring
+    // a Developer ID certificate; distribution builds use the real identity.
+    identity: SIGN ? undefined : "-",
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
     notarize: NOTARIZE ? { teamId: /** @type {string} */ (process.env.APPLE_TEAM_ID) } : false,

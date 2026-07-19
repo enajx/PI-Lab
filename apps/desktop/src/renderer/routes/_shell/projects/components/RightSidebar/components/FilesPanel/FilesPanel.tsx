@@ -8,13 +8,15 @@ import { FileTree } from "../../../../../../../Editor/components/FileTree"
 export function FilesPanel({
   workspaceId,
   onOpenFile,
+  activeRelPath,
 }: {
   workspaceId: string
   onOpenFile: (relPath: string) => void
+  activeRelPath?: string | null
 }) {
   return (
     <section data-testid="panel-files" className="flex min-h-0 flex-1 flex-col">
-      <FileTree workspaceId={workspaceId} onOpenFile={onOpenFile} />
+      <FileTree workspaceId={workspaceId} onOpenFile={onOpenFile} activeRelPath={activeRelPath} />
     </section>
   )
 }

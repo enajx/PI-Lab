@@ -1,5 +1,5 @@
 // Integration tests for the science.cluster router via createCallerFactory over
-// a temp SQLite DB with the real migrations (docs/testing-and-build.md). The ssh probe is the
+// a temp SQLite DB with the real migrations (md/engineering/testing-and-build.md). The ssh probe is the
 // injected fake (FAKE_SSH_EXEC) so `refreshStatus` never touches the network.
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -28,7 +28,7 @@ let fixturePath: string
 
 beforeEach(async () => {
   h = await createHarness()
-  fixtureDir = await mkdtemp(join(tmpdir(), "skipper-ssh-"))
+  fixtureDir = await mkdtemp(join(tmpdir(), "pi-lab-ssh-"))
   fixturePath = join(fixtureDir, "config")
   await writeFile(fixturePath, SSH_CONFIG_FIXTURE)
 })
@@ -226,6 +226,11 @@ describe("science.cluster with a custom injected ssh-exec", () => {
         (await custom.caller.science.cluster.refreshStatus({ id: no.id })).machine.reachable,
       ).toBe(false)
       expect(calls).toEqual(["yes", "no"])
+      expect(custom.caffeine.meaningfulStartedTags).toEqual([
+        `cluster:refresh:${yes.id}`,
+        `cluster:refresh:${no.id}`,
+      ])
+      expect(custom.caffeine.meaningfulTags).toEqual([])
     } finally {
       await custom.dispose()
     }

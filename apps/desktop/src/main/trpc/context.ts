@@ -1,16 +1,36 @@
-import type { SkipperDatabase } from "@skipper/local-db"
-import type { DaemonClient } from "@skipper/pty-daemon"
-import { BUILTIN_AGENTS, type TerminalAgent } from "@skipper/shared"
+import type { PiLabDatabase } from "@pi-lab/local-db"
+import type { DaemonClient } from "@pi-lab/pty-daemon"
+import { BUILTIN_AGENTS, type TerminalAgent } from "@pi-lab/shared"
+import type { ActivityMonitorPort } from "../activity"
+import {
+  type AgentExecutableResolver,
+  type AgentLaunchEnvironmentResolver,
+  liveAgentExecutableResolver,
+  liveAgentLaunchEnvironment,
+} from "../agents/executable"
+import {
+  type NonInteractiveProcessRunner,
+  runNonInteractiveProcess,
+} from "../automations/nonInteractiveRunner"
+import type { CaffeineControllerPort } from "../caffeine"
 import { livePyToolsExec, type PyToolsExec } from "../diagnostics"
 import { liveSshExec, type SshExec } from "../lib/ssh-config"
-import type { LiveAgentRegistry } from "../sessions/liveAgentRegistry"
+import type { NotificationBrokers, NotificationService } from "../notifications"
+import {
+  livePythonEnvironmentDiscoverer,
+  livePythonRuntimeResolver,
+  type PythonEnvironmentDiscoverer,
+  type PythonRuntimeResolver,
+} from "../python"
+import type { CredentialCipher } from "../setup/credentials"
+import { liveSetupProbe, type SetupProbe } from "../setup/probe"
 
 /**
  * Per-request context for the main-process appRouter.
  *
  * Everything a feature router needs is injected here rather than imported as a
  * module singleton, so the whole surface is `createCaller`-testable without a
- * window (docs/testing-and-build.md): tests pass a temp-file Drizzle handle, an in-process
+ * window (md/engineering/testing-and-build.md): tests pass a temp-file Drizzle handle, an in-process
  * daemon client, and a fake agent catalog.
  *
  *   - `db`              — the migrated local store (projects/workspaces/git rows).
@@ -18,15 +38,13 @@ import type { LiveAgentRegistry } from "../sessions/liveAgentRegistry"
  *                         lazily adopt-or-spawned and transparently reconnected
  *                         by the supervisor; routers that never touch terminals
  *                         simply never call it.
- *   - `agentCatalog`    — the launchable external-CLI agents (docs/architecture.md (agent runtime)),
+ *   - `agentCatalog`    — the launchable external-CLI agents (md/engineering/architecture.md (agent runtime)),
  *                         injectable so launch tests use a deterministic fake
  *                         binary instead of a real (paid) agent.
- *   - `liveAgents`      — per-project tally of live agent sessions, the input the
- *                         start-agent-session policy reads (docs/architecture.md (agent runtime)). Shared
- *                         across calls within one app instance; injectable so
- *                         each test gets its own.
+ *   - `activityMonitor` — durable, renderer-independent agent activity and the
+ *                         live count used by the worktree policy.
  *   - `sshExec`         — reachability probe for the Cluster science tab
- *                         (AGENTS.md "Scope", docs/architecture.md (agent runtime)). Injectable so the cluster router's
+ *                         (AGENTS.md "Scope", md/engineering/architecture.md (agent runtime)). Injectable so the cluster router's
  *                         status tests use a deterministic fake instead of the
  *                         real `ssh` CLI / a live host.
  *   - `httpFetch`       — outbound HTTP for the Library science tab's Zotero calls
@@ -42,16 +60,32 @@ import type { LiveAgentRegistry } from "../sessions/liveAgentRegistry"
  *                         "Built-in editor"). Injectable so the diagnostics
  *                         router's tests feed canned tool output and a
  *                         "binary missing" branch with no `uv` installed.
+ *   - `discoverPythonEnvironments` — chooser-only, shallow global-manager
+ *                         discovery. Injectable so router tests never inspect
+ *                         the developer's real home directory.
  */
 export interface AppContext {
-  db: SkipperDatabase
+  db: PiLabDatabase
+  /** User home whose conventional global agent-skill roots are indexed read-only. */
+  skillsHomeDir: string
   getDaemonClient: () => Promise<DaemonClient>
   agentCatalog: readonly TerminalAgent[]
-  liveAgents: LiveAgentRegistry
+  resolveAgentExecutable: AgentExecutableResolver
+  getAgentLaunchEnvironment: AgentLaunchEnvironmentResolver
+  runNonInteractiveProcess: NonInteractiveProcessRunner
+  setupProbe?: SetupProbe
+  /** Encrypts API credentials before they enter local SQLite. Never renderer-visible. */
+  credentialCipher: CredentialCipher
   sshExec: SshExec
   httpFetch: HttpFetch
   openPath: OpenPath
   pyToolsExec: PyToolsExec
+  discoverPythonEnvironments: PythonEnvironmentDiscoverer
+  resolvePythonRuntime: PythonRuntimeResolver
+  notifications: NotificationBrokers
+  activityMonitor: ActivityMonitorPort
+  notificationService: NotificationService
+  caffeine: CaffeineControllerPort
 }
 
 /**
@@ -71,8 +105,12 @@ export type OpenPath = (path: string) => Promise<string>
 
 /** Default agent catalog when the app doesn't override it (the built-ins). */
 export const DEFAULT_AGENT_CATALOG: readonly TerminalAgent[] = BUILTIN_AGENTS
+export const DEFAULT_AGENT_EXECUTABLE_RESOLVER = liveAgentExecutableResolver
+export const DEFAULT_AGENT_LAUNCH_ENVIRONMENT = liveAgentLaunchEnvironment
+export const DEFAULT_WORKFLOW_PROCESS_RUNNER: NonInteractiveProcessRunner = runNonInteractiveProcess
+export const DEFAULT_SETUP_PROBE: SetupProbe = liveSetupProbe
 
-/** Default reachability probe — the real `ssh` CLI (docs/architecture.md (agent runtime)). */
+/** Default reachability probe — the real `ssh` CLI (md/engineering/architecture.md (agent runtime)). */
 export const DEFAULT_SSH_EXEC: SshExec = liveSshExec
 
 /**
@@ -87,9 +125,12 @@ export const DEFAULT_HTTP_FETCH: HttpFetch = (...args) => fetch(...args)
  * this; tests inject a deterministic fake instead.
  */
 export const DEFAULT_PY_TOOLS_EXEC: PyToolsExec = livePyToolsExec
+export const DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER: PythonEnvironmentDiscoverer =
+  livePythonEnvironmentDiscoverer
+export const DEFAULT_PYTHON_RUNTIME_RESOLVER: PythonRuntimeResolver = livePythonRuntimeResolver
 
 /**
- * Deterministic, credential-free agent used only in test mode (docs/testing-and-build.md).
+ * Deterministic, credential-free agent used only in test mode (md/engineering/testing-and-build.md).
  * It runs the bundled Node/Electron binary to print a known marker and exit, so
  * the projects E2E can click "Open agent" and assert real PTY output without a
  * paid agent or network. Its id is what the project view selects in test mode.
@@ -107,7 +148,7 @@ export const TEST_AGENT: TerminalAgent = {
 /**
  * Build the launchable agent catalog for an app instance. In test mode the
  * deterministic {@link TEST_AGENT} is appended so the E2E has an assertable agent
- * to launch; in normal use it's just the built-ins (docs/architecture.md (agent runtime)).
+ * to launch; in normal use it's just the built-ins (md/engineering/architecture.md (agent runtime)).
  */
 export function buildAgentCatalog(testMode: boolean): readonly TerminalAgent[] {
   return testMode ? [...BUILTIN_AGENTS, TEST_AGENT] : BUILTIN_AGENTS

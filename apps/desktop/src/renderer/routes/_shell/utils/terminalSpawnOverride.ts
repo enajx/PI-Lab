@@ -1,10 +1,15 @@
 /**
- * Test seam (docs/testing-and-build.md): let the E2E spawn the terminal with a deterministic
+ * Test seam (md/engineering/testing-and-build.md): let the E2E spawn the terminal with a deterministic
  * program via URL query params (`?termcmd=…&termargs=<json-array>`), so the
- * harness can assert a known marker without typing into the grid. In normal use
- * no params are present and the terminal falls back to the login shell.
+ * harness can assert a known marker without typing into the grid. `termkind`
+ * optionally exercises agent/TUI input encoding. In normal use no params are
+ * present and the terminal falls back to the login shell.
  */
-export function readTerminalSpawnOverride(): { command?: string; args?: string[] } | null {
+export function readTerminalSpawnOverride(): {
+  command?: string
+  args?: string[]
+  inputKind: "agent" | "terminal"
+} | null {
   if (typeof window === "undefined") return null
   const params = new URLSearchParams(window.location.search)
   const command = params.get("termcmd")
@@ -19,5 +24,9 @@ export function readTerminalSpawnOverride(): { command?: string; args?: string[]
       // Ignore malformed args; spawn the command bare.
     }
   }
-  return { command, args }
+  return {
+    command,
+    args,
+    inputKind: params.get("termkind") === "agent" ? "agent" : "terminal",
+  }
 }

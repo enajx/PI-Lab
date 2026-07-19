@@ -1,4 +1,4 @@
-import "@skipper/ui/styles/globals.css"
+import "@pi-lab/ui/styles/globals.css"
 import { RouterProvider } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
@@ -11,7 +11,7 @@ if (!rootElement) {
 }
 
 // The router is created once at module scope; providers wrap it so Query/tRPC and
-// theme context are available to every route (docs/architecture.md (renderer)).
+// theme context are available to every route (md/engineering/architecture.md (renderer)).
 const router = createAppRouter()
 
 createRoot(rootElement).render(

@@ -18,7 +18,7 @@ let server: DaemonServer
 const clients: DaemonClient[] = []
 
 beforeEach(async () => {
-  socketDir = await mkdtemp(join(tmpdir(), "skipper-ptyd-"))
+  socketDir = await mkdtemp(join(tmpdir(), "pi-lab-ptyd-"))
   socketPath = join(socketDir, "daemon.sock")
   server = new DaemonServer({ socketPath })
   await server.listen()

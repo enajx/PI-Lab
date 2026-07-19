@@ -1,12 +1,13 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { type ITheme, Terminal as XTerm } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { type CSSProperties, useEffect, useRef, useState } from "react"
-import { createSkipperTrpcClient, type SkipperTrpcClient } from "../trpc/client"
+import { type CSSProperties, useEffect, useRef } from "react"
+import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
+import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
 
 /**
- * Live terminal pane (docs/architecture.md (renderer)) wired end-to-end to the `terminal` tRPC
- * router (docs/architecture.md (process model), docs/architecture.md (agent runtime)). It streams a PTY session's bytes into xterm.js,
+ * Live terminal pane (md/engineering/architecture.md (renderer)) wired end-to-end to the `terminal` tRPC
+ * router (md/engineering/architecture.md (process model), md/engineering/architecture.md (agent runtime)). It streams a PTY session's bytes into xterm.js,
  * forwards keystrokes back, and keeps the PTY sized to the viewport.
  *
  * Two modes, picked by props:
@@ -22,17 +23,19 @@ import { createSkipperTrpcClient, type SkipperTrpcClient } from "../trpc/client"
  * Lifecycle ownership is deliberate: on unmount we unsubscribe and **detach**
  * (the subscription's teardown calls the daemon's `detach`) — we never `kill`.
  * The session lives in the separate pty-daemon process so it survives an Electron
- * reload (docs/architecture.md (process model)); killing here would defeat that survival contract.
+ * reload (md/engineering/architecture.md (process model)); killing here would defeat that survival contract.
  *
  * Scrolling is xterm's own viewport, not Radix `ScrollArea` (AGENTS.md Pitfalls #3).
  */
 
 interface TerminalProps {
+  /** Whether this PTY hosts an interactive agent/TUI or an ordinary shell. */
+  inputKind: TerminalInputKind
   /**
-   * Injectable tRPC client for tests (docs/testing-and-build.md); defaults to the real IPC
+   * Injectable tRPC client for tests (md/engineering/testing-and-build.md); defaults to the real IPC
    * client. A fresh client per pane keeps subscriptions independent.
    */
-  client?: SkipperTrpcClient
+  client?: PiLabTrpcClient
   /**
    * Attach to an existing PTY session instead of spawning. When set, all spawn
    * options below are ignored: the pane only subscribes (and the subscription
@@ -53,35 +56,40 @@ interface TerminalProps {
   args?: string[]
 }
 
-export function Terminal({ client, sessionId, cwd, command, args }: TerminalProps) {
+export function Terminal({ client, inputKind, sessionId, cwd, command, args }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   // Effect deps are intentionally empty: a terminal pane binds to one session for
   // its lifetime. Options are captured in a ref so changing a prop never
   // re-spawns/re-attaches (and never tears down a live agent session) mid-flight.
-  const optionsRef = useRef({ client, sessionId, cwd, command, args })
-  optionsRef.current = { client, sessionId, cwd, command, args }
+  const optionsRef = useRef({ client, inputKind, sessionId, cwd, command, args })
+  optionsRef.current = { client, inputKind, sessionId, cwd, command, args }
 
-  // Track the app theme (the <html> .dark class) so the terminal matches light/
-  // dark without re-attaching the session.
+  // Track the app's resolved mode and CSS-token palette so the terminal follows
+  // Appearance changes without re-attaching the session.
   const xtermRef = useRef<XTerm | null>(null)
-  const [isDark, setIsDark] = useState(currentIsDark)
   useEffect(() => {
     const root = document.documentElement
-    const observer = new MutationObserver(() => setIsDark(root.classList.contains("dark")))
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] })
+    const observer = new MutationObserver(() => {
+      if (xtermRef.current) xtermRef.current.options.theme = currentTerminalTheme()
+    })
+    observer.observe(root, { attributes: true, attributeFilter: ["class", "style"] })
     return () => observer.disconnect()
   }, [])
-  useEffect(() => {
-    if (xtermRef.current) xtermRef.current.options.theme = terminalTheme(isDark)
-  }, [isDark])
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
 
-    const { client: injected, sessionId: attachId, cwd, command, args } = optionsRef.current
-    const trpc = injected ?? createSkipperTrpcClient()
+    const {
+      client: injected,
+      inputKind,
+      sessionId: attachId,
+      cwd,
+      command,
+      args,
+    } = optionsRef.current
+    const trpc = injected ?? createPiLabTrpcClient()
 
     const xterm = new XTerm({
       convertEol: true,
@@ -89,7 +97,7 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
       fontFamily:
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
-      theme: terminalTheme(currentIsDark()),
+      theme: currentTerminalTheme(),
     })
     xtermRef.current = xterm
     const fitAddon = new FitAddon()
@@ -104,6 +112,26 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
     let unsubscribe: (() => void) | null = null
     let inputDisposable: { dispose: () => void } | null = null
     let resizeObserver: ResizeObserver | null = null
+
+    /** Forward one input chunk exactly once, whether xterm generated or custom-mapped. */
+    const forwardInput = (data: string): void => {
+      if (cancelled || !sessionId) return
+      void trpc.terminal.write.mutate({ sessionId, data }).catch(() => {})
+    }
+
+    // xterm cannot choose the right Shift+Enter protocol without knowing
+    // whether this PTY is a shell or an agent TUI. Returning false suppresses
+    // xterm's own onData for mapped keys, avoiding a second write.
+    xterm.attachCustomKeyEventHandler((event) => {
+      const data = mapTerminalKeyEvent(event, {
+        platform: isMacOSPlatform(navigator.platform) ? "darwin" : "other",
+        inputKind,
+      })
+      if (data === null) return true
+      event.preventDefault()
+      forwardInput(data)
+      return false
+    })
 
     /** Fit to the container, then push the new grid size to the PTY. */
     const syncSize = () => {
@@ -133,17 +161,14 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
           onData: (event) => {
             if (cancelled) return
             if (event.type === "data") xterm.write(event.chunk)
-            else xterm.write(`\r\n[skipper] session exited (code ${event.exitCode ?? "?"})\r\n`)
+            else xterm.write(`\r\n[pi-lab] session exited (code ${event.exitCode ?? "?"})\r\n`)
           },
         },
       )
       unsubscribe = () => subscription.unsubscribe()
 
       // Forward keystrokes (and pasted text) to the PTY's stdin.
-      inputDisposable = xterm.onData((data) => {
-        if (cancelled || !sessionId) return
-        void trpc.terminal.write.mutate({ sessionId, data }).catch(() => {})
-      })
+      inputDisposable = xterm.onData(forwardInput)
 
       // Keep the PTY grid matched to the viewport.
       resizeObserver = new ResizeObserver(() => syncSize())
@@ -180,7 +205,7 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
         })
       } catch (error) {
         if (!cancelled) {
-          xterm.write(`\r\n[skipper] failed to start terminal: ${String(error)}\r\n`)
+          xterm.write(`\r\n[pi-lab] failed to start terminal: ${String(error)}\r\n`)
         }
         return
       }
@@ -193,7 +218,7 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
       resizeObserver?.disconnect()
       inputDisposable?.dispose()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
-      // session (it is NOT killed), so the PTY persists across reload (docs/architecture.md (process model)).
+      // session (it is NOT killed), so the PTY persists across reload (md/engineering/architecture.md (process model)).
       unsubscribe?.()
       xterm.dispose()
       xtermRef.current = null
@@ -204,9 +229,13 @@ export function Terminal({ client, sessionId, cwd, command, args }: TerminalProp
     <div
       ref={containerRef}
       data-testid="terminal"
-      style={{ ...paneStyle, background: isDark ? "#101014" : "#ffffff" }}
+      style={{ ...paneStyle, background: "var(--background)" }}
     />
   )
+}
+
+function isMacOSPlatform(platform: string): boolean {
+  return /^Mac/u.test(platform)
 }
 
 /** Whether the app is currently in dark mode (the `<html>` `.dark` class). */
@@ -247,6 +276,21 @@ const LIGHT_TERMINAL_THEME: ITheme = {
 
 function terminalTheme(isDark: boolean): ITheme {
   return isDark ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME
+}
+
+function currentTerminalTheme(): ITheme {
+  const fallback = terminalTheme(currentIsDark())
+  if (typeof document === "undefined") return fallback
+  const styles = window.getComputedStyle(document.documentElement)
+  const background = styles.getPropertyValue("--background").trim()
+  const foreground = styles.getPropertyValue("--foreground").trim()
+  const selectionBackground = styles.getPropertyValue("--accent").trim()
+  return {
+    ...fallback,
+    ...(background ? { background } : {}),
+    ...(foreground ? { foreground, cursor: foreground } : {}),
+    ...(selectionBackground ? { selectionBackground } : {}),
+  }
 }
 
 // xterm manages its own scrollback viewport; the pane just needs to be a bounded

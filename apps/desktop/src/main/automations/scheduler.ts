@@ -1,17 +1,17 @@
-import { type Automation, automations, type SkipperDatabase } from "@skipper/local-db"
-import { nextOccurrence } from "@skipper/shared"
+import { type Automation, automations, type PiLabDatabase } from "@pi-lab/local-db"
+import { nextOccurrence } from "@pi-lab/shared"
 import { and, asc, eq, isNotNull, lte } from "drizzle-orm"
 import type { FireAutomation } from "./dispatch"
 
 /**
  * Local scheduled-agent-run engine, in the Electron main process (AGENTS.md "Scope"
- * — Automations, docs/architecture.md (process model) — boot sequence).
+ * — Automations, md/engineering/architecture.md (process model) — boot sequence).
  *
  * "When" lives here — the timer, the due-sweep, and `nextRunAt` advancement.
  * "What happens on fire" lives in `dispatch.ts` (record a run row, launch the
  * agent through the shared session-start flow). Keeping that split lets the
  * scheduler be unit-tested with an *injected clock* and an *injected fire*, so
- * no real time, agents, or PTYs are involved (docs/testing-and-build.md).
+ * no real time, agents, or PTYs are involved (md/engineering/testing-and-build.md).
  *
  * Persistence is the local SQLite DB, so a schedule survives a restart: on
  * `start()` we reconcile (recompute every enabled automation's `nextRunAt` from
@@ -28,7 +28,7 @@ import type { FireAutomation } from "./dispatch"
 export type Clock = () => number
 
 export interface AutomationSchedulerOptions {
-  db: SkipperDatabase
+  db: PiLabDatabase
   /** Fired for each due automation; production passes the real dispatcher. */
   fire: FireAutomation
   /** Current epoch-ms; defaults to `Date.now`. Injected in tests. */
@@ -40,7 +40,7 @@ export interface AutomationSchedulerOptions {
 const DEFAULT_INTERVAL_MS = 30_000
 
 export class AutomationScheduler {
-  private readonly db: SkipperDatabase
+  private readonly db: PiLabDatabase
   private readonly fire: FireAutomation
   private readonly now: Clock
   private readonly intervalMs: number

@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs"
 import { cp } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { resolveDataDir } from "@skipper/local-db"
+import { resolveDataDir } from "@pi-lab/local-db"
 
 /**
  * The bundled project template + its first-run seed into a writable copy.
  *
- * Skipper ships a starter repo layout (`AGENTS.md`, the `CLAUDE.md` symlink,
+ * PI Lab ships a starter repo layout (`AGENTS.md`, the `CLAUDE.md` symlink,
  * `RESEARCH.md`, `TODO.md`, cluster/experiment notes, `.gitignore`) under
  * `apps/desktop/resources/template`. New projects are stamped from it
  * (`projects.createFromTemplate`) and the user edits it from Settings.
@@ -49,8 +49,8 @@ export function resolveBundledTemplateDir(): string {
 }
 
 /**
- * The writable template copy under the data dir (`~/.skipper/template`, or the
- * `SKIPPER_DATA_DIR` override). This is the directory the Settings editor and
+ * The writable template copy under the data dir (`~/.pi-lab/template`, or the
+ * `PI_LAB_DATA_DIR` override). This is the directory the Settings editor and
  * `projects.createFromTemplate` read/write — never the bundled original.
  */
 export function resolveWritableTemplateDir(): string {

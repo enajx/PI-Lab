@@ -1,0 +1,656 @@
+import {
+  type AgentSession,
+  type AutomationRun,
+  agentSessions,
+  automationRuns,
+  type PiLabDatabase,
+} from "@pi-lab/local-db"
+import type { AttachResult, DataEvent, ExitEvent, SessionInfo } from "@pi-lab/pty-daemon"
+import { eq, ne } from "drizzle-orm"
+import type { NotificationService } from "../notifications"
+import type { ActivityRegistry } from "./registry"
+import {
+  createHeadlessRenderedTerminal,
+  type RenderedTerminal,
+  type RenderedTerminalFactory,
+} from "./renderedTerminal"
+import type {
+  ActivityRegistryChange,
+  ActivityScheduler,
+  ActivityTimer,
+  AgentActivityRecord,
+  RegisterAgentActivity,
+  WorkflowRunActivityState,
+} from "./types"
+
+export interface ActivityDaemonClient {
+  attach: (sessionId: string) => Promise<AttachResult>
+  list: () => Promise<SessionInfo[]>
+  on: {
+    (event: "data", listener: (event: DataEvent) => void): unknown
+    (event: "exit", listener: (event: ExitEvent) => void): unknown
+    (event: "close", listener: () => void): unknown
+  }
+}
+
+export interface TrackAgentSession extends RegisterAgentActivity {
+  cols: number
+  rows: number
+}
+
+export interface TrackTerminalSession {
+  sessionId: string
+  projectId: string
+  workspaceId: string
+  label: string
+  cols: number
+  rows: number
+}
+
+export interface ActivityMonitorPort {
+  track: (input: TrackAgentSession) => Promise<void>
+  trackTerminal: (input: TrackTerminalSession) => Promise<void>
+  reconcile: () => Promise<void>
+  liveAgentCount: (projectId: string) => number
+  userInput: (sessionId: string, data: string) => void
+  resize: (sessionId: string, cols: number, rows: number) => void
+  dispose: () => void
+}
+
+export interface ActivityMonitorOptions {
+  db: PiLabDatabase
+  registry: ActivityRegistry
+  getMonitorClient: () => Promise<ActivityDaemonClient>
+  notifications: NotificationService
+  scheduler: ActivityScheduler
+  terminalFactory: RenderedTerminalFactory
+  logger: Pick<Console, "warn">
+}
+
+interface MonitoredTerminal {
+  terminal: RenderedTerminal
+  cols: number
+  rows: number
+  kind: "agent" | "terminal"
+}
+
+interface TerminalCommandRuntime {
+  projectId: string
+  workspaceId: string
+  label: string
+  inputBuffer: string
+  promptLine: string | null
+  currentLine: string
+  lastScreen: string
+  baselineScreen: string
+  submittedCommand: string | null
+  commandPending: boolean
+  outputObserved: boolean
+  completionTimer: ActivityTimer | null
+}
+
+const RECONNECT_DELAY_MS = 1_000
+export const TERMINAL_COMPLETION_CONFIRMATION_MS = 1_000
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal input can contain ANSI escape sequences.
+const TERMINAL_ANSI_ESCAPE = /\u001b\[[0-?]*[ -/]*[@-~]/g
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control bytes are expected in raw terminal input.
+const TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g
+
+export class ActivityMonitor implements ActivityMonitorPort {
+  private readonly terminals = new Map<string, MonitoredTerminal>()
+  private readonly terminalCommands = new Map<string, TerminalCommandRuntime>()
+  private readonly clients = new WeakSet<object>()
+  private readonly previous = new Map<string, AgentActivityRecord>()
+  private readonly unsubscribeRegistry: () => void
+  private reconnectTimer: { cancel(): void } | null = null
+  private disposed = false
+
+  constructor(private readonly options: ActivityMonitorOptions) {
+    this.unsubscribeRegistry = options.registry.subscribe((change) =>
+      this.handleRegistryChange(change),
+    )
+  }
+
+  async track(input: TrackAgentSession): Promise<void> {
+    const at = Date.now()
+    this.options.db
+      .insert(agentSessions)
+      .values({
+        sessionId: input.sessionId,
+        projectId: input.projectId,
+        workspaceId: input.workspaceId,
+        agentId: input.agentId,
+        workflowRunId: input.workflowRunId,
+        state: "working",
+        turnArmed: input.turnArmed,
+        updatedAt: at,
+      })
+      .onConflictDoUpdate({
+        target: agentSessions.sessionId,
+        set: {
+          projectId: input.projectId,
+          workspaceId: input.workspaceId,
+          agentId: input.agentId,
+          workflowRunId: input.workflowRunId,
+          state: "working",
+          turnArmed: input.turnArmed,
+          waitingReason: null,
+          waitingSince: null,
+          exitedAt: null,
+          updatedAt: at,
+        },
+      })
+      .run()
+
+    this.options.registry.register(input)
+    if (input.workflowRunId) this.options.registry.markWorkflowRunning(input.sessionId)
+    await this.attach(input.sessionId, input.cols, input.rows, "agent")
+  }
+
+  async trackTerminal(input: TrackTerminalSession): Promise<void> {
+    if (this.terminalCommands.has(input.sessionId)) return
+    this.terminalCommands.set(input.sessionId, {
+      projectId: input.projectId,
+      workspaceId: input.workspaceId,
+      label: input.label,
+      inputBuffer: "",
+      promptLine: null,
+      currentLine: "",
+      lastScreen: "",
+      baselineScreen: "",
+      submittedCommand: null,
+      commandPending: false,
+      outputObserved: false,
+      completionTimer: null,
+    })
+    await this.attach(input.sessionId, input.cols, input.rows, "terminal")
+  }
+
+  async reconcile(): Promise<void> {
+    if (this.disposed) return
+    const durable = this.options.db
+      .select()
+      .from(agentSessions)
+      .where(ne(agentSessions.state, "exited"))
+      .all()
+    if (durable.length === 0 && this.terminalCommands.size === 0) return
+    const client = await this.options.getMonitorClient()
+    this.wireClient(client)
+    const daemonSessions = new Map((await client.list()).map((session) => [session.id, session]))
+
+    for (const row of durable) {
+      const daemonSession = daemonSessions.get(row.sessionId)
+      const restored = this.toActivityRecord(row)
+      this.options.registry.restore(restored)
+      if (!daemonSession?.alive) {
+        this.options.registry.processExited(row.sessionId, "Session was not live after restart")
+        continue
+      }
+      await this.attach(row.sessionId, daemonSession.cols, daemonSession.rows, "agent", client)
+    }
+
+    for (const sessionId of this.terminalCommands.keys()) {
+      const daemonSession = daemonSessions.get(sessionId)
+      if (!daemonSession?.alive) {
+        this.forgetTerminal(sessionId)
+        continue
+      }
+      await this.attach(sessionId, daemonSession.cols, daemonSession.rows, "terminal", client)
+    }
+  }
+
+  userInput(sessionId: string, data: string): void {
+    const terminal = this.terminalCommands.get(sessionId)
+    if (terminal) {
+      this.observeTerminalInput(terminal, data)
+      return
+    }
+    if (data.includes("\r")) {
+      this.options.registry.userSubmitted(sessionId)
+    }
+  }
+
+  liveAgentCount(projectId: string): number {
+    return this.options.registry
+      .snapshot()
+      .sessions.filter((session) => session.projectId === projectId && session.state !== "exited")
+      .length
+  }
+
+  resize(sessionId: string, cols: number, rows: number): void {
+    const monitored = this.terminals.get(sessionId)
+    if (!monitored) return
+    monitored.cols = cols
+    monitored.rows = rows
+    monitored.terminal.resize(cols, rows)
+  }
+
+  dispose(): void {
+    this.disposed = true
+    this.reconnectTimer?.cancel()
+    this.reconnectTimer = null
+    this.unsubscribeRegistry()
+    for (const monitored of this.terminals.values()) monitored.terminal.dispose()
+    this.terminals.clear()
+    for (const terminal of this.terminalCommands.values()) terminal.completionTimer?.cancel()
+    this.terminalCommands.clear()
+  }
+
+  private async attach(
+    sessionId: string,
+    cols: number,
+    rows: number,
+    kind: "agent" | "terminal",
+    providedClient?: ActivityDaemonClient,
+  ): Promise<void> {
+    if (this.disposed || this.terminals.has(sessionId)) return
+    const client = providedClient ?? (await this.options.getMonitorClient())
+    this.wireClient(client)
+    const terminal = this.options.terminalFactory(cols, rows)
+    this.terminals.set(sessionId, { terminal, cols, rows, kind })
+    try {
+      const result = await client.attach(sessionId)
+      if (!result.session.alive) {
+        this.handleExit({
+          kind: "exit",
+          sessionId,
+          exitCode: null,
+          signal: null,
+        })
+        return
+      }
+      if (result.scrollback.length > 0) this.render(sessionId, result.scrollback)
+    } catch (error) {
+      terminal.dispose()
+      this.terminals.delete(sessionId)
+      if (kind === "agent") {
+        this.options.registry.processExited(
+          sessionId,
+          error instanceof Error ? error.message : String(error),
+        )
+      } else {
+        this.forgetTerminal(sessionId)
+      }
+      this.options.logger.warn(
+        `[pi-lab] failed to monitor agent session ${sessionId}: ${String(error)}`,
+      )
+    }
+  }
+
+  private wireClient(client: ActivityDaemonClient): void {
+    const identity = client as object
+    if (this.clients.has(identity)) return
+    this.clients.add(identity)
+    client.on("data", (event) => this.render(event.sessionId, event.chunk))
+    client.on("exit", (event) => this.handleExit(event))
+    client.on("close", () => this.handleClientClose())
+  }
+
+  private render(sessionId: string, chunk: string): void {
+    const monitored = this.terminals.get(sessionId)
+    if (!monitored) return
+    monitored.terminal.write(chunk, () => {
+      if (!this.terminals.has(sessionId)) return
+      const screen = monitored.terminal.screen()
+      if (monitored.kind === "agent") {
+        this.options.registry.observeRenderedScreen(sessionId, screen)
+      } else {
+        this.observeTerminalScreen(sessionId, screen, monitored.terminal.cursorLine())
+      }
+    })
+  }
+
+  private handleExit(event: ExitEvent): void {
+    const monitored = this.terminals.get(event.sessionId)
+    monitored?.terminal.dispose()
+    this.terminals.delete(event.sessionId)
+    if (monitored?.kind === "terminal" || this.terminalCommands.has(event.sessionId)) {
+      const terminal = this.terminalCommands.get(event.sessionId)
+      if (terminal?.commandPending && event.exitCode === 0)
+        this.notifyTerminalCompletion(event.sessionId)
+      this.forgetTerminal(event.sessionId)
+      return
+    }
+    const description =
+      event.signal !== null
+        ? `Agent exited from signal ${event.signal}`
+        : event.exitCode === 0
+          ? null
+          : `Agent exited with code ${event.exitCode ?? "unknown"}`
+    this.options.registry.processExited(event.sessionId, description)
+  }
+
+  private handleClientClose(): void {
+    if (this.disposed) return
+    for (const monitored of this.terminals.values()) monitored.terminal.dispose()
+    this.terminals.clear()
+    this.reconnectTimer?.cancel()
+    this.reconnectTimer = this.options.scheduler.schedule(RECONNECT_DELAY_MS, () => {
+      this.reconnectTimer = null
+      void this.reconcile().catch((error) => {
+        this.options.logger.warn(`[pi-lab] activity monitor reconnect failed: ${String(error)}`)
+        this.handleClientClose()
+      })
+    })
+  }
+
+  private observeTerminalInput(runtime: TerminalCommandRuntime, data: string): void {
+    for (const character of data) {
+      if (character === "\u0003") {
+        runtime.inputBuffer = ""
+        continue
+      }
+      if (character === "\u007f" || character === "\b") {
+        runtime.inputBuffer = runtime.inputBuffer.slice(0, -1)
+        continue
+      }
+      if (character === "\n") {
+        runtime.inputBuffer += character
+        continue
+      }
+      if (character !== "\r") {
+        if (character >= " ") runtime.inputBuffer += character
+        continue
+      }
+
+      const command = cleanTerminalCommand(runtime.inputBuffer)
+      runtime.inputBuffer = ""
+      if (!command) continue
+      runtime.completionTimer?.cancel()
+      runtime.completionTimer = null
+      runtime.submittedCommand = command
+      runtime.commandPending = true
+      runtime.outputObserved = false
+      runtime.baselineScreen = runtime.lastScreen
+    }
+  }
+
+  private observeTerminalScreen(sessionId: string, rawScreen: string, rawCursorLine: string): void {
+    const runtime = this.terminalCommands.get(sessionId)
+    if (!runtime) return
+    const screen = normalizeTerminalScreen(rawScreen)
+    const cursorLine = normalizeTerminalLine(rawCursorLine)
+    runtime.currentLine = cursorLine
+
+    if (!runtime.commandPending) {
+      runtime.lastScreen = screen
+      if (cursorLine && isLikelyShellPrompt(cursorLine)) runtime.promptLine = cursorLine
+      return
+    }
+
+    if (screen !== runtime.baselineScreen) runtime.outputObserved = true
+    runtime.lastScreen = screen
+    const returnedToPrompt =
+      runtime.outputObserved &&
+      cursorLine.length > 0 &&
+      isReturnedShellPrompt(cursorLine, runtime.promptLine, runtime.submittedCommand)
+
+    if (!returnedToPrompt) {
+      runtime.completionTimer?.cancel()
+      runtime.completionTimer = null
+      return
+    }
+    if (runtime.completionTimer) return
+    runtime.completionTimer = this.options.scheduler.schedule(
+      TERMINAL_COMPLETION_CONFIRMATION_MS,
+      () => {
+        const current = this.terminalCommands.get(sessionId)
+        if (!current?.commandPending) return
+        current.completionTimer = null
+        if (
+          !current.outputObserved ||
+          !current.currentLine ||
+          !isReturnedShellPrompt(current.currentLine, current.promptLine, current.submittedCommand)
+        ) {
+          return
+        }
+        current.promptLine = current.currentLine
+        this.notifyTerminalCompletion(sessionId)
+      },
+    )
+  }
+
+  private notifyTerminalCompletion(sessionId: string): void {
+    const runtime = this.terminalCommands.get(sessionId)
+    if (!runtime?.commandPending) return
+    runtime.completionTimer?.cancel()
+    runtime.completionTimer = null
+    runtime.submittedCommand = null
+    runtime.commandPending = false
+    runtime.outputObserved = false
+    runtime.baselineScreen = runtime.lastScreen
+    this.options.notifications.notify({
+      eventType: "terminalCompletion",
+      title: "Terminal command finished",
+      body: `${runtime.label} is ready for the next command`,
+      target: {
+        type: "terminal",
+        projectId: runtime.projectId,
+        workspaceId: runtime.workspaceId,
+        sessionId,
+        label: runtime.label,
+      },
+    })
+  }
+
+  private forgetTerminal(sessionId: string): void {
+    const runtime = this.terminalCommands.get(sessionId)
+    runtime?.completionTimer?.cancel()
+    this.terminalCommands.delete(sessionId)
+  }
+
+  private handleRegistryChange(change: ActivityRegistryChange): void {
+    for (const record of change.snapshot.sessions) {
+      const prior = this.previous.get(record.sessionId)
+      this.previous.set(record.sessionId, { ...record })
+      this.persistAgent(record)
+      if (record.workflowRunId) this.persistWorkflow(record)
+
+      if (
+        record.state === "waiting" &&
+        (prior?.state !== "waiting" || prior.waitingEpisode !== record.waitingEpisode)
+      ) {
+        if (record.waitingReason !== "initial-prompt") {
+          const claimed = this.options.registry.claimWaitingNotification(record.sessionId)
+          if (claimed?.waitingReason === "turn-complete") {
+            const isInitialWorkflowCompletion =
+              prior?.workflowState === "running" && claimed.workflowState === "completed"
+            if (!isInitialWorkflowCompletion) this.notifyAgentTurnCompletion(claimed)
+          } else if (claimed) {
+            this.notifyAgentWaiting(claimed)
+          }
+        }
+      }
+
+      if (!prior || prior.workflowState === record.workflowState || !record.workflowRunId) continue
+      if (record.workflowState === "running") this.notifyWorkflow(record, "workflowStart")
+      if (record.workflowState === "completed") this.notifyWorkflow(record, "workflowCompletion")
+      if (record.workflowState === "failed") this.notifyWorkflow(record, "workflowFailure")
+    }
+  }
+
+  private persistAgent(record: AgentActivityRecord): void {
+    this.options.db
+      .update(agentSessions)
+      .set({
+        state: record.state,
+        turnArmed: record.turnArmed,
+        waitingReason: record.waitingReason,
+        waitingSince: record.waitingSince,
+        exitedAt: record.exitedAt,
+        updatedAt: record.updatedAt,
+      })
+      .where(eq(agentSessions.sessionId, record.sessionId))
+      .run()
+  }
+
+  private persistWorkflow(record: AgentActivityRecord): void {
+    if (!record.workflowRunId || !record.workflowState) return
+    this.options.db
+      .update(automationRuns)
+      .set({
+        state: record.workflowState,
+        sessionId: record.sessionId,
+        workspaceId: record.workspaceId,
+        launchedAt: record.workflowState === "running" ? record.updatedAt : undefined,
+        completedAt: record.workflowCompletedAt,
+        error: record.workflowFailureReason,
+      })
+      .where(eq(automationRuns.id, record.workflowRunId))
+      .run()
+  }
+
+  private notifyAgentWaiting(record: AgentActivityRecord): void {
+    if (!record.workspaceId) return
+    this.options.notifications.notify({
+      eventType: "agentInput",
+      title: "Agent needs input",
+      body: `${record.agentId} is waiting for ${waitingLabel(record)}`,
+      target: {
+        type: "agent",
+        projectId: record.projectId,
+        workspaceId: record.workspaceId,
+        sessionId: record.sessionId,
+        agentId: record.agentId,
+      },
+    })
+  }
+
+  private notifyAgentTurnCompletion(record: AgentActivityRecord): void {
+    if (!record.workspaceId) return
+    this.options.notifications.notify({
+      eventType: "agentTurnCompletion",
+      title: "Agent finished its turn",
+      body: `${record.agentId} is ready for your next instruction`,
+      target: {
+        type: "agent",
+        projectId: record.projectId,
+        workspaceId: record.workspaceId,
+        sessionId: record.sessionId,
+        agentId: record.agentId,
+      },
+    })
+  }
+
+  private notifyWorkflow(
+    record: AgentActivityRecord,
+    eventType: "workflowStart" | "workflowCompletion" | "workflowFailure",
+  ): void {
+    if (!record.workflowRunId) return
+    const run = this.options.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, record.workflowRunId))
+      .get()
+    if (!run) return
+    const title =
+      eventType === "workflowStart"
+        ? "Workflow started"
+        : eventType === "workflowCompletion"
+          ? "Workflow completed"
+          : "Workflow failed"
+    this.options.notifications.notify({
+      eventType,
+      title,
+      body: workflowBody(run, record),
+      target: { type: "workflow", workflowId: run.automationId, runId: run.id },
+    })
+  }
+
+  private toActivityRecord(row: AgentSession): AgentActivityRecord {
+    const workflow = row.workflowRunId
+      ? this.options.db
+          .select()
+          .from(automationRuns)
+          .where(eq(automationRuns.id, row.workflowRunId))
+          .get()
+      : null
+    return {
+      sessionId: row.sessionId,
+      projectId: row.projectId,
+      workspaceId: row.workspaceId,
+      agentId: row.agentId,
+      workflowRunId: row.workflowRunId,
+      state: row.state,
+      waitingReason: row.waitingReason,
+      waitingSince: row.waitingSince,
+      waitingEpisode: row.state === "waiting" ? 1 : 0,
+      waitingNotifiedEpisode: row.state === "waiting" ? 1 : null,
+      turnArmed: row.turnArmed,
+      workflowState: workflowState(workflow),
+      workflowCompletedAt: workflow?.completedAt ?? null,
+      workflowFailureReason: workflow?.error ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      lastQualifyingOutputAt: null,
+      exitedAt: row.exitedAt,
+    }
+  }
+}
+
+export function createActivityMonitor(
+  options: Omit<ActivityMonitorOptions, "terminalFactory">,
+): ActivityMonitor {
+  return new ActivityMonitor({ ...options, terminalFactory: createHeadlessRenderedTerminal })
+}
+
+function workflowState(run: AutomationRun | null | undefined): WorkflowRunActivityState | null {
+  if (!run) return null
+  if (run.state === "launched") return "completed"
+  return run.state
+}
+
+function waitingLabel(record: AgentActivityRecord): string {
+  if (record.waitingReason === "permission") return "permission"
+  if (record.waitingReason === "question") return "an answer"
+  return "your next instruction"
+}
+
+function workflowBody(run: AutomationRun, record: AgentActivityRecord): string {
+  if (record.workflowState === "failed") {
+    return record.workflowFailureReason ?? `Run ${run.id} failed`
+  }
+  return `Run ${run.id}`
+}
+
+function normalizeTerminalScreen(screen: string): string {
+  return screen
+    .replaceAll("\r", "")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trimEnd()
+}
+
+function normalizeTerminalLine(line: string): string {
+  return line.replaceAll("\r", "").trim()
+}
+
+function isLikelyShellPrompt(line: string): boolean {
+  if (line.length > 200) return false
+  return /^(?:➜|❯|λ)\s+/u.test(line) || /(?:^|\s)[^\n]*[$%#❯›>]\s*$/u.test(line)
+}
+
+function isReturnedShellPrompt(
+  line: string,
+  knownPrompt: string | null,
+  submittedCommand: string | null,
+): boolean {
+  if (!knownPrompt) return isLikelyShellPrompt(line)
+  if (line === knownPrompt) return true
+  if (
+    submittedCommand &&
+    line.startsWith(knownPrompt) &&
+    line.slice(knownPrompt.length).trim() === submittedCommand
+  ) {
+    return false
+  }
+  const knownPrefix = knownPrompt.match(/^(?:➜|❯|λ)\s+/u)?.[0]
+  if (knownPrefix) return line.startsWith(knownPrefix)
+  const knownSuffix = knownPrompt.match(/[$%#❯›>]\s*$/u)?.[0]
+  return knownSuffix ? line.endsWith(knownSuffix) && isLikelyShellPrompt(line) : false
+}
+
+function cleanTerminalCommand(input: string): string {
+  return input.replace(TERMINAL_ANSI_ESCAPE, "").replace(TERMINAL_CONTROL_CHARACTERS, "").trim()
+}

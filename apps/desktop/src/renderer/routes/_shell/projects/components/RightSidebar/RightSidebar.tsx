@@ -1,17 +1,30 @@
-import { cn } from "@skipper/ui"
+import { cn } from "@pi-lab/ui"
 import { Check, PanelRightClose, Settings2 } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
-import { useShowCodeChanges, useShowFilesPanel } from "../../../../../preferences/preferences"
+import {
+  useShowCodeChanges,
+  useShowFilesPanel,
+  useShowSkillsPanel,
+} from "../../../../../preferences/preferences"
 import { ChangesPanel } from "./components/ChangesPanel"
 import { FilesPanel } from "./components/FilesPanel"
 import { ResearchPanel } from "./components/ResearchPanel"
+import { SkillsPanel } from "./components/SkillsPanel"
 import { TodosPanel } from "./components/TodosPanel"
+
+interface PanelRenderContext {
+  projectId: string
+  workspaceId: string
+  onOpenFile: (relPath: string) => void
+  activeRelPath: string | null
+}
 
 /** A tab in the right sidebar: a label + the panel it reveals. */
 interface PanelTab {
   id: string
   label: string
-  render: (workspaceId: string, onOpenFile: (relPath: string) => void) => ReactNode
+  description: string
+  render: (context: PanelRenderContext) => ReactNode
 }
 
 /**
@@ -30,20 +43,41 @@ interface PanelTab {
  * so switching tabs is just a render swap.
  */
 const BASE_TABS: readonly PanelTab[] = [
-  { id: "research", label: "Research", render: (id) => <ResearchPanel workspaceId={id} /> },
-  { id: "todos", label: "TODOs", render: (id) => <TodosPanel workspaceId={id} /> },
+  {
+    id: "research",
+    label: "Research",
+    description: "Read the project's RESEARCH.md, where durable context and findings are kept.",
+    render: ({ workspaceId }) => <ResearchPanel workspaceId={workspaceId} />,
+  },
+  {
+    id: "todos",
+    label: "TODOs",
+    description: "View the project's TODO.md, where project work items are tracked in Markdown.",
+    render: ({ workspaceId }) => <TodosPanel workspaceId={workspaceId} />,
+  },
 ]
 
 const FILES_TAB: PanelTab = {
   id: "files",
   label: "Files",
-  render: (id, onOpenFile) => <FilesPanel workspaceId={id} onOpenFile={onOpenFile} />,
+  description: "Browse workspace files and open them in the built-in editor.",
+  render: ({ workspaceId, onOpenFile, activeRelPath }) => (
+    <FilesPanel workspaceId={workspaceId} onOpenFile={onOpenFile} activeRelPath={activeRelPath} />
+  ),
 }
 
 const CODE_CHANGES_TAB: PanelTab = {
   id: "changes",
   label: "Code changes",
-  render: (id) => <ChangesPanel workspaceId={id} />,
+  description: "Review staged, unstaged, and untracked Git changes in this workspace.",
+  render: ({ workspaceId }) => <ChangesPanel workspaceId={workspaceId} />,
+}
+
+const SKILLS_TAB: PanelTab = {
+  id: "skills",
+  label: "Skills",
+  description: "Browse this project's local skills followed by your global skills.",
+  render: ({ projectId }) => <SkillsPanel projectId={projectId} />,
 }
 
 /**
@@ -55,24 +89,36 @@ const CODE_CHANGES_TAB: PanelTab = {
  * not persisted), dropping the right column and showing an expand affordance when collapsed.
  */
 export function RightSidebar({
+  projectId,
   workspaceId,
   onOpenFile,
+  activeRelPath = null,
+  initialActiveId,
+  onActiveIdChange,
   onCollapse,
 }: {
+  projectId: string
   workspaceId: string
   onOpenFile: (relPath: string) => void
+  activeRelPath?: string | null
+  initialActiveId?: string
+  onActiveIdChange?: (id: string) => void
   onCollapse: () => void
 }) {
   const [showCodeChanges, setShowCodeChanges] = useShowCodeChanges()
+  const [showSkills, setShowSkills] = useShowSkillsPanel()
   const [showFilesPanel] = useShowFilesPanel()
   // Files moves to the left central column when the left Files panel is on, so
   // drop its tab here in that case.
   const tabs = [
     ...BASE_TABS,
     ...(showFilesPanel ? [] : [FILES_TAB]),
+    ...(showSkills ? [SKILLS_TAB] : []),
     ...(showCodeChanges ? [CODE_CHANGES_TAB] : []),
   ]
-  const [activeId, setActiveId] = useState<string>(BASE_TABS[0]?.id ?? "research")
+  const [activeId, setActiveId] = useState<string>(
+    initialActiveId ?? BASE_TABS[0]?.id ?? "research",
+  )
   // The selected tab can vanish (Files toggled to the left, Code changes hidden),
   // so fall back to the first tab whenever the stored id no longer resolves.
   const active = tabs.find((tab) => tab.id === activeId) ?? tabs[0]
@@ -94,7 +140,12 @@ export function RightSidebar({
                 aria-selected={selected}
                 data-testid={`panel-tab-${tab.id}`}
                 data-active={selected}
-                onClick={() => setActiveId(tab.id)}
+                data-feature-label={tab.label}
+                data-feature-help={tab.description}
+                onClick={() => {
+                  setActiveId(tab.id)
+                  onActiveIdChange?.(tab.id)
+                }}
                 className={cn(
                   "flex-1 rounded-md px-2 py-1 text-xs transition-colors",
                   selected
@@ -109,20 +160,25 @@ export function RightSidebar({
         </div>
         <ViewOptionsMenu
           showCodeChanges={showCodeChanges}
+          showSkills={showSkills}
           onToggleCodeChanges={() => setShowCodeChanges(!showCodeChanges)}
+          onToggleSkills={() => setShowSkills(!showSkills)}
         />
         <button
           type="button"
           data-testid="right-sidebar-collapse"
           aria-label="Collapse panel"
           title="Collapse panel"
+          data-feature-help="Hide the project details sidebar to give the editor more room"
           onClick={onCollapse}
           className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <PanelRightClose className="size-3.5" aria-hidden />
         </button>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">{active?.render(workspaceId, onOpenFile)}</div>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {active?.render({ projectId, workspaceId, onOpenFile, activeRelPath })}
+      </div>
     </aside>
   )
 }
@@ -135,10 +191,14 @@ export function RightSidebar({
  */
 function ViewOptionsMenu({
   showCodeChanges,
+  showSkills,
   onToggleCodeChanges,
+  onToggleSkills,
 }: {
   showCodeChanges: boolean
+  showSkills: boolean
   onToggleCodeChanges: () => void
+  onToggleSkills: () => void
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -170,6 +230,7 @@ function ViewOptionsMenu({
         aria-expanded={open}
         aria-label="View options"
         title="View options"
+        data-feature-help="Choose which optional panels appear in the project sidebar"
         onClick={() => setOpen((value) => !value)}
         className={cn(
           "flex size-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
@@ -189,6 +250,13 @@ function ViewOptionsMenu({
           <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
             View options
           </p>
+          <ToggleRow
+            testId="right-sidebar-toggle-skills"
+            label="Skills"
+            description="Show project-local and global skills"
+            checked={showSkills}
+            onToggle={onToggleSkills}
+          />
           <ToggleRow
             testId="right-sidebar-toggle-changes"
             label="Code changes"
@@ -219,6 +287,8 @@ function ToggleRow({ testId, label, description, checked, onToggle }: ToggleRowP
       aria-checked={checked}
       data-testid={testId}
       data-checked={checked}
+      data-feature-label={label}
+      data-feature-help={description}
       onClick={onToggle}
       className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
     >

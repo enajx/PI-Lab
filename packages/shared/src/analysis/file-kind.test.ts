@@ -4,6 +4,7 @@ import {
   ALL_DATA_FILE_CATEGORIES,
   ALL_DATA_FILE_KINDS,
   categoryOf,
+  classifyAnalysisArtifact,
   classifyDataFile,
   DATA_FILE_CATEGORY_LABELS,
   type DataFileCategory,
@@ -44,6 +45,40 @@ describe("classifyDataFile", () => {
     expect(classifyDataFile("RESEARCH.md")).toBe("markdown")
     expect(classifyDataFile("run.log")).toBe("text")
     expect(classifyDataFile("params.yaml")).toBe("text")
+  })
+
+  test("whitelists scientific stores, reports, and explicit metadata-only pickle artifacts", () => {
+    for (const path of [
+      "results/data.h5",
+      "results/data.hdf5",
+      "results/climate.nc",
+      "results/table.sqlite",
+      "results/table.db",
+      "results/workbook.xlsx",
+      "reports/summary.html",
+    ]) {
+      expect(classifyAnalysisArtifact(path, "file")).not.toBeNull()
+    }
+    expect(classifyAnalysisArtifact("runs/store.zarr", "directory")).toBe("dataset")
+    expect(classifyAnalysisArtifact("runs/model.pkl", "file")).toBe("other")
+    expect(classifyAnalysisArtifact("runs/model.pickle", "file")).toBe("other")
+  })
+
+  test("rejects source, compiled, unknown, and non-Zarr directory entries", () => {
+    for (const path of [
+      "analysis.py",
+      "run.sh",
+      "run.ps1",
+      "run.bat",
+      "native.dylib",
+      "binary.exe",
+      "a.out",
+      "unknown.xyz",
+      "README",
+    ]) {
+      expect(classifyAnalysisArtifact(path, "file")).toBeNull()
+    }
+    expect(classifyAnalysisArtifact("results", "directory")).toBeNull()
   })
 
   test("is case-insensitive on the extension", () => {

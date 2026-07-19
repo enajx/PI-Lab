@@ -5,8 +5,8 @@ const execFileAsync = promisify(execFile)
 
 /**
  * Thin, promisified wrapper around the system `git` binary. The whole git layer
- * is built on `node:child_process` so Skipper adds **no** git dependency
- * (docs/architecture.md) — `git` is invoked as the user's own CLI, exactly as a
+ * is built on `node:child_process` so PI Lab adds **no** git dependency
+ * (md/engineering/architecture.md) — `git` is invoked as the user's own CLI, exactly as a
  * terminal would. Output is captured (no shell, no interpolation) and failures
  * are surfaced as a typed {@link GitError} that keeps stderr intact so callers
  * can show the real git diagnostic.

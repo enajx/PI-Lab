@@ -1,7 +1,7 @@
-import { DEFAULT_AGENT_ID } from "@skipper/shared"
+import { DEFAULT_AGENT_ID } from "@pi-lab/shared"
 
 /**
- * Test seam (docs/testing-and-build.md): the "Open agent" action launches a real external
+ * Test seam (md/engineering/testing-and-build.md): the "Open agent" action launches a real external
  * CLI agent, which needs credentials and is non-deterministic. So the E2E points
  * the project view at the deterministic test agent (`test-echo`, present only in
  * test mode) via `?agentId=test-echo`, and asserts its known marker. In normal

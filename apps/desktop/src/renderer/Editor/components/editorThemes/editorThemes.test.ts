@@ -1,21 +1,31 @@
 import { EditorState } from "@codemirror/state"
 import { describe, expect, test } from "vitest"
-import { DEFAULT_EDITOR_THEME_ID, EDITOR_THEMES, editorThemeExtension } from "./editorThemes"
+import {
+  allEditorThemes,
+  DEFAULT_EDITOR_THEME_ID,
+  EDITOR_THEMES,
+  editorThemeExtension,
+} from "./editorThemes"
 
 describe("editorThemes registry", () => {
-  test("holds exactly four light themes followed by four dark themes", () => {
-    expect(EDITOR_THEMES).toHaveLength(8)
-    expect(EDITOR_THEMES.filter((theme) => theme.mode === "light")).toHaveLength(4)
-    expect(EDITOR_THEMES.filter((theme) => theme.mode === "dark")).toHaveLength(4)
-    // Order is light block first, dark block second — that order drives the picker.
-    expect(EDITOR_THEMES.slice(0, 4).every((theme) => theme.mode === "light")).toBe(true)
-    expect(EDITOR_THEMES.slice(4).every((theme) => theme.mode === "dark")).toBe(true)
+  test("offers several high-quality built-ins beyond the original eight", () => {
+    expect(EDITOR_THEMES.length).toBeGreaterThanOrEqual(12)
+    expect(EDITOR_THEMES.map((theme) => theme.id)).toEqual(
+      expect.arrayContaining(["dracula", "monokai", "github-dark", "catppuccin-mocha"]),
+    )
   })
 
   test("every label ends with the suffix matching its mode", () => {
     for (const theme of EDITOR_THEMES) {
       expect(theme.label.endsWith(theme.mode === "light" ? "(Light)" : "(Dark)")).toBe(true)
     }
+  })
+
+  test("offers the same number of built-in Light and Dark themes", () => {
+    const light = EDITOR_THEMES.filter((theme) => theme.mode === "light")
+    const dark = EDITOR_THEMES.filter((theme) => theme.mode === "dark")
+    expect(light).toHaveLength(dark.length)
+    expect(light.map((theme) => theme.id)).toContain("one-light")
   })
 
   test("ids are unique and non-empty and labels are non-empty", () => {
@@ -66,5 +76,32 @@ describe("editorThemeExtension", () => {
       expect(() => editorThemeExtension(id)).not.toThrow()
       expect(editorThemeExtension(id)).not.toEqual([])
     }
+  })
+
+  test("converts imported VS Code scopes into a valid selectable CodeMirror theme", () => {
+    const custom = {
+      id: "custom:ocean:abc",
+      name: "Ocean",
+      mode: "dark" as const,
+      colors: { background: "#102030", foreground: "#ddeeff" },
+      tokenColors: [
+        { scopes: ["comment"], foreground: "#778899", fontStyle: "italic" },
+        { scopes: ["entity.name.function"], foreground: "#66ccff" },
+        { scopes: ["unsupported.scope"], foreground: "#ffffff" },
+      ],
+    }
+    const themes = allEditorThemes([custom])
+    expect(themes.at(-1)).toMatchObject({
+      id: custom.id,
+      label: "Ocean (Dark)",
+      mode: "dark",
+      custom: true,
+    })
+    expect(() =>
+      EditorState.create({
+        doc: "def run(): pass",
+        extensions: [editorThemeExtension(custom.id, [custom])],
+      }),
+    ).not.toThrow()
   })
 })

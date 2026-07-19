@@ -9,6 +9,7 @@ lerna-debug.log*
 # Build output
 node_modules
 dist
+/docs/
 out
 release
 *.local
@@ -46,6 +47,7 @@ coverage
 .turbo
 .cache
 .tmp/
+md/.vitepress/cache/
 mise.toml
 
 # Codex workspace config (track only shared config/symlinks; ignore runtime state)
@@ -59,9 +61,13 @@ mise.toml
 .mcp.json
 .cursor/mcp.json
 
-# Local-only plans / reference research projects (not Skipper source)
+# Local-only plans / reference research projects (not PI Lab source)
 plans/local/
 project_examples/
+
+# Native-ABI binary cache — per-machine compiled better-sqlite3 binaries (one per
+# ABI) that native-abi.cjs swaps between the Node test ABI and Electron app ABI.
+apps/desktop/.native-abi-cache/
 
 # Desktop packaging — app icons are generated from icons/icon.png at build time
 # (release/ output is covered by the `release` rule above; entitlements plist IS tracked)

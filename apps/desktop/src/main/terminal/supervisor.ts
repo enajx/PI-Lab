@@ -2,13 +2,13 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { connect } from "node:net"
 import { join } from "node:path"
-import { DaemonClient } from "@skipper/pty-daemon"
+import { DaemonClient } from "@pi-lab/pty-daemon"
 import { resolveDaemonSocketPath } from "./socketPath"
 
 /**
  * Keeps exactly one PTY daemon reachable for the lifetime of the app.
  *
- * The daemon is a *separate, detached* process on purpose (docs/architecture.md (process model)): live
+ * The daemon is a *separate, detached* process on purpose (md/engineering/architecture.md (process model)): live
  * terminals and agent sessions must outlive an Electron reload or a full app
  * quit, so in normal use the supervisor never owns the daemon's lifecycle — it
  * only ensures one is listening and holds a client to it. (The one exception is
@@ -88,7 +88,7 @@ export function planDaemonSpawn(daemonEntry: string, socketPath: string): SpawnP
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
-      SKIPPER_SOCKET_PATH: socketPath,
+      PI_LAB_SOCKET_PATH: socketPath,
     },
   }
 }
@@ -126,8 +126,11 @@ export class TerminalSupervisor {
 
   private client: DaemonClient | null = null
   private starting: Promise<DaemonClient> | null = null
+  private monitorClient: DaemonClient | null = null
+  private monitorStarting: Promise<DaemonClient> | null = null
   private disposed = false
   private reconnecting = false
+  private monitorReconnecting = false
   /** The daemon child we spawned (null when we adopted an existing one). */
   private child: ChildProcess | null = null
 
@@ -152,6 +155,31 @@ export class TerminalSupervisor {
       this.starting = null
     })
     return this.starting
+  }
+
+  /**
+   * Return a second physical daemon connection reserved for lifecycle
+   * monitoring. Renderer subscriptions detach sessions from the shared client;
+   * keeping monitoring on this connection means closing a tab cannot stop
+   * activity observation.
+   */
+  ensureMonitorClient(): Promise<DaemonClient> {
+    if (this.disposed) return Promise.reject(new Error("supervisor disposed"))
+    if (this.monitorClient) return Promise.resolve(this.monitorClient)
+    if (this.monitorStarting) return this.monitorStarting
+    this.monitorStarting = this.startMonitorClient().finally(() => {
+      this.monitorStarting = null
+    })
+    return this.monitorStarting
+  }
+
+  private async startMonitorClient(): Promise<DaemonClient> {
+    await this.ensureClient()
+    const client = new DaemonClient(this.socketPath)
+    await client.connect()
+    this.monitorClient = client
+    client.on("close", () => this.handleMonitorClose())
+    return client
   }
 
   private async start(): Promise<DaemonClient> {
@@ -228,6 +256,29 @@ export class TerminalSupervisor {
     this.reconnecting = false
   }
 
+  private handleMonitorClose(): void {
+    this.monitorClient = null
+    if (this.disposed || this.monitorReconnecting) return
+    this.monitorReconnecting = true
+    void this.reconnectMonitorLoop()
+  }
+
+  private async reconnectMonitorLoop(): Promise<void> {
+    let attempt = 0
+    while (!this.disposed && !this.monitorClient) {
+      const backoff = Math.min(this.reconnectBaseMs * 2 ** attempt, this.reconnectMaxMs)
+      await delay(backoff)
+      if (this.disposed) break
+      attempt += 1
+      try {
+        await this.ensureMonitorClient()
+      } catch {
+        // The primary reconnect loop may still be restoring the daemon.
+      }
+    }
+    this.monitorReconnecting = false
+  }
+
   /** The socket this supervisor uses (for diagnostics/tests). */
   getSocketPath(): string {
     return this.socketPath
@@ -244,6 +295,8 @@ export class TerminalSupervisor {
     this.disposed = true
     this.client?.close()
     this.client = null
+    this.monitorClient?.close()
+    this.monitorClient = null
     if (this.reapDaemonOnDispose) {
       this.reapDaemon()
     }

@@ -17,7 +17,7 @@ async function seedTree(base: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "skipper-wfs-search-"))
+  root = await mkdtemp(join(tmpdir(), "pi-lab-wfs-search-"))
   await seedTree(root)
 })
 

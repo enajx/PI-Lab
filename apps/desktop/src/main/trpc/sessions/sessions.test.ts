@@ -1,19 +1,88 @@
-// Integration tests for the start-agent-session policy (docs/architecture.md (agent runtime), P5b):
+// Integration tests for the start-agent-session policy (md/engineering/architecture.md (agent runtime), P5b):
 // createCaller over a temp SQLite DB with real migrations, real temp git repos,
 // an in-process pty-daemon, and injected fake agents (one short-lived, one
 // long-lived so a session can be held open across a second start). Full cleanup
 // per test; concurrency assertions poll with timeouts, never fixed sleeps.
 import { existsSync } from "node:fs"
-import { settings } from "@skipper/local-db"
+import { join } from "node:path"
+import { agentSessions, settings } from "@pi-lab/local-db"
+import { DaemonClient } from "@pi-lab/pty-daemon"
+import type { TerminalAgent } from "@pi-lab/shared"
+import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import {
+  ActivityRegistry,
+  createActivityMonitor,
+  systemActivityClock,
+  systemActivityScheduler,
+} from "../../activity"
 import { createHarness, FAKE_AGENT, type Harness, LONG_FAKE_AGENT, makeRepo } from "../testHarness"
 import { workspaceWorkingDir } from "../workspaces"
 
 let h: Harness
 let projectId: string
 
+const PROMPT_AGENT: TerminalAgent = {
+  id: "prompt-agent",
+  label: "Prompt Agent",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: ["-e", "process.stdout.write(process.argv[1] ?? 'NO-PROMPT')"],
+}
+
+const PERMISSION_AGENT: TerminalAgent = {
+  id: "permission-agent",
+  label: "Permission Agent",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: [
+    "-e",
+    "process.stdout.write('Do you want to allow this command? [y/N]\\n');process.stdin.resume()",
+  ],
+}
+
+const TURN_COMPLETE_AGENT: TerminalAgent = {
+  id: "turn-complete-agent",
+  label: "Turn Complete Agent",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: [
+    "-e",
+    "process.stdin.setEncoding('utf8');process.stdout.write('OpenAI Codex\\n\\n› Ask Codex to do anything\\n  gpt-5 · 97% left\\n');process.stdin.once('data',()=>process.stdout.write('\\nApplied the requested change.\\n\\n› Ask Codex to do anything\\n  gpt-5 · 96% left\\n'));process.stdin.resume()",
+  ],
+}
+
+const ENVIRONMENT_AGENT: TerminalAgent = {
+  id: "environment-agent",
+  label: "Environment Agent",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: [
+    "-e",
+    "process.stdout.write('AGENT-ENV:'+(process.env.PI_LAB_ENV_PARITY??'missing'))",
+  ],
+}
+
 beforeEach(async () => {
-  h = await createHarness([FAKE_AGENT, LONG_FAKE_AGENT])
+  h = await createHarness(
+    [
+      FAKE_AGENT,
+      LONG_FAKE_AGENT,
+      PROMPT_AGENT,
+      PERMISSION_AGENT,
+      TURN_COMPLETE_AGENT,
+      ENVIRONMENT_AGENT,
+    ],
+    {
+      notificationsUnfocused: true,
+      nativeNotificationsSupported: true,
+      getAgentLaunchEnvironment: async () =>
+        ({
+          ...process.env,
+          PI_LAB_ENV_PARITY: "shared-login-environment",
+        }) as Record<string, string>,
+    },
+  )
   const project = await h.caller.projects.open({ path: h.repoDir })
   projectId = project.id
 })
@@ -44,6 +113,16 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     expect(result.kind).toBe("branch")
     expect(result.sessionId).toBeTruthy()
     expect(result.workspaceId).toBeTruthy()
+    const durable = h.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, result.sessionId))
+      .get()
+    expect(durable).toMatchObject({
+      projectId,
+      workspaceId: result.workspaceId,
+      agentId: "fake-agent",
+    })
 
     // The session's workspace is branch-kind and rooted at the project repo root.
     const workspace = await h.caller.workspaces.get({ id: result.workspaceId })
@@ -63,11 +142,148 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     expect(chunks.join("")).toContain("AGENT-OK")
   })
 
+  test("the public mutation passes an initial prompt to the selected agent", async () => {
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: "prompt-agent",
+      prompt: "Implement the selected TODO",
+    })
+
+    const chunks: string[] = []
+    const stream = await h.caller.terminal.onData({ sessionId: result.sessionId })
+    const sub = stream.subscribe({
+      next: (event) => {
+        if (event.type === "data") chunks.push(event.chunk)
+      },
+    })
+    await waitFor(() => chunks.join("").includes("Implement the selected TODO"))
+    sub.unsubscribe()
+  })
+
+  test("agents and manual project terminals receive the same resolved launch environment", async () => {
+    const agent = await h.caller.sessions.start({
+      projectId,
+      agentId: ENVIRONMENT_AGENT.id,
+    })
+    const agentChunks: string[] = []
+    const agentStream = await h.caller.terminal.onData({ sessionId: agent.sessionId })
+    const agentSub = agentStream.subscribe({
+      next: (event) => {
+        if (event.type === "data") agentChunks.push(event.chunk)
+      },
+    })
+    await waitFor(() => agentChunks.join("").includes("AGENT-ENV:shared-login-environment"))
+    agentSub.unsubscribe()
+
+    const terminal = await h.caller.workspaces.spawnTerminal({
+      workspaceId: agent.workspaceId,
+      cols: 80,
+      rows: 24,
+    })
+    const terminalChunks: string[] = []
+    const terminalStream = await h.caller.terminal.onData({ sessionId: terminal.sessionId })
+    const terminalSub = terminalStream.subscribe({
+      next: (event) => {
+        if (event.type === "data") terminalChunks.push(event.chunk)
+      },
+    })
+    await h.caller.terminal.write({
+      sessionId: terminal.sessionId,
+      data: "printf 'TERM-ENV:%s\\n' \"$PI_LAB_ENV_PARITY\"\r",
+    })
+    await waitFor(() => terminalChunks.join("").includes("TERM-ENV:shared-login-environment"))
+    terminalSub.unsubscribe()
+    await h.caller.terminal.kill({ sessionId: terminal.sessionId })
+  })
+
+  test("the public launch path renders and durably classifies a stable permission prompt", async () => {
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: PERMISSION_AGENT.id,
+    })
+
+    await waitFor(() => {
+      const durable = h.db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.sessionId, result.sessionId))
+        .get()
+      return durable?.state === "waiting" && durable.waitingReason === "permission"
+    })
+    await waitFor(() =>
+      h.notificationDeliveries.some(
+        ({ input }) =>
+          input.title === "Agent needs input" && input.body.includes(PERMISSION_AGENT.id),
+      ),
+    )
+    expect(
+      h.notificationDeliveries.some(({ input }) => input.title === "Agent finished its turn"),
+    ).toBe(false)
+
+    await h.caller.terminal.kill({ sessionId: result.sessionId })
+  })
+
+  test("an unfocused app notifies exactly once when a submitted turn returns to its prompt", async () => {
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: TURN_COMPLETE_AGENT.id,
+    })
+
+    await waitFor(() => {
+      const durable = h.db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.sessionId, result.sessionId))
+        .get()
+      return durable?.state === "waiting"
+    })
+    expect(h.notificationDeliveries).toEqual([])
+
+    // Exercise the public write mutation without a renderer subscription. This
+    // both arms the real agent turn and feeds the deterministic agent its input.
+    await h.caller.terminal.write({
+      sessionId: result.sessionId,
+      data: "Implement the selected change\r",
+    })
+    await waitFor(() =>
+      h.notificationDeliveries.some(
+        ({ input }) =>
+          input.title === "Agent finished its turn" &&
+          input.body.includes(TURN_COMPLETE_AGENT.id) &&
+          input.silent,
+      ),
+    )
+
+    const turnDeliveries = h.notificationDeliveries.filter(
+      ({ input }) => input.title === "Agent finished its turn",
+    )
+    expect(turnDeliveries).toHaveLength(1)
+    expect(
+      h.notificationDeliveries.some(({ input }) => input.title === "Terminal command finished"),
+    ).toBe(false)
+
+    const activations: unknown[] = []
+    const unsubscribe = h.notifications.activations.subscribe((target) => activations.push(target))
+    turnDeliveries[0]?.handlers.onClick()
+    expect(activations).toEqual([
+      {
+        type: "agent",
+        projectId,
+        workspaceId: result.workspaceId,
+        sessionId: result.sessionId,
+        agentId: TURN_COMPLETE_AGENT.id,
+      },
+    ])
+    unsubscribe()
+
+    await h.caller.terminal.kill({ sessionId: result.sessionId })
+  })
+
   test("a long-lived agent makes the 2nd start (same project) a 'worktree'; another project stays 'branch'", async () => {
     // First start: branch (main checkout), held live by the long agent.
     const first = await h.caller.sessions.start({ projectId, agentId: "long-fake-agent" })
     expect(first.kind).toBe("branch")
-    await waitFor(() => h.liveAgents.liveAgentCount(projectId) === 1)
+    await waitFor(() => h.activityMonitor.liveAgentCount(projectId) === 1)
 
     // A second concurrent start for the SAME project must get its own worktree.
     const second = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
@@ -94,6 +310,23 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     // Release the held session.
     await h.caller.terminal.kill({ sessionId: first.sessionId })
   })
+
+  test("a source-file-bound launch stays in the main checkout despite a live agent", async () => {
+    const first = await h.caller.sessions.start({ projectId, agentId: "long-fake-agent" })
+    await waitFor(() => h.activityMonitor.liveAgentCount(projectId) === 1)
+
+    const taskAgent = await h.caller.sessions.start({
+      projectId,
+      agentId: "fake-agent",
+      workspaceMode: "main",
+    })
+
+    expect(taskAgent.kind).toBe("branch")
+    expect(taskAgent.workspaceId).toBe(first.workspaceId)
+    const workspace = await h.caller.workspaces.get({ id: taskAgent.workspaceId })
+    expect(workspaceWorkingDir(h.db, workspace)).toBe(h.repoDir)
+    await h.caller.terminal.kill({ sessionId: first.sessionId })
+  })
 })
 
 describe("sessions.start — worktreePerAgent ON", () => {
@@ -107,6 +340,20 @@ describe("sessions.start — worktreePerAgent ON", () => {
     expect(workspace.kind).toBe("worktree")
     expect(existsSync(workspaceWorkingDir(h.db, workspace))).toBe(true)
   })
+
+  test("a source-file-bound launch still uses the main checkout", async () => {
+    enableWorktreePerAgent()
+
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: "fake-agent",
+      workspaceMode: "main",
+    })
+
+    expect(result.kind).toBe("branch")
+    const workspace = await h.caller.workspaces.get({ id: result.workspaceId })
+    expect(workspaceWorkingDir(h.db, workspace)).toBe(h.repoDir)
+  })
 })
 
 describe("sessions.start — registry drains on exit", () => {
@@ -114,14 +361,14 @@ describe("sessions.start — registry drains on exit", () => {
     // Hold a live agent so a 2nd start would be a worktree.
     const live = await h.caller.sessions.start({ projectId, agentId: "long-fake-agent" })
     expect(live.kind).toBe("branch")
-    await waitFor(() => h.liveAgents.liveAgentCount(projectId) === 1)
+    await waitFor(() => h.activityMonitor.liveAgentCount(projectId) === 1)
 
     const second = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
     expect(second.kind).toBe("worktree")
 
     // Kill the long-lived session; the registry drains via the daemon exit event.
     await h.caller.terminal.kill({ sessionId: live.sessionId })
-    await waitFor(() => h.liveAgents.liveAgentCount(projectId) === 0)
+    await waitFor(() => h.activityMonitor.liveAgentCount(projectId) === 0)
 
     // The next start is branch again — and reuses the existing single branch
     // workspace (no CONFLICT, same workspace id as the first branch start).
@@ -133,5 +380,41 @@ describe("sessions.start — registry drains on exit", () => {
     const all = await h.caller.workspaces.list({ projectId })
     const branchCount = all.filter((w) => w.kind === "branch").length
     expect(branchCount).toBe(1)
+  })
+
+  test("a fresh app-lifetime monitor reconciles a durable still-live daemon session", async () => {
+    const live = await h.caller.sessions.start({
+      projectId,
+      agentId: LONG_FAKE_AGENT.id,
+    })
+    h.activityMonitor.dispose()
+
+    const recoveredClient = new DaemonClient(join(h.dataDir, "daemon.sock"))
+    await recoveredClient.connect()
+    const recoveredRegistry = new ActivityRegistry({
+      clock: systemActivityClock,
+      scheduler: systemActivityScheduler,
+    })
+    const recoveredMonitor = createActivityMonitor({
+      db: h.db,
+      registry: recoveredRegistry,
+      getMonitorClient: async () => recoveredClient,
+      notifications: h.notificationService,
+      scheduler: systemActivityScheduler,
+      logger: { warn: () => {} },
+    })
+
+    await recoveredMonitor.reconcile()
+    expect(recoveredRegistry.get(live.sessionId)).toMatchObject({
+      sessionId: live.sessionId,
+      projectId,
+      workspaceId: live.workspaceId,
+      state: "working",
+    })
+
+    await h.caller.terminal.kill({ sessionId: live.sessionId })
+    recoveredMonitor.dispose()
+    recoveredRegistry.dispose()
+    recoveredClient.close()
   })
 })

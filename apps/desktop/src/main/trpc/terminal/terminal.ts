@@ -1,16 +1,16 @@
-import type { DataEvent, ExitEvent } from "@skipper/pty-daemon"
+import type { DataEvent, ExitEvent } from "@pi-lab/pty-daemon"
 import { observable } from "@trpc/server/observable"
 import { z } from "zod"
 import { publicProcedure, router } from "../trpc"
 
 /**
- * Terminal router — the renderer's contract to the PTY daemon (docs/architecture.md (process model), docs/architecture.md (agent runtime)).
+ * Terminal router — the renderer's contract to the PTY daemon (md/engineering/architecture.md (process model), md/engineering/architecture.md (agent runtime)).
  *
  * Every procedure is a thin bridge to the supervisor's {@link DaemonClient}
  * obtained from context; all real PTY ownership (spawn, scrollback, reattach)
- * lives in `@skipper/pty-daemon` and is reused, not reimplemented. Keeping these
+ * lives in `@pi-lab/pty-daemon` and is reused, not reimplemented. Keeping these
  * one-liners over a fetched client makes the router `createCaller`-testable
- * without an Electron window (docs/testing-and-build.md).
+ * without an Electron window (md/engineering/testing-and-build.md).
  */
 
 const spawnInput = z.object({
@@ -59,7 +59,9 @@ export const terminalRouter = router({
   /** Feed bytes to a session's stdin. */
   write: publicProcedure.input(writeInput).mutation(async ({ ctx, input }) => {
     const client = await ctx.getDaemonClient()
+    ctx.activityMonitor.userInput(input.sessionId, input.data)
     await client.write(input.sessionId, input.data)
+    ctx.caffeine.markTerminalActivity()
     return { ok: true as const }
   }),
 
@@ -67,6 +69,7 @@ export const terminalRouter = router({
   resize: publicProcedure.input(resizeInput).mutation(async ({ ctx, input }) => {
     const client = await ctx.getDaemonClient()
     await client.resize(input.sessionId, input.cols, input.rows)
+    ctx.activityMonitor.resize(input.sessionId, input.cols, input.rows)
     return { ok: true as const }
   }),
 
@@ -101,7 +104,9 @@ export const terminalRouter = router({
       // Listeners are registered before `attach` resolves so no live chunk that
       // arrives between scrollback snapshot and our subscription is dropped.
       const onData = (event: DataEvent) => {
-        if (event.sessionId === sessionId) emit.next({ type: "data", chunk: event.chunk })
+        if (event.sessionId !== sessionId) return
+        ctx.caffeine.markTerminalActivity()
+        emit.next({ type: "data", chunk: event.chunk })
       }
       const onExit = (event: ExitEvent) => {
         if (event.sessionId !== sessionId) return

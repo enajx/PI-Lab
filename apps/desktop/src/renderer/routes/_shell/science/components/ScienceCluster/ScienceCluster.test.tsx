@@ -1,17 +1,13 @@
-import type { Machine } from "@skipper/local-db"
+import type { Machine } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test } from "vitest"
-import {
-  CLUSTER_CARD_MAX_SIZE,
-  CLUSTER_CARD_MIN_SIZE,
-} from "../../../../../preferences/preferences"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ScienceCluster } from "./ScienceCluster"
 
 /**
- * Component test for the Cluster science tab (docs/testing-and-build.md). The tab renders
+ * Component test for the Cluster science tab (md/engineering/testing-and-build.md). The tab renders
  * plain DOM + the hand-authored (non-Radix) UI primitives, so jsdom suffices and
  * we assert structure only: machine cards, the hide toggle, the import action,
  * and the empty state — never copy text or shadcn classes.
@@ -22,11 +18,12 @@ function renderCluster(handlers: FakeHandlers) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const client = createFakeTrpcClient(handlers)
-  return render(
+  const result = render(
     <AppProviders client={client} queryClient={queryClient}>
       <ScienceCluster />
     </AppProviders>,
   )
+  return { ...result, queryClient }
 }
 
 function machine(overrides: Partial<Machine> & Pick<Machine, "id" | "host">): Machine {
@@ -47,8 +44,8 @@ function machine(overrides: Partial<Machine> & Pick<Machine, "id" | "host">): Ma
 }
 
 describe("ScienceCluster", () => {
-  // The card order + card-size live in localStorage; reset between tests so a
-  // persisted drag order or slider value never leaks into the next case.
+  // The card order + independent spans live in localStorage; reset between tests
+  // so persisted layout never leaks into the next case.
   beforeEach(() => {
     window.localStorage.clear()
   })
@@ -74,6 +71,12 @@ describe("ScienceCluster", () => {
     const statuses = screen.getAllByTestId("machine-status")
     const states = statuses.map((el) => el.getAttribute("data-reachable")).sort()
     expect(states).toEqual(["true", "unknown"])
+    expect(statuses[0]?.textContent).toContain("not checked")
+    expect(screen.getByText("online")).toBeTruthy()
+    expect(screen.getAllByTestId("machine-running-projects")).toHaveLength(2)
+    expect(screen.queryByText("ssh config")).toBeNull()
+    const caffeine = screen.getByTestId("caffeine-control")
+    expect(caffeine.parentElement?.lastElementChild).toBe(caffeine)
   })
 
   test("shows the import action in the header", async () => {
@@ -121,6 +124,7 @@ describe("ScienceCluster", () => {
       expect(screen.getByTestId("science-cluster-empty")).toBeTruthy()
     })
     expect(screen.queryByTestId("machine-card")).toBeNull()
+    expect(screen.getByTestId("cluster-grid").hidden).toBe(true)
   })
 
   test("each card exposes hide and annotate affordances", async () => {
@@ -163,6 +167,8 @@ describe("ScienceCluster", () => {
     // One GPU over the busy threshold ⇒ "1/2 GPUs busy".
     expect(screen.getByTestId("gpu-summary").textContent).toContain("1/2")
     expect(screen.getByTestId("cpu-usage").textContent).toContain("37")
+    expect(screen.getByTestId("machine-checked-at").textContent).toContain("Checked")
+    expect(screen.getAllByTestId("gpu-row")[0]?.className).toContain("grid-cols")
   })
 
   test("a reachable host with no GPUs renders the no-GPUs fallback", async () => {
@@ -266,7 +272,7 @@ describe("ScienceCluster", () => {
     expect(focused?.getAttribute("data-focused")).toBe("true")
   })
 
-  test("the card-size slider drives the grid's column template", async () => {
+  test("removes the scalar card-size slider", async () => {
     renderCluster({
       "science.cluster.list": () => ({
         machines: [machine({ id: "m1", host: "box" })],
@@ -274,17 +280,72 @@ describe("ScienceCluster", () => {
       }),
     })
 
-    await waitFor(() => {
-      expect(screen.getByTestId("cluster-card-size")).toBeTruthy()
-    })
-    const slider = screen.getByTestId("cluster-card-size") as HTMLInputElement
-    expect(slider.min).toBe(String(CLUSTER_CARD_MIN_SIZE))
-    expect(slider.max).toBe(String(CLUSTER_CARD_MAX_SIZE))
+    await screen.findByTestId("machine-card")
+    expect(screen.queryByTestId("cluster-card-size")).toBeNull()
+    expect(screen.getByTestId("cluster-grid").getAttribute("data-card-grid-base-column")).toBe(
+      "280",
+    )
+    expect(screen.getByTestId("machine-card-drag").getAttribute("data-card-span")).toBe("1x1")
+    expect(screen.getByTestId("card-resize-handle")).toBeTruthy()
+  })
 
-    fireEvent.change(slider, { target: { value: "500" } })
-    await waitFor(() => {
-      expect(screen.getByTestId("cluster-grid").style.gridTemplateColumns).toContain("500px")
+  test("the resize handle cannot start machine-card reordering", async () => {
+    renderCluster({
+      "science.cluster.list": () => ({
+        machines: [machine({ id: "m1", host: "alpha" }), machine({ id: "m2", host: "beta" })],
+        hiddenCount: 0,
+      }),
     })
+
+    await screen.findAllByTestId("machine-card")
+    const handle = screen.getAllByTestId("card-resize-handle")[1]
+    if (!handle) throw new Error("Expected the second machine resize handle")
+    const alpha = screen
+      .getAllByTestId("machine-card")
+      .find((card) => card.getAttribute("data-host") === "alpha")
+    fireEvent.dragStart(handle)
+    if (alpha) {
+      fireEvent.dragOver(alpha)
+      fireEvent.drop(alpha)
+    }
+
+    expect(screen.getAllByTestId("machine-name").map((element) => element.textContent)).toEqual([
+      "alpha",
+      "beta",
+    ])
+  })
+
+  test("hiding ignores legacy machine spans because Cluster now uses one shared scale", async () => {
+    let machines = [machine({ id: "m1", host: "alpha" })]
+    window.localStorage.setItem("pi-lab.cardGrid.cluster.spans", JSON.stringify({ m1: "2x2" }))
+    const { queryClient } = renderCluster({
+      "science.cluster.list": (input) => {
+        const includeHidden = (input as { includeHidden: boolean }).includeHidden
+        return {
+          machines: includeHidden ? machines : machines.filter((item) => !item.hidden),
+          hiddenCount: machines.filter((item) => item.hidden).length,
+        }
+      },
+      "science.cluster.setHidden": (input) => {
+        const { id, hidden } = input as { id: string; hidden: boolean }
+        machines = machines.map((item) => (item.id === id ? { ...item, hidden } : item))
+        return machines[0]
+      },
+    })
+
+    expect((await screen.findByTestId("machine-card-drag")).dataset.cardSpan).toBe("1x1")
+    expect(window.localStorage.getItem("pi-lab.cardGrid.cluster.spans")).toBeNull()
+    fireEvent.click(screen.getByTestId("toggle-hidden"))
+    await screen.findByTestId("science-cluster-empty")
+
+    fireEvent.click(screen.getByTestId("show-hidden"))
+    expect((await screen.findByTestId("machine-card-drag")).dataset.cardSpan).toBe("1x1")
+
+    machines = []
+    await queryClient.invalidateQueries()
+    await screen.findByTestId("science-cluster-empty")
+    expect(screen.getByTestId("cluster-grid").hidden).toBe(true)
+    expect(window.localStorage.getItem("pi-lab.cardGrid.cluster.spans")).toBeNull()
   })
 
   test("an unreachable host reveals its error in a hover popover, not inline", async () => {
@@ -308,6 +369,7 @@ describe("ScienceCluster", () => {
     })
     // The status label stays always-visible…
     expect(screen.getByTestId("machine-status").getAttribute("data-reachable")).toBe("false")
+    expect(screen.getByTestId("machine-status").textContent).toContain("offline")
     // …while the full detail lives in a hover-gated popover (in the DOM, hidden by default).
     const detail = screen.getByTestId("machine-status-detail")
     expect(detail.textContent).toContain("Connection refused")

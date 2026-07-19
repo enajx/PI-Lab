@@ -10,7 +10,7 @@
  *
  * As with the ruff/ty parsers, this **never throws**: invalid JSON, a missing or
  * non-array `errors`, or entries lacking a position all degrade to `[]` / a
- * skipped entry, which the property tests assert (docs/testing-and-build.md).
+ * skipped entry, which the property tests assert (md/engineering/testing-and-build.md).
  */
 
 import type { Diagnostic, DiagnosticSeverity } from "./types"

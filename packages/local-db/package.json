@@ -1,10 +1,11 @@
 {
-  "name": "@skipper/local-db",
+  "name": "@pi-lab/local-db",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./editor-settings": "./src/editorSettings.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

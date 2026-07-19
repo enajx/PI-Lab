@@ -13,16 +13,19 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { Dashboard } from "./Dashboard"
 
 /**
- * Component test for the project-cards Dashboard (docs/testing-and-build.md). Mounts it under
+ * Component test for the project-cards Dashboard (md/engineering/testing-and-build.md). Mounts it under
  * the real providers + a router (so the card's `useNavigate` resolves) with a
  * faked tRPC client. jsdom suffices — the cards render plain DOM (no Radix), and
- * we only assert structure: cards-by-name, the status badge, the size slider, and
- * the empty state.
+ * we assert public structure and interactions: cards-by-name, status, direct
+ * resizing, thumbnail drop, navigation isolation, and the empty state.
  */
 
 function renderDashboard(handlers: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const client = createFakeTrpcClient(handlers)
+  const client = createFakeTrpcClient({
+    "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+    ...handlers,
+  })
 
   const rootRoute = createRootRoute({ component: Dashboard })
   // A stub project route so the card's navigate target type-checks/resolves.
@@ -42,7 +45,7 @@ function renderDashboard(handlers: FakeHandlers) {
       <RouterProvider router={router as any} />
     </AppProviders>,
   )
-  return { ...result, router }
+  return { ...result, queryClient, router }
 }
 
 function project(id: string, name: string, thumbnail: string | null = null) {
@@ -62,6 +65,15 @@ function project(id: string, name: string, thumbnail: string | null = null) {
 }
 
 describe("Dashboard", () => {
+  test("uses the Projects Dashboard name", async () => {
+    renderDashboard({ "projects.list": () => [] })
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Projects Dashboard" })).toBeTruthy()
+    })
+    expect(screen.getByTestId("caffeine-control")).toBeTruthy()
+  })
+
   test("renders a card per project with its name and a status badge", async () => {
     renderDashboard({
       "projects.list": () => [project("p1", "Photon Drift"), project("p2", "Lattice QCD")],
@@ -78,10 +90,11 @@ describe("Dashboard", () => {
     expect(statuses.every((el) => el.getAttribute("data-state") === "idle")).toBe(true)
   })
 
-  test("a project with workspaces reads as active", async () => {
+  test("a project with a working agent reads as active", async () => {
     renderDashboard({
       "projects.list": () => [project("p1", "Active Project")],
-      "workspaces.list": () => [{ id: "w1" }],
+      "workspaces.list": () => [],
+      "sessions.activity": () => [{ projectId: "p1", state: "working" }],
     })
 
     await waitFor(() => {
@@ -89,29 +102,42 @@ describe("Dashboard", () => {
     })
   })
 
-  test("shows the card-size slider", async () => {
+  test("removes the scalar card-size slider", async () => {
     renderDashboard({
       "projects.list": () => [project("p1", "Anything")],
       "workspaces.list": () => [],
     })
 
-    await waitFor(() => {
-      expect(screen.getByTestId("card-size-slider")).toBeTruthy()
-    })
-    expect((screen.getByTestId("card-size-slider") as HTMLInputElement).type).toBe("range")
+    await screen.findByTestId("project-card")
+    expect(screen.queryByTestId("card-size-slider")).toBeNull()
+    expect(screen.getByTestId("dashboard-grid").getAttribute("data-card-grid-base-column")).toBe(
+      "200",
+    )
+    expect(screen.getByTestId("project-card-grid-item").getAttribute("data-card-span")).toBe("1x1")
+    expect(screen.getByTestId("card-resize-handle")).toBeTruthy()
   })
 
-  test("a no-thumbnail card renders the animated gradient layer with seeded timing vars", async () => {
+  test("a no-thumbnail card renders one deterministic shape-and-motion variant", async () => {
     renderDashboard({
       "projects.list": () => [project("p1", "Gradient Project")],
       "workspaces.list": () => [],
     })
 
-    const layer = await screen.findByTestId("project-card-gradient")
-    expect(layer.classList.contains("project-gradient-anim")).toBe(true)
-    // Per-project animation timing is applied as inline CSS custom properties.
-    expect(layer.style.getPropertyValue("--grad-duration")).toMatch(/^\d+s$/)
-    expect(layer.style.getPropertyValue("--grad-delay")).toMatch(/^-?\d+s$/)
+    const field = await screen.findByTestId("project-card-gradient")
+    expect(field.classList.contains("project-gradient-field")).toBe(true)
+    expect(field.dataset.gradientPalette).toMatch(/^[a-z-]+$/)
+    expect(field.dataset.gradientShape).toMatch(/^[a-z-]+$/)
+    expect(field.dataset.gradientMotion).toMatch(/^[a-z-]+$/)
+
+    const layers = screen.getAllByTestId("project-card-gradient-layer")
+    expect(layers).toHaveLength(3)
+    expect(field.style.getPropertyValue("--layer-a-duration")).toMatch(/^\d+(?:\.\d+)?s$/)
+    expect(field.style.getPropertyValue("--layer-b-duration")).toMatch(/^\d+(?:\.\d+)?s$/)
+    expect(field.style.getPropertyValue("--layer-c-duration")).toMatch(/^\d+(?:\.\d+)?s$/)
+    expect(
+      Number.parseFloat(field.style.getPropertyValue("--layer-a-duration")),
+    ).toBeGreaterThanOrEqual(8)
+    expect(screen.getByTestId("project-card-gradient-grain")).toBeTruthy()
   })
 
   test("a card with a thumbnail renders no gradient layer", async () => {
@@ -124,6 +150,11 @@ describe("Dashboard", () => {
       expect(screen.getByTestId("project-card")).toBeTruthy()
     })
     expect(screen.queryByTestId("project-card-gradient")).toBeNull()
+    expect(screen.queryByTestId("project-card-gradient-layer")).toBeNull()
+    expect(screen.queryByTestId("project-card-gradient-grain")).toBeNull()
+    expect(screen.getByTestId("project-card-image").querySelector("img")?.getAttribute("src")).toBe(
+      "data:image/png;base64,AAAA",
+    )
   })
 
   test("clicking the card's thumbnail region opens the project", async () => {
@@ -154,6 +185,38 @@ describe("Dashboard", () => {
     })
   })
 
+  test("dropping an image still persists the project thumbnail", async () => {
+    const updates: unknown[] = []
+    renderDashboard({
+      "projects.list": () => [project("p1", "Photon Drift")],
+      "workspaces.list": () => [],
+      "projects.setThumbnail": (input) => {
+        updates.push(input)
+        return project("p1", "Photon Drift")
+      },
+    })
+
+    const image = await screen.findByTestId("project-card-image")
+    const file = new File(["pixels"], "thumbnail.png", { type: "image/png" })
+    fireEvent.drop(image, { dataTransfer: { files: [file] } })
+
+    await waitFor(() => {
+      expect(updates).toHaveLength(1)
+    })
+    expect(updates[0]).toMatchObject({ id: "p1" })
+    expect((updates[0] as { dataUrl: string }).dataUrl).toMatch(/^data:image\/png;base64,/)
+  })
+
+  test("using the resize handle does not navigate the project card", async () => {
+    const { router } = renderDashboard({
+      "projects.list": () => [project("p1", "Photon Drift")],
+      "workspaces.list": () => [],
+    })
+
+    fireEvent.click(await screen.findByTestId("card-resize-handle"))
+    expect(router.state.location.pathname).toBe("/")
+  })
+
   test("shows the empty state when there are no projects", async () => {
     renderDashboard({ "projects.list": () => [] })
 
@@ -161,5 +224,25 @@ describe("Dashboard", () => {
       expect(screen.getByTestId("dashboard-empty")).toBeTruthy()
     })
     expect(screen.queryByTestId("project-card")).toBeNull()
+    expect(screen.getByTestId("dashboard-grid").hidden).toBe(true)
+  })
+
+  test("clears legacy per-card spans when the result becomes empty", async () => {
+    let projects = [project("p1", "Photon Drift")]
+    window.localStorage.setItem("pi-lab.cardGrid.dashboard.spans", JSON.stringify({ p1: "2x2" }))
+    const { queryClient } = renderDashboard({
+      "projects.list": () => projects,
+      "workspaces.list": () => [],
+    })
+
+    expect((await screen.findByTestId("project-card-grid-item")).dataset.cardSpan).toBe("1x1")
+    projects = []
+    await queryClient.invalidateQueries()
+
+    await screen.findByTestId("dashboard-empty")
+    expect(screen.getByTestId("dashboard-grid").hidden).toBe(true)
+    await waitFor(() => {
+      expect(window.localStorage.getItem("pi-lab.cardGrid.dashboard.spans")).toBeNull()
+    })
   })
 })

@@ -1,4 +1,5 @@
 export {
+  allEditorThemes,
   DEFAULT_EDITOR_THEME_ID,
   EDITOR_THEMES,
   type EditorTheme,

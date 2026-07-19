@@ -1,10 +1,15 @@
-import type { EditorSettings } from "@skipper/local-db"
-import { cn } from "@skipper/ui"
+import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
+import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
+import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
 import { DEFAULT_EDITOR_SETTINGS } from "../../../Editor/hooks/useEditorBuffers"
+import {
+  type ProjectNotificationSearch,
+  projectNotificationSearchSchema,
+} from "../../../notifications/activation"
 import {
   RIGHT_SIDEBAR_MAX_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
@@ -13,6 +18,12 @@ import {
 } from "../../../preferences/preferences"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
+import { clearPendingTaskSession, readPendingTaskSession } from "./-pendingTaskSession"
+import {
+  readProjectWorkspaceState,
+  writeProjectWorkspaceState,
+  writeProjectWorkspaceViewState,
+} from "./-workspaceState"
 import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
 import { RightSidebar } from "./components/RightSidebar"
 
@@ -30,12 +41,14 @@ import { RightSidebar } from "./components/RightSidebar"
  * one project's state never leaks into another.
  */
 export const Route = createFileRoute("/_shell/projects/$projectId")({
+  validateSearch: (search) => projectNotificationSearchSchema.parse(search),
   component: ProjectRoute,
 })
 
 function ProjectRoute() {
   const { projectId } = Route.useParams()
-  return <ProjectWorkspace key={projectId} projectId={projectId} />
+  const activation = Route.useSearch()
+  return <ProjectWorkspace key={projectId} projectId={projectId} activation={activation} />
 }
 
 /**
@@ -45,10 +58,22 @@ function ProjectRoute() {
  * required; opening an agent (`sessions.start`) or a terminal
  * (`workspaces.spawnTerminal`) attaches a session pane in the central panel.
  */
-function ProjectWorkspace({ projectId }: { projectId: string }) {
+export function ProjectWorkspace({
+  projectId,
+  activation,
+}: {
+  projectId: string
+  activation: ProjectNotificationSearch
+}) {
   const trpc = useTRPC()
   const client = useTRPCClient()
   const queryClient = useQueryClient()
+  const pendingTaskSession = useRef(readPendingTaskSession(projectId)).current
+  const restoredWorkspaceState = useRef(readProjectWorkspaceState(projectId)).current
+
+  useEffect(() => {
+    if (pendingTaskSession) clearPendingTaskSession(projectId)
+  }, [pendingTaskSession, projectId])
 
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
@@ -68,8 +93,20 @@ function ProjectWorkspace({ projectId }: { projectId: string }) {
   // sidebar's collapse button or the central panel's expand button) lasts for this project
   // view; switching/reopening a project shows it expanded again. Its width when expanded is a
   // separately-persisted, edge-resizable preference.
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(
+    () => restoredWorkspaceState?.rightSidebarCollapsed ?? false,
+  )
+  const [rightSidebarActiveId, setRightSidebarActiveId] = useState<string | null>(
+    () => restoredWorkspaceState?.rightSidebarActiveId ?? null,
+  )
   const [rightSidebarWidth, setRightSidebarWidth] = useRightSidebarWidth()
+
+  useEffect(() => {
+    writeProjectWorkspaceViewState(projectId, {
+      rightSidebarCollapsed,
+      rightSidebarActiveId,
+    })
+  }, [projectId, rightSidebarActiveId, rightSidebarCollapsed])
 
   // When the left sidebar is collapsed, the traffic lights ride this view's title-bar
   // strip, so the header clears + drags around them (the path text stays selectable).
@@ -107,7 +144,34 @@ function ProjectWorkspace({ projectId }: { projectId: string }) {
     workspaceId: workspaceId ?? "",
     projectId,
     settings: editorSettings,
+    initialSession: pendingTaskSession,
+    initialState: restoredWorkspaceState,
+    onStateChange: (state) => writeProjectWorkspaceState(projectId, state),
   })
+  const handledActivation = useRef<string | null>(null)
+  useEffect(() => {
+    if (
+      !activation.notificationId ||
+      !activation.notificationSessionId ||
+      !activation.notificationKind ||
+      handledActivation.current === activation.notificationId
+    ) {
+      return
+    }
+    handledActivation.current = activation.notificationId
+    controller.attachSession({
+      kind: activation.notificationKind,
+      sessionId: activation.notificationSessionId,
+      label: activation.notificationLabel ?? activation.notificationAgentId ?? "Terminal",
+    })
+  }, [
+    activation.notificationAgentId,
+    activation.notificationId,
+    activation.notificationKind,
+    activation.notificationLabel,
+    activation.notificationSessionId,
+    controller.attachSession,
+  ])
 
   if (projectQuery.isError) {
     return (
@@ -139,6 +203,7 @@ function ProjectWorkspace({ projectId }: { projectId: string }) {
             </p>
           ) : null}
         </div>
+        <CaffeineControl />
       </header>
 
       {workspaceId ? (
@@ -165,8 +230,12 @@ function ProjectWorkspace({ projectId }: { projectId: string }) {
                 testId="right-sidebar-edge-drag"
               />
               <RightSidebar
+                projectId={projectId}
                 workspaceId={workspaceId}
                 onOpenFile={controller.openFile}
+                activeRelPath={controller.editor.active?.relPath ?? null}
+                initialActiveId={rightSidebarActiveId ?? undefined}
+                onActiveIdChange={setRightSidebarActiveId}
                 onCollapse={() => setRightSidebarCollapsed(true)}
               />
             </div>

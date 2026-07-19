@@ -1,20 +1,22 @@
 import {
+  agentSessions,
+  getAgentSettingsOrDefaults,
   getSettingsOrDefaults,
+  type PiLabDatabase,
   projects,
-  type SkipperDatabase,
   type Workspace,
   workspaces,
-} from "@skipper/local-db"
-import { buildLaunchArgv, getAgent } from "@skipper/shared"
+} from "@pi-lab/local-db"
+import { buildLaunchArgv, getAgent } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "drizzle-orm"
+import { and, eq, ne } from "drizzle-orm"
 import { z } from "zod"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
 
 /**
- * Sessions router — the "start agent session" flow (docs/architecture.md (agent runtime), P5b).
+ * Sessions router — the "start agent session" flow (md/engineering/architecture.md (agent runtime), P5b).
  *
  * Opening an agent session must, by default, behave like opening a normal
  * terminal in the project's *main checkout* (cwd = repo root, no new worktree).
@@ -34,6 +36,13 @@ const startInput = z.object({
   agentId: z.string().min(1),
   /** Display name for a freshly-created worktree workspace. Defaulted when omitted. */
   name: z.string().min(1).optional(),
+  /** Optional initial prompt passed to the selected agent. */
+  prompt: z.string().optional(),
+  /**
+   * Task launches use the main checkout because its TODO Markdown is their
+   * source of truth. Other launches retain the normal concurrency policy.
+   */
+  workspaceMode: z.enum(["policy", "main", "worktree"]).default("policy"),
   /** Cols/rows for the PTY the agent runs in. */
   cols: z.number().int().positive().default(80),
   rows: z.number().int().positive().default(24),
@@ -49,7 +58,7 @@ export interface StartSessionResult {
 }
 
 /**
- * Decide the workspace kind for a new agent session, per docs/architecture.md (agent runtime):
+ * Decide the workspace kind for a new agent session, per md/engineering/architecture.md (agent runtime):
  *   1. `worktreePerAgent` ON   → always a fresh worktree;
  *   2. a live agent already runs for this project (2nd+ concurrent) → fresh
  *      worktree, so it can't clobber the shared main checkout;
@@ -68,7 +77,7 @@ export function decideSessionKind(worktreePerAgent: boolean, liveAgentCount: num
  * conflicting one. A name is derived from the project when creating.
  */
 export async function getOrCreateBranchWorkspace(
-  db: SkipperDatabase,
+  db: PiLabDatabase,
   projectId: string,
 ): Promise<Workspace> {
   const existing = db
@@ -108,14 +117,18 @@ export interface StartAgentSessionInput {
   name?: string
   /** Optional prompt passed to the agent as a final positional argument. */
   prompt?: string
+  /** Override the normal worktree policy for a source-file-bound launch. */
+  workspaceMode?: "policy" | "main" | "worktree"
   cols?: number
   rows?: number
+  /** Workflow run whose initially-launched interactive turn this session owns. */
+  workflowRunId?: string
 }
 
 /**
  * The "start agent session" flow as a plain function over {@link AppContext}, so
  * both the `sessions.start` mutation *and* the automations dispatcher fire agents
- * through the exact same policy path (docs/architecture.md, agent runtime; no duplicated launch logic). It decides
+ * through the exact same policy path (md/engineering/architecture.md, agent runtime; no duplicated launch logic). It decides
  * the workspace kind, gets-or-creates that workspace, launches the agent in the
  * correct cwd, registers the live session, and marks the workspace active.
  *
@@ -137,9 +150,27 @@ export async function startAgentSession(
     throw new TRPCError({ code: "NOT_FOUND", message: `No agent ${input.agentId}` })
   }
 
-  const { worktreePerAgent } = getSettingsOrDefaults(ctx.db)
-  const liveCount = ctx.liveAgents.liveAgentCount(project.id)
-  const kind = decideSessionKind(worktreePerAgent, liveCount)
+  const promptArgs = input.prompt?.trim() ? [input.prompt] : []
+  const [catalogCommand, ...args] = buildLaunchArgv(agent, { args: promptArgs })
+  const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[agent.id]?.trim()
+  const candidate = configuredCommand || catalogCommand
+  const command = candidate ? await ctx.resolveAgentExecutable(candidate) : null
+  if (!command) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `${agent.label} is not available at ${candidate || "(no executable configured)"}. Configure its executable path in Settings → Agents & worktrees.`,
+    })
+  }
+
+  const appSettings = getSettingsOrDefaults(ctx.db)
+  const { worktreePerAgent } = appSettings
+  const liveCount = ctx.activityMonitor.liveAgentCount(project.id)
+  const kind =
+    input.workspaceMode === "main"
+      ? "branch"
+      : input.workspaceMode === "worktree"
+        ? "worktree"
+        : decideSessionKind(worktreePerAgent, liveCount)
 
   const workspace =
     kind === "branch"
@@ -154,29 +185,28 @@ export async function startAgentSession(
 
   // Resolve cwd by kind: repo root for branch, worktree path for worktree.
   const dir = workspaceWorkingDir(ctx.db, workspace)
-  const promptArgs = input.prompt?.trim() ? [input.prompt] : []
-  const [command, ...args] = buildLaunchArgv(agent, { args: promptArgs })
-  if (!command) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: `Agent ${agent.id} has no command`,
-    })
-  }
 
   const client = await ctx.getDaemonClient()
-  // Wire exit-draining before spawning so the session is deregistered the
-  // instant it exits (attach is idempotent per client).
-  ctx.liveAgents.attach(client)
+  const launchEnvironment = await ctx.getAgentLaunchEnvironment()
   const session = await client.spawn({
     command,
     args,
     cwd: dir,
-    env: agent.env,
+    env: { ...launchEnvironment, ...agent.env },
     cols: input.cols ?? 80,
     rows: input.rows ?? 24,
   })
 
-  ctx.liveAgents.register(project.id, session.id)
+  await ctx.activityMonitor.track({
+    sessionId: session.id,
+    projectId: project.id,
+    workspaceId: workspace.id,
+    agentId: agent.id,
+    workflowRunId: input.workflowRunId ?? null,
+    turnArmed: Boolean(input.prompt?.trim()),
+    cols: input.cols ?? 80,
+    rows: input.rows ?? 24,
+  })
 
   // Mark the workspace active so "recent" ordering reflects the launch.
   ctx.db
@@ -189,8 +219,16 @@ export async function startAgentSession(
 }
 
 export const sessionsRouter = router({
+  /** Live agent state, grouped by project in the renderer for project-level indicators. */
+  activity: publicProcedure.query(({ ctx }) =>
+    ctx.db
+      .select({ projectId: agentSessions.projectId, state: agentSessions.state })
+      .from(agentSessions)
+      .where(ne(agentSessions.state, "exited"))
+      .all(),
+  ),
   /**
-   * Start an external CLI agent for a project under the worktree policy (docs/architecture.md, agent runtime).
+   * Start an external CLI agent for a project under the worktree policy (md/engineering/architecture.md, agent runtime).
    * Thin wrapper over {@link startAgentSession} — the shared start flow also used
    * by the automations dispatcher so the policy lives in one place.
    */

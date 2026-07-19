@@ -1,4 +1,4 @@
-import type { EditorSettings } from "@skipper/local-db"
+import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
 import { EditorSettingsMenu } from "./EditorSettingsMenu"
@@ -14,9 +14,12 @@ import { EditorSettingsMenu } from "./EditorSettingsMenu"
 const SETTINGS: EditorSettings = {
   autosave: false,
   vim: false,
+  diagnosticsEnabled: false,
   typeChecker: "ty",
   formatOnSave: false,
   editorTheme: "default",
+  customEditorThemes: [],
+  pythonRunDestination: "central",
 }
 
 describe("EditorSettingsMenu", () => {
@@ -67,5 +70,49 @@ describe("EditorSettingsMenu", () => {
     fireEvent.click(screen.getByTestId("editor-settings-format-on-save"))
     expect(onChange).toHaveBeenNthCalledWith(1, { vim: true })
     expect(onChange).toHaveBeenNthCalledWith(2, { formatOnSave: true })
+  })
+
+  test("toggling diagnostics patches the persisted diagnostics setting", () => {
+    const onChange = vi.fn()
+    render(<EditorSettingsMenu settings={SETTINGS} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId("editor-settings"))
+
+    const diagnostics = screen.getByTestId("editor-settings-diagnostics")
+    expect(diagnostics.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(diagnostics)
+
+    expect(onChange).toHaveBeenCalledWith({ diagnosticsEnabled: true })
+  })
+
+  test("selects built-in and imported themes while a file is open", () => {
+    const onChange = vi.fn()
+    const custom = {
+      id: "custom:ocean:abc",
+      name: "Ocean",
+      mode: "dark" as const,
+      colors: { background: "#102030", foreground: "#ddeeff" },
+      tokenColors: [],
+    }
+    render(
+      <EditorSettingsMenu
+        settings={{ ...SETTINGS, customEditorThemes: [custom] }}
+        onChange={onChange}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("editor-settings"))
+    const select = screen.getByTestId("editor-settings-theme")
+    expect(select.textContent).toContain("Ocean (Dark)")
+    fireEvent.change(select, { target: { value: custom.id } })
+    expect(onChange).toHaveBeenCalledWith({ editorTheme: custom.id })
+  })
+
+  test("changes the persisted Run Python destination", () => {
+    const onChange = vi.fn()
+    render(<EditorSettingsMenu settings={SETTINGS} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId("editor-settings"))
+    fireEvent.change(screen.getByTestId("editor-settings-run-destination"), {
+      target: { value: "below-editor" },
+    })
+    expect(onChange).toHaveBeenCalledWith({ pythonRunDestination: "below-editor" })
   })
 })

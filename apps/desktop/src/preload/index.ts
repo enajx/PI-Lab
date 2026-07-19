@@ -11,6 +11,6 @@ import { exposeElectronTRPC } from "trpc-electron/main"
  */
 exposeElectronTRPC()
 
-contextBridge.exposeInMainWorld("skipper", {
+contextBridge.exposeInMainWorld("piLab", {
   platform: process.platform,
 })

@@ -1,5 +1,5 @@
-import { fuzzyMatch, highlightSegments } from "@skipper/shared"
-import { cn } from "@skipper/ui"
+import { fuzzyMatch, highlightSegments } from "@pi-lab/shared"
+import { cn } from "@pi-lab/ui"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { type PaletteCommand, usePaletteCommands } from "./usePaletteCommands"
 
@@ -17,7 +17,7 @@ interface RankedCommand {
 /**
  * The `⌘P` command palette (TODO "Command palette on ⌘P"): a centered overlay that
  * fuzzy-searches **commands + projects** (NOT files — file quick-open lives on ⌘F).
- * Typing ranks entries by the shared `@skipper/shared` fuzzy scorer with match
+ * Typing ranks entries by the shared `@pi-lab/shared` fuzzy scorer with match
  * highlighting; ↑/↓ move the highlight, Enter runs the highlighted entry, Esc/backdrop
  * dismiss. Mounted app-globally by the shell so it works from any surface. With an empty
  * query it shows every entry in registry order (navigations, view toggles, then projects).
@@ -95,6 +95,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
       <button
         type="button"
         aria-label="Close command palette"
+        data-feature-help="Close the command palette without running an action"
         tabIndex={-1}
         onClick={onClose}
         className="-z-10 absolute inset-0 cursor-default bg-black/40"
@@ -109,6 +110,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         <input
           ref={inputRef}
           data-testid="command-palette-input"
+          aria-label="Search commands and projects"
+          data-feature-help="Search commands and open projects; press Enter to run the highlighted action"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
@@ -134,6 +137,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                     type="button"
                     data-testid="command-palette-item"
                     data-command-id={command.id}
+                    data-feature-label={command.label}
+                    data-feature-help="Run this command or open the selected project"
                     data-index={index}
                     data-highlighted={selected}
                     onClick={() => choose(index)}

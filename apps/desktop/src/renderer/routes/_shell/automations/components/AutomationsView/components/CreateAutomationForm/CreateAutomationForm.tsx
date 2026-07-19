@@ -1,4 +1,4 @@
-import { Button, Input, Label } from "@skipper/ui"
+import { Button, Input, Label } from "@pi-lab/ui"
 import { useState } from "react"
 import type { AgentOption, ProjectListItem } from "../../../../../../../trpc/types"
 import { ScheduleBuilder } from "../ScheduleBuilder"
@@ -6,6 +6,7 @@ import { ScheduleBuilder } from "../ScheduleBuilder"
 export interface CreateAutomationValues {
   projectId: string
   agentId: string
+  executionMode: "interactive" | "noninteractive"
   name: string
   prompt: string
   recurrenceRule: string
@@ -40,7 +41,7 @@ function localTimezone(): string {
  * the agent is launched on, and choose a recurrence via the {@link ScheduleBuilder}
  * (simple presets or raw RRULE with a live human-readable preview). A plain
  * inline panel (not a Radix dialog) so it renders and is assertable under jsdom
- * (docs/testing-and-build.md). The schedule is evaluated in the user's local timezone.
+ * (md/engineering/testing-and-build.md). The schedule is evaluated in the user's local timezone.
  */
 export function CreateAutomationForm({
   projects,
@@ -53,6 +54,9 @@ export function CreateAutomationForm({
   const [name, setName] = useState("")
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "")
   const [agentId, setAgentId] = useState(agents[0]?.id ?? "")
+  const [executionMode, setExecutionMode] = useState<"interactive" | "noninteractive">(
+    "interactive",
+  )
   const [prompt, setPrompt] = useState("")
   const [recurrenceRule, setRecurrenceRule] = useState(DEFAULT_RRULE)
   const [timezone] = useState(localTimezone())
@@ -69,6 +73,7 @@ export function CreateAutomationForm({
       name: name.trim(),
       projectId,
       agentId,
+      executionMode,
       prompt: prompt.trim(),
       recurrenceRule: recurrenceRule.trim(),
       timezone,
@@ -135,6 +140,28 @@ export function CreateAutomationForm({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <Label htmlFor="automation-execution-mode" className="text-muted-foreground text-xs">
+            Execution
+          </Label>
+          <select
+            id="automation-execution-mode"
+            data-testid="automation-execution-mode"
+            value={executionMode}
+            onChange={(event) =>
+              setExecutionMode(event.target.value as "interactive" | "noninteractive")
+            }
+            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <option value="interactive">Interactive session</option>
+            <option value="noninteractive">Run to completion</option>
+          </select>
+          <p className="text-muted-foreground text-xs">
+            Interactive opens an agent terminal. Run to completion uses the harness one-shot mode
+            and finishes from its exit status.
+          </p>
         </div>
       </div>
 

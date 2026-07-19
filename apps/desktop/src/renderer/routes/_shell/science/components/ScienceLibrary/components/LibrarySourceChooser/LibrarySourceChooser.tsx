@@ -1,4 +1,4 @@
-import { Button } from "@skipper/ui"
+import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Cloud, FolderOpen, HardDrive } from "lucide-react"
 import { useState } from "react"
@@ -90,6 +90,8 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
               type="button"
               size="sm"
               data-testid="zotero-use-local"
+              data-feature-label="Use local Zotero"
+              data-feature-help="Browse the library in the running Zotero desktop app without an API key."
               disabled={isPending}
               onClick={() =>
                 onConnect({ kind: "zotero", mode: "local", libraryType: "user", libraryId: "0" })
@@ -102,6 +104,8 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
               variant="ghost"
               size="sm"
               data-testid="zotero-local-advanced-toggle"
+              data-feature-label="Local Zotero options"
+              data-feature-help="Configure a specific local Zotero user or group library."
               className="text-muted-foreground text-xs"
               onClick={() => setExpanded((cur) => (cur === "local" ? null : "local"))}
             >
@@ -129,6 +133,8 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
               size="sm"
               variant={expanded === "web" ? "secondary" : "default"}
               data-testid="zotero-use-web"
+              data-feature-label="Connect Zotero cloud"
+              data-feature-help="Connect a Zotero library using its cloud Web API credentials."
               onClick={() => setExpanded((cur) => (cur === "web" ? null : "web"))}
             >
               Connect with API key
@@ -153,6 +159,8 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
               type="button"
               size="sm"
               data-testid="library-source-folder-pick"
+              data-feature-label="Choose PDF folder"
+              data-feature-help="Browse a local folder of PDFs as a read-only research library."
               disabled={isPending || pickFolder.isPending}
               onClick={() => void chooseFolder()}
             >

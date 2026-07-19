@@ -1,4 +1,4 @@
-import type { EditorSettings } from "@skipper/local-db"
+import type { EditorSettings } from "@pi-lab/local-db"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import {
@@ -13,6 +13,7 @@ import {
   Moon,
   PanelLeft,
   Save,
+  ScanSearch,
   Server,
   Settings,
   ShieldCheck,
@@ -48,7 +49,7 @@ export interface PaletteCommand {
 
 /** Param-less navigation targets — literal `to`s so TanStack types them precisely. */
 const NAV_TARGETS = [
-  { id: "dashboard", label: "Go to Dashboard", icon: LayoutDashboard, to: "/" },
+  { id: "dashboard", label: "Go to Projects Dashboard", icon: LayoutDashboard, to: "/" },
   { id: "library", label: "Go to Library", icon: Library, to: "/science/library" },
   { id: "analysis", label: "Go to Analysis", icon: ChartArea, to: "/science/analysis" },
   { id: "cluster", label: "Go to Cluster", icon: Server, to: "/science/cluster" },
@@ -67,7 +68,7 @@ const NAV_TARGETS = [
  */
 export function usePaletteCommands(): PaletteCommand[] {
   const navigate = useNavigate()
-  const { theme, toggleTheme } = useTheme()
+  const { resolvedMode, toggleTheme } = useTheme()
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -101,9 +102,9 @@ export function usePaletteCommands(): PaletteCommand[] {
   const viewCommands: PaletteCommand[] = [
     {
       id: "toggle-theme",
-      label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+      label: resolvedMode === "dark" ? "Switch to light theme" : "Switch to dark theme",
       group: "View",
-      icon: theme === "dark" ? Sun : Moon,
+      icon: resolvedMode === "dark" ? Sun : Moon,
       run: toggleTheme,
     },
     {
@@ -116,6 +117,13 @@ export function usePaletteCommands(): PaletteCommand[] {
   ]
 
   const settingsCommands: PaletteCommand[] = [
+    {
+      id: "open-first-run-setup",
+      label: "Run first-launch setup",
+      group: "Settings",
+      icon: ScanSearch,
+      run: () => void navigate({ to: "/setup" }),
+    },
     {
       id: "settings-editor-vim",
       label: editor.vim ? "Turn off Vim mode" : "Turn on Vim mode",

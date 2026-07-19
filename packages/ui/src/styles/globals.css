@@ -10,14 +10,13 @@
 @source "../components";
 
 /*
- * Skipper shared design tokens (docs/architecture.md (renderer), md/02-ux-and-design.md).
+ * PI Lab shared design tokens (md/engineering/architecture.md (renderer), md/02-ux-and-design.md).
  *
- * Calm "analog/scandi" palette: minimal, never a pure-black background. Two
- * themes — light (default) and dark — expressed as CSS custom properties on
- * :root / .dark, then mapped into Tailwind's token namespace via @theme inline
- * so `bg-background`, `text-foreground`, `border-border`, … resolve. Switching
- * theme is one class toggle on <html> (handled by the renderer ThemeProvider);
- * no rebuild, no duplicate utilities.
+ * Calm "analog/scandi" default palette, with light and dark token sets expressed
+ * on :root / .dark. The renderer ThemeProvider can override the same tokens with
+ * a named curated palette and uses `.dark` for the resolved light/dark/system
+ * mode. Tailwind maps the tokens via @theme inline, so `bg-background`,
+ * `text-foreground`, `border-border`, … follow changes without a rebuild.
  *
  * Colors are OKLCH so lightness/chroma read predictably and the two themes stay
  * perceptually balanced. The dark background is a warm near-black (NOT #000).
@@ -64,7 +63,7 @@
 }
 
 .dark {
-  /* Dark theme — warm near-black, NOT pure black (docs/architecture.md (renderer)). */
+  /* Dark theme — warm near-black, NOT pure black (md/engineering/architecture.md (renderer)). */
   --background: oklch(0.18 0.005 75);
   --foreground: oklch(0.92 0.004 85);
 
@@ -161,30 +160,329 @@
   -webkit-app-region: no-drag;
 }
 
-/* No-thumbnail project-card gradient morph (apps/desktop … ProjectCard). A slow,
-   transform-only ping-pong (translate/scale/rotate) so the seeded gradient feels
-   subtly alive while staying GPU-composited — only `transform` is animated, never
-   paint properties. Timing comes from per-project CSS vars; the oversized layer
-   it runs on (inset-[-25%]) keeps the box covered under any rotate/scale. */
-@keyframes skipper-gradient-morph {
-  from {
-    transform: translate3d(-2%, 1%, 0) scale(1.05) rotate(-4deg);
+/*
+ * Shared compact-control activity treatment. Each variant is deliberately
+ * monochrome and transform/opacity-only. Callers provide the authoritative
+ * active state; inactive effects disappear completely.
+ */
+.control-animation {
+  position: relative;
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  place-items: center;
+  color: currentColor;
+}
+
+.control-animation-content {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+}
+
+.control-animation-effect {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  color: color-mix(in oklab, var(--muted-foreground) 72%, transparent);
+}
+
+.control-animation[data-active="false"] .control-animation-effect {
+  display: none;
+}
+
+.control-animation-steam {
+  position: absolute;
+  top: -0.34rem;
+  width: 1px;
+  height: 0.38rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0;
+  animation: pi-lab-control-steam 1.9s ease-in-out infinite;
+}
+
+.control-animation-steam-a {
+  left: 0.31rem;
+  animation-delay: -1.2s;
+}
+
+.control-animation-steam-b {
+  left: 0.5rem;
+  animation-delay: -0.55s;
+}
+
+.control-animation-steam-c {
+  left: 0.69rem;
+  animation-delay: -1.65s;
+}
+
+.control-animation-halo {
+  position: absolute;
+  inset: -0.18rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  opacity: 0.24;
+  animation: pi-lab-control-halo 2.8s ease-in-out infinite;
+}
+
+.control-animation-shimmer {
+  position: absolute;
+  inset: -0.12rem;
+  overflow: hidden;
+  border-radius: 0.24rem;
+}
+
+.control-animation-shimmer::after {
+  position: absolute;
+  inset: -35% auto -35% -70%;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, currentColor, transparent);
+  content: "";
+  opacity: 0.46;
+  transform: skewX(-18deg);
+  animation: pi-lab-control-shimmer 2.6s ease-in-out infinite;
+}
+
+@keyframes pi-lab-control-steam {
+  0%,
+  16% {
+    opacity: 0;
+    transform: translate3d(0, 0.12rem, 0) scaleY(0.72);
   }
-  to {
-    transform: translate3d(2%, -1%, 0) scale(1.12) rotate(4deg);
+  46% {
+    opacity: 0.5;
+  }
+  78%,
+  100% {
+    opacity: 0;
+    transform: translate3d(0.04rem, -0.25rem, 0) scaleY(1);
   }
 }
 
-.project-gradient-anim {
-  animation: skipper-gradient-morph var(--grad-duration, 40s) ease-in-out infinite alternate;
-  animation-delay: var(--grad-delay, 0s);
-  will-change: transform;
+@keyframes pi-lab-control-halo {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 0.42;
+    transform: scale(1.08);
+  }
 }
 
-/* Respect the OS "reduce motion" setting: hold the layer perfectly still. */
+@keyframes pi-lab-control-shimmer {
+  0%,
+  24% {
+    transform: translate3d(0, 0, 0) skewX(-18deg);
+  }
+  62%,
+  100% {
+    transform: translate3d(2rem, 0, 0) skewX(-18deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .project-gradient-anim {
+  .control-animation-steam,
+  .control-animation-halo,
+  .control-animation-shimmer::after {
     animation: none;
     transform: none;
   }
+
+  .control-animation-steam {
+    top: -0.18rem;
+    height: 0.22rem;
+    opacity: 0.28;
+  }
+
+  .control-animation-halo {
+    opacity: 0.28;
+  }
+
+  .control-animation-shimmer::after {
+    inset: -35% auto -35% 30%;
+    opacity: 0.24;
+  }
 }
+
+/* No-thumbnail project-card color field (apps/desktop … ProjectCard). The seeded
+   pastel base and grain stay stationary while three oversized rasterized fields
+   follow a seeded motion family. Only transforms animate, keeping the calm
+   morphing on the compositor instead of repainting gradient pixels every frame. */
+.project-gradient-field {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.project-gradient-layer {
+  position: absolute;
+  inset: -48%;
+  background-repeat: no-repeat;
+  background-size: cover;
+  animation-timing-function: cubic-bezier(0.45, 0.05, 0.55, 0.95);
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  animation-play-state: var(--gradient-play-state, paused);
+  will-change: var(--gradient-will-change, auto);
+}
+
+.project-gradient-layer-a {
+  z-index: 1;
+  animation-duration: var(--layer-a-duration, 9s);
+  animation-delay: var(--layer-a-delay, 0s);
+}
+
+.project-gradient-layer-b {
+  z-index: 2;
+  opacity: 0.7;
+  mix-blend-mode: soft-light;
+  animation-duration: var(--layer-b-duration, 11.5s);
+  animation-delay: var(--layer-b-delay, -0.7s);
+}
+
+.project-gradient-layer-c {
+  z-index: 3;
+  opacity: 0.46;
+  mix-blend-mode: overlay;
+  animation-duration: var(--layer-c-duration, 14s);
+  animation-delay: var(--layer-c-delay, -1.3s);
+}
+
+@keyframes pi-lab-gradient-meander {
+  0% {
+    transform: translate3d(-13%, -9%, 0) scale(0.96, 1.06) rotate(-7deg);
+  }
+  32% {
+    transform: translate3d(9%, -14%, 0) scale(1.06, 0.94) rotate(5deg);
+  }
+  68% {
+    transform: translate3d(14%, 10%, 0) scale(0.94, 1.08) rotate(11deg);
+  }
+  100% {
+    transform: translate3d(-9%, 14%, 0) scale(1.07, 0.95) rotate(-4deg);
+  }
+}
+
+@keyframes pi-lab-gradient-turn {
+  0% {
+    transform: translate3d(-8%, 5%, 0) scale(0.92, 1.08) rotate(-28deg);
+  }
+  34% {
+    transform: translate3d(10%, -7%, 0) scale(1.08, 0.92) rotate(12deg);
+  }
+  66% {
+    transform: translate3d(-5%, -10%, 0) scale(0.96, 1.05) rotate(31deg);
+  }
+  100% {
+    transform: translate3d(9%, 6%, 0) scale(1.08, 0.92) rotate(42deg);
+  }
+}
+
+@keyframes pi-lab-gradient-breathe {
+  0% {
+    transform: translate3d(-3%, 2%, 0) scale(0.8, 1.18) rotate(-5deg);
+  }
+  35% {
+    transform: translate3d(5%, -4%, 0) scale(1.16, 0.84) rotate(8deg);
+  }
+  70% {
+    transform: translate3d(-4%, -2%, 0) scale(0.86, 1.14) rotate(17deg);
+  }
+  100% {
+    transform: translate3d(4%, 5%, 0) scale(1.12, 0.88) rotate(24deg);
+  }
+}
+
+@keyframes pi-lab-gradient-weave {
+  0% {
+    transform: translate3d(-15%, 9%, 0) scale(0.96, 1.04) skewX(-10deg) rotate(-6deg);
+  }
+  38% {
+    transform: translate3d(8%, -12%, 0) scale(1.06, 0.94) skewX(8deg) rotate(4deg);
+  }
+  72% {
+    transform: translate3d(16%, 8%, 0) scale(0.94, 1.06) skewX(-6deg) rotate(12deg);
+  }
+  100% {
+    transform: translate3d(-10%, -7%, 0) scale(1.05, 0.95) skewX(7deg) rotate(-3deg);
+  }
+}
+
+@keyframes pi-lab-gradient-orbit {
+  0% {
+    transform: translate3d(10%, 0, 0) scale(0.94, 1.06) rotate(0deg);
+  }
+  25% {
+    transform: translate3d(0, 11%, 0) scale(1.06, 0.94) rotate(90deg);
+  }
+  50% {
+    transform: translate3d(-10%, 0, 0) scale(0.95, 1.05) rotate(180deg);
+  }
+  75% {
+    transform: translate3d(0, -11%, 0) scale(1.05, 0.95) rotate(270deg);
+  }
+  100% {
+    transform: translate3d(10%, 0, 0) scale(0.94, 1.06) rotate(360deg);
+  }
+}
+
+@keyframes pi-lab-gradient-rock {
+  0% {
+    transform: translate3d(-11%, -7%, 0) scale(0.92, 1.08) rotate(-16deg);
+  }
+  31% {
+    transform: translate3d(4%, -10%, 0) scale(1.06, 0.94) rotate(3deg);
+  }
+  69% {
+    transform: translate3d(12%, 8%, 0) scale(1.08, 0.92) rotate(18deg);
+  }
+  100% {
+    transform: translate3d(-7%, 10%, 0) scale(0.94, 1.06) rotate(-5deg);
+  }
+}
+
+.project-gradient-motion-meander .project-gradient-layer-a,
+.project-gradient-motion-breathe .project-gradient-layer-b,
+.project-gradient-motion-rock .project-gradient-layer-c {
+  animation-name: pi-lab-gradient-meander;
+}
+
+.project-gradient-motion-turn .project-gradient-layer-a,
+.project-gradient-motion-orbit .project-gradient-layer-b,
+.project-gradient-motion-breathe .project-gradient-layer-c {
+  animation-name: pi-lab-gradient-turn;
+}
+
+.project-gradient-motion-breathe .project-gradient-layer-a,
+.project-gradient-motion-rock .project-gradient-layer-b,
+.project-gradient-motion-meander .project-gradient-layer-c {
+  animation-name: pi-lab-gradient-breathe;
+}
+
+.project-gradient-motion-weave .project-gradient-layer-a,
+.project-gradient-motion-meander .project-gradient-layer-b,
+.project-gradient-motion-turn .project-gradient-layer-c {
+  animation-name: pi-lab-gradient-weave;
+}
+
+.project-gradient-motion-orbit .project-gradient-layer-a,
+.project-gradient-motion-turn .project-gradient-layer-b,
+.project-gradient-motion-weave .project-gradient-layer-c {
+  animation-name: pi-lab-gradient-orbit;
+}
+
+.project-gradient-motion-rock .project-gradient-layer-a,
+.project-gradient-motion-weave .project-gradient-layer-b,
+.project-gradient-motion-orbit .project-gradient-layer-c {
+  animation-name: pi-lab-gradient-rock;
+}
+
+/* Diagnostic build: this intentionally remains animated even when macOS Reduce
+   Motion is enabled, so the user can verify that the fallback animation runs. */

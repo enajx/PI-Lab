@@ -1,0 +1,73 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { createRequire } from "node:module"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const DESKTOP_DIR = join(HERE, "..", "apps", "desktop")
+const MAIN_ENTRY = join(DESKTOP_DIR, "out", "main", "index.js")
+const ELECTRON_PATH = createRequire(join(DESKTOP_DIR, "package.json"))("electron") as string
+
+let app: ElectronApplication | null = null
+let dataDir = ""
+
+async function launch(): Promise<ElectronApplication> {
+  return electron.launch({
+    executablePath: ELECTRON_PATH,
+    args: [MAIN_ENTRY],
+    env: {
+      ...process.env,
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_TEST_FIRST_RUN: "1",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+    },
+  })
+}
+
+test.beforeEach(async () => {
+  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-setup-"))
+  app = await launch()
+})
+
+test.afterEach(async () => {
+  await app?.close()
+  app = null
+  if (dataDir) await rm(dataDir, { recursive: true, force: true })
+})
+
+test("first launch finishes with Silent, stays complete after restart, and can reopen manually", async () => {
+  if (!app) throw new Error("Electron app did not launch")
+  let window = await app.firstWindow()
+
+  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("dashboard")).toHaveCount(0)
+  await expect(window.getByLabel("Completion sound")).toHaveValue("silent")
+  await window.getByRole("button", { name: "Finish setup" }).click()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+
+  await app.close()
+  app = await launch()
+  window = await app.firstWindow()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("first-run-setup")).toHaveCount(0)
+
+  await window.keyboard.press("ControlOrMeta+p")
+  await window.getByTestId("command-palette-input").fill("Run first-launch setup")
+  const command = window.locator('[data-command-id="open-first-run-setup"]')
+  await expect(command).toBeVisible()
+  await command.click()
+  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+})
+
+test("first-launch setup is skippable", async () => {
+  if (!app) throw new Error("Electron app did not launch")
+  const window = await app.firstWindow()
+
+  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+  await window.getByRole("button", { name: "Skip setup" }).first().click()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("first-run-setup")).toHaveCount(0)
+})

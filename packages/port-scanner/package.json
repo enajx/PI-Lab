@@ -1,5 +1,5 @@
 {
-  "name": "@skipper/port-scanner",
+  "name": "@pi-lab/port-scanner",
   "version": "0.0.0",
   "private": true,
   "type": "module",

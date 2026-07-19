@@ -1,21 +1,17 @@
 import {
   type Automation,
+  type AutomationExecutionMode,
   type AutomationPromptVersion,
   type AutomationRun,
   automationPromptVersions,
   automationRuns,
   automations,
+  type PiLabDatabase,
   projects,
-  type SkipperDatabase,
-} from "@skipper/local-db"
-import {
-  describeSchedule,
-  isValidRrule,
-  nextOccurrence,
-  upcomingOccurrences,
-} from "@skipper/shared"
+} from "@pi-lab/local-db"
+import { describeSchedule, isValidRrule, nextOccurrence, upcomingOccurrences } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
-import { desc, eq } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { dispatchAutomation } from "../../automations/dispatch"
 import { publicProcedure, router } from "../trpc"
@@ -25,10 +21,10 @@ import { publicProcedure, router } from "../trpc"
  * `automations` table plus the prompt-version history, the run log, and the
  * manual `runNow` fire. The recurrence math (initial / advanced `nextRunAt`,
  * the human cadence summary, the create-form preview) is delegated wholesale to
- * the pure `@skipper/shared` recurrence engine; the scheduler timer owns the
+ * the pure `@pi-lab/shared` recurrence engine; the scheduler timer owns the
  * actual firing (started in main boot).
  *
- * Convention (docs/testing-and-build.md): procedures stay thin — input validation + a call into the
+ * Convention (md/engineering/testing-and-build.md): procedures stay thin — input validation + a call into the
  * plain functions below — so the logic is `createCaller`-testable and reusable.
  */
 
@@ -41,6 +37,7 @@ export interface AutomationListItem {
   id: string
   name: string
   agentId: string
+  executionMode: AutomationExecutionMode
   projectId: string
   recurrenceRule: string
   scheduleSummary: string
@@ -61,6 +58,7 @@ function toListItem(row: Automation): AutomationListItem {
     id: row.id,
     name: row.name,
     agentId: row.agentId,
+    executionMode: row.executionMode,
     projectId: row.projectId,
     recurrenceRule: row.recurrenceRule,
     scheduleSummary: describeSchedule(row.recurrenceRule),
@@ -80,7 +78,7 @@ function toDetail(row: Automation): AutomationDetail {
 // Plain service functions (the testable core; the router is one-liners over these).
 // ---------------------------------------------------------------------------
 
-function readAutomation(db: SkipperDatabase, id: string): Automation {
+function readAutomation(db: PiLabDatabase, id: string): Automation {
   const row = db.select().from(automations).where(eq(automations.id, id)).get()
   if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `No automation ${id}` })
   return row
@@ -88,7 +86,7 @@ function readAutomation(db: SkipperDatabase, id: string): Automation {
 
 /** Snapshot the current prompt into the version history (newest-first by createdAt). */
 function snapshotPrompt(
-  db: SkipperDatabase,
+  db: PiLabDatabase,
   automationId: string,
   prompt: string,
   origin: AutomationPromptVersion["origin"],
@@ -120,6 +118,7 @@ const idInput = z.object({ id: z.string().min(1) })
 const createInput = z.object({
   projectId: z.string().min(1),
   agentId: z.string().min(1),
+  executionMode: z.enum(["interactive", "noninteractive"]).default("interactive"),
   name: z.string().min(1),
   prompt: z.string().default(""),
   recurrenceRule: z.string().min(1),
@@ -133,6 +132,7 @@ const updateInput = z.object({
   id: z.string().min(1),
   name: z.string().min(1).optional(),
   agentId: z.string().min(1).optional(),
+  executionMode: z.enum(["interactive", "noninteractive"]).optional(),
   projectId: z.string().min(1).optional(),
   prompt: z.string().optional(),
   recurrenceRule: z.string().min(1).optional(),
@@ -182,6 +182,7 @@ export const automationsRouter = router({
       .values({
         projectId: input.projectId,
         agentId: input.agentId,
+        executionMode: input.executionMode,
         name: input.name,
         prompt: input.prompt,
         recurrenceRule: input.recurrenceRule,
@@ -229,6 +230,7 @@ export const automationsRouter = router({
       .set({
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+        ...(input.executionMode !== undefined ? { executionMode: input.executionMode } : {}),
         ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         ...(promptChanged ? { prompt: input.prompt } : {}),
         recurrenceRule,
@@ -291,17 +293,31 @@ export const automationsRouter = router({
       z.object({
         automationId: z.string().min(1),
         limit: z.number().int().positive().max(100).default(20),
+        targetRunId: z.string().min(1).optional(),
       }),
     )
-    .query(({ ctx, input }): AutomationRun[] =>
-      ctx.db
+    .query(({ ctx, input }): AutomationRun[] => {
+      const runs = ctx.db
         .select()
         .from(automationRuns)
         .where(eq(automationRuns.automationId, input.automationId))
         .orderBy(desc(automationRuns.createdAt))
         .limit(input.limit)
-        .all(),
-    ),
+        .all()
+      if (!input.targetRunId || runs.some((run) => run.id === input.targetRunId)) return runs
+
+      const target = ctx.db
+        .select()
+        .from(automationRuns)
+        .where(
+          and(
+            eq(automationRuns.id, input.targetRunId),
+            eq(automationRuns.automationId, input.automationId),
+          ),
+        )
+        .get()
+      return target ? [...runs, target] : runs
+    }),
 
   /** The prompt revision history for an automation, newest first. */
   listPromptVersions: publicProcedure

@@ -11,7 +11,7 @@
 // debuggable (`nc -U socket`), and the parser is a single buffer split — no
 // length bookkeeping, no separate binary tail to reassemble. The cost is JSON
 // string-escaping of terminal bytes, which is acceptable for the per-session
-// throughput Skipper terminals produce.
+// throughput PI Lab terminals produce.
 //
 // Direction:
 //   Request   client -> daemon  (carries a correlation `cid`)

@@ -27,15 +27,15 @@ let repoDir: string
 async function initRepo(dir: string): Promise<void> {
   await execFileAsync("git", ["init", "-b", "main", dir])
   const run = (args: string[]) => execFileAsync("git", ["-C", dir, ...args])
-  await run(["config", "user.email", "test@skipper.local"])
-  await run(["config", "user.name", "Skipper Test"])
+  await run(["config", "user.email", "test@pi-lab.local"])
+  await run(["config", "user.name", "PI Lab Test"])
   await writeFile(join(dir, "RESEARCH.md"), "# Fixture\n\nbody\n")
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
 }
 
 test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "skipper-e2e-palette-"))
+  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-palette-"))
   repoDir = join(dataDir, "repo")
   await initRepo(repoDir)
   app = await electron.launch({
@@ -43,10 +43,10 @@ test.beforeEach(async () => {
     args: [MAIN_ENTRY],
     env: {
       ...process.env,
-      SKIPPER_TEST_MODE: "1",
-      SKIPPER_DATA_DIR: dataDir,
-      SKIPPER_SOCKET_PATH: join(dataDir, "daemon.sock"),
-      SKIPPER_TEST_OPEN_PROJECT: repoDir,
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      PI_LAB_TEST_OPEN_PROJECT: repoDir,
     },
   })
 })
@@ -86,6 +86,21 @@ test("⌘P → type a project name → Enter jumps to that project", async () =>
 
   await window.keyboard.press("Enter")
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+})
+
+test("Go to Projects returns to the home view", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+
+  await window.keyboard.press("ControlOrMeta+p")
+  await window.getByTestId("command-palette-input").fill("projects")
+  const command = window.locator('[data-command-id="nav-dashboard"]')
+  await expect(command).toHaveText(/Go to Projects/)
+  await command.click()
+
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
 })
 
 test("⌘F outside a project opens the project finder and jumps to a project", async () => {

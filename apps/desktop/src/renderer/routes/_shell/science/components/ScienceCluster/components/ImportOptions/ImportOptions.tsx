@@ -1,4 +1,4 @@
-import { Button, Input, Label } from "@skipper/ui"
+import { Button, Input, Label } from "@pi-lab/ui"
 import { useState } from "react"
 
 interface ImportOptionsProps {

@@ -1,4 +1,4 @@
-import { Button } from "@skipper/ui"
+import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { LogOut } from "lucide-react"
 import { useTRPC } from "../../../../../trpc/react"
@@ -62,6 +62,8 @@ export function ScienceLibrary() {
         connected ? (
           <Button
             data-testid="library-disconnect"
+            data-feature-label="Disconnect library"
+            data-feature-help="Disconnect this library source so you can choose a different Zotero library or PDF folder."
             variant="ghost"
             size="sm"
             className="h-8 gap-1.5 text-muted-foreground"

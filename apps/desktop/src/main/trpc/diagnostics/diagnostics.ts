@@ -1,5 +1,5 @@
 import { relative } from "node:path"
-import { type SkipperDatabase, type Workspace, workspaces } from "@skipper/local-db"
+import { type PiLabDatabase, type Workspace, workspaces } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
@@ -11,6 +11,7 @@ import {
   runLint,
   runTypeCheck,
 } from "../../diagnostics"
+import { resolveWorkspacePythonRuntime } from "../../python"
 import { resolveInsideDir } from "../files"
 import { publicProcedure, router } from "../trpc"
 import { workspaceWorkingDir } from "../workspaces/workspaces"
@@ -24,7 +25,7 @@ import { workspaceWorkingDir } from "../workspaces/workspaces"
  * shape so the editor draws squiggles / gutter markers / a status count from one
  * list.
  *
- * The router stays thin (docs/testing-and-build.md): it resolves the workspace working dir,
+ * The router stays thin (md/engineering/testing-and-build.md): it resolves the workspace working dir,
  * jails `relPath` to it (reusing the files router's traversal guard), and
  * delegates to the pure runners over the injected {@link PyToolsExec}. It operates
  * on the **saved file on disk** — the editor saves before/at check and passes the
@@ -59,7 +60,7 @@ export interface FormatResult {
 }
 
 /** Fetch a workspace row or throw a clean NOT_FOUND (mirrors the files router). */
-function requireWorkspace(db: SkipperDatabase, workspaceId: string): Workspace {
+function requireWorkspace(db: PiLabDatabase, workspaceId: string): Workspace {
   const row = db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).get()
   if (!row) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No workspace ${workspaceId}` })
@@ -75,16 +76,20 @@ function requireWorkspace(db: SkipperDatabase, workspaceId: string): Workspace {
  * with FORBIDDEN before any exec runs.
  */
 function resolveTarget(
-  db: SkipperDatabase,
+  db: PiLabDatabase,
   workspaceId: string,
   relPath: string,
-): { cwd: string; fileArg: string } {
+): { cwd: string; fileArg: string; pythonEnvironmentPath: string | null } {
   const workspace = requireWorkspace(db, workspaceId)
   const cwd = workspaceWorkingDir(db, workspace)
   const absolute = resolveInsideDir(cwd, relPath)
   // Pass a path relative to cwd so the tool's own output paths stay tidy; the
   // guard already proved it can't escape, so this relative form stays inside.
-  return { cwd, fileArg: relative(cwd, absolute) }
+  return {
+    cwd,
+    fileArg: relative(cwd, absolute),
+    pythonEnvironmentPath: workspace.pythonEnvironmentPath,
+  }
 }
 
 /**
@@ -127,8 +132,18 @@ export const diagnosticsRouter = router({
   check: publicProcedure
     .input(checkInput)
     .query(async ({ ctx, input }): Promise<DiagnosticsResult> => {
-      const { cwd, fileArg } = resolveTarget(ctx.db, input.workspaceId, input.relPath)
-      return runChecks(ctx.pyToolsExec, {
+      const { cwd, fileArg, pythonEnvironmentPath } = resolveTarget(
+        ctx.db,
+        input.workspaceId,
+        input.relPath,
+      )
+      const runtime = await resolveWorkspacePythonRuntime(
+        ctx.resolvePythonRuntime,
+        cwd,
+        pythonEnvironmentPath,
+      )
+      const exec: PyToolsExec = (params) => ctx.pyToolsExec({ ...params, runtime })
+      return runChecks(exec, {
         fileArg,
         cwd,
         typeChecker: input.typeChecker,
@@ -145,8 +160,21 @@ export const diagnosticsRouter = router({
   format: publicProcedure
     .input(formatInput)
     .mutation(async ({ ctx, input }): Promise<FormatResult> => {
-      const { cwd, fileArg } = resolveTarget(ctx.db, input.workspaceId, input.relPath)
-      const result = await runFormat(ctx.pyToolsExec, fileArg, cwd)
+      const { cwd, fileArg, pythonEnvironmentPath } = resolveTarget(
+        ctx.db,
+        input.workspaceId,
+        input.relPath,
+      )
+      const runtime = await resolveWorkspacePythonRuntime(
+        ctx.resolvePythonRuntime,
+        cwd,
+        pythonEnvironmentPath,
+      )
+      const result = await runFormat(
+        (params) => ctx.pyToolsExec({ ...params, runtime }),
+        fileArg,
+        cwd,
+      )
       return {
         toolsAvailable: result.available,
         changed: result.changed,

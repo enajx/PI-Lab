@@ -1,6 +1,7 @@
 import { type Diagnostic, linter, lintGutter } from "@codemirror/lint"
 import { Compartment, EditorState } from "@codemirror/state"
 import { EditorView, keymap } from "@codemirror/view"
+import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { vim } from "@replit/codemirror-vim"
 import { basicSetup } from "codemirror"
 import { useEffect, useRef } from "react"
@@ -37,6 +38,8 @@ interface CodeMirrorBufferProps {
    * the keybinding always swallows the event so the browser's Save never fires.
    */
   onSave: () => void
+  /** Fires on Mod+Enter while this focused buffer is eligible to run. */
+  onRun?: () => void
   /**
    * Optional Vim keymap toggle (TODO "Built-in editor" — off by default). Wired
    * here behind the prop so the integrate stage can surface it as a setting
@@ -50,6 +53,8 @@ interface CodeMirrorBufferProps {
    * registry's default theme. Changing it reconfigures live (no remount).
    */
   theme?: string
+  /** Parsed custom themes copied into editor settings. */
+  customThemes?: ImportedEditorTheme[]
   /**
    * Optional diagnostics source (Python `ty`/`ruff` in the integrate stage).
    * Omitted in the editor core ⇒ no linting is attached. Re-supplying a new
@@ -59,7 +64,7 @@ interface CodeMirrorBufferProps {
 }
 
 /**
- * Thin React wrapper around a CodeMirror 6 `EditorView` (docs/architecture.md (renderer); spec:
+ * Thin React wrapper around a CodeMirror 6 `EditorView` (md/engineering/architecture.md (renderer); spec:
  * TODO "Built-in editor"). It owns exactly one view for its lifetime: the doc,
  * language, ⌘S keybinding, and change listener are wired once on mount, and
  * mutable concerns (the language for the current path, vim, the diagnostics
@@ -79,8 +84,10 @@ export function CodeMirrorBuffer({
   initialDoc,
   onChange,
   onSave,
+  onRun,
   vim: vimEnabled = false,
   theme,
+  customThemes,
   diagnostics,
 }: CodeMirrorBufferProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -90,8 +97,10 @@ export function CodeMirrorBuffer({
   // through to the current handlers without re-creating the view on each render.
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
+  const onRunRef = useRef(onRun)
   onChangeRef.current = onChange
   onSaveRef.current = onSave
+  onRunRef.current = onRun
 
   // Reconfigurable slices of the config. Created once per mount.
   const languageCompartment = useRef(new Compartment()).current
@@ -115,6 +124,14 @@ export function CodeMirrorBuffer({
           return true
         },
       },
+      {
+        key: "Mod-Enter",
+        run: () => {
+          if (!onRunRef.current) return false
+          onRunRef.current()
+          return true
+        },
+      },
     ])
 
     const changeListener = EditorView.updateListener.of((update) => {
@@ -126,14 +143,16 @@ export function CodeMirrorBuffer({
       extensions: [
         // Vim must precede other keymaps to win precedence when enabled.
         vimCompartment.of(vimEnabled ? vim() : []),
+        // Run/save must precede basicSetup's Enter keymap so Mod+Enter does not
+        // fall through and insert a newline.
+        saveKeymap,
         basicSetup,
         languageCompartment.of(languageForPath(relPath) ?? []),
         // Color theme (chrome + syntax highlighting) chosen in Settings → Editor.
         // Layered over basicSetup's default highlight; the structural height theme
         // below only sets layout, so the two never conflict on color.
-        themeCompartment.of(editorThemeExtension(theme)),
+        themeCompartment.of(editorThemeExtension(theme, customThemes)),
         lintCompartment.of(lintExtension(diagnostics)),
-        saveKeymap,
         changeListener,
         EditorView.lineWrapping,
         // Constrain the view to its bounded host so it scrolls internally instead of
@@ -175,9 +194,9 @@ export function CodeMirrorBuffer({
   // Swap the color theme live.
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: themeCompartment.reconfigure(editorThemeExtension(theme)),
+      effects: themeCompartment.reconfigure(editorThemeExtension(theme, customThemes)),
     })
-  }, [theme, themeCompartment])
+  }, [theme, customThemes, themeCompartment])
 
   // Swap the diagnostics source live.
   useEffect(() => {

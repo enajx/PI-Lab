@@ -1,7 +1,13 @@
-import { readFile, stat } from "node:fs/promises"
-import { extname, relative } from "node:path"
-import { ALL_DATA_FILE_KINDS, classifyDataFile, type DataFileKind } from "@skipper/shared"
-import { walkFiles } from "@skipper/workspace-fs"
+import type { Dirent } from "node:fs"
+import { open, readdir, readFile, stat } from "node:fs/promises"
+import { extname, join, relative } from "node:path"
+import {
+  ALL_DATA_FILE_KINDS,
+  classifyAnalysisArtifact,
+  classifyDataFile,
+  type DataFileKind,
+} from "@pi-lab/shared"
+import { DEFAULT_IGNORED_DIRS } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 
 /**
@@ -42,7 +48,7 @@ const EXTRA_IGNORED_DIRS = [
   ".vscode",
 ] as const
 
-/** One discovered file, tagged with its kind and lightweight metadata. */
+/** One discovered artifact, tagged with its kind and lightweight metadata. */
 export interface DataFileEntry {
   /** Repo-relative path (POSIX separators), the stable id / preview key. */
   relPath: string
@@ -73,28 +79,20 @@ export interface DataFileListing {
 }
 
 /**
- * Walk a repo and classify every data/analysis file under it. Noise directories
- * are pruned; the rest are tagged via {@link classifyDataFile}, grouped by kind
- * in canonical order, and sorted by path within each group. Pure read — never
- * throws on an unreadable file (it is simply skipped). A repo with nothing data-
- * like yields empty groups.
+ * Walk a repo for explicitly whitelisted data/analysis artifacts. Source,
+ * compiled, and unknown files never enter the candidate set, so the cap applies
+ * after filtering and a source-heavy directory cannot starve deeper results.
+ * `.zarr` directories are collected as one metadata-only dataset and pruned.
  */
 export async function discoverDataFiles(repoPath: string): Promise<DataFileListing> {
-  // Request one extra so we can tell "exactly at the cap" from "over the cap".
-  const absPaths = await walkFiles(repoPath, {
-    ignore: [...EXTRA_IGNORED_DIRS],
-    limit: MAX_LISTED_FILES + 1,
-  })
-
-  const truncated = absPaths.length > MAX_LISTED_FILES
-  const kept = truncated ? absPaths.slice(0, MAX_LISTED_FILES) : absPaths
+  const candidates = await walkAnalysisArtifacts(repoPath, MAX_LISTED_FILES + 1)
+  const truncated = candidates.length > MAX_LISTED_FILES
+  const kept = truncated ? candidates.slice(0, MAX_LISTED_FILES) : candidates
 
   const entries: DataFileEntry[] = []
-  for (const abs of kept) {
+  for (const { abs, kind } of kept) {
     const relPath = toPosix(relative(repoPath, abs))
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
-    // Dotfiles (`.env`, `.gitignore`, …) are config/noise, not data — skip them.
-    if (name.startsWith(".")) continue
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
@@ -105,7 +103,7 @@ export async function discoverDataFiles(repoPath: string): Promise<DataFileListi
     entries.push({
       relPath,
       name,
-      kind: classifyDataFile(relPath),
+      kind,
       size: info.size,
       mtime: info.mtimeMs,
     })
@@ -127,6 +125,55 @@ export async function discoverDataFiles(repoPath: string): Promise<DataFileListi
   }
 
   return { groups, total: entries.length, truncated }
+}
+
+interface AnalysisArtifactCandidate {
+  abs: string
+  kind: DataFileKind
+}
+
+/**
+ * Breadth-first whitelist-aware traversal. Unlike the generic workspace walker,
+ * rejected files do not consume `limit`. Directory artifacts are collected only
+ * for `.zarr`; all other eligible artifacts are regular files.
+ */
+async function walkAnalysisArtifacts(
+  repoPath: string,
+  limit: number,
+): Promise<AnalysisArtifactCandidate[]> {
+  const ignored = new Set([...DEFAULT_IGNORED_DIRS, ...EXTRA_IGNORED_DIRS])
+  const artifacts: AnalysisArtifactCandidate[] = []
+  let frontier = [repoPath]
+
+  while (frontier.length > 0 && artifacts.length < limit) {
+    const next: string[] = []
+    for (const dir of frontier) {
+      let dirents: Dirent[]
+      try {
+        dirents = await readdir(dir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      dirents.sort((a, b) => a.name.localeCompare(b.name))
+
+      for (const dirent of dirents) {
+        if (dirent.name.startsWith(".")) continue
+        const abs = join(dir, dirent.name)
+        if (dirent.isFile()) {
+          const kind = classifyAnalysisArtifact(dirent.name, "file")
+          if (kind !== null) artifacts.push({ abs, kind })
+        } else if (dirent.isDirectory() && !ignored.has(dirent.name)) {
+          const kind = classifyAnalysisArtifact(dirent.name, "directory")
+          if (kind !== null) artifacts.push({ abs, kind })
+          else next.push(abs)
+        }
+        if (artifacts.length >= limit) return artifacts
+      }
+    }
+    frontier = next
+  }
+
+  return artifacts
 }
 
 // ── Preview ──────────────────────────────────────────────────────────────────
@@ -254,6 +301,8 @@ const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
   ".webp": "image/webp",
   ".bmp": "image/bmp",
   ".svg": "image/svg+xml",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
 }
 
 /**
@@ -272,7 +321,8 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
   } catch {
     throw new TRPCError({ code: "NOT_FOUND", message: `No file ${relPath}` })
   }
-  if (!info.isFile()) {
+  const isZarrDirectory = info.isDirectory() && extname(relPath).toLowerCase() === ".zarr"
+  if (!info.isFile() && !isZarrDirectory) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `Not a file: ${relPath}` })
   }
 
@@ -298,17 +348,24 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     case "npy":
       return previewNpy(abs, relPath, info.size, meta)
     default:
-      // npz / parquet / notebook / plot / other — no safe inline preview in v1.
+      // Binary stores (including pickle), reports, notebooks, plots, and Zarr
+      // directories are intentionally metadata-only: never deserialize or read.
       return meta()
   }
 }
 
 /** Read at most {@link MAX_TEXT_BYTES} of a file as UTF-8, flagging a cutoff. */
 async function readBoundedText(abs: string): Promise<{ text: string; truncated: boolean }> {
-  const buf = await readFile(abs)
-  const truncated = buf.length > MAX_TEXT_BYTES
-  const slice = truncated ? buf.subarray(0, MAX_TEXT_BYTES) : buf
-  return { text: slice.toString("utf8"), truncated }
+  const file = await open(abs, "r")
+  try {
+    const buf = Buffer.allocUnsafe(MAX_TEXT_BYTES + 1)
+    const { bytesRead } = await file.read(buf, 0, buf.length, 0)
+    const truncated = bytesRead > MAX_TEXT_BYTES
+    const length = Math.min(bytesRead, MAX_TEXT_BYTES)
+    return { text: buf.subarray(0, length).toString("utf8"), truncated }
+  } finally {
+    await file.close()
+  }
 }
 
 async function previewText(abs: string): Promise<TextPreview> {

@@ -1,5 +1,5 @@
-import { buildRrule, matchPreset, type SchedulePreset, type Weekday } from "@skipper/shared"
-import { Input, Label } from "@skipper/ui"
+import { buildRrule, matchPreset, type SchedulePreset, type Weekday } from "@pi-lab/shared"
+import { Input, Label } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { useTRPC } from "../../../../../../../trpc/react"

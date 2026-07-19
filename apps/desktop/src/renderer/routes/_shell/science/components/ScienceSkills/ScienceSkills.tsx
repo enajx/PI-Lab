@@ -1,19 +1,32 @@
-import { Badge, cn, Input } from "@skipper/ui"
+import { Input } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { FlaskConical, Search } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
+import {
+  SkillCard,
+  type SkillCatalogItem,
+  SkillRootWarnings,
+  SkillScopeControls,
+  SkillsMessage,
+  skillKey,
+  useSkillScopeVisibility,
+  useVisibleSkills,
+} from "../../../../../skills"
 import { useTRPC } from "../../../../../trpc/react"
 import { ScienceTabShell } from "../ScienceTabShell"
 
+const EMPTY_SKILLS: SkillCatalogItem[] = []
+
 /**
  * Skills science tab (AGENTS.md "Scope" "Science tabs") — a **read-only catalog**:
- * pick a project, then browse the agent skills declared in its repo. Each skill
- * is a `<dir>/SKILL.md` discovered under the repo's `.claude/skills` /
- * `.agents/skills` directories (see `science.skills.list`) and shown as a card
- * with its name, description, and a badge for the source directory. Triggering a
- * skill from here is a later (v2) concern and is intentionally absent.
+ * pick a project, then browse its project-local and global agent skills. Each
+ * skill is a `<dir>/SKILL.md` discovered under `.claude/skills`,
+ * `.codex/skills`, or `.agents/skills` in the repository or home directory (see
+ * `science.skills.list`) and shown as a card with name, description, scope,
+ * harness, and source labels. Triggering a skill from here is a later (v2)
+ * concern and is intentionally absent.
  *
  * The project defaults to the most-recently-opened (`projects.list` is ordered
  * that way), with a selector to switch. A client-side search narrows the list;
@@ -51,18 +64,21 @@ export function ScienceSkills() {
     enabled: selectedId !== null,
     staleTime: 60_000,
   })
-  const skills = skillsQuery.data ?? []
+  const catalog = skillsQuery.data
+  const skills = catalog?.skills ?? EMPTY_SKILLS
+  const visibility = useSkillScopeVisibility()
+  const visibleSkills = useVisibleSkills(skills, visibility)
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    if (!needle) return skills
-    return skills.filter(
+    if (!needle) return visibleSkills
+    return visibleSkills.filter(
       (skill) =>
         skill.name.toLowerCase().includes(needle) ||
         skill.description.toLowerCase().includes(needle) ||
         skill.slug.toLowerCase().includes(needle),
     )
-  }, [skills, query])
+  }, [query, visibleSkills])
 
   // Context-aware ⌘F finder over the skills shown in this tab, plus the card it
   // highlights once a result is picked (skills have no open/trigger action — v2).
@@ -94,6 +110,9 @@ export function ScienceSkills() {
     projects.length > 0 ? (
       <select
         data-testid="skills-project-select"
+        aria-label="Skills project"
+        data-feature-label="Skills project"
+        data-feature-help="Choose which project repository to inspect for agent skills."
         value={selectedId ?? ""}
         onChange={(event) => {
           setSelectedId(event.target.value)
@@ -113,14 +132,17 @@ export function ScienceSkills() {
     <ScienceTabShell
       testId="science-skills"
       title="Skills"
-      subtitle="Browse the agent skills declared in a project's repo"
+      subtitle="Browse project-local and global agent skills"
       actions={selector}
     >
-      <div className="flex shrink-0 items-center border-border border-b px-6 py-2">
+      <div className="flex shrink-0 items-center gap-3 border-border border-b px-6 py-2">
         <div className="relative w-full max-w-sm">
           <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
           <Input
             data-testid="skills-search"
+            aria-label="Search skills"
+            data-feature-label="Search skills"
+            data-feature-help="Filter the selected project's declared agent skills by name or description."
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search skills…"
@@ -128,16 +150,37 @@ export function ScienceSkills() {
             disabled={skills.length === 0}
           />
         </div>
+        <SkillScopeControls visibility={visibility} testIdPrefix="skills" />
       </div>
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3 p-6">
           {projects.length === 0 ? (
             <NoProjectsState />
-          ) : skills.length === 0 && !skillsQuery.isLoading ? (
-            <EmptyState />
+          ) : skillsQuery.isError ? (
+            <SkillsMessage
+              testId="science-skills-error"
+              title="Skills could not be indexed"
+              detail={skillsQuery.error.message}
+              destructive={true}
+            />
+          ) : skillsQuery.isLoading ? (
+            <SkillsMessage
+              testId="science-skills-loading"
+              title="Indexing skills…"
+              detail="Reading the conventional project-local and global skill locations."
+              destructive={false}
+            />
+          ) : skills.length === 0 ? (
+            <SkillsMessage
+              testId="science-skills-empty"
+              title="No skills found"
+              detail="PI Lab checked .claude/skills, .codex/skills, and .agents/skills in this project and in your home directory."
+              destructive={false}
+            />
           ) : (
             <>
+              <SkillRootWarnings roots={catalog?.roots ?? []} testIdPrefix="science-skills" />
               <div
                 data-testid="skills-count"
                 className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
@@ -146,13 +189,13 @@ export function ScienceSkills() {
               </div>
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {filtered.map((skill) => {
-                  const key = `${skill.source}:${skill.slug}`
+                  const key = skillKey(skill)
                   return <SkillCard key={key} skill={skill} selected={key === selectedKey} />
                 })}
               </div>
               {filtered.length === 0 && skills.length > 0 ? (
                 <p data-testid="skills-no-matches" className="text-muted-foreground text-xs">
-                  No skills match “{query}”.
+                  {query ? `No skills match “${query}”.` : "No skills are visible in these scopes."}
                 </p>
               ) : null}
             </>
@@ -167,9 +210,9 @@ export function ScienceSkills() {
           // The skills currently shown in this tab (narrowed by the search box, if any).
           items={filtered.map(
             (skill): QuickFindItem => ({
-              id: `${skill.source}:${skill.slug}`,
+              id: skillKey(skill),
               label: skill.name,
-              hint: skill.source,
+              hint: `${skill.scope === "project" ? "Project-local" : "Global"} · ${skill.source}`,
               icon: FlaskConical,
             }),
           )}
@@ -180,41 +223,6 @@ export function ScienceSkills() {
         />
       ) : null}
     </ScienceTabShell>
-  )
-}
-
-/** A single skill, rendered as a card (name, source badge, description). */
-function SkillCard({
-  skill,
-  selected,
-}: {
-  skill: { name: string; description: string; slug: string; source: string; path: string }
-  /** Highlighted by the ⌘F finder (the picked result). */
-  selected: boolean
-}) {
-  return (
-    <div
-      data-testid="skill-card"
-      data-skill={skill.slug}
-      data-selected={selected}
-      className={cn(
-        "flex flex-col gap-1.5 rounded-lg border bg-card/40 p-3",
-        selected ? "border-ring ring-1 ring-ring" : "border-border",
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <span data-testid="skill-name" className="min-w-0 flex-1 truncate font-medium text-sm">
-          {skill.name}
-        </span>
-        <Badge data-testid="skill-source" variant="muted" className="font-mono">
-          {skill.source}
-        </Badge>
-      </div>
-      {skill.description ? (
-        <p className="text-muted-foreground text-xs leading-relaxed">{skill.description}</p>
-      ) : null}
-    </div>
   )
 }
 
@@ -230,26 +238,6 @@ function NoProjectsState() {
         <p className="font-medium text-foreground text-sm">No projects open</p>
         <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
           Open a project from the sidebar to browse the skills declared in its repo.
-        </p>
-      </div>
-    </div>
-  )
-}
-
-/** Shown when the selected project has no skills declared. */
-function EmptyState() {
-  return (
-    <div
-      data-testid="science-skills-empty"
-      className="flex flex-col items-center gap-3 rounded-lg border border-border border-dashed p-12 text-center"
-    >
-      <FlaskConical className="size-8 text-muted-foreground" aria-hidden />
-      <div className="flex flex-col gap-1">
-        <p className="font-medium text-foreground text-sm">No skills found</p>
-        <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
-          Skills are discovered from <code className="font-mono">.claude/skills/*/SKILL.md</code>{" "}
-          and <code className="font-mono">.agents/skills/*/SKILL.md</code> in the selected project's
-          repo.
         </p>
       </div>
     </div>

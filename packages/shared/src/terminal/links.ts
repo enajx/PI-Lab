@@ -3,7 +3,7 @@
  *
  * Terminal agents (Claude Code, Codex, compilers, test runners, …) print file
  * references in a handful of recurring shapes — `src/app.ts:12:5`, `main.rs:40`,
- * `App.tsx(18,3)`, `report(7)`. Skipper's terminal pane wants to turn those into
+ * `App.tsx(18,3)`, `report(7)`. PI Lab's terminal pane wants to turn those into
  * clickable jumps, so it needs to know *where* in a chunk of text each reference
  * sits and *what* it points at. This module answers exactly that and nothing
  * more: it is a side-effect-free string→matches function — no filesystem, no

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "master": {
+    "path": "icons/icon.svg",
+    "sha256": "f0291ea68370fcecc3d3bbd3b749322cb1c6488d167f5d3bb0d117582cb0e425"
+  },
+  "derivative": {
+    "path": "icons/icon.png",
+    "sha256": "5944d0810cf735c72a99cccc8126ac99bcca14e11c5f7c8f6ed82da4441a42fd",
+    "width": 1024,
+    "height": 1024
+  }
+}

@@ -1,4 +1,4 @@
-import { Button, cn } from "@skipper/ui"
+import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
@@ -8,7 +8,7 @@ import { SettingsSection } from "../SettingsControls"
 
 /**
  * Project template editor (Settings → "Project template"). Edits the writable
- * copy of the bundled template (`~/.skipper/template`) that `createFromTemplate`
+ * copy of the bundled template (`~/.pi-lab/template`) that `createFromTemplate`
  * stamps into every new project. A left file list selects a file; the right pane
  * is a workspace-agnostic {@link CodeMirrorBuffer} that loads via `template.read`
  * and saves via `template.write`.
@@ -98,6 +98,8 @@ export function ProjectTemplateSection() {
               type="button"
               data-testid={`template-file-${file.relPath}`}
               data-active={file.relPath === activeRelPath}
+              data-feature-label={file.name}
+              data-feature-help="Edit this starter file used when creating future projects"
               onClick={() => handleSelect(file.relPath)}
               className={cn(
                 "rounded-md px-2 py-1.5 text-left font-mono text-xs transition-colors",
@@ -127,6 +129,7 @@ export function ProjectTemplateSection() {
               data-testid="template-save"
               className="h-6 px-2 text-xs"
               disabled={activeRelPath === null || !dirty || write.isPending}
+              data-feature-help="Save this template file for future projects"
               onClick={handleSave}
             >
               Save

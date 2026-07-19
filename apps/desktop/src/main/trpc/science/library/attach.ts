@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { readFile, stat } from "node:fs/promises"
 import { basename } from "node:path"
-import type { ZoteroLocalSource, ZoteroWebSource } from "@skipper/local-db"
+import type { ZoteroLocalSource, ZoteroWebSource } from "@pi-lab/local-db"
 import type { HttpFetch } from "../../context"
 import type { AttachFileResult } from "./library"
 

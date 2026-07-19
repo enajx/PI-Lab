@@ -1,12 +1,13 @@
-import type { EditorSettings } from "@skipper/local-db"
-import { useMutation } from "@tanstack/react-query"
-import { useCallback, useRef, useState } from "react"
+import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   type EditorBuffersApi,
+  type OpenBuffer,
   useEditorBuffers,
 } from "../../../../../Editor/hooks/useEditorBuffers"
 import { resolveLaunchAgentId } from "../../../../../preferences/preferences"
-import type { SkipperTrpcClient } from "../../../../../trpc/client"
+import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { useTRPC } from "../../../../../trpc/react"
 
 /** Which kind of pane the central panel is currently showing. */
@@ -22,6 +23,27 @@ export interface SessionPane {
   wsKind?: "branch" | "worktree"
 }
 
+export interface BelowEditorRun {
+  sessionId: string
+  label: string
+}
+
+export interface AgentOption {
+  id: string
+  label: string
+  available: boolean
+  executable: string
+}
+
+/** Restorable project workspace state, retained only while the app is running. */
+export interface CentralPanelRestoreState {
+  buffers: OpenBuffer[]
+  activeRelPath: string | null
+  sessions: SessionPane[]
+  active: ActiveRef | null
+  belowEditorRun: BelowEditorRun | null
+}
+
 export interface CentralPanelController {
   editor: EditorBuffersApi
   sessions: SessionPane[]
@@ -30,6 +52,8 @@ export interface CentralPanelController {
   selectFile: (relPath: string) => void
   /** Focus a session tab. */
   selectSession: (id: string) => void
+  /** Attach or select an existing live session targeted outside this view. */
+  attachSession: (session: Omit<SessionPane, "id">) => void
   /** Open a file (from the Files panel / quick-open) and make it active. */
   openFile: (relPath: string) => void
   closeFile: (relPath: string) => void
@@ -37,19 +61,34 @@ export interface CentralPanelController {
   /** Close whichever tab is currently active (⌘W); a no-op when none is. */
   closeActiveTab: () => void
   openAgent: () => void
+  openAgentChooser: () => void
+  closeAgentChooser: () => void
+  launchChosenAgent: (agentId: string, workspaceMode: "main" | "worktree") => void
+  agentChooserOpen: boolean
+  agentOptions: AgentOption[]
+  preferredAgentId: string
   openTerminal: () => void
   openNewMarkdown: () => void
+  runPython: (destination?: PythonRunDestination) => void
+  belowEditorRun: BelowEditorRun | null
+  closeBelowEditorRun: () => void
   pendingAgent: boolean
   pendingTerminal: boolean
+  pendingPython: boolean
   launchError: string | null
 }
 
 interface UseCentralPanelArgs {
-  client: SkipperTrpcClient
+  client: PiLabTrpcClient
   workspaceId: string
   projectId: string
   settings: EditorSettings
   onSaved?: (relPath: string) => void
+  /** A session launched immediately before navigating here (for example from Tasks). */
+  initialSession?: Omit<SessionPane, "id"> | null
+  /** State retained after temporarily navigating away from this project. */
+  initialState?: CentralPanelRestoreState
+  onStateChange?: (state: CentralPanelRestoreState) => void
 }
 
 /**
@@ -67,15 +106,58 @@ export function useCentralPanel({
   projectId,
   settings,
   onSaved,
+  initialSession,
+  initialState,
+  onStateChange,
 }: UseCentralPanelArgs): CentralPanelController {
   const trpc = useTRPC()
-  const editor = useEditorBuffers({ client, workspaceId, settings, onSaved })
-  const [sessions, setSessions] = useState<SessionPane[]>([])
-  const [active, setActive] = useState<ActiveRef | null>(null)
-  const idCounter = useRef(0)
+  const queryClient = useQueryClient()
+  const editor = useEditorBuffers({
+    client,
+    workspaceId,
+    settings,
+    onSaved,
+    initialBuffers: initialState?.buffers,
+    initialActiveRelPath: initialState?.activeRelPath,
+  })
+  const initialPane = useRef<SessionPane | null>(
+    !initialState && initialSession ? { ...initialSession, id: "pane-1" } : null,
+  )
+  const [sessions, setSessions] = useState<SessionPane[]>(
+    () => initialState?.sessions ?? (initialPane.current ? [initialPane.current] : []),
+  )
+  const [belowEditorRun, setBelowEditorRun] = useState<BelowEditorRun | null>(
+    () => initialState?.belowEditorRun ?? null,
+  )
+  const [agentChooserOpen, setAgentChooserOpen] = useState(false)
+  const belowEditorRunRef = useRef<BelowEditorRun | null>(null)
+  belowEditorRunRef.current = belowEditorRun
+  const [active, setActive] = useState<ActiveRef | null>(
+    () =>
+      initialState?.active ??
+      (initialPane.current ? { type: "session", id: initialPane.current.id } : null),
+  )
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
+  const idCounter = useRef(highestPaneNumber(sessions))
+
+  useEffect(() => {
+    onStateChange?.({
+      buffers: editor.buffers,
+      activeRelPath: editor.activeRelPath,
+      sessions,
+      active,
+      belowEditorRun,
+    })
+  }, [active, belowEditorRun, editor.activeRelPath, editor.buffers, onStateChange, sessions])
 
   const startSession = useMutation(trpc.sessions.start.mutationOptions())
+  const agentsQuery = useQuery(trpc.agents.list.queryOptions())
+  const projectChoiceQuery = useQuery(trpc.agents.projectChoice.queryOptions({ projectId }))
+  const setProjectChoice = useMutation(trpc.agents.setProjectChoice.mutationOptions())
   const spawnTerminal = useMutation(trpc.workspaces.spawnTerminal.mutationOptions())
+  const runPythonFile = useMutation(trpc.python.runFile.mutationOptions())
+  const killTerminal = useMutation(trpc.terminal.kill.mutationOptions())
 
   const selectFile = useCallback(
     (relPath: string) => {
@@ -128,21 +210,76 @@ export function useCentralPanel({
     return `pane-${idCounter.current}`
   }, [])
 
-  const openAgent = useCallback(() => {
-    startSession.mutate(
-      { projectId, agentId: resolveLaunchAgentId() },
-      {
-        onSuccess: (result) => {
-          const id = nextPaneId()
-          setSessions((prev) => [
-            ...prev,
-            { id, kind: "agent", sessionId: result.sessionId, label: "Agent", wsKind: result.kind },
-          ])
-          setActive({ type: "session", id })
+  const attachSession = useCallback(
+    (session: Omit<SessionPane, "id">) => {
+      const existing = sessionsRef.current.find((pane) => pane.sessionId === session.sessionId)
+      if (existing) {
+        setActive({ type: "session", id: existing.id })
+        return
+      }
+      const pane = { ...session, id: nextPaneId() }
+      sessionsRef.current = [...sessionsRef.current, pane]
+      setSessions(sessionsRef.current)
+      setActive({ type: "session", id: pane.id })
+    },
+    [nextPaneId],
+  )
+
+  const launchAgent = useCallback(
+    (agentId: string, workspaceMode: "main" | "worktree") => {
+      const option = agentsQuery.data?.find((agent) => agent.id === agentId)
+      startSession.mutate(
+        { projectId, agentId, workspaceMode },
+        {
+          onSuccess: (result) => {
+            const id = nextPaneId()
+            setSessions((prev) => [
+              ...prev,
+              {
+                id,
+                kind: "agent",
+                sessionId: result.sessionId,
+                label: option?.label ?? "Agent",
+                wsKind: result.kind,
+              },
+            ])
+            setActive({ type: "session", id })
+          },
         },
-      },
-    )
-  }, [projectId, startSession, nextPaneId])
+      )
+    },
+    [agentsQuery.data, projectId, startSession, nextPaneId],
+  )
+
+  const openAgent = useCallback(() => {
+    const remembered = projectChoiceQuery.data?.agentId
+    const option = agentsQuery.data?.find((agent) => agent.id === remembered)
+    if (option?.available) {
+      launchAgent(option.id, "main")
+      return
+    }
+    setAgentChooserOpen(true)
+  }, [agentsQuery.data, launchAgent, projectChoiceQuery.data?.agentId])
+
+  const openAgentChooser = useCallback(() => setAgentChooserOpen(true), [])
+  const closeAgentChooser = useCallback(() => setAgentChooserOpen(false), [])
+  const launchChosenAgent = useCallback(
+    (agentId: string, workspaceMode: "main" | "worktree") => {
+      setProjectChoice.mutate(
+        { projectId, agentId },
+        {
+          onSuccess: () => {
+            void queryClient.invalidateQueries({
+              queryKey: trpc.agents.projectChoice.queryKey({ projectId }),
+            })
+            setAgentChooserOpen(false)
+            launchAgent(agentId, workspaceMode)
+          },
+        },
+      )
+    },
+    [launchAgent, projectId, queryClient, setProjectChoice, trpc.agents.projectChoice],
+  )
 
   const openTerminal = useCallback(() => {
     spawnTerminal.mutate(
@@ -169,21 +306,102 @@ export function useCentralPanel({
     openFile(name)
   }, [editor.tabs, openFile])
 
+  const runPython = useCallback(
+    (override?: PythonRunDestination) => {
+      const relPath = editor.active?.relPath
+      if (!relPath || !/\.pyi?$/i.test(relPath)) return
+      const destination = override ?? settings.pythonRunDestination ?? "central"
+      void editor.saveFile(relPath).then((saved) => {
+        if (!saved) return
+        runPythonFile.mutate(
+          { workspaceId, relPath, cols: 80, rows: 24 },
+          {
+            onSuccess: (result) => {
+              if (destination === "below-editor") {
+                const previous = belowEditorRunRef.current
+                const next = {
+                  sessionId: result.sessionId,
+                  label: `Run ${relPath.split("/").at(-1) ?? relPath}`,
+                }
+                belowEditorRunRef.current = next
+                setBelowEditorRun(next)
+                if (previous && previous.sessionId !== result.sessionId) {
+                  killTerminal.mutate({ sessionId: previous.sessionId })
+                }
+                return
+              }
+              const id = nextPaneId()
+              setSessions((prev) => [
+                ...prev,
+                {
+                  id,
+                  kind: "terminal",
+                  sessionId: result.sessionId,
+                  label: `Run ${relPath.split("/").at(-1) ?? relPath}`,
+                },
+              ])
+              setActive({ type: "session", id })
+            },
+          },
+        )
+      })
+    },
+    [editor, killTerminal, nextPaneId, runPythonFile, settings.pythonRunDestination, workspaceId],
+  )
+
+  const closeBelowEditorRun = useCallback(() => {
+    const current = belowEditorRunRef.current
+    if (!current) return
+    belowEditorRunRef.current = null
+    setBelowEditorRun(null)
+    killTerminal.mutate({ sessionId: current.sessionId })
+  }, [killTerminal])
+
   return {
     editor,
     sessions,
     active,
     selectFile,
     selectSession,
+    attachSession,
     openFile,
     closeFile,
     closeSession,
     closeActiveTab,
     openAgent,
+    openAgentChooser,
+    closeAgentChooser,
+    launchChosenAgent,
+    agentChooserOpen,
+    agentOptions: agentsQuery.data ?? [],
+    preferredAgentId: projectChoiceQuery.data?.agentId ?? resolveLaunchAgentId(),
     openTerminal,
     openNewMarkdown,
-    pendingAgent: startSession.isPending,
+    runPython,
+    belowEditorRun,
+    closeBelowEditorRun,
+    pendingAgent:
+      startSession.isPending ||
+      setProjectChoice.isPending ||
+      agentsQuery.isPending ||
+      projectChoiceQuery.isPending,
     pendingTerminal: spawnTerminal.isPending,
-    launchError: startSession.error?.message ?? spawnTerminal.error?.message ?? null,
+    pendingPython: runPythonFile.isPending,
+    launchError:
+      startSession.error?.message ??
+      setProjectChoice.error?.message ??
+      agentsQuery.error?.message ??
+      projectChoiceQuery.error?.message ??
+      spawnTerminal.error?.message ??
+      runPythonFile.error?.message ??
+      killTerminal.error?.message ??
+      null,
   }
+}
+
+function highestPaneNumber(sessions: SessionPane[]): number {
+  return sessions.reduce((highest, session) => {
+    const match = /^pane-(\d+)$/.exec(session.id)
+    return match ? Math.max(highest, Number(match[1])) : highest
+  }, 0)
 }

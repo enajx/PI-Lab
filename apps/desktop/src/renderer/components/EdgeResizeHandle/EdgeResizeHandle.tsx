@@ -1,4 +1,4 @@
-import { cn } from "@skipper/ui"
+import { cn } from "@pi-lab/ui"
 import type { PointerEvent as ReactPointerEvent } from "react"
 
 /**

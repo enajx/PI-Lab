@@ -1,4 +1,4 @@
-import { BUILTIN_AGENTS } from "@skipper/shared"
+import { BUILTIN_AGENTS } from "@pi-lab/shared"
 import { describe, expect, test } from "vitest"
 import { buildAgentCatalog, TEST_AGENT_ID } from "./context"
 

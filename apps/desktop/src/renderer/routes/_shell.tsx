@@ -3,15 +3,18 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { FolderGit2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { CommandPalette } from "../CommandPalette"
+import { NotificationBridge } from "../notifications/NotificationBridge"
 import { useSidebarCollapsed } from "../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../QuickFind"
+import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute"
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
 import { useTRPC } from "../trpc/react"
+import { rememberSettingsReturnRoute } from "./_shell/-settingsReturnRoute"
 import { Sidebar } from "./_shell/components/Sidebar"
 import { useTitleBarTrafficLights } from "./_shell/titleBar"
 
 /**
- * Pathless layout route — the default app surface (docs/architecture.md (renderer)): a ROW of
+ * Pathless layout route — the default app surface (md/engineering/architecture.md (renderer)): a ROW of
  * [sidebar | main]. The gray sidebar owns the window's top-left — its own header clears the
  * macOS traffic lights and holds the collapse toggle — and each page renders its header as the
  * top row of the main column (single header level, not a full-width bar). The content column is
@@ -32,15 +35,31 @@ export const Route = createFileRoute("/_shell")({
 function ShellLayout() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [findProjectsOpen, setFindProjectsOpen] = useState(false)
-  useGlobalShortcuts(() => setPaletteOpen(true))
+  const navigate = useNavigate()
   const { location } = useRouterState()
+  useGlobalShortcuts(location.pathname, location.search, () => setPaletteOpen(true))
+  useDashboardTabToggle(location.pathname, location.search)
+  const trpc = useTRPC()
+  const settings = useQuery(trpc.settings.get.queryOptions())
+  const setupGateMode = readSetupGateMode(window.location.search)
+  const isSetup = location.pathname === "/setup"
+  const redirectToSetup =
+    settings.data !== undefined &&
+    shouldRedirectToSetup(settings.data.agents.setupCompleted, location.pathname, setupGateMode)
+  const awaitingSetupDecision =
+    setupGateMode === "honor" && !isSetup && settings.data === undefined && settings.isPending
   const isSettings = location.pathname.startsWith("/settings")
+  const isFullScreen = isSettings || isSetup || redirectToSetup || awaitingSetupDecision
+
+  useEffect(() => {
+    if (redirectToSetup) void navigate({ to: "/setup", replace: true })
+  }, [navigate, redirectToSetup])
 
   // Keep the macOS traffic lights in sync with the layout: they ride the title-bar
   // strip above the main panel only when the sidebar is shown AND collapsed, and sit
-  // on the sidebar header otherwise (expanded, or Settings — which hides the sidebar).
+  // on the sidebar header otherwise (expanded, or a full-screen route).
   const [collapsed] = useSidebarCollapsed()
-  useTitleBarTrafficLights({ sidebarShown: !isSettings, collapsed })
+  useTitleBarTrafficLights({ sidebarShown: !isFullScreen, collapsed })
 
   // ⌘F (the `quick-open` shortcut) is context-aware. The project view (files) and every science
   // tab (Library collections, Skills, Cluster machines, Analysis files) own ⌘F for their own
@@ -70,7 +89,13 @@ function ShellLayout() {
 
   return (
     <>
-      {isSettings ? (
+      <NotificationBridge />
+      {redirectToSetup || awaitingSetupDecision ? (
+        <div
+          data-testid="setup-gate-loading"
+          className="flex h-screen w-screen bg-background text-foreground"
+        />
+      ) : isFullScreen ? (
         <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
           {content}
         </div>
@@ -116,21 +141,78 @@ function ProjectsFind({ onClose }: { onClose: () => void }) {
  * command palette. Handlers read the *current* binding at event time, so a rebind in Settings
  * takes effect with no listener re-subscription.
  */
-function useGlobalShortcuts(onCommandPalette: () => void): void {
+function useGlobalShortcuts(pathname: string, search: unknown, onCommandPalette: () => void): void {
   const navigate = useNavigate()
   const paletteRef = useRef(onCommandPalette)
   paletteRef.current = onCommandPalette
+  const routeRef = useRef({ pathname, search })
+  routeRef.current = { pathname, search }
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (eventMatchesShortcut(event, "open-settings")) {
         event.preventDefault()
+        rememberSettingsReturnRoute(routeRef.current)
         void navigate({ to: "/settings" })
       } else if (eventMatchesShortcut(event, "command-palette")) {
         event.preventDefault()
         paletteRef.current()
       }
     }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [navigate])
+}
+
+/**
+ * Plain Tab is PI Lab's two-view switch outside controls that own Tab as input:
+ * one press returns to the Dashboard and the next restores the previous route.
+ */
+function useDashboardTabToggle(pathname: string, search: unknown): void {
+  const navigate = useNavigate()
+  const routeRef = useRef({ pathname, search })
+  const lastNonDashboardRef = useRef<{ pathname: string; search: unknown } | null>(null)
+  routeRef.current = { pathname, search }
+
+  useEffect(() => {
+    if (pathname !== "/") lastNonDashboardRef.current = { pathname, search }
+  }, [pathname, search])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Tab" ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.defaultPrevented ||
+        preservesNativeTab(event.target)
+      ) {
+        return
+      }
+
+      const route = routeRef.current
+      if (route.pathname === "/") {
+        const previous = lastNonDashboardRef.current
+        if (!previous) return
+        event.preventDefault()
+        void navigate({ to: previous.pathname as never, search: previous.search as never })
+        return
+      }
+
+      lastNonDashboardRef.current = route
+      event.preventDefault()
+      void navigate({ to: "/" })
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [navigate])
+}
+
+function preservesNativeTab(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(
+    target.closest(
+      ".xterm, .cm-editor, .cm-content, input, textarea, select, [contenteditable='true']",
+    ),
+  )
 }

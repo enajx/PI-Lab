@@ -1,5 +1,5 @@
-import type { Project } from "@skipper/local-db"
-import { cn } from "@skipper/ui"
+import type { Project } from "@pi-lab/local-db"
+import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useRef, useState } from "react"
@@ -18,7 +18,8 @@ import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
  *     image file onto it reads the file into a `data:` URL and persists it via
  *     `projects.setThumbnail`, then the card re-renders from the refreshed list.
  *   - an **info area** — the project name, a status badge from
- *     `deriveProjectState`, and (when available) the project's current TODO line.
+ *     `deriveProjectState`, with live agent activity determining whether the
+ *     status is empty, working, or paused.
  *
  * Clicking the card opens the project's route. This is a deliberately minimal
  * first pass: the "glowy edge" / animated polish and the richer card contents
@@ -27,16 +28,18 @@ import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
  */
 
 const STATUS_LABEL: Record<ProjectState, string> = {
-  idle: "Idle",
-  active: "Active",
-  attention: "Needs attention",
+  idle: "No active agents",
+  active: "Working",
+  attention: "Paused",
 }
 
 const STATUS_DOT: Record<ProjectState, string> = {
-  idle: "bg-muted-foreground/40",
+  idle: "border border-muted-foreground/50",
   active: "bg-emerald-500",
   attention: "bg-red-500",
 }
+
+const GRADIENT_LAYER_NAMES = ["a", "b", "c"] as const
 
 interface ProjectCardProps {
   project: Project
@@ -48,11 +51,10 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const queryClient = useQueryClient()
   const [isDragOver, setIsDragOver] = useState(false)
 
-  // Workspace count + working-tree changes drive the card's status. Both are
-  // best-effort reads (the card still renders while they resolve); attention is
-  // not yet sourced, so it stays 0 for v1 (see deriveProjectState).
-  const workspacesQuery = useQuery(trpc.workspaces.list.queryOptions({ projectId: project.id }))
-  const sessionCount = workspacesQuery.data?.length ?? 0
+  const activityQuery = useQuery(trpc.sessions.activity.queryOptions())
+  const agentStates = (activityQuery.data ?? [])
+    .filter((activity) => activity.projectId === project.id)
+    .map((activity) => activity.state)
 
   const setThumbnail = useMutation(
     trpc.projects.setThumbnail.mutationOptions({
@@ -62,7 +64,11 @@ export function ProjectCard({ project }: ProjectCardProps) {
     }),
   )
 
-  const state = deriveProjectState({ sessionCount, changeCount: 0, attentionCount: 0 })
+  const state = deriveProjectState({
+    sessionCount: agentStates.includes("working") ? 1 : 0,
+    changeCount: 0,
+    attentionCount: agentStates.includes("waiting") ? 1 : 0,
+  })
 
   const openProject = () => {
     void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
@@ -91,7 +97,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
       data-project-id={project.id}
       data-state={state}
       className={cn(
-        "group flex flex-col overflow-hidden rounded-xl border border-border bg-card text-left transition-colors",
+        "group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card text-left transition-colors",
         isDragOver && "border-brand ring-2 ring-brand/40",
       )}
     >
@@ -107,7 +113,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the click only mirrors the info button's navigation, which is the real keyboard-activable control; a key handler / extra tab stop here would be a redundant duplicate target. */}
       <div
         data-testid="project-card-image"
-        className="relative h-32 w-full shrink-0 overflow-hidden"
+        className="relative isolate h-32 w-full shrink-0 overflow-hidden"
         style={project.thumbnail ? undefined : { backgroundColor: "var(--muted)" }}
         onClick={openProject}
         onDragOver={(event) => {
@@ -121,36 +127,53 @@ export function ProjectCard({ project }: ProjectCardProps) {
           <img src={project.thumbnail} alt="" className="size-full object-cover" />
         ) : (
           <>
-            {/*
-             * The seeded gradient on an oversized layer that slowly morphs
-             * (transform-only, GPU-composited — see globals.css). `inset-[-25%]`
-             * (~150% box) keeps the container covered as the layer rotates/scales/
-             * translates under `overflow-hidden`. The per-project duration/delay
-             * vars drive `.project-gradient-anim`; the play-state hook pauses it
-             * off-screen/unfocused via the ref.
-             */}
+            {/* A stationary seeded pastel base containing three independently
+                animated fields. Their seeded geometry and motion families vary;
+                only child transforms move, while the card, base, and grain stay
+                still. */}
             <div
               data-testid="project-card-gradient"
+              data-gradient-palette={gradient.variant.palette}
+              data-gradient-shape={gradient.variant.shape}
+              data-gradient-motion={gradient.variant.motion}
               aria-hidden
               ref={gradientRef}
-              className="absolute inset-[-25%] project-gradient-anim"
+              className={`project-gradient-field project-gradient-motion-${gradient.variant.motion}`}
               style={
                 {
                   backgroundImage: gradient.background,
-                  "--grad-duration": `${gradient.animation.durationSec}s`,
-                  "--grad-delay": `${gradient.animation.delaySec}s`,
+                  "--layer-a-duration": `${gradient.animation.durationSec}s`,
+                  "--layer-b-duration": `${gradient.animation.durationSec + 2.5}s`,
+                  "--layer-c-duration": `${gradient.animation.durationSec + 5}s`,
+                  "--layer-a-delay": `${gradient.animation.delaySec}s`,
+                  "--layer-b-delay": `${gradient.animation.delaySec - 0.7}s`,
+                  "--layer-c-delay": `${gradient.animation.delaySec - 1.3}s`,
                 } as React.CSSProperties
               }
-            />
-            {/* Retro film-grain over the gradient (md/02 — "grainy"): a static
-                sibling rendered on top. A denser tile + hard-light blend at ~35%
-                reads as vintage speckle rather than a faint wash. */}
+            >
+              {gradient.layerBackgrounds.map((backgroundImage, index) => {
+                const name = GRADIENT_LAYER_NAMES[index]
+                return (
+                  <div
+                    key={name}
+                    data-testid="project-card-gradient-layer"
+                    data-layer={name}
+                    className={`project-gradient-layer project-gradient-layer-${name}`}
+                    style={{ backgroundImage }}
+                  />
+                )
+              })}
+            </div>
+            {/* Static film grain remains above the fields. The cached turbulence
+                tile supplies irregular noise while two fine dot screens ensure
+                the texture remains legible over the new light palettes. */}
             <div
+              data-testid="project-card-gradient-grain"
               aria-hidden
-              className="absolute inset-0 opacity-35 mix-blend-hard-light"
+              className="pointer-events-none absolute inset-0 opacity-50 mix-blend-soft-light"
               style={{
-                backgroundImage: `url("${gradient.grainUrl}")`,
-                backgroundSize: "80px 80px",
+                backgroundImage: `url("${gradient.grainUrl}"), radial-gradient(circle at 25% 35%, hsl(0 0% 0% / 0.26) 0 0.6px, transparent 0.9px), radial-gradient(circle at 70% 62%, hsl(0 0% 100% / 0.42) 0 0.55px, transparent 0.9px)`,
+                backgroundSize: "180px 180px, 5px 5px, 7px 7px",
               }}
             />
           </>
@@ -166,6 +189,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
       <button
         type="button"
         data-testid="project-card-open"
+        data-feature-label={project.name}
+        data-feature-help={`Open the ${project.name} project workspace; drop an image on the card header to change its thumbnail`}
         onClick={openProject}
         className="flex flex-col items-start gap-1.5 p-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40"
       >

@@ -1,4 +1,4 @@
-// Integration tests for the diagnostics router (docs/testing-and-build.md): createCaller over
+// Integration tests for the diagnostics router (md/engineering/testing-and-build.md): createCaller over
 // a temp SQLite DB with real migrations + a real temp git repo, with the Python
 // tools exec injected as a deterministic fake returning canned ruff-JSON / ty /
 // pyrefly output (plus a "binary missing" branch). No `uv` is required. They
@@ -7,6 +7,7 @@
 // files traversal guard is reused.
 import { afterEach, describe, expect, test } from "vitest"
 import type { PyToolExecResult, PyToolsExec } from "../../diagnostics"
+import type { PythonRuntime, PythonRuntimeResolver } from "../../python"
 import { createHarness, type Harness } from "../testHarness"
 
 // Canned tool outputs (same shapes the live CLIs emit).
@@ -40,11 +41,12 @@ const NOT_FOUND: PyToolExecResult = { stdout: "", stderr: "", code: null, notFou
 /** A fake exec that records calls and returns canned per-tool results. */
 function cannedExec(byTool: Partial<Record<"ty" | "pyrefly" | "ruff", PyToolExecResult>>): {
   exec: PyToolsExec
-  calls: { tool: string; args: readonly string[]; cwd: string }[]
+  calls: { tool: string; args: readonly string[]; cwd: string; runtime?: PythonRuntime }[]
 } {
-  const calls: { tool: string; args: readonly string[]; cwd: string }[] = []
-  const exec: PyToolsExec = async ({ tool, args, cwd }) => {
-    calls.push({ tool, args, cwd })
+  const calls: { tool: string; args: readonly string[]; cwd: string; runtime?: PythonRuntime }[] =
+    []
+  const exec: PyToolsExec = async ({ tool, args, cwd, runtime }) => {
+    calls.push({ tool, args, cwd, runtime })
     return byTool[tool] ?? NOT_FOUND
   }
   return { exec, calls }
@@ -53,8 +55,11 @@ function cannedExec(byTool: Partial<Record<"ty" | "pyrefly" | "ruff", PyToolExec
 let h: Harness
 let projectId: string
 
-async function setup(exec: PyToolsExec): Promise<void> {
-  h = await createHarness(undefined, { pyToolsExec: exec })
+async function setup(
+  exec: PyToolsExec,
+  resolvePythonRuntime?: PythonRuntimeResolver,
+): Promise<void> {
+  h = await createHarness(undefined, { pyToolsExec: exec, resolvePythonRuntime })
   const project = await h.caller.projects.open({ path: h.repoDir })
   projectId = project.id
 }
@@ -75,6 +80,44 @@ async function makeWorkspace(): Promise<{ id: string; dir: string }> {
 }
 
 describe("diagnostics.check — mapping + merge", () => {
+  test("uses the persisted manual Python selection for diagnostics", async () => {
+    const selectedPath = "/shared/conda/research"
+    const selectedRuntime: PythonRuntime = {
+      source: "selected",
+      displayName: "research",
+      interpreterPath: "/shared/conda/research/bin/python",
+      environmentPath: selectedPath,
+      runStrategy: {
+        kind: "environment",
+        command: "/shared/conda/research/bin/python",
+        argsPrefix: [],
+      },
+    }
+    const fallbackRuntime: PythonRuntime = {
+      source: null,
+      displayName: "No virtual env",
+      interpreterPath: "/usr/bin/python3",
+      runStrategy: { kind: "python3", command: "/usr/bin/python3", argsPrefix: [] },
+    }
+    const { exec, calls } = cannedExec({
+      ty: { stdout: "All checks passed!\n", stderr: "", code: 0, notFound: false },
+    })
+    await setup(exec, async (_cwd, path) =>
+      path === selectedPath ? selectedRuntime : fallbackRuntime,
+    )
+    const ws = await makeWorkspace()
+    await h.caller.python.select({ workspaceId: ws.id, path: selectedPath })
+
+    await h.caller.diagnostics.check({
+      workspaceId: ws.id,
+      relPath: "app.py",
+      typeChecker: "ty",
+      lint: false,
+    })
+
+    expect(calls[0]?.runtime).toEqual(selectedRuntime)
+  })
+
   test("ty + ruff: diagnostics from both tools merge, toolsAvailable:true", async () => {
     const { exec, calls } = cannedExec({
       ty: { stdout: TY_OUT, stderr: "", code: 1, notFound: false },

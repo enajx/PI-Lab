@@ -1,6 +1,6 @@
-import { cn } from "@skipper/ui"
+import { cn } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight, Eye } from "lucide-react"
 import { useState } from "react"
 import { useTRPC } from "../../../trpc/react"
 import type { FileTreeEntry } from "../../../trpc/types"
@@ -10,10 +10,12 @@ interface FileTreeProps {
   workspaceId: string
   /** Open a file in the editor (called with its working-dir-relative path). */
   onOpenFile: (relPath: string) => void
+  /** The file currently focused in the editor, if any. */
+  activeRelPath?: string | null
 }
 
 /**
- * Lazy workspace file tree (docs/architecture.md (renderer)). The root level is listed via
+ * Lazy workspace file tree (md/engineering/architecture.md (renderer)). The root level is listed via
  * `files.tree` with an empty path; each directory expands on click, fetching its
  * own children on demand so a large repo never walks the whole tree up front.
  * Files open into the editor on click.
@@ -21,14 +23,20 @@ interface FileTreeProps {
  * Scrolling is a native bounded `min-h-0 flex-1 overflow-y-auto` column
  * (AGENTS.md Pitfalls #3) — no Radix ScrollArea.
  */
-export function FileTree({ workspaceId, onOpenFile }: FileTreeProps) {
+export function FileTree({ workspaceId, onOpenFile, activeRelPath }: FileTreeProps) {
   return (
     <div data-testid="file-tree" className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-border border-b px-3 py-1.5 font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Files
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
-        <TreeLevel workspaceId={workspaceId} relPath="" depth={0} onOpenFile={onOpenFile} />
+        <TreeLevel
+          workspaceId={workspaceId}
+          relPath=""
+          depth={0}
+          activeRelPath={activeRelPath}
+          onOpenFile={onOpenFile}
+        />
       </div>
     </div>
   )
@@ -39,11 +47,12 @@ interface TreeLevelProps {
   /** Directory to list; "" is the workspace root. */
   relPath: string
   depth: number
+  activeRelPath?: string | null
   onOpenFile: (relPath: string) => void
 }
 
 /** The children of one directory, fetched lazily when this level mounts. */
-function TreeLevel({ workspaceId, relPath, depth, onOpenFile }: TreeLevelProps) {
+function TreeLevel({ workspaceId, relPath, depth, activeRelPath, onOpenFile }: TreeLevelProps) {
   const trpc = useTRPC()
   const query = useQuery(
     trpc.files.tree.queryOptions(
@@ -80,6 +89,7 @@ function TreeLevel({ workspaceId, relPath, depth, onOpenFile }: TreeLevelProps) 
           workspaceId={workspaceId}
           entry={entry}
           depth={depth}
+          activeRelPath={activeRelPath}
           onOpenFile={onOpenFile}
         />
       ))}
@@ -91,11 +101,12 @@ interface TreeNodeProps {
   workspaceId: string
   entry: FileTreeEntry
   depth: number
+  activeRelPath?: string | null
   onOpenFile: (relPath: string) => void
 }
 
 /** A single file or directory row; directories expand their own `TreeLevel`. */
-function TreeNode({ workspaceId, entry, depth, onOpenFile }: TreeNodeProps) {
+function TreeNode({ workspaceId, entry, depth, activeRelPath, onOpenFile }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false)
   const indent = { paddingLeft: `${depth * 0.75 + 0.5}rem` }
 
@@ -106,6 +117,8 @@ function TreeNode({ workspaceId, entry, depth, onOpenFile }: TreeNodeProps) {
           type="button"
           data-testid="file-tree-dir"
           data-rel-path={entry.relPath}
+          data-feature-label="Folder"
+          data-feature-help="Expand or collapse this folder in the project file tree"
           onClick={() => setExpanded((value) => !value)}
           style={indent}
           className="flex w-full cursor-pointer items-center gap-1 py-1 pr-2 text-left text-foreground/90 text-xs transition-colors hover:bg-accent/60"
@@ -123,6 +136,7 @@ function TreeNode({ workspaceId, entry, depth, onOpenFile }: TreeNodeProps) {
             workspaceId={workspaceId}
             relPath={entry.relPath}
             depth={depth + 1}
+            activeRelPath={activeRelPath}
             onOpenFile={onOpenFile}
           />
         ) : null}
@@ -130,20 +144,34 @@ function TreeNode({ workspaceId, entry, depth, onOpenFile }: TreeNodeProps) {
     )
   }
 
+  const active = entry.relPath === activeRelPath
   return (
     <li>
       <button
         type="button"
         data-testid="file-tree-file"
         data-rel-path={entry.relPath}
+        data-feature-label="File"
+        data-feature-help="Open this project file in a built-in editor tab"
         onClick={() => onOpenFile(entry.relPath)}
         style={indent}
-        className="flex w-full cursor-pointer items-center gap-1 py-1 pr-2 text-left text-muted-foreground text-xs transition-colors hover:bg-accent/60 hover:text-foreground"
+        aria-current={active ? "true" : undefined}
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-1 py-1 pr-2 text-left text-muted-foreground text-xs transition-colors hover:bg-accent/60 hover:text-foreground",
+          active && "bg-accent/50 text-foreground",
+        )}
       >
         {/* Spacer the width of the dir chevron so files align under directories. */}
         <span className="size-3.5 shrink-0" aria-hidden />
         <CodIcon src={fileIconUrl(entry.name)} className="size-4 opacity-80" />
         <span className="truncate">{entry.name}</span>
+        {active ? (
+          <Eye
+            data-testid="file-tree-focused"
+            className="ml-auto size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Focused in editor"
+          />
+        ) : null}
       </button>
     </li>
   )

@@ -1,3 +1,5 @@
+export * from "./editorSettings"
+export * from "./editorThemeImport"
 export * from "./migrate"
 export * from "./paths"
 export * from "./relations"

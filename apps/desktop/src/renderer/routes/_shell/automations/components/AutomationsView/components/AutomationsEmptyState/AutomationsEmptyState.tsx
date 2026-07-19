@@ -1,4 +1,4 @@
-import { Button } from "@skipper/ui"
+import { Button } from "@pi-lab/ui"
 import { Plus, Workflow } from "lucide-react"
 
 interface AutomationsEmptyStateProps {

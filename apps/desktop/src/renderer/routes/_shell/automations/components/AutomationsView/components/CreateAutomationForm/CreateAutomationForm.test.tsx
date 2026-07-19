@@ -6,14 +6,21 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../../../te
 import { CreateAutomationForm } from "./CreateAutomationForm"
 
 /**
- * Component test for the create-workflow form (docs/testing-and-build.md): jsdom + a fake
+ * Component test for the create-workflow form (md/engineering/testing-and-build.md): jsdom + a fake
  * tRPC client (the ScheduleBuilder fetches a live preview via
  * `automations.previewSchedule`). Asserts the schedule preview renders and that
  * submitting passes the collected values up.
  */
 
 const PROJECTS = [{ id: "p1", name: "Repo", repoPath: "/tmp/repo" }]
-const AGENTS = [{ id: "claude-code", label: "Claude Code" }]
+const AGENTS = [
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    available: true,
+    executable: "/usr/bin/claude",
+  },
+]
 
 function renderForm(handlers: FakeHandlers, onSubmit = vi.fn(), onCancel = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -68,9 +75,27 @@ describe("CreateAutomationForm", () => {
       prompt: "do the thing",
       projectId: "p1",
       agentId: "claude-code",
+      executionMode: "interactive",
       recurrenceRule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
     })
     expect(typeof values.timezone).toBe("string")
+  })
+
+  test("submits the selected run-to-completion mode", async () => {
+    const { onSubmit } = renderForm(validPreview)
+    fireEvent.change(screen.getByTestId("automation-name-input"), {
+      target: { value: "One-shot review" },
+    })
+    fireEvent.change(screen.getByTestId("automation-execution-mode"), {
+      target: { value: "noninteractive" },
+    })
+    fireEvent.click(screen.getByTestId("create-automation-submit"))
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ executionMode: "noninteractive" }),
+      ),
+    )
   })
 
   test("switching to a weekly preset rewrites the rule", async () => {

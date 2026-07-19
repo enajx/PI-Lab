@@ -8,7 +8,14 @@
 export { parsePyreflyJson } from "./parsePyrefly"
 export { parseRuffJson } from "./parseRuff"
 export { parseConciseLines, parseTyConcise } from "./parseTy"
-export { livePyToolsExec, type PyToolExecResult, type PyToolsExec } from "./pyToolsExec"
+export {
+  createPyToolsExec,
+  livePyToolsExec,
+  type PyToolCommandExec,
+  type PyToolExecResult,
+  type PyToolsExec,
+  type PyToolsExecDependencies,
+} from "./pyToolsExec"
 export {
   type FormatRunResult,
   runFormat,

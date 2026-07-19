@@ -273,11 +273,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Resolve the socket path from an explicit value, then `SKIPPER_SOCKET_PATH`. */
+/** Resolve the socket path from an explicit value, then `PI_LAB_SOCKET_PATH`. */
 export function resolveSocketPath(explicit?: string): string {
-  const path = explicit ?? process.env.SKIPPER_SOCKET_PATH
+  const path = explicit ?? process.env.PI_LAB_SOCKET_PATH
   if (!path) {
-    throw new Error("no socket path: pass one explicitly or set SKIPPER_SOCKET_PATH")
+    throw new Error("no socket path: pass one explicitly or set PI_LAB_SOCKET_PATH")
   }
   return path
 }

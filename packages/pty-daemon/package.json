@@ -1,5 +1,5 @@
 {
-  "name": "@skipper/pty-daemon",
+  "name": "@pi-lab/pty-daemon",
   "version": "0.0.0",
   "private": true,
   "type": "module",

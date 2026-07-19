@@ -1,4 +1,4 @@
-// Integration tests for the files router's editor primitives (docs/testing-and-build.md):
+// Integration tests for the files router's editor primitives (md/engineering/testing-and-build.md):
 // `stat`, `tree`, and `search`, exercised via createCaller over a temp SQLite DB
 // with real migrations and a real temp git repo. These prove the file tree, the
 // quick-open fuzzy search, and the external-change fingerprint the built-in

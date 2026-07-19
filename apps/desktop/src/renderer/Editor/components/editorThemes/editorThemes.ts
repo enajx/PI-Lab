@@ -1,5 +1,6 @@
 import type { Extension } from "@codemirror/state"
-import { tags as t } from "@lezer/highlight"
+import { type Tag, tags as t } from "@lezer/highlight"
+import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { createTheme } from "@uiw/codemirror-themes"
 
 /**
@@ -15,10 +16,10 @@ import { createTheme } from "@uiw/codemirror-themes"
  * settings (chrome colors) and styles (syntax highlighting via `@lezer/highlight`
  * tags) into a single CodeMirror {@link Extension}.
  *
- * The registry holds exactly eight curated palettes — four light, then four dark —
- * grouped light-first in the Settings picker, with each label suffixed "(Light)" or
+ * The registry holds twelve curated palettes, grouped light-first in the Settings
+ * picker, with each label suffixed "(Light)" or
  * "(Dark)". The stored id is a plain string (see `EditorSettings.editorTheme` in
- * `@skipper/local-db`) so the DB never couples to this renderer-only registry.
+ * `@pi-lab/local-db`) so the DB never couples to this renderer-only registry.
  */
 
 /** A selectable editor color theme: stable id, menu label, palette mode, and extension. */
@@ -31,6 +32,8 @@ export interface EditorTheme {
   mode: "light" | "dark"
   /** The CodeMirror extension that paints chrome + syntax for this theme. */
   extension: Extension
+  /** Imported themes can be removed; bundled themes cannot. */
+  custom?: boolean
 }
 
 /**
@@ -258,9 +261,196 @@ const tokyoNightDay = createTheme({
   ],
 })
 
+interface CompactPalette {
+  background: string
+  foreground: string
+  muted: string
+  selection: string
+  line: string
+  keyword: string
+  string: string
+  number: string
+  function: string
+  type: string
+  property: string
+  operator: string
+  invalid: string
+}
+
+function compactTheme(palette: CompactPalette, mode: "light" | "dark"): Extension {
+  return createTheme({
+    theme: mode,
+    settings: {
+      background: palette.background,
+      foreground: palette.foreground,
+      caret: palette.foreground,
+      selection: palette.selection,
+      selectionMatch: palette.selection,
+      lineHighlight: palette.line,
+      gutterBackground: palette.background,
+      gutterForeground: palette.muted,
+    },
+    styles: [
+      { tag: [t.keyword, t.moduleKeyword, t.controlKeyword], color: palette.keyword },
+      { tag: [t.string, t.special(t.string)], color: palette.string },
+      {
+        tag: [t.comment, t.lineComment, t.blockComment],
+        color: palette.muted,
+        fontStyle: "italic",
+      },
+      { tag: [t.number, t.bool, t.null], color: palette.number },
+      {
+        tag: [t.function(t.variableName), t.function(t.propertyName)],
+        color: palette.function,
+      },
+      { tag: [t.typeName, t.className, t.namespace], color: palette.type },
+      { tag: [t.propertyName, t.attributeName], color: palette.property },
+      { tag: [t.operator, t.punctuation], color: palette.operator },
+      { tag: [t.variableName, t.definition(t.variableName)], color: palette.foreground },
+      { tag: t.invalid, color: palette.invalid },
+    ],
+  })
+}
+
+function compactDarkTheme(palette: CompactPalette): Extension {
+  return compactTheme(palette, "dark")
+}
+
+function compactLightTheme(palette: CompactPalette): Extension {
+  return compactTheme(palette, "light")
+}
+
+const dracula = compactDarkTheme({
+  background: "#282a36",
+  foreground: "#f8f8f2",
+  muted: "#6272a4",
+  selection: "#44475a",
+  line: "#30323f",
+  keyword: "#ff79c6",
+  string: "#f1fa8c",
+  number: "#bd93f9",
+  function: "#50fa7b",
+  type: "#8be9fd",
+  property: "#ffb86c",
+  operator: "#ff79c6",
+  invalid: "#ff5555",
+})
+
+const monokai = compactDarkTheme({
+  background: "#272822",
+  foreground: "#f8f8f2",
+  muted: "#75715e",
+  selection: "#49483e",
+  line: "#30302a",
+  keyword: "#f92672",
+  string: "#e6db74",
+  number: "#ae81ff",
+  function: "#a6e22e",
+  type: "#66d9ef",
+  property: "#fd971f",
+  operator: "#f92672",
+  invalid: "#f44747",
+})
+
+const githubDark = compactDarkTheme({
+  background: "#0d1117",
+  foreground: "#c9d1d9",
+  muted: "#8b949e",
+  selection: "#264f78",
+  line: "#161b22",
+  keyword: "#ff7b72",
+  string: "#a5d6ff",
+  number: "#79c0ff",
+  function: "#d2a8ff",
+  type: "#ffa657",
+  property: "#79c0ff",
+  operator: "#ff7b72",
+  invalid: "#f85149",
+})
+
+const catppuccinMocha = compactDarkTheme({
+  background: "#1e1e2e",
+  foreground: "#cdd6f4",
+  muted: "#6c7086",
+  selection: "#45475a",
+  line: "#252536",
+  keyword: "#cba6f7",
+  string: "#a6e3a1",
+  number: "#fab387",
+  function: "#89b4fa",
+  type: "#f9e2af",
+  property: "#f5c2e7",
+  operator: "#89dceb",
+  invalid: "#f38ba8",
+})
+
+const oneLight = compactLightTheme({
+  background: "#fafafa",
+  foreground: "#383a42",
+  muted: "#a0a1a7",
+  selection: "#dbe9f9",
+  line: "#f0f0f0",
+  keyword: "#a626a4",
+  string: "#50a14f",
+  number: "#986801",
+  function: "#4078f2",
+  type: "#c18401",
+  property: "#e45649",
+  operator: "#0184bc",
+  invalid: "#e45649",
+})
+
+const gruvboxLight = compactLightTheme({
+  background: "#fbf1c7",
+  foreground: "#3c3836",
+  muted: "#928374",
+  selection: "#ebdbb2",
+  line: "#f2e5bc",
+  keyword: "#9d0006",
+  string: "#79740e",
+  number: "#8f3f71",
+  function: "#427b58",
+  type: "#b57614",
+  property: "#076678",
+  operator: "#af3a03",
+  invalid: "#9d0006",
+})
+
+const nordLight = compactLightTheme({
+  background: "#eceff4",
+  foreground: "#2e3440",
+  muted: "#7b88a1",
+  selection: "#d8dee9",
+  line: "#e5e9f0",
+  keyword: "#5e81ac",
+  string: "#a35f5f",
+  number: "#b48ead",
+  function: "#5e81ac",
+  type: "#2e8b8b",
+  property: "#d08770",
+  operator: "#5e81ac",
+  invalid: "#bf616a",
+})
+
+const draculaLight = compactLightTheme({
+  background: "#f8f8f2",
+  foreground: "#282a36",
+  muted: "#787a91",
+  selection: "#e5e5de",
+  line: "#f0f0e9",
+  keyword: "#a626a4",
+  string: "#718c00",
+  number: "#986801",
+  function: "#4078f2",
+  type: "#0184bc",
+  property: "#c18401",
+  operator: "#a626a4",
+  invalid: "#e45649",
+})
+
 /**
- * The eight selectable themes in picker order: the four light palettes first, then
- * the four dark ones. The array order *is* the grouped picker order, and each
+ * The sixteen selectable themes in picker order, with light palettes first and dark
+ * palettes second. The array order *is* the grouped picker order, and each
  * label already carries its "(Light)"/"(Dark)" suffix.
  */
 export const EDITOR_THEMES: readonly EditorTheme[] = [
@@ -273,10 +463,23 @@ export const EDITOR_THEMES: readonly EditorTheme[] = [
   },
   { id: "github-light", label: "GitHub (Light)", mode: "light", extension: githubLight },
   { id: "tokyo-night-day", label: "Tokyo Night (Light)", mode: "light", extension: tokyoNightDay },
+  { id: "one-light", label: "Atom One (Light)", mode: "light", extension: oneLight },
+  { id: "gruvbox-light", label: "Gruvbox (Light)", mode: "light", extension: gruvboxLight },
+  { id: "nord-light", label: "Nord (Light)", mode: "light", extension: nordLight },
+  { id: "dracula-light", label: "Dracula (Light)", mode: "light", extension: draculaLight },
   { id: "one-dark", label: "Atom One (Dark)", mode: "dark", extension: oneDark },
   { id: "tokyo-night", label: "Tokyo Night (Dark)", mode: "dark", extension: tokyoNight },
   { id: "gruvbox-dark", label: "Gruvbox (Dark)", mode: "dark", extension: gruvboxDark },
   { id: "nord", label: "Nord (Dark)", mode: "dark", extension: nord },
+  { id: "dracula", label: "Dracula (Dark)", mode: "dark", extension: dracula },
+  { id: "monokai", label: "Monokai (Dark)", mode: "dark", extension: monokai },
+  { id: "github-dark", label: "GitHub (Dark)", mode: "dark", extension: githubDark },
+  {
+    id: "catppuccin-mocha",
+    label: "Catppuccin Mocha (Dark)",
+    mode: "dark",
+    extension: catppuccinMocha,
+  },
 ]
 
 /** Id of any registered editor theme (kept as a string in the DB, narrowed here). */
@@ -289,11 +492,84 @@ export type EditorThemeId = (typeof EDITOR_THEMES)[number]["id"]
  * the {@link DEFAULT_EDITOR_THEME_ID} theme so the editor always renders a defined,
  * styled palette rather than failing or going unstyled.
  */
-export function editorThemeExtension(id: string | undefined): Extension {
+export function allEditorThemes(customThemes: ImportedEditorTheme[]): readonly EditorTheme[] {
+  return [...EDITOR_THEMES, ...customThemes.map(importedEditorTheme)]
+}
+
+export function editorThemeExtension(
+  id: string | undefined,
+  customThemes?: ImportedEditorTheme[],
+): Extension {
   return (
     (
-      EDITOR_THEMES.find((theme) => theme.id === id) ??
+      allEditorThemes(customThemes ?? []).find((theme) => theme.id === id) ??
       EDITOR_THEMES.find((theme) => theme.id === DEFAULT_EDITOR_THEME_ID)
     )?.extension ?? []
   )
+}
+
+function importedEditorTheme(theme: ImportedEditorTheme): EditorTheme {
+  return {
+    id: theme.id,
+    label: `${theme.name} (${theme.mode === "light" ? "Light" : "Dark"})`,
+    mode: theme.mode,
+    custom: true,
+    extension: createTheme({
+      theme: theme.mode,
+      settings: {
+        background: theme.colors.background,
+        foreground: theme.colors.foreground,
+        caret: theme.colors.caret ?? theme.colors.foreground,
+        selection: theme.colors.selection,
+        selectionMatch: theme.colors.selectionMatch,
+        lineHighlight: theme.colors.lineHighlight,
+        gutterBackground: theme.colors.gutterBackground ?? theme.colors.background,
+        gutterForeground: theme.colors.gutterForeground,
+      },
+      styles: theme.tokenColors.flatMap((rule) => {
+        const tags = tagsForScopes(rule.scopes)
+        if (tags.length === 0) return []
+        const fontStyles = new Set(rule.fontStyle?.split(/\s+/u) ?? [])
+        return [
+          {
+            tag: tags,
+            color: rule.foreground,
+            fontStyle: fontStyles.has("italic") ? "italic" : undefined,
+            fontWeight: fontStyles.has("bold") ? "bold" : undefined,
+            textDecoration: fontStyles.has("underline") ? "underline" : undefined,
+          },
+        ]
+      }),
+    }),
+  }
+}
+
+function tagsForScopes(scopes: string[]): Tag[] {
+  const tags = new Set<Tag>()
+  for (const scope of scopes) {
+    const mapped = tagForScope(scope.toLowerCase())
+    if (mapped) tags.add(mapped)
+  }
+  return [...tags]
+}
+
+function tagForScope(scope: string): Tag | null {
+  if (scope.includes("comment")) return t.comment
+  if (scope.includes("string")) return t.string
+  if (scope.includes("constant.numeric")) return t.number
+  if (scope.includes("constant.language.boolean")) return t.bool
+  if (scope.includes("constant.language.null")) return t.null
+  if (scope.startsWith("keyword") || scope.startsWith("storage") || scope.includes("control")) {
+    return t.keyword
+  }
+  if (scope.includes("function")) return t.function(t.variableName)
+  if (scope.includes("class")) return t.className
+  if (scope.includes("type") || scope.includes("namespace")) return t.typeName
+  if (scope.includes("attribute")) return t.attributeName
+  if (scope.includes("property") || scope.includes("object-literal.key")) return t.propertyName
+  if (scope.includes("variable")) return t.variableName
+  if (scope.includes("operator")) return t.operator
+  if (scope.includes("punctuation")) return t.punctuation
+  if (scope.includes("invalid")) return t.invalid
+  return null
 }

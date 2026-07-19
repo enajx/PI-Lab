@@ -4,7 +4,7 @@
  * through the injected {@link PyToolsExec} and maps its output via the matching
  * pure parser. They are deliberately small and side-effect-light — all I/O is the
  * one exec call, so the diagnostics router's tests drive them with a canned exec
- * and need no `uv` (docs/testing-and-build.md).
+ * and need no `uv` (md/engineering/testing-and-build.md).
  *
  * **Graceful when tools are absent (hard requirement):** a missing binary
  * (`uv`/`ty`/`ruff`/`pyrefly` not installed → `notFound`) is never thrown; it

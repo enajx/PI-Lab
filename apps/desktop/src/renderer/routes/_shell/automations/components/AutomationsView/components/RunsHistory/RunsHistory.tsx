@@ -1,11 +1,13 @@
-import { Badge } from "@skipper/ui"
+import { Badge } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
+import { useEffect, useRef } from "react"
 import { useTRPC } from "../../../../../../../trpc/react"
 
 interface RunsHistoryProps {
   automationId: string
   /** Timezone the automation is scheduled in (for rendering instants). */
   timezone: string
+  targetRunId?: string
 }
 
 function formatInstant(ms: number): string {
@@ -18,15 +20,22 @@ function formatInstant(ms: number): string {
 }
 
 /**
- * Run history for one automation (AGENTS.md "Scope"): the launch log, newest first.
- * v1 records launch-only outcomes — `launched` (with the spun-up workspace),
- * `failed` (with the error), or `pending` (claimed but not yet launched). No
- * agent-completion tracking.
+ * Run history for one workflow, newest first. Interactive and one-shot runs
+ * progress from pending to running and completed/failed; legacy launched rows
+ * remain readable. A notification target focuses its exact run.
  */
-export function RunsHistory({ automationId }: RunsHistoryProps) {
+export function RunsHistory({ automationId, targetRunId }: RunsHistoryProps) {
   const trpc = useTRPC()
-  const runsQuery = useQuery(trpc.automations.listRuns.queryOptions({ automationId, limit: 20 }))
+  const runsQuery = useQuery(
+    trpc.automations.listRuns.queryOptions({ automationId, limit: 20, targetRunId }),
+  )
   const runs = runsQuery.data ?? []
+  const targetRef = useRef<HTMLLIElement>(null)
+  useEffect(() => {
+    if (!targetRunId || !runs.some((run) => run.id === targetRunId)) return
+    targetRef.current?.scrollIntoView?.({ block: "center" })
+    targetRef.current?.focus({ preventScroll: true })
+  }, [runs, targetRunId])
 
   if (runsQuery.isLoading) {
     return <p className="text-muted-foreground text-xs">Loading runs…</p>
@@ -43,10 +52,15 @@ export function RunsHistory({ automationId }: RunsHistoryProps) {
     <ul data-testid="runs-history" className="flex flex-col gap-1.5">
       {runs.map((run) => (
         <li
+          ref={run.id === targetRunId ? targetRef : undefined}
+          tabIndex={run.id === targetRunId ? -1 : undefined}
           key={run.id}
           data-testid="run-item"
           data-run-state={run.state}
-          className="flex items-center gap-2 text-xs"
+          data-highlighted={run.id === targetRunId}
+          className={`flex items-center gap-2 rounded text-xs ${
+            run.id === targetRunId ? "bg-brand/15 px-2 py-1 ring-1 ring-brand/60" : ""
+          }`}
         >
           <Badge
             variant={run.state === "failed" ? "destructive" : "secondary"}

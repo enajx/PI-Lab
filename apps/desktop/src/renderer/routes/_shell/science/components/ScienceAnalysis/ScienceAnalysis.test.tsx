@@ -1,4 +1,4 @@
-import type { Project } from "@skipper/local-db"
+import type { Project } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test } from "vitest"
@@ -7,7 +7,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { ScienceAnalysis } from "./ScienceAnalysis"
 
 /**
- * Component test for the Analysis science tab (docs/testing-and-build.md). Renders plain DOM
+ * Component test for the Analysis science tab (md/engineering/testing-and-build.md). Renders plain DOM
  * + hand-authored primitives, so jsdom suffices: we assert structure only — the
  * grouped file list, a CSV table preview, the metadata fallback, and the empty /
  * no-projects states — never copy text or shadcn classes.
@@ -29,6 +29,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     defaultBranch: "main",
     color: null,
     thumbnail: null,
+    agentConfig: null,
     sortIndex: 0,
     archivedAt: null,
     createdAt: 0,
@@ -193,7 +194,7 @@ describe("ScienceAnalysis", () => {
     })
   })
 
-  test("the search filter narrows the visible rows", async () => {
+  test("the search filter fuzzy-matches and highlights the visible rows", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
@@ -207,7 +208,7 @@ describe("ScienceAnalysis", () => {
       expect(screen.getAllByTestId("analysis-file")).toHaveLength(2)
     })
 
-    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "metrics" } })
+    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "mtrcs" } })
 
     await waitFor(() => {
       expect(screen.getAllByTestId("analysis-file")).toHaveLength(1)
@@ -215,6 +216,32 @@ describe("ScienceAnalysis", () => {
     expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe(
       "data/metrics.csv",
     )
+    expect(
+      screen
+        .getAllByTestId("analysis-match")
+        .map((node) => node.textContent)
+        .join(""),
+    ).toBe("mtrcs")
+  })
+
+  test("empty search ranks likely results above config-like files within a category", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          { relPath: "config.json", name: "config.json", kind: "json" },
+          {
+            relPath: "runs/experiment-results.json",
+            name: "experiment-results.json",
+            kind: "json",
+          },
+        ]),
+    })
+
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(2))
+    expect(
+      screen.getAllByTestId("analysis-file").map((row) => row.getAttribute("data-rel-path")),
+    ).toEqual(["runs/experiment-results.json", "config.json"])
   })
 
   test("⌘F opens a fuzzy finder over the analysis files; picking one previews it", async () => {

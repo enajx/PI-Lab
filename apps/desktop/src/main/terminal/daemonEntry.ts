@@ -2,7 +2,7 @@
  * Bundle entry for the detached PTY daemon child (electron.vite.config.ts emits
  * this to `out/pty-daemon/index.js`).
  *
- * We don't bundle `@skipper/pty-daemon`'s own `serve.ts` directly: its run guard
+ * We don't bundle `@pi-lab/pty-daemon`'s own `serve.ts` directly: its run guard
  * keys on the filename ending in `serve.{ts,js}`, which our bundle (`index.js`)
  * would never match, so `main()` would silently not run. Instead we drive the
  * reused server primitives here — the daemon logic itself (sockets, sessions,
@@ -10,10 +10,10 @@
  *
  * The supervisor launches this under Electron's bundled Node
  * (`ELECTRON_RUN_AS_NODE=1`), passing the socket path as argv[1] and via
- * `SKIPPER_SOCKET_PATH`; `resolveSocketPath` prefers the explicit arg.
+ * `PI_LAB_SOCKET_PATH`; `resolveSocketPath` prefers the explicit arg.
  */
 
-import { resolveSocketPath, startDaemon } from "@skipper/pty-daemon"
+import { resolveSocketPath, startDaemon } from "@pi-lab/pty-daemon"
 
 async function main(): Promise<void> {
   const socketPath = resolveSocketPath(process.argv[2])

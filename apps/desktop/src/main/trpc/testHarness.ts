@@ -1,5 +1,5 @@
 // Shared test plumbing for the projects/workspaces router suites (AGENTS.md
-// docs/testing-and-build.md): a `createCaller` over a temp-file SQLite handle with the *real* generated
+// md/engineering/testing-and-build.md): a `createCaller` over a temp-file SQLite handle with the *real* generated
 // migrations, a throwaway git repo, an in-process pty-daemon, and an injectable
 // fake agent catalog. Everything is created with real tools (git init, real
 // DaemonServer) — only the transport (caller vs IPC) and the daemon's home
@@ -10,13 +10,35 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
-import { runMigrations, type SkipperDatabase } from "@skipper/local-db"
-import { DaemonClient, DaemonServer } from "@skipper/pty-daemon"
-import type { TerminalAgent } from "@skipper/shared"
+import { getSettingsOrDefaults, type PiLabDatabase, runMigrations } from "@pi-lab/local-db"
+import { DaemonClient, DaemonServer } from "@pi-lab/pty-daemon"
+import type { TerminalAgent } from "@pi-lab/shared"
 import type Database from "better-sqlite3"
+import {
+  type ActivityMonitorPort,
+  ActivityRegistry,
+  createActivityMonitor,
+  systemActivityClock,
+  systemActivityScheduler,
+} from "../activity"
+import type { AgentLaunchEnvironmentResolver } from "../agents/executable"
+import {
+  type NonInteractiveProcessRunner,
+  runNonInteractiveProcess,
+} from "../automations/nonInteractiveRunner"
+import type { CaffeineControllerPort, CaffeineSettings, CaffeineStatus } from "../caffeine"
 import type { PyToolsExec } from "../diagnostics"
 import type { SshExec } from "../lib/ssh-config"
-import { LiveAgentRegistry } from "../sessions/liveAgentRegistry"
+import {
+  createNotificationBrokers,
+  type NativeNotificationHandlers,
+  type NativeNotificationInput,
+  type NotificationBrokers,
+  NotificationService,
+} from "../notifications"
+import type { PythonEnvironmentDiscoverer, PythonRuntimeResolver } from "../python"
+import { testCredentialCipher } from "../setup/credentials"
+import type { SetupProbe } from "../setup/probe"
 import { appRouter } from "./appRouter"
 import type { AppContext, HttpFetch, OpenPath } from "./context"
 import { createCallerFactory } from "./trpc"
@@ -27,7 +49,7 @@ const createCaller = createCallerFactory(appRouter)
 export type Caller = ReturnType<typeof createCaller>
 
 /**
- * A deterministic, credential-free fake agent (docs/testing-and-build.md): it runs the test
+ * A deterministic, credential-free fake agent (md/engineering/testing-and-build.md): it runs the test
  * runner's own Node and prints a known marker, so launchAgent exercises the real
  * PTY/launch/stream path with zero network and zero paid credentials.
  */
@@ -43,7 +65,7 @@ export const FAKE_AGENT: TerminalAgent = {
  * A *long-lived* fake agent: it prints its marker then stays alive on an
  * interval until killed, so a test can keep a session "live" while it starts a
  * second concurrent agent (exercising the concurrency-spills-to-worktree
- * branch of the policy; docs/architecture.md, agent runtime). Killing the PTY (or closing the daemon) ends it.
+ * branch of the policy; md/engineering/architecture.md, agent runtime). Killing the PTY (or closing the daemon) ends it.
  */
 export const LONG_FAKE_AGENT: TerminalAgent = {
   id: "long-fake-agent",
@@ -55,20 +77,63 @@ export const LONG_FAKE_AGENT: TerminalAgent = {
 
 export interface Harness {
   caller: Caller
-  db: SkipperDatabase
+  db: PiLabDatabase
   /** Data dir backing the DB and managed worktrees (honored by the routers). */
   dataDir: string
+  /** Deterministic stand-in for the user's home during global Skills discovery. */
+  skillsHomeDir: string
   /** A throwaway git repo with one commit on `main`. */
   repoDir: string
   client: DaemonClient
-  /** The per-project live-agent tally the start-agent-session policy reads. */
-  liveAgents: LiveAgentRegistry
+  activityMonitor: ActivityMonitorPort
+  caffeine: TestCaffeineController
+  notificationService: NotificationService
+  notifications: NotificationBrokers
+  notificationDeliveries: TestNotificationDelivery[]
   dispose: () => Promise<void>
+}
+
+export interface TestNotificationDelivery {
+  input: NativeNotificationInput
+  handlers: NativeNotificationHandlers
+}
+
+export interface TestCaffeineController extends CaffeineControllerPort {
+  terminalActivityCount: number
+  meaningfulTags: string[]
+  meaningfulStartedTags: string[]
+}
+
+export function createTestCaffeineController(): TestCaffeineController {
+  let settings: CaffeineSettings = { mode: "off", scope: "system-only" }
+  const activeTags: string[] = []
+  const startedTags: string[] = []
+  return {
+    terminalActivityCount: 0,
+    meaningfulTags: activeTags,
+    meaningfulStartedTags: startedTags,
+    status: (): CaffeineStatus => ({ ...settings, held: settings.mode === "on" }),
+    configure: (next): CaffeineStatus => {
+      settings = { ...next }
+      return { ...settings, held: settings.mode === "on" }
+    },
+    markTerminalActivity(): void {
+      this.terminalActivityCount += 1
+    },
+    beginMeaningfulActivity(tag: string): () => void {
+      activeTags.push(tag)
+      startedTags.push(tag)
+      return () => {
+        const index = activeTags.indexOf(tag)
+        if (index >= 0) activeTags.splice(index, 1)
+      }
+    },
+  }
 }
 
 /**
  * A deterministic, network-free ssh probe for the cluster router's status tests
- * (docs/testing-and-build.md): every host is reachable unless its alias starts with `down-`,
+ * (md/engineering/testing-and-build.md): every host is reachable unless its alias starts with `down-`,
  * so a suite can assert both branches without any real `ssh` / network.
  */
 export const FAKE_SSH_EXEC: SshExec = async (host) =>
@@ -80,7 +145,7 @@ export const FAKE_SSH_EXEC: SshExec = async (host) =>
  * Default outbound-HTTP fake for the harness: any unexpected URL is a hard error
  * so a test that hits the network by accident fails loudly rather than reaching
  * the real Zotero API. Library router suites pass their own `httpFetch` to stub
- * specific responses (docs/testing-and-build.md).
+ * specific responses (md/engineering/testing-and-build.md).
  */
 export const FAKE_HTTP_FETCH: HttpFetch = async (input) => {
   throw new Error(`Unexpected network call in tests: ${String(input)}`)
@@ -97,13 +162,20 @@ export const FAKE_OPEN_PATH: OpenPath = async () => ""
  * Default Python-tools exec for the harness: reports every tool as **absent**
  * (`notFound: true`) so an unrelated router suite never spawns a real `uvx`
  * process. The diagnostics suite passes its own exec returning canned tool output
- * to exercise the parse + merge path (docs/testing-and-build.md).
+ * to exercise the parse + merge path (md/engineering/testing-and-build.md).
  */
 export const FAKE_PY_TOOLS_EXEC: PyToolsExec = async () => ({
   stdout: "",
   stderr: "",
   code: null,
   notFound: true,
+})
+
+export const FAKE_PYTHON_RUNTIME_RESOLVER: PythonRuntimeResolver = async () => ({
+  source: null,
+  displayName: "No virtual env",
+  interpreterPath: process.execPath,
+  runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
 })
 
 export interface HarnessOptions {
@@ -117,33 +189,59 @@ export interface HarnessOptions {
   openPath?: OpenPath
   /** Python-tools exec for the diagnostics router (defaults to {@link FAKE_PY_TOOLS_EXEC}). */
   pyToolsExec?: PyToolsExec
+  /** Workspace Python resolver (defaults to a deterministic Node-backed runtime). */
+  resolvePythonRuntime?: PythonRuntimeResolver
+  /** Global Python environment discovery (defaults to no global environments). */
+  discoverPythonEnvironments?: PythonEnvironmentDiscoverer
+  /** One-shot workflow process runner (defaults to the production no-shell runner). */
+  runNonInteractiveProcess?: NonInteractiveProcessRunner
+  setupProbe?: SetupProbe
+  /** Login-shell environment supplied to direct agent/workflow launches. */
+  getAgentLaunchEnvironment?: AgentLaunchEnvironmentResolver
+  /** Make the fake application focus adapter report another app in front. */
+  notificationsUnfocused?: boolean
+  /** Make the fake native platform accept and record notification delivery. */
+  nativeNotificationsSupported?: boolean
 }
 
 /** Initialize a repo with one commit on `main`, deterministic identity. */
 async function initRepo(dir: string): Promise<void> {
   await execFileAsync("git", ["init", "-b", "main", dir])
   const run = (args: string[]) => execFileAsync("git", ["-C", dir, ...args])
-  await run(["config", "user.email", "test@skipper.local"])
-  await run(["config", "user.name", "Skipper Test"])
+  await run(["config", "user.email", "test@pi-lab.local"])
+  await run(["config", "user.name", "PI Lab Test"])
   await writeFile(join(dir, "README.md"), "# fixture\n")
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
 }
 
 /**
- * Stand up a full router harness. `SKIPPER_DATA_DIR` is pointed at a temp dir so
+ * Stand up a full router harness. `PI_LAB_DATA_DIR` is pointed at a temp dir so
  * managed worktrees and the DB both land there; the caller restores it in
  * `dispose`.
  */
 export async function createHarness(
   agentCatalog: readonly TerminalAgent[] = [FAKE_AGENT],
-  options: Pick<HarnessOptions, "sshExec" | "httpFetch" | "openPath" | "pyToolsExec"> = {},
+  options: Pick<
+    HarnessOptions,
+    | "sshExec"
+    | "httpFetch"
+    | "openPath"
+    | "pyToolsExec"
+    | "discoverPythonEnvironments"
+    | "resolvePythonRuntime"
+    | "notificationsUnfocused"
+    | "nativeNotificationsSupported"
+    | "runNonInteractiveProcess"
+    | "setupProbe"
+    | "getAgentLaunchEnvironment"
+  > = {},
 ): Promise<Harness> {
   // Canonicalize: on macOS `mkdtemp` hands back `/var/...` but git reports the
   // realpath `/private/var/...`; resolving here keeps repoPath assertions exact.
-  const dataDir = await realpath(await mkdtemp(join(tmpdir(), "skipper-rtr-")))
-  const previousDataDir = process.env.SKIPPER_DATA_DIR
-  process.env.SKIPPER_DATA_DIR = dataDir
+  const dataDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-rtr-")))
+  const previousDataDir = process.env.PI_LAB_DATA_DIR
+  process.env.PI_LAB_DATA_DIR = dataDir
 
   const repoDir = join(dataDir, "repo")
   await initRepo(repoDir)
@@ -156,31 +254,95 @@ export async function createHarness(
   await server.listen()
   const client = new DaemonClient(socketPath)
   await client.connect()
+  const monitorClient = new DaemonClient(socketPath)
+  await monitorClient.connect()
 
-  const liveAgents = new LiveAgentRegistry()
+  const notifications = createNotificationBrokers()
+  const notificationDeliveries: TestNotificationDelivery[] = []
+  const notificationService = new NotificationService({
+    native: {
+      isSupported: () => options.nativeNotificationsSupported ?? false,
+      deliver: (input, handlers) => {
+        notificationDeliveries.push({ input, handlers })
+      },
+    },
+    focus: {
+      isFocused: () => !(options.notificationsUnfocused ?? false),
+      restoreAndFocus: () => {},
+    },
+    getPreferences: () => getSettingsOrDefaults(db).notifications,
+    activations: notifications.activations,
+    sounds: notifications.sounds,
+    errors: notifications.errors,
+    logger: { warn: () => {} },
+  })
+  const activityRegistry = new ActivityRegistry({
+    clock: systemActivityClock,
+    scheduler: systemActivityScheduler,
+  })
+  const activityMonitor = createActivityMonitor({
+    db,
+    registry: activityRegistry,
+    getMonitorClient: async () => monitorClient,
+    notifications: notificationService,
+    scheduler: systemActivityScheduler,
+    logger: { warn: () => {} },
+  })
+  const caffeine = createTestCaffeineController()
+  const skillsHomeDir = join(dataDir, "home")
   const context: AppContext = {
     db,
+    skillsHomeDir,
     getDaemonClient: async () => client,
     agentCatalog,
-    liveAgents,
+    resolveAgentExecutable: async (candidate) =>
+      candidate === "/missing/pi-lab-agent" ? null : candidate,
+    getAgentLaunchEnvironment:
+      options.getAgentLaunchEnvironment ??
+      (async () => ({ ...process.env }) as Record<string, string>),
+    runNonInteractiveProcess: options.runNonInteractiveProcess ?? runNonInteractiveProcess,
+    setupProbe:
+      options.setupProbe ?? (async () => ({ code: 1, stdout: "", stderr: "", timedOut: false })),
+    credentialCipher: testCredentialCipher,
     sshExec: options.sshExec ?? FAKE_SSH_EXEC,
     httpFetch: options.httpFetch ?? FAKE_HTTP_FETCH,
     openPath: options.openPath ?? FAKE_OPEN_PATH,
     pyToolsExec: options.pyToolsExec ?? FAKE_PY_TOOLS_EXEC,
+    discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
+    resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,
+    notifications,
+    activityMonitor,
+    notificationService,
+    caffeine,
   }
   const caller = createCaller(context)
 
   const dispose = async () => {
-    liveAgents.detach(client)
+    activityMonitor.dispose()
+    activityRegistry.dispose()
+    monitorClient.close()
     client.close()
     await server.close()
     closeSqlite(sqlite)
-    if (previousDataDir === undefined) delete process.env.SKIPPER_DATA_DIR
-    else process.env.SKIPPER_DATA_DIR = previousDataDir
+    if (previousDataDir === undefined) delete process.env.PI_LAB_DATA_DIR
+    else process.env.PI_LAB_DATA_DIR = previousDataDir
     await rm(dataDir, { recursive: true, force: true })
   }
 
-  return { caller, db, dataDir, repoDir, client, liveAgents, dispose }
+  return {
+    caller,
+    db,
+    dataDir,
+    skillsHomeDir,
+    repoDir,
+    client,
+    activityMonitor,
+    caffeine,
+    notificationService,
+    notifications,
+    notificationDeliveries,
+    dispose,
+  }
 }
 
 /**

@@ -1,7 +1,7 @@
 import fc from "fast-check"
 import { describe, expect, test } from "vitest"
 import { BUILTIN_AGENTS, getAgent, type TerminalAgent } from "./catalog"
-import { buildLaunchArgv } from "./command"
+import { buildLaunchArgv, buildNonInteractiveLaunchArgv } from "./command"
 
 describe("buildLaunchArgv", () => {
   test("launches the agent's binary", () => {
@@ -56,5 +56,52 @@ describe("buildLaunchArgv", () => {
         return argv.length === expected.length && argv.every((value, i) => value === expected[i])
       }),
     )
+  })
+})
+
+describe("buildNonInteractiveLaunchArgv", () => {
+  test("uses Claude print mode and preserves the prompt as one exact argv value", () => {
+    const prompt = "review this; $(touch /tmp/never) && echo nope"
+    expect(
+      buildNonInteractiveLaunchArgv(
+        {
+          id: "claude-code",
+          label: "Claude Code",
+          command: "/custom/claude",
+          detect: "claude",
+          defaultArgs: ["--model", "sonnet"],
+        },
+        prompt,
+      ),
+    ).toEqual(["/custom/claude", "--model", "sonnet", "-p", prompt])
+  })
+
+  test("uses Codex exec mode and preserves the prompt as one exact argv value", () => {
+    const prompt = "fix `README.md` | tee leaked"
+    expect(
+      buildNonInteractiveLaunchArgv(
+        {
+          id: "codex",
+          label: "Codex",
+          command: "codex",
+          detect: "codex",
+        },
+        prompt,
+      ),
+    ).toEqual(["codex", "exec", prompt])
+  })
+
+  test("rejects harnesses without a supported one-shot contract", () => {
+    expect(() =>
+      buildNonInteractiveLaunchArgv(
+        {
+          id: "future-agent",
+          label: "Future Agent",
+          command: "future-agent",
+          detect: "future-agent",
+        },
+        "go",
+      ),
+    ).toThrow(/does not support non-interactive workflows/i)
   })
 })

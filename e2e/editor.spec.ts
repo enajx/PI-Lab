@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -8,7 +8,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (docs/testing-and-build.md) for the built-in editor (spec: TODO "Built-in
+ * Whole-app E2E (md/engineering/testing-and-build.md) for the built-in editor (spec: TODO "Built-in
  * editor"). Launch the real Electron build, open a temp git repo as a project via
  * the `?openProject` seam (landing directly on the rich project view), then
  * exercise the editor end-to-end:
@@ -24,17 +24,18 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * opens a `.py` file and the status bar renders without crashing), never that a
  * specific tool ran.
  *
- * Driven through the same seams as `projects.spec.ts`: `SKIPPER_TEST_OPEN_PROJECT`
- * + `SKIPPER_TEST_AGENT_ID` (env → renderer query params). No native dialogs.
+ * Driven through the same seams as `projects.spec.ts`: `PI_LAB_TEST_OPEN_PROJECT`
+ * + `PI_LAB_TEST_AGENT_ID` (env → renderer query params). No native dialogs.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (docs/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun (md/engineering/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const SEED_FILE = "edit-me.txt"
 const SEED_CONTENT = "original line\n"
 const PY_FILE = "module.py"
 const PY_CONTENT = "import os\n\n\ndef main():\n    return 1\n"
+const PY_RUN_MARKER = "PYTHON-RUN-E2E-OK"
 const APPENDED = "APPENDED-BY-E2E"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -52,18 +53,37 @@ let repoDir: string
 async function initRepo(dir: string): Promise<void> {
   await execFileAsync("git", ["init", "-b", "main", dir])
   const run = (args: string[]) => execFileAsync("git", ["-C", dir, ...args])
-  await run(["config", "user.email", "test@skipper.local"])
-  await run(["config", "user.name", "Skipper Test"])
+  await run(["config", "user.email", "test@pi-lab.local"])
+  await run(["config", "user.name", "PI Lab Test"])
   await writeFile(join(dir, "README.md"), "# fixture\n")
   await writeFile(join(dir, "RESEARCH.md"), "# Fixture\n\nbody\n")
   await writeFile(join(dir, SEED_FILE), SEED_CONTENT)
   await writeFile(join(dir, PY_FILE), PY_CONTENT)
+  if (process.platform !== "win32") {
+    const venvBin = join(dir, ".venv", "bin")
+    await mkdir(venvBin, { recursive: true })
+    await writeFile(
+      join(venvBin, "python3"),
+      `#!/bin/sh
+if [ "\${1-}" = "-c" ]; then
+  printf '{"executable":"%s","version":"3.13"}\\n' "$0"
+  exit 0
+fi
+if [ "\${1-}" != "${PY_FILE}" ]; then
+  printf 'unexpected Python file argument: %s\\n' "\${1-}" >&2
+  exit 64
+fi
+printf '${PY_RUN_MARKER}\\n'
+`,
+      { mode: 0o755 },
+    )
+  }
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
 }
 
 test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "skipper-e2e-editor-"))
+  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-editor-"))
   repoDir = join(dataDir, "repo")
   await initRepo(repoDir)
 
@@ -72,11 +92,11 @@ test.beforeEach(async () => {
     args: [MAIN_ENTRY],
     env: {
       ...process.env,
-      SKIPPER_TEST_MODE: "1",
-      SKIPPER_DATA_DIR: dataDir,
-      SKIPPER_SOCKET_PATH: join(dataDir, "daemon.sock"),
-      SKIPPER_TEST_OPEN_PROJECT: repoDir,
-      SKIPPER_TEST_AGENT_ID: "test-echo",
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      PI_LAB_TEST_OPEN_PROJECT: repoDir,
+      PI_LAB_TEST_AGENT_ID: "test-echo",
     },
   })
 })
@@ -184,4 +204,79 @@ test("opening a Python file renders the status bar without crashing", async () =
   const statusBar = window.getByTestId("editor-status-bar")
   await expect(statusBar).toBeVisible()
   await expect(statusBar).toContainText(PY_FILE)
+})
+
+test.describe("Python environment and run-file on POSIX", () => {
+  test.skip(
+    process.platform === "win32",
+    "The deterministic fixture is a POSIX .venv interpreter shim; Windows needs a native fake python.exe.",
+  )
+
+  test("detects .venv and runs the focused Python file in a real terminal", async () => {
+    const window = await app.firstWindow()
+
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    const projectItem = window.getByTestId("project-item")
+    await expect(projectItem).toBeVisible({ timeout: 30_000 })
+    await projectItem.click()
+    await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+
+    await window.getByTestId("panel-tab-files").click()
+    const pyEntry = window.getByTestId("file-tree-file").filter({ hasText: PY_FILE })
+    await expect(pyEntry).toBeVisible({ timeout: 30_000 })
+    await pyEntry.click()
+
+    await expect(window.getByTestId("editor-buffer")).toBeVisible({ timeout: 30_000 })
+    const runtime = window.getByTestId("editor-python-runtime")
+    await expect(runtime).toHaveText("repo/.venv (3.13)", { timeout: 30_000 })
+    await expect(runtime).toHaveAttribute(
+      "title",
+      join(await realpath(repoDir), ".venv", "bin", "python3"),
+    )
+
+    const runPython = window.getByTestId("central-run-python")
+    await expect(runPython).toBeVisible()
+    await expect(runPython).toBeEnabled()
+    await window.getByTestId("editor-buffer").locator(".cm-content").click()
+    await window.keyboard.press("ControlOrMeta+Enter")
+
+    const runTab = window.getByTestId("central-tab").filter({ hasText: `Run ${PY_FILE}` })
+    await expect(runTab).toBeVisible({ timeout: 30_000 })
+    await expect(runTab).toHaveAttribute("data-tab-kind", "terminal")
+
+    const terminal = window.getByTestId("terminal")
+    await expect(terminal).toBeVisible({ timeout: 30_000 })
+    await expect(terminal).toContainText(PY_RUN_MARKER, { timeout: 30_000 })
+  })
+
+  test("runs below the editor without creating a central terminal tab", async () => {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await window.getByTestId("project-item").click()
+    await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+    await window.getByTestId("panel-tab-files").click()
+    await window.getByTestId("file-tree-file").filter({ hasText: PY_FILE }).click()
+    await expect(window.getByTestId("editor-buffer")).toBeVisible({ timeout: 30_000 })
+
+    await window.getByTestId("editor-settings").click()
+    await window.getByTestId("editor-settings-run-destination").selectOption("below-editor")
+    await expect(window.getByTestId("editor-settings-run-destination")).toHaveValue("below-editor")
+    await window.keyboard.press("Escape")
+
+    await window.getByTestId("editor-buffer").locator(".cm-content").click()
+    await window.keyboard.press("ControlOrMeta+Enter")
+    const region = window.getByTestId("editor-run-terminal")
+    await expect(region).toBeVisible({ timeout: 30_000 })
+    await expect(region.getByTestId("terminal")).toContainText(PY_RUN_MARKER, {
+      timeout: 30_000,
+    })
+    await expect(
+      window.getByTestId("central-tab").filter({ hasText: `Run ${PY_FILE}` }),
+    ).toHaveCount(0)
+
+    await window.getByTestId("editor-run-terminal-collapse").click()
+    await expect(region.getByTestId("terminal")).toHaveCount(0)
+    await window.getByTestId("editor-run-terminal-collapse").click()
+    await expect(region.getByTestId("terminal")).toBeVisible()
+  })
 })

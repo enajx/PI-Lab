@@ -9,14 +9,14 @@ import { type Plugin, build as viteBuild } from "vite"
 /**
  * Copy the generated Drizzle migrations next to the compiled main bundle so the
  * packaged app can find them at `out/main/drizzle`. They live in the bundled
- * `@skipper/local-db`, whose source path no longer points anywhere useful once
+ * `@pi-lab/local-db`, whose source path no longer points anywhere useful once
  * inlined (see src/main/db/migrationsDir.ts).
  */
 function copyMigrationsPlugin(): Plugin {
   const from = resolve(__dirname, "..", "..", "packages", "local-db", "drizzle")
   const to = resolve(__dirname, "out", "main", "drizzle")
   return {
-    name: "skipper:copy-migrations",
+    name: "pi-lab:copy-migrations",
     apply: "build",
     closeBundle() {
       if (existsSync(from)) {
@@ -31,7 +31,7 @@ function copyMigrationsPlugin(): Plugin {
  *
  * electron-vite only knows main/preload/renderer, so we bundle the daemon's
  * entry (`src/main/terminal/daemonEntry.ts`, which drives the reused
- * `@skipper/pty-daemon` server) ourselves via a plain Vite library build,
+ * `@pi-lab/pty-daemon` server) ourselves via a plain Vite library build,
  * triggered from the main build's `closeBundle`. The daemon package's source
  * uses extensionless ESM imports that Node's loader can't resolve from `.ts`, so
  * it MUST be bundled to a single `out/pty-daemon/index.js` the supervisor can run
@@ -47,7 +47,7 @@ function bundlePtyDaemonPlugin(): Plugin {
   const entry = resolve(__dirname, "src", "main", "terminal", "daemonEntry.ts")
   const outDir = resolve(__dirname, "out", "pty-daemon")
   return {
-    name: "skipper:bundle-pty-daemon",
+    name: "pi-lab:bundle-pty-daemon",
     apply: "build",
     async closeBundle() {
       await viteBuild({
@@ -92,34 +92,34 @@ function bundlePtyDaemonPlugin(): Plugin {
  *
  * Externalization (main/preload):
  *   - `externalizeDepsPlugin` leaves node_modules deps as runtime `require`s so
- *     native binaries (e.g. `better-sqlite3`, pulled in via `@skipper/local-db`)
+ *     native binaries (e.g. `better-sqlite3`, pulled in via `@pi-lab/local-db`)
  *     load from disk instead of being bundled.
  *   - Workspace packages are SOURCE-only TypeScript with extensionless ESM
  *     imports and an `exports` map that points at raw `.ts`; Node's ESM loader
- *     can't resolve those. So every `@skipper/*` package main imports at runtime
+ *     can't resolve those. So every `@pi-lab/*` package main imports at runtime
  *     is BUNDLED here (excluded from externalization) — Vite transpiles their TS
- *     and inlines it. (`@skipper/shared` is used by the agent/workspace routers —
- *     `BUILTIN_AGENTS`, `buildLaunchArgv`, `slugify`; `@skipper/port-scanner` by
+ *     and inlines it. (`@pi-lab/shared` is used by the agent/workspace routers —
+ *     `BUILTIN_AGENTS`, `buildLaunchArgv`, `slugify`; `@pi-lab/port-scanner` by
  *     workspace port allocation — `portBaseForSlot`. Left external, their raw-`.ts`
  *     extensionless sub-imports — e.g. `./agents/catalog`, `./allocation` — fail
  *     under Node's ESM loader and the app won't boot. The main process only uses
  *     the daemon's *client* over a socket; if it stayed external, its raw-`.ts`
- *     `./client` import would likewise fail. `@skipper/workspace-fs` backs the
+ *     `./client` import would likewise fail. `@pi-lab/workspace-fs` backs the
  *     `files` router's read/write — same reason it must be bundled.)
  *   - Bundling local-db/pty-daemon would drag their transitive native `.node`
  *     addons in too (`better-sqlite3` via local-db; `node-pty` via the daemon's
  *     server, which main never instantiates), which breaks at runtime, so both are
  *     forced external via `rollupOptions.external`. `drizzle-orm`,
- *     `@skipper/shared`, and `@skipper/port-scanner` are pure JS and inline fine.
+ *     `@pi-lab/shared`, and `@pi-lab/port-scanner` are pure JS and inline fine.
  *   - `trpc-electron` is bundled into the preload because a sandboxed preload
  *     can only `require("electron")`, not arbitrary node_modules.
  */
 const WORKSPACE_PACKAGES = [
-  "@skipper/local-db",
-  "@skipper/pty-daemon",
-  "@skipper/shared",
-  "@skipper/port-scanner",
-  "@skipper/workspace-fs",
+  "@pi-lab/local-db",
+  "@pi-lab/pty-daemon",
+  "@pi-lab/shared",
+  "@pi-lab/port-scanner",
+  "@pi-lab/workspace-fs",
 ]
 /** Native `.node` addons that must stay runtime `require`s, never inlined. */
 const NATIVE_DEPS = ["better-sqlite3", "node-pty"]
@@ -176,7 +176,7 @@ export default defineConfig({
       }),
       react(),
       // Tailwind v4 via its first-party Vite plugin — scans the renderer and the
-      // shared `@skipper/ui` package for utility classes (docs/architecture.md (renderer)).
+      // shared `@pi-lab/ui` package for utility classes (md/engineering/architecture.md (renderer)).
       tailwindcss(),
     ],
     build: {

@@ -1,20 +1,37 @@
-// Integration tests for the workspaces router (docs/testing-and-build.md): createCaller over
+// Integration tests for the workspaces router (md/engineering/testing-and-build.md): createCaller over
 // a temp SQLite DB with real migrations, real temp git repos, an in-process
 // pty-daemon for launchAgent, and an injected fake agent. Full cleanup per test.
 import { existsSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { agentSessions } from "@pi-lab/local-db"
+import type { TerminalAgent } from "@pi-lab/shared"
 import type { Unsubscribable } from "@trpc/server/observable"
+import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { TerminalEvent } from "../terminal/terminal"
-import { createHarness, type Harness } from "../testHarness"
+import { createHarness, FAKE_AGENT, type Harness } from "../testHarness"
 
 let h: Harness
 let projectId: string
 const subscriptions: Unsubscribable[] = []
 
+const WORKSPACE_PROMPT_AGENT: TerminalAgent = {
+  id: "workspace-prompt-agent",
+  label: "Workspace Prompt Agent",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: [
+    "-e",
+    "process.stdin.setEncoding('utf8');process.stdout.write('OpenAI Codex\\n\\n› Ask Codex to do anything\\n  gpt-5 · 97% left\\n');process.stdin.once('data',()=>process.stdout.write('\\nFinished from workspace launch.\\n\\n› Ask Codex to do anything\\n  gpt-5 · 96% left\\n'));process.stdin.resume()",
+  ],
+}
+
 beforeEach(async () => {
-  h = await createHarness()
+  h = await createHarness([FAKE_AGENT, WORKSPACE_PROMPT_AGENT], {
+    notificationsUnfocused: true,
+    nativeNotificationsSupported: true,
+  })
   const project = await h.caller.projects.open({ path: h.repoDir })
   projectId = project.id
 })
@@ -168,6 +185,46 @@ describe("workspaces.launchAgent", () => {
       h.caller.workspaces.launchAgent({ workspaceId: workspace.id, agentId: "ghost" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
+
+  test("the workspace launch entry independently notifies only after a submitted agent turn", async () => {
+    const main = await h.caller.workspaces.ensureMain({ projectId })
+    const { sessionId } = await h.caller.workspaces.launchAgent({
+      workspaceId: main.id,
+      agentId: WORKSPACE_PROMPT_AGENT.id,
+    })
+
+    // Deliberately do not subscribe to terminal.onData. The app-lifetime monitor
+    // must be registered by this public launch entry itself. Its initial blank
+    // prompt is not a completed turn.
+    await waitFor(() => {
+      const durable = h.db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.sessionId, sessionId))
+        .get()
+      return durable?.state === "waiting" && durable.waitingReason === "initial-prompt"
+    })
+    expect(h.notificationDeliveries).toEqual([])
+
+    await h.caller.terminal.write({
+      sessionId,
+      data: "Implement the workspace change\r",
+    })
+    await waitFor(() =>
+      h.notificationDeliveries.some(
+        ({ input }) =>
+          input.title === "Agent finished its turn" &&
+          input.body.includes(WORKSPACE_PROMPT_AGENT.id),
+      ),
+    )
+    expect(h.notificationDeliveries).toContainEqual(
+      expect.objectContaining({
+        input: expect.objectContaining({ title: "Agent finished its turn", silent: true }),
+      }),
+    )
+
+    await h.caller.terminal.kill({ sessionId })
+  })
 })
 
 describe("workspaces.ensureMain", () => {
@@ -230,5 +287,49 @@ describe("workspaces.spawnTerminal", () => {
     await expect(
       h.caller.workspaces.spawnTerminal({ workspaceId: "ghost", cols: 80, rows: 24 }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+
+  test("notifies through the independent monitor when a submitted command returns to the prompt", async () => {
+    const main = await h.caller.workspaces.ensureMain({ projectId })
+    const { sessionId } = await h.caller.workspaces.spawnTerminal({
+      workspaceId: main.id,
+      cols: 80,
+      rows: 24,
+    })
+
+    // Exercise the public write mutation without a renderer onData subscription:
+    // closing/detaching the tab cannot be required for lifecycle observation.
+    await h.caller.terminal.write({
+      sessionId,
+      data: "printf 'TERMINAL-COMPLETION-OK\\\\n'\r",
+    })
+    await waitFor(() =>
+      h.notificationDeliveries.some(
+        ({ input }) => input.title === "Terminal command finished" && input.body.includes("ready"),
+      ),
+    )
+
+    const delivery = h.notificationDeliveries.find(
+      ({ input }) => input.title === "Terminal command finished",
+    )
+    expect(delivery?.input).toMatchObject({
+      title: "Terminal command finished",
+      silent: true,
+    })
+
+    const activations: unknown[] = []
+    const unsubscribe = h.notifications.activations.subscribe((target) => activations.push(target))
+    delivery?.handlers.onClick()
+    expect(activations).toEqual([
+      {
+        type: "terminal",
+        projectId,
+        workspaceId: main.id,
+        sessionId,
+        label: "Terminal",
+      },
+    ])
+    unsubscribe()
+    await h.caller.terminal.kill({ sessionId })
   })
 })

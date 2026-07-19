@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm"
 import {
+  agentSessions,
   automationPromptVersions,
   automationRuns,
   automations,
@@ -17,6 +18,7 @@ export const projectRelations = relations(projects, ({ many }) => ({
   workspaces: many(workspaces),
   sections: many(workspaceSections),
   automations: many(automations),
+  agentSessions: many(agentSessions),
 }))
 
 export const worktreeRelations = relations(worktrees, ({ one, many }) => ({
@@ -49,6 +51,7 @@ export const workspaceRelations = relations(workspaces, ({ one, many }) => ({
     references: [workspaceSections.id],
   }),
   automationRuns: many(automationRuns),
+  agentSessions: many(agentSessions),
 }))
 
 export const automationRelations = relations(automations, ({ one, many }) => ({
@@ -60,7 +63,7 @@ export const automationRelations = relations(automations, ({ one, many }) => ({
   promptVersions: many(automationPromptVersions),
 }))
 
-export const automationRunRelations = relations(automationRuns, ({ one }) => ({
+export const automationRunRelations = relations(automationRuns, ({ one, many }) => ({
   automation: one(automations, {
     fields: [automationRuns.automationId],
     references: [automations.id],
@@ -68,6 +71,22 @@ export const automationRunRelations = relations(automationRuns, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [automationRuns.workspaceId],
     references: [workspaces.id],
+  }),
+  agentSessions: many(agentSessions),
+}))
+
+export const agentSessionRelations = relations(agentSessions, ({ one }) => ({
+  project: one(projects, {
+    fields: [agentSessions.projectId],
+    references: [projects.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [agentSessions.workspaceId],
+    references: [workspaces.id],
+  }),
+  workflowRun: one(automationRuns, {
+    fields: [agentSessions.workflowRunId],
+    references: [automationRuns.id],
   }),
 }))
 

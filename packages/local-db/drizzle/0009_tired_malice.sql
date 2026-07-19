@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `caffeine` text DEFAULT '{"mode":"off","scope":"system-only"}' NOT NULL;

@@ -9,7 +9,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
 
 /**
  * Packaged-app smoke (git history (build phases) P11 / AGENTS.md Pitfalls #4): launch the REAL packaged
- * `Skipper.app` — not `out/main/index.js` — and assert it boots to `app-ready`.
+ * `PI Lab.app` — not `out/main/index.js` — and assert it boots to `app-ready`.
  *
  * This is the only test that proves native modules load from the *packaged* app:
  * better-sqlite3 (DB init + migrate on boot) and node-pty (its `.node` +
@@ -17,12 +17,12 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * asar-aware resolver, with the Electron ABI. If the ABI were wrong or a native
  * module were missing/un-unpacked, boot would fail before `app-ready`.
  *
- * It's GATED on the packaged build existing (`release/mac-arm64/Skipper.app`) and
+ * It's GATED on the packaged build existing (`release/mac-arm64/PI Lab.app`) and
  * skips otherwise, so it never breaks `bun run e2e` on a checkout that only ran
  * `bun run build`. Build it with `bun run package` (or `--cwd apps/desktop package`).
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * the Bun runtime (docs/testing-and-build.md (build & ship)).
+ * the Bun runtime (md/engineering/testing-and-build.md (build & ship)).
  */
 
 const execFileAsync = promisify(execFile)
@@ -34,10 +34,10 @@ const PACKAGED_BINARY = join(
   DESKTOP_DIR,
   "release",
   "mac-arm64",
-  "Skipper.app",
+  "PI Lab.app",
   "Contents",
   "MacOS",
-  "Skipper",
+  "PI Lab",
 )
 
 let app: ElectronApplication
@@ -47,8 +47,8 @@ let repoDir: string
 async function initRepo(dir: string): Promise<void> {
   await execFileAsync("git", ["init", "-b", "main", dir])
   const run = (args: string[]) => execFileAsync("git", ["-C", dir, ...args])
-  await run(["config", "user.email", "test@skipper.local"])
-  await run(["config", "user.name", "Skipper Test"])
+  await run(["config", "user.email", "test@pi-lab.local"])
+  await run(["config", "user.name", "PI Lab Test"])
   await writeFile(join(dir, "README.md"), "# fixture\n")
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
@@ -61,7 +61,7 @@ test.skip(
 )
 
 test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "skipper-pkg-smoke-"))
+  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-pkg-smoke-"))
   repoDir = join(dataDir, "repo")
   await initRepo(repoDir)
 
@@ -71,10 +71,10 @@ test.beforeEach(async () => {
     executablePath: PACKAGED_BINARY,
     env: {
       ...process.env,
-      SKIPPER_TEST_MODE: "1",
-      SKIPPER_DATA_DIR: dataDir,
-      SKIPPER_SOCKET_PATH: join(dataDir, "daemon.sock"),
-      SKIPPER_TEST_OPEN_PROJECT: repoDir,
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      PI_LAB_TEST_OPEN_PROJECT: repoDir,
     },
   })
 })
@@ -84,7 +84,7 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
-test("packaged Skipper.app boots with native modules (better-sqlite3 + node-pty)", async () => {
+test("packaged PI Lab.app boots with native modules (better-sqlite3 + node-pty)", async () => {
   const window = await app.firstWindow()
 
   // Boot gate — reaching this proves DB init + migrate ran (better-sqlite3 loaded

@@ -2,10 +2,10 @@
  * Data/analysis file classifier for the Science → Analysis tab (AGENTS.md "Scope"
  * "Science tabs", P8c). A **pure, total, deterministic** function from a file
  * path to one of a fixed set of {@link DataFileKind} sub-formats — the single
- * source of truth shared by the main-side walker (which tags every file it
- * discovers) and the renderer (which dispatches each preview to the right
- * sub-renderer). Keeping classification here means the two surfaces can never
- * disagree about what a file *is*. A coarser {@link DataFileCategory} layer
+ * source of truth shared by the main-side walker and the renderer. Discovery
+ * uses the nullable {@link classifyAnalysisArtifact} boundary so unknown/source
+ * files never enter the browser; direct preview dispatch keeps the total
+ * {@link classifyDataFile} fallback. A coarser {@link DataFileCategory} layer
  * ({@link categoryOf}) groups related sub-formats (csv/json/npy/… → "data") for
  * the UI's top-level filter chips and group headers.
  *
@@ -24,9 +24,11 @@ export type DataFileKind =
   | "image"
   | "notebook"
   | "parquet"
+  | "dataset"
   | "npy"
   | "npz"
   | "plot"
+  | "report"
   | "markdown"
   | "text"
   | "other"
@@ -34,7 +36,7 @@ export type DataFileKind =
 /**
  * Extension → kind lookup (keys are lowercase, no leading dot). The authoritative
  * map; {@link classifyDataFile} does nothing but normalize an extension and read
- * it. Grouped by kind for readability.
+ * it. Only extensions deliberately present here are Analysis artifacts.
  */
 const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   // Tabular
@@ -54,6 +56,8 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   webp: "image",
   bmp: "image",
   svg: "image",
+  tif: "image",
+  tiff: "image",
   // Computational notebooks
   ipynb: "notebook",
   // Columnar binary data stores
@@ -61,6 +65,21 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   pq: "parquet",
   feather: "parquet",
   arrow: "parquet",
+  // Scientific/container stores (metadata-only preview)
+  h5: "dataset",
+  hdf5: "dataset",
+  he5: "dataset",
+  nc: "dataset",
+  nc4: "dataset",
+  netcdf: "dataset",
+  sqlite: "dataset",
+  sqlite3: "dataset",
+  db: "dataset",
+  xls: "dataset",
+  xlsx: "dataset",
+  xlsm: "dataset",
+  ods: "dataset",
+  zarr: "dataset",
   // NumPy arrays (raw `.npy` + zipped `.npz`)
   npy: "npy",
   npz: "npz",
@@ -68,6 +87,9 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   pdf: "plot",
   eps: "plot",
   ps: "plot",
+  // Rendered reports
+  html: "report",
+  htm: "report",
   // Prose / docs
   md: "markdown",
   markdown: "markdown",
@@ -83,6 +105,10 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   toml: "text",
   ini: "text",
   cfg: "text",
+  // Serialized Python objects are listed for metadata only. Preview code must
+  // never deserialize or read their contents.
+  pkl: "other",
+  pickle: "other",
 }
 
 /**
@@ -96,9 +122,11 @@ export const ALL_DATA_FILE_KINDS: readonly DataFileKind[] = [
   "image",
   "notebook",
   "parquet",
+  "dataset",
   "npy",
   "npz",
   "plot",
+  "report",
   "markdown",
   "text",
   "other",
@@ -112,9 +140,11 @@ export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
   image: "Images",
   notebook: "Notebooks",
   parquet: "Parquet",
+  dataset: "Datasets",
   npy: "NumPy",
   npz: "NumPy (zip)",
   plot: "Plots",
+  report: "Reports",
   markdown: "Markdown",
   text: "Text",
   other: "Other",
@@ -135,11 +165,13 @@ const CATEGORY_BY_KIND: Readonly<Record<DataFileKind, DataFileCategory>> = {
   tsv: "data",
   json: "data",
   parquet: "data",
+  dataset: "data",
   npy: "data",
   npz: "data",
   image: "image",
   notebook: "notebook",
   plot: "plot",
+  report: "text",
   markdown: "text",
   text: "text",
   other: "other",
@@ -199,11 +231,29 @@ export function classifyDataFile(filePath: string): DataFileKind {
 }
 
 /**
+ * Classify a path only when it is deliberately allowed into Analysis discovery.
+ * Files use the explicit extension whitelist above. Directories are excluded
+ * except for `.zarr` stores, which are artifacts in their own right and must not
+ * be traversed as ordinary folders.
+ */
+export function classifyAnalysisArtifact(
+  filePath: string,
+  entryType: "file" | "directory",
+): DataFileKind | null {
+  const extension = extensionOf(filePath)
+  if (entryType === "directory") return extension === "zarr" ? "dataset" : null
+  if (extension === "zarr") return null
+  const baseName = filePath.replaceAll("\\", "/").split("/").at(-1)?.toLowerCase()
+  if (baseName === "a.out") return null
+  return KIND_BY_EXTENSION[extension] ?? null
+}
+
+/**
  * Whether a kind is one Analysis can render a meaningful inline preview for
  * (table / chart / array / image / pretty-JSON / text head). A raw `.npy` array
  * is decoded into a chart or array view, so it is previewable; `.npz` (a zip of
- * arrays we don't unpack), `parquet`, `plot`, `notebook`, and `other` fall back
- * to a metadata-only card — the UI uses this to decide.
+ * arrays we don't unpack), `parquet`, `dataset`, `plot`, `notebook`, `report`,
+ * and `other` fall back to a metadata-only card — the UI uses this to decide.
  */
 export function isPreviewableKind(kind: DataFileKind): boolean {
   return (

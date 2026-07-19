@@ -4,7 +4,7 @@ import { join } from "node:path"
 /**
  * Locate the generated Drizzle migrations folder.
  *
- * `@skipper/local-db` derives this from its own source location, but that
+ * `@pi-lab/local-db` derives this from its own source location, but that
  * package is BUNDLED into the main process (electron.vite.config.ts), so its
  * `import.meta`/`__dirname` resolves to the bundle output — not the real
  * `packages/local-db/drizzle`. We therefore resolve it ourselves against a list

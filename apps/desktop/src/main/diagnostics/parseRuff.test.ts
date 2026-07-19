@@ -1,4 +1,4 @@
-// Unit + property tests for the ruff JSON parser (docs/testing-and-build.md). It's a pure
+// Unit + property tests for the ruff JSON parser (md/engineering/testing-and-build.md). It's a pure
 // transform over loose JSON text, so it gets example tests against the *real*
 // `ruff check --output-format json` shape plus fast-check properties for totality
 // (never throws, always well-formed) on arbitrary input.

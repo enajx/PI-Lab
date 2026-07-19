@@ -1,4 +1,4 @@
-import { Button } from "@skipper/ui"
+import { Button } from "@pi-lab/ui"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronRight, FileText, Folder, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -348,6 +348,8 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
           <button
             type="button"
             data-testid="library-crumb-root"
+            data-feature-label={rootLabel}
+            data-feature-help="Return to the top level of the connected research library."
             onClick={goToRoot}
             className="max-w-[12rem] truncate font-medium text-[10px] uppercase tracking-wider hover:text-foreground"
           >
@@ -358,6 +360,8 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
               <ChevronRight className="size-3" aria-hidden />
               <button
                 type="button"
+                data-feature-label={c.name}
+                data-feature-help="Return to this collection in the library path."
                 onClick={() => goToCrumb(index)}
                 className="max-w-[12rem] truncate hover:text-foreground"
               >
@@ -377,6 +381,8 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
           variant="ghost"
           size="sm"
           data-testid="library-refresh"
+          data-feature-label="Refresh library"
+          data-feature-help="Reload collections and papers from the connected library source."
           className="h-7 shrink-0 gap-1.5 text-muted-foreground text-xs"
           disabled={isFetching}
           onClick={refresh}

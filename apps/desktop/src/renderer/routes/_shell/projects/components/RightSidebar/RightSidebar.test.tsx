@@ -23,11 +23,17 @@ function renderSidebar(onOpenFile = vi.fn(), overrides: FakeHandlers = {}) {
     "files.read": () => ({ exists: true, content: "# Research\n" }),
     "files.tree": () => [{ name: "main.py", relPath: "main.py", kind: "file" as const }],
     "workspaces.changes": () => [],
+    "science.skills.list": () => ({ skills: [], roots: [] }),
     ...overrides,
   })
   render(
     <AppProviders client={client} queryClient={queryClient}>
-      <RightSidebar workspaceId="ws-1" onOpenFile={onOpenFile} onCollapse={onCollapse} />
+      <RightSidebar
+        projectId="p1"
+        workspaceId="ws-1"
+        onOpenFile={onOpenFile}
+        onCollapse={onCollapse}
+      />
     </AppProviders>,
   )
   return { onOpenFile, onCollapse }
@@ -51,6 +57,7 @@ function CollapsibleHarness({ onOpenFile = vi.fn() }: { onOpenFile?: () => void 
     </button>
   ) : (
     <RightSidebar
+      projectId="p1"
       workspaceId="ws-1"
       onOpenFile={onOpenFile}
       onCollapse={() => setCollapsed(true)}
@@ -64,6 +71,7 @@ function renderCollapsible() {
     "files.read": () => ({ exists: true, content: "# Research\n" }),
     "files.tree": () => [{ name: "main.py", relPath: "main.py", kind: "file" as const }],
     "workspaces.changes": () => [],
+    "science.skills.list": () => ({ skills: [], roots: [] }),
   })
   render(
     <AppProviders client={client} queryClient={queryClient}>
@@ -84,6 +92,26 @@ describe("RightSidebar", () => {
     expect(screen.getByTestId("panel-tab-files")).toBeTruthy()
     expect(screen.queryByTestId("panel-tab-status")).toBeNull()
     expect(screen.queryByTestId("panel-tab-changes")).toBeNull()
+    expect(screen.queryByTestId("panel-tab-skills")).toBeNull()
+  })
+
+  test("gives every project panel a concise purpose instead of its bare label", () => {
+    renderSidebar()
+    expect(screen.getByTestId("panel-tab-research").getAttribute("data-feature-help")).toBe(
+      "Read the project's RESEARCH.md, where durable context and findings are kept.",
+    )
+    expect(screen.getByTestId("panel-tab-todos").getAttribute("data-feature-help")).toBe(
+      "View the project's TODO.md, where project work items are tracked in Markdown.",
+    )
+    expect(screen.getByTestId("panel-tab-files").getAttribute("data-feature-help")).toBe(
+      "Browse workspace files and open them in the built-in editor.",
+    )
+
+    fireEvent.click(screen.getByTestId("right-sidebar-settings"))
+    fireEvent.click(screen.getByTestId("right-sidebar-toggle-changes"))
+    expect(screen.getByTestId("panel-tab-changes").getAttribute("data-feature-help")).toBe(
+      "Review staged, unstaged, and untracked Git changes in this workspace.",
+    )
   })
 
   test("the gear opens a View-options menu whose toggle reveals and persists Code changes", () => {
@@ -98,7 +126,128 @@ describe("RightSidebar", () => {
     fireEvent.click(toggle)
 
     expect(screen.getByTestId("panel-tab-changes")).toBeTruthy()
-    expect(window.localStorage.getItem("skipper.projectView.showCodeChanges")).toBe("true")
+    expect(window.localStorage.getItem("pi-lab.projectView.showCodeChanges")).toBe("true")
+  })
+
+  test("the gear independently reveals and persists the optional Skills panel", () => {
+    renderSidebar()
+    fireEvent.click(screen.getByTestId("right-sidebar-settings"))
+
+    const toggle = screen.getByTestId("right-sidebar-toggle-skills")
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(toggle)
+
+    expect(screen.getByTestId("panel-tab-skills")).toBeTruthy()
+    expect(window.localStorage.getItem("pi-lab.projectView.showSkillsPanel")).toBe("true")
+  })
+
+  test("Skills panel shows project-local first and shares persisted scope filters", async () => {
+    renderSidebar(vi.fn(), {
+      "science.skills.list": () => ({
+        skills: [
+          {
+            name: "local",
+            description: "project skill",
+            slug: "local",
+            path: "/repo/.agents/skills/local/SKILL.md",
+            source: ".agents/skills",
+            harness: "agents",
+            scope: "project",
+          },
+          {
+            name: "global",
+            description: "global skill",
+            slug: "global",
+            path: "/home/.codex/skills/global/SKILL.md",
+            source: "~/.codex/skills",
+            harness: "codex",
+            scope: "global",
+          },
+        ],
+        roots: [],
+      }),
+    })
+    fireEvent.click(screen.getByTestId("right-sidebar-settings"))
+    fireEvent.click(screen.getByTestId("right-sidebar-toggle-skills"))
+    fireEvent.click(screen.getByTestId("panel-tab-skills"))
+
+    await waitFor(() => expect(screen.getAllByTestId("skill-card")).toHaveLength(2))
+    expect(screen.getAllByTestId("skill-name").map((node) => node.textContent)).toEqual([
+      "local",
+      "global",
+    ])
+    fireEvent.click(screen.getByTestId("panel-skills-show-global"))
+    await waitFor(() => expect(screen.getAllByTestId("skill-card")).toHaveLength(1))
+    expect(screen.getByTestId("skill-name").textContent).toBe("local")
+    expect(window.localStorage.getItem("pi-lab.skills.showGlobal")).toBe("false")
+  })
+
+  test("Skills panel has a clear empty state", async () => {
+    renderSidebar()
+    fireEvent.click(screen.getByTestId("right-sidebar-settings"))
+    fireEvent.click(screen.getByTestId("right-sidebar-toggle-skills"))
+    fireEvent.click(screen.getByTestId("panel-tab-skills"))
+    expect(await screen.findByTestId("panel-skills-empty")).toBeTruthy()
+  })
+
+  test("Skills panel surfaces a catalog query error", async () => {
+    window.localStorage.setItem("pi-lab.projectView.showSkillsPanel", "true")
+    renderSidebar(vi.fn(), {
+      "science.skills.list": async () => {
+        throw new Error("skills index failed")
+      },
+    })
+    fireEvent.click(screen.getByTestId("panel-tab-skills"))
+    expect((await screen.findByTestId("panel-skills-error")).textContent).toContain(
+      "skills index failed",
+    )
+  })
+
+  test("Skills panel re-indexes when the project id changes", async () => {
+    window.localStorage.setItem("pi-lab.projectView.showSkillsPanel", "true")
+    const requested: string[] = []
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = createFakeTrpcClient({
+      "files.read": () => ({ exists: true, content: "# Research\n" }),
+      "files.tree": () => [],
+      "workspaces.changes": () => [],
+      "science.skills.list": (input) => {
+        const projectId = (input as { projectId: string }).projectId
+        requested.push(projectId)
+        return {
+          skills: [
+            {
+              name: `${projectId}-skill`,
+              description: "",
+              slug: `${projectId}-skill`,
+              path: `/repo/${projectId}/.agents/skills/${projectId}-skill/SKILL.md`,
+              source: ".agents/skills",
+              harness: "agents",
+              scope: "project",
+            },
+          ],
+          roots: [],
+        }
+      },
+    })
+    const sidebar = (projectId: string) => (
+      <AppProviders client={client} queryClient={queryClient}>
+        <RightSidebar
+          projectId={projectId}
+          workspaceId={`ws-${projectId}`}
+          onOpenFile={() => {}}
+          onCollapse={() => {}}
+        />
+      </AppProviders>
+    )
+    const view = render(sidebar("p1"))
+    fireEvent.click(screen.getByTestId("panel-tab-skills"))
+    await screen.findByText("p1-skill")
+
+    view.rerender(sidebar("p2"))
+    await screen.findByText("p2-skill")
+    expect(requested).toEqual(["p1", "p2"])
+    expect(screen.queryByText("p1-skill")).toBeNull()
   })
 
   test("the Files tab lists the tree and opening a file calls onOpenFile", async () => {
@@ -110,7 +259,7 @@ describe("RightSidebar", () => {
   })
 
   test("excludes the Files tab when the left Files panel is enabled", () => {
-    window.localStorage.setItem("skipper.projectView.showFilesPanel", "true")
+    window.localStorage.setItem("pi-lab.projectView.showFilesPanel", "true")
     renderSidebar()
 
     expect(screen.queryByTestId("panel-tab-files")).toBeNull()

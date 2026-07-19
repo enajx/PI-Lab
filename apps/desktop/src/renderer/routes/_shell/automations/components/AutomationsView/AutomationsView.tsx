@@ -1,7 +1,8 @@
-import { Button, cn } from "@skipper/ui"
+import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Workflow } from "lucide-react"
 import { useState } from "react"
+import { CaffeineControl } from "../../../../../caffeine"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
@@ -13,15 +14,19 @@ import { CreateAutomationForm } from "./components/CreateAutomationForm"
  * Automations / Workflows view (AGENTS.md "Scope" — scheduled & looping agent runs).
  * Lists every automation (name, cadence summary, next run, enabled toggle),
  * offers a create form, and per-row run-now / enable-disable / delete plus an
- * expandable run history. v1 is launch-only: an automation fires a fresh agent
- * session on its project on schedule; external-comms reporting is a later add-on
- * and intentionally absent.
+ * expandable run history. A workflow can either open an interactive agent
+ * terminal or invoke the supported harness in one-shot run-to-completion mode;
+ * external communications remain intentionally absent.
  *
  * The body owns its own scroll via a bounded `min-h-0 overflow-y-auto` child
  * (AGENTS.md Pitfalls #3 — never a nested Radix ScrollArea). All assertion-worthy
- * elements carry stable `data-testid`s (docs/testing-and-build.md).
+ * elements carry stable `data-testid`s (md/engineering/testing-and-build.md).
  */
-export function AutomationsView() {
+export function AutomationsView({
+  activation,
+}: {
+  activation?: { workflowId: string; runId: string }
+}) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
@@ -67,17 +72,20 @@ export function AutomationsView() {
             </p>
           </div>
         </div>
-        <Button
-          data-testid="new-automation"
-          size="sm"
-          className={titleBarControlClass(collapsed)}
-          disabled={!canCreate || creating}
-          onClick={() => setCreating(true)}
-          title={canCreate ? undefined : "Open a project first"}
-        >
-          <Plus aria-hidden />
-          New workflow
-        </Button>
+        <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
+          <Button
+            data-testid="new-automation"
+            size="sm"
+            disabled={!canCreate || creating}
+            onClick={() => setCreating(true)}
+            title={canCreate ? undefined : "Open a project first"}
+            data-feature-help="Create a recurring agent run for a project, prompt, and schedule"
+          >
+            <Plus aria-hidden />
+            New workflow
+          </Button>
+          <CaffeineControl />
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
@@ -102,6 +110,9 @@ export function AutomationsView() {
                 automation={automation}
                 projectName={projects.find((p) => p.id === automation.projectId)?.name}
                 onChanged={() => void invalidateList()}
+                targetRunId={
+                  activation?.workflowId === automation.id ? activation.runId : undefined
+                }
               />
             ))}
           </ul>

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { runMigrations, type SkipperDatabase } from "@skipper/local-db"
+import { type PiLabDatabase, runMigrations } from "@pi-lab/local-db"
 import { resolveBundledMigrationsDir } from "./migrationsDir"
 
 /**
@@ -17,7 +17,7 @@ export interface DbStatus {
 }
 
 let status: DbStatus | null = null
-let dbHandle: SkipperDatabase | null = null
+let dbHandle: PiLabDatabase | null = null
 
 /**
  * Newest migration tag from `meta/_journal.json`. The applied *count* is the
@@ -37,8 +37,8 @@ function readLatestTag(migrationsFolder: string): string | null {
 
 /**
  * Open the local SQLite DB and apply all migrations (self-healing on journal
- * drift — handled inside `@skipper/local-db`). Must run before any router that
- * touches the DB. Idempotent; the resolved path honors `SKIPPER_DATA_DIR`.
+ * drift — handled inside `@pi-lab/local-db`). Must run before any router that
+ * touches the DB. Idempotent; the resolved path honors `PI_LAB_DATA_DIR`.
  */
 export function initDatabase(): DbStatus {
   const migrationsFolder = resolveBundledMigrationsDir()
@@ -67,7 +67,7 @@ export function getDbStatus(): DbStatus {
  * touches the local store. Throws if read before {@link initDatabase} so a
  * mis-ordered boot fails loudly rather than opening a second connection.
  */
-export function getDb(): SkipperDatabase {
+export function getDb(): PiLabDatabase {
   if (!dbHandle) {
     throw new Error("Database not initialized — call initDatabase() during boot")
   }

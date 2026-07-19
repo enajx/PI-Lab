@@ -1,4 +1,4 @@
-// Unit tests for the folder-source filesystem readers (docs/testing-and-build.md). These
+// Unit tests for the folder-source filesystem readers (md/engineering/testing-and-build.md). These
 // are pure of tRPC/Electron, so they run against real temp directories — no mocking.
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -23,7 +23,7 @@ afterEach(async () => {
  *   root/methods/{alpha,beta}.pdf + root/methods/2023/deep.pdf
  */
 async function fixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "skipper-folder-"))
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-folder-"))
   dirs.push(root)
   await writeFile(join(root, "Top.pdf"), "x")
   await writeFile(join(root, "notes.txt"), "x")
@@ -109,7 +109,7 @@ describe("listFolderItems", () => {
   })
 
   test("caps a pathological listing and flags it truncated", async () => {
-    const big = await mkdtemp(join(tmpdir(), "skipper-folder-big-"))
+    const big = await mkdtemp(join(tmpdir(), "pi-lab-folder-big-"))
     dirs.push(big)
     await Promise.all(
       Array.from({ length: FOLDER_ITEM_CAP + 1 }, (_, i) => writeFile(join(big, `p${i}.pdf`), "x")),

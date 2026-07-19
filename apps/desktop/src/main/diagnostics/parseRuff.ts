@@ -7,7 +7,7 @@
  * Defensive by contract: this takes the *raw stdout string*, decodes it itself,
  * and **never throws** — malformed JSON, a non-array payload, or individual
  * entries missing fields all degrade to an empty list / skipped entry. That
- * totality is what the property tests assert (docs/testing-and-build.md), and it means a
+ * totality is what the property tests assert (md/engineering/testing-and-build.md), and it means a
  * future ruff output tweak can't crash the editor's save path.
  */
 

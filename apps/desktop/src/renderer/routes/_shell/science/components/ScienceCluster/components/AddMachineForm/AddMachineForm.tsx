@@ -1,4 +1,4 @@
-import { Button, Input, Label } from "@skipper/ui"
+import { Button, Input, Label } from "@pi-lab/ui"
 import { useState } from "react"
 
 export interface AddMachineValues {
@@ -21,7 +21,7 @@ interface AddMachineFormProps {
 /**
  * Inline form to register a machine by hand (AGENTS.md "Scope" — Cluster monitoring).
  * Deliberately a plain inline panel rather than a Radix dialog so it renders and
- * is assertable under jsdom (docs/testing-and-build.md). Only `host` is required; the rest is
+ * is assertable under jsdom (md/engineering/testing-and-build.md). Only `host` is required; the rest is
  * optional connection metadata. ssh key material is never collected here.
  */
 export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMachineFormProps) {

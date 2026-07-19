@@ -3,6 +3,7 @@ import { analysisRouter } from "./analysis"
 import { clusterRouter } from "./cluster/cluster"
 import { libraryRouter } from "./library"
 import { skillsRouter } from "./skills/skills"
+import { tasksRouter } from "./tasks"
 
 /**
  * Science namespace (AGENTS.md "Scope" "Science tabs") — the umbrella for the
@@ -17,4 +18,5 @@ export const scienceRouter = router({
   skills: skillsRouter,
   analysis: analysisRouter,
   library: libraryRouter,
+  tasks: tasksRouter,
 })

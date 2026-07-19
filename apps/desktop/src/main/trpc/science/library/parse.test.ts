@@ -1,4 +1,4 @@
-// Unit + property tests for the Library parsers (docs/testing-and-build.md). These are pure
+// Unit + property tests for the Library parsers (md/engineering/testing-and-build.md). These are pure
 // transforms over loose JSON, so they get example tests for the real API shapes
 // plus fast-check properties for totality (never throw, always well-formed) on
 // arbitrary inputs.

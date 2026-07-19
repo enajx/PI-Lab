@@ -2,14 +2,14 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 /**
- * Root directory for all of Skipper's on-disk state.
+ * Root directory for all of PI Lab's on-disk state.
  *
- * Overridable via `SKIPPER_DATA_DIR` (docs/testing-and-build.md) so tests and parallel
- * instances can point at a throwaway directory; defaults to `~/.skipper`.
+ * Overridable via `PI_LAB_DATA_DIR` (md/engineering/testing-and-build.md) so tests and parallel
+ * instances can point at a throwaway directory; defaults to `~/.pi-lab`.
  */
 export function resolveDataDir(): string {
-  const override = process.env.SKIPPER_DATA_DIR?.trim()
-  return override && override.length > 0 ? override : join(homedir(), ".skipper")
+  const override = process.env.PI_LAB_DATA_DIR?.trim()
+  return override && override.length > 0 ? override : join(homedir(), ".pi-lab")
 }
 
 /** Absolute path of the SQLite database file inside the data directory. */

@@ -1,0 +1,26 @@
+import { describe, expect, test } from "vitest"
+import { buildMainWindowOptions } from "./windowOptions"
+
+describe("buildMainWindowOptions", () => {
+  test("sets the resolved Pi icon on the native window", () => {
+    expect(
+      buildMainWindowOptions("/repo/icons/icon.png", "/repo/out/preload/index.js", "linux").icon,
+    ).toBe("/repo/icons/icon.png")
+  })
+
+  test("omits the native icon cleanly when the asset is unavailable", () => {
+    expect(buildMainWindowOptions(null, "/repo/out/preload/index.js", "linux")).not.toHaveProperty(
+      "icon",
+    )
+  })
+
+  test("retains the macOS hidden inset window chrome", () => {
+    const options = buildMainWindowOptions(
+      "/repo/icons/icon.png",
+      "/repo/out/preload/index.js",
+      "darwin",
+    )
+    expect(options.titleBarStyle).toBe("hiddenInset")
+    expect(options.trafficLightPosition).toEqual({ x: 16, y: 18 })
+  })
+})

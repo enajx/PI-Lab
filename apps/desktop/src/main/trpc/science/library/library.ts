@@ -9,8 +9,9 @@ import {
   SETTINGS_ROW_ID,
   settings,
   type ZoteroSource,
-} from "@skipper/local-db"
+} from "@pi-lab/local-db"
 import { z } from "zod"
+import { withMeaningfulActivity } from "../../../caffeine"
 import type { HttpFetch } from "../../context"
 import { publicProcedure, router } from "../../trpc"
 import { attachViaBridge, attachViaWebApi } from "./attach"
@@ -38,7 +39,7 @@ import {
  * paper recommendations are explicitly v2 and absent here.
  *
  * Zotero HTTP goes through the injected {@link AppContext.httpFetch} so the suite mocks
- * Zotero with zero network (docs/testing-and-build.md); the folder source reads the disk
+ * Zotero with zero network (md/engineering/testing-and-build.md); the folder source reads the disk
  * directly (see `folder.ts`) and opens files through {@link AppContext.openPath}. Not-
  * configured and request failures are returned as **typed results**, never thrown — the
  * UI renders them as states. The stored Zotero API key is never logged.
@@ -306,45 +307,46 @@ export const libraryRouter = router({
    * existing directory. Either way an obviously-bad config is rejected up front rather
    * than silently stored. On success the source is upserted into the singleton settings row.
    */
-  connect: publicProcedure
-    .input(connectInput)
-    .mutation(async ({ ctx, input }): Promise<LibraryStatus> => {
-      if (input.kind === "folder") {
-        const folderPath = resolve(input.folderPath.trim())
-        const isDir = await stat(folderPath)
-          .then((s) => s.isDirectory())
-          .catch(() => false)
-        if (!isDir) throw new Error(`Folder not found, or not a directory: ${folderPath}`)
-        const source: FolderSource = { kind: "folder", folderPath }
+  connect: publicProcedure.input(connectInput).mutation(
+    ({ ctx, input }): Promise<LibraryStatus> =>
+      withMeaningfulActivity(ctx.caffeine, "library:connect", async () => {
+        if (input.kind === "folder") {
+          const folderPath = resolve(input.folderPath.trim())
+          const isDir = await stat(folderPath)
+            .then((s) => s.isDirectory())
+            .catch(() => false)
+          if (!isDir) throw new Error(`Folder not found, or not a directory: ${folderPath}`)
+          const source: FolderSource = { kind: "folder", folderPath }
+          writeSource(ctx.db, source)
+          return statusOf(source)
+        }
+
+        const source: ZoteroSource =
+          input.mode === "local"
+            ? {
+                kind: "zotero",
+                mode: "local",
+                libraryType: input.libraryType,
+                libraryId: input.libraryId.trim(),
+                ...(input.bridgeToken ? { bridgeToken: input.bridgeToken.trim() } : {}),
+              }
+            : {
+                kind: "zotero",
+                mode: "web",
+                apiKey: input.apiKey.trim(),
+                libraryType: input.libraryType,
+                libraryId: input.libraryId.trim(),
+              }
+
+        // Probe before persisting so an unreachable local server or a bad key/library
+        // is rejected up front rather than silently stored. Local probes carry no key.
+        const probe = await zoteroGet(ctx.httpFetch, source, `${libraryBase(source)}/items?limit=1`)
+        if (!probe.ok) throw new Error(connectErrorMessage(source, probe.message))
+
         writeSource(ctx.db, source)
         return statusOf(source)
-      }
-
-      const source: ZoteroSource =
-        input.mode === "local"
-          ? {
-              kind: "zotero",
-              mode: "local",
-              libraryType: input.libraryType,
-              libraryId: input.libraryId.trim(),
-              ...(input.bridgeToken ? { bridgeToken: input.bridgeToken.trim() } : {}),
-            }
-          : {
-              kind: "zotero",
-              mode: "web",
-              apiKey: input.apiKey.trim(),
-              libraryType: input.libraryType,
-              libraryId: input.libraryId.trim(),
-            }
-
-      // Probe before persisting so an unreachable local server or a bad key/library
-      // is rejected up front rather than silently stored. Local probes carry no key.
-      const probe = await zoteroGet(ctx.httpFetch, source, `${libraryBase(source)}/items?limit=1`)
-      if (!probe.ok) throw new Error(connectErrorMessage(source, probe.message))
-
-      writeSource(ctx.db, source)
-      return statusOf(source)
-    }),
+      }),
+  ),
 
   /** Clear the stored library source (any credentials are removed locally). */
   disconnect: publicProcedure.mutation(({ ctx }): LibraryStatus => {
@@ -421,23 +423,24 @@ export const libraryRouter = router({
    * write-enabled key). A folder source is read-only, so it returns `writes-disabled`.
    * Returns a typed result — never a throw.
    */
-  attachFile: publicProcedure
-    .input(attachFileInput)
-    .mutation(async ({ ctx, input }): Promise<AttachFileResult> => {
-      const source = readSource(ctx.db)
-      if (!source) return { ok: false, reason: "not-connected" }
-      if (source.kind !== "zotero") {
-        return {
-          ok: false,
-          reason: "writes-disabled",
-          message: "The folder source is read-only — attaching files needs a Zotero connection.",
+  attachFile: publicProcedure.input(attachFileInput).mutation(
+    ({ ctx, input }): Promise<AttachFileResult> =>
+      withMeaningfulActivity(ctx.caffeine, "library:attach-file", async () => {
+        const source = readSource(ctx.db)
+        if (!source) return { ok: false, reason: "not-connected" }
+        if (source.kind !== "zotero") {
+          return {
+            ok: false,
+            reason: "writes-disabled",
+            message: "The folder source is read-only — attaching files needs a Zotero connection.",
+          }
         }
-      }
-      const title = input.title ?? basename(input.filePath)
-      return source.mode === "local"
-        ? attachViaBridge(ctx.httpFetch, source, input.itemKey, input.filePath, title)
-        : attachViaWebApi(ctx.httpFetch, source, input.itemKey, input.filePath, title)
-    }),
+        const title = input.title ?? basename(input.filePath)
+        return source.mode === "local"
+          ? attachViaBridge(ctx.httpFetch, source, input.itemKey, input.filePath, title)
+          : attachViaWebApi(ctx.httpFetch, source, input.itemKey, input.filePath, title)
+      }),
+  ),
 
   /**
    * Open a folder item (a PDF) with the OS default application. Folder source only — the

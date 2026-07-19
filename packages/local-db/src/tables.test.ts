@@ -1,20 +1,21 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { runMigrations, type SkipperDatabase } from "./migrate"
-import { projects, workspaces } from "./tables"
+import { type PiLabDatabase, runMigrations } from "./migrate"
+import { agentSessions, automationRuns, automations, projects, workspaces } from "./tables"
 
 // Behavioral tests against a migrated temp DB: insert rows through Drizzle and
 // assert the constraints that live in SQL (foreign keys + the partial unique
 // index) actually fire.
 
 let dataDir: string
-let db: SkipperDatabase
+let db: PiLabDatabase
 let close: () => void
 
 beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), "skipper-localdb-tables-"))
+  dataDir = mkdtempSync(join(tmpdir(), "pi-lab-localdb-tables-"))
   const result = runMigrations(join(dataDir, "local.db"))
   db = result.db
   close = () => result.sqlite.close()
@@ -92,5 +93,113 @@ describe("workspaces partial unique index", () => {
     await expect(
       db.insert(workspaces).values({ projectId: b, kind: "branch", name: "main", branch: "main" }),
     ).resolves.toBeDefined()
+  })
+})
+
+describe("interactive activity persistence", () => {
+  it("round-trips a durable agent session and its workflow-run target", async () => {
+    const projectId = await makeProject("activity")
+    const [workspace] = await db
+      .insert(workspaces)
+      .values({
+        projectId,
+        kind: "branch",
+        name: "main",
+        branch: "main",
+      })
+      .returning()
+    if (!workspace) throw new Error("workspace insert returned nothing")
+
+    const [automation] = await db
+      .insert(automations)
+      .values({
+        projectId,
+        name: "Morning check",
+        agentId: "codex",
+        prompt: "Check the project",
+        recurrenceRule: "FREQ=DAILY",
+        timezone: "Europe/Copenhagen",
+      })
+      .returning()
+    if (!automation) throw new Error("automation insert returned nothing")
+
+    const [run] = await db
+      .insert(automationRuns)
+      .values({
+        automationId: automation.id,
+        scheduledFor: Date.now(),
+        state: "running",
+        workspaceId: workspace.id,
+        sessionId: "pty-activity",
+        launchedAt: Date.now(),
+      })
+      .returning()
+    if (!run) throw new Error("automation run insert returned nothing")
+
+    await db.insert(agentSessions).values({
+      sessionId: "pty-activity",
+      projectId,
+      workspaceId: workspace.id,
+      agentId: "codex",
+      workflowRunId: run.id,
+      state: "waiting",
+      turnArmed: true,
+      waitingReason: "permission",
+      waitingSince: Date.now(),
+    })
+
+    const stored = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, "pty-activity"))
+      .get()
+    expect(stored).toMatchObject({
+      projectId,
+      workspaceId: workspace.id,
+      agentId: "codex",
+      workflowRunId: run.id,
+      state: "waiting",
+      turnArmed: true,
+      waitingReason: "permission",
+    })
+  })
+
+  it("keeps legacy launched workflow rows readable alongside completed rows", async () => {
+    const projectId = await makeProject("run-states")
+    const [automation] = await db
+      .insert(automations)
+      .values({
+        projectId,
+        name: "State check",
+        agentId: "claude-code",
+        recurrenceRule: "FREQ=DAILY",
+        timezone: "UTC",
+      })
+      .returning()
+    if (!automation) throw new Error("automation insert returned nothing")
+
+    await db.insert(automationRuns).values([
+      {
+        automationId: automation.id,
+        scheduledFor: 1,
+        state: "launched",
+        launchedAt: 1,
+      },
+      {
+        automationId: automation.id,
+        scheduledFor: 2,
+        state: "completed",
+        launchedAt: 2,
+        completedAt: 3,
+      },
+    ])
+
+    const rows = db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.automationId, automation.id))
+      .all()
+    expect(rows.map(({ state }) => state)).toEqual(["launched", "completed"])
+    expect(rows[1]?.completedAt).toBe(3)
   })
 })

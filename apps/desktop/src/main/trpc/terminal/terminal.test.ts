@@ -1,5 +1,5 @@
 // Integration test for the terminal router via `createCallerFactory` — no
-// Electron window (docs/testing-and-build.md). The test owns an in-process `DaemonServer` on
+// Electron window (md/engineering/testing-and-build.md). The test owns an in-process `DaemonServer` on
 // a temp socket and a `DaemonClient` connected to it, injected as the router's
 // context. This exercises the real router → real daemon client → real PTY path;
 // only the *transport* (caller vs IPC) and the daemon's *home* (in-process vs
@@ -8,11 +8,11 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { SkipperDatabase } from "@skipper/local-db"
-import { DaemonClient, DaemonServer } from "@skipper/pty-daemon"
+import type { PiLabDatabase } from "@pi-lab/local-db"
+import { DaemonClient, DaemonServer } from "@pi-lab/pty-daemon"
 import type { Unsubscribable } from "@trpc/server/observable"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import { LiveAgentRegistry } from "../../sessions/liveAgentRegistry"
+import { createNotificationBrokers, NotificationService } from "../../notifications"
 import { appRouter } from "../appRouter"
 import { DEFAULT_AGENT_CATALOG } from "../context"
 import { createCallerFactory } from "../trpc"
@@ -26,29 +26,80 @@ let socketPath: string
 let server: DaemonServer
 let client: DaemonClient
 let caller: ReturnType<typeof createCaller>
+let terminalActivityCount: number
 const subscriptions: Unsubscribable[] = []
 
 beforeEach(async () => {
-  socketDir = await mkdtemp(join(tmpdir(), "skipper-term-router-"))
+  socketDir = await mkdtemp(join(tmpdir(), "pi-lab-term-router-"))
   socketPath = join(socketDir, "daemon.sock")
   server = new DaemonServer({ socketPath })
   await server.listen()
   client = new DaemonClient(socketPath)
   await client.connect()
+  const notifications = createNotificationBrokers()
+  terminalActivityCount = 0
   // The terminal router never reads `db`, `sshExec`, or `httpFetch`; stubs keep
   // the context typed without standing up SQLite (or ssh / network) for a
   // pure-PTY test.
   caller = createCaller({
-    db: {} as SkipperDatabase,
+    db: {} as PiLabDatabase,
+    skillsHomeDir: socketDir,
     getDaemonClient: async () => client,
     agentCatalog: DEFAULT_AGENT_CATALOG,
-    liveAgents: new LiveAgentRegistry(),
+    resolveAgentExecutable: async (candidate) => candidate,
+    getAgentLaunchEnvironment: async () => ({ ...process.env }) as Record<string, string>,
+    runNonInteractiveProcess: async () => {
+      throw new Error("runNonInteractiveProcess unused in terminal tests")
+    },
+    credentialCipher: { encrypt: (value) => value },
     sshExec: async () => ({ ok: true, detail: "stub" }),
     httpFetch: async () => {
       throw new Error("httpFetch unused in terminal tests")
     },
     openPath: async () => "",
     pyToolsExec: async () => ({ stdout: "", stderr: "", code: null, notFound: true }),
+    discoverPythonEnvironments: async () => [],
+    resolvePythonRuntime: async () => ({
+      source: null,
+      displayName: "No virtual env",
+      interpreterPath: process.execPath,
+      runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
+    }),
+    notifications,
+    activityMonitor: {
+      track: async () => {},
+      trackTerminal: async () => {},
+      reconcile: async () => {},
+      liveAgentCount: () => 0,
+      userInput: () => {},
+      resize: () => {},
+      dispose: () => {},
+    },
+    notificationService: new NotificationService({
+      native: { isSupported: () => false, deliver: () => {} },
+      focus: { isFocused: () => true, restoreAndFocus: () => {} },
+      getPreferences: () => ({
+        muted: false,
+        agentInput: { enabled: true, sound: "chime" },
+        agentTurnCompletion: { enabled: true, sound: "success" },
+        terminalCompletion: { enabled: true, sound: "success" },
+        workflowStart: { enabled: false, sound: "pulse" },
+        workflowCompletion: { enabled: true, sound: "success" },
+        workflowFailure: { enabled: true, sound: "alert" },
+      }),
+      activations: notifications.activations,
+      sounds: notifications.sounds,
+      errors: notifications.errors,
+      logger: { warn: () => {} },
+    }),
+    caffeine: {
+      status: () => ({ mode: "off", scope: "system-only", held: false }),
+      configure: (settings) => ({ ...settings, held: settings.mode === "on" }),
+      markTerminalActivity: () => {
+        terminalActivityCount += 1
+      },
+      beginMeaningfulActivity: () => () => {},
+    },
   })
 })
 
@@ -119,6 +170,7 @@ describe("terminal router", () => {
     await caller.terminal.write({ sessionId, data: "ECHO-ME\n" })
     await waitFor(() => chunks.join("").includes("ECHO-ME"))
     expect(chunks.join("")).toContain("ECHO-ME")
+    expect(terminalActivityCount).toBeGreaterThanOrEqual(2)
 
     const listed = await caller.terminal.list()
     expect(listed.some((s) => s.id === sessionId && s.alive)).toBe(true)

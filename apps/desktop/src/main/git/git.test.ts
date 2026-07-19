@@ -1,5 +1,5 @@
 // Integration tests for the git wrapper against throwaway repos created with
-// real `git init` (docs/testing-and-build.md). No mocks — these exercise the actual CLI.
+// real `git init` (md/engineering/testing-and-build.md). No mocks — these exercise the actual CLI.
 import { execFile } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -26,15 +26,15 @@ let repoDir: string
 async function initRepo(dir: string): Promise<void> {
   await execFileAsync("git", ["init", "-b", "main", dir])
   const run = (args: string[]) => execFileAsync("git", ["-C", dir, ...args])
-  await run(["config", "user.email", "test@skipper.local"])
-  await run(["config", "user.name", "Skipper Test"])
+  await run(["config", "user.email", "test@pi-lab.local"])
+  await run(["config", "user.name", "PI Lab Test"])
   await writeFile(join(dir, "README.md"), "# fixture\n")
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "skipper-git-"))
+  root = await mkdtemp(join(tmpdir(), "pi-lab-git-"))
   repoDir = join(root, "repo")
   await initRepo(repoDir)
 })

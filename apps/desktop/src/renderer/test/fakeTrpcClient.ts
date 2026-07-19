@@ -1,7 +1,7 @@
 import { createTRPCClient, type TRPCLink } from "@trpc/client"
 import { observable } from "@trpc/server/observable"
 import type { AppRouter } from "../../main/trpc/appRouter"
-import type { SkipperTrpcClient } from "../trpc/client"
+import type { PiLabTrpcClient } from "../trpc/client"
 
 /**
  * A handler for one procedure path (dot-joined, e.g. `"files.read"`). Receives
@@ -15,12 +15,12 @@ export type FakeHandlers = Record<string, FakeHandler>
 /**
  * Build a *real* tRPC client backed by an in-memory terminating link instead of
  * the IPC link, so component tests can drive `useTRPC()` reads/mutations without
- * a main process (docs/testing-and-build.md). The `@trpc/tanstack-react-query` integration
+ * a main process (md/engineering/testing-and-build.md). The `@trpc/tanstack-react-query` integration
  * resolves calls through the untyped client, so a hand-rolled plain object won't
  * do — this returns a genuine client whose link dispatches each operation to the
  * handler registered for its path, erroring clearly on an unhandled path.
  */
-export function createFakeTrpcClient(handlers: FakeHandlers): SkipperTrpcClient {
+export function createFakeTrpcClient(handlers: FakeHandlers): PiLabTrpcClient {
   const link: TRPCLink<AppRouter> =
     () =>
     ({ op }) =>

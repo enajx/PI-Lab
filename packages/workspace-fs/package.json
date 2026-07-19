@@ -1,5 +1,5 @@
 {
-  "name": "@skipper/workspace-fs",
+  "name": "@pi-lab/workspace-fs",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,6 +10,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@skipper/shared": "workspace:*"
+    "@pi-lab/shared": "workspace:*"
   }
 }

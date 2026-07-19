@@ -1,5 +1,5 @@
-import type { Machine } from "@skipper/local-db"
-import { Badge, Button, cn, Input } from "@skipper/ui"
+import type { Machine } from "@pi-lab/local-db"
+import { Badge, Button, cn, Input } from "@pi-lab/ui"
 import { Check, Cpu, Eye, EyeOff, Loader2, Pencil, Radar, X } from "lucide-react"
 import { useState } from "react"
 import type { RouterOutputs } from "../../../../../../../trpc/types"
@@ -19,6 +19,8 @@ interface MachineCardProps {
   machine: Machine
   /** Live GPU / CPU telemetry from the last probe (omitted before any probe). */
   telemetry?: MachineTelemetry
+  /** Projects currently assigned to this machine; empty until remote dispatch is available. */
+  runningProjects: readonly string[]
   /** Probe this machine's reachability now. */
   onRefresh: () => void
   /** Hide / unhide this machine. */
@@ -39,8 +41,8 @@ function statusFor(machine: Machine): {
     return { label: "not checked", dot: "bg-muted-foreground/40", variant: "muted" }
   }
   return machine.reachable
-    ? { label: "reachable", dot: "bg-emerald-500", variant: "success" }
-    : { label: "unreachable", dot: "bg-rose-500", variant: "destructive" }
+    ? { label: "online", dot: "bg-emerald-500", variant: "success" }
+    : { label: "offline", dot: "bg-rose-500", variant: "destructive" }
 }
 
 /** Build the `user@hostname:port` connection line (omitting unset parts). */
@@ -66,6 +68,7 @@ function pct(value: number): number {
 export function MachineCard({
   machine,
   telemetry,
+  runningProjects,
   onRefresh,
   onToggleHidden,
   onAnnotate,
@@ -88,7 +91,7 @@ export function MachineCard({
       data-host={machine.host}
       data-hidden={machine.hidden}
       className={cn(
-        "flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-4",
+        "flex h-full flex-col gap-2 rounded-lg border border-border bg-card/40 p-4",
         machine.hidden && "opacity-60",
       )}
     >
@@ -103,9 +106,6 @@ export function MachineCard({
                 {machine.host}
               </Badge>
             ) : null}
-            <Badge variant="muted">
-              {machine.source === "ssh-config" ? "ssh config" : "manual"}
-            </Badge>
           </div>
           <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs">
             {connectionLine(machine)}
@@ -118,6 +118,7 @@ export function MachineCard({
             size="icon"
             className="size-7"
             aria-label="Annotate machine"
+            data-feature-help="Set a friendly display name while keeping the SSH host alias"
             onClick={() => {
               setDraft(machine.label ?? "")
               setEditing(true)
@@ -131,6 +132,11 @@ export function MachineCard({
             size="icon"
             className="size-7"
             aria-label={machine.hidden ? "Unhide machine" : "Hide machine"}
+            data-feature-help={
+              machine.hidden
+                ? "Restore this machine to the normal cluster view"
+                : "Remove this machine from the normal cluster view"
+            }
             onClick={onToggleHidden}
           >
             {machine.hidden ? <EyeOff /> : <Eye />}
@@ -197,16 +203,28 @@ export function MachineCard({
           size="sm"
           className="h-7 gap-1.5 px-2.5 text-xs"
           disabled={isRefreshing}
+          data-feature-help="Connect over SSH and refresh this machine's reachability and hardware usage"
           onClick={onRefresh}
         >
           {isRefreshing ? <Loader2 className="animate-spin" /> : <Radar />}
-          {isRefreshing ? "Checking…" : "Check if available"}
+          {isRefreshing ? "Checking…" : "Check"}
         </Button>
       </div>
 
       {telemetry && machine.reachable === true ? (
-        <MachineTelemetryPanel telemetry={telemetry} />
+        <MachineTelemetryPanel telemetry={telemetry} checkedAt={machine.lastCheckedAt} />
       ) : null}
+
+      <div
+        data-testid="machine-running-projects"
+        className="mt-auto flex min-h-7 items-center gap-1.5 border-border/60 border-t pt-2"
+      >
+        {runningProjects.map((project) => (
+          <Badge key={project} variant="muted">
+            {project}
+          </Badge>
+        ))}
+      </div>
     </div>
   )
 }
@@ -216,7 +234,13 @@ export function MachineCard({
  * summary, and one row per GPU (name, a utilization bar, and used/total memory).
  * Falls back to "No GPUs reported" when the host returned no GPUs.
  */
-function MachineTelemetryPanel({ telemetry }: { telemetry: MachineTelemetry }) {
+function MachineTelemetryPanel({
+  telemetry,
+  checkedAt,
+}: {
+  telemetry: MachineTelemetry
+  checkedAt: number | null
+}) {
   const gpus = telemetry.gpus ?? []
   const busy = gpus.filter((gpu) => gpu.utilization >= GPU_BUSY_PERCENT).length
 
@@ -236,6 +260,14 @@ function MachineTelemetryPanel({ telemetry }: { telemetry: MachineTelemetry }) {
           </span>
         ) : null}
       </div>
+      {checkedAt != null ? (
+        <p data-testid="machine-checked-at" className="text-muted-foreground/80 text-xs">
+          Checked{" "}
+          {new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(
+            new Date(checkedAt),
+          )}
+        </p>
+      ) : null}
       {gpus.length > 0 ? (
         <ul className="flex flex-col gap-1">
           {gpus.map((gpu) => (
@@ -255,21 +287,21 @@ function GpuRow({ gpu }: { gpu: GpuSnapshot }) {
     <li
       data-testid="gpu-row"
       data-gpu-index={gpu.index}
-      className="flex items-center gap-2 text-xs"
+      className="grid grid-cols-[minmax(0,1fr)_4rem_2.5rem_auto] items-center gap-2 text-xs"
     >
-      <span className="min-w-0 flex-1 truncate text-muted-foreground" title={gpu.name}>
-        {gpu.index}: {gpu.name}
+      <span className="flex min-w-0 items-center text-muted-foreground" title={gpu.name}>
+        <span className="w-4 shrink-0 text-right tabular-nums">{gpu.index}</span>
+        <span className="shrink-0">:&nbsp;</span>
+        <span className="truncate">{gpu.name}</span>
       </span>
-      <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted-foreground/15">
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted-foreground/15">
         <div
           className={cn("h-full rounded-full", busy ? "bg-amber-500" : "bg-emerald-500")}
           style={{ width: `${utilization}%` }}
           aria-hidden
         />
       </div>
-      <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">
-        {pct(gpu.utilization)}%
-      </span>
+      <span className="text-right tabular-nums text-muted-foreground">{pct(gpu.utilization)}%</span>
       <span className="shrink-0 font-mono text-muted-foreground/80 text-[11px]">
         {gpu.memUsed}/{gpu.memTotal} MiB
       </span>

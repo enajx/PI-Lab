@@ -1,5 +1,5 @@
-import { fuzzyMatch, highlightSegments } from "@skipper/shared"
-import { cn } from "@skipper/ui"
+import { fuzzyMatch, highlightSegments } from "@pi-lab/shared"
+import { cn } from "@pi-lab/ui"
 import type { ComponentType } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
@@ -22,7 +22,7 @@ interface RankedItem {
 /**
  * A generic centered quick-find overlay: a debounce-free, client-side fuzzy filter over a
  * caller-supplied list of {@link QuickFindItem}s, with match highlighting (shared
- * `@skipper/shared` scorer), ↑/↓ to move, Enter to pick, Esc/backdrop to dismiss. The
+ * `@pi-lab/shared` scorer), ↑/↓ to move, Enter to pick, Esc/backdrop to dismiss. The
  * caller owns the data + the pick action — this is the reusable shell behind the
  * context-aware ⌘F (projects when outside a project, collections/folders in the Library, …).
  * Mounted only while open. Empty query lists every item in the given order.
@@ -108,6 +108,7 @@ export function QuickFind({
       <button
         type="button"
         aria-label="Close quick find"
+        data-feature-help="Close this search without opening a result"
         tabIndex={-1}
         onClick={onClose}
         className="-z-10 absolute inset-0 cursor-default bg-black/40"
@@ -122,7 +123,9 @@ export function QuickFind({
         <input
           ref={inputRef}
           data-testid="quick-find-input"
+          aria-label={ariaLabel}
           value={query}
+          data-feature-help="Search the items available in this view"
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
@@ -147,6 +150,8 @@ export function QuickFind({
                     type="button"
                     data-testid="quick-find-item"
                     data-find-id={item.id}
+                    data-feature-label={item.label}
+                    data-feature-help="Open this result in the current view"
                     data-index={index}
                     data-highlighted={selected}
                     onClick={() => choose(index)}

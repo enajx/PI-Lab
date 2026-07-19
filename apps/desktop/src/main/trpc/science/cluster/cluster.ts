@@ -1,7 +1,8 @@
-import { type Machine, machines, type NewMachine, type SkipperDatabase } from "@skipper/local-db"
+import { type Machine, machines, type NewMachine, type PiLabDatabase } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { asc, eq } from "drizzle-orm"
 import { z } from "zod"
+import { withMeaningfulActivity } from "../../../caffeine"
 import {
   defaultSshConfigPath,
   type GpuSnapshot,
@@ -224,7 +225,9 @@ export const clusterRouter = router({
     .mutation(async ({ ctx, input }): Promise<MachineProbeResult> => {
       const machine = ctx.db.select().from(machines).where(eq(machines.id, input.id)).get()
       if (!machine) throw new TRPCError({ code: "NOT_FOUND", message: `No machine ${input.id}` })
-      return probeAndRecord(ctx.db, ctx.sshExec, machine)
+      return withMeaningfulActivity(ctx.caffeine, `cluster:refresh:${machine.id}`, async () =>
+        probeAndRecord(ctx.db, ctx.sshExec, machine),
+      )
     }),
 
   /**
@@ -234,7 +237,9 @@ export const clusterRouter = router({
    */
   refreshAll: publicProcedure.mutation(async ({ ctx }): Promise<MachineProbeResult[]> => {
     const targets = ctx.db.select().from(machines).where(eq(machines.hidden, false)).all()
-    return Promise.all(targets.map((m) => probeAndRecord(ctx.db, ctx.sshExec, m)))
+    return withMeaningfulActivity(ctx.caffeine, "cluster:refresh-all", async () =>
+      Promise.all(targets.map((m) => probeAndRecord(ctx.db, ctx.sshExec, m))),
+    )
   }),
 })
 
@@ -246,7 +251,7 @@ export const clusterRouter = router({
  * point-in-time and surfaced through the return value only.
  */
 async function probeAndRecord(
-  db: SkipperDatabase,
+  db: PiLabDatabase,
   sshExec: SshExec,
   machine: Machine,
 ): Promise<MachineProbeResult> {

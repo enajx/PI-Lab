@@ -6,7 +6,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { ScienceLibrary } from "./ScienceLibrary"
 
 /**
- * Component test for the Library science tab (docs/testing-and-build.md). The tab renders
+ * Component test for the Library science tab (md/engineering/testing-and-build.md). The tab renders
  * plain DOM + the hand-authored UI primitives, so jsdom suffices; we assert structure
  * only — the source chooser (disconnected) vs. the collections browser (connected).
  * Item/navigation detail lives in the LibraryBrowser test.

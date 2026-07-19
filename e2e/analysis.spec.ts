@@ -8,13 +8,13 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (docs/testing-and-build.md, P8c): launch the real Electron build, open a
+ * Whole-app E2E (md/engineering/testing-and-build.md, P8c): launch the real Electron build, open a
  * temp git repo as a project via the `?openProject` seam (no native dialog),
  * navigate to the Analysis science tab, select the CSV the repo contains, and
  * prove the preview table renders end to end.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (docs/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun (md/engineering/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -38,20 +38,21 @@ let repoDir: string
 async function initRepo(dir: string): Promise<void> {
   await execFileAsync("git", ["init", "-b", "main", dir])
   const run = (args: string[]) => execFileAsync("git", ["-C", dir, ...args])
-  await run(["config", "user.email", "test@skipper.local"])
-  await run(["config", "user.name", "Skipper Test"])
+  await run(["config", "user.email", "test@pi-lab.local"])
+  await run(["config", "user.name", "PI Lab Test"])
   await writeFile(join(dir, "README.md"), "# fixture\n")
 
   // A data file the Analysis tab should discover and preview as a table.
   await mkdir(join(dir, "data"), { recursive: true })
   await writeFile(join(dir, CSV_REL_PATH), CSV_BODY)
+  await writeFile(join(dir, "analysis.py"), "print('source, not a result artifact')\n")
 
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
 }
 
 test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "skipper-e2e-analysis-"))
+  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-analysis-"))
   repoDir = join(dataDir, "repo")
   await initRepo(repoDir)
 
@@ -60,11 +61,11 @@ test.beforeEach(async () => {
     args: [MAIN_ENTRY],
     env: {
       ...process.env,
-      SKIPPER_TEST_MODE: "1",
-      SKIPPER_DATA_DIR: dataDir,
-      SKIPPER_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       // Open the temp repo as a project on load (renderer query seam).
-      SKIPPER_TEST_OPEN_PROJECT: repoDir,
+      PI_LAB_TEST_OPEN_PROJECT: repoDir,
     },
   })
 })
@@ -96,6 +97,9 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
   // The repo's CSV appears in the file list.
   const fileRow = window.locator(`[data-testid="analysis-file"][data-rel-path="${CSV_REL_PATH}"]`)
   await expect(fileRow).toBeVisible({ timeout: 30_000 })
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path="analysis.py"]'),
+  ).toHaveCount(0)
 
   // Selecting it renders the preview table.
   await fileRow.click()

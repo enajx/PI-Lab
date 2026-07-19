@@ -6,7 +6,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../../../te
 import { LibraryBrowser } from "./LibraryBrowser"
 
 /**
- * Component test for the source-agnostic collections browser (docs/testing-and-build.md):
+ * Component test for the source-agnostic collections browser (md/engineering/testing-and-build.md):
  * collections-first rendering, the folder "Open" action, the truncation banner, and the
  * keyboard cursor (↓/↑ move, ⌘→ enters, ⌘←/⌘↑ go back, ⌘↓ no-ops).
  */

@@ -1,16 +1,28 @@
-import type { EditorSettings } from "@skipper/local-db"
-import { cn } from "@skipper/ui"
+import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
+import { cn } from "@pi-lab/ui"
 import {
   Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
   FileText,
+  MessageSquare,
   PanelLeft,
   PanelLeftOpen,
   PanelRight,
   Play,
+  Plus,
   TerminalSquare,
   X,
 } from "lucide-react"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import {
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
 import { EditorSettingsMenu } from "../../../../../Editor/components/EditorSettingsMenu"
@@ -26,7 +38,7 @@ import {
 } from "../../../../../preferences/preferences"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { Terminal } from "../../../../../Terminal"
-import type { SkipperTrpcClient } from "../../../../../trpc/client"
+import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
@@ -34,7 +46,7 @@ import type { CentralPanelController, SessionPane } from "./useCentralPanel"
 interface CentralPanelProps {
   controller: CentralPanelController
   /** App-wide tRPC client for the terminal panes' observable subscriptions. */
-  client: SkipperTrpcClient
+  client: PiLabTrpcClient
   /** Main-checkout workspace — drives quick-open search + file reads. */
   workspaceId: string
   settings: EditorSettings
@@ -65,8 +77,11 @@ export function CentralPanel({
 }: CentralPanelProps) {
   const { editor, sessions, active } = controller
   const [quickOpen, setQuickOpen] = useState(false)
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const addMenuRef = useRef<HTMLDivElement | null>(null)
   const [showFilesPanel, setShowFilesPanel] = useShowFilesPanel()
   const [filesWidth, setFilesWidth] = useFilesPanelWidth()
+  const runDestination = settings.pythonRunDestination ?? "central"
 
   // Quick-open (⌘F, rebindable) opens the file palette from anywhere in the view.
   useEffect(() => {
@@ -79,6 +94,22 @@ export function CentralPanel({
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
+
+  useEffect(() => {
+    if (!addMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddMenuOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [addMenuOpen])
 
   // ⌘W closes the active tab (and stays in the project). The app menu deliberately
   // leaves ⌘W unbound (see main/window/appMenu.ts) so the keystroke reaches here
@@ -103,6 +134,8 @@ export function CentralPanel({
   }, [])
 
   const hasFileActive = active?.type === "file" && editor.active !== null
+  const hasPythonActive =
+    hasFileActive && editor.active !== null && isPythonPath(editor.active.relPath)
   const showLauncher = active === null || (active.type === "file" && editor.active === null)
 
   const openFile = (relPath: string) => {
@@ -123,7 +156,9 @@ export function CentralPanel({
             type="button"
             data-testid="central-files-toggle"
             aria-pressed={showFilesPanel}
+            aria-label={showFilesPanel ? "Hide files panel" : "Show files panel"}
             title={showFilesPanel ? "Hide files panel" : "Show files panel"}
+            data-feature-help="Show the project file tree beside the editor instead of in the right sidebar"
             onClick={() => setShowFilesPanel(!showFilesPanel)}
             className={cn(
               "flex size-7 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
@@ -170,13 +205,61 @@ export function CentralPanel({
           ))}
         </div>
 
-        {/* Direct pane-creation buttons and editor settings — right. */}
+        {/* Pane creation, file run, and editor settings — intentionally grouped. */}
         <div className="flex shrink-0 items-center gap-0.5 border-border border-l bg-muted/30 px-1">
+          <div ref={addMenuRef} className="relative">
+            <button
+              type="button"
+              data-testid="central-add-menu"
+              title="Add pane"
+              aria-label="Add pane"
+              aria-expanded={addMenuOpen}
+              onClick={() => setAddMenuOpen((open) => !open)}
+              className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Plus className="size-4" aria-hidden />
+            </button>
+            {addMenuOpen ? (
+              <div
+                data-testid="central-add-menu-options"
+                className="absolute top-8 right-0 z-30 w-36 rounded-md border border-border bg-popover p-1 shadow-lg"
+              >
+                <AddMenuButton
+                  testId="central-add-agent"
+                  label="Agent CLI"
+                  icon={<Bot className="size-3.5" aria-hidden />}
+                  onClick={() => {
+                    setAddMenuOpen(false)
+                    controller.openAgentChooser()
+                  }}
+                />
+                <AddMenuButton
+                  testId="central-add-terminal"
+                  label="Terminal"
+                  icon={<TerminalSquare className="size-3.5" aria-hidden />}
+                  onClick={() => {
+                    setAddMenuOpen(false)
+                    controller.openTerminal()
+                  }}
+                />
+                <AddMenuButton
+                  testId="central-add-document"
+                  label="Document"
+                  icon={<FileText className="size-3.5" aria-hidden />}
+                  onClick={() => {
+                    setAddMenuOpen(false)
+                    controller.openNewMarkdown()
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             data-testid="central-new-agent"
             title="New agent"
             aria-label="New agent"
+            data-feature-help="Start the remembered coding agent in this project workspace"
             disabled={controller.pendingAgent}
             onClick={controller.openAgent}
             className={cn(
@@ -184,13 +267,14 @@ export function CentralPanel({
               controller.pendingAgent && "cursor-not-allowed opacity-50",
             )}
           >
-            <Play className="size-4" aria-hidden />
+            <Bot className="size-4" aria-hidden />
           </button>
           <button
             type="button"
             data-testid="central-new-terminal"
             title="New terminal"
             aria-label="New terminal"
+            data-feature-help="Open an interactive shell in this project workspace"
             disabled={controller.pendingTerminal}
             onClick={controller.openTerminal}
             className={cn(
@@ -205,11 +289,33 @@ export function CentralPanel({
             data-testid="central-new-markdown"
             title="New markdown"
             aria-label="New markdown"
+            data-feature-help="Create an untitled Markdown file in the built-in editor"
             onClick={controller.openNewMarkdown}
             className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <FileText className="size-4" aria-hidden />
           </button>
+          {hasPythonActive ? (
+            <>
+              <ToolbarDivider testId="central-run-divider" />
+              <button
+                type="button"
+                data-testid="central-run-python"
+                title="Run Python (Mod+Enter)"
+                aria-label="Run Python"
+                data-feature-help="Save, format, and run the focused Python file using the destination selected in Editor settings"
+                disabled={controller.pendingPython}
+                onClick={() => controller.runPython(runDestination)}
+                className={cn(
+                  "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  controller.pendingPython && "cursor-not-allowed opacity-50",
+                )}
+              >
+                <Play className="size-4" aria-hidden />
+              </button>
+            </>
+          ) : null}
+          <ToolbarDivider testId="central-settings-divider" />
           <EditorSettingsMenu settings={settings} onChange={onUpdateEditorSettings} />
           {rightSidebarCollapsed ? (
             <button
@@ -217,6 +323,7 @@ export function CentralPanel({
               data-testid="right-sidebar-expand"
               aria-label="Expand panel"
               title="Expand panel"
+              data-feature-help="Restore the project details sidebar"
               onClick={onExpandRightSidebar}
               className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
@@ -257,7 +364,11 @@ export function CentralPanel({
               data-testid="central-files-panel"
               className="flex min-h-0 w-full flex-col overflow-y-auto border-border border-r"
             >
-              <FilesPanel workspaceId={workspaceId} onOpenFile={controller.openFile} />
+              <FilesPanel
+                workspaceId={workspaceId}
+                onOpenFile={controller.openFile}
+                activeRelPath={editor.active?.relPath}
+              />
             </div>
             <EdgeResizeHandle
               side="right"
@@ -281,7 +392,7 @@ export function CentralPanel({
                 data-session-kind={session.kind}
                 className={cn("min-h-0 flex-1 flex-col", isActive ? "flex" : "hidden")}
               >
-                <Terminal client={client} sessionId={session.sessionId} />
+                <Terminal client={client} inputKind={session.kind} sessionId={session.sessionId} />
               </div>
             )
           })}
@@ -290,13 +401,21 @@ export function CentralPanel({
               buffer/cursor state survives a tab switch. */}
           {editor.buffers.length > 0 ? (
             <div className={cn("min-h-0 flex-1 flex-col", hasFileActive ? "flex" : "hidden")}>
-              <FileSurface editor={editor} settings={settings} />
+              <FileSurface
+                editor={editor}
+                settings={settings}
+                onUpdateSettings={onUpdateEditorSettings}
+                onRunPython={() => controller.runPython(runDestination)}
+                belowEditorRun={controller.belowEditorRun}
+                onCloseBelowEditorRun={controller.closeBelowEditorRun}
+                client={client}
+              />
             </div>
           ) : null}
 
           {showLauncher ? (
             <Launcher
-              onOpenAgent={controller.openAgent}
+              onOpenAgent={controller.openAgentChooser}
               onOpenTerminal={controller.openTerminal}
               onOpenFile={() => setQuickOpen(true)}
               pendingAgent={controller.pendingAgent}
@@ -313,12 +432,254 @@ export function CentralPanel({
           onClose={() => setQuickOpen(false)}
         />
       ) : null}
+      {controller.agentChooserOpen ? (
+        <NewAgentDialog
+          key={controller.preferredAgentId}
+          agents={controller.agentOptions}
+          initialAgentId={controller.preferredAgentId}
+          pending={controller.pendingAgent}
+          error={controller.launchError}
+          onStart={controller.launchChosenAgent}
+          onClose={controller.closeAgentChooser}
+        />
+      ) : null}
     </section>
   )
 }
 
+function AddMenuButton({
+  testId,
+  label,
+  icon,
+  onClick,
+}: {
+  testId: string
+  label: string
+  icon: ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+function ToolbarDivider({ testId }: { testId: string }) {
+  return <div aria-hidden="true" data-testid={testId} className="mx-1 h-4 w-px bg-border" />
+}
+
+function NewAgentDialog({
+  agents,
+  initialAgentId,
+  pending,
+  error,
+  onStart,
+  onClose,
+}: {
+  agents: CentralPanelController["agentOptions"]
+  initialAgentId: string
+  pending: boolean
+  error: string | null
+  onStart: (agentId: string, workspaceMode: "main" | "worktree") => void
+  onClose: () => void
+}) {
+  const firstAvailable = agents.find((agent) => agent.available)?.id ?? ""
+  const initial = agents.some((agent) => agent.id === initialAgentId && agent.available)
+    ? initialAgentId
+    : firstAvailable
+  const [selected, setSelected] = useState(initial)
+  const [workspaceMode, setWorkspaceMode] = useState<"main" | "worktree">("main")
+  const selectedAvailable = agents.some((agent) => agent.id === selected && agent.available)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      data-testid="new-agent-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-agent-title"
+      className="absolute inset-0 z-50 flex items-center justify-center bg-background/75 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div className="w-full max-w-md rounded-lg border border-border bg-background shadow-xl">
+        <div className="flex items-start justify-between border-border border-b p-4">
+          <div>
+            <h2 id="new-agent-title" className="font-semibold text-sm">
+              New session
+            </h2>
+            <p className="mt-1 text-muted-foreground text-xs">
+              Start a CLI coding agent in the project’s main checkout or its own worktree.
+            </p>
+          </div>
+          <button type="button" aria-label="Close new session" onClick={onClose}>
+            <X className="size-4" aria-hidden />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2 border-border border-b p-3">
+          <button type="button" className="rounded border border-primary bg-primary/10 p-2 text-xs">
+            <Bot className="mx-auto mb-1 size-4" aria-hidden />
+            Agent CLI
+          </button>
+          <button
+            type="button"
+            disabled
+            className="rounded border border-border p-2 text-muted-foreground text-xs opacity-50"
+          >
+            <MessageSquare className="mx-auto mb-1 size-4" aria-hidden />
+            Chat
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2 p-4">
+          {agents.map((agent) => (
+            <label
+              key={agent.id}
+              data-available={agent.available}
+              className={cn(
+                "flex rounded-lg border p-3",
+                agent.available
+                  ? selected === agent.id
+                    ? "cursor-pointer border-primary bg-primary/5"
+                    : "cursor-pointer border-border hover:bg-accent/40"
+                  : "border-border opacity-50",
+              )}
+            >
+              <input
+                type="radio"
+                name="agent"
+                aria-label={agent.label}
+                value={agent.id}
+                checked={selected === agent.id}
+                disabled={!agent.available}
+                onChange={() => setSelected(agent.id)}
+                className="sr-only"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center justify-between gap-3 text-sm">
+                  {agent.label}
+                  {agent.available ? (
+                    <CheckCircle2 className="size-4 text-emerald-600" aria-label="Detected" />
+                  ) : (
+                    <CircleHelp
+                      className="size-4 text-muted-foreground"
+                      aria-label="Not detected"
+                    />
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "mt-1 block text-xs",
+                    agent.available ? "text-emerald-600" : "text-muted-foreground",
+                  )}
+                >
+                  {agent.available ? "Detected" : "Not detected"}
+                </span>
+              </span>
+            </label>
+          ))}
+          {agents.length === 0 ? (
+            <p className="text-destructive text-xs">No agent harnesses are configured.</p>
+          ) : null}
+          <fieldset className="col-span-2 grid grid-cols-2 gap-2 border-border border-t pt-3">
+            <legend className="mb-2 text-muted-foreground text-xs">Run agent in</legend>
+            <label
+              className={cn(
+                "cursor-pointer rounded-md border p-2 text-sm",
+                workspaceMode === "main" ? "border-primary bg-primary/5" : "border-border",
+              )}
+            >
+              <input
+                type="radio"
+                name="agent-workspace"
+                aria-label="Main"
+                value="main"
+                checked={workspaceMode === "main"}
+                onChange={() => setWorkspaceMode("main")}
+                className="sr-only"
+              />
+              Main
+              <span className="mt-0.5 block text-muted-foreground text-xs">Project checkout</span>
+            </label>
+            <label
+              className={cn(
+                "cursor-pointer rounded-md border p-2 text-sm",
+                workspaceMode === "worktree" ? "border-primary bg-primary/5" : "border-border",
+              )}
+            >
+              <input
+                type="radio"
+                name="agent-workspace"
+                aria-label="Worktree"
+                value="worktree"
+                checked={workspaceMode === "worktree"}
+                onChange={() => setWorkspaceMode("worktree")}
+                className="sr-only"
+              />
+              Worktree
+              <span className="mt-0.5 block text-muted-foreground text-xs">Isolated checkout</span>
+            </label>
+          </fieldset>
+          {error ? (
+            <p data-testid="new-agent-error" className="text-destructive text-xs">
+              {error}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2 border-border border-t p-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded px-3 py-1.5 text-sm hover:bg-accent"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!selectedAvailable || pending}
+            onClick={() => onStart(selected, workspaceMode)}
+            className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm disabled:opacity-50"
+          >
+            Start agent
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** The editor body for the active file: banners + buffer + status bar. */
-function FileSurface({ editor, settings }: { editor: EditorBuffersApi; settings: EditorSettings }) {
+function FileSurface({
+  editor,
+  settings,
+  onUpdateSettings,
+  onRunPython,
+  belowEditorRun,
+  onCloseBelowEditorRun,
+  client,
+}: {
+  editor: EditorBuffersApi
+  settings: EditorSettings
+  onUpdateSettings: (patch: Partial<EditorSettings>) => void
+  onRunPython: () => void
+  belowEditorRun: CentralPanelController["belowEditorRun"]
+  onCloseBelowEditorRun: () => void
+  client: PiLabTrpcClient
+}) {
   const active = editor.active
   return (
     <>
@@ -342,22 +703,118 @@ function FileSurface({ editor, settings }: { editor: EditorBuffersApi; settings:
             initialDoc={active.content}
             onChange={(doc) => editor.onEdit(active.relPath, doc)}
             onSave={() => void editor.saveFile(active.relPath)}
+            onRun={isPythonPath(active.relPath) ? onRunPython : undefined}
             vim={settings.vim}
             theme={settings.editorTheme}
+            customThemes={settings.customEditorThemes ?? []}
             diagnostics={editor.diagnosticsSource}
           />
         ) : null}
       </div>
 
+      {belowEditorRun ? (
+        <BelowEditorTerminal run={belowEditorRun} client={client} onClose={onCloseBelowEditorRun} />
+      ) : null}
+
       <EditorStatusBar
-        relPath={active?.relPath ?? null}
         isPython={active ? isPythonPath(active.relPath) : false}
         counts={editor.statusCounts}
         missing={editor.statusMissing}
         checking={editor.activeDiagnostics.checking}
         hasRun={editor.activeDiagnostics.hasRun}
+        diagnosticsEnabled={settings.diagnosticsEnabled}
+        onToggleDiagnostics={() =>
+          onUpdateSettings({ diagnosticsEnabled: !settings.diagnosticsEnabled })
+        }
+        pythonRuntime={editor.pythonRuntime}
+        listPythonEnvironments={editor.listPythonEnvironments}
+        selectPythonEnvironment={editor.selectPythonEnvironment}
+        choosePythonEnvironment={editor.choosePythonEnvironment}
       />
     </>
+  )
+}
+
+function BelowEditorTerminal({
+  run,
+  client,
+  onClose,
+}: {
+  run: NonNullable<CentralPanelController["belowEditorRun"]>
+  client: PiLabTrpcClient
+  onClose: () => void
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  const [height, setHeight] = useState(220)
+
+  const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startY = event.clientY
+    const startHeight = height
+    const target = event.currentTarget
+    target.setPointerCapture(event.pointerId)
+    const onMove = (move: PointerEvent) => {
+      setHeight(Math.min(480, Math.max(120, startHeight - (move.clientY - startY))))
+    }
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", cleanup)
+      window.removeEventListener("pointercancel", cleanup)
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", cleanup)
+    window.addEventListener("pointercancel", cleanup)
+  }
+
+  return (
+    <section
+      data-testid="editor-run-terminal"
+      className="relative flex shrink-0 flex-col border-border border-t bg-background"
+      style={collapsed ? undefined : { height }}
+    >
+      <div
+        data-testid="editor-run-terminal-resize"
+        aria-hidden
+        onPointerDown={onResizeStart}
+        className="-top-1.5 absolute inset-x-0 z-20 h-1.5 cursor-row-resize hover:bg-primary/30"
+      />
+      <div className="flex h-7 shrink-0 items-center gap-2 border-border border-b bg-muted/30 px-2">
+        <button
+          type="button"
+          data-testid="editor-run-terminal-collapse"
+          aria-label={collapsed ? "Reopen run terminal" : "Collapse run terminal"}
+          onClick={() => setCollapsed((value) => !value)}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          {collapsed ? (
+            <ChevronRight className="size-3.5" aria-hidden />
+          ) : (
+            <ChevronDown className="size-3.5" aria-hidden />
+          )}
+        </button>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">{run.label}</span>
+        <button
+          type="button"
+          data-testid="editor-run-terminal-close"
+          aria-label="Close run terminal"
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
+      </div>
+      {collapsed ? null : (
+        <div className="min-h-0 flex-1">
+          <Terminal
+            key={run.sessionId}
+            client={client}
+            inputKind="terminal"
+            sessionId={run.sessionId}
+          />
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -375,6 +832,12 @@ interface CentralTabProps {
 /** One central-panel tab: kind icon, label, a dirty dot for files, close button. */
 function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: CentralTabProps) {
   const Icon = kind === "agent" ? Bot : kind === "terminal" ? TerminalSquare : FileText
+  const description =
+    kind === "agent"
+      ? "Switch to this coding agent session."
+      : kind === "terminal"
+        ? "Switch to this interactive shell terminal."
+        : "Switch to this open file in the built-in editor."
   return (
     <div
       data-testid="central-tab"
@@ -388,6 +851,10 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
     >
       <button
         type="button"
+        data-testid="central-tab-select"
+        aria-label={label}
+        data-feature-label={label}
+        data-feature-help={description}
         onClick={onSelect}
         className="flex items-center gap-1.5 py-1.5"
         title={label}
@@ -406,6 +873,7 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
         type="button"
         data-testid="central-tab-close"
         aria-label={`Close ${label}`}
+        data-feature-help={`Close this ${kind === "file" ? "editor file" : `${kind} session`} tab`}
         onClick={onClose}
         className="flex size-4 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent hover:text-foreground"
       >
@@ -441,21 +909,24 @@ function Launcher({
         <LauncherButton
           testId="launcher-agent"
           icon={<Play className="size-4" aria-hidden />}
-          label="Open agent"
+          label="New agent"
+          description="Start a coding agent in this project workspace."
           disabled={pendingAgent}
           onClick={onOpenAgent}
         />
         <LauncherButton
           testId="launcher-terminal"
           icon={<TerminalSquare className="size-4" aria-hidden />}
-          label="Open terminal"
+          label="New terminal"
+          description="Open an interactive shell in this project workspace."
           disabled={pendingTerminal}
           onClick={onOpenTerminal}
         />
         <LauncherButton
           testId="launcher-file"
           icon={<FileText className="size-4" aria-hidden />}
-          label="Open file"
+          label="New file"
+          description="Find and open a project file in the built-in editor."
           onClick={onOpenFile}
         />
       </div>
@@ -467,12 +938,14 @@ function LauncherButton({
   testId,
   icon,
   label,
+  description,
   disabled,
   onClick,
 }: {
   testId: string
   icon: ReactNode
   label: string
+  description: string
   disabled?: boolean
   onClick: () => void
 }) {
@@ -480,6 +953,8 @@ function LauncherButton({
     <button
       type="button"
       data-testid={testId}
+      data-feature-label={label}
+      data-feature-help={description}
       disabled={disabled}
       onClick={onClick}
       className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-foreground text-sm transition-colors hover:bg-accent disabled:opacity-50"

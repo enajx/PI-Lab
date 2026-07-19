@@ -4,7 +4,7 @@ import { Menu, type MenuItemConstructorOptions } from "electron"
  * Install the application menu, deliberately binding **no** accelerator to ⌘W / Ctrl+W.
  *
  * Electron's default menu has a "Close Window" item (role `"close"`) bound to ⌘W; on the
- * lone Skipper window that closed the window — and since macOS keeps the app alive with no
+ * lone PI Lab window that closed the window — and since macOS keeps the app alive with no
  * window (`window-all-closed` is a no-op on darwin), it read as "the app exited". By owning
  * the menu and omitting any ⌘W item, the keystroke instead reaches the renderer, where the
  * project view closes the **active tab** (see `CentralPanel`). The window can still be closed

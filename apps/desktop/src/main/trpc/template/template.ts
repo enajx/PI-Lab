@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
-import { readTextFile, statFile, writeTextFile } from "@skipper/workspace-fs"
+import { readTextFile, statFile, writeTextFile } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { publicProcedure, router } from "../trpc"
@@ -8,10 +8,10 @@ import { resolveWritableTemplateDir, seedWritableTemplate } from "./templateDir"
 
 /**
  * Template router — read/write the files of the *writable* project template
- * (`~/.skipper/template`) that backs the Settings "Project template" editor and
+ * (`~/.pi-lab/template`) that backs the Settings "Project template" editor and
  * `projects.createFromTemplate`. The shape mirrors the files router: thin
  * procedures that jail every path to the template dir and delegate I/O to
- * `@skipper/workspace-fs`. Every procedure lazily seeds the writable copy first
+ * `@pi-lab/workspace-fs`. Every procedure lazily seeds the writable copy first
  * (idempotent — a no-op once it exists) so the surface works on a cold start even
  * if the boot-time seed was skipped.
  */

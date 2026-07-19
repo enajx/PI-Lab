@@ -1,4 +1,4 @@
-import { Button } from "@skipper/ui"
+import { Button } from "@pi-lab/ui"
 import { useMutation } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
 import { useState } from "react"

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { ScienceAnalysis } from "./components/ScienceAnalysis"
 
 /**
- * Analysis science tab route (AGENTS.md "Scope" / docs/architecture.md (renderer)) — the read-only data browser.
+ * Analysis science tab route (AGENTS.md "Scope" / md/engineering/architecture.md (renderer)) — the read-only data browser.
  * Sibling routes (cluster / skills / library) live alongside; the nav registry
  * (`scienceNavItems`) lists the as-yet-unbuilt ones as "coming soon".
  */

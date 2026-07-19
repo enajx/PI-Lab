@@ -1,4 +1,4 @@
-// Unit tests for the automations scheduler (AGENTS.md "Scope" / docs/testing-and-build.md): a temp-file
+// Unit tests for the automations scheduler (AGENTS.md "Scope" / md/engineering/testing-and-build.md): a temp-file
 // SQLite DB with the real generated migrations, an INJECTED clock, and an
 // INJECTED fire function — no real time, no agents, no PTYs. We seed automations
 // directly, advance the clock, tick, and assert what fired and how nextRunAt
@@ -10,16 +10,16 @@ import {
   type Automation,
   automations,
   type NewAutomation,
+  type PiLabDatabase,
   projects,
   runMigrations,
-  type SkipperDatabase,
-} from "@skipper/local-db"
+} from "@pi-lab/local-db"
 import type Database from "better-sqlite3"
 import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { AutomationScheduler } from "./scheduler"
 
-let db: SkipperDatabase
+let db: PiLabDatabase
 let sqlite: Database.Database
 let dataDir: string
 let projectId: string
@@ -30,7 +30,7 @@ const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
 beforeEach(async () => {
-  dataDir = await realpath(await mkdtemp(join(tmpdir(), "skipper-sched-")))
+  dataDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-sched-")))
   const result = runMigrations(join(dataDir, "local.db"))
   db = result.db
   sqlite = result.sqlite

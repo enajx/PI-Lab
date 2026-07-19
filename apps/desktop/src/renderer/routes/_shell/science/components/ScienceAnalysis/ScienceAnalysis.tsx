@@ -6,8 +6,10 @@ import {
   DATA_FILE_KIND_LABELS,
   type DataFileCategory,
   type DataFileKind,
-} from "@skipper/shared"
-import { badgeVariants, cn, Input } from "@skipper/ui"
+  fuzzyMatch,
+  highlightSegments,
+} from "@pi-lab/shared"
+import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { ChartArea, FileText, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -82,8 +84,7 @@ export function ScienceAnalysis() {
 
   // Context-aware ⌘F: while Analysis is open, the quick-open shortcut opens a fuzzy
   // finder over this project's data files (the shell skips /science/* so this tab is
-  // the sole ⌘F owner here). The finder runs its own filter — the inline substring box
-  // stays independent.
+  // the sole ⌘F owner here). The finder runs its own filter independently.
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (eventMatchesShortcut(event, "quick-open")) {
@@ -129,24 +130,43 @@ export function ScienceAnalysis() {
   }, [allFiles, categoryFilter])
 
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return allFiles.filter((file) => {
-      if (categoryFilter !== "all" && categoryOf(file.kind) !== categoryFilter) return false
-      if (kindFilter !== null && file.kind !== kindFilter) return false
-      if (needle && !file.relPath.toLowerCase().includes(needle)) return false
-      return true
-    })
+    const needle = query.trim()
+    const ranked: RankedAnalysisFile[] = []
+    for (const file of allFiles) {
+      if (categoryFilter !== "all" && categoryOf(file.kind) !== categoryFilter) continue
+      if (kindFilter !== null && file.kind !== kindFilter) continue
+
+      const nameMatch = fuzzyMatch(needle, file.name)
+      const pathMatch = fuzzyMatch(needle, file.relPath)
+      if (nameMatch === null && pathMatch === null) continue
+      ranked.push({
+        file,
+        fuzzyScore: Math.max(nameMatch?.score ?? -1, pathMatch?.score ?? -1),
+        likelihood: analysisLikelihood(file.relPath),
+        namePositions: nameMatch?.positions ?? [],
+        // When the basename already carries the match, highlighting it again in
+        // the path is visual noise; directory-only matches remain visible here.
+        pathPositions: nameMatch === null ? (pathMatch?.positions ?? []) : [],
+      })
+    }
+    ranked.sort(
+      (a, b) =>
+        b.fuzzyScore - a.fuzzyScore ||
+        b.likelihood - a.likelihood ||
+        a.file.relPath.localeCompare(b.file.relPath),
+    )
+    return ranked
   }, [allFiles, query, categoryFilter, kindFilter])
 
   // Re-group the filtered files by category in canonical order for sectioned
   // rendering — the header reads "Data", not the raw sub-format.
   const filteredGroups = useMemo(() => {
-    const byCategory = new Map<DataFileCategory, DataFileEntry[]>()
-    for (const file of filtered) {
-      const category = categoryOf(file.kind)
+    const byCategory = new Map<DataFileCategory, RankedAnalysisFile[]>()
+    for (const rankedFile of filtered) {
+      const category = categoryOf(rankedFile.file.kind)
       const bucket = byCategory.get(category)
-      if (bucket) bucket.push(file)
-      else byCategory.set(category, [file])
+      if (bucket) bucket.push(rankedFile)
+      else byCategory.set(category, [rankedFile])
     }
     return ALL_DATA_FILE_CATEGORIES.filter((c) => byCategory.has(c)).map((category) => ({
       category,
@@ -177,6 +197,9 @@ export function ScienceAnalysis() {
             <div className="flex shrink-0 items-center border-border border-b px-4 py-2">
               <select
                 data-testid="analysis-project-select"
+                aria-label="Analysis project"
+                data-feature-label="Analysis project"
+                data-feature-help="Choose which project repository to scan for data files."
                 value={selectedProjectId ?? ""}
                 onChange={(event) => setSelectedProjectId(event.target.value)}
                 className="h-8 w-full rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -194,6 +217,9 @@ export function ScienceAnalysis() {
                 <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
                 <Input
                   data-testid="analysis-search"
+                  aria-label="Search data files"
+                  data-feature-label="Search data files"
+                  data-feature-help="Filter this project's discovered data files by name or path."
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search files…"
@@ -274,12 +300,14 @@ export function ScienceAnalysis() {
                           {group.files.length}
                         </span>
                       </div>
-                      {group.files.map((file) => (
+                      {group.files.map((rankedFile) => (
                         <FileRow
-                          key={file.relPath}
-                          file={file}
-                          selected={file.relPath === selectedRelPath}
-                          onSelect={() => setSelectedRelPath(file.relPath)}
+                          key={rankedFile.file.relPath}
+                          file={rankedFile.file}
+                          namePositions={rankedFile.namePositions}
+                          pathPositions={rankedFile.pathPositions}
+                          selected={rankedFile.file.relPath === selectedRelPath}
+                          onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
                         />
                       ))}
                     </div>
@@ -326,10 +354,14 @@ export function ScienceAnalysis() {
 /** A single file row in the list (icon, name, repo-relative path, size). */
 function FileRow({
   file,
+  namePositions,
+  pathPositions,
   selected,
   onSelect,
 }: {
   file: DataFileEntry
+  namePositions: number[]
+  pathPositions: number[]
   selected: boolean
   onSelect: () => void
 }) {
@@ -340,6 +372,8 @@ function FileRow({
       data-rel-path={file.relPath}
       data-kind={file.kind}
       aria-pressed={selected}
+      data-feature-label={file.name}
+      data-feature-help="Open a read-only preview of this repository data file."
       onClick={onSelect}
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
@@ -349,17 +383,108 @@ function FileRow({
       <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium" title={file.relPath}>
-          {file.name}
+          <HighlightedText text={file.name} positions={namePositions} />
         </span>
         {file.relPath !== file.name ? (
           <span className="truncate text-[10px] text-muted-foreground" title={file.relPath}>
-            {file.relPath}
+            <HighlightedText text={file.relPath} positions={pathPositions} />
           </span>
         ) : null}
       </span>
       <span className="shrink-0 text-[10px] text-muted-foreground/70">{formatSize(file.size)}</span>
     </button>
   )
+}
+
+interface RankedAnalysisFile {
+  file: DataFileEntry
+  fuzzyScore: number
+  likelihood: number
+  namePositions: number[]
+  pathPositions: number[]
+}
+
+const LIKELY_ANALYSIS_TERMS = new Set([
+  "analysis",
+  "artifact",
+  "artifacts",
+  "eval",
+  "evaluation",
+  "experiment",
+  "experiments",
+  "figure",
+  "figures",
+  "metric",
+  "metrics",
+  "output",
+  "outputs",
+  "plot",
+  "plots",
+  "prediction",
+  "predictions",
+  "report",
+  "reports",
+  "result",
+  "results",
+  "run",
+  "runs",
+  "score",
+  "scores",
+  "summary",
+])
+
+const UNLIKELY_ANALYSIS_TERMS = new Set([
+  "code",
+  "config",
+  "configs",
+  "configuration",
+  "fixture",
+  "fixtures",
+  "license",
+  "package",
+  "params",
+  "parameters",
+  "readme",
+  "script",
+  "scripts",
+  "setup",
+  "source",
+  "src",
+  "test",
+  "tests",
+])
+
+/** Lightweight path/name prior; fuzzy relevance remains the primary sort key. */
+function analysisLikelihood(relPath: string): number {
+  const terms = relPath
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  let score = 0
+  for (const term of terms) {
+    if (LIKELY_ANALYSIS_TERMS.has(term)) score += 10
+    if (UNLIKELY_ANALYSIS_TERMS.has(term)) score -= 10
+  }
+  return score
+}
+
+function HighlightedText({ text, positions }: { text: string; positions: number[] }) {
+  let offset = 0
+  return highlightSegments(text, positions).map((segment) => {
+    const start = offset
+    offset += segment.text.length
+    return segment.matched ? (
+      <mark
+        key={`matched-${start}`}
+        data-testid="analysis-match"
+        className="bg-transparent font-semibold text-primary"
+      >
+        {segment.text}
+      </mark>
+    ) : (
+      <span key={`plain-${start}`}>{segment.text}</span>
+    )
+  })
 }
 
 /** A clickable filter chip for a category, sub-kind, or "All". */
@@ -380,6 +505,8 @@ function FilterChip({
       data-testid={testId}
       data-active={active}
       aria-pressed={active}
+      data-feature-label={`${label} filter`}
+      data-feature-help="Filter the data-file list by format or analysis category."
       onClick={onClick}
       className={cn(
         badgeVariants({ variant: active ? "default" : "muted" }),

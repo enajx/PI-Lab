@@ -13,7 +13,7 @@ interface QuickOpenProps {
 const DEBOUNCE_MS = 120
 
 /**
- * `⌘F` fuzzy quick-open palette (docs/architecture.md (renderer)). Typing debounces a `files.search`
+ * `⌘F` fuzzy quick-open palette (md/engineering/architecture.md (renderer)). Typing debounces a `files.search`
  * fuzzy query against the workspace; ↑/↓ move the highlight, Enter opens the
  * highlighted hit, Esc dismisses. Rendered as a centered overlay by the parent
  * `Editor`, which mounts it only while open.
@@ -97,6 +97,7 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose }: QuickOpenProps) 
       <button
         type="button"
         aria-label="Close quick open"
+        data-feature-help="Close file search without opening a file"
         tabIndex={-1}
         onClick={onClose}
         className="-z-10 absolute inset-0 cursor-default bg-black/40"
@@ -111,6 +112,8 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose }: QuickOpenProps) 
         <input
           ref={inputRef}
           data-testid="quick-open-input"
+          aria-label="Search project files"
+          data-feature-help="Search this project's files by name"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
@@ -132,6 +135,8 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose }: QuickOpenProps) 
                   type="button"
                   data-testid="quick-open-result"
                   data-rel-path={hit.relPath}
+                  data-feature-label={hit.relPath}
+                  data-feature-help="Open this project file in the built-in editor"
                   data-highlighted={index === highlight}
                   onClick={() => choose(index)}
                   onMouseEnter={() => setHighlight(index)}

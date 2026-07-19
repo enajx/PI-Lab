@@ -6,18 +6,21 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { AutomationsView } from "./AutomationsView"
 
 /**
- * Component tests for the Workflows view (docs/testing-and-build.md): jsdom + a fake tRPC
+ * Component tests for the Workflows view (md/engineering/testing-and-build.md): jsdom + a fake tRPC
  * client. The view renders plain DOM and the hand-authored UI primitives, so we
  * assert structure and the wiring of the enable toggle / create flow — never
  * copy text or shadcn classes.
  */
 
-function renderView(handlers: FakeHandlers) {
+function renderView(handlers: FakeHandlers, activation?: { workflowId: string; runId: string }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const client = createFakeTrpcClient(handlers)
+  const client = createFakeTrpcClient({
+    "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+    ...handlers,
+  })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <AutomationsView />
+      <AutomationsView activation={activation} />
     </AppProviders>,
   )
 }
@@ -27,6 +30,7 @@ function automation(overrides: Record<string, unknown> = {}) {
     id: "a1",
     name: "Nightly",
     agentId: "claude-code",
+    executionMode: "interactive",
     projectId: "p1",
     recurrenceRule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
     scheduleSummary: "Daily at 9:00 AM",
@@ -51,6 +55,9 @@ describe("AutomationsView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("automations-empty")).toBeTruthy()
     })
+    const caffeine = screen.getByTestId("caffeine-control")
+    expect(caffeine).toBeTruthy()
+    expect(caffeine.parentElement?.lastElementChild).toBe(caffeine)
   })
 
   test("renders a row per automation with its schedule summary and next run", async () => {
@@ -104,6 +111,64 @@ describe("AutomationsView", () => {
     await waitFor(() => {
       expect(runNow).toHaveBeenCalledWith({ id: "a1" })
     })
+  })
+
+  test("the row execution control persists a run-to-completion selection", async () => {
+    const update = vi.fn(() => automation({ executionMode: "noninteractive" }))
+    renderView({
+      ...baseHandlers,
+      "automations.list": () => [automation()],
+      "automations.update": update,
+    })
+
+    const mode = await screen.findByTestId("automation-row-execution-mode")
+    fireEvent.change(mode, { target: { value: "noninteractive" } })
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({
+        id: "a1",
+        executionMode: "noninteractive",
+      }),
+    )
+  })
+
+  test("an exact notification target expands, scrolls to, and highlights its run", async () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView")
+    const listRuns = vi.fn(() => [
+      {
+        id: "run-target",
+        automationId: "a1",
+        scheduledFor: Date.now(),
+        startedAt: Date.now(),
+        completedAt: Date.now(),
+        state: "completed",
+        workspaceId: "ws-1",
+        sessionId: "session-1",
+        error: null,
+        createdAt: Date.now(),
+      },
+    ])
+    renderView(
+      {
+        ...baseHandlers,
+        "automations.list": () => [automation()],
+        "automations.listRuns": listRuns,
+      },
+      { workflowId: "a1", runId: "run-target" },
+    )
+
+    const row = await screen.findByTestId("automation-row")
+    await waitFor(() => expect(row.getAttribute("data-highlighted")).toBe("true"))
+    const run = await screen.findByTestId("run-item")
+    await waitFor(() => expect(run.getAttribute("data-highlighted")).toBe("true"))
+    expect(document.activeElement).toBe(run)
+    expect(scrollIntoView).toHaveBeenCalled()
+    expect(listRuns).toHaveBeenCalledWith({
+      automationId: "a1",
+      limit: 20,
+      targetRunId: "run-target",
+    })
+    scrollIntoView.mockRestore()
   })
 
   test("the New workflow button reveals the create form", async () => {

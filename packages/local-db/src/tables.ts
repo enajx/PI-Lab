@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto"
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "./editorSettings"
+
+export { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "./editorSettings"
 
 /**
- * Skipper's local store. Every row lives on the user's own machine in
- * `$SKIPPER_DATA_DIR/local.db` — there is no cloud mirror, no synced identity,
+ * PI Lab's local store. Every row lives on the user's own machine in
+ * `$PI_LAB_DATA_DIR/local.db` — there is no cloud mirror, no synced identity,
  * and no remote ownership. The shape below models exactly four things:
  *
  *   1. the user's research units      -> `projects`
@@ -47,8 +50,84 @@ const createdNow = () =>
  */
 export type WorkspaceKind = "worktree" | "branch"
 
-/** Lifecycle of a single automation firing (launch-only; no completion tracking). */
-export type AutomationRunState = "pending" | "launched" | "failed"
+/**
+ * Lifecycle of a single automation firing.
+ *
+ * `launched` is retained for rows written by older PI Lab versions. New
+ * interactive and run-to-completion workflows advance through `pending` →
+ * `running` → `completed`/`failed`.
+ */
+export type AutomationRunState = "pending" | "launched" | "running" | "completed" | "failed"
+
+/** How a workflow invokes its selected harness. */
+export type AutomationExecutionMode = "interactive" | "noninteractive"
+
+/** Current lifecycle classification for a durable interactive agent session. */
+export type AgentSessionState = "working" | "waiting" | "exited"
+
+/** Why a live interactive agent is waiting for the user. */
+export type AgentSessionWaitingReason =
+  | "initial-prompt"
+  | "permission"
+  | "question"
+  | "turn-complete"
+  | "idle"
+
+/** Bundled notification sound, or no custom sound playback. */
+export type NotificationSound = "chime" | "pulse" | "success" | "alert" | "silent"
+
+/** Enablement and sound choice for one notification event. */
+export interface NotificationEventSettings {
+  enabled: boolean
+  sound: NotificationSound
+}
+
+/** App-wide notification preferences persisted on the singleton settings row. */
+export interface NotificationSettings {
+  /** Suppress all native banners and custom sounds. */
+  muted: boolean
+  /** Interactive agent needs permission, an answer, or a new instruction. */
+  agentInput: NotificationEventSettings
+  /** An armed interactive agent turn returned to its normal input prompt. */
+  agentTurnCompletion: NotificationEventSettings
+  /** A submitted command in a project terminal returned to its shell prompt. */
+  terminalCompletion: NotificationEventSettings
+  /** A workflow run entered its running state. */
+  workflowStart: NotificationEventSettings
+  /** A workflow run completed successfully. */
+  workflowCompletion: NotificationEventSettings
+  /** A workflow run failed to launch or terminated unsuccessfully. */
+  workflowFailure: NotificationEventSettings
+}
+
+/** Defaults for a settings row that predates notification preferences. */
+export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  muted: false,
+  agentInput: { enabled: true, sound: "chime" },
+  agentTurnCompletion: { enabled: true, sound: "success" },
+  terminalCompletion: { enabled: true, sound: "success" },
+  workflowStart: { enabled: false, sound: "pulse" },
+  workflowCompletion: { enabled: true, sound: "success" },
+  workflowFailure: { enabled: true, sound: "alert" },
+}
+
+/** User-selected caffeine behavior for Electron's power-save blocker. */
+export type CaffeineMode = "off" | "on" | "auto"
+
+/** Whether caffeine prevents app suspension only, or also keeps the display awake. */
+export type CaffeineScope = "system-only" | "system-plus-display"
+
+/** App-wide caffeine preferences persisted on the singleton settings row. */
+export interface CaffeineSettings {
+  mode: CaffeineMode
+  scope: CaffeineScope
+}
+
+/** Conservative defaults: no blocker until the user opts in, system-only when enabled. */
+export const DEFAULT_CAFFEINE_SETTINGS: CaffeineSettings = {
+  mode: "off",
+  scope: "system-only",
+}
 
 /** Origin of an automation prompt revision, for the version-history view. */
 export type PromptRevisionOrigin = "edit" | "revert"
@@ -67,44 +146,33 @@ export interface AgentPreset {
   cwd?: string
 }
 
-/** A locally-known v2 Team (names only — no remote ids, see docs/architecture.md (local DB)). */
+/** Where PI Lab persists project-specific launch choices. */
+export type ProjectConfigStorage = "app" | "project" | "both"
+
+/** App-wide agent launch and per-project config persistence preferences. */
+export interface AgentSettings {
+  projectConfigStorage: ProjectConfigStorage
+  /** Explicit executable paths keyed by catalog agent id. */
+  executableOverrides: Record<string, string>
+  /** Whether the user has completed or skipped the first-run setup flow. */
+  setupCompleted: boolean
+}
+
+export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  projectConfigStorage: "app",
+  executableOverrides: {},
+  setupCompleted: false,
+}
+
+/** PI Lab-owned keys stored per project, either in SQLite or `.pi-lab/config.json`. */
+export interface ProjectAgentConfig {
+  agentId?: string
+}
+
+/** A locally-known v2 Team (names only — no remote ids, see md/engineering/architecture.md (local DB)). */
 export interface KnownTeam {
   name: string
   color?: string
-}
-
-/**
- * Built-in editor preferences (AGENTS.md "Scope", TODO "Built-in editor" — "Editor
- * settings group"). Persisted as a JSON blob on the singleton `settings` row so
- * the whole group travels as one column and gains new keys without a migration.
- * Every field is local-only and has a default that matches the spec ("off by
- * default" for the toggles; `ty` as the default type checker).
- */
-export interface EditorSettings {
-  /** Save on debounce/blur instead of requiring an explicit ⌘S (default off). */
-  autosave: boolean
-  /** Enable the CodeMirror Vim keymap (default off). */
-  vim: boolean
-  /** Which Python type checker the diagnostics run uses (default `ty`). */
-  typeChecker: "ty" | "pyrefly"
-  /** Run `ruff format` on ⌘S, then reload the buffer (default off). */
-  formatOnSave: boolean
-  /**
-   * Stored id of the editor color theme (default `"default"` — the editor's
-   * built-in highlighting). Kept a plain string so the DB never couples to the
-   * renderer's theme registry; the renderer resolves it to a CodeMirror extension
-   * and treats an unknown/legacy id as the default.
-   */
-  editorTheme: string
-}
-
-/** Spec defaults for {@link EditorSettings} (TODO "Built-in editor"). */
-export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  autosave: false,
-  vim: false,
-  typeChecker: "ty",
-  formatOnSave: false,
-  editorTheme: "default",
 }
 
 /** Personal-library id for local (zero-config) mode: `/users/0`. */
@@ -245,6 +313,8 @@ export const projects = sqliteTable(
      * travels with the row and never dangles.
      */
     thumbnail: text("thumbnail"),
+    /** App-memory copy of project-specific agent choices. */
+    agentConfig: text("agent_config", { mode: "json" }).$type<ProjectAgentConfig>(),
     /** Manual ordering in the sidebar; lower sorts first. */
     sortIndex: integer("sort_index").notNull().default(0),
     /** Archived projects are hidden from the active list but never deleted. */
@@ -339,6 +409,11 @@ export const workspaces = sqliteTable(
     branch: text("branch").notNull(),
     /** Base of a contiguous port range reserved for this workspace's dev servers. */
     portBase: integer("port_base"),
+    /**
+     * User-selected Python environment directory or interpreter. Null keeps
+     * workspace-scoped automatic detection active.
+     */
+    pythonEnvironmentPath: text("python_environment_path"),
     /** Manual ordering within its project / section. */
     sortIndex: integer("sort_index").notNull().default(0),
     createdAt: createdNow(),
@@ -382,7 +457,7 @@ export const settings = sqliteTable("settings", {
   /** Whether to prompt before quitting with live sessions. */
   confirmOnQuit: integer("confirm_on_quit", { mode: "boolean" }).notNull().default(true),
   /**
-   * Worktree policy for the "start agent session" flow (docs/architecture.md (agent runtime)). When ON,
+   * Worktree policy for the "start agent session" flow (md/engineering/architecture.md (agent runtime)). When ON,
    * every agent session gets its own fresh git worktree. When OFF (default), an
    * agent opens in the project's main checkout (its single branch workspace) and
    * only spills into a fresh worktree once a second concurrent agent would
@@ -398,6 +473,23 @@ export const settings = sqliteTable("settings", {
     .notNull()
     .$type<EditorSettings>()
     .default(DEFAULT_EDITOR_SETTINGS),
+  /**
+   * Native notification and renderer sound preferences. Stored as one JSON
+   * group so adding an event in a later release does not require another
+   * migration.
+   */
+  notifications: text("notifications", { mode: "json" })
+    .notNull()
+    .$type<NotificationSettings>()
+    .default(DEFAULT_NOTIFICATION_SETTINGS),
+  /**
+   * Persisted caffeine mode and power-save blocker scope. The controller reads
+   * this group during app startup and reconciles the live blocker.
+   */
+  caffeine: text("caffeine", { mode: "json" })
+    .notNull()
+    .$type<CaffeineSettings>()
+    .default(DEFAULT_CAFFEINE_SETTINGS),
   /** Locally-known v2 Teams (names/colors only — no remote identity). */
   knownTeams: text("known_teams", { mode: "json" }).notNull().$type<KnownTeam[]>().default([]),
   /**
@@ -409,6 +501,40 @@ export const settings = sqliteTable("settings", {
    * without a migration — rows are normalized at read time by `coerceLibrarySource`.
    */
   zotero: text("zotero", { mode: "json" }).$type<LibrarySource>(),
+  updatedAt: integer("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+})
+
+// ---------------------------------------------------------------------------
+// agentSettings — singleton launch/config preferences, split from `settings`
+// so its lifecycle does not force unrelated JSON-default table rebuilds.
+// ---------------------------------------------------------------------------
+
+export const agentSettings = sqliteTable("agent_settings", {
+  id: integer("id").primaryKey().default(1),
+  projectConfigStorage: text("project_config_storage")
+    .notNull()
+    .$type<ProjectConfigStorage>()
+    .default("app"),
+  executableOverrides: text("executable_overrides", { mode: "json" })
+    .notNull()
+    .$type<Record<string, string>>()
+    .default({}),
+  setupCompleted: integer("setup_completed", { mode: "boolean" }).notNull().default(false),
+  updatedAt: integer("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+})
+
+/**
+ * Encrypted, machine-local API credentials chosen during setup. The renderer
+ * receives only presence state; ciphertext is produced by Electron safeStorage
+ * in the main process and is never written to a project or exported config.
+ */
+export const agentCredentials = sqliteTable("agent_credentials", {
+  agentId: text("agent_id").primaryKey(),
+  encryptedValue: text("encrypted_value").notNull(),
   updatedAt: integer("updated_at")
     .notNull()
     .$defaultFn(() => Date.now()),
@@ -498,6 +624,14 @@ export const automations = sqliteTable(
     name: text("name").notNull(),
     /** Catalogued agent id to launch (mirrors a workspace's chosen agent). */
     agentId: text("agent_id").notNull(),
+    /**
+     * Interactive opens a durable PTY session; non-interactive invokes the
+     * harness once and owns lifecycle directly through process exit.
+     */
+    executionMode: text("execution_mode")
+      .notNull()
+      .$type<AutomationExecutionMode>()
+      .default("interactive"),
     /** Current prompt body the agent is launched on. */
     prompt: text("prompt").notNull().default(""),
     /** RFC 5545 RRULE body (the recurrence rule, without DTSTART). */
@@ -541,18 +675,77 @@ export const automationRuns = sqliteTable(
     workspaceId: text("workspace_id").references(() => workspaces.id, {
       onDelete: "set null",
     }),
+    /**
+     * PTY-daemon session targeted by this interactive run. Deliberately not a
+     * foreign key: the daemon id must remain readable on historical rows even
+     * when its durable session record is cleaned up.
+     */
+    sessionId: text("session_id"),
     /** Failure detail when `state = "failed"`. */
     error: text("error"),
     createdAt: createdNow(),
     launchedAt: integer("launched_at"),
+    completedAt: integer("completed_at"),
   },
   (t) => [
     index("ix_automation_runs_automation").on(t.automationId, t.createdAt),
     index("ix_automation_runs_workspace").on(t.workspaceId),
+    index("ix_automation_runs_session").on(t.sessionId),
     // One run per scheduled occurrence: the scheduler's overlap/double-fire guard
     // claims an occurrence by inserting a run with `onConflictDoNothing` against
     // this index, so a slow/overlapping tick can't fire the same instant twice.
     uniqueIndex("ux_automation_run_occurrence").on(t.automationId, t.scheduledFor),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// agentSessions — durable targeting and last-known lifecycle for interactive
+// CLI agents. The app-lifetime activity registry owns the live classification;
+// this table lets main reconcile still-live PTY sessions after a restart.
+// ---------------------------------------------------------------------------
+
+export const agentSessions = sqliteTable(
+  "agent_sessions",
+  {
+    id: primaryId(),
+    /** Stable PTY-daemon session id used to attach/select the exact tab. */
+    sessionId: text("session_id").notNull().unique(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id").references(() => workspaces.id, {
+      onDelete: "set null",
+    }),
+    /** Catalogued interactive agent id, e.g. `claude-code` or `codex`. */
+    agentId: text("agent_id").notNull(),
+    /**
+     * Interactive workflow run that initially launched this session, if any.
+     * The inverse run → daemon-session target is plain indexed text, avoiding a
+     * foreign-key cycle while preserving exact navigation in both directions.
+     */
+    workflowRunId: text("workflow_run_id").references(() => automationRuns.id, {
+      onDelete: "set null",
+    }),
+    state: text("state").notNull().$type<AgentSessionState>().default("working"),
+    /**
+     * Whether a real user/launch prompt has armed the current turn. Persisted so
+     * restart reconciliation cannot mistake an initial blank prompt for a
+     * completed turn or lose a submitted turn that is still running.
+     */
+    turnArmed: integer("turn_armed", { mode: "boolean" }).notNull().default(false),
+    waitingReason: text("waiting_reason").$type<AgentSessionWaitingReason>(),
+    waitingSince: integer("waiting_since"),
+    exitedAt: integer("exited_at"),
+    createdAt: createdNow(),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    index("ix_agent_sessions_project").on(t.projectId),
+    index("ix_agent_sessions_workspace").on(t.workspaceId),
+    index("ix_agent_sessions_workflow_run").on(t.workflowRunId),
+    index("ix_agent_sessions_state").on(t.state),
   ],
 )
 
@@ -597,5 +790,7 @@ export type Automation = typeof automations.$inferSelect
 export type NewAutomation = typeof automations.$inferInsert
 export type AutomationRun = typeof automationRuns.$inferSelect
 export type NewAutomationRun = typeof automationRuns.$inferInsert
+export type AgentSession = typeof agentSessions.$inferSelect
+export type NewAgentSession = typeof agentSessions.$inferInsert
 export type AutomationPromptVersion = typeof automationPromptVersions.$inferSelect
 export type NewAutomationPromptVersion = typeof automationPromptVersions.$inferInsert

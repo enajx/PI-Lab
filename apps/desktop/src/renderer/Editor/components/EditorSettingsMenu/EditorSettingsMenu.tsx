@@ -1,7 +1,8 @@
-import type { EditorSettings } from "@skipper/local-db"
-import { cn } from "@skipper/ui"
+import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
+import { cn } from "@pi-lab/ui"
 import { Check, Settings2 } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { allEditorThemes, DEFAULT_EDITOR_THEME_ID } from "../editorThemes"
 
 interface EditorSettingsMenuProps {
   /** Current editor preferences (drives the toggle states). */
@@ -15,10 +16,10 @@ interface EditorSettingsMenuProps {
 }
 
 /**
- * Self-contained editor-settings popover (docs/architecture.md (renderer); spec: TODO "Built-in
+ * Self-contained editor-settings popover (md/engineering/architecture.md (renderer); spec: TODO "Built-in
  * editor" — "Editor settings group"). A gear button in the editor toolbar that
- * opens a small menu toggling the three v1 preferences: autosave, vim mode, and
- * ruff format-on-save. The Python type checker (`ty` ↔ `pyrefly`) lives in
+ * opens a small menu toggling autosave, vim mode, Python diagnostics, and ruff
+ * format-on-save. The Python type checker (`ty` ↔ `pyrefly`) lives in
  * Settings → Editor instead, so it is intentionally absent here.
  *
  * Each toggle writes just its own field through {@link onChange} so a click
@@ -30,6 +31,10 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const labelId = useId()
+  const themes = allEditorThemes(settings.customEditorThemes ?? [])
+  const selectedTheme = themes.some((theme) => theme.id === settings.editorTheme)
+    ? settings.editorTheme
+    : DEFAULT_EDITOR_THEME_ID
 
   // Close on outside click or Escape so the menu behaves like a real popover.
   useEffect(() => {
@@ -57,6 +62,7 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
         aria-expanded={open}
         aria-label="Editor settings"
         title="Editor settings"
+        data-feature-help="Configure autosave, Vim keybindings, Python diagnostics, and format-on-save for the built-in editor"
         onClick={() => setOpen((value) => !value)}
         className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
@@ -74,6 +80,40 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
             Editor settings
           </p>
 
+          <SelectRow
+            testId="editor-settings-theme"
+            label="Color theme"
+            value={selectedTheme}
+            groups={[
+              {
+                label: "Light",
+                options: themes
+                  .filter((theme) => theme.mode === "light")
+                  .map((theme) => ({ value: theme.id, label: theme.label })),
+              },
+              {
+                label: "Dark",
+                options: themes
+                  .filter((theme) => theme.mode === "dark")
+                  .map((theme) => ({ value: theme.id, label: theme.label })),
+              },
+            ]}
+            onChange={(editorTheme) => onChange?.({ editorTheme })}
+          />
+
+          <SelectRow
+            testId="editor-settings-run-destination"
+            label="Run Python in"
+            value={settings.pythonRunDestination ?? "central"}
+            options={[
+              { value: "central", label: "New tab" },
+              { value: "below-editor", label: "Below editor" },
+            ]}
+            onChange={(pythonRunDestination) =>
+              onChange?.({ pythonRunDestination: pythonRunDestination as PythonRunDestination })
+            }
+          />
+
           <ToggleRow
             testId="editor-settings-autosave"
             label="Autosave"
@@ -89,6 +129,13 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
             onToggle={() => onChange?.({ vim: !settings.vim })}
           />
           <ToggleRow
+            testId="editor-settings-diagnostics"
+            label="Python diagnostics"
+            description="Type-check and lint open Python files"
+            checked={settings.diagnosticsEnabled}
+            onToggle={() => onChange?.({ diagnosticsEnabled: !settings.diagnosticsEnabled })}
+          />
+          <ToggleRow
             testId="editor-settings-format-on-save"
             label="Format on save"
             description="Run ruff format on ⌘S"
@@ -98,6 +145,51 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
         </div>
       ) : null}
     </div>
+  )
+}
+
+function SelectRow({
+  testId,
+  label,
+  value,
+  options,
+  groups,
+  onChange,
+}: {
+  testId: string
+  label: string
+  value: string
+  options?: Array<{ value: string; label: string }>
+  groups?: Array<{ label: string; options: Array<{ value: string; label: string }> }>
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent">
+      <span>{label}</span>
+      <select
+        data-testid={testId}
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-w-0 max-w-40 rounded border border-border bg-background px-1.5 py-1 text-foreground"
+      >
+        {groups
+          ? groups.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))
+          : options?.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+      </select>
+    </label>
   )
 }
 
@@ -118,6 +210,8 @@ function ToggleRow({ testId, label, description, checked, onToggle }: ToggleRowP
       aria-checked={checked}
       data-testid={testId}
       data-checked={checked}
+      data-feature-label={label}
+      data-feature-help={description}
       onClick={onToggle}
       className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
     >

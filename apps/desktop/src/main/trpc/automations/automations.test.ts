@@ -1,23 +1,47 @@
-// Integration tests for the automations router (AGENTS.md "Scope" / docs/testing-and-build.md): createCaller
+// Integration tests for the automations router (AGENTS.md "Scope" / md/engineering/testing-and-build.md): createCaller
 // over a temp SQLite DB with real migrations, a real temp git repo, and the
 // in-process pty-daemon + fake agent. Covers CRUD, prompt-version snapshotting,
 // the computed nextRunAt, runNow firing through the real session-start flow, and
 // the scheduler firing a due automation via the SAME dispatch path.
-import { automations } from "@skipper/local-db"
+import { agentSessions, automationRuns, automations } from "@pi-lab/local-db"
+import type { TerminalAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { dispatchAutomation } from "../../automations/dispatch"
+import type {
+  NonInteractiveProcessResult,
+  NonInteractiveProcessRunner,
+} from "../../automations/nonInteractiveRunner"
 import { AutomationScheduler } from "../../automations/scheduler"
+import { createNotificationBrokers } from "../../notifications"
 import type { AppContext } from "../context"
 import { createHarness, FAKE_AGENT, type Harness } from "../testHarness"
 
 const DAILY_9 = "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
+const WORKFLOW_AGENT: TerminalAgent = {
+  id: "workflow-agent",
+  label: "Workflow Agent",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: [
+    "-e",
+    "process.stdout.write('Working on it\\n');setTimeout(()=>process.stdout.write('\\n❯\\n'),25);process.stdin.resume()",
+  ],
+}
+const CODEX_ONE_SHOT_AGENT: TerminalAgent = {
+  id: "codex",
+  label: "Codex",
+  command: "/custom/codex",
+  detect: "codex",
+  defaultArgs: ["--profile", "science"],
+  env: { AGENT_ENV: "kept" },
+}
 
 let h: Harness
 let projectId: string
 
 beforeEach(async () => {
-  h = await createHarness([FAKE_AGENT])
+  h = await createHarness([FAKE_AGENT, WORKFLOW_AGENT])
   const project = await h.caller.projects.open({ path: h.repoDir })
   projectId = project.id
 })
@@ -26,19 +50,71 @@ afterEach(async () => {
   await h.dispose()
 })
 
+async function waitFor(predicate: () => boolean, timeoutMs = 4_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error("waitFor timed out")
+}
+
+async function resetHarness(
+  agents: readonly TerminalAgent[],
+  runNonInteractiveProcess: NonInteractiveProcessRunner,
+): Promise<void> {
+  await h.dispose()
+  h = await createHarness(agents, {
+    runNonInteractiveProcess,
+    getAgentLaunchEnvironment: async () => ({
+      PATH: "/login/bin",
+      LOGIN_ENV: "resolved",
+    }),
+    notificationsUnfocused: true,
+    nativeNotificationsSupported: true,
+  })
+  const project = await h.caller.projects.open({ path: h.repoDir })
+  projectId = project.id
+}
+
 /** The AppContext the harness built, for direct dispatch/scheduler tests. */
 function harnessContext(): AppContext {
   return {
     db: h.db,
+    skillsHomeDir: h.skillsHomeDir,
     getDaemonClient: async () => h.client,
-    agentCatalog: [FAKE_AGENT],
-    liveAgents: h.liveAgents,
+    agentCatalog: [FAKE_AGENT, WORKFLOW_AGENT],
+    resolveAgentExecutable: async (candidate) => candidate,
+    getAgentLaunchEnvironment: async () => ({ ...process.env }) as Record<string, string>,
+    runNonInteractiveProcess: async () => {
+      throw new Error("interactive test unexpectedly ran a one-shot workflow")
+    },
+    credentialCipher: { encrypt: (value) => value },
     sshExec: async () => ({ ok: true, detail: "" }),
     httpFetch: async () => {
       throw new Error("no network in tests")
     },
     openPath: async () => "",
     pyToolsExec: async () => ({ stdout: "", stderr: "", code: null, notFound: true }),
+    discoverPythonEnvironments: async () => [],
+    resolvePythonRuntime: async () => ({
+      source: null,
+      displayName: "No virtual env",
+      interpreterPath: process.execPath,
+      runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
+    }),
+    notifications: createNotificationBrokers(),
+    activityMonitor: h.activityMonitor,
+    notificationService: h.notificationService,
+    caffeine: h.caffeine,
+  }
+}
+
+function nonInteractiveHarnessContext(runner: NonInteractiveProcessRunner): AppContext {
+  return {
+    ...harnessContext(),
+    agentCatalog: [CODEX_ONE_SHOT_AGENT],
+    runNonInteractiveProcess: runner,
   }
 }
 
@@ -88,6 +164,55 @@ describe("automations CRUD", () => {
     })
     expect(created.enabled).toBe(false)
     expect(created.nextRunAt).toBeNull()
+  })
+
+  test("create and update persist the selected execution mode", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      executionMode: "noninteractive",
+      name: "One shot",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    expect(created.executionMode).toBe("noninteractive")
+    expect((await h.caller.automations.list())[0]?.executionMode).toBe("noninteractive")
+
+    const updated = await h.caller.automations.update({
+      id: created.id,
+      executionMode: "interactive",
+    })
+    expect(updated.executionMode).toBe("interactive")
+  })
+
+  test("listRuns includes an exact target older than the requested page", async () => {
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "fake-agent",
+      name: "History",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    h.db
+      .insert(automationRuns)
+      .values(
+        Array.from({ length: 25 }, (_, index) => ({
+          id: `history-run-${index}`,
+          automationId: created.id,
+          scheduledFor: 1_900_000_000_000 + index,
+          createdAt: 1_900_000_000_000 + index,
+        })),
+      )
+      .run()
+
+    const runs = await h.caller.automations.listRuns({
+      automationId: created.id,
+      limit: 20,
+      targetRunId: "history-run-0",
+    })
+
+    expect(runs).toHaveLength(21)
+    expect(runs.at(-1)?.id).toBe("history-run-0")
   })
 
   test("list returns created automations newest-first", async () => {
@@ -197,10 +322,10 @@ describe("automations CRUD", () => {
 })
 
 describe("runNow — fires via the real session-start flow", () => {
-  test("launches the agent, records a 'launched' run with a workspace id", async () => {
+  test("tracks the initially launched interactive turn through completion", async () => {
     const created = await h.caller.automations.create({
       projectId,
-      agentId: "fake-agent",
+      agentId: WORKFLOW_AGENT.id,
       name: "Manual",
       prompt: "go",
       recurrenceRule: DAILY_9,
@@ -210,10 +335,20 @@ describe("runNow — fires via the real session-start flow", () => {
     const { runId } = await h.caller.automations.runNow({ id: created.id })
     expect(runId).toBeTruthy()
 
+    await waitFor(
+      () =>
+        h.db
+          .select()
+          .from(automationRuns)
+          .where(eq(automationRuns.id, runId ?? ""))
+          .get()?.state === "completed",
+    )
     const runs = await h.caller.automations.listRuns({ automationId: created.id })
     expect(runs).toHaveLength(1)
-    expect(runs[0]?.state).toBe("launched")
+    expect(runs[0]?.state).toBe("completed")
     expect(runs[0]?.workspaceId).toBeTruthy()
+    expect(runs[0]?.sessionId).toBeTruthy()
+    expect(runs[0]?.completedAt).toEqual(expect.any(Number))
 
     // runNow uses a fresh scheduledFor and never touches the cadence.
     const after = await h.caller.automations.get({ id: created.id })
@@ -244,6 +379,262 @@ describe("runNow — fires via the real session-start flow", () => {
   })
 })
 
+describe("runNow — non-interactive process lifecycle", () => {
+  test("runs exact argv in the active project and routes start/completion to the exact run", async () => {
+    let finish: (result: NonInteractiveProcessResult) => void = () => {}
+    const completion = new Promise<NonInteractiveProcessResult>((resolve) => {
+      finish = resolve
+    })
+    const runner = vi.fn<NonInteractiveProcessRunner>(async () => ({ completion }))
+    await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
+    await h.caller.settings.updateNotifications({
+      workflowStart: { enabled: true },
+    })
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "codex",
+      executionMode: "noninteractive",
+      name: "Review",
+      prompt: "review; $(touch never)",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const { runId } = await h.caller.automations.runNow({ id: created.id })
+    expect(runId).toBeTruthy()
+    expect(runner).toHaveBeenCalledWith({
+      command: "/custom/codex",
+      args: ["--profile", "science", "exec", "review; $(touch never)"],
+      cwd: h.repoDir,
+      env: expect.objectContaining({
+        PATH: "/login/bin",
+        LOGIN_ENV: "resolved",
+        AGENT_ENV: "kept",
+      }),
+    })
+    expect(
+      h.db
+        .select()
+        .from(automationRuns)
+        .where(eq(automationRuns.id, runId ?? ""))
+        .get(),
+    ).toMatchObject({
+      state: "running",
+      workspaceId: null,
+      sessionId: null,
+    })
+    expect(h.db.select().from(agentSessions).all()).toHaveLength(0)
+    expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
+      "Workflow started",
+    ])
+
+    finish({ code: 0, signal: null, error: null, stderr: "" })
+    await waitFor(
+      () =>
+        h.db
+          .select()
+          .from(automationRuns)
+          .where(eq(automationRuns.id, runId ?? ""))
+          .get()?.state === "completed",
+    )
+    expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
+      "Workflow started",
+      "Workflow completed",
+    ])
+
+    const activations: unknown[] = []
+    const unsubscribe = h.notifications.activations.subscribe((target) => activations.push(target))
+    h.notificationDeliveries[1]?.handlers.onClick()
+    unsubscribe()
+    expect(activations).toEqual([{ type: "workflow", workflowId: created.id, runId }])
+  })
+
+  test("uses the actual exit code and stderr for one failure notification", async () => {
+    const runner: NonInteractiveProcessRunner = async () => ({
+      completion: Promise.resolve({
+        code: 17,
+        signal: null,
+        error: null,
+        stderr: "model unavailable",
+      }),
+    })
+    await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "codex",
+      executionMode: "noninteractive",
+      name: "Failing review",
+      prompt: "review",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const { runId } = await h.caller.automations.runNow({ id: created.id })
+    await waitFor(
+      () =>
+        h.db
+          .select()
+          .from(automationRuns)
+          .where(eq(automationRuns.id, runId ?? ""))
+          .get()?.state === "failed",
+    )
+    const run = h.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, runId ?? ""))
+      .get()
+    expect(run?.error).toMatch(/code 17.*model unavailable/i)
+    expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
+      "Workflow failed",
+    ])
+  })
+
+  test("uses the same configured executable override as interactive agent launches", async () => {
+    const runner = vi.fn<NonInteractiveProcessRunner>(async () => ({
+      completion: Promise.resolve({ code: 0, signal: null, error: null, stderr: "" }),
+    }))
+    await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
+    await h.caller.settings.updateAgents({
+      executableOverrides: { codex: "/configured/codex" },
+    })
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "codex",
+      executionMode: "noninteractive",
+      name: "Configured",
+      prompt: "review",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    await h.caller.automations.runNow({ id: created.id })
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "/configured/codex",
+        args: ["--profile", "science", "exec", "review"],
+      }),
+    )
+  })
+
+  test("surfaces an unavailable harness without inventing a started event", async () => {
+    const runner = vi.fn<NonInteractiveProcessRunner>()
+    await resetHarness([{ ...CODEX_ONE_SHOT_AGENT, command: "/missing/pi-lab-agent" }], runner)
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "codex",
+      executionMode: "noninteractive",
+      name: "Unavailable",
+      prompt: "review",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const { runId } = await h.caller.automations.runNow({ id: created.id })
+    const run = h.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, runId ?? ""))
+      .get()
+    expect(run).toMatchObject({ state: "failed" })
+    expect(run?.error).toMatch(/not available.*settings/i)
+    expect(runner).not.toHaveBeenCalled()
+    expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
+      "Workflow failed",
+    ])
+  })
+
+  test("surfaces a spawn failure without inventing a started event", async () => {
+    const runner: NonInteractiveProcessRunner = async () => {
+      throw new Error("Unable to start /custom/codex: spawn EACCES")
+    }
+    await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
+    await h.caller.settings.updateNotifications({
+      workflowStart: { enabled: true },
+    })
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "codex",
+      executionMode: "noninteractive",
+      name: "Cannot spawn",
+      prompt: "review",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const { runId } = await h.caller.automations.runNow({ id: created.id })
+    const run = h.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, runId ?? ""))
+      .get()
+    expect(run).toMatchObject({
+      state: "failed",
+      launchedAt: null,
+      error: "Unable to start /custom/codex: spawn EACCES",
+    })
+    expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
+      "Workflow failed",
+    ])
+  })
+
+  test.each([
+    {
+      label: "signal termination",
+      result: {
+        code: null,
+        signal: "SIGTERM" as NodeJS.Signals,
+        error: null,
+        stderr: "",
+      },
+      expectedError: /signal SIGTERM/i,
+    },
+    {
+      label: "post-spawn runtime error",
+      result: {
+        code: null,
+        signal: null,
+        error: "Codex process stream failed",
+        stderr: "",
+      },
+      expectedError: /process failed.*stream failed/i,
+    },
+  ])("fails once on $label", async ({ result, expectedError }) => {
+    const runner: NonInteractiveProcessRunner = async () => ({
+      completion: Promise.resolve(result),
+    })
+    await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "codex",
+      executionMode: "noninteractive",
+      name: "Interrupted",
+      prompt: "review",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+
+    const { runId } = await h.caller.automations.runNow({ id: created.id })
+    await waitFor(
+      () =>
+        h.db
+          .select()
+          .from(automationRuns)
+          .where(eq(automationRuns.id, runId ?? ""))
+          .get()?.state === "failed",
+    )
+    const run = h.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, runId ?? ""))
+      .get()
+    expect(run?.error).toMatch(expectedError)
+    expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
+      "Workflow failed",
+    ])
+  })
+})
+
 describe("dispatch overlap guard", () => {
   test("a second dispatch for the same scheduledFor is a no-op", async () => {
     const ctx = harnessContext()
@@ -251,7 +642,7 @@ describe("dispatch overlap guard", () => {
       .insert(automations)
       .values({
         projectId,
-        agentId: "fake-agent",
+        agentId: WORKFLOW_AGENT.id,
         name: "Once",
         recurrenceRule: DAILY_9,
         startAt: Date.now(),
@@ -277,7 +668,7 @@ describe("scheduler fires a due automation end-to-end", () => {
     const ctx = harnessContext()
     const created = await h.caller.automations.create({
       projectId,
-      agentId: "fake-agent",
+      agentId: WORKFLOW_AGENT.id,
       name: "Due",
       prompt: "tick",
       recurrenceRule: DAILY_9,
@@ -296,11 +687,21 @@ describe("scheduler fires a due automation end-to-end", () => {
     const fired = await scheduler.tick()
     expect(fired).toBe(1)
 
-    // A run was recorded and launched against the fake agent. tick() awaited the
-    // fire, so the run row is already terminal — read it directly.
+    await waitFor(
+      () =>
+        h.db.select().from(automationRuns).where(eq(automationRuns.automationId, created.id)).get()
+          ?.state === "completed",
+    ).catch(() => {
+      const current = h.db
+        .select()
+        .from(automationRuns)
+        .where(eq(automationRuns.automationId, created.id))
+        .get()
+      throw new Error(`workflow remained ${current?.state}: ${current?.error ?? "no error"}`)
+    })
     const runs = await h.caller.automations.listRuns({ automationId: created.id })
     expect(runs).toHaveLength(1)
-    expect(runs[0]?.state).toBe("launched")
+    expect(runs[0]?.state).toBe("completed")
     expect(runs[0]?.scheduledFor).toBe(due)
 
     // nextRunAt advanced past the fired occurrence.
@@ -329,5 +730,50 @@ describe("scheduler fires a due automation end-to-end", () => {
 
     const runs = await h.caller.automations.listRuns({ automationId: created.id })
     expect(runs).toHaveLength(0)
+  })
+
+  test("a scheduled run-to-completion workflow follows its process lifecycle", async () => {
+    const runner = vi.fn<NonInteractiveProcessRunner>(async () => ({
+      completion: Promise.resolve({
+        code: 0,
+        signal: null,
+        error: null,
+        stderr: "",
+      }),
+    }))
+    await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
+    await h.caller.settings.updateNotifications({
+      workflowStart: { enabled: true },
+    })
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: CODEX_ONE_SHOT_AGENT.id,
+      executionMode: "noninteractive",
+      name: "Scheduled one-shot",
+      prompt: "review",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    const due = created.nextRunAt
+    expect(due).not.toBeNull()
+
+    const scheduler = new AutomationScheduler({
+      db: h.db,
+      fire: (args) => dispatchAutomation(nonInteractiveHarnessContext(runner), args),
+      now: () => (due ?? 0) + 60_000,
+    })
+    const fired = await scheduler.tick()
+    expect(fired).toBe(1)
+    await waitFor(
+      () =>
+        h.db.select().from(automationRuns).where(eq(automationRuns.automationId, created.id)).get()
+          ?.state === "completed",
+    )
+
+    expect(runner).toHaveBeenCalledTimes(1)
+    expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
+      "Workflow started",
+      "Workflow completed",
+    ])
   })
 })

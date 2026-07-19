@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Skipper is local-only: the env-validation gate is effectively always-on
+  # PI Lab is local-only: the env-validation gate is effectively always-on
   # (AGENTS.md §12.6 / Rule 10). Set it for any build/test step that reads env.
   SKIP_ENV_VALIDATION: "1"
 
@@ -53,6 +53,23 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run typecheck
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.0"
+      - name: Cache bun store
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run docs:build
 
   # ── Unit + integration tests (NODE ABI) ─────────────────────────────────────
   # CRITICAL — ABI sequencing (AGENTS.md §13): native modules install prebuilt for

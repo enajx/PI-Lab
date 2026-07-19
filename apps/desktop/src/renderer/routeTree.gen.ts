@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ShellIndexRouteImport } from './routes/_shell/index'
+import { Route as ShellSetupRouteImport } from './routes/_shell/setup'
 import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
 import { Route as ShellAutomationsRouteImport } from './routes/_shell/automations'
+import { Route as ShellScienceTasksRouteImport } from './routes/_shell/science/tasks'
 import { Route as ShellScienceSkillsRouteImport } from './routes/_shell/science/skills'
 import { Route as ShellScienceLibraryRouteImport } from './routes/_shell/science/library'
 import { Route as ShellScienceClusterRouteImport } from './routes/_shell/science/cluster'
@@ -28,6 +30,11 @@ const ShellIndexRoute = ShellIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellSetupRoute = ShellSetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -36,6 +43,11 @@ const ShellSettingsRoute = ShellSettingsRouteImport.update({
 const ShellAutomationsRoute = ShellAutomationsRouteImport.update({
   id: '/automations',
   path: '/automations',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellScienceTasksRoute = ShellScienceTasksRouteImport.update({
+  id: '/science/tasks',
+  path: '/science/tasks',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellScienceSkillsRoute = ShellScienceSkillsRouteImport.update({
@@ -68,33 +80,39 @@ export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/automations': typeof ShellAutomationsRoute
   '/settings': typeof ShellSettingsRoute
+  '/setup': typeof ShellSetupRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/science/analysis': typeof ShellScienceAnalysisRoute
   '/science/cluster': typeof ShellScienceClusterRoute
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
+  '/science/tasks': typeof ShellScienceTasksRoute
 }
 export interface FileRoutesByTo {
   '/automations': typeof ShellAutomationsRoute
   '/settings': typeof ShellSettingsRoute
+  '/setup': typeof ShellSetupRoute
   '/': typeof ShellIndexRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/science/analysis': typeof ShellScienceAnalysisRoute
   '/science/cluster': typeof ShellScienceClusterRoute
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
+  '/science/tasks': typeof ShellScienceTasksRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_shell': typeof ShellRouteWithChildren
   '/_shell/automations': typeof ShellAutomationsRoute
   '/_shell/settings': typeof ShellSettingsRoute
+  '/_shell/setup': typeof ShellSetupRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/science/analysis': typeof ShellScienceAnalysisRoute
   '/_shell/science/cluster': typeof ShellScienceClusterRoute
   '/_shell/science/library': typeof ShellScienceLibraryRoute
   '/_shell/science/skills': typeof ShellScienceSkillsRoute
+  '/_shell/science/tasks': typeof ShellScienceTasksRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -102,32 +120,38 @@ export interface FileRouteTypes {
     | '/'
     | '/automations'
     | '/settings'
+    | '/setup'
     | '/projects/$projectId'
     | '/science/analysis'
     | '/science/cluster'
     | '/science/library'
     | '/science/skills'
+    | '/science/tasks'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/automations'
     | '/settings'
+    | '/setup'
     | '/'
     | '/projects/$projectId'
     | '/science/analysis'
     | '/science/cluster'
     | '/science/library'
     | '/science/skills'
+    | '/science/tasks'
   id:
     | '__root__'
     | '/_shell'
     | '/_shell/automations'
     | '/_shell/settings'
+    | '/_shell/setup'
     | '/_shell/'
     | '/_shell/projects/$projectId'
     | '/_shell/science/analysis'
     | '/_shell/science/cluster'
     | '/_shell/science/library'
     | '/_shell/science/skills'
+    | '/_shell/science/tasks'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -150,6 +174,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellIndexRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/setup': {
+      id: '/_shell/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof ShellSetupRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/settings': {
       id: '/_shell/settings'
       path: '/settings'
@@ -162,6 +193,13 @@ declare module '@tanstack/react-router' {
       path: '/automations'
       fullPath: '/automations'
       preLoaderRoute: typeof ShellAutomationsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/science/tasks': {
+      id: '/_shell/science/tasks'
+      path: '/science/tasks'
+      fullPath: '/science/tasks'
+      preLoaderRoute: typeof ShellScienceTasksRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/science/skills': {
@@ -205,23 +243,27 @@ declare module '@tanstack/react-router' {
 interface ShellRouteChildren {
   ShellAutomationsRoute: typeof ShellAutomationsRoute
   ShellSettingsRoute: typeof ShellSettingsRoute
+  ShellSetupRoute: typeof ShellSetupRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellScienceAnalysisRoute: typeof ShellScienceAnalysisRoute
   ShellScienceClusterRoute: typeof ShellScienceClusterRoute
   ShellScienceLibraryRoute: typeof ShellScienceLibraryRoute
   ShellScienceSkillsRoute: typeof ShellScienceSkillsRoute
+  ShellScienceTasksRoute: typeof ShellScienceTasksRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
   ShellAutomationsRoute: ShellAutomationsRoute,
   ShellSettingsRoute: ShellSettingsRoute,
+  ShellSetupRoute: ShellSetupRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellScienceAnalysisRoute: ShellScienceAnalysisRoute,
   ShellScienceClusterRoute: ShellScienceClusterRoute,
   ShellScienceLibraryRoute: ShellScienceLibraryRoute,
   ShellScienceSkillsRoute: ShellScienceSkillsRoute,
+  ShellScienceTasksRoute: ShellScienceTasksRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)

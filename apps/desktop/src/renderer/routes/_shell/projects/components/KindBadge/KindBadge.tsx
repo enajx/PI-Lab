@@ -1,8 +1,8 @@
-import type { Workspace } from "@skipper/local-db"
+import type { Workspace } from "@pi-lab/local-db"
 import { GitBranch, GitFork } from "lucide-react"
 
 /**
- * Small badge surfacing the worktree policy outcome (docs/architecture.md, agent
+ * Small badge surfacing the worktree policy outcome (md/engineering/architecture.md, agent
  * runtime) — branch (the project's main checkout) vs. an isolated worktree.
  * Extracted from the old project route so the project view and the central
  * panel's agent tabs can both show it.
@@ -20,7 +20,7 @@ export function KindBadge({ kind }: { kind: Workspace["kind"] }) {
       ) : (
         <GitBranch className="size-3" aria-hidden />
       )}
-      {isWorktree ? "worktree" : "branch"}
+      {isWorktree ? "worktree" : "main"}
     </span>
   )
 }

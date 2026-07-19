@@ -1,1 +1,6 @@
-export { Sidebar } from "./Sidebar"
+export {
+  FeatureHelpPanel,
+  FeatureHelpRestoreButton,
+  Sidebar,
+  useFeatureHelp,
+} from "./Sidebar"

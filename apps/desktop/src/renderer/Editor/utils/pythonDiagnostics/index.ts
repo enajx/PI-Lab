@@ -5,7 +5,7 @@ export {
   type DiagnosticsTypeChecker,
   isPythonPath,
   lineColToOffset,
+  type PiLabDiagnostic,
   runPythonCheck,
-  type SkipperDiagnostic,
   toCmDiagnostics,
 } from "./pythonDiagnostics"

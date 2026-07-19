@@ -9,18 +9,18 @@ import * as tables from "./tables"
 
 const schema = { ...tables, ...relations }
 
-export type SkipperDatabase = ReturnType<typeof drizzle<typeof schema>>
+export type PiLabDatabase = ReturnType<typeof drizzle<typeof schema>>
 
 export interface OpenDatabaseResult {
   /** Drizzle handle bound to the full schema (tables + relations). */
-  db: SkipperDatabase
+  db: PiLabDatabase
   /** Underlying better-sqlite3 connection (for pragmas / raw access). */
   sqlite: Database.Database
 }
 
 /**
  * Open (creating if needed) the local SQLite database and return a Drizzle
- * handle. Honors `SKIPPER_DATA_DIR` via {@link resolveDbPath}. Foreign keys are
+ * handle. Honors `PI_LAB_DATA_DIR` via {@link resolveDbPath}. Foreign keys are
  * enabled and WAL is used for concurrent reader/writer safety.
  */
 export function openDatabase(dbPath: string = resolveDbPath()): OpenDatabaseResult {
@@ -111,7 +111,7 @@ function readJournal(migrationsFolder: string): JournalEntry[] {
  * never `rm` (AGENTS.md Pitfalls #2).
  */
 function reconcileJournal(
-  db: SkipperDatabase,
+  db: PiLabDatabase,
   sqlite: Database.Database,
   migrationsFolder: string,
 ): void {
@@ -145,7 +145,7 @@ function reconcileJournal(
 }
 
 export interface RunMigrationsResult {
-  db: SkipperDatabase
+  db: PiLabDatabase
   sqlite: Database.Database
   /** True when journal-drift recovery was triggered. */
   recovered: boolean

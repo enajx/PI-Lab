@@ -5,7 +5,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DaemonServer } from "@skipper/pty-daemon"
+import { DaemonServer } from "@pi-lab/pty-daemon"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import {
   isDaemonListening,
@@ -20,7 +20,7 @@ let server: DaemonServer | null = null
 let supervisor: TerminalSupervisor | null = null
 
 beforeEach(async () => {
-  socketDir = await mkdtemp(join(tmpdir(), "skipper-supervisor-"))
+  socketDir = await mkdtemp(join(tmpdir(), "pi-lab-supervisor-"))
   socketPath = join(socketDir, "daemon.sock")
 })
 
@@ -40,7 +40,7 @@ describe("planDaemonSpawn", () => {
     expect(plan.command).toBe(process.execPath)
     expect(plan.args).toEqual(["/abs/out/pty-daemon/index.js", "/tmp/sock"])
     expect(plan.env.ELECTRON_RUN_AS_NODE).toBe("1")
-    expect(plan.env.SKIPPER_SOCKET_PATH).toBe("/tmp/sock")
+    expect(plan.env.PI_LAB_SOCKET_PATH).toBe("/tmp/sock")
   })
 })
 
@@ -77,6 +77,32 @@ describe("adopt branch", () => {
     expect(Array.isArray(sessions)).toBe(true)
   })
 
+  test("keeps lifecycle monitoring on a distinct connection after renderer detach", async () => {
+    server = new DaemonServer({ socketPath })
+    await server.listen()
+
+    supervisor = new TerminalSupervisor({ socketPath })
+    const rendererClient = await supervisor.ensureClient()
+    const monitorClient = await supervisor.ensureMonitorClient()
+    expect(monitorClient).not.toBe(rendererClient)
+
+    const session = await rendererClient.spawn({ command: "/bin/cat", args: [] })
+    await monitorClient.attach(session.id)
+    await rendererClient.detach(session.id)
+
+    const observed = new Promise<string>((resolve) => {
+      monitorClient.on("data", (event) => {
+        if (event.sessionId === session.id && event.chunk.includes("monitor-alive")) {
+          resolve(event.chunk)
+        }
+      })
+    })
+    await rendererClient.write(session.id, "monitor-alive\n")
+
+    await expect(observed).resolves.toContain("monitor-alive")
+    await rendererClient.kill(session.id)
+  })
+
   test("ensureClient rejects after dispose", async () => {
     server = new DaemonServer({ socketPath })
     await server.listen()
@@ -84,6 +110,7 @@ describe("adopt branch", () => {
     await supervisor.ensureClient()
     supervisor.dispose()
     await expect(supervisor.ensureClient()).rejects.toThrow(/disposed/)
+    await expect(supervisor.ensureMonitorClient()).rejects.toThrow(/disposed/)
   })
 })
 

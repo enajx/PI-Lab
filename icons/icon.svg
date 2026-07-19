@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1024 1024"
+  width="1024"
+  height="1024"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">PI Lab uppercase Pi icon</title>
+  <desc id="description">
+    The Avenir Next Medium uppercase Pi, converted to a path and centered in black
+    on a white macOS-style rounded tile with transparent outer corners.
+  </desc>
+  <metadata>
+    Source glyph: Avenir Next Medium face index 5 from /System/Library/Fonts/Avenir Next.ttc.
+    Original 533×708-unit outline scaled to geometric bounds 436.638×580 at
+    x=293.681, y=222 and centered on the 1024×1024 canvas.
+    The path is outlined, so rendering this asset does not require the source font.
+    See ICON-PROVENANCE.md for the reproducible extraction record.
+  </metadata>
+  <rect x="64" y="64" width="896" height="896" rx="210" fill="#fff" />
+  <path
+    fill="#000"
+    transform="matrix(0.819209039548 0 0 0.819209039548 220.771186441 802)"
+    d="M 622 -708 L 622 0 L 525 0 L 525 -622 L 186 -622 L 186 0 L 89 0 L 89 -708 Z"
+  />
+</svg>

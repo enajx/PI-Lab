@@ -1,15 +1,16 @@
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import {
+  getAgentSettingsOrDefaults,
+  type PiLabDatabase,
   projects,
-  type SkipperDatabase,
   type Workspace,
   type Worktree,
   workspaces,
   worktrees,
-} from "@skipper/local-db"
-import { portBaseForSlot } from "@skipper/port-scanner"
-import { buildLaunchArgv, getAgent } from "@skipper/shared"
+} from "@pi-lab/local-db"
+import { portBaseForSlot } from "@pi-lab/port-scanner"
+import { buildLaunchArgv, getAgent } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
@@ -87,7 +88,7 @@ export interface CreateWorkspaceArgs {
 
 /**
  * Create a workspace and its backing git checkout — the choreography shared by
- * the `create` procedure and the start-agent-session flow (docs/architecture.md (agent runtime)).
+ * the `create` procedure and the start-agent-session flow (md/engineering/architecture.md (agent runtime)).
  *
  * For `kind: "worktree"` we compute a managed worktree path under the data dir,
  * `git worktree add` a fresh branch there, and insert matching `worktrees` +
@@ -98,7 +99,7 @@ export interface CreateWorkspaceArgs {
  * concurrent workspaces never share dev-server ports.
  */
 export async function createWorkspace(
-  db: SkipperDatabase,
+  db: PiLabDatabase,
   args: CreateWorkspaceArgs,
 ): Promise<WorkspaceWithWorktree> {
   const project = db.select().from(projects).where(eq(projects.id, args.projectId)).get()
@@ -177,7 +178,7 @@ export async function createWorkspace(
 }
 
 /** The working directory an agent/terminal should run in for a workspace. */
-export function workspaceWorkingDir(db: SkipperDatabase, workspace: Workspace): string {
+export function workspaceWorkingDir(db: PiLabDatabase, workspace: Workspace): string {
   if (workspace.kind === "worktree") {
     if (!workspace.worktreeId) {
       throw new TRPCError({
@@ -287,10 +288,10 @@ export const workspacesRouter = router({
    * Launch an external CLI agent in the workspace's working directory. Resolves
    * the agent from the injected catalog (default `BUILTIN_AGENTS`), builds its
    * argv with the pure `buildLaunchArgv`, and spawns it in a PTY via the shared
-   * daemon client (the same path terminals use — docs/architecture.md (agent runtime)). Returns the new
+   * daemon client (the same path terminals use — md/engineering/architecture.md (agent runtime)). Returns the new
    * session id; the renderer subscribes to `terminal.onData` to render it.
    *
-   * Authentication is the agent's own (docs/architecture.md (agent runtime)): we set the agent's `env`
+   * Authentication is the agent's own (md/engineering/architecture.md (agent runtime)): we set the agent's `env`
    * if it declares any, but inject no credentials and read none.
    */
   launchAgent: publicProcedure
@@ -311,20 +312,36 @@ export const workspacesRouter = router({
       }
 
       const dir = workspaceWorkingDir(ctx.db, workspace)
-      const [command, ...args] = buildLaunchArgv(agent)
+      const [catalogCommand, ...args] = buildLaunchArgv(agent)
+      const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[
+        agent.id
+      ]?.trim()
+      const candidate = configuredCommand || catalogCommand
+      const command = candidate ? await ctx.resolveAgentExecutable(candidate) : null
       if (!command) {
         throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Agent ${agent.id} has no command`,
+          code: "PRECONDITION_FAILED",
+          message: `${agent.label} is not available at ${candidate || "(no executable configured)"}. Configure its executable path in Settings → Agents & worktrees.`,
         })
       }
 
       const client = await ctx.getDaemonClient()
+      const launchEnvironment = await ctx.getAgentLaunchEnvironment()
       const session = await client.spawn({
         command,
         args,
         cwd: dir,
-        env: agent.env,
+        env: { ...launchEnvironment, ...agent.env },
+        cols: input.cols,
+        rows: input.rows,
+      })
+      await ctx.activityMonitor.track({
+        sessionId: session.id,
+        projectId: workspace.projectId,
+        workspaceId: workspace.id,
+        agentId: agent.id,
+        workflowRunId: null,
+        turnArmed: false,
         cols: input.cols,
         rows: input.rows,
       })
@@ -373,9 +390,19 @@ export const workspacesRouter = router({
 
       const dir = workspaceWorkingDir(ctx.db, workspace)
       const client = await ctx.getDaemonClient()
+      const launchEnvironment = await ctx.getAgentLaunchEnvironment()
       const session = await client.spawn({
         command: DEFAULT_SHELL,
         cwd: dir,
+        env: launchEnvironment,
+        cols: input.cols,
+        rows: input.rows,
+      })
+      await ctx.activityMonitor.trackTerminal({
+        sessionId: session.id,
+        projectId: workspace.projectId,
+        workspaceId: workspace.id,
+        label: "Terminal",
         cols: input.cols,
         rows: input.rows,
       })

@@ -1,5 +1,5 @@
 import type { Diagnostic as CmDiagnostic } from "@codemirror/lint"
-import type { SkipperTrpcClient } from "../../../trpc/client"
+import type { PiLabTrpcClient } from "../../../trpc/client"
 import type { RouterOutputs } from "../../../trpc/types"
 
 /**
@@ -8,7 +8,7 @@ import type { RouterOutputs } from "../../../trpc/types"
  * CLIs over `diagnostics.check`; this module is the thin glue that
  *   1. decides whether a file is even a Python file (no diagnostics otherwise),
  *   2. calls the router for the **saved** file, and
- *   3. maps the normalized {@link SkipperDiagnostic}s into CodeMirror's
+ *   3. maps the normalized {@link PiLabDiagnostic}s into CodeMirror's
  *      `@codemirror/lint` shape (character offsets + severities) so the buffer
  *      draws squiggles / gutter markers / hover tooltips.
  *
@@ -18,7 +18,7 @@ import type { RouterOutputs } from "../../../trpc/types"
  */
 
 /** The normalized diagnostic the `diagnostics.check` procedure returns. */
-export type SkipperDiagnostic = RouterOutputs["diagnostics"]["check"]["diagnostics"][number]
+export type PiLabDiagnostic = RouterOutputs["diagnostics"]["check"]["diagnostics"][number]
 
 /** The full result of one diagnostics run, surfaced to the editor status bar. */
 export type DiagnosticsRunResult = RouterOutputs["diagnostics"]["check"]
@@ -51,7 +51,7 @@ export function lineColToOffset(doc: string, line: number, column: number): numb
 }
 
 /** Map a normalized severity onto CodeMirror's lint severity vocabulary. */
-function cmSeverity(severity: SkipperDiagnostic["severity"]): CmDiagnostic["severity"] {
+function cmSeverity(severity: PiLabDiagnostic["severity"]): CmDiagnostic["severity"] {
   // CodeMirror knows error | warning | info | hint; our model has no "hint".
   return severity
 }
@@ -63,7 +63,7 @@ function cmSeverity(severity: SkipperDiagnostic["severity"]): CmDiagnostic["seve
  * squiggle is still visible. The source + code are folded into the message and a
  * stable `source` tag so the gutter/tooltip identify the tool.
  */
-export function toCmDiagnostics(doc: string, diagnostics: SkipperDiagnostic[]): CmDiagnostic[] {
+export function toCmDiagnostics(doc: string, diagnostics: PiLabDiagnostic[]): CmDiagnostic[] {
   return diagnostics.map((d) => {
     const from = lineColToOffset(doc, d.line, d.column)
     const to =
@@ -89,7 +89,7 @@ export interface DiagnosticCounts {
 }
 
 /** Tally a diagnostics list by severity for the status-bar summary. */
-export function countDiagnostics(diagnostics: SkipperDiagnostic[]): DiagnosticCounts {
+export function countDiagnostics(diagnostics: PiLabDiagnostic[]): DiagnosticCounts {
   const counts: DiagnosticCounts = { errors: 0, warnings: 0, infos: 0 }
   for (const d of diagnostics) {
     if (d.severity === "error") counts.errors++
@@ -106,7 +106,7 @@ export function countDiagnostics(diagnostics: SkipperDiagnostic[]): DiagnosticCo
  * `toolsAvailable: false` / `missing[]` in the result.
  */
 export async function runPythonCheck(
-  client: SkipperTrpcClient,
+  client: PiLabTrpcClient,
   params: {
     workspaceId: string
     relPath: string

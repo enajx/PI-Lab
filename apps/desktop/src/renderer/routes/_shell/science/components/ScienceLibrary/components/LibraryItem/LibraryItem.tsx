@@ -1,4 +1,4 @@
-import { Badge } from "@skipper/ui"
+import { Badge } from "@pi-lab/ui"
 import type { ReactNode } from "react"
 import type { LibraryPaper } from "../../../../../../../../main/trpc/science/library"
 

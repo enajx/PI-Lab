@@ -1,5 +1,5 @@
 // Integration tests for the science.library router via createCallerFactory over
-// a temp SQLite DB with the real migrations (docs/testing-and-build.md). Outbound HTTP is
+// a temp SQLite DB with the real migrations (md/engineering/testing-and-build.md). Outbound HTTP is
 // the injected fake (`httpFetch`) so the real Zotero API is never hit; the folder source
 // reads real temp dirs and opens files through the injected `openPath`. We assert
 // kind/mode-aware reads (Zotero local vs web, and folder), credential/coercion
@@ -8,7 +8,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type LibrarySource, SETTINGS_ROW_ID, settings } from "@skipper/local-db"
+import { type LibrarySource, SETTINGS_ROW_ID, settings } from "@pi-lab/local-db"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { HttpFetch } from "../../context"
 import { createHarness, FAKE_AGENT, type Harness } from "../../testHarness"
@@ -81,7 +81,7 @@ const tmpDirs: string[] = []
 
 /** Create a real temp file (the web upload path reads + hashes it for real). */
 async function tempFile(name: string, body: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "skipper-zot-"))
+  const dir = await mkdtemp(join(tmpdir(), "pi-lab-zot-"))
   tmpDirs.push(dir)
   const path = join(dir, name)
   await writeFile(path, body)
@@ -90,7 +90,7 @@ async function tempFile(name: string, body: string): Promise<string> {
 
 /** A small folder library: root/Top.pdf + root/methods/alpha.pdf. Returns the root. */
 async function folderFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "skipper-libfolder-"))
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-libfolder-"))
   tmpDirs.push(root)
   await writeFile(join(root, "Top.pdf"), "x")
   await mkdir(join(root, "methods"), { recursive: true })
@@ -298,7 +298,7 @@ describe("science.library folder source", () => {
   test("connect (folder) rejects a path that isn't a directory (not persisted)", async () => {
     h = await createHarness()
     await expect(
-      h.caller.science.library.connect({ kind: "folder", folderPath: "/no/such/skipper-dir-xyz" }),
+      h.caller.science.library.connect({ kind: "folder", folderPath: "/no/such/pi-lab-dir-xyz" }),
     ).rejects.toThrow(/not found|not a directory/i)
     expect((await h.caller.science.library.getStatus()).connected).toBe(false)
   })
@@ -483,7 +483,7 @@ describe("science.library.openZoteroItem", () => {
           data: {
             itemType: "attachment",
             linkMode: "linked_file",
-            path: "/no/such/skipper-missing-xyz.pdf",
+            path: "/no/such/pi-lab-missing-xyz.pdf",
           },
         },
       ]),

@@ -21,7 +21,7 @@ interface DocPanelProps {
  * via `files.read` and renders it (Research = `RESEARCH.md`, Todos =
  * `TODO.md`). A missing file is the *expected* empty state, not an error: the
  * router returns `{ exists: false }`, so we show a friendly prompt rather than a
- * failure (AGENTS.md "What Skipper is" — these are plain files the user may not have authored
+ * failure (AGENTS.md "What PI Lab is" — these are plain files the user may not have authored
  * yet).
  *
  * Scrolling follows AGENTS.md Pitfalls #3: a bounded `min-h-0 flex-1` column with a

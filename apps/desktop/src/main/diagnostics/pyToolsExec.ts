@@ -1,13 +1,16 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
+import { delimiter, dirname, join } from "node:path"
 import { promisify } from "node:util"
+import type { PythonRuntime } from "../python"
 
 /**
- * Injectable exec seam for the Python diagnostics runners (docs/testing-and-build.md). The
+ * Injectable exec seam for the Python diagnostics runners (md/engineering/testing-and-build.md). The
  * runners shell out to the Astral CLIs (`ty` / `pyrefly` / `ruff`) **one-shot**
  * per save (TODO "Built-in editor" — one-shot CLI, not LSP). They never call
  * `node:child_process` directly: they go through this function so the diagnostics
  * router's tests inject a deterministic fake (canned ruff-JSON / ty output, plus
- * a "binary missing" branch) and need no `uv` installed (docs/testing-and-build.md —
+ * a "binary missing" branch) and need no `uv` installed (md/engineering/testing-and-build.md —
  * determinism without credentials/tooling).
  *
  * The live implementation runs the tool via `uvx` ({@link livePyToolsExec}); the
@@ -44,6 +47,7 @@ export type PyToolsExec = (params: {
   tool: "ty" | "pyrefly" | "ruff"
   args: readonly string[]
   cwd: string
+  runtime?: PythonRuntime
 }) => Promise<PyToolExecResult>
 
 const execFileAsync = promisify(execFile)
@@ -54,6 +58,20 @@ const EXEC_TIMEOUT_MS = 30_000
 /** Cap captured output so a pathological run can't blow up memory. */
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 
+export type PyToolCommandExec = (params: {
+  command: string
+  args: readonly string[]
+  cwd: string
+  env: NodeJS.ProcessEnv
+}) => Promise<PyToolExecResult>
+
+export interface PyToolsExecDependencies {
+  commandExec: PyToolCommandExec
+  executableExists: (path: string) => boolean
+  platform: NodeJS.Platform
+  env: NodeJS.ProcessEnv
+}
+
 /**
  * Live exec (AGENTS.md "Scope", TODO "Built-in editor"): run the tool through `uvx`
  * (`uvx ty …` / `uvx pyrefly …` / `uvx ruff …`), which provisions the binary on
@@ -61,10 +79,53 @@ const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
  * captured, not thrown; only a genuinely unspawnable command (`uv`/`uvx` not on
  * PATH → `ENOENT`) becomes `notFound: true`, the graceful "tools absent" path.
  */
-export const livePyToolsExec: PyToolsExec = async ({ tool, args, cwd }) => {
-  try {
-    const { stdout, stderr } = await execFileAsync("uvx", [tool, ...args], {
+export function createPyToolsExec(dependencies: PyToolsExecDependencies): PyToolsExec {
+  return async ({ tool, args, cwd, runtime }) => {
+    const environment = runtimeEnvironment(runtime, dependencies.env)
+    const environmentDir = runtimeEnvironmentDir(runtime)
+    const environmentTool =
+      environmentDir && runtime?.interpreterPath
+        ? join(
+            dirname(runtime.interpreterPath),
+            dependencies.platform === "win32" ? `${tool}.exe` : tool,
+          )
+        : null
+
+    if (environmentTool && dependencies.executableExists(environmentTool)) {
+      const result = await dependencies.commandExec({
+        command: environmentTool,
+        args,
+        cwd,
+        env: environment,
+      })
+      if (!result.notFound) return result
+    }
+
+    const pathResult = await dependencies.commandExec({
+      command: tool,
+      args,
       cwd,
+      env: environment,
+    })
+    if (!pathResult.notFound) return pathResult
+
+    const pythonArgs = runtime?.interpreterPath
+      ? ["--python", runtime.interpreterPath, tool, ...args]
+      : [tool, ...args]
+    return dependencies.commandExec({
+      command: "uvx",
+      args: pythonArgs,
+      cwd,
+      env: environment,
+    })
+  }
+}
+
+const liveCommandExec: PyToolCommandExec = async ({ command, args, cwd, env }) => {
+  try {
+    const { stdout, stderr } = await execFileAsync(command, [...args], {
+      cwd,
+      env,
       timeout: EXEC_TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT_BYTES,
     })
@@ -72,6 +133,33 @@ export const livePyToolsExec: PyToolsExec = async ({ tool, args, cwd }) => {
   } catch (error) {
     return fromExecError(error)
   }
+}
+
+export const livePyToolsExec: PyToolsExec = createPyToolsExec({
+  commandExec: liveCommandExec,
+  executableExists: existsSync,
+  platform: process.platform,
+  env: process.env,
+})
+
+function runtimeEnvironment(
+  runtime: PythonRuntime | undefined,
+  baseEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environmentDir = runtimeEnvironmentDir(runtime)
+  if (!runtime?.interpreterPath || !environmentDir) return baseEnv
+  const scriptsDir = dirname(runtime.interpreterPath)
+  return {
+    ...baseEnv,
+    VIRTUAL_ENV: environmentDir,
+    PATH: `${scriptsDir}${delimiter}${baseEnv.PATH ?? ""}`,
+  }
+}
+
+function runtimeEnvironmentDir(runtime: PythonRuntime | undefined): string | null {
+  if (!runtime?.interpreterPath || runtime.source === null) return null
+  if (runtime.source === "selected") return runtime.environmentPath ?? null
+  return dirname(dirname(runtime.interpreterPath))
 }
 
 /**

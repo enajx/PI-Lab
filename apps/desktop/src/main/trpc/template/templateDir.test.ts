@@ -1,10 +1,10 @@
 // Unit tests for the template directory resolver + first-run seed. Each test points
-// SKIPPER_DATA_DIR at a throwaway temp dir so the writable copy is hermetic; the
-// bundled source is read from `apps/desktop/resources/template` (docs/testing-and-build.md).
+// PI_LAB_DATA_DIR at a throwaway temp dir so the writable copy is hermetic; the
+// bundled source is read from `apps/desktop/resources/template` (md/engineering/testing-and-build.md).
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { resolveDataDir } from "@skipper/local-db"
+import { resolveDataDir } from "@pi-lab/local-db"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { resolveWritableTemplateDir, seedWritableTemplate } from "./templateDir"
 
@@ -12,14 +12,14 @@ let dataDir: string
 let previousDataDir: string | undefined
 
 beforeEach(async () => {
-  dataDir = await realpath(await mkdtemp(join(tmpdir(), "skipper-tpl-dir-")))
-  previousDataDir = process.env.SKIPPER_DATA_DIR
-  process.env.SKIPPER_DATA_DIR = dataDir
+  dataDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-tpl-dir-")))
+  previousDataDir = process.env.PI_LAB_DATA_DIR
+  process.env.PI_LAB_DATA_DIR = dataDir
 })
 
 afterEach(async () => {
-  if (previousDataDir === undefined) delete process.env.SKIPPER_DATA_DIR
-  else process.env.SKIPPER_DATA_DIR = previousDataDir
+  if (previousDataDir === undefined) delete process.env.PI_LAB_DATA_DIR
+  else process.env.PI_LAB_DATA_DIR = previousDataDir
   await rm(dataDir, { recursive: true, force: true })
 })
 

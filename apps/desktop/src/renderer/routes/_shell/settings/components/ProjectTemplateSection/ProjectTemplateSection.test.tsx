@@ -1,4 +1,4 @@
-import type { EditorSettings } from "@skipper/local-db"
+import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useState } from "react"
@@ -11,7 +11,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
  * view needs layout APIs jsdom lacks, so it is stubbed (re-exposing
  * `onChange`/`onSave` + the seeded `initialDoc`); the file list, selection, and
  * save round-trip are asserted through the DOM + a faked tRPC client
- * (docs/testing-and-build.md), mirroring the CentralPanel editor test.
+ * (md/engineering/testing-and-build.md), mirroring the CentralPanel editor test.
  */
 
 vi.mock("../../../../../Editor/components/CodeMirrorBuffer", () => ({
@@ -47,9 +47,12 @@ const { ProjectTemplateSection } = await import("./ProjectTemplateSection")
 const DEFAULT_SETTINGS: EditorSettings = {
   autosave: false,
   vim: false,
+  diagnosticsEnabled: false,
   typeChecker: "ty",
   formatOnSave: false,
   editorTheme: "default",
+  customEditorThemes: [],
+  pythonRunDestination: "central",
 }
 
 let store: Record<string, string>

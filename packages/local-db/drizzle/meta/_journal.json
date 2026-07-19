@@ -57,6 +57,48 @@
       "when": 1782238672294,
       "tag": "0007_omniscient_sumo",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784423376257,
+      "tag": "0008_faulty_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1784425695117,
+      "tag": "0009_tired_malice",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1784458688773,
+      "tag": "0010_zippy_jubilee",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1784467583965,
+      "tag": "0011_unique_patch",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1784474016366,
+      "tag": "0012_mean_bucky",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1784478077628,
+      "tag": "0013_eager_wallflower",
+      "breakpoints": true
     }
   ]
 }

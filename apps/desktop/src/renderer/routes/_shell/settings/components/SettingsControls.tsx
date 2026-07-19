@@ -1,4 +1,4 @@
-import { cn } from "@skipper/ui"
+import { cn } from "@pi-lab/ui"
 import type { ReactNode } from "react"
 
 /** A titled settings section with its rows in a bordered, divided card. */
@@ -60,6 +60,8 @@ export function ToggleField({
         role="switch"
         aria-checked={checked}
         aria-label={typeof label === "string" ? label : undefined}
+        data-feature-label={typeof label === "string" ? label : undefined}
+        data-feature-help={typeof description === "string" ? description : undefined}
         data-testid={testId}
         data-checked={checked}
         disabled={disabled}
@@ -111,6 +113,9 @@ export function SelectField({
       <FieldLabel label={label} description={description} />
       <select
         data-testid={testId}
+        aria-label={typeof label === "string" ? label : undefined}
+        data-feature-label={typeof label === "string" ? label : undefined}
+        data-feature-help={typeof description === "string" ? description : undefined}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-foreground text-sm outline-none"

@@ -3,7 +3,7 @@ import {
   countDiagnostics,
   isPythonPath,
   lineColToOffset,
-  type SkipperDiagnostic,
+  type PiLabDiagnostic,
   toCmDiagnostics,
 } from "./pythonDiagnostics"
 
@@ -42,7 +42,7 @@ describe("toCmDiagnostics", () => {
   const doc = "import os\nx = 1\n"
 
   it("maps a ranged diagnostic to character offsets and folds the code into source", () => {
-    const diags: SkipperDiagnostic[] = [
+    const diags: PiLabDiagnostic[] = [
       {
         source: "ruff",
         severity: "warning",
@@ -64,7 +64,7 @@ describe("toCmDiagnostics", () => {
   })
 
   it("gives a point diagnostic a one-char span so the squiggle is visible", () => {
-    const diags: SkipperDiagnostic[] = [
+    const diags: PiLabDiagnostic[] = [
       { source: "ty", severity: "error", line: 2, column: 1, message: "bad" },
     ]
     const [cm] = toCmDiagnostics(doc, diags)
@@ -77,7 +77,7 @@ describe("toCmDiagnostics", () => {
 
 describe("countDiagnostics", () => {
   it("tallies by severity", () => {
-    const diags: SkipperDiagnostic[] = [
+    const diags: PiLabDiagnostic[] = [
       { source: "ty", severity: "error", line: 1, column: 1, message: "a" },
       { source: "ruff", severity: "warning", line: 2, column: 1, message: "b" },
       { source: "ruff", severity: "warning", line: 3, column: 1, message: "c" },

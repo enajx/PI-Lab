@@ -13,7 +13,7 @@
  *
  * Like the ruff parser this **never throws**: any line that doesn't match the
  * shape (the summary, blank lines, ANSI residue, arbitrary garbage) is skipped,
- * which the property tests assert (docs/testing-and-build.md).
+ * which the property tests assert (md/engineering/testing-and-build.md).
  */
 
 import type { Diagnostic, DiagnosticSeverity } from "./types"
