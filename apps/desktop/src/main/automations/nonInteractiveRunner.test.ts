@@ -32,6 +32,39 @@ describe("runNonInteractiveProcess", () => {
     })
   })
 
+  test("captures the child's full stdout (the run's user-facing output)", async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-one-shot-")))
+    tempDirs.push(cwd)
+    const started = await runNonInteractiveProcess({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('line one\\nline two\\n');process.exit(0)"],
+      cwd,
+    })
+
+    await expect(started.completion).resolves.toMatchObject({
+      code: 0,
+      stdout: "line one\nline two\n",
+    })
+  })
+
+  test("retains only the bounded stdout tail when the output overruns the cap", async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-one-shot-")))
+    tempDirs.push(cwd)
+    // Write well over the 1 MiB stdout cap, ending with a recognizable marker.
+    // No process.exit: let the process end naturally so the large pipe write fully
+    // flushes (an immediate exit would truncate it mid-drain).
+    const started = await runNonInteractiveProcess({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('x'.repeat(1024*1024 + 5000) + 'TAIL')"],
+      cwd,
+    })
+
+    const result = await started.completion
+    expect(result.code).toBe(0)
+    expect(Buffer.byteLength(result.stdout)).toBe(1024 * 1024)
+    expect(result.stdout.endsWith("TAIL")).toBe(true)
+  })
+
   test("reports a non-zero exit and bounded stderr", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "pi-lab-one-shot-"))
     tempDirs.push(cwd)

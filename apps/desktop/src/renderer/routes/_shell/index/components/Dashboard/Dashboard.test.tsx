@@ -24,6 +24,12 @@ function renderDashboard(handlers: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+    // No-thumbnail cards persist a default gradient on first render; tolerate it
+    // unless a test overrides this to assert on the call.
+    "projects.setGradient": (input) => {
+      const { id } = input as { id: string }
+      return project(id, id)
+    },
     ...handlers,
   })
 
@@ -48,7 +54,12 @@ function renderDashboard(handlers: FakeHandlers) {
   return { ...result, queryClient, router }
 }
 
-function project(id: string, name: string, thumbnail: string | null = null) {
+function project(
+  id: string,
+  name: string,
+  thumbnail: string | null = null,
+  gradient: { seed: number; palette: string[] } | null = null,
+) {
   return {
     id,
     repoPath: `/tmp/${id}`,
@@ -56,6 +67,7 @@ function project(id: string, name: string, thumbnail: string | null = null) {
     defaultBranch: "main",
     color: null,
     thumbnail,
+    gradient,
     sortIndex: 0,
     archivedAt: null,
     createdAt: 0,
@@ -117,27 +129,79 @@ describe("Dashboard", () => {
     expect(screen.getByTestId("card-resize-handle")).toBeTruthy()
   })
 
-  test("a no-thumbnail card renders one deterministic shape-and-motion variant", async () => {
+  test("a card renders its stored gradient as three baked, drifting layers", async () => {
     renderDashboard({
-      "projects.list": () => [project("p1", "Gradient Project")],
+      "projects.list": () => [
+        project("p1", "Gradient Project", null, { seed: 42, palette: ["#FFC700", "#18A0FB"] }),
+      ],
       "workspaces.list": () => [],
     })
 
     const field = await screen.findByTestId("project-card-gradient")
     expect(field.classList.contains("project-gradient-field")).toBe(true)
-    expect(field.dataset.gradientPalette).toMatch(/^[a-z-]+$/)
-    expect(field.dataset.gradientShape).toMatch(/^[a-z-]+$/)
-    expect(field.dataset.gradientMotion).toMatch(/^[a-z-]+$/)
+    // Motion family drives both the class and a debug attribute.
+    expect(field.dataset.gradientMotion).toMatch(/^(meander|turn|breathe|weave|orbit|rock)$/)
+    expect(
+      field.classList.contains(`project-gradient-motion-${field.dataset.gradientMotion}`),
+    ).toBe(true)
+    expect(field.dataset.gradientSeed).toBe("42")
 
+    // Three stacked drift layers (their baked data-URI backgrounds are asserted in
+    // projectGradient.test.ts; jsdom drops complex `url(data:…)` background-image).
     const layers = screen.getAllByTestId("project-card-gradient-layer")
     expect(layers).toHaveLength(3)
+    expect(layers.map((layer) => layer.dataset.layer)).toEqual(["a", "b", "c"])
     expect(field.style.getPropertyValue("--layer-a-duration")).toMatch(/^\d+(?:\.\d+)?s$/)
-    expect(field.style.getPropertyValue("--layer-b-duration")).toMatch(/^\d+(?:\.\d+)?s$/)
-    expect(field.style.getPropertyValue("--layer-c-duration")).toMatch(/^\d+(?:\.\d+)?s$/)
     expect(
       Number.parseFloat(field.style.getPropertyValue("--layer-a-duration")),
     ).toBeGreaterThanOrEqual(8)
     expect(screen.getByTestId("project-card-gradient-grain")).toBeTruthy()
+  })
+
+  test("a no-thumbnail card with no stored gradient persists a default sampled from the theme", async () => {
+    const calls: unknown[] = []
+    renderDashboard({
+      "projects.list": () => [project("p1", "Fresh Project")],
+      "workspaces.list": () => [],
+      "projects.setGradient": (input) => {
+        calls.push(input)
+        return project("p1", "Fresh Project")
+      },
+    })
+
+    // The card still renders a gradient immediately (from the sampled default)...
+    await screen.findByTestId("project-card-gradient")
+    // ...and persists that default exactly once, as a { seed, palette } pair.
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toMatchObject({ id: "p1" })
+    const { gradient } = calls[0] as { gradient: { seed: number; palette: string[] } }
+    expect(typeof gradient.seed).toBe("number")
+    expect(gradient.palette.length).toBeGreaterThan(0)
+  })
+
+  test("right-click generates a new gradient sampled from the current theme", async () => {
+    const calls: unknown[] = []
+    renderDashboard({
+      "projects.list": () => [
+        project("p1", "Photon Drift", null, { seed: 1, palette: ["#FFC700"] }),
+      ],
+      "workspaces.list": () => [],
+      "projects.setGradient": (input) => {
+        calls.push(input)
+        return project("p1", "Photon Drift")
+      },
+    })
+
+    const image = await screen.findByTestId("project-card-image")
+    fireEvent.contextMenu(image)
+    fireEvent.click(await screen.findByTestId("project-card-menu-gradient"))
+
+    await waitFor(() => expect(calls).toHaveLength(1))
+    const { gradient } = calls[0] as { gradient: { seed: number; palette: string[] } }
+    expect(typeof gradient.seed).toBe("number")
+    expect(gradient.palette.length).toBeGreaterThan(0)
+    // The menu closes after the action.
+    expect(screen.queryByTestId("project-card-menu")).toBeNull()
   })
 
   test("a card with a thumbnail renders no gradient layer", async () => {

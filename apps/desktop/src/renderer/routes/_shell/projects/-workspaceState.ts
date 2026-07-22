@@ -9,6 +9,8 @@ import type { CentralPanelRestoreState } from "./components/CentralPanel/useCent
 export interface ProjectWorkspaceState extends CentralPanelRestoreState {
   rightSidebarCollapsed: boolean
   rightSidebarActiveId: string | null
+  /** Working-dir-relative `.md` paths the user pinned as right-sidebar panels. */
+  pinnedPanels: string[]
 }
 
 const projectWorkspaceStates = new Map<string, ProjectWorkspaceState>()
@@ -31,13 +33,17 @@ export function writeProjectWorkspaceState(
     ...state,
     rightSidebarCollapsed: existing?.rightSidebarCollapsed ?? false,
     rightSidebarActiveId: existing?.rightSidebarActiveId ?? null,
+    pinnedPanels: existing?.pinnedPanels ?? [],
   })
   persist()
 }
 
 export function writeProjectWorkspaceViewState(
   projectId: string,
-  view: Pick<ProjectWorkspaceState, "rightSidebarCollapsed" | "rightSidebarActiveId">,
+  view: Pick<
+    ProjectWorkspaceState,
+    "rightSidebarCollapsed" | "rightSidebarActiveId" | "pinnedPanels"
+  >,
 ): void {
   hydrate()
   const existing = projectWorkspaceStates.get(projectId)

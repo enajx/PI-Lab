@@ -484,5 +484,101 @@
   animation-name: pi-lab-gradient-rock;
 }
 
-/* Diagnostic build: this intentionally remains animated even when macOS Reduce
-   Motion is enabled, so the user can verify that the fallback animation runs. */
+/* Diagnostic build: the project gradient animation above intentionally remains
+   animated even when macOS Reduce Motion is enabled, so the user can verify that
+   the fallback animation runs. */
+
+/* Animated ellipsis for inline pending labels (e.g. "Working…", or a running
+   background workflow control). Three dots pulse AND gently bounce in a
+   staggered wave so the indicator is unmistakably alive and moving. Under
+   reduced motion they simply hold visible so the label still reads as three
+   static dots. */
+.pi-lab-loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18em;
+  line-height: 1;
+}
+
+.pi-lab-loading-dots > span {
+  display: inline-block;
+  animation: pi-lab-loading-dot 1s ease-in-out infinite;
+}
+
+.pi-lab-loading-dots > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.pi-lab-loading-dots > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes pi-lab-loading-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-0.22em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pi-lab-loading-dots > span {
+    animation: none;
+    opacity: 0.6;
+    transform: none;
+  }
+}
+
+/* The edge of a *running* background-workflow control comes alive: a brighter
+   brand-orange point travels AROUND the thin border like a snake, fading from
+   saturated to faint, so "the agent is thinking" reads at a glance. It's just the
+   1px edge — no bar. Rendered as a masked conic-gradient ring (only the border
+   padding shows) whose angle rotates. Reduced motion holds a static orange edge. */
+@property --pi-lab-snake-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.pi-lab-workflow-snake {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--pi-lab-snake-angle),
+    color-mix(in srgb, var(--color-brand) 10%, transparent),
+    var(--color-brand),
+    color-mix(in srgb, var(--color-brand) 10%, transparent)
+  );
+  /* Show ONLY the 1px padding ring (the border), never the interior. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: pi-lab-workflow-snake 2.4s linear infinite;
+}
+
+@keyframes pi-lab-workflow-snake {
+  to {
+    --pi-lab-snake-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pi-lab-workflow-snake {
+    animation: none;
+    background: var(--color-brand);
+    opacity: 0.5;
+  }
+}

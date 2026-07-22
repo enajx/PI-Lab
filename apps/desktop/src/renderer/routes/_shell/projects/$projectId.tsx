@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
+import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import { DEFAULT_EDITOR_SETTINGS } from "../../../Editor/hooks/useEditorBuffers"
 import {
   type ProjectNotificationSearch,
@@ -13,11 +14,13 @@ import {
 import {
   RIGHT_SIDEBAR_MAX_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
+  useFetchExperimentsInstructions,
   useRightSidebarWidth,
   useSidebarCollapsed,
 } from "../../../preferences/preferences"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
+import { clearPendingLaunch, readPendingLaunch } from "./-pendingLaunch"
 import { clearPendingTaskSession, readPendingTaskSession } from "./-pendingTaskSession"
 import {
   readProjectWorkspaceState,
@@ -25,6 +28,7 @@ import {
   writeProjectWorkspaceViewState,
 } from "./-workspaceState"
 import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
+import { ProjectPalette } from "./components/ProjectPalette"
 import { RightSidebar } from "./components/RightSidebar"
 
 /**
@@ -69,11 +73,16 @@ export function ProjectWorkspace({
   const client = useTRPCClient()
   const queryClient = useQueryClient()
   const pendingTaskSession = useRef(readPendingTaskSession(projectId)).current
+  const pendingLaunch = useRef(readPendingLaunch(projectId)).current
   const restoredWorkspaceState = useRef(readProjectWorkspaceState(projectId)).current
 
   useEffect(() => {
     if (pendingTaskSession) clearPendingTaskSession(projectId)
   }, [pendingTaskSession, projectId])
+
+  useEffect(() => {
+    if (pendingLaunch) clearPendingLaunch(projectId)
+  }, [pendingLaunch, projectId])
 
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
@@ -101,12 +110,23 @@ export function ProjectWorkspace({
   )
   const [rightSidebarWidth, setRightSidebarWidth] = useRightSidebarWidth()
 
+  // User-pinned `.md` right-sidebar panels, seeded from the restored workspace state
+  // and persisted per project so they survive remount and app relaunch.
+  const [pinnedPanels, setPinnedPanels] = useState<string[]>(
+    () => restoredWorkspaceState?.pinnedPanels ?? [],
+  )
+  const pinPanel = (relPath: string) =>
+    setPinnedPanels((prev) => (prev.includes(relPath) ? prev : [...prev, relPath]))
+  const unpinPanel = (relPath: string) =>
+    setPinnedPanels((prev) => prev.filter((path) => path !== relPath))
+
   useEffect(() => {
     writeProjectWorkspaceViewState(projectId, {
       rightSidebarCollapsed,
       rightSidebarActiveId,
+      pinnedPanels,
     })
-  }, [projectId, rightSidebarActiveId, rightSidebarCollapsed])
+  }, [projectId, rightSidebarActiveId, rightSidebarCollapsed, pinnedPanels])
 
   // When the left sidebar is collapsed, the traffic lights ride this view's title-bar
   // strip, so the header clears + drags around them (the path text stays selectable).
@@ -118,22 +138,25 @@ export function ProjectWorkspace({
   const ensureMainRef = useRef(ensureMain.mutateAsync)
   ensureMainRef.current = ensureMain.mutateAsync
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
-  const firedRef = useRef(false)
-
   useEffect(() => {
-    if (firedRef.current) return
-    firedRef.current = true
-    let cancelled = false
+    // Fire on every effect run; only the still-active run applies the result.
+    // Under React StrictMode's dev double-invoke the first run is cleaned up
+    // (active=false) and the second run is the one that resolves workspaceId;
+    // ensureMain is idempotent, so firing it twice is harmless. A "fire once"
+    // ref guard instead leaves the second run inert while the first was already
+    // cancelled — so workspaceId is never set and the view hangs on
+    // "Opening project…" in dev (StrictMode) even though the prod build works.
+    let active = true
     ensureMainRef
       .current({ projectId })
       .then((workspace) => {
-        if (!cancelled) setWorkspaceId(workspace.id)
+        if (active) setWorkspaceId(workspace.id)
       })
       .catch(() => {
-        // Surfaced below via ensureMain.isError; nothing to do here.
+        // Real errors surface below via ensureMain.isError.
       })
     return () => {
-      cancelled = true
+      active = false
     }
   }, [projectId])
 
@@ -148,6 +171,48 @@ export function ProjectWorkspace({
     initialState: restoredWorkspaceState,
     onStateChange: (state) => writeProjectWorkspaceState(projectId, state),
   })
+  // Auto-research: open an isolated worktree agent session for the project and
+  // attach it so it appears (and is selectable) in the central panel.
+  const startAutoResearch = useMutation(trpc.sessions.startAutoResearch.mutationOptions())
+  const onAutoResearch = () => {
+    startAutoResearch.mutate(
+      { projectId },
+      {
+        onSuccess: (result) =>
+          controller.attachSession({
+            kind: "agent",
+            sessionId: result.sessionId,
+            label: "Auto-research",
+          }),
+      },
+    )
+  }
+
+  // The extra fetch-experiments prompt instructions from Settings, passed to the
+  // background workflow control below.
+  const [fetchInstructions] = useFetchExperimentsInstructions()
+
+  // Run a launch a project card triggered before navigating here, once the main
+  // workspace is ready (so a `main`-mode launch reuses the already-ensured branch
+  // workspace rather than racing `ensureMain` to create it). The launched session
+  // attaches to the central panel above; a failed launch surfaces in the banner
+  // below. The ref guard fires it exactly once, independent of the open itself, so
+  // the view is never blocked on the launch (no permanent "Opening project…").
+  const runPendingLaunch = useRef<() => void>(() => {})
+  runPendingLaunch.current = () => {
+    if (pendingLaunch?.kind === "auto-research") onAutoResearch()
+  }
+  const pendingLaunchFired = useRef(false)
+  useEffect(() => {
+    if (!pendingLaunch || !workspaceId || pendingLaunchFired.current) return
+    pendingLaunchFired.current = true
+    runPendingLaunch.current()
+  }, [pendingLaunch, workspaceId])
+
+  // Card-triggered and in-view auto-research launch failures surface here (no
+  // silent failure — AGENTS.md), so a failed launch never leaves the view stuck.
+  const launchError = startAutoResearch.error?.message ?? null
+
   const handledActivation = useRef<string | null>(null)
   useEffect(() => {
     if (
@@ -203,8 +268,34 @@ export function ProjectWorkspace({
             </p>
           ) : null}
         </div>
-        <CaffeineControl />
+        <div className="flex shrink-0 items-center gap-2">
+          <ProjectWorkflowControl
+            projectId={projectId}
+            projectName={project?.name ?? "Project"}
+            task="fetch-experiments"
+            variant="labeled"
+            testId="project-view-fetch-experiments"
+            instructions={fetchInstructions}
+          />
+          <ProjectWorkflowControl
+            projectId={projectId}
+            projectName={project?.name ?? "Project"}
+            task="summary"
+            variant="labeled"
+            testId="project-view-summary"
+          />
+          <CaffeineControl />
+        </div>
       </header>
+
+      {launchError ? (
+        <p
+          data-testid="project-launch-error"
+          className="shrink-0 cursor-text select-text rounded-md border border-border bg-destructive/10 px-4 py-2 text-destructive text-xs"
+        >
+          {launchError}
+        </p>
+      ) : null}
 
       {workspaceId ? (
         <div className="flex min-h-0 flex-1 gap-3">
@@ -217,6 +308,7 @@ export function ProjectWorkspace({
               onUpdateEditorSettings={onUpdateEditorSettings}
               rightSidebarCollapsed={rightSidebarCollapsed}
               onExpandRightSidebar={() => setRightSidebarCollapsed(false)}
+              onPinFile={pinPanel}
             />
           </div>
           {rightSidebarCollapsed ? null : (
@@ -234,12 +326,24 @@ export function ProjectWorkspace({
                 workspaceId={workspaceId}
                 onOpenFile={controller.openFile}
                 activeRelPath={controller.editor.active?.relPath ?? null}
-                initialActiveId={rightSidebarActiveId ?? undefined}
+                activeId={rightSidebarActiveId}
                 onActiveIdChange={setRightSidebarActiveId}
                 onCollapse={() => setRightSidebarCollapsed(true)}
+                pinnedPanels={pinnedPanels}
+                onPinFile={pinPanel}
+                onUnpinFile={unpinPanel}
               />
             </div>
           )}
+          <ProjectPalette
+            controller={controller}
+            workspaceId={workspaceId}
+            pinnedPanels={pinnedPanels}
+            onSelectPanel={(panelId) => {
+              setRightSidebarActiveId(panelId)
+              setRightSidebarCollapsed(false)
+            }}
+          />
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground text-sm">

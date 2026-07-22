@@ -83,6 +83,40 @@ export function ToggleField({
   )
 }
 
+/** A labelled multi-line text row. The value is committed on change (controlled). */
+export function TextAreaField({
+  testId,
+  label,
+  description,
+  value,
+  placeholder,
+  onChange,
+}: {
+  testId: string
+  label: ReactNode
+  description?: ReactNode
+  value: string
+  placeholder?: string
+  onChange: (next: string) => void
+}) {
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3">
+      <FieldLabel label={label} description={description} />
+      <textarea
+        data-testid={testId}
+        aria-label={typeof label === "string" ? label : undefined}
+        data-feature-label={typeof label === "string" ? label : undefined}
+        data-feature-help={typeof description === "string" ? description : undefined}
+        value={value}
+        placeholder={placeholder}
+        rows={3}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-foreground text-sm outline-none"
+      />
+    </div>
+  )
+}
+
 /** A single option in a {@link SelectField}. */
 type SelectOption = { value: string; label: string }
 

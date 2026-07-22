@@ -1,7 +1,7 @@
 import type { Stats } from "node:fs"
 import { cp, mkdir, readdir, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
-import { type PiLabDatabase, type Project, projects } from "@pi-lab/local-db"
+import { type PiLabDatabase, type Project, type ProjectMetadata, projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { desc, eq } from "drizzle-orm"
 import { z } from "zod"
@@ -32,6 +32,39 @@ const setThumbnailInput = z.object({
    * (no external paths to dangle).
    */
   dataUrl: z.string().startsWith("data:").nullable(),
+})
+
+const setGradientInput = z.object({
+  id: z.string().min(1),
+  /**
+   * The gradient to persist (`{ seed, palette }`, captured from the app theme by
+   * the renderer), or `null` to clear it. Setting a non-null gradient also clears
+   * any thumbnail — the card shows one artwork at a time, and generating a gradient
+   * replaces an imported image.
+   */
+  gradient: z
+    .object({ seed: z.number().int(), palette: z.array(z.string().min(1)).min(1) })
+    .nullable(),
+})
+
+/**
+ * Extra project metadata edited via the card's "Edit project…" dialog. Every field
+ * is optional and only the filled ones are stored; a `null` metadata clears the
+ * whole group. Kept in step with {@link ProjectMetadata} in `@pi-lab/local-db`.
+ */
+const setMetadataInput = z.object({
+  id: z.string().min(1),
+  metadata: z
+    .object({
+      collaborators: z.string().min(1).optional(),
+      venue: z.string().min(1).optional(),
+      deadline: z.string().min(1).optional(),
+      emojiTags: z.array(z.string().min(1)).optional(),
+      referenceLinks: z
+        .array(z.object({ url: z.string().min(1), label: z.string().min(1).optional() }))
+        .optional(),
+    })
+    .nullable(),
 })
 
 const cloneInput = z.object({
@@ -275,7 +308,59 @@ export const projectsRouter = router({
   setThumbnail: publicProcedure.input(setThumbnailInput).mutation(({ ctx, input }): Project => {
     const row = ctx.db
       .update(projects)
-      .set({ thumbnail: input.dataUrl, updatedAt: Date.now() })
+      // Setting a thumbnail replaces the gradient (one artwork at a time); clearing
+      // it (dataUrl: null) leaves the gradient column untouched.
+      .set({
+        thumbnail: input.dataUrl,
+        ...(input.dataUrl ? { gradient: null } : {}),
+        updatedAt: Date.now(),
+      })
+      .where(eq(projects.id, input.id))
+      .returning()
+      .get()
+    if (!row) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+    }
+    return row
+  }),
+
+  /**
+   * Persist (or clear, with `gradient: null`) the project's dashboard-card gradient.
+   * The renderer samples the current app theme's colors, seeds a gradient, and sends
+   * `{ seed, palette }` here so the exact artwork is reproduced on every launch. A
+   * non-null gradient also clears the thumbnail — the card shows one artwork at a
+   * time, so generating a gradient replaces an imported image. Returns the updated
+   * row so the dashboard re-renders from the mutation result.
+   */
+  setGradient: publicProcedure.input(setGradientInput).mutation(({ ctx, input }): Project => {
+    const row = ctx.db
+      .update(projects)
+      .set({
+        gradient: input.gradient,
+        ...(input.gradient ? { thumbnail: null } : {}),
+        updatedAt: Date.now(),
+      })
+      .where(eq(projects.id, input.id))
+      .returning()
+      .get()
+    if (!row) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+    }
+    return row
+  }),
+
+  /**
+   * Persist (or clear, with `metadata: null`) the project's extra metadata
+   * (collaborators, publishing venue, deadline, emoji tags, reference links) edited
+   * via the card's "Edit project…" dialog. The renderer sends the whole group with
+   * empty fields already omitted; only filled fields are stored. Returns the updated
+   * row so the dashboard re-renders from the mutation result.
+   */
+  setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
+    const metadata: ProjectMetadata | null = input.metadata
+    const row = ctx.db
+      .update(projects)
+      .set({ metadata, updatedAt: Date.now() })
       .where(eq(projects.id, input.id))
       .returning()
       .get()

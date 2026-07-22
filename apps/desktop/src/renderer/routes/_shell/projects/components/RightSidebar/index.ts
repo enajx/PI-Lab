@@ -1,1 +1,5 @@
-export { RightSidebar } from "./RightSidebar"
+export {
+  RightSidebar,
+  type RightSidebarPanel,
+  useRightSidebarPanels,
+} from "./RightSidebar"

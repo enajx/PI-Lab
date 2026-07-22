@@ -404,7 +404,12 @@ describe("runNow — non-interactive process lifecycle", () => {
     expect(runId).toBeTruthy()
     expect(runner).toHaveBeenCalledWith({
       command: "/custom/codex",
-      args: ["--profile", "science", "exec", "review; $(touch never)"],
+      args: [
+        "exec",
+        "--skip-git-repo-check",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "review; $(touch never)",
+      ],
       cwd: h.repoDir,
       env: expect.objectContaining({
         PATH: "/login/bin",
@@ -428,7 +433,7 @@ describe("runNow — non-interactive process lifecycle", () => {
       "Workflow started",
     ])
 
-    finish({ code: 0, signal: null, error: null, stderr: "" })
+    finish({ code: 0, signal: null, error: null, stdout: "", stderr: "" })
     await waitFor(
       () =>
         h.db
@@ -455,6 +460,7 @@ describe("runNow — non-interactive process lifecycle", () => {
         code: 17,
         signal: null,
         error: null,
+        stdout: "",
         stderr: "model unavailable",
       }),
     })
@@ -491,7 +497,7 @@ describe("runNow — non-interactive process lifecycle", () => {
 
   test("uses the same configured executable override as interactive agent launches", async () => {
     const runner = vi.fn<NonInteractiveProcessRunner>(async () => ({
-      completion: Promise.resolve({ code: 0, signal: null, error: null, stderr: "" }),
+      completion: Promise.resolve({ code: 0, signal: null, error: null, stdout: "", stderr: "" }),
     }))
     await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
     await h.caller.settings.updateAgents({
@@ -512,7 +518,12 @@ describe("runNow — non-interactive process lifecycle", () => {
     expect(runner).toHaveBeenCalledWith(
       expect.objectContaining({
         command: "/configured/codex",
-        args: ["--profile", "science", "exec", "review"],
+        args: [
+          "exec",
+          "--skip-git-repo-check",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "review",
+        ],
       }),
     )
   })
@@ -585,6 +596,7 @@ describe("runNow — non-interactive process lifecycle", () => {
         code: null,
         signal: "SIGTERM" as NodeJS.Signals,
         error: null,
+        stdout: "",
         stderr: "",
       },
       expectedError: /signal SIGTERM/i,
@@ -595,6 +607,7 @@ describe("runNow — non-interactive process lifecycle", () => {
         code: null,
         signal: null,
         error: "Codex process stream failed",
+        stdout: "",
         stderr: "",
       },
       expectedError: /process failed.*stream failed/i,
@@ -738,6 +751,7 @@ describe("scheduler fires a due automation end-to-end", () => {
         code: 0,
         signal: null,
         error: null,
+        stdout: "",
         stderr: "",
       }),
     }))

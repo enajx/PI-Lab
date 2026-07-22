@@ -68,6 +68,12 @@ function readNumber(key: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback
 }
 
+function readString(key: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback
+  const raw = window.localStorage.getItem(key)
+  return raw === null ? fallback : raw
+}
+
 /** Shared boolean-preference hook: seeds from localStorage, persists + broadcasts on change. */
 function useBooleanPref(key: string, fallback: boolean): [boolean, (next: boolean) => void] {
   const subscribe = useCallback((cb: () => void) => subscribePref(key, cb), [key])
@@ -86,11 +92,44 @@ function useNumberPref(key: string, fallback: number): [number, (next: number) =
   return [value, set]
 }
 
+/** Shared string-preference hook — same cross-instance sync semantics as the boolean one. */
+function useStringPref(key: string, fallback: string): [string, (next: string) => void] {
+  const subscribe = useCallback((cb: () => void) => subscribePref(key, cb), [key])
+  const getSnapshot = useCallback(() => readString(key, fallback), [key, fallback])
+  const value = useSyncExternalStore(subscribe, getSnapshot, () => fallback)
+  const set = useCallback((next: string) => writePref(key, next), [key])
+  return [value, set]
+}
+
 // --- Project view: show the "Code changes" panel (hidden by default) ----------
 const SHOW_CODE_CHANGES_KEY = "pi-lab.projectView.showCodeChanges"
 export const readShowCodeChanges = (): boolean => readBoolean(SHOW_CODE_CHANGES_KEY, false)
 export const useShowCodeChanges = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_CODE_CHANGES_KEY, false)
+
+// --- Optional app sections: show/hide from Settings (all shown by default) ----
+// Cluster and Analysis are live surfaces: their pref gates the sidebar nav row
+// and guards the route. Experiments and Research Heartbeat have no surface yet, so
+// Settings renders them as disabled, not-yet-available rows — their toggles are
+// no-ops today (they never write), and the pref simply stays at its default until
+// those sections ship (see the "Sections" settings section).
+const SHOW_CLUSTER_SECTION_KEY = "pi-lab.sections.showCluster"
+export const readShowClusterSection = (): boolean => readBoolean(SHOW_CLUSTER_SECTION_KEY, true)
+export const useShowClusterSection = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_CLUSTER_SECTION_KEY, true)
+
+const SHOW_ANALYSIS_SECTION_KEY = "pi-lab.sections.showAnalysis"
+export const readShowAnalysisSection = (): boolean => readBoolean(SHOW_ANALYSIS_SECTION_KEY, true)
+export const useShowAnalysisSection = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_ANALYSIS_SECTION_KEY, true)
+
+const SHOW_EXPERIMENTS_SECTION_KEY = "pi-lab.sections.showExperiments"
+export const useShowExperimentsSection = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_EXPERIMENTS_SECTION_KEY, true)
+
+const SHOW_RESEARCH_HEARTBEAT_SECTION_KEY = "pi-lab.sections.showResearchHeartbeat"
+export const useShowResearchHeartbeatSection = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_RESEARCH_HEARTBEAT_SECTION_KEY, true)
 
 // --- Skills: shared scope visibility across the science tab + project panel --
 const SHOW_PROJECT_SKILLS_KEY = "pi-lab.skills.showProjectLocal"
@@ -104,6 +143,16 @@ export const useShowGlobalSkills = (): [boolean, (next: boolean) => void] =>
 const SHOW_SKILLS_PANEL_KEY = "pi-lab.projectView.showSkillsPanel"
 export const useShowSkillsPanel = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_SKILLS_PANEL_KEY, false)
+
+// --- Fetch remote experiments: extra instructions appended to the agent prompt
+// Passed from the renderer into `workflows.run` (the fetch-experiments task); the
+// scaffolded skill NAME/path stays fixed server-side (only this free text is
+// user-editable).
+const FETCH_EXPERIMENTS_INSTRUCTIONS_KEY = "pi-lab.fetchExperiments.instructions"
+export const readFetchExperimentsInstructions = (): string =>
+  readString(FETCH_EXPERIMENTS_INSTRUCTIONS_KEY, "")
+export const useFetchExperimentsInstructions = (): [string, (next: string) => void] =>
+  useStringPref(FETCH_EXPERIMENTS_INSTRUCTIONS_KEY, "")
 
 // --- Project view: show the file tree as a left panel (off by default) --------
 // When on, the file tree moves out of the right sidebar into a column on the
@@ -159,42 +208,58 @@ export const useSidebarFeatureHelp = (): [boolean, (next: boolean) => void] =>
 // order and appends any not-yet-seen ids (so new items still show). Cached per
 // key so useSyncExternalStore gets a STABLE snapshot reference — returning a
 // freshly-parsed array on every read would loop forever.
+// An unset key (`""`) yields the caller's `fallback` (a seed); an explicitly-
+// stored `"[]"` stays empty, so a user who clears a seeded list keeps it cleared.
+// `fallback` must be a STABLE reference (a module const) so useSyncExternalStore
+// gets an unchanging snapshot when the key is unset.
 const EMPTY_ORDER: string[] = []
 const orderCache = new Map<string, { raw: string; value: string[] }>()
-function readOrder(key: string): string[] {
-  if (typeof window === "undefined") return EMPTY_ORDER
+function readOrder(key: string, fallback: string[]): string[] {
+  if (typeof window === "undefined") return fallback
   const raw = window.localStorage.getItem(key) ?? ""
+  if (raw === "") return fallback
   const cached = orderCache.get(key)
   if (cached && cached.raw === raw) return cached.value
-  let value: string[] = EMPTY_ORDER
-  if (raw) {
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) value = parsed.filter((x): x is string => typeof x === "string")
-    } catch {
-      value = EMPTY_ORDER
-    }
+  let value: string[] = fallback
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (Array.isArray(parsed)) value = parsed.filter((x): x is string => typeof x === "string")
+  } catch {
+    value = fallback
   }
   orderCache.set(key, { raw, value })
   return value
 }
-function useOrderPref(key: string): [string[], (next: string[]) => void] {
+function useOrderPref(key: string, fallback: string[]): [string[], (next: string[]) => void] {
   const subscribe = useCallback((cb: () => void) => subscribePref(key, cb), [key])
-  const getSnapshot = useCallback(() => readOrder(key), [key])
-  const value = useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_ORDER)
+  const getSnapshot = useCallback(() => readOrder(key, fallback), [key, fallback])
+  const value = useSyncExternalStore(subscribe, getSnapshot, () => fallback)
   const set = useCallback((next: string[]) => writePref(key, JSON.stringify(next)), [key])
   return [value, set]
 }
 
 /** Persisted drag order for the sidebar science/Workflows nav (by item id). */
 export const useNavOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("pi-lab.sidebar.navOrder")
+  useOrderPref("pi-lab.sidebar.navOrder", EMPTY_ORDER)
 /** Persisted drag order for the sidebar project list (by project id). */
 export const useProjectOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("pi-lab.sidebar.projectOrder")
+  useOrderPref("pi-lab.sidebar.projectOrder", EMPTY_ORDER)
 /** Persisted drag order for the cluster machine list (by machine id). */
 export const useClusterOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("pi-lab.cluster.machineOrder")
+  useOrderPref("pi-lab.cluster.machineOrder", EMPTY_ORDER)
+
+// --- Global emoji-tag palette: shared across ALL projects ---------------------
+// The reusable set of emoji the "Edit project…" dialog offers as toggle chips.
+// It is a single global palette (the user reuses the same tags everywhere), NOT
+// per-project — a project's *assigned* tags live in its `metadata.emojiTags`.
+// Seeded small; the user grows it via the dialog's "+" and prunes it by
+// right-clicking a chip.
+const EMOJI_TAG_PALETTE_KEY = "pi-lab.emojiTagPalette"
+const DEFAULT_EMOJI_TAG_PALETTE: string[] = ["🔬", "🧪", "🚀", "💡"]
+export const readEmojiTagPalette = (): string[] =>
+  readOrder(EMOJI_TAG_PALETTE_KEY, DEFAULT_EMOJI_TAG_PALETTE)
+export const useEmojiTagPalette = (): [string[], (next: string[]) => void] =>
+  useOrderPref(EMOJI_TAG_PALETTE_KEY, DEFAULT_EMOJI_TAG_PALETTE)
 
 // --- Experimental: gate v2 surfaces (integrations / teams) --------------------
 const EXPERIMENTAL_V2_KEY = "pi-lab.experimentalV2"

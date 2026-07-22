@@ -23,9 +23,9 @@ class MockIntersectionObserver implements IntersectionObserver {
   }
 }
 
-function GradientHarness() {
+function GradientHarness({ active = true }: { active?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null)
-  useGradientPlayState(ref as RefObject<HTMLDivElement | null>)
+  useGradientPlayState(ref as RefObject<HTMLDivElement | null>, active)
   return <div data-testid="gradient" ref={ref} />
 }
 
@@ -74,6 +74,28 @@ describe("useGradientPlayState", () => {
     expect(gradient.style.animationPlayState).toBe("paused")
 
     act(() => observer?.emit(true))
+    expect(gradient.style.animationPlayState).toBe("running")
+  })
+
+  test("stays paused while the project is inactive, even on-screen and focused", () => {
+    render(<GradientHarness active={false} />)
+
+    const gradient = screen.getByTestId("gradient")
+    const observer = MockIntersectionObserver.instances[0]
+    // On-screen + focused, but inactive ⇒ frozen (drift is an activity cue).
+    expect(gradient.style.animationPlayState).toBe("paused")
+
+    act(() => observer?.emit(true))
+    expect(gradient.style.animationPlayState).toBe("paused")
+  })
+
+  test("resumes when the project becomes active", () => {
+    const { rerender } = render(<GradientHarness active={false} />)
+
+    const gradient = screen.getByTestId("gradient")
+    expect(gradient.style.animationPlayState).toBe("paused")
+
+    rerender(<GradientHarness active={true} />)
     expect(gradient.style.animationPlayState).toBe("running")
   })
 

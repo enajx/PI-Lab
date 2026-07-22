@@ -8,6 +8,8 @@ interface QuickOpenProps {
   onOpenFile: (relPath: string) => void
   /** Dismiss the palette without opening anything. */
   onClose: () => void
+  /** Optional predicate restricting which results are shown/selectable (e.g. `.md` only). */
+  filter?: (relPath: string) => boolean
 }
 
 const DEBOUNCE_MS = 120
@@ -21,7 +23,7 @@ const DEBOUNCE_MS = 120
  * Results scroll in a native bounded list (AGENTS.md Pitfalls #3). The palette owns no
  * file I/O — it only turns a chosen path into an `onOpenFile` call.
  */
-export function QuickOpen({ workspaceId, onOpenFile, onClose }: QuickOpenProps) {
+export function QuickOpen({ workspaceId, onOpenFile, onClose, filter }: QuickOpenProps) {
   const trpc = useTRPC()
   const [query, setQuery] = useState("")
   const [debounced, setDebounced] = useState("")
@@ -57,7 +59,8 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose }: QuickOpenProps) 
       { staleTime: 5_000, enabled: debounced.trim().length > 0 },
     ),
   )
-  const hits = debounced.trim().length > 0 ? (searchQuery.data ?? []) : []
+  const allHits = debounced.trim().length > 0 ? (searchQuery.data ?? []) : []
+  const hits = filter ? allHits.filter((hit) => filter(hit.relPath)) : allHits
 
   // Reset the highlight to the top whenever the query (and thus the result set)
   // changes, so Enter always targets the best match for the current input.

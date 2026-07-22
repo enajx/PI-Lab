@@ -1,9 +1,14 @@
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
+import {
+  readProjectWorkspaceState,
+  writeProjectWorkspaceState,
+  writeProjectWorkspaceViewState,
+} from "../../-workspaceState"
 import { RightSidebar } from "./RightSidebar"
 
 /**
@@ -287,5 +292,150 @@ describe("RightSidebar", () => {
 
     fireEvent.click(screen.getByTestId("right-sidebar-expand"))
     expect(screen.getByTestId("right-sidebar")).toBeTruthy()
+  })
+})
+
+/**
+ * Feature F?? — pin arbitrary `.md` files as persistent per-project right-sidebar
+ * panels. `PinnedHarness` mirrors how the project route (`$projectId.tsx`) owns the
+ * pinned list: it seeds/reads it from `-workspaceState`, persists on change via
+ * `writeProjectWorkspaceViewState`, and threads pin/unpin handlers into the sidebar —
+ * so these tests drive the real persistence path and the sidebar's real controls.
+ */
+function seedWorkspaceState(projectId: string) {
+  // The view-state writer only updates an existing entry, so seed one first (the
+  // central panel does this in production before the view effect runs).
+  writeProjectWorkspaceState(projectId, {
+    buffers: [],
+    activeRelPath: null,
+    sessions: [],
+    active: null,
+    belowEditorRun: null,
+  })
+}
+
+function PinnedHarness({ projectId }: { projectId: string }) {
+  const [restored] = useState(() => readProjectWorkspaceState(projectId))
+  const [pinned, setPinned] = useState<string[]>(() => restored?.pinnedPanels ?? [])
+  const [activeId, setActiveId] = useState<string | null>(
+    () => restored?.rightSidebarActiveId ?? null,
+  )
+  useEffect(() => {
+    writeProjectWorkspaceViewState(projectId, {
+      rightSidebarCollapsed: false,
+      rightSidebarActiveId: activeId,
+      pinnedPanels: pinned,
+    })
+  }, [projectId, pinned, activeId])
+  return (
+    <RightSidebar
+      projectId={projectId}
+      workspaceId="ws-1"
+      onOpenFile={vi.fn()}
+      onCollapse={vi.fn()}
+      initialActiveId={activeId ?? undefined}
+      onActiveIdChange={setActiveId}
+      pinnedPanels={pinned}
+      onPinFile={(relPath) =>
+        setPinned((prev) => (prev.includes(relPath) ? prev : [...prev, relPath]))
+      }
+      onUnpinFile={(relPath) => setPinned((prev) => prev.filter((path) => path !== relPath))}
+    />
+  )
+}
+
+function renderPinned(projectId: string, overrides: FakeHandlers = {}) {
+  seedWorkspaceState(projectId)
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const client = createFakeTrpcClient({
+    "files.read": () => ({ exists: true, content: "# Pinned notes\n" }),
+    "files.tree": () => [{ name: "notes.md", relPath: "notes.md", kind: "file" as const }],
+    "files.search": () => [{ relPath: "notes.md" }, { relPath: "main.py" }],
+    "workspaces.changes": () => [],
+    "science.skills.list": () => ({ skills: [], roots: [] }),
+    ...overrides,
+  })
+  return render(
+    <AppProviders client={client} queryClient={queryClient}>
+      <PinnedHarness projectId={projectId} />
+    </AppProviders>,
+  )
+}
+
+describe("RightSidebar pinned Markdown panels", () => {
+  test("right-clicking a .md file in the tree offers Pin as panel, which adds a panel", async () => {
+    renderPinned("p-tree")
+    fireEvent.click(screen.getByTestId("panel-tab-files"))
+
+    const fileRow = await screen.findByTestId("file-tree-file")
+    expect(fileRow.getAttribute("data-rel-path")).toBe("notes.md")
+    fireEvent.contextMenu(fileRow)
+
+    fireEvent.click(screen.getByTestId("file-tree-pin"))
+
+    const pinnedTab = await screen.findByTestId("panel-tab-pinned:notes.md")
+    fireEvent.click(pinnedTab)
+    expect(await screen.findByTestId("panel-pinned:notes.md")).toBeTruthy()
+    expect(await screen.findByText("Pinned notes")).toBeTruthy()
+  })
+
+  test("the + control pins a selected .md file (and filters out non-.md hits)", async () => {
+    renderPinned("p-plus")
+    fireEvent.click(screen.getByTestId("right-sidebar-pin"))
+
+    fireEvent.change(screen.getByTestId("quick-open-input"), { target: { value: "notes" } })
+    const results = await screen.findAllByTestId("quick-open-result")
+    // main.py is filtered out; only the .md hit is selectable.
+    expect(results.map((node) => node.getAttribute("data-rel-path"))).toEqual(["notes.md"])
+
+    fireEvent.click(screen.getByTestId("quick-open-result"))
+    expect(await screen.findByTestId("panel-tab-pinned:notes.md")).toBeTruthy()
+    expect(screen.queryByTestId("quick-open")).toBeNull()
+  })
+
+  test("pinned panels persist to -workspaceState and restore on a fresh mount", async () => {
+    const view = renderPinned("p-persist")
+    fireEvent.click(screen.getByTestId("right-sidebar-pin"))
+    fireEvent.change(screen.getByTestId("quick-open-input"), { target: { value: "notes" } })
+    fireEvent.click(await screen.findByTestId("quick-open-result"))
+    await screen.findByTestId("panel-tab-pinned:notes.md")
+
+    // Persisted through the real workspace-state writer.
+    expect(readProjectWorkspaceState("p-persist")?.pinnedPanels).toEqual(["notes.md"])
+
+    // A fresh mount (app relaunch) restores the pinned panel from that state.
+    view.unmount()
+    renderPinned("p-persist")
+    expect(await screen.findByTestId("panel-tab-pinned:notes.md")).toBeTruthy()
+  })
+
+  test("unpinning removes the panel and the active tab falls back to the first tab", async () => {
+    seedWorkspaceState("p-unpin")
+    writeProjectWorkspaceViewState("p-unpin", {
+      rightSidebarCollapsed: false,
+      rightSidebarActiveId: "pinned:notes.md",
+      pinnedPanels: ["notes.md"],
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = createFakeTrpcClient({
+      "files.read": () => ({ exists: true, content: "# Pinned notes\n" }),
+      "files.tree": () => [],
+      "files.search": () => [],
+      "workspaces.changes": () => [],
+      "science.skills.list": () => ({ skills: [], roots: [] }),
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        <PinnedHarness projectId="p-unpin" />
+      </AppProviders>,
+    )
+
+    expect(screen.getByTestId("panel-tab-pinned:notes.md")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("right-sidebar-unpin:notes.md"))
+
+    await waitFor(() => expect(screen.queryByTestId("panel-tab-pinned:notes.md")).toBeNull())
+    // The active-tab fallback still resolves — Research (the first tab) is shown.
+    expect(await screen.findByTestId("panel-research")).toBeTruthy()
+    expect(readProjectWorkspaceState("p-unpin")?.pinnedPanels).toEqual([])
   })
 })

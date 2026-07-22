@@ -169,6 +169,46 @@ export interface ProjectAgentConfig {
   agentId?: string
 }
 
+/**
+ * A project's persisted dashboard-card gradient. The card's noisy-gradient artwork
+ * is re-derived from these on every launch, so it stays identical across restarts.
+ * `seed` drives the `mulberry32` PRNG in `@pi-lab/ui`'s gradient-patterns generator;
+ * `palette` is the exact list of colors it was sampled with (captured from the app
+ * theme at generation time), frozen here so a later theme change never alters an
+ * existing project's gradient. Null ⇒ no gradient captured yet (the card samples one
+ * from the current theme on first render and persists it).
+ */
+export interface ProjectGradient {
+  seed: number
+  palette: string[]
+}
+
+/** One reference link on a project card: a URL, optionally given a display label. */
+export interface ProjectReferenceLink {
+  url: string
+  label?: string
+}
+
+/**
+ * Extra, user-entered project metadata edited via the card's "Edit project…"
+ * dialog and surfaced under the card title. Every field is optional; only the
+ * fields the user actually filled render on the card (empty fields show nothing).
+ * Stored as one JSON blob (like {@link ProjectGradient}) so the group can grow
+ * without another migration. Null / an all-empty object ⇒ nothing to show.
+ */
+export interface ProjectMetadata {
+  /** Free-text collaborators (e.g. co-authors), as typed by the user. */
+  collaborators?: string
+  /** Target publishing venue (journal, conference, etc.). */
+  venue?: string
+  /** Deadline as an ISO date string (`YYYY-MM-DD`, from an `<input type="date">`). */
+  deadline?: string
+  /** A small set of chosen emoji tags. */
+  emojiTags?: string[]
+  /** Reference links, each a URL with an optional label. */
+  referenceLinks?: ProjectReferenceLink[]
+}
+
 /** A locally-known v2 Team (names only — no remote ids, see md/engineering/architecture.md (local DB)). */
 export interface KnownTeam {
   name: string
@@ -313,6 +353,21 @@ export const projects = sqliteTable(
      * travels with the row and never dangles.
      */
     thumbnail: text("thumbnail"),
+    /**
+     * Persisted dashboard-card gradient (`{ seed, palette }`), captured from the app
+     * theme when the gradient is generated and frozen so it survives restarts and later
+     * theme changes ({@link ProjectGradient}). Null ⇒ none captured yet (the card samples
+     * one on first render). Mutually exclusive with {@link projects.thumbnail} in the UI:
+     * setting a thumbnail nulls this, generating a gradient nulls the thumbnail.
+     */
+    gradient: text("gradient", { mode: "json" }).$type<ProjectGradient>(),
+    /**
+     * Extra user-entered project metadata (collaborators, publishing venue,
+     * deadline, emoji tags, reference links) edited via the card's "Edit project…"
+     * dialog and shown under the card title ({@link ProjectMetadata}). One JSON blob
+     * so the field group grows without a migration; null ⇒ none entered yet.
+     */
+    metadata: text("metadata", { mode: "json" }).$type<ProjectMetadata>(),
     /** App-memory copy of project-specific agent choices. */
     agentConfig: text("agent_config", { mode: "json" }).$type<ProjectAgentConfig>(),
     /** Manual ordering in the sidebar; lower sorts first. */
@@ -699,6 +754,52 @@ export const automationRuns = sqliteTable(
 )
 
 // ---------------------------------------------------------------------------
+// projectWorkflowRuns — the last COMPLETED result of a non-interactive project
+// workflow (the "Project summary" and "Fetch remote experiments" background
+// tasks). One row per (project, task): the run's captured output, the git-state
+// hash it was computed against (the cache/re-run trigger), when it was last
+// checked, and a failure message when the run errored/timed out. Only completed
+// results live here — "currently running" is tracked in-memory (nothing is
+// running on startup), never persisted.
+// ---------------------------------------------------------------------------
+
+/** A non-interactive project workflow with a cached, per-project result. */
+export type WorkflowTask = "summary" | "fetch-experiments"
+
+export const projectWorkflowRuns = sqliteTable(
+  "project_workflow_runs",
+  {
+    id: primaryId(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Which background workflow this row caches ({@link WorkflowTask}). */
+    task: text("task").notNull().$type<WorkflowTask>(),
+    /** The run's captured user-facing output (trimmed stdout); "" when none printed. */
+    result: text("result").notNull().default(""),
+    /**
+     * The git-state hash the result was computed against (sha256 of HEAD +
+     * `status --porcelain` + `diff HEAD`). A run request re-runs only when the
+     * current hash differs; an identical hash returns this cached result.
+     */
+    inputHash: text("input_hash").notNull().default(""),
+    /** When this result was last (re-)computed or re-checked (epoch ms). */
+    lastCheckedAt: integer("last_checked_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    /** Failure detail when the last run errored/timed out; null on success. */
+    errorMessage: text("error_message"),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("ux_project_workflow_runs_project_task").on(t.projectId, t.task),
+    index("ix_project_workflow_runs_project").on(t.projectId),
+  ],
+)
+
+// ---------------------------------------------------------------------------
 // agentSessions — durable targeting and last-known lifecycle for interactive
 // CLI agents. The app-lifetime activity registry owns the live classification;
 // this table lets main reconcile still-live PTY sessions after a restart.
@@ -794,3 +895,5 @@ export type AgentSession = typeof agentSessions.$inferSelect
 export type NewAgentSession = typeof agentSessions.$inferInsert
 export type AutomationPromptVersion = typeof automationPromptVersions.$inferSelect
 export type NewAutomationPromptVersion = typeof automationPromptVersions.$inferInsert
+export type ProjectWorkflowRun = typeof projectWorkflowRuns.$inferSelect
+export type NewProjectWorkflowRun = typeof projectWorkflowRuns.$inferInsert

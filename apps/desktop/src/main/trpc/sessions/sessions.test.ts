@@ -3,7 +3,7 @@
 // an in-process pty-daemon, and injected fake agents (one short-lived, one
 // long-lived so a session can be held open across a second start). Full cleanup
 // per test; concurrency assertions poll with timeouts, never fixed sleeps.
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { agentSessions, settings } from "@pi-lab/local-db"
 import { DaemonClient } from "@pi-lab/pty-daemon"
@@ -326,6 +326,39 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     const workspace = await h.caller.workspaces.get({ id: taskAgent.workspaceId })
     expect(workspaceWorkingDir(h.db, workspace)).toBe(h.repoDir)
     await h.caller.terminal.kill({ sessionId: first.sessionId })
+  })
+})
+
+describe("sessions.startAutoResearch — placeholder worktree launch", () => {
+  test("creates a worktree workspace and seeds AUTORESEARCH.md into it", async () => {
+    // Remember a launchable test agent so the default (`claude-code`, absent from
+    // the harness catalog) isn't resolved.
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "fake-agent" })
+
+    const result = await h.caller.sessions.startAutoResearch({ projectId })
+
+    // The session runs in a fresh worktree, never the project's main checkout.
+    expect(result.kind).toBe("worktree")
+    expect(result.sessionId).toBeTruthy()
+    const workspace = await h.caller.workspaces.get({ id: result.workspaceId })
+    expect(workspace.kind).toBe("worktree")
+    const dir = workspaceWorkingDir(h.db, workspace)
+    expect(dir).not.toBe(h.repoDir)
+    expect(existsSync(dir)).toBe(true)
+
+    // The placeholder file lands inside that worktree's working dir. It is seeded
+    // BEFORE the agent spawns, so it already exists the moment the call resolves.
+    const seeded = join(dir, "AUTORESEARCH.md")
+    expect(existsSync(seeded)).toBe(true)
+    expect(readFileSync(seeded, "utf8")).toContain("placeholder")
+
+    // The launch is durably recorded against the project's remembered/default agent.
+    const durable = h.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, result.sessionId))
+      .get()
+    expect(durable).toMatchObject({ projectId, workspaceId: result.workspaceId })
   })
 })
 

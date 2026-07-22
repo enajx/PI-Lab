@@ -313,4 +313,104 @@ describe("projects.setThumbnail", () => {
       h.caller.projects.setThumbnail({ id: "missing", dataUrl: DATA_URL }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
+
+  test("setting a thumbnail clears any stored gradient (one artwork at a time)", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setGradient({
+      id: project.id,
+      gradient: { seed: 7, palette: ["#FFC700"] },
+    })
+
+    const updated = await h.caller.projects.setThumbnail({ id: project.id, dataUrl: DATA_URL })
+    expect(updated.thumbnail).toBe(DATA_URL)
+    expect(updated.gradient).toBeNull()
+  })
+})
+
+describe("projects.setGradient", () => {
+  test("persists a { seed, palette } gradient and surfaces it in list/get", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    expect(project.gradient).toBeNull()
+
+    const gradient = { seed: 12345, palette: ["#FFC700", "#18A0FB"] }
+    const updated = await h.caller.projects.setGradient({ id: project.id, gradient })
+    expect(updated.gradient).toEqual(gradient)
+
+    expect((await h.caller.projects.get({ id: project.id })).gradient).toEqual(gradient)
+    const listed = (await h.caller.projects.list()).find((p) => p.id === project.id)
+    expect(listed?.gradient).toEqual(gradient)
+  })
+
+  test("generating a gradient clears any thumbnail", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setThumbnail({
+      id: project.id,
+      dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA=",
+    })
+
+    const updated = await h.caller.projects.setGradient({
+      id: project.id,
+      gradient: { seed: 1, palette: ["#EE46D3"] },
+    })
+    expect(updated.gradient).toEqual({ seed: 1, palette: ["#EE46D3"] })
+    expect(updated.thumbnail).toBeNull()
+  })
+
+  test("clears the gradient with gradient: null", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setGradient({
+      id: project.id,
+      gradient: { seed: 3, palette: ["#000"] },
+    })
+
+    const cleared = await h.caller.projects.setGradient({ id: project.id, gradient: null })
+    expect(cleared.gradient).toBeNull()
+  })
+
+  test("throws NOT_FOUND for an unknown project", async () => {
+    await expect(
+      h.caller.projects.setGradient({ id: "missing", gradient: { seed: 1, palette: ["#000"] } }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+})
+
+describe("projects.setMetadata", () => {
+  const METADATA = {
+    collaborators: "Ada Lovelace, Alan Turing",
+    venue: "NeurIPS 2026",
+    deadline: "2026-11-30",
+    emojiTags: ["🔬", "🚀"],
+    referenceLinks: [
+      { url: "https://example.com/paper", label: "Preprint" },
+      { url: "https://example.com/code" },
+    ],
+  }
+
+  test("persists metadata and surfaces it in list/get", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    expect(project.metadata).toBeNull()
+
+    const updated = await h.caller.projects.setMetadata({ id: project.id, metadata: METADATA })
+    expect(updated.metadata).toEqual(METADATA)
+
+    // Survives a fresh read (i.e. it round-trips through the DB, not just the return).
+    expect((await h.caller.projects.get({ id: project.id })).metadata).toEqual(METADATA)
+    const listed = (await h.caller.projects.list()).find((p) => p.id === project.id)
+    expect(listed?.metadata).toEqual(METADATA)
+  })
+
+  test("clears metadata with metadata: null", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setMetadata({ id: project.id, metadata: METADATA })
+
+    const cleared = await h.caller.projects.setMetadata({ id: project.id, metadata: null })
+    expect(cleared.metadata).toBeNull()
+    expect((await h.caller.projects.get({ id: project.id })).metadata).toBeNull()
+  })
+
+  test("throws NOT_FOUND for an unknown project", async () => {
+    await expect(
+      h.caller.projects.setMetadata({ id: "missing", metadata: METADATA }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
 })

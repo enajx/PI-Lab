@@ -127,6 +127,47 @@ describe("Sidebar", () => {
     expect(screen.getAllByTestId("science-nav-item").length).toBeGreaterThan(0)
   })
 
+  test("hides Cluster/Analysis nav rows when their section preference is off, restores when on", async () => {
+    const clusterTab = () =>
+      screen
+        .queryAllByTestId("science-nav-item")
+        .find((item) => item.getAttribute("data-science-tab") === "cluster")
+    const analysisTab = () =>
+      screen
+        .queryAllByTestId("science-nav-item")
+        .find((item) => item.getAttribute("data-science-tab") === "analysis")
+
+    // Shown by default.
+    const shown = renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("science-nav")).toBeTruthy())
+    expect(clusterTab()).toBeTruthy()
+    expect(analysisTab()).toBeTruthy()
+    shown.unmount()
+
+    // Off ⇒ both rows gone.
+    window.localStorage.setItem("pi-lab.sections.showCluster", "false")
+    window.localStorage.setItem("pi-lab.sections.showAnalysis", "false")
+    const hidden = renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("science-nav")).toBeTruthy())
+    expect(clusterTab()).toBeUndefined()
+    expect(analysisTab()).toBeUndefined()
+    // The other science rows stay put.
+    expect(
+      screen
+        .getAllByTestId("science-nav-item")
+        .some((item) => item.getAttribute("data-science-tab") === "tasks"),
+    ).toBe(true)
+    hidden.unmount()
+
+    // Back on ⇒ both rows return.
+    window.localStorage.setItem("pi-lab.sections.showCluster", "true")
+    window.localStorage.setItem("pi-lab.sections.showAnalysis", "true")
+    renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("science-nav")).toBeTruthy())
+    expect(clusterTab()).toBeTruthy()
+    expect(analysisTab()).toBeTruthy()
+  })
+
   test("Projects Dashboard navigation uses the home route", async () => {
     const { router } = renderSidebar({
       "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],

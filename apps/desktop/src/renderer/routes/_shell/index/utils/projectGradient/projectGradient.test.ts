@@ -1,96 +1,82 @@
 import fc from "fast-check"
 import { describe, expect, test } from "vitest"
-import { projectGradient } from "./projectGradient"
+import { hashString, projectGradient } from "./projectGradient"
+
+const PALETTE = ["#FFC700", "#18A0FB", "#EE46D3"]
 
 describe("projectGradient", () => {
-  // Example-based: pin down the concrete, human-meaningful behaviour.
-  test("is stable — the same id yields an identical gradient + animation", () => {
-    const a = projectGradient("photon-drift")
-    const b = projectGradient("photon-drift")
+  test("is stable — the same seed+palette yields an identical artwork", () => {
+    const a = projectGradient(1234, PALETTE)
+    const b = projectGradient(1234, PALETTE)
     expect(a.background).toBe(b.background)
+    expect(a.baseColor).toBe(b.baseColor)
     expect(a.grainUrl).toBe(b.grainUrl)
     expect(a.layerBackgrounds).toEqual(b.layerBackgrounds)
     expect(a.variant).toEqual(b.variant)
     expect(a.animation).toEqual(b.animation)
   })
 
-  test("a project set receives genuinely varied shapes, motions, and palettes", () => {
-    const gradients = Array.from({ length: 120 }, (_, index) => projectGradient(`project-${index}`))
+  test("different seeds diverge; the palette shapes the fill colors", () => {
+    const a = projectGradient(1, PALETTE)
+    const b = projectGradient(2, PALETTE)
+    expect(a.layerBackgrounds).not.toEqual(b.layerBackgrounds)
 
-    expect(new Set(gradients.map(({ variant }) => variant.shape)).size).toBeGreaterThanOrEqual(10)
-    expect(new Set(gradients.map(({ variant }) => variant.motion)).size).toBeGreaterThanOrEqual(5)
-    expect(new Set(gradients.map(({ background }) => background)).size).toBeGreaterThanOrEqual(10)
-  })
-
-  test("uses broad eddy and bloom fields instead of pinched vortex or starburst petals", () => {
-    const gradients = Array.from({ length: 240 }, (_, index) =>
-      projectGradient(`shape-sample-${index}`),
+    // Every fill in the baked SVGs comes from the given palette (case-insensitive,
+    // url-encoded in the data URI). At least one palette color must appear.
+    const encoded = a.layerBackgrounds.join(" ").toUpperCase()
+    expect(PALETTE.some((color) => encoded.includes(encodeURIComponent(color).toUpperCase()))).toBe(
+      true,
     )
-    const shapes = new Set(gradients.map(({ variant }) => variant.shape))
-    const fields = gradients.flatMap(({ layerBackgrounds }) => layerBackgrounds)
-
-    expect(shapes).toContain("eddy")
-    expect(shapes).toContain("bloom")
-    expect(shapes).not.toContain("vortex")
-    expect(shapes).not.toContain("petals")
-    expect(fields.some((field) => field.includes("repeating-conic-gradient"))).toBe(false)
   })
 
-  test("returns a light pastel base, three organic color fields, and strong inline SVG grain", () => {
-    const { background, layerBackgrounds, grainUrl } = projectGradient("anything")
+  test("a project set receives genuinely varied motions", () => {
+    const motions = new Set(
+      Array.from({ length: 120 }, (_, index) => projectGradient(index, PALETTE).variant.motion),
+    )
+    expect(motions.size).toBeGreaterThanOrEqual(5)
+  })
+
+  test("bakes three distinct transparent layers and an inline turbulence grain", () => {
+    const { background, baseColor, layerBackgrounds, grainUrl } = projectGradient(7, PALETTE)
+
     expect(background.startsWith("linear-gradient(")).toBe(true)
+    expect(baseColor).toMatch(/^#(FFFFFF|000000)$/)
     expect(layerBackgrounds).toHaveLength(3)
     expect(new Set(layerBackgrounds).size).toBe(3)
-
-    const css = [background, ...layerBackgrounds].join(" ")
-    const lightnesses = [...css.matchAll(/hsl\([^ ]+ [^ ]+% ([\d.]+)%/g)].map((match) =>
-      Number(match[1]),
-    )
-    expect(lightnesses.length).toBeGreaterThan(0)
-    expect(Math.min(...lightnesses)).toBeGreaterThanOrEqual(76)
+    for (const layer of layerBackgrounds) {
+      expect(layer.startsWith('url("data:image/svg+xml,')).toBe(true)
+      // A transparent shapes-only field: no opaque base rect (that lives outside).
+      expect(layer).toContain(encodeURIComponent("feGaussianBlur"))
+    }
 
     expect(grainUrl.startsWith("data:image/svg+xml,")).toBe(true)
-    expect(grainUrl).toContain("fractalNoise")
-    expect(grainUrl).toContain("baseFrequency='.82'")
-    expect(grainUrl).toContain("numOctaves='4'")
+    expect(grainUrl).toContain(encodeURIComponent("fractalNoise"))
   })
 
   test("animation timing sits in the documented ranges", () => {
-    const { animation } = projectGradient("anything")
+    const { animation } = projectGradient(99, PALETTE)
     expect(animation.durationSec).toBeGreaterThanOrEqual(8)
     expect(animation.durationSec).toBeLessThanOrEqual(12)
     // A negative (mid-cycle) phase offset.
     expect(animation.delaySec).toBeLessThanOrEqual(0)
   })
 
-  // Property-based: invariants that must hold for ALL ids. fast-check generates
-  // hundreds of strings (incl. unicode, empty) and shrinks any failure.
-  test("base duration is always within 8..12s and delay is always <= 0", () => {
+  test("hashString is deterministic and unsigned", () => {
+    expect(hashString("photon-drift")).toBe(hashString("photon-drift"))
+    expect(hashString("photon-drift")).not.toBe(hashString("lattice-qcd"))
+    expect(hashString("anything") >>> 0).toBe(hashString("anything"))
+  })
+
+  // Property-based: invariants that must hold for ALL seeds.
+  test("base duration is always within 8..12s and delay is always in (-dur, 0]", () => {
     fc.assert(
-      fc.property(fc.string(), (id) => {
-        const { animation } = projectGradient(id)
+      fc.property(fc.integer({ min: 0, max: 0xffffffff }), (seed) => {
+        const { animation } = projectGradient(seed, PALETTE)
         return (
           animation.durationSec >= 8 &&
           animation.durationSec <= 12 &&
           animation.delaySec <= 0 &&
-          // The negative offset never exceeds the cycle length.
           animation.delaySec > -animation.durationSec
-        )
-      }),
-    )
-  })
-
-  test("is deterministic — same id maps to the same animation timing", () => {
-    fc.assert(
-      fc.property(fc.string(), (id) => {
-        const a = projectGradient(id)
-        const b = projectGradient(id)
-        return (
-          a.background === b.background &&
-          a.variant.shape === b.variant.shape &&
-          a.variant.motion === b.variant.motion &&
-          a.animation.durationSec === b.animation.durationSec &&
-          a.animation.delaySec === b.animation.delaySec
         )
       }),
     )

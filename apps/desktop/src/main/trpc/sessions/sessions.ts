@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import {
   agentSessions,
   getAgentSettingsOrDefaults,
@@ -7,10 +8,12 @@ import {
   type Workspace,
   workspaces,
 } from "@pi-lab/local-db"
-import { buildLaunchArgv, getAgent } from "@pi-lab/shared"
+import { buildLaunchArgv, DEFAULT_AGENT_ID, getAgent } from "@pi-lab/shared"
+import { writeTextFile } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 import { and, eq, ne } from "drizzle-orm"
 import { z } from "zod"
+import { readProjectAgentConfig } from "../../agents/projectConfig"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
@@ -123,6 +126,13 @@ export interface StartAgentSessionInput {
   rows?: number
   /** Workflow run whose initially-launched interactive turn this session owns. */
   workflowRunId?: string
+  /**
+   * Pre-spawn hook invoked right after the working dir is resolved and **before**
+   * the agent PTY is spawned, so callers can seed files into the workspace (e.g.
+   * `AUTORESEARCH.md`) with a guaranteed seed-before-launch ordering. If it throws,
+   * the session is never spawned, so a failed seed can't orphan a live agent.
+   */
+  onWorkspaceReady?: (workingDir: string, workspace: Workspace) => Promise<void>
 }
 
 /**
@@ -186,6 +196,10 @@ export async function startAgentSession(
   // Resolve cwd by kind: repo root for branch, worktree path for worktree.
   const dir = workspaceWorkingDir(ctx.db, workspace)
 
+  // Seed the workspace before the agent launches (seed-before-launch). A throw
+  // here aborts the start before any PTY is spawned, so it can't orphan a session.
+  if (input.onWorkspaceReady) await input.onWorkspaceReady(dir, workspace)
+
   const client = await ctx.getDaemonClient()
   const launchEnvironment = await ctx.getAgentLaunchEnvironment()
   const session = await client.spawn({
@@ -218,6 +232,71 @@ export async function startAgentSession(
   return { sessionId: session.id, workspaceId: workspace.id, kind }
 }
 
+/** Filename PI Lab seeds into an auto-research worktree (placeholder for now). */
+const AUTORESEARCH_FILENAME = "AUTORESEARCH.md"
+
+/**
+ * Placeholder `AUTORESEARCH.md` seeded into the isolated worktree. The real
+ * auto-research loop is not implemented yet — launching auto-research currently
+ * just opens an agent session in this worktree — and the real instructions will
+ * live in this file later.
+ */
+const AUTORESEARCH_PLACEHOLDER = `# Auto-research (placeholder)
+
+This file is a placeholder for PI Lab's auto-research instructions.
+
+The real auto-research loop is **not implemented yet**. For now, launching
+auto-research from a project card only:
+
+- creates this isolated git worktree, separate from the project's main checkout, and
+- opens an agent session in it.
+
+The real auto-research instructions and loop will live in this file later.
+`
+
+/** Result of {@link startAutoResearch} — the seeded worktree's live session. */
+export type StartAutoResearchResult = StartSessionResult
+
+/**
+ * Placeholder "Auto-research" trigger for a Dashboard project card. Opens an
+ * isolated git-worktree agent session for the project — separate from its main
+ * checkout — using the project's remembered agent (or the catalog default), then
+ * seeds a placeholder {@link AUTORESEARCH_FILENAME} into that worktree. The real
+ * auto-research loop is out of scope; this only opens the worktree agent session.
+ *
+ * Reuses the shared {@link startAgentSession} launch policy (worktree mode) so
+ * worktree creation, agent resolution, and activity bookkeeping stay in one
+ * place; the placeholder is written into the returned workspace's working dir
+ * afterwards.
+ */
+export async function startAutoResearch(
+  ctx: AppContext,
+  input: { projectId: string },
+): Promise<StartAutoResearchResult> {
+  const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
+  if (!project) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+  }
+
+  // The project's remembered agent choice, falling back to the catalog default.
+  const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
+  const config = await readProjectAgentConfig(ctx.db, project, storage)
+  const agentId = config.agentId ?? DEFAULT_AGENT_ID
+
+  // Seed the placeholder BEFORE the agent launches, via the pre-spawn hook, so the
+  // worktree always has AUTORESEARCH.md before the session starts and a failed seed
+  // aborts the start rather than orphaning a live session.
+  return startAgentSession(ctx, {
+    projectId: project.id,
+    agentId,
+    name: `auto-research-${Date.now().toString(36)}`,
+    workspaceMode: "worktree",
+    onWorkspaceReady: async (dir) => {
+      await writeTextFile(join(dir, AUTORESEARCH_FILENAME), AUTORESEARCH_PLACEHOLDER)
+    },
+  })
+}
+
 export const sessionsRouter = router({
   /** Live agent state, grouped by project in the renderer for project-level indicators. */
   activity: publicProcedure.query(({ ctx }) =>
@@ -235,4 +314,14 @@ export const sessionsRouter = router({
   start: publicProcedure
     .input(startInput)
     .mutation(({ ctx, input }): Promise<StartSessionResult> => startAgentSession(ctx, input)),
+
+  /**
+   * Placeholder "Auto-research" trigger for a Dashboard project card. Opens an
+   * isolated git-worktree agent session for the project and seeds a placeholder
+   * `AUTORESEARCH.md` into it — the real auto-research loop is out of scope. Thin
+   * wrapper over {@link startAutoResearch}.
+   */
+  startAutoResearch: publicProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(({ ctx, input }): Promise<StartAutoResearchResult> => startAutoResearch(ctx, input)),
 })

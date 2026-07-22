@@ -24,6 +24,8 @@ import {
   SIDEBAR_MIN_WIDTH,
   useNavOrder,
   useProjectOrder,
+  useShowAnalysisSection,
+  useShowClusterSection,
   useSidebarCollapsed,
   useSidebarFeatureHelp,
   useSidebarWidth,
@@ -954,7 +956,16 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
   const { location } = useRouterState()
   const pathname = location.pathname
   const [navOrder, setNavOrder] = useNavOrder()
-  const ordered = orderById(navItems, navOrder)
+  const [showCluster] = useShowClusterSection()
+  const [showAnalysis] = useShowAnalysisSection()
+  // Hide the optional sections whose Settings toggle is off (the surfaces stay
+  // route-guarded too, so a bookmarked URL can't reach a hidden section).
+  const visibleItems = navItems.filter((item) => {
+    if (item.id === "cluster") return showCluster
+    if (item.id === "analysis") return showAnalysis
+    return true
+  })
+  const ordered = orderById(visibleItems, navOrder)
   const navRowProps = useDragReorder(
     ordered.map((item) => item.id),
     setNavOrder,

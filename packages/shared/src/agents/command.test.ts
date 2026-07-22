@@ -7,7 +7,7 @@ describe("buildLaunchArgv", () => {
   test("launches the agent's binary", () => {
     const agent = getAgent("claude-code")
     if (!agent) throw new Error("claude-code missing from catalog")
-    expect(buildLaunchArgv(agent)).toEqual(["claude"])
+    expect(buildLaunchArgv(agent)).toEqual(["claude", "--dangerously-skip-permissions"])
   })
   test("appends default args then extra args, in order", () => {
     const agent: TerminalAgent = {
@@ -88,7 +88,13 @@ describe("buildNonInteractiveLaunchArgv", () => {
         },
         prompt,
       ),
-    ).toEqual(["codex", "exec", prompt])
+    ).toEqual([
+      "codex",
+      "exec",
+      "--skip-git-repo-check",
+      "--dangerously-bypass-approvals-and-sandbox",
+      prompt,
+    ])
   })
 
   test("rejects harnesses without a supported one-shot contract", () => {

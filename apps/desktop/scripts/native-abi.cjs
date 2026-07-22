@@ -109,13 +109,49 @@ function build(/** @type {"node"|"electron"} */ target) {
 }
 
 /**
- * Ensure better-sqlite3's in-place binary is on `target`'s ABI, using the cache to
- * avoid recompiling on repeat switches.
+ * Prove better-sqlite3 actually works under the consuming runtime: load the
+ * PACKAGE (so it resolves its own binary however it likes) and run a trivial
+ * query, in a child process (Node, or Electron-as-node) so a bad load can't
+ * poison this process. Returns true only on a clean "ok".
+ *
+ * This is crash-robust: a wrong-ABI node-gyp binary that *segfaults* the child
+ * (instead of throwing) simply yields no "ok" → false, so the caller falls
+ * through to the legacy swap rather than dying on the probe.
+ * @param {"node"|"electron"} target
+ */
+function moduleLoadsUnder(target) {
+  const pkgEntry = require.resolve("better-sqlite3", { paths: [DESKTOP_DIR] })
+  const snippet =
+    "try{const D=require(process.env.__PROBE_PKG);const db=new D(':memory:');" +
+    "db.prepare('select 1 as x').get();process.stdout.write('ok')}" +
+    "catch(e){process.stdout.write('no')}"
+  const cmd = target === "electron" ? electronBinary() : process.execPath
+  const env = { ...process.env, __PROBE_PKG: pkgEntry }
+  if (target === "electron") env.ELECTRON_RUN_AS_NODE = "1"
+  const res = spawnSync(cmd, ["-e", snippet], { env, encoding: "utf8" })
+  return (res.stdout || "").trim() === "ok"
+}
+
+/**
+ * Ensure better-sqlite3 works under `target`'s runtime.
+ *
+ * better-sqlite3 v13+ (and node-pty) are N-API (node-addon-api): a single
+ * prebuilt binary loads on ANY Node/Electron ABI, so no per-ABI swap is needed —
+ * if the package already loads, this is a no-op. The legacy node-gyp swap below
+ * is kept as a fallback for a pre-v13 (ABI-specific) binary.
  * @param {"node"|"electron"} target
  */
 function ensureAbi(target) {
-  const bin = betterSqlite3Bin()
   const label = target === "node" ? "Node (test)" : "Electron (app)"
+
+  // Fast path: N-API / already-correct binary loads as-is → nothing to swap.
+  if (moduleLoadsUnder(target)) {
+    console.log(`native ABI — ${label}: better-sqlite3 loads as-is (N-API), no swap needed`)
+    return
+  }
+
+  // --- Legacy node-gyp ABI swap (pre-v13 better-sqlite3) --------------------
+  const bin = betterSqlite3Bin()
 
   // 1) Already correct? Make sure it's cached, then stop.
   const current = probe(target, bin)

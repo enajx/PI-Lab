@@ -45,6 +45,13 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     editable: true,
   },
   {
+    id: "project-command-palette",
+    label: "Project command palette",
+    description: "Run a project action (open agent/terminal/file, switch panel) inside a project",
+    defaultBinding: "Mod+Shift+p",
+    editable: true,
+  },
+  {
     id: "save-file",
     label: "Save file",
     description: "Save the active editor buffer (CodeMirror)",

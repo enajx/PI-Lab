@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gradient Patterns — playground</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #111;
+        color: #ddd;
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        min-height: 100vh;
+        padding: 16px;
+      }
+      #stage {
+        display: grid;
+        place-items: center;
+      }
+      svg {
+        width: min(90vh, 100%);
+        height: auto;
+        border-radius: 8px;
+      }
+      aside {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0;
+        letter-spacing: 0.05em;
+      }
+      .hint {
+        color: #888;
+      }
+      button {
+        font: inherit;
+        padding: 8px 12px;
+        background: #222;
+        color: #eee;
+        border: 1px solid #444;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #2c2c2c;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #aaa;
+      }
+      input[type="number"] {
+        width: 90px;
+        font: inherit;
+        background: #1a1a1a;
+        color: #eee;
+        border: 1px solid #444;
+        border-radius: 4px;
+        padding: 3px 6px;
+      }
+      pre {
+        background: #0a0a0a;
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 10px;
+        overflow: auto;
+        max-height: 32vh;
+        color: #9ecbff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="stage"></main>
+    <aside>
+      <h1>GRADIENT PATTERNS — playground</h1>
+      <p class="hint">Press <b>spacebar</b> (new seed) or click <b>Generate</b>. Tune the dials, then tell the agent the values to freeze.</p>
+      <button type="button" id="gen">Generate new seed</button>
+      <label>seed <input type="number" id="seed" value="12345" step="1" /></label>
+      <label><input type="checkbox" id="noise" checked /> apply turbulence noise</label>
+      <label>base freq <input type="range" id="freq" min="0.05" max="1" step="0.01" value="0.7" /></label>
+      <label>octaves <input type="range" id="oct" min="1" max="18" step="1" value="3" /></label>
+      <label>blur <input type="range" id="blur" min="0" max="400" step="5" value="250" /></label>
+      <pre id="cfg"></pre>
+    </aside>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

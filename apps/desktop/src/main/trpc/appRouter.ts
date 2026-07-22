@@ -15,6 +15,7 @@ import { systemRouter } from "./system"
 import { templateRouter } from "./template"
 import { terminalRouter } from "./terminal/terminal"
 import { router } from "./trpc"
+import { workflowsRouter } from "./workflows"
 import { workspacesRouter } from "./workspaces"
 
 /**
@@ -32,6 +33,7 @@ export const appRouter = router({
   python: pythonRouter,
   workspaces: workspacesRouter,
   sessions: sessionsRouter,
+  workflows: workflowsRouter,
   system: systemRouter,
   files: filesRouter,
   diagnostics: diagnosticsRouter,

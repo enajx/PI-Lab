@@ -55,6 +55,12 @@ interface CentralPanelProps {
    * bring it back (the sidebar isn't mounted to host its own expand affordance). */
   rightSidebarCollapsed: boolean
   onExpandRightSidebar: () => void
+  /**
+   * Pin a `.md` file as a right-sidebar panel. Threaded down to the left Files
+   * panel's tree so its right-click "Pin as panel" entry works in this layout too
+   * (the right-sidebar Files tab is hidden while the left panel is on).
+   */
+  onPinFile?: (relPath: string) => void
 }
 
 /**
@@ -74,6 +80,7 @@ export function CentralPanel({
   onUpdateEditorSettings,
   rightSidebarCollapsed,
   onExpandRightSidebar,
+  onPinFile,
 }: CentralPanelProps) {
   const { editor, sessions, active } = controller
   const [quickOpen, setQuickOpen] = useState(false)
@@ -368,6 +375,7 @@ export function CentralPanel({
                 workspaceId={workspaceId}
                 onOpenFile={controller.openFile}
                 activeRelPath={editor.active?.relPath}
+                onPinFile={onPinFile}
               />
             </div>
             <EdgeResizeHandle

@@ -1,12 +1,14 @@
 import { cn } from "@pi-lab/ui"
-import { Check, PanelRightClose, Settings2 } from "lucide-react"
+import { Check, PanelRightClose, Pin, Settings2, X } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import {
   useShowCodeChanges,
   useShowFilesPanel,
   useShowSkillsPanel,
 } from "../../../../../preferences/preferences"
 import { ChangesPanel } from "./components/ChangesPanel"
+import { DocPanel } from "./components/DocPanel"
 import { FilesPanel } from "./components/FilesPanel"
 import { ResearchPanel } from "./components/ResearchPanel"
 import { SkillsPanel } from "./components/SkillsPanel"
@@ -17,6 +19,20 @@ interface PanelRenderContext {
   workspaceId: string
   onOpenFile: (relPath: string) => void
   activeRelPath: string | null
+  /** Pin a `.md` file as a right-sidebar panel (from the Files tree's right-click menu). */
+  onPinFile: (relPath: string) => void
+}
+
+/** Tab-id prefix marking a user-pinned Markdown panel (the rest is its relPath). */
+const PINNED_PREFIX = "pinned:"
+
+/** The relPath of a pinned tab, or `null` for a built-in tab. */
+function pinnedRelPath(tabId: string): string | null {
+  return tabId.startsWith(PINNED_PREFIX) ? tabId.slice(PINNED_PREFIX.length) : null
+}
+
+function basename(relPath: string): string {
+  return relPath.split("/").pop() ?? relPath
 }
 
 /** A tab in the right sidebar: a label + the panel it reveals. */
@@ -61,9 +77,37 @@ const FILES_TAB: PanelTab = {
   id: "files",
   label: "Files",
   description: "Browse workspace files and open them in the built-in editor.",
-  render: ({ workspaceId, onOpenFile, activeRelPath }) => (
-    <FilesPanel workspaceId={workspaceId} onOpenFile={onOpenFile} activeRelPath={activeRelPath} />
+  render: ({ workspaceId, onOpenFile, activeRelPath, onPinFile }) => (
+    <FilesPanel
+      workspaceId={workspaceId}
+      onOpenFile={onOpenFile}
+      activeRelPath={activeRelPath}
+      onPinFile={onPinFile}
+    />
   ),
+}
+
+/** Build a right-sidebar tab that renders one pinned `.md` file through the shared DocPanel. */
+function pinnedTab(relPath: string): PanelTab {
+  const name = basename(relPath)
+  return {
+    id: `${PINNED_PREFIX}${relPath}`,
+    label: name,
+    description: `Pinned Markdown panel showing ${relPath}.`,
+    render: ({ workspaceId }) => (
+      <DocPanel
+        workspaceId={workspaceId}
+        relPath={relPath}
+        testId={`panel-pinned:${relPath}`}
+        emptyTitle={`${name} is empty`}
+        emptyHint={
+          <>
+            This pinned file (<code className="font-mono">{relPath}</code>) has no content yet.
+          </>
+        }
+      />
+    ),
+  }
 }
 
 const CODE_CHANGES_TAB: PanelTab = {
@@ -81,6 +125,49 @@ const SKILLS_TAB: PanelTab = {
 }
 
 /**
+ * The right-sidebar tab set, in display order, for the current view options and
+ * pinned panels. The single source of truth shared by the sidebar itself and the
+ * project command palette's "switch panel" list (via {@link useRightSidebarPanels}),
+ * so the two never drift out of sync. Files moves to the left central column when
+ * the left Files panel is on; Skills / Code changes are opt-in; pinned panels last.
+ */
+function buildPanelTabs(options: {
+  showFilesPanel: boolean
+  showSkills: boolean
+  showCodeChanges: boolean
+  pinnedPanels: string[]
+}): PanelTab[] {
+  return [
+    ...BASE_TABS,
+    ...(options.showFilesPanel ? [] : [FILES_TAB]),
+    ...(options.showSkills ? [SKILLS_TAB] : []),
+    ...(options.showCodeChanges ? [CODE_CHANGES_TAB] : []),
+    ...options.pinnedPanels.map(pinnedTab),
+  ]
+}
+
+/** A right-sidebar panel's identity, for the project palette's "switch panel" list. */
+export interface RightSidebarPanel {
+  id: string
+  label: string
+}
+
+/**
+ * The right-sidebar panels currently shown, in tab order — the same list the
+ * {@link RightSidebar} renders, reduced to `{ id, label }`. Reads the same view-option
+ * preferences the sidebar does, so switching a panel from the project command palette
+ * always targets a tab that actually exists.
+ */
+export function useRightSidebarPanels(pinnedPanels: string[]): RightSidebarPanel[] {
+  const [showCodeChanges] = useShowCodeChanges()
+  const [showSkills] = useShowSkillsPanel()
+  const [showFilesPanel] = useShowFilesPanel()
+  return buildPanelTabs({ showFilesPanel, showSkills, showCodeChanges, pinnedPanels }).map(
+    (tab) => ({ id: tab.id, label: tab.label }),
+  )
+}
+
+/**
  * Stacked, bounded-flex sidebar: a tab strip on top (plus a collapse button and a
  * gear opening a view-options menu), the active panel below in a `min-h-0 flex-1`
  * region so each panel's own `overflow-y-auto` body scrolls (AGENTS.md Pitfalls #3
@@ -93,35 +180,57 @@ export function RightSidebar({
   workspaceId,
   onOpenFile,
   activeRelPath = null,
+  activeId: controlledActiveId,
   initialActiveId,
   onActiveIdChange,
   onCollapse,
+  pinnedPanels = [],
+  onPinFile,
+  onUnpinFile,
 }: {
   projectId: string
   workspaceId: string
   onOpenFile: (relPath: string) => void
   activeRelPath?: string | null
+  /** Controlled selected-tab id: when provided, the route drives selection (e.g. the
+   * project command palette's "switch panel"). `null`/an unknown id falls back to the
+   * first tab. Mutually exclusive with the uncontrolled `initialActiveId` seed. */
+  activeId?: string | null
   initialActiveId?: string
   onActiveIdChange?: (id: string) => void
   onCollapse: () => void
+  /** Working-dir-relative `.md` paths pinned as persistent panels (owned by the route). */
+  pinnedPanels?: string[]
+  /** Pin a `.md` file as a panel. */
+  onPinFile?: (relPath: string) => void
+  /** Remove a pinned panel. */
+  onUnpinFile?: (relPath: string) => void
 }) {
   const [showCodeChanges, setShowCodeChanges] = useShowCodeChanges()
   const [showSkills, setShowSkills] = useShowSkillsPanel()
   const [showFilesPanel] = useShowFilesPanel()
-  // Files moves to the left central column when the left Files panel is on, so
-  // drop its tab here in that case.
-  const tabs = [
-    ...BASE_TABS,
-    ...(showFilesPanel ? [] : [FILES_TAB]),
-    ...(showSkills ? [SKILLS_TAB] : []),
-    ...(showCodeChanges ? [CODE_CHANGES_TAB] : []),
-  ]
-  const [activeId, setActiveId] = useState<string>(
+  const [pinPickerOpen, setPinPickerOpen] = useState(false)
+  const tabs = buildPanelTabs({ showFilesPanel, showSkills, showCodeChanges, pinnedPanels })
+  // Selection is controlled when the route passes `activeId` (so the palette can switch
+  // panels reactively); otherwise the sidebar owns it internally, seeded once from
+  // `initialActiveId`. `onActiveIdChange` still fires in both modes for persistence.
+  const controlled = controlledActiveId !== undefined
+  const [uncontrolledActiveId, setUncontrolledActiveId] = useState<string>(
     initialActiveId ?? BASE_TABS[0]?.id ?? "research",
   )
-  // The selected tab can vanish (Files toggled to the left, Code changes hidden),
-  // so fall back to the first tab whenever the stored id no longer resolves.
+  const activeId = controlled ? (controlledActiveId ?? "") : uncontrolledActiveId
+  const selectTab = (id: string) => {
+    if (!controlled) setUncontrolledActiveId(id)
+    onActiveIdChange?.(id)
+  }
+  // The selected tab can vanish (Files toggled to the left, Code changes hidden, a
+  // pinned panel unpinned) or be unset in controlled mode, so fall back to the first
+  // tab whenever the stored id no longer resolves.
   const active = tabs.find((tab) => tab.id === activeId) ?? tabs[0]
+
+  // Pinning is a no-op unless the route wired a handler; guard so the "+" picker and
+  // the Files tree's right-click menu never silently drop a selection.
+  const pinFile = (relPath: string) => onPinFile?.(relPath)
 
   return (
     <aside
@@ -129,10 +238,15 @@ export function RightSidebar({
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
     >
       <div className="flex shrink-0 items-center gap-0.5 border-border border-b p-1">
-        <div role="tablist" aria-label="Project panels" className="flex min-w-0 flex-1 gap-0.5">
+        <div
+          role="tablist"
+          aria-label="Project panels"
+          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+        >
           {tabs.map((tab) => {
             const selected = tab.id === active?.id
-            return (
+            const relPath = pinnedRelPath(tab.id)
+            const tabButton = (
               <button
                 key={tab.id}
                 type="button"
@@ -142,12 +256,10 @@ export function RightSidebar({
                 data-active={selected}
                 data-feature-label={tab.label}
                 data-feature-help={tab.description}
-                onClick={() => {
-                  setActiveId(tab.id)
-                  onActiveIdChange?.(tab.id)
-                }}
+                title={relPath ?? undefined}
+                onClick={() => selectTab(tab.id)}
                 className={cn(
-                  "flex-1 rounded-md px-2 py-1 text-xs transition-colors",
+                  "min-w-0 flex-1 truncate rounded-md px-2 py-1 text-xs transition-colors",
                   selected
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -156,8 +268,37 @@ export function RightSidebar({
                 {tab.label}
               </button>
             )
+            if (relPath === null) return tabButton
+            // Pinned tabs carry an inline unpin affordance (built-in tabs can't be removed).
+            return (
+              <span key={tab.id} className="flex min-w-0 flex-1 items-center">
+                {tabButton}
+                <button
+                  type="button"
+                  data-testid={`right-sidebar-unpin:${relPath}`}
+                  aria-label={`Unpin ${tab.label}`}
+                  title="Unpin panel"
+                  data-feature-help="Remove this pinned Markdown panel from the sidebar"
+                  onClick={() => onUnpinFile?.(relPath)}
+                  className="-ml-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-3" aria-hidden />
+                </button>
+              </span>
+            )
           })}
         </div>
+        <button
+          type="button"
+          data-testid="right-sidebar-pin"
+          aria-label="Pin a Markdown panel"
+          title="Pin a Markdown panel"
+          data-feature-help="Pin a Markdown file as a persistent panel in this project's sidebar"
+          onClick={() => setPinPickerOpen(true)}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Pin className="size-3.5" aria-hidden />
+        </button>
         <ViewOptionsMenu
           showCodeChanges={showCodeChanges}
           showSkills={showSkills}
@@ -177,8 +318,19 @@ export function RightSidebar({
         </button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        {active?.render({ projectId, workspaceId, onOpenFile, activeRelPath })}
+        {active?.render({ projectId, workspaceId, onOpenFile, activeRelPath, onPinFile: pinFile })}
       </div>
+      {pinPickerOpen ? (
+        <QuickOpen
+          workspaceId={workspaceId}
+          filter={(relPath) => relPath.endsWith(".md")}
+          onOpenFile={(relPath) => {
+            pinFile(relPath)
+            setPinPickerOpen(false)
+          }}
+          onClose={() => setPinPickerOpen(false)}
+        />
+      ) : null}
     </aside>
   )
 }

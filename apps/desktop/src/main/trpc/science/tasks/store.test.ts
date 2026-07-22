@@ -33,6 +33,8 @@ async function fixture(name: string): Promise<{ root: string; project: Project }
       defaultBranch: "main",
       color: null,
       thumbnail: null,
+      gradient: null,
+      metadata: null,
       agentConfig: null,
       sortIndex: 0,
       archivedAt: null,

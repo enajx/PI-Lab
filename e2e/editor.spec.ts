@@ -197,13 +197,13 @@ test("opening a Python file renders the status bar without crashing", async () =
   await pyEntry.click()
 
   await expect(window.getByTestId("editor-buffer")).toBeVisible({ timeout: 30_000 })
-  // The status bar is present and names the active Python file. Whether a real
-  // check ran depends on uv/ty/ruff being installed; either the diagnostics
-  // summary or the "tools unavailable" hint is acceptable — we only assert the
-  // editor did not crash and the bar reflects the file.
+  // The status bar surfaces the Python runtime + diagnostics for the active file
+  // (not the filename). A Python file always renders the runtime selector; whether
+  // a real check ran depends on uv/ty/ruff being installed, so we only assert the
+  // editor did not crash and the bar reflects a Python file.
   const statusBar = window.getByTestId("editor-status-bar")
   await expect(statusBar).toBeVisible()
-  await expect(statusBar).toContainText(PY_FILE)
+  await expect(window.getByTestId("editor-python-runtime")).toBeVisible()
 })
 
 test.describe("Python environment and run-file on POSIX", () => {

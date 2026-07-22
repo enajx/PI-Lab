@@ -170,7 +170,10 @@ async function dispatchNonInteractiveAutomation(
   return ctx.db.select().from(automationRuns).where(eq(automationRuns.id, run.id)).get() ?? run
 }
 
-function nonInteractiveFailure(agentLabel: string, result: NonInteractiveProcessResult): string {
+export function nonInteractiveFailure(
+  agentLabel: string,
+  result: NonInteractiveProcessResult,
+): string {
   if (result.error) return `${agentLabel} process failed: ${result.error}`
   const exit =
     result.signal !== null

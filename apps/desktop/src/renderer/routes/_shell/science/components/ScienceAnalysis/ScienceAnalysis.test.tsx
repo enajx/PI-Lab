@@ -29,6 +29,8 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     defaultBranch: "main",
     color: null,
     thumbnail: null,
+    gradient: null,
+    metadata: null,
     agentConfig: null,
     sortIndex: 0,
     archivedAt: null,

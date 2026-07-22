@@ -218,6 +218,7 @@ function Harness({
   onUpdate,
   initialSession,
   activatedSession,
+  onPinFile,
 }: {
   client: ReturnType<typeof createFakeTrpcClient>
   settings: EditorSettings
@@ -234,6 +235,7 @@ function Harness({
     label: string
     wsKind: "branch" | "worktree"
   }
+  onPinFile?: (relPath: string) => void
 }) {
   const controller = useCentralPanel({
     client,
@@ -260,6 +262,7 @@ function Harness({
         onUpdateEditorSettings={onUpdate}
         rightSidebarCollapsed={false}
         onExpandRightSidebar={() => {}}
+        onPinFile={onPinFile}
       />
     </div>
   )
@@ -281,6 +284,7 @@ function renderPanel(
     label: string
     wsKind: "branch" | "worktree"
   },
+  onPinFile?: (relPath: string) => void,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient(handlers)
@@ -292,6 +296,7 @@ function renderPanel(
         onUpdate={onUpdate}
         initialSession={initialSession}
         activatedSession={activatedSession}
+        onPinFile={onPinFile}
       />
     </AppProviders>,
   )
@@ -681,6 +686,26 @@ describe("CentralPanel — left Files panel", () => {
     const tab = screen.getByTestId("central-tab")
     expect(tab.getAttribute("data-tab-kind")).toBe("file")
     expect(screen.getByTestId("buffer-path").textContent).toBe("main.py")
+  })
+
+  test("the left tree's right-click 'Pin as panel' works when onPinFile is threaded through", async () => {
+    const pinned: string[] = []
+    renderPanel(
+      baseHandlers("notes.md"),
+      DEFAULT_SETTINGS,
+      () => {},
+      undefined,
+      undefined,
+      (relPath) => pinned.push(relPath),
+    )
+    fireEvent.click(screen.getByTestId("central-files-toggle"))
+
+    const panel = screen.getByTestId("central-files-panel")
+    // Right-click the Markdown file row in the LEFT (central) tree to open its menu.
+    fireEvent.contextMenu(await within(panel).findByTestId("file-tree-file"))
+    fireEvent.click(await screen.findByTestId("file-tree-pin"))
+
+    expect(pinned).toEqual(["notes.md"])
   })
 })
 

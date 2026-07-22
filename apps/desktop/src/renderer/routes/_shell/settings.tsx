@@ -13,10 +13,12 @@ import {
   CaffeineSection,
   EditorSection,
   ExperimentalSection,
+  ExperimentsSection,
   GeneralSection,
   LibrarySection,
   NotificationsSection,
   ProjectViewSection,
+  SectionsSection,
   ShortcutsSection,
 } from "./settings/components/SettingsSections"
 
@@ -93,6 +95,18 @@ const SECTIONS = [
     label: "Project view",
     description: "Choose which file and Git panels appear in project workspaces.",
     render: () => <ProjectViewSection />,
+  },
+  {
+    id: "sections",
+    label: "Sections",
+    description: "Enable or hide optional app sections in the sidebar.",
+    render: () => <SectionsSection />,
+  },
+  {
+    id: "experiments",
+    label: "Remote experiments",
+    description: "Configure the “Fetch remote experiments” button.",
+    render: () => <ExperimentsSection />,
   },
   {
     id: "shortcuts",

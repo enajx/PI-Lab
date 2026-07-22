@@ -21,7 +21,7 @@
     "format": "biome format --write .",
     "test": "bun run --cwd apps/desktop restore:native:node && vitest run",
     "test:watch": "bun run --cwd apps/desktop restore:native:node && vitest",
-    "e2e": "bun run docs:build && node node_modules/@playwright/test/cli.js test",
+    "e2e": "bun run build && bun run docs:build && node node_modules/@playwright/test/cli.js test",
     "verify": "bun run scripts/verify.ts",
     "package": "bun run --cwd apps/desktop package",
     "package:prod": "bun run --cwd apps/desktop package:prod",

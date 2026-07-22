@@ -1,17 +1,20 @@
 import { type RefObject, useEffect } from "react"
 
 /**
- * Pauses a project card's gradient morph when it can't be seen, to keep a grid of
- * cards cheap. The animated layer keeps running only while it is **on-screen**
- * (IntersectionObserver) AND the **window is focused & visible** (focus/blur +
- * `visibilitychange`). Anything else parks it at `animation-play-state: paused`.
+ * Pauses a project card's gradient drift unless it is both **worth showing** and
+ * **worth animating**. The layer runs only while the project is **active** (agents
+ * working — `active`) AND the card is **on-screen** (IntersectionObserver) AND the
+ * **window is focused & visible** (focus/blur + `visibilitychange`). Anything else
+ * parks it at `animation-play-state: paused`. Because drift only runs for active
+ * projects, a card's motion doubles as a live activity cue while idle cards stay
+ * frozen (and cost nothing).
  *
  * It writes `style.animationPlayState` directly on the layer element — no React
  * state, so toggling visibility never re-renders the card. When the relevant
  * browser APIs are missing (e.g. jsdom has no `IntersectionObserver`) it defaults
  * to "running" so the animation degrades to always-on rather than always-off.
  */
-export function useGradientPlayState(ref: RefObject<HTMLDivElement | null>): void {
+export function useGradientPlayState(ref: RefObject<HTMLDivElement | null>, active: boolean): void {
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -28,7 +31,7 @@ export function useGradientPlayState(ref: RefObject<HTMLDivElement | null>): voi
         : true
 
     const apply = () => {
-      const playState = isIntersecting && isFocused && isVisible ? "running" : "paused"
+      const playState = active && isIntersecting && isFocused && isVisible ? "running" : "paused"
       el.style.animationPlayState = playState
       el.style.setProperty("--gradient-play-state", playState)
       el.style.setProperty("--gradient-will-change", playState === "running" ? "transform" : "auto")
@@ -71,5 +74,5 @@ export function useGradientPlayState(ref: RefObject<HTMLDivElement | null>): voi
       document.removeEventListener("visibilitychange", onVisibility)
       observer?.disconnect()
     }
-  }, [ref])
+  }, [ref, active])
 }

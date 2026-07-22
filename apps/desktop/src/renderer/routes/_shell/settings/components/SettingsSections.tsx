@@ -22,7 +22,12 @@ import {
 import {
   useDefaultAgentId,
   useExperimentalV2,
+  useFetchExperimentsInstructions,
+  useShowAnalysisSection,
+  useShowClusterSection,
   useShowCodeChanges,
+  useShowExperimentsSection,
+  useShowResearchHeartbeatSection,
   useShowSkillsPanel,
 } from "../../../../preferences/preferences"
 import { type ThemeMode, useTheme } from "../../../../providers/ThemeProvider"
@@ -35,7 +40,7 @@ import {
 import { useTRPC } from "../../../../trpc/react"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
 import { AppThemeGallery } from "./AppThemeGallery"
-import { SelectField, SettingsSection, ToggleField } from "./SettingsControls"
+import { SelectField, SettingsSection, TextAreaField, ToggleField } from "./SettingsControls"
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   muted: false,
@@ -750,6 +755,85 @@ export function ProjectViewSection() {
         description="Reveal project-local and global skills in the right sidebar (off by default)."
         checked={showSkillsPanel}
         onChange={setShowSkillsPanel}
+      />
+    </SettingsSection>
+  )
+}
+
+/**
+ * Sections — enable or hide the optional app sections. Cluster and Analysis are
+ * live surfaces: their toggle gates the sidebar nav row and guards the route.
+ * Experiments and Research Heartbeat have no surface yet, so their rows are shown
+ * as not-yet-available (a disabled toggle with a "when available" hint) rather
+ * than pretending to hide something that doesn't exist.
+ */
+export function SectionsSection() {
+  const [showCluster, setShowCluster] = useShowClusterSection()
+  const [showAnalysis, setShowAnalysis] = useShowAnalysisSection()
+  const [showExperiments] = useShowExperimentsSection()
+  const [showResearchHeartbeat] = useShowResearchHeartbeatSection()
+  return (
+    <SettingsSection
+      testId="settings-section-sections"
+      title="Sections"
+      description="Show or hide the optional app sections in the sidebar."
+    >
+      <ToggleField
+        testId="settings-show-cluster-section"
+        label="Cluster"
+        description="Show the Cluster section for monitoring compute machines."
+        checked={showCluster}
+        onChange={setShowCluster}
+      />
+      <ToggleField
+        testId="settings-show-analysis-section"
+        label="Analysis"
+        description="Show the Analysis section for browsing and previewing data files."
+        checked={showAnalysis}
+        onChange={setShowAnalysis}
+      />
+      <ToggleField
+        testId="settings-show-experiments-section"
+        label="Experiments"
+        description="Available in a future release — this section isn't built yet."
+        checked={showExperiments}
+        onChange={() => undefined}
+        disabled
+      />
+      <ToggleField
+        testId="settings-show-research-heartbeat-section"
+        label="Research Heartbeat"
+        description="Available in a future release — this section isn't built yet."
+        checked={showResearchHeartbeat}
+        onChange={() => undefined}
+        disabled
+      />
+    </SettingsSection>
+  )
+}
+
+/**
+ * Remote experiments — configure the "Fetch remote experiments" button. Only the
+ * extra instructions text is user-editable; the scaffolded skill name/path stays
+ * fixed server-side. The instructions are appended to the agent's prompt at launch.
+ * (Named "Remote experiments" to disambiguate from the disabled "Experiments"
+ * section row in the Sections settings.)
+ */
+export function ExperimentsSection() {
+  const [instructions, setInstructions] = useFetchExperimentsInstructions()
+  return (
+    <SettingsSection
+      testId="settings-section-experiments"
+      title="Remote experiments"
+      description="Configure the “Fetch remote experiments” button."
+    >
+      <TextAreaField
+        testId="settings-fetch-experiments-instructions"
+        label="Fetch instructions"
+        description="Extra instructions appended to the agent prompt when fetching remote experiments. The fetch-experiments skill is scaffolded on first use and editable in the project."
+        value={instructions}
+        placeholder="e.g. Only pull the latest run's metrics into results/."
+        onChange={setInstructions}
       />
     </SettingsSection>
   )

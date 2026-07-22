@@ -39,7 +39,7 @@
     "@xterm/addon-fit": "^0.10",
     "@xterm/headless": "5.5.0",
     "@xterm/xterm": "^5",
-    "better-sqlite3": "^12.2.0",
+    "better-sqlite3": "^13.0.1",
     "codemirror": "^6.0.2",
     "drizzle-orm": "^0.45.0",
     "lucide-react": "^0.563.0",

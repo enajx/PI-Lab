@@ -1,10 +1,20 @@
 import { cn } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronDown, ChevronRight, Eye } from "lucide-react"
-import { useState } from "react"
+import { ChevronDown, ChevronRight, Eye, Pin } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../trpc/react"
 import type { FileTreeEntry } from "../../../trpc/types"
 import { fileIconUrl, folderIconUrl } from "./fileIcons"
+
+/** Position + target of the file row's right-click menu. */
+interface FileMenuState {
+  relPath: string
+  x: number
+  y: number
+}
+
+/** A right-click on a `.md` file row hands its path and cursor position up. */
+type ContextMenuFile = (relPath: string, event: React.MouseEvent) => void
 
 interface FileTreeProps {
   workspaceId: string
@@ -12,6 +22,8 @@ interface FileTreeProps {
   onOpenFile: (relPath: string) => void
   /** The file currently focused in the editor, if any. */
   activeRelPath?: string | null
+  /** Pin a `.md` file as a right-sidebar panel (enables the row's right-click menu). */
+  onPinFile?: (relPath: string) => void
 }
 
 /**
@@ -23,7 +35,16 @@ interface FileTreeProps {
  * Scrolling is a native bounded `min-h-0 flex-1 overflow-y-auto` column
  * (AGENTS.md Pitfalls #3) — no Radix ScrollArea.
  */
-export function FileTree({ workspaceId, onOpenFile, activeRelPath }: FileTreeProps) {
+export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: FileTreeProps) {
+  const [menu, setMenu] = useState<FileMenuState | null>(null)
+  // Only offer the right-click menu when the host can act on a pin.
+  const onContextMenuFile: ContextMenuFile | undefined = onPinFile
+    ? (relPath, event) => {
+        event.preventDefault()
+        setMenu({ relPath, x: event.clientX, y: event.clientY })
+      }
+    : undefined
+
   return (
     <div data-testid="file-tree" className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-border border-b px-3 py-1.5 font-medium text-muted-foreground text-xs uppercase tracking-wide">
@@ -36,8 +57,76 @@ export function FileTree({ workspaceId, onOpenFile, activeRelPath }: FileTreePro
           depth={0}
           activeRelPath={activeRelPath}
           onOpenFile={onOpenFile}
+          onContextMenuFile={onContextMenuFile}
         />
       </div>
+      <FileTreeContextMenu
+        menu={menu}
+        onClose={() => setMenu(null)}
+        onPin={(relPath) => {
+          onPinFile?.(relPath)
+          setMenu(null)
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * The right-click menu for a `.md` file row, rendered once at the tree root and
+ * positioned at the cursor (mirrors the sidebar's `ProjectContextMenu`). Its only
+ * action pins the file as a right-sidebar panel. Closes on outside mousedown or
+ * Escape; the action click stays inside `rootRef` so it doesn't self-close early.
+ */
+function FileTreeContextMenu({
+  menu,
+  onClose,
+  onPin,
+}: {
+  menu: FileMenuState | null
+  onClose: () => void
+  onPin: (relPath: string) => void
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menu) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) onClose()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    window.addEventListener("mousedown", onPointerDown)
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown)
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [menu, onClose])
+
+  if (!menu) return null
+  return (
+    <div
+      ref={rootRef}
+      data-testid="file-tree-context-menu"
+      role="menu"
+      className="fixed z-50 w-52 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+      style={{ left: menu.x, top: menu.y }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        data-testid="file-tree-pin"
+        data-rel-path={menu.relPath}
+        data-feature-label="Pin as panel"
+        data-feature-help="Pin this Markdown file as a persistent panel in the project's right sidebar"
+        onClick={() => onPin(menu.relPath)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+      >
+        <Pin className="size-4 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">Pin as panel</span>
+      </button>
     </div>
   )
 }
@@ -49,10 +138,18 @@ interface TreeLevelProps {
   depth: number
   activeRelPath?: string | null
   onOpenFile: (relPath: string) => void
+  onContextMenuFile?: ContextMenuFile
 }
 
 /** The children of one directory, fetched lazily when this level mounts. */
-function TreeLevel({ workspaceId, relPath, depth, activeRelPath, onOpenFile }: TreeLevelProps) {
+function TreeLevel({
+  workspaceId,
+  relPath,
+  depth,
+  activeRelPath,
+  onOpenFile,
+  onContextMenuFile,
+}: TreeLevelProps) {
   const trpc = useTRPC()
   const query = useQuery(
     trpc.files.tree.queryOptions(
@@ -91,6 +188,7 @@ function TreeLevel({ workspaceId, relPath, depth, activeRelPath, onOpenFile }: T
           depth={depth}
           activeRelPath={activeRelPath}
           onOpenFile={onOpenFile}
+          onContextMenuFile={onContextMenuFile}
         />
       ))}
     </ul>
@@ -103,10 +201,18 @@ interface TreeNodeProps {
   depth: number
   activeRelPath?: string | null
   onOpenFile: (relPath: string) => void
+  onContextMenuFile?: ContextMenuFile
 }
 
 /** A single file or directory row; directories expand their own `TreeLevel`. */
-function TreeNode({ workspaceId, entry, depth, activeRelPath, onOpenFile }: TreeNodeProps) {
+function TreeNode({
+  workspaceId,
+  entry,
+  depth,
+  activeRelPath,
+  onOpenFile,
+  onContextMenuFile,
+}: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false)
   const indent = { paddingLeft: `${depth * 0.75 + 0.5}rem` }
 
@@ -138,6 +244,7 @@ function TreeNode({ workspaceId, entry, depth, activeRelPath, onOpenFile }: Tree
             depth={depth + 1}
             activeRelPath={activeRelPath}
             onOpenFile={onOpenFile}
+            onContextMenuFile={onContextMenuFile}
           />
         ) : null}
       </li>
@@ -154,6 +261,12 @@ function TreeNode({ workspaceId, entry, depth, activeRelPath, onOpenFile }: Tree
         data-feature-label="File"
         data-feature-help="Open this project file in a built-in editor tab"
         onClick={() => onOpenFile(entry.relPath)}
+        // Right-click a Markdown file to pin it as a right-sidebar panel.
+        onContextMenu={
+          onContextMenuFile && entry.name.endsWith(".md")
+            ? (event) => onContextMenuFile(entry.relPath, event)
+            : undefined
+        }
         style={indent}
         aria-current={active ? "true" : undefined}
         className={cn(

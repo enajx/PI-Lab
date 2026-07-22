@@ -24,10 +24,31 @@ export interface TerminalAgent {
   env?: Record<string, string>
 }
 
-/** Agents shipped by default. Others (Gemini, Amp, opencode, …) are added here. */
+/**
+ * Agents shipped by default. Others (Gemini, Amp, opencode, …) are added here.
+ *
+ * `defaultArgs` carry the permission/approval-bypass flags each agent needs to run
+ * unattended inside PI Lab: without them the CLIs block on a first-run "trust this
+ * folder" / approval prompt (in a fresh worktree or on a headless summary run), so
+ * a launched agent looks dead. PI Lab drives agents autonomously over the user's
+ * own local repos, so these are applied to every launch. Codex's non-interactive
+ * (`exec`) flags differ and are added in {@link buildNonInteractiveLaunchArgv}.
+ */
 export const BUILTIN_AGENTS: readonly TerminalAgent[] = [
-  { id: "claude-code", label: "Claude Code", command: "claude", detect: "claude" },
-  { id: "codex", label: "Codex", command: "codex", detect: "codex" },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    command: "claude",
+    detect: "claude",
+    defaultArgs: ["--dangerously-skip-permissions"],
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    command: "codex",
+    detect: "codex",
+    defaultArgs: ["--dangerously-bypass-approvals-and-sandbox"],
+  },
 ] as const
 
 /** Agent offered when the user hasn't chosen one. */

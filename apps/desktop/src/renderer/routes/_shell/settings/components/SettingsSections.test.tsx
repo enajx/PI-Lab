@@ -11,6 +11,7 @@ import {
   GeneralSection,
   NotificationsSection,
   ProjectViewSection,
+  SectionsSection,
 } from "./SettingsSections"
 
 /**
@@ -332,6 +333,29 @@ describe("Settings sections", () => {
     renderSection(<ProjectViewSection />)
     fireEvent.click(screen.getByTestId("settings-show-skills"))
     expect(window.localStorage.getItem("pi-lab.projectView.showSkillsPanel")).toBe("true")
+  })
+
+  test("Sections shows four rows; Cluster/Analysis toggle, Experiments/Research Heartbeat not-yet-available", () => {
+    renderSection(<SectionsSection />)
+
+    // All four rows are present, defaulting to shown.
+    const cluster = screen.getByTestId("settings-show-cluster-section")
+    const analysis = screen.getByTestId("settings-show-analysis-section")
+    const experiments = screen.getByTestId("settings-show-experiments-section")
+    const heartbeat = screen.getByTestId("settings-show-research-heartbeat-section")
+    expect(cluster.getAttribute("aria-checked")).toBe("true")
+    expect(analysis.getAttribute("aria-checked")).toBe("true")
+
+    // The unbuilt sections are shown as not-yet-available (disabled toggles).
+    expect((experiments as HTMLButtonElement).disabled).toBe(true)
+    expect((heartbeat as HTMLButtonElement).disabled).toBe(true)
+    expect((cluster as HTMLButtonElement).disabled).toBe(false)
+
+    // The live toggles persist their choice.
+    fireEvent.click(cluster)
+    expect(window.localStorage.getItem("pi-lab.sections.showCluster")).toBe("false")
+    fireEvent.click(analysis)
+    expect(window.localStorage.getItem("pi-lab.sections.showAnalysis")).toBe("false")
   })
 
   test("Editor section round-trips an autosave patch through settings.updateEditor", async () => {

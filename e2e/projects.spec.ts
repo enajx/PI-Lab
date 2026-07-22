@@ -112,7 +112,7 @@ test("open a project, launch an agent, and see its changes", async () => {
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid"))),
   ).toEqual(["central-add-menu", "central-new-agent"])
   await window.getByTestId("central-add-menu").click()
-  await expect(window.getByTestId("central-add-agent")).toHaveText("Agent")
+  await expect(window.getByTestId("central-add-agent")).toHaveText("Agent CLI")
   await expect(window.getByTestId("central-add-terminal")).toHaveText("Terminal")
   await expect(window.getByTestId("central-add-document")).toHaveText("Document")
   await window.getByTestId("central-add-menu").click()
@@ -142,8 +142,9 @@ test("open a project, launch an agent, and see its changes", async () => {
   await newSession.getByRole("button", { name: "Start agent" }).click()
 
   // With no prior live agent the session policy keeps it in the main checkout →
-  // kind "branch", surfaced on the agent tab.
-  const kindBadge = window.getByTestId("kind-badge")
+  // kind "branch", surfaced on the agent tab. (The same badge also appears in the
+  // session list, so scope to the central tab's badge to stay unambiguous.)
+  const kindBadge = window.getByTestId("central-tab").getByTestId("kind-badge")
   await expect(kindBadge).toBeVisible({ timeout: 30_000 })
   await expect(kindBadge).toHaveAttribute("data-kind", "branch")
 

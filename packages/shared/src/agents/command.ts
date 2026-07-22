@@ -22,11 +22,22 @@ export function buildLaunchArgv(agent: TerminalAgent, options: LaunchOptions = {
  * element and callers spawn the returned command without a shell.
  */
 export function buildNonInteractiveLaunchArgv(agent: TerminalAgent, prompt: string): string[] {
+  // Permission/approval-bypass flags belong in different positions per CLI:
+  // Claude takes `--dangerously-skip-permissions` as a global flag; Codex needs
+  // `--skip-git-repo-check --dangerously-bypass-approvals-and-sandbox` AFTER the
+  // `exec` subcommand. The interactive `defaultArgs` (catalog) don't apply here.
   if (agent.id === "claude-code") {
+    // `--dangerously-skip-permissions` rides `defaultArgs` (valid before `-p`).
     return [agent.command, ...(agent.defaultArgs ?? []), "-p", prompt]
   }
   if (agent.id === "codex") {
-    return [agent.command, ...(agent.defaultArgs ?? []), "exec", prompt]
+    return [
+      agent.command,
+      "exec",
+      "--skip-git-repo-check",
+      "--dangerously-bypass-approvals-and-sandbox",
+      prompt,
+    ]
   }
   throw new Error(`${agent.label} does not support non-interactive workflows`)
 }
