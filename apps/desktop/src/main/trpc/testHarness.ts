@@ -41,6 +41,12 @@ import { testCredentialCipher } from "../setup/credentials"
 import type { SetupProbe } from "../setup/probe"
 import { appRouter } from "./appRouter"
 import type { AppContext, HttpFetch, OpenPath } from "./context"
+import type {
+  AnalysisInteractivePort,
+  AnalysisInteractiveResult,
+  OpenReportInput,
+  StartMarimoInput,
+} from "./science/analysis/interactive"
 import { createCallerFactory } from "./trpc"
 
 const execFileAsync = promisify(execFile)
@@ -90,7 +96,48 @@ export interface Harness {
   notificationService: NotificationService
   notifications: NotificationBrokers
   notificationDeliveries: TestNotificationDelivery[]
+  analysisInteractive: TestAnalysisInteractive
   dispose: () => Promise<void>
+}
+
+export interface TestAnalysisInteractive extends AnalysisInteractivePort {
+  reportStarts: OpenReportInput[]
+  marimoStarts: StartMarimoInput[]
+  closes: Array<{ ownerId: string; leaseId: string }>
+}
+
+export function createTestAnalysisInteractive(): TestAnalysisInteractive {
+  const reportStarts: OpenReportInput[] = []
+  const marimoStarts: StartMarimoInput[] = []
+  const closes: Array<{ ownerId: string; leaseId: string }> = []
+  const generations = new Map<string, number>()
+  const leases = new Map<string, string>()
+  return {
+    reportStarts,
+    marimoStarts,
+    closes,
+    async begin(ownerId, leaseId): Promise<number> {
+      const generation = (generations.get(ownerId) ?? 0) + 1
+      generations.set(ownerId, generation)
+      leases.set(ownerId, leaseId)
+      return generation
+    },
+    async openReport(input): Promise<AnalysisInteractiveResult> {
+      reportStarts.push(input)
+      return { type: "html", url: "pi-lab-report://test/report.html" }
+    },
+    async startMarimo(input): Promise<AnalysisInteractiveResult> {
+      marimoStarts.push(input)
+      return { type: "marimo", url: "http://127.0.0.1:41000/", runtime: "Test Python" }
+    },
+    async close(ownerId, leaseId): Promise<void> {
+      closes.push({ ownerId, leaseId })
+      if (leases.get(ownerId) !== leaseId) return
+      leases.delete(ownerId)
+      generations.set(ownerId, (generations.get(ownerId) ?? 0) + 1)
+    },
+    dispose(): void {},
+  }
 }
 
 export interface TestNotificationDelivery {
@@ -289,6 +336,7 @@ export async function createHarness(
     logger: { warn: () => {} },
   })
   const caffeine = createTestCaffeineController()
+  const analysisInteractive = createTestAnalysisInteractive()
   const skillsHomeDir = join(dataDir, "home")
   const context: AppContext = {
     db,
@@ -310,6 +358,7 @@ export async function createHarness(
     pyToolsExec: options.pyToolsExec ?? FAKE_PY_TOOLS_EXEC,
     discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
     resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,
+    analysisInteractive,
     notifications,
     activityMonitor,
     notificationService,
@@ -341,6 +390,7 @@ export async function createHarness(
     notificationService,
     notifications,
     notificationDeliveries,
+    analysisInteractive,
     dispose,
   }
 }

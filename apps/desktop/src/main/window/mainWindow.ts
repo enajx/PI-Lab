@@ -15,6 +15,8 @@ import { buildMainWindowOptions } from "./windowOptions"
  *   - `PI_LAB_TEST_OPEN_PROJECT` → the sidebar opens this absolute path as a
  *     project on load (`?openProject`), so the harness needn't drive the native
  *     folder picker.
+ *   - `PI_LAB_TEST_PICK_DIRECTORY` → `system.pickDirectory` returns this path
+ *     directly, so chooser E2Es can exercise the real renderer flow.
  *   - `PI_LAB_TEST_AGENT_ID` → the project view launches this agent id
  *     (`?agentId`), so the harness can pick the deterministic test agent.
  *   - `PI_LAB_TEST_SSH_CONFIG` → the Cluster science tab imports machines from
@@ -65,6 +67,14 @@ export function createMainWindow(iconPath: string | null): BrowserWindow {
   )
 
   window.once("ready-to-show", () => window.show())
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  window.webContents.on("will-navigate", (event, navigationUrl) => {
+    const currentUrl = window.webContents.getURL()
+    if (!currentUrl) return
+    if (new URL(navigationUrl).origin !== new URL(currentUrl).origin) {
+      event.preventDefault()
+    }
+  })
 
   const query = testSeamQuery()
   if (rendererDevServerUrl) {

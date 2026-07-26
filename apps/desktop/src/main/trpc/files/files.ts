@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve, sep } from "node:path"
+import { mkdir, realpath, writeFile } from "node:fs/promises"
+import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
 import { type PiLabDatabase, type Workspace, workspaces } from "@pi-lab/local-db"
 import {
   type FileStat,
@@ -73,6 +74,10 @@ export interface FileTreeEntry {
   /** Path relative to the workspace working dir, POSIX-separated. */
   relPath: string
   kind: "file" | "dir"
+  /** Normalized extension/type (`folder`, extension sans dot, or `file`). */
+  type: string
+  /** Last-modified time as epoch milliseconds. */
+  mtimeMs: number
 }
 
 /** A ranked quick-open hit, addressed relative to the working dir. */
@@ -174,6 +179,20 @@ export const filesRouter = router({
     return statFile(target)
   }),
 
+  /** Create one new, empty file without overwriting an existing filesystem entry. */
+  createFile: publicProcedure
+    .input(readInput)
+    .mutation(async ({ ctx, input }): Promise<{ relPath: string }> => {
+      return createEntry(ctx.db, input.workspaceId, input.relPath, "file")
+    }),
+
+  /** Create one new, empty folder without recursively inventing missing parents. */
+  createFolder: publicProcedure
+    .input(readInput)
+    .mutation(async ({ ctx, input }): Promise<{ relPath: string }> => {
+      return createEntry(ctx.db, input.workspaceId, input.relPath, "dir")
+    }),
+
   /**
    * List one directory's immediate children for a lazy file tree. The root is
    * addressed by an empty `relPath`; child directories are expanded on demand by
@@ -195,6 +214,8 @@ export const filesRouter = router({
         name: entry.name,
         relPath: toRelPosix(base, entry.path),
         kind: entry.kind,
+        type: entry.kind === "dir" ? "folder" : fileType(entry.name),
+        mtimeMs: entry.mtimeMs,
       }))
   }),
 
@@ -216,6 +237,80 @@ export const filesRouter = router({
 })
 
 /**
+ * Create a single entry after checking both the lexical path jail and the real
+ * parent directory. The realpath check prevents a workspace symlink from
+ * redirecting creation outside the working directory.
+ */
+async function createEntry(
+  db: PiLabDatabase,
+  workspaceId: string,
+  relPath: string,
+  kind: "file" | "dir",
+): Promise<{ relPath: string }> {
+  const workspace = requireWorkspace(db, workspaceId)
+  const dir = workspaceWorkingDir(db, workspace)
+  const base = resolve(dir)
+  const target = resolveInsideDir(base, relPath)
+  await requireRealParentInside(base, target, relPath)
+
+  try {
+    if (kind === "file") {
+      await writeFile(target, "", { encoding: "utf8", flag: "wx" })
+    } else {
+      await mkdir(target)
+    }
+  } catch (error) {
+    const code = nodeErrorCode(error)
+    if (code === "EEXIST") {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `A file or folder already exists at ${relPath}`,
+        cause: error,
+      })
+    }
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "EINVAL") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Cannot create ${relPath}: its parent folder is missing or the name is invalid`,
+        cause: error,
+      })
+    }
+    throw error
+  }
+
+  return { relPath: toRelPosix(base, target) }
+}
+
+/** Confirm the target's existing real parent remains inside the real workspace. */
+async function requireRealParentInside(
+  base: string,
+  target: string,
+  relPath: string,
+): Promise<void> {
+  const realBase = await realpath(base)
+  let realParent: string
+  try {
+    realParent = await realpath(dirname(target))
+  } catch (error) {
+    if (nodeErrorCode(error) === "ENOENT") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Cannot create ${relPath}: its parent folder does not exist`,
+        cause: error,
+      })
+    }
+    throw error
+  }
+  const rel = relative(realBase, realParent)
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Path escapes the workspace directory through its parent: ${relPath}`,
+    })
+  }
+}
+
+/**
  * Directory/file names hidden from the file tree. `.git` is excluded because it
  * is never something the user edits; the rest mirror {@link DEFAULT_IGNORED_DIRS}
  * intent for the *listing* path (search already prunes them via `walkFiles`).
@@ -225,6 +320,18 @@ const IGNORED_TREE_NAMES = new Set([".git", "node_modules", ".turbo", "dist", ".
 /** Convert an absolute path under `base` to a POSIX, working-dir-relative path. */
 function toRelPosix(base: string, absPath: string): string {
   return relative(base, absPath).replaceAll(sep, "/")
+}
+
+/** Lowercase extension sans dot, or `file` for extensionless/dotfiles. */
+function fileType(name: string): string {
+  return extname(name).slice(1).toLowerCase() || "file"
+}
+
+/** Extract a Node filesystem error code without hiding unknown errors. */
+function nodeErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? code : undefined
 }
 
 /** Whether an error is Node's "no such file or directory". */

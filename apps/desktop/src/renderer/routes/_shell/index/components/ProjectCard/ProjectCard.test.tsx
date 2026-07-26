@@ -8,7 +8,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx): reproduces the dev build's
@@ -32,6 +32,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     defaultBranch: "main",
     color: null,
     thumbnail: null,
+    digitalRain: false,
     // A stored gradient so the card doesn't try to persist a default on first render.
     gradient: { seed: 1, palette: ["#FFC700"] },
     metadata: null,
@@ -52,6 +53,7 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "sessions.activity": () => [],
+    "projects.capabilities": () => ({ git: true }),
     "workflows.status": () => IDLE_STATUS,
     ...handlers,
   })
@@ -95,6 +97,77 @@ const FULL_METADATA: ProjectMetadata = {
 }
 
 describe("ProjectCard metadata", () => {
+  test("Digital Rain refreshes from paused to working without remounting", async () => {
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+    let activity: Array<{ projectId: string; state: "working" | "waiting" }> = [
+      { projectId: "rain-working", state: "waiting" },
+    ]
+
+    const idle = renderCard(project({ id: "rain-idle", name: "Idle rain", digitalRain: true }), {
+      "projects.digitalRainCharacters": () => ({ characters: "constrain=0" }),
+    })
+    expect(
+      (await screen.findByTestId("project-card-digital-rain")).getAttribute("data-animating"),
+    ).toBe("false")
+    idle.unmount()
+
+    renderCard(project({ id: "rain-working", name: "Working rain", digitalRain: true }), {
+      "sessions.activity": () => activity,
+      "projects.digitalRainCharacters": () => ({ characters: "constrain=1" }),
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("project-card-status").textContent).toContain("Paused"),
+    )
+    expect(screen.getByTestId("project-card-digital-rain").getAttribute("data-animating")).toBe(
+      "false",
+    )
+
+    activity = [{ projectId: "rain-working", state: "working" }]
+    await new Promise((resolve) => window.setTimeout(resolve, 1_100))
+    await waitFor(() =>
+      expect(screen.getByTestId("project-card-digital-rain").getAttribute("data-animating")).toBe(
+        "true",
+      ),
+    )
+    expect(screen.getByTestId("project-card-status").textContent).toContain("Working")
+    getContext.mockRestore()
+  })
+
+  test("highlights the entire card, including its action area, on hover", async () => {
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+    renderCard(project({ id: "hover-card", name: "Hover card", digitalRain: true }), {
+      "projects.digitalRainCharacters": () => ({ characters: "rain=1" }),
+    })
+
+    const card = await screen.findByTestId("project-card")
+    const body = screen.getByTestId("project-card-body")
+    const actions = screen.getByTestId("project-card-actions")
+    const title = screen.getByTestId("project-card-open")
+
+    const image = screen.getByTestId("project-card-image")
+    expect(card.className).not.toContain("brightness-105")
+    expect(title.className).not.toContain("hover:bg-")
+    expect(image.className).toContain("group-hover:brightness-105")
+    expect(image.className).toContain("group-hover:contrast-105")
+    expect(image.className).toContain("group-hover:saturate-125")
+    expect(screen.getByTestId("project-card-digital-rain")).toBeTruthy()
+    const rainHover = screen.getByTestId("project-card-digital-rain-hover")
+    expect(rainHover.className).toContain("group-hover:bg-white/[0.06]")
+    expect(body.className).toContain("group-hover:brightness-105")
+    expect(actions.className).toContain("group-hover:brightness-105")
+    getContext.mockRestore()
+  })
+
+  test("opens the project when the blank body space above the action divider is clicked", async () => {
+    renderCard(project({ id: "open-body", name: "Open body" }))
+
+    fireEvent.click(await screen.findByTestId("project-card-body"))
+
+    expect((await screen.findByTestId("on-project-route")).getAttribute("data-project-id")).toBe(
+      "open-body",
+    )
+  })
+
   test("renders every filled field under the title, below the image", async () => {
     renderCard(project({ id: "p1", name: "Alpha", metadata: FULL_METADATA }))
 
@@ -145,6 +218,28 @@ describe("ProjectCard metadata", () => {
     expect(fetch.parentElement).toBe(summary.parentElement)
   })
 
+  test("disables Git-only card actions with an Initialize Git explanation", async () => {
+    renderCard(
+      project({ id: "plain-folder", name: "Plain", metadata: null, defaultBranch: null }),
+      {
+        "projects.capabilities": () => ({ git: false }),
+      },
+    )
+
+    const auto = await screen.findByTestId("project-card-auto-research")
+    const fetch = screen.getByTestId("project-card-fetch-experiments")
+    const summary = screen.getByTestId("project-card-summary")
+
+    for (const button of [auto, fetch, summary]) {
+      expect((button as HTMLButtonElement).disabled).toBe(true)
+      expect(button.getAttribute("data-feature-help")).toContain("Initialize Git")
+    }
+
+    fireEvent.click(auto)
+    expect(screen.queryByTestId("on-project-route")).toBeNull()
+    expect(readPendingLaunch("plain-folder")).toBeNull()
+  })
+
   test("renders nothing for empty fields (only the filled one shows)", async () => {
     renderCard(project({ id: "p2", name: "Beta", metadata: { venue: "ICML 2026" } }))
 
@@ -189,7 +284,7 @@ describe("ProjectCard metadata", () => {
       },
     })
 
-    fireEvent.contextMenu(await screen.findByTestId("project-card-image"))
+    fireEvent.contextMenu(await screen.findByTestId("project-card-body"))
     fireEvent.click(screen.getByTestId("project-card-menu-edit"))
 
     const dialog = screen.getByTestId("edit-project-dialog")
@@ -200,6 +295,48 @@ describe("ProjectCard metadata", () => {
 
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0]).toEqual({ id: "p4", metadata: { collaborators: "Grace Hopper" } })
+  })
+
+  test("Set thumbnail opens an artwork chooser for a file, gradient, or Digital Rain", async () => {
+    const gradientCalls: unknown[] = []
+    const digitalRainCalls: unknown[] = []
+    renderCard(project({ id: "artwork-card", name: "Artwork" }), {
+      "projects.setGradient": (input) => {
+        gradientCalls.push(input)
+        return project({ id: "artwork-card", name: "Artwork" })
+      },
+      "projects.setDigitalRain": (input) => {
+        digitalRainCalls.push(input)
+        return project({ id: "artwork-card", name: "Artwork", digitalRain: true })
+      },
+    })
+
+    const image = await screen.findByTestId("project-card-image")
+    const picker = screen.getByTestId("project-card-thumbnail-input")
+    const pickerClick = vi.spyOn(picker, "click")
+    fireEvent.contextMenu(image)
+    expect(screen.queryByTestId("project-card-menu-gradient")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("project-card-menu-thumbnail"))
+    const dialog = screen.getByTestId("project-card-artwork-dialog")
+    expect(dialog).toBeTruthy()
+
+    fireEvent.click(within(dialog).getByTestId("project-card-artwork-file"))
+    expect(pickerClick).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("project-card-artwork-dialog")).toBeNull()
+
+    fireEvent.contextMenu(image)
+    fireEvent.click(screen.getByTestId("project-card-menu-thumbnail"))
+    fireEvent.click(screen.getByTestId("project-card-artwork-gradient"))
+    await waitFor(() => expect(gradientCalls).toHaveLength(1))
+    expect(gradientCalls[0]).toMatchObject({ id: "artwork-card" })
+    expect(screen.queryByTestId("project-card-artwork-dialog")).toBeNull()
+
+    fireEvent.contextMenu(image)
+    fireEvent.click(screen.getByTestId("project-card-menu-thumbnail"))
+    fireEvent.click(screen.getByTestId("project-card-artwork-digital-rain"))
+    await waitFor(() => expect(digitalRainCalls).toEqual([{ id: "artwork-card", enabled: true }]))
+    expect(screen.queryByTestId("project-card-artwork-dialog")).toBeNull()
   })
 })
 

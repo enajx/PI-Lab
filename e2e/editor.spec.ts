@@ -82,11 +82,7 @@ printf '${PY_RUN_MARKER}\\n'
   await run(["commit", "-m", "initial"])
 }
 
-test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-editor-"))
-  repoDir = join(dataDir, "repo")
-  await initRepo(repoDir)
-
+async function launchApp(): Promise<void> {
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
     args: [MAIN_ENTRY],
@@ -97,8 +93,16 @@ test.beforeEach(async () => {
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       PI_LAB_TEST_OPEN_PROJECT: repoDir,
       PI_LAB_TEST_AGENT_ID: "test-echo",
+      PI_LAB_TEST_FONT_FAMILIES: '["PI Lab Test Mono","PI Lab Test Sans"]',
     },
   })
+}
+
+test.beforeEach(async () => {
+  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-editor-"))
+  repoDir = join(dataDir, "repo")
+  await initRepo(repoDir)
+  await launchApp()
 })
 
 test.afterEach(async () => {
@@ -159,6 +163,56 @@ test("open a file, edit, ⌘S, and the save reaches disk", async () => {
   await expect(buffer).toContainText(APPENDED)
 })
 
+test("creates files and folders inline and restores the global file sort after relaunch", async () => {
+  let window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("panel-tab-files").click()
+  const fileTree = window.getByTestId("file-tree")
+
+  // Root fallback: no folder is selected yet, so New folder creates at project root.
+  await fileTree.getByRole("button", { name: "New folder" }).click()
+  await window.getByRole("textbox", { name: "New folder name" }).fill("research")
+  await window.getByRole("textbox", { name: "New folder name" }).press("Enter")
+  const research = window.getByTestId("file-tree-dir").filter({ hasText: "research" })
+  await expect(research).toBeVisible()
+  await expect
+    .poll(async () => (await realpath(join(repoDir, "research"))).length)
+    .toBeGreaterThan(0)
+
+  // Selecting the folder makes it the inline creation target; a new file opens
+  // directly in the editor after the tree refreshes.
+  await research.click()
+  await expect(research).toHaveAttribute("data-selected", "true")
+  await fileTree.getByRole("button", { name: "New file" }).click()
+  await window.getByRole("textbox", { name: "New file name" }).fill("notes.md")
+  await window.getByRole("textbox", { name: "New file name" }).press("Enter")
+  await expect(window.getByTestId("central-tab")).toContainText("notes.md")
+  await expect(window.getByTestId("editor-buffer")).toBeVisible()
+  await expect.poll(async () => readFile(join(repoDir, "research", "notes.md"), "utf8")).toBe("")
+
+  // Duplicate creation stays in the inline form with a visible error.
+  await fileTree.getByRole("button", { name: "New file" }).click()
+  await window.getByRole("textbox", { name: "New file name" }).fill("notes.md")
+  await window.getByRole("textbox", { name: "New file name" }).press("Enter")
+  await expect(window.getByTestId("file-tree-create-error")).toContainText("already exists")
+  await window.getByRole("textbox", { name: "New file name" }).press("Escape")
+
+  const sort = window.getByTestId("file-tree-sort")
+  await sort.click()
+  await expect(sort).toHaveAttribute("aria-label", "File sort: Name Z–A")
+
+  await app.close()
+  await launchApp()
+  window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await window.getByTestId("panel-tab-files").click()
+  await expect(window.getByRole("button", { name: "File sort: Name Z–A" })).toBeVisible()
+  await expect(window.getByTestId("file-tree-dir").filter({ hasText: "research" })).toBeVisible()
+})
+
 test("the editor settings menu opens and toggles a preference", async () => {
   const window = await app.firstWindow()
 
@@ -179,6 +233,61 @@ test("the editor settings menu opens and toggles a preference", async () => {
   await expect(vimToggle).toHaveAttribute("data-checked", "false")
   await vimToggle.click()
   await expect(vimToggle).toHaveAttribute("data-checked", "true", { timeout: 30_000 })
+})
+
+test("sets global editor typography from the gear deep link and restores it after relaunch", async () => {
+  test.setTimeout(60_000)
+  let window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await window.getByTestId("panel-tab-files").click()
+  await window.getByTestId("file-tree-file").filter({ hasText: SEED_FILE }).click()
+  await expect(window.getByTestId("editor-buffer")).toBeVisible({ timeout: 30_000 })
+
+  // Leave the document dirty before visiting Settings. The tab stays open, so
+  // returning must preserve this in-memory edit as well as apply typography.
+  const initialContent = window.getByTestId("editor-buffer").locator(".cm-content")
+  await initialContent.click()
+  await window.keyboard.press("ControlOrMeta+End")
+  await window.keyboard.type(APPENDED)
+  await expect(window.getByTestId("central-tab-dirty")).toBeVisible()
+
+  await window.getByTestId("editor-settings").click()
+  await window.getByTestId("editor-advanced-settings-link").click()
+  await expect(window.getByTestId("settings-section-appearance")).toBeVisible()
+  await expect(window.getByTestId("appearance-advanced-editor-typography")).toBeVisible()
+  await window.getByTestId("settings-editor-font-family").selectOption("PI Lab Test Mono")
+  await window.getByTestId("settings-editor-font-size").fill("18")
+  await window.getByTestId("settings-back").click()
+
+  await expect(window.getByTestId("project-view")).toBeVisible()
+  await expect(window.getByTestId("editor-buffer")).toContainText(APPENDED)
+  await expect(window.getByTestId("central-tab-dirty")).toBeVisible()
+  const content = window.getByTestId("editor-buffer").locator(".cm-content")
+  const gutters = window.getByTestId("editor-buffer").locator(".cm-gutters")
+  await expect
+    .poll(() => content.evaluate((element) => getComputedStyle(element).fontFamily))
+    .toContain("PI Lab Test Mono")
+  await expect
+    .poll(() => gutters.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe("18px")
+
+  await app.close()
+  await launchApp()
+  window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await window.getByTestId("panel-tab-files").click()
+  await window.getByTestId("file-tree-file").filter({ hasText: SEED_FILE }).click()
+
+  const restoredContent = window.getByTestId("editor-buffer").locator(".cm-content")
+  const restoredGutters = window.getByTestId("editor-buffer").locator(".cm-gutters")
+  await expect
+    .poll(() => restoredContent.evaluate((element) => getComputedStyle(element).fontFamily))
+    .toContain("PI Lab Test Mono")
+  await expect
+    .poll(() => restoredGutters.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe("18px")
 })
 
 test("opening a Python file renders the status bar without crashing", async () => {

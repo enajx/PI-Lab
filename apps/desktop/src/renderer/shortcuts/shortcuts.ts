@@ -128,6 +128,24 @@ export function formatBinding(binding: string): string {
     .join("")
 }
 
+/**
+ * Return the first action already using `binding`, in registry order. The
+ * current action is excluded so recording its existing chord remains a valid
+ * no-op. Reference-only editor actions participate too: an app-global binding
+ * must not shadow a fixed CodeMirror key.
+ */
+export function findShortcutConflict(
+  shortcutId: string,
+  binding: string,
+  bindingFor: (id: string) => string,
+): ShortcutDef | null {
+  return (
+    SHORTCUTS.find(
+      (shortcut) => shortcut.id !== shortcutId && bindingFor(shortcut.id) === binding,
+    ) ?? null
+  )
+}
+
 /** Reactive bindings + setters for the Settings → Shortcuts section. */
 export function useShortcutBindings(): {
   bindingFor: (id: string) => string

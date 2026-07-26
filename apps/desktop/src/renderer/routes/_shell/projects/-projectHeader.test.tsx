@@ -24,6 +24,7 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
       name: "Photon Drift",
       repoPath: "/tmp/photon-drift",
     }),
+    "projects.capabilities": () => ({ git: true }),
     "settings.get": () => ({}),
     "workflows.status": () => ({ summary: null, fetchExperiments: null }),
     "workspaces.ensureMain": () => new Promise(() => {}),
@@ -46,6 +47,57 @@ describe("Project header", () => {
     expect(await screen.findByRole("heading", { name: "Photon Drift" })).toBeTruthy()
   })
 
+  test("explains disabled Git features and initializes Git explicitly", async () => {
+    let git = false
+    const initializeCalls: unknown[] = []
+    renderWorkspace({
+      "projects.capabilities": () => ({ git }),
+      "projects.initializeGit": (input) => {
+        initializeCalls.push(input)
+        git = true
+        return {
+          id: "p1",
+          name: "Photon Drift",
+          repoPath: "/tmp/photon-drift",
+          defaultBranch: "main",
+        }
+      },
+    })
+
+    const notice = await screen.findByTestId("non-git-project-notice")
+    expect(notice.textContent).toContain("This project is not git tracked")
+    expect(notice.textContent).toContain("Initialize Git for worktrees and concurrent agents")
+    expect(screen.getByTestId("project-view-summary").hasAttribute("disabled")).toBe(true)
+    expect(screen.getByTestId("project-view-fetch-experiments").hasAttribute("disabled")).toBe(true)
+
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Git" }))
+
+    await waitFor(() => expect(initializeCalls).toEqual([{ id: "p1" }]))
+    await waitFor(() => expect(screen.queryByTestId("non-git-project-notice")).toBeNull())
+    expect(screen.getByTestId("project-view-summary").hasAttribute("disabled")).toBe(false)
+  })
+
+  test("allows the concise non-Git notice to be dismissed", async () => {
+    renderWorkspace({ "projects.capabilities": () => ({ git: false }) })
+    await screen.findByTestId("non-git-project-notice")
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss Git notice" }))
+    expect(screen.queryByTestId("non-git-project-notice")).toBeNull()
+  })
+
+  test("keeps Git features disabled and surfaces a capability-check failure", async () => {
+    renderWorkspace({
+      "projects.capabilities": async () => {
+        throw new Error("filesystem unavailable")
+      },
+    })
+
+    const alert = await screen.findByTestId("project-git-capability-error")
+    expect(alert.textContent).toContain("filesystem unavailable")
+    expect(screen.getByTestId("project-view-summary").hasAttribute("disabled")).toBe(true)
+    expect(screen.getByTestId("project-view-fetch-experiments").hasAttribute("disabled")).toBe(true)
+    expect(screen.queryByTestId("non-git-project-notice")).toBeNull()
+  })
+
   test("the labeled Fetch experiments control triggers a background run with its instructions", async () => {
     const calls: Array<Record<string, unknown>> = []
     renderWorkspace({
@@ -65,6 +117,7 @@ describe("Project header", () => {
     const button = await screen.findByTestId("project-view-fetch-experiments")
     expect(button.textContent).toContain("Fetch experiments")
     expect(button.getAttribute("data-state")).toBe("idle")
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
 
     fireEvent.click(button)
 
@@ -166,6 +219,7 @@ describe("Card-triggered launch on the project view", () => {
         name: "Photon Drift",
         repoPath: "/tmp/photon-drift",
       }),
+      "projects.capabilities": () => ({ git: true }),
       "settings.get": () => ({}),
       "workflows.status": () => ({ summary: null, fetchExperiments: null }),
       "workspaces.ensureMain": () => ({ id: "w1" }),

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
@@ -13,6 +13,17 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = resolve(HERE, "..", "..", "..")
 const REPO_ROOT = resolve(DESKTOP_DIR, "..", "..")
 const ICONS_DIR = join(REPO_ROOT, "icons")
+const LEGACY_ICON_PATHS = [
+  "icon_bw.png",
+  "icon_bw_negative.png",
+  "icon_bw_alpha.png",
+  "icon_bw_negative_alpha.png",
+  "icon_color_black.png",
+  "icon_color_white.png",
+  "icon_color_white_r.png",
+  "icon_old.png",
+  "wave.icon",
+] as const
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex")
@@ -59,6 +70,25 @@ function blackPixelBounds(icon: ReturnType<typeof decodeRgbaPng>): {
 }
 
 describe("canonical PI Lab application icon", () => {
+  test("excludes retired branding while preserving the canonical icon and motif prototypes", () => {
+    for (const legacyPath of LEGACY_ICON_PATHS) {
+      expect(existsSync(join(ICONS_DIR, legacyPath)), `${legacyPath} should be removed`).toBe(false)
+    }
+
+    for (const retainedPath of [
+      "icon.png",
+      "icon.svg",
+      "icon.manifest.json",
+      "motifs.icon",
+      "motifs2.icon",
+      "motifs3.icon",
+    ]) {
+      expect(existsSync(join(ICONS_DIR, retainedPath)), `${retainedPath} should be retained`).toBe(
+        true,
+      )
+    }
+  })
+
   test("pins the outlined Avenir Next Medium vector and its committed PNG derivative", () => {
     const manifest = validateIconSources()
     expect(manifest).toMatchObject({

@@ -7,9 +7,14 @@ import {
 } from "@pi-lab/local-db"
 import { buildNonInteractiveLaunchArgv, getAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
+import { isGitRepo } from "../git"
+import { acquireAgentLaunchSlot } from "../trpc/agentLaunchGuard"
 import type { AppContext } from "../trpc/context"
 import { startAgentSession } from "../trpc/sessions/sessions"
-import type { NonInteractiveProcessResult } from "./nonInteractiveRunner"
+import type {
+  NonInteractiveProcessResult,
+  StartedNonInteractiveProcess,
+} from "./nonInteractiveRunner"
 import { createWorkflowLifecycleReporter } from "./workflowLifecycle"
 
 /**
@@ -130,18 +135,31 @@ async function dispatchNonInteractiveAutomation(
       )
     }
 
-    const launchEnvironment = await ctx.getAgentLaunchEnvironment()
-    const started = await ctx.runNonInteractiveProcess({
-      command,
-      args,
-      cwd: project.repoPath,
-      env: { ...launchEnvironment, ...agent.env },
+    const releaseAgentSlot = acquireAgentLaunchSlot({
+      projectId: project.id,
+      gitAvailable: await isGitRepo(project.repoPath),
+      liveAgentCount: () => ctx.activityMonitor.liveAgentCount(project.id),
     })
-    lifecycle.started()
-    const endActivity = ctx.caffeine.beginMeaningfulActivity(`workflow:${run.id}`)
+    let started: StartedNonInteractiveProcess
+    let endActivity: () => void
+    try {
+      const launchEnvironment = await ctx.getAgentLaunchEnvironment()
+      started = await ctx.runNonInteractiveProcess({
+        command,
+        args,
+        cwd: project.repoPath,
+        env: { ...launchEnvironment, ...agent.env },
+      })
+      lifecycle.started()
+      endActivity = ctx.caffeine.beginMeaningfulActivity(`workflow:${run.id}`)
+    } catch (error) {
+      releaseAgentSlot()
+      throw error
+    }
     void started.completion
       .then(
         (result) => {
+          releaseAgentSlot()
           endActivity()
           if (result.code === 0 && result.signal === null && result.error === null) {
             lifecycle.completed()
@@ -150,6 +168,7 @@ async function dispatchNonInteractiveAutomation(
           lifecycle.failed(nonInteractiveFailure(agent.label, result))
         },
         (error) => {
+          releaseAgentSlot()
           endActivity()
           lifecycle.failed(
             error instanceof Error

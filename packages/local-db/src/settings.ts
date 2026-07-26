@@ -7,6 +7,7 @@ import {
   DEFAULT_CAFFEINE_SETTINGS,
   DEFAULT_EDITOR_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
+  DEFAULT_PROJECT_TEMPLATE_SETTINGS,
   type EditorSettings,
   type Settings,
   settings,
@@ -48,6 +49,7 @@ function defaultSettings(): Settings {
     editor: DEFAULT_EDITOR_SETTINGS,
     notifications: DEFAULT_NOTIFICATION_SETTINGS,
     caffeine: DEFAULT_CAFFEINE_SETTINGS,
+    projectTemplate: DEFAULT_PROJECT_TEMPLATE_SETTINGS,
     zotero: null,
     updatedAt: Date.now(),
   }
@@ -114,6 +116,10 @@ export function getSettingsOrDefaults(db: PiLabDatabase): Settings {
     ...row,
     editor: editorSettingsWithDefaults(row.editor),
     notifications: notificationSettingsWithDefaults(row.notifications),
+    projectTemplate: {
+      ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
+      ...row.projectTemplate,
+    },
   }
 }
 

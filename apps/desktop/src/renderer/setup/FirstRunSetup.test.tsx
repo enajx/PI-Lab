@@ -43,7 +43,7 @@ describe("FirstRunSetup", () => {
 
     expect(await screen.findByText("Detected")).toBeTruthy()
     expect(screen.getByText("Not detected")).toBeTruthy()
-    expect(screen.getByText("Default agent")).toBeTruthy()
+    expect(await screen.findByText("Default agent")).toBeTruthy()
     expect(screen.getByText("GitHub")).toBeTruthy()
     expect(screen.getByText("Zotero")).toBeTruthy()
     expect(screen.queryByText(/Chat mode/u)).toBeNull()

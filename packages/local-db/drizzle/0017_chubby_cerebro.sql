@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `project_template` text DEFAULT '{"initializationMarkdownFiles":["AGENTS.md","CLAUDE.md","CLUSTER_INSTRUCTIONS.md","EXPERIMENT_TRACKING_SQLITE.md","RESEARCH.md","TODO.md"],"defaultTemplateParentPath":null}' NOT NULL;

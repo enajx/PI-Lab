@@ -5,10 +5,8 @@ import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-ro
 import {
   Bot,
   ChevronDown,
-  FilePlus2,
-  FolderOpen,
-  FolderPlus,
-  GitFork,
+  Eye,
+  EyeOff,
   Info,
   LayoutDashboard,
   PanelLeft,
@@ -18,14 +16,17 @@ import {
   Waypoints,
   X,
 } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
+  dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   useNavOrder,
   useProjectOrder,
+  useRestoreProjectTabs,
   useShowAnalysisSection,
   useShowClusterSection,
+  useShowHiddenProjects,
   useSidebarCollapsed,
   useSidebarFeatureHelp,
   useSidebarWidth,
@@ -41,6 +42,8 @@ import {
 import { KindBadge } from "../../projects/components/KindBadge"
 import { type ScienceNavItem, scienceNavItems } from "../../science/components/scienceNavItems"
 import { readOpenProjectOverride } from "../../utils/openProjectOverride"
+import { AddProjectMenu } from "../AddProjectMenu"
+import { ProjectVisibilityToggle } from "../ProjectVisibilityToggle"
 
 /**
  * Shared layout/typography for every sidebar nav row (Dashboard, Science tabs,
@@ -263,6 +266,7 @@ function useDragReorder(
 interface ProjectMenuState {
   id: string
   name: string
+  hidden: boolean
   x: number
   y: number
 }
@@ -303,9 +307,15 @@ export function Sidebar() {
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const agentActivityQuery = useQuery(trpc.sessions.activity.queryOptions())
+  const projects = projectsQuery.data ?? []
+  const hiddenCount =
+    projectsQuery.data === undefined
+      ? null
+      : projects.filter((project) => Boolean(project.archivedAt)).length
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const [width, setWidth] = useSidebarWidth()
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
+  const [restoreProjectTabs] = useRestoreProjectTabs()
   const featureHelp = useFeatureHelp(showFeatureHelp && !collapsed)
 
   const invalidateProjects = () =>
@@ -318,7 +328,11 @@ export function Sidebar() {
   const removeProject = useMutation(
     trpc.projects.remove.mutationOptions({ onSuccess: () => void invalidateProjects() }),
   )
+  const setArchived = useMutation(
+    trpc.projects.setArchived.mutationOptions({ onSuccess: () => void invalidateProjects() }),
+  )
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
+  const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
   const [, setWorkspaceRevision] = useState(0)
 
   useEffect(
@@ -330,9 +344,10 @@ export function Sidebar() {
     void openProject.mutateAsync({ path })
   })
 
-  const projects = projectsQuery.data ?? []
   const [projectOrder, setProjectOrder] = useProjectOrder()
-  const orderedProjects = orderById(projects, projectOrder)
+  const orderedProjects = orderById(projects, projectOrder).filter(
+    (project) => showHidden || !project.archivedAt,
+  )
   const projectRowProps = useDragReorder(
     orderedProjects.map((project) => project.id),
     setProjectOrder,
@@ -404,7 +419,7 @@ export function Sidebar() {
                 key={project.id}
                 project={project}
                 collapsed={collapsed}
-                workspaceState={readProjectWorkspaceState(project.id)}
+                workspaceState={readProjectWorkspaceState(project.id, restoreProjectTabs)}
                 agentStatus={projectAgentStatus(project.id, agentActivityQuery.data ?? [])}
                 reorder={collapsed ? null : projectRowProps(project.id)}
                 onContextMenu={(event) => {
@@ -412,6 +427,7 @@ export function Sidebar() {
                   setProjectMenu({
                     id: project.id,
                     name: project.name,
+                    hidden: Boolean(project.archivedAt),
                     x: event.clientX,
                     y: event.clientY,
                   })
@@ -419,6 +435,14 @@ export function Sidebar() {
               />
             ))
           )}
+          <ProjectVisibilityToggle
+            hiddenCount={hiddenCount ?? 0}
+            showHidden={showHidden}
+            collapsed={collapsed}
+            testId="sidebar-show-hidden-projects"
+            className="mt-1"
+            onToggle={() => setShowHidden(!showHidden)}
+          />
         </nav>
 
         {!collapsed && showFeatureHelp ? (
@@ -435,7 +459,7 @@ export function Sidebar() {
               onRestore={() => setShowFeatureHelp(true)}
             />
           ) : null}
-          <AddProjectMenu collapsed={collapsed} onAdded={invalidateProjects} />
+          <AddProjectMenu variant="sidebar" collapsed={collapsed} onAdded={invalidateProjects} />
           <SettingsNav collapsed={collapsed} />
         </div>
       </div>
@@ -452,6 +476,14 @@ export function Sidebar() {
         onClose={() => setProjectMenu(null)}
         onRemove={(id) => {
           removeProject.mutate({ id })
+          setProjectMenu(null)
+        }}
+        onSetHidden={(id, hidden) => {
+          setArchived.mutate({ id, archived: hidden })
+          setProjectMenu(null)
+        }}
+        onDismissGitNotice={(id) => {
+          dismissNonGitNotice(id)
           setProjectMenu(null)
         }}
       />
@@ -575,10 +607,14 @@ function ProjectContextMenu({
   menu,
   onClose,
   onRemove,
+  onSetHidden,
+  onDismissGitNotice,
 }: {
   menu: ProjectMenuState | null
   onClose: () => void
   onRemove: (id: string) => void
+  onSetHidden: (id: string, hidden: boolean) => void
+  onDismissGitNotice: (id: string) => void
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -610,6 +646,36 @@ function ProjectContextMenu({
       <button
         type="button"
         role="menuitem"
+        data-testid="project-dismiss-git-notice"
+        onClick={() => onDismissGitNotice(menu.id)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60"
+      >
+        <X className="size-4 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">Dismiss Git warning</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        data-testid={menu.hidden ? "project-restore" : "project-hide"}
+        data-feature-label={menu.hidden ? "Unhide project" : "Hide project"}
+        data-feature-help={
+          menu.hidden
+            ? "Restore this project to the Dashboard and sidebar."
+            : "Hide this project from the Dashboard and sidebar without removing its data."
+        }
+        onClick={() => onSetHidden(menu.id, !menu.hidden)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60"
+      >
+        {menu.hidden ? (
+          <Eye className="size-4 shrink-0" aria-hidden />
+        ) : (
+          <EyeOff className="size-4 shrink-0" aria-hidden />
+        )}
+        <span className="min-w-0 truncate">{menu.hidden ? "Unhide project" : "Hide project"}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
         data-testid="project-remove"
         data-feature-label="Remove project"
         data-feature-help="Remove this project from PI Lab without deleting any files from disk."
@@ -623,234 +689,6 @@ function ProjectContextMenu({
         Removes “{menu.name}” from the app only — the files on disk are left untouched.
       </p>
     </div>
-  )
-}
-
-/**
- * Add-project dropdown popover with three ways to create a project (mirrors the
- * editor/right-sidebar menus: an `aria-haspopup="menu"` trigger and an absolutely
- * positioned `role="menu"` that closes on outside mousedown or Escape). "Open from
- * folder" picks a directory and runs `projects.open`; "Start from template" picks the
- * target folder and runs `projects.createFromTemplate` directly (no name form); "Clone
- * from git repo" reveals an inline form that gathers the URL, picks a parent directory,
- * then clones. Each success invalidates the project list via {@link onAdded}; any
- * mutation error surfaces as selectable text inside the popover (no silent failures).
- * Collapsed, the trigger is an icon-only button.
- */
-function AddProjectMenu({ collapsed, onAdded }: { collapsed: boolean; onAdded: () => void }) {
-  const trpc = useTRPC()
-  const [open, setOpen] = useState(false)
-  const [mode, setMode] = useState<"menu" | "clone">("menu")
-  const [url, setUrl] = useState("")
-  const rootRef = useRef<HTMLDivElement | null>(null)
-  const labelId = useId()
-
-  const onSuccess = () => {
-    onAdded()
-    setOpen(false)
-  }
-  const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
-  const openProject = useMutation(trpc.projects.open.mutationOptions({ onSuccess }))
-  const cloneProject = useMutation(trpc.projects.clone.mutationOptions({ onSuccess }))
-  const templateProject = useMutation(
-    trpc.projects.createFromTemplate.mutationOptions({ onSuccess }),
-  )
-
-  const pending =
-    pickDirectory.isPending ||
-    openProject.isPending ||
-    cloneProject.isPending ||
-    templateProject.isPending
-  const error =
-    pickDirectory.error ?? openProject.error ?? cloneProject.error ?? templateProject.error
-
-  // Reset the popover to its menu state whenever it closes, so reopening always
-  // starts fresh (no stale form values or lingering error).
-  useEffect(() => {
-    if (open) return
-    setMode("menu")
-    setUrl("")
-    pickDirectory.reset()
-    openProject.reset()
-    cloneProject.reset()
-    templateProject.reset()
-  }, [open, pickDirectory.reset, openProject.reset, cloneProject.reset, templateProject.reset])
-
-  // Close on outside click or Escape so the menu behaves like a real popover.
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
-
-  const openFromFolder = async () => {
-    const path = await pickDirectory.mutateAsync()
-    if (!path) return
-    await openProject.mutateAsync({ path })
-  }
-  const submitClone = async () => {
-    const trimmed = url.trim()
-    if (!trimmed) return
-    const parentDir = await pickDirectory.mutateAsync()
-    if (!parentDir) return
-    await cloneProject.mutateAsync({ url: trimmed, parentDir })
-  }
-  const startFromTemplate = async () => {
-    const targetDir = await pickDirectory.mutateAsync()
-    if (!targetDir) return
-    await templateProject.mutateAsync({ targetDir })
-  }
-
-  return (
-    <div ref={rootRef} className="relative">
-      <Button
-        data-testid="add-project"
-        variant="ghost"
-        size="sm"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={cn("w-full text-sm", collapsed ? "justify-center px-0" : "justify-start px-2")}
-        title={collapsed ? "Add project" : undefined}
-        data-feature-label="Add project"
-        data-feature-help="Open a folder, clone a repository, or create a project from the template"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <FolderPlus aria-hidden />
-        {collapsed ? null : "Add project"}
-      </Button>
-
-      {open ? (
-        <div
-          data-testid="add-project-menu"
-          role="menu"
-          aria-labelledby={labelId}
-          className="absolute bottom-11 left-0 z-50 w-64 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
-        >
-          <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
-            Add project
-          </p>
-
-          {mode === "menu" ? (
-            <>
-              <MenuItem
-                testId="add-project-folder"
-                icon={FolderOpen}
-                label="Open from folder"
-                description="Add an existing local project folder to PI Lab."
-                onClick={() => void openFromFolder()}
-                disabled={pending}
-              />
-              <MenuItem
-                testId="add-project-clone"
-                icon={GitFork}
-                label="Clone from git repo"
-                description="Clone a Git repository into a folder and add it as a project."
-                onClick={() => setMode("clone")}
-                disabled={pending}
-              />
-              <MenuItem
-                testId="add-project-template"
-                icon={FilePlus2}
-                label="Start from template"
-                description="Create a new project folder from PI Lab's configured template."
-                onClick={() => void startFromTemplate()}
-                disabled={pending}
-              />
-            </>
-          ) : null}
-
-          {mode === "clone" ? (
-            <form
-              data-testid="add-project-clone-form"
-              className="flex flex-col gap-2 p-1.5"
-              onSubmit={(event) => {
-                event.preventDefault()
-                void submitClone()
-              }}
-            >
-              <label
-                className="font-medium text-muted-foreground text-xs"
-                htmlFor={`${labelId}-url`}
-              >
-                Git repository URL
-              </label>
-              <input
-                id={`${labelId}-url`}
-                data-testid="add-project-clone-url"
-                data-feature-label="Git repository URL"
-                data-feature-help="Enter the Git repository to clone into a new local project folder."
-                type="text"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://github.com/owner/repo.git"
-                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-ring"
-              />
-              <Button
-                type="submit"
-                size="sm"
-                data-feature-label="Choose folder and clone"
-                data-feature-help="Choose a destination folder, clone the repository, and add it to PI Lab."
-                disabled={pending || url.trim().length === 0}
-              >
-                Choose folder & clone
-              </Button>
-            </form>
-          ) : null}
-
-          {error ? (
-            <p
-              data-testid="add-project-error"
-              className="cursor-text select-text px-2 py-1 text-destructive text-xs leading-relaxed"
-            >
-              {error.message}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/** A single action row in the Add-project menu (icon + label). */
-function MenuItem({
-  testId,
-  icon: Icon,
-  label,
-  description,
-  onClick,
-  disabled,
-}: {
-  testId: string
-  icon: typeof FolderOpen
-  label: string
-  description: string
-  onClick: () => void
-  disabled: boolean
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      data-testid={testId}
-      data-feature-label={label}
-      data-feature-help={description}
-      onClick={onClick}
-      disabled={disabled}
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
-    >
-      <Icon className="size-4 shrink-0" aria-hidden />
-      <span className="min-w-0 truncate">{label}</span>
-    </button>
   )
 }
 
@@ -922,7 +760,7 @@ function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
   const { location } = useRouterState()
   const isActive = location.pathname === "/"
   return (
-    <div className="shrink-0 border-sidebar-border border-b pb-3">
+    <div className="shrink-0 border-sidebar-border border-b pt-1 pb-3">
       <Link
         to="/"
         data-testid="nav-dashboard"
@@ -1092,6 +930,8 @@ function ProjectItem({
   const navigate = useNavigate()
   const [sessionsExpanded, setSessionsExpanded] = useState(true)
   const agentSessions = workspaceState?.sessions.filter((session) => session.kind === "agent") ?? []
+  const hasUnsavedEdits =
+    workspaceState?.buffers.some((buffer) => buffer.content !== buffer.savedContent) ?? false
 
   if (collapsed) {
     return (
@@ -1101,16 +941,21 @@ function ProjectItem({
         data-testid="project-item"
         data-project-id={project.id}
         data-active={isActive}
+        data-hidden={Boolean(project.archivedAt)}
         onContextMenu={onContextMenu}
         className={cn(
           "flex justify-center rounded-md py-1.5 transition-colors",
           navStateClass(isActive),
+          project.archivedAt && "opacity-60 saturate-50",
         )}
         title={project.name}
         data-feature-label={project.name}
         data-feature-help={`Open the ${project.name} project workspace`}
       >
-        <ProjectBadge project={project} isActive={isActive} />
+        <span className="relative">
+          <ProjectBadge project={project} isActive={isActive} />
+          {hasUnsavedEdits ? <UnsavedProjectMarker /> : null}
+        </span>
         <span className="sr-only">{project.name}</span>
       </Link>
     )
@@ -1155,14 +1000,19 @@ function ProjectItem({
           data-testid="project-item"
           data-project-id={project.id}
           data-active={isActive}
+          data-hidden={Boolean(project.archivedAt)}
           onContextMenu={onContextMenu}
-          className="min-w-0 flex-1 truncate text-left text-sm"
+          className={cn(
+            "min-w-0 flex-1 truncate text-left text-sm",
+            project.archivedAt && "opacity-60",
+          )}
           title={project.repoPath}
           data-feature-label={project.name}
           data-feature-help={`Open the ${project.name} project workspace at ${project.repoPath}`}
         >
           {project.name}
         </Link>
+        {hasUnsavedEdits ? <UnsavedProjectMarker /> : null}
         <ProjectAgentStatusRing status={agentStatus} />
       </div>
       {sessionsExpanded && agentSessions.length > 0 ? (
@@ -1183,6 +1033,19 @@ function ProjectItem({
         </div>
       ) : null}
     </div>
+  )
+}
+
+/** A project-level counterpart to an editor tab's dirty dot. */
+function UnsavedProjectMarker() {
+  return (
+    <span
+      data-testid="project-unsaved-edits"
+      role="img"
+      aria-label="Unsaved edits"
+      title="Unsaved edits"
+      className="block size-2 shrink-0 rounded-full border border-muted-foreground/70 bg-transparent"
+    />
   )
 }
 

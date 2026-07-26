@@ -83,6 +83,13 @@ function useBooleanPref(key: string, fallback: boolean): [boolean, (next: boolea
   return [value, set]
 }
 
+/** Per-project dismissal state for the concise non-Git capability notice. */
+export const useNonGitNoticeDismissed = (projectId: string): [boolean, (next: boolean) => void] =>
+  useBooleanPref(`pi-lab.project.${projectId}.nonGitNoticeDismissed`, false)
+
+export const dismissNonGitNotice = (projectId: string): void =>
+  writePref(`pi-lab.project.${projectId}.nonGitNoticeDismissed`, "true")
+
 /** Shared numeric-preference hook — same cross-instance sync semantics as the boolean one. */
 function useNumberPref(key: string, fallback: number): [number, (next: number) => void] {
   const subscribe = useCallback((cb: () => void) => subscribePref(key, cb), [key])
@@ -99,6 +106,36 @@ function useStringPref(key: string, fallback: string): [string, (next: string) =
   const value = useSyncExternalStore(subscribe, getSnapshot, () => fallback)
   const set = useCallback((next: string) => writePref(key, next), [key])
   return [value, set]
+}
+
+// --- Dashboard Digital Rain: global, renderer-only animation tuning --------
+// These settings deliberately don't belong to a project: every card uses the
+// same bounded rendering budget, while its character source remains project-owned.
+export type DigitalRainDensity = "sparse" | "normal" | "dense"
+export type DigitalRainSpeed = "slow" | "normal" | "fast"
+
+const DIGITAL_RAIN_DENSITY_KEY = "pi-lab.digitalRain.density"
+const DIGITAL_RAIN_SPEED_KEY = "pi-lab.digitalRain.speed"
+const DIGITAL_RAIN_DENSITIES = new Set<DigitalRainDensity>(["sparse", "normal", "dense"])
+const DIGITAL_RAIN_SPEEDS = new Set<DigitalRainSpeed>(["slow", "normal", "fast"])
+
+export const useDigitalRainDensity = (): [
+  DigitalRainDensity,
+  (next: DigitalRainDensity) => void,
+] => {
+  const [stored, setStored] = useStringPref(DIGITAL_RAIN_DENSITY_KEY, "normal")
+  const density = DIGITAL_RAIN_DENSITIES.has(stored as DigitalRainDensity)
+    ? (stored as DigitalRainDensity)
+    : "normal"
+  return [density, setStored]
+}
+
+export const useDigitalRainSpeed = (): [DigitalRainSpeed, (next: DigitalRainSpeed) => void] => {
+  const [stored, setStored] = useStringPref(DIGITAL_RAIN_SPEED_KEY, "normal")
+  const speed = DIGITAL_RAIN_SPEEDS.has(stored as DigitalRainSpeed)
+    ? (stored as DigitalRainSpeed)
+    : "normal"
+  return [speed, setStored]
 }
 
 // --- Project view: show the "Code changes" panel (hidden by default) ----------
@@ -122,6 +159,20 @@ const SHOW_ANALYSIS_SECTION_KEY = "pi-lab.sections.showAnalysis"
 export const readShowAnalysisSection = (): boolean => readBoolean(SHOW_ANALYSIS_SECTION_KEY, true)
 export const useShowAnalysisSection = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_ANALYSIS_SECTION_KEY, true)
+
+// --- Projects: one reveal state shared by Dashboard and sidebar ---------------
+// This controls only whether archived projects are temporarily visible; the
+// durable hidden state itself remains `projects.archivedAt` in the local DB.
+const SHOW_HIDDEN_PROJECTS_KEY = "pi-lab.projects.showHidden"
+export const useShowHiddenProjects = (
+  hiddenCount: number | null,
+): [boolean, (next: boolean) => void] => {
+  const [showHidden, setShowHidden] = useBooleanPref(SHOW_HIDDEN_PROJECTS_KEY, false)
+  useEffect(() => {
+    if (hiddenCount === 0 && showHidden) setShowHidden(false)
+  }, [hiddenCount, setShowHidden, showHidden])
+  return [showHidden, setShowHidden]
+}
 
 const SHOW_EXPERIMENTS_SECTION_KEY = "pi-lab.sections.showExperiments"
 export const useShowExperimentsSection = (): [boolean, (next: boolean) => void] =>
@@ -162,6 +213,12 @@ export const readShowFilesPanel = (): boolean => readBoolean(SHOW_FILES_PANEL_KE
 export const useShowFilesPanel = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_FILES_PANEL_KEY, false)
 
+// --- Project view: restore open file/terminal/agent tabs (on by default) ------
+const RESTORE_PROJECT_TABS_KEY = "pi-lab.projectView.restoreTabs"
+export const readRestoreProjectTabs = (): boolean => readBoolean(RESTORE_PROJECT_TABS_KEY, true)
+export const useRestoreProjectTabs = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(RESTORE_PROJECT_TABS_KEY, true)
+
 // --- Project view: right sidebar width (px), continuously resizable from its edge
 const RIGHT_SIDEBAR_WIDTH_KEY = "pi-lab.projectView.rightSidebarWidth"
 export const RIGHT_SIDEBAR_MIN_WIDTH = 240
@@ -177,6 +234,52 @@ export const FILES_PANEL_MAX_WIDTH = 480
 export const FILES_PANEL_DEFAULT_WIDTH = 224
 export const useFilesPanelWidth = (): [number, (next: number) => void] =>
   useNumberPref(FILES_PANEL_WIDTH_KEY, FILES_PANEL_DEFAULT_WIDTH)
+
+// --- File tree: one global sort shared by every project/tree placement -------
+export type FileTreeSort = "name-asc" | "name-desc" | "type" | "modified"
+const FILE_TREE_SORT_KEY = "pi-lab.fileTree.sort"
+const FILE_TREE_SORT_VALUES = new Set<FileTreeSort>(["name-asc", "name-desc", "type", "modified"])
+export const useFileTreeSort = (): [FileTreeSort, (next: FileTreeSort) => void] => {
+  const [stored, setStored] = useStringPref(FILE_TREE_SORT_KEY, "name-asc")
+  const sort = FILE_TREE_SORT_VALUES.has(stored as FileTreeSort)
+    ? (stored as FileTreeSort)
+    : "name-asc"
+  return [sort, setStored]
+}
+
+// --- Editor typography: global across every project/CodeMirror instance ------
+export const EDITOR_FONT_DEFAULT_FAMILY = "default"
+export const EDITOR_FONT_DEFAULT_SIZE = 14
+export const EDITOR_FONT_MIN_SIZE = 10
+export const EDITOR_FONT_MAX_SIZE = 24
+export const EDITOR_SAFE_MONOSPACE_STACK =
+  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+
+const EDITOR_FONT_FAMILY_KEY = "pi-lab.editor.fontFamily"
+const EDITOR_FONT_SIZE_KEY = "pi-lab.editor.fontSize"
+
+function boundedEditorFontSize(value: number): number {
+  if (!Number.isFinite(value)) return EDITOR_FONT_DEFAULT_SIZE
+  return Math.min(EDITOR_FONT_MAX_SIZE, Math.max(EDITOR_FONT_MIN_SIZE, Math.round(value)))
+}
+
+export const useEditorFontFamily = (): [string, (next: string) => void] => {
+  const [stored, setStored] = useStringPref(EDITOR_FONT_FAMILY_KEY, EDITOR_FONT_DEFAULT_FAMILY)
+  const family = stored.trim().length > 0 ? stored : EDITOR_FONT_DEFAULT_FAMILY
+  return [family, setStored]
+}
+
+export const useEditorFontSize = (): [number, (next: number) => void] => {
+  const [stored, setStored] = useNumberPref(EDITOR_FONT_SIZE_KEY, EDITOR_FONT_DEFAULT_SIZE)
+  const setSize = useCallback((next: number) => setStored(boundedEditorFontSize(next)), [setStored])
+  return [boundedEditorFontSize(stored), setSize]
+}
+
+export function editorFontFamilyCss(family: string): string {
+  return family === EDITOR_FONT_DEFAULT_FAMILY
+    ? EDITOR_SAFE_MONOSPACE_STACK
+    : `${JSON.stringify(family)}, ${EDITOR_SAFE_MONOSPACE_STACK}`
+}
 
 // --- Left sidebar: collapsed to an icon-only rail (expanded by default) -------
 const SIDEBAR_COLLAPSED_KEY = "pi-lab.sidebar.collapsed"
@@ -255,7 +358,7 @@ export const useClusterOrder = (): [string[], (next: string[]) => void] =>
 // Seeded small; the user grows it via the dialog's "+" and prunes it by
 // right-clicking a chip.
 const EMOJI_TAG_PALETTE_KEY = "pi-lab.emojiTagPalette"
-const DEFAULT_EMOJI_TAG_PALETTE: string[] = ["🔬", "🧪", "🚀", "💡"]
+const DEFAULT_EMOJI_TAG_PALETTE: string[] = ["🔬", "🧪", "🚀", "💡", "💼", "🥭", "🐬", "☑️"]
 export const readEmojiTagPalette = (): string[] =>
   readOrder(EMOJI_TAG_PALETTE_KEY, DEFAULT_EMOJI_TAG_PALETTE)
 export const useEmojiTagPalette = (): [string[], (next: string[]) => void] =>

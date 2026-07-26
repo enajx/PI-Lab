@@ -22,6 +22,8 @@ let lastBufferProps: {
   vim?: boolean
   diagnostics?: ((doc: string) => unknown) | undefined
   onRun?: (() => void) | undefined
+  markdownMode?: "render" | "source"
+  projectEntries?: Array<{ name: string; relPath: string; kind: "file" | "dir" }>
 } = {}
 
 vi.mock("../../../../../Terminal", () => ({
@@ -39,6 +41,8 @@ vi.mock("../../../../../Editor/components/CodeMirrorBuffer", () => ({
     onRun,
     vim,
     diagnostics,
+    markdownMode,
+    projectEntries,
   }: {
     relPath: string
     initialDoc: string
@@ -47,8 +51,10 @@ vi.mock("../../../../../Editor/components/CodeMirrorBuffer", () => ({
     onRun?: () => void
     vim?: boolean
     diagnostics?: (doc: string) => unknown
+    markdownMode?: "render" | "source"
+    projectEntries?: Array<{ name: string; relPath: string; kind: "file" | "dir" }>
   }) => {
-    lastBufferProps = { vim, diagnostics, onRun }
+    lastBufferProps = { vim, diagnostics, onRun, markdownMode, projectEntries }
     // Mirror CodeMirror: seed from initialDoc once on mount (live reloads remount
     // via a new React key), so the displayed doc only changes on a real remount.
     const [seeded] = useState(initialDoc)
@@ -58,6 +64,10 @@ vi.mock("../../../../../Editor/components/CodeMirrorBuffer", () => ({
         <span data-testid="buffer-path">{relPath}</span>
         <span data-testid="buffer-vim">{String(vim)}</span>
         <span data-testid="buffer-has-diagnostics">{String(Boolean(diagnostics))}</span>
+        <span data-testid="buffer-markdown-mode">{markdownMode ?? "none"}</span>
+        <span data-testid="buffer-project-entries">
+          {projectEntries?.map((entry) => entry.relPath).join(",") ?? ""}
+        </span>
         <button type="button" data-testid="buffer-type" onClick={() => onChange(`${seeded} EDIT`)}>
           type
         </button>
@@ -76,6 +86,7 @@ vi.mock("../../../../../Editor/components/CodeMirrorBuffer", () => ({
 
 const { CentralPanel } = await import("./CentralPanel")
 const { useCentralPanel } = await import("./useCentralPanel")
+type CentralPanelRestoreState = import("./useCentralPanel").CentralPanelRestoreState
 
 const DEFAULT_SETTINGS: EditorSettings = {
   autosave: false,
@@ -174,6 +185,7 @@ function baseHandlers(treeName = "main.py", overrides: FakeHandlers = {}): FakeH
     },
     "diagnostics.format": () => ({ toolsAvailable: true, changed: false, missing: [] }),
     "workspaces.spawnTerminal": () => ({ sessionId: "term-1" }),
+    "terminal.list": () => [],
     "agents.list": () => [
       {
         id: "claude-code",
@@ -218,6 +230,7 @@ function Harness({
   onUpdate,
   initialSession,
   activatedSession,
+  initialState,
   onPinFile,
 }: {
   client: ReturnType<typeof createFakeTrpcClient>
@@ -235,6 +248,7 @@ function Harness({
     label: string
     wsKind: "branch" | "worktree"
   }
+  initialState?: CentralPanelRestoreState
   onPinFile?: (relPath: string) => void
 }) {
   const controller = useCentralPanel({
@@ -243,6 +257,7 @@ function Harness({
     projectId: "p-1",
     settings,
     initialSession,
+    initialState,
   })
   useEffect(() => {
     if (activatedSession) controller.attachSession(activatedSession)
@@ -285,10 +300,11 @@ function renderPanel(
     wsKind: "branch" | "worktree"
   },
   onPinFile?: (relPath: string) => void,
+  initialState?: CentralPanelRestoreState,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient(handlers)
-  render(
+  return render(
     <AppProviders client={client} queryClient={queryClient}>
       <Harness
         client={client}
@@ -296,6 +312,7 @@ function renderPanel(
         onUpdate={onUpdate}
         initialSession={initialSession}
         activatedSession={activatedSession}
+        initialState={initialState}
         onPinFile={onPinFile}
       />
     </AppProviders>,
@@ -569,6 +586,134 @@ describe("CentralPanel — panel", () => {
     ).toBe("Switch to this interactive shell terminal.")
   })
 
+  test("closing a terminal tab terminates its PTY instead of leaving a hidden session", async () => {
+    const killed: string[] = []
+    renderPanel(
+      baseHandlers("main.py", {
+        "terminal.kill": (input) => {
+          killed.push((input as { sessionId: string }).sessionId)
+          return { ok: true }
+        },
+      }),
+    )
+    fireEvent.click(screen.getByTestId("launcher-terminal"))
+    await screen.findByTestId("terminal")
+
+    fireEvent.click(screen.getByTestId("central-tab-close"))
+
+    await waitFor(() => expect(killed).toEqual(["term-1"]))
+    expect(screen.getByTestId("central-launcher")).toBeTruthy()
+    expect(screen.queryByTestId("terminal")).toBeNull()
+  })
+
+  test("restoration reattaches live sessions and recreates missing sessions from launch config", async () => {
+    const spawned: unknown[] = []
+    const launched: unknown[] = []
+    const initialState: CentralPanelRestoreState = {
+      buffers: [],
+      activeRelPath: null,
+      sessions: [
+        {
+          id: "pane-1",
+          kind: "terminal",
+          sessionId: "live-terminal",
+          label: "Terminal",
+          launch: { type: "terminal" },
+        },
+        {
+          id: "pane-2",
+          kind: "agent",
+          sessionId: "dead-agent",
+          label: "Claude Code",
+          wsKind: "worktree",
+          launch: { type: "agent", agentId: "claude-code", workspaceMode: "worktree" },
+        },
+      ],
+      active: { type: "session", id: "pane-2" },
+      belowEditorRun: null,
+    }
+    renderPanel(
+      baseHandlers("main.py", {
+        "terminal.list": () => [
+          { id: "live-terminal", pid: 1, cols: 80, rows: 24, alive: true, createdAt: 1 },
+        ],
+        "workspaces.spawnTerminal": (input) => {
+          spawned.push(input)
+          return { sessionId: "unexpected-terminal" }
+        },
+        "sessions.start": (input) => {
+          launched.push(input)
+          return { sessionId: "recreated-agent", workspaceId: "ws-new", kind: "worktree" }
+        },
+      }),
+      DEFAULT_SETTINGS,
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      initialState,
+    )
+
+    await waitFor(() => {
+      const ids = screen
+        .getAllByTestId("terminal")
+        .map((terminal) => terminal.getAttribute("data-session-id"))
+      expect(ids).toEqual(["live-terminal", "recreated-agent"])
+    })
+    expect(spawned).toEqual([])
+    expect(launched).toEqual([
+      { projectId: "p-1", agentId: "claude-code", workspaceMode: "worktree" },
+    ])
+    const activeTab = screen
+      .getAllByTestId("central-tab")
+      .find((tab) => tab.getAttribute("data-active") === "true")
+    expect(activeTab?.textContent).toContain("Claude Code")
+  })
+
+  test("leaving during restoration kills any newly recreated session instead of orphaning it", async () => {
+    let resolveList!: (sessions: unknown[]) => void
+    const listed = new Promise<unknown[]>((resolve) => {
+      resolveList = resolve
+    })
+    const killed: string[] = []
+    const initialState: CentralPanelRestoreState = {
+      buffers: [],
+      activeRelPath: null,
+      sessions: [
+        {
+          id: "pane-1",
+          kind: "terminal",
+          sessionId: "dead-terminal",
+          label: "Terminal",
+          launch: { type: "terminal" },
+        },
+      ],
+      active: { type: "session", id: "pane-1" },
+      belowEditorRun: null,
+    }
+    const rendered = renderPanel(
+      baseHandlers("main.py", {
+        "terminal.list": () => listed,
+        "workspaces.spawnTerminal": () => ({ sessionId: "unclaimed-terminal" }),
+        "terminal.kill": (input) => {
+          killed.push((input as { sessionId: string }).sessionId)
+          return { ok: true }
+        },
+      }),
+      DEFAULT_SETTINGS,
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      initialState,
+    )
+
+    rendered.unmount()
+    resolveList([])
+
+    await waitFor(() => expect(killed).toContain("unclaimed-terminal"))
+  })
+
   test("a task-launched agent is attached and focused on first render", async () => {
     renderPanel(baseHandlers(), DEFAULT_SETTINGS, () => {}, {
       kind: "agent",
@@ -710,6 +855,27 @@ describe("CentralPanel — left Files panel", () => {
 })
 
 describe("CentralPanel — editor behaviour", () => {
+  test("Markdown opens in Render and toggles to raw Source", async () => {
+    renderPanel(baseHandlers("notes.md"))
+    const note = (await screen.findAllByTestId("file-tree-file")).find(
+      (file) => file.getAttribute("data-rel-path") === "notes.md",
+    )
+    fireEvent.click(note as HTMLElement)
+    await screen.findByTestId("editor-buffer")
+
+    expect(
+      screen.getByRole("button", { name: "Render Markdown" }).getAttribute("aria-pressed"),
+    ).toBe("true")
+    expect(screen.getByTestId("buffer-markdown-mode").textContent).toBe("render")
+    expect(screen.getByTestId("buffer-project-entries").textContent).toBe("")
+
+    fireEvent.click(screen.getByRole("button", { name: "Source Markdown" }))
+    expect(screen.getByTestId("buffer-markdown-mode").textContent).toBe("source")
+    expect(
+      screen.getByRole("button", { name: "Source Markdown" }).getAttribute("aria-pressed"),
+    ).toBe("true")
+  })
+
   test("editing marks the tab dirty; ⌘S writes it and clears the dirty state", async () => {
     renderPanel()
     await openFile()

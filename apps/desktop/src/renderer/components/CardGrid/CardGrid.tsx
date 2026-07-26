@@ -15,7 +15,7 @@ import {
 import "./cardGrid.css"
 
 export const CARD_GRID_SURFACES = {
-  dashboard: { baseColumnPx: 200, baseRowPx: 176 },
+  dashboard: { baseColumnPx: 220, baseRowPx: 236 },
   cluster: { baseColumnPx: 280, baseRowPx: 128 },
 } as const
 
@@ -101,6 +101,7 @@ export function CardGrid({
   const Element = as
   const columnPx = Math.round(config.baseColumnPx * scale)
   const rowPx = Math.round(config.baseRowPx * scale)
+  const boundedColumns = surface === "dashboard"
 
   useEffect(() => {
     window.localStorage.removeItem(`pi-lab.cardGrid.${surface}.spans`)
@@ -117,9 +118,12 @@ export function CardGrid({
         data-card-grid-base-row={config.baseRowPx}
         className={cn("card-grid grid", className)}
         style={{
-          gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${columnPx}px), 1fr))`,
+          gridTemplateColumns: boundedColumns
+            ? `repeat(auto-fill, minmax(min(100%, ${columnPx}px), ${columnPx}px))`
+            : `repeat(auto-fit, minmax(min(100%, ${columnPx}px), 1fr))`,
           gridAutoRows: `minmax(${rowPx}px, auto)`,
           gridAutoFlow: "row",
+          justifyContent: boundedColumns ? "start" : undefined,
           ...style,
         }}
       >
@@ -142,9 +146,9 @@ function scaleLabel(label: string, scale: number): string {
 }
 
 /**
- * A card supplies an invisible corner drag target. Changing any card changes the
- * whole surface, which preserves a calm uniform grid rather than reflowing one
- * card into abrupt span states.
+ * A card supplies an invisible corner drag target. Horizontal and vertical movement
+ * both change the shared scale, so the Dashboard card grows in both dimensions
+ * rather than feeling like a width-only resize.
  */
 export function ResizableCardGridItem({
   cardId,

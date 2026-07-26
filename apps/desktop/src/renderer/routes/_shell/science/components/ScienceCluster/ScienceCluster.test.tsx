@@ -272,6 +272,27 @@ describe("ScienceCluster", () => {
     expect(focused?.getAttribute("data-focused")).toBe("true")
   })
 
+  test("Tab cycles the machine finder between Cluster and all projects", async () => {
+    renderCluster({
+      "science.cluster.list": () => ({
+        machines: [machine({ id: "m1", host: "alpha" })],
+        hiddenCount: 0,
+      }),
+      "projects.list": () => [{ id: "p1", name: "Research", repoPath: "/tmp/research" }],
+    })
+    await screen.findByTestId("machine-card")
+
+    fireEvent.keyDown(window, { key: "f", metaKey: true })
+    const input = await screen.findByTestId("quick-find-input")
+    expect(screen.getByTestId("quick-find-scope").textContent).toContain("Cluster machines")
+
+    fireEvent.keyDown(input, { key: "Tab" })
+    await waitFor(() =>
+      expect(screen.getByTestId("quick-find-scope").textContent).toContain("All projects"),
+    )
+    expect(screen.getByTestId("quick-find-item").getAttribute("data-find-id")).toBe("p1")
+  })
+
   test("removes the scalar card-size slider", async () => {
     renderCluster({
       "science.cluster.list": () => ({

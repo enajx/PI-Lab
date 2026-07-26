@@ -10,8 +10,8 @@ import {
   highlightSegments,
 } from "@pi-lab/shared"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
-import { useQuery } from "@tanstack/react-query"
-import { ChartArea, FileText, Search } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ChartArea, FileCode2, FilePlus2, FileText, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
@@ -39,7 +39,7 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  */
 export function ScienceAnalysis() {
   const trpc = useTRPC()
-
+  const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
 
@@ -62,7 +62,16 @@ export function ScienceAnalysis() {
   const [kindFilter, setKindFilter] = useState<DataFileKind | null>(null)
   const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
-
+  const createTemplate = useMutation(
+    trpc.science.analysis.createTemplate.mutationOptions({
+      onSuccess: async (created) => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.science.analysis.listFiles.queryKey(),
+        })
+        setSelectedRelPath(created.relPath)
+      },
+    }),
+  )
   const listing = useQuery({
     ...trpc.science.analysis.listFiles.queryOptions({ projectId: selectedProjectId ?? "" }),
     enabled: selectedProjectId !== null,
@@ -185,6 +194,34 @@ export function ScienceAnalysis() {
       testId="science-analysis"
       title="Analysis"
       subtitle="Browse and preview the data files in a project's repo"
+      actions={
+        <>
+          <button
+            type="button"
+            data-testid="analysis-new-html-report"
+            disabled={!selectedProjectId || createTemplate.isPending}
+            onClick={() =>
+              createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
+            }
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileCode2 className="size-3.5" aria-hidden />
+            HTML report
+          </button>
+          <button
+            type="button"
+            data-testid="analysis-new-marimo-notebook"
+            disabled={!selectedProjectId || createTemplate.isPending}
+            onClick={() =>
+              createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "marimo" })
+            }
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FilePlus2 className="size-3.5" aria-hidden />
+            Marimo report
+          </button>
+        </>
+      }
     >
       {projects.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
@@ -329,7 +366,11 @@ export function ScienceAnalysis() {
           {/* Right column: preview pane for the selected file. */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {selectedProjectId && selectedRelPath ? (
-              <AnalysisPreview projectId={selectedProjectId} relPath={selectedRelPath} />
+              <AnalysisPreview
+                projectId={selectedProjectId}
+                relPath={selectedRelPath}
+                kind={allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"}
+              />
             ) : (
               <NoSelectionState />
             )}
@@ -341,6 +382,8 @@ export function ScienceAnalysis() {
         <QuickFind
           ariaLabel="Find a file"
           placeholder="Find a file…"
+          scopeLabel="Selected project files"
+          allowGlobalSearch
           items={findItems}
           emptyText="No matching files"
           onSelect={(item) => setSelectedRelPath(item.id)}

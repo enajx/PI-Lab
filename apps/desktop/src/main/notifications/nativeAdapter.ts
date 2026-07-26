@@ -16,6 +16,7 @@ export interface PlatformNotificationInput extends NativeNotificationInput {
 }
 
 export interface PlatformNotificationDependencies {
+  platform: NodeJS.Platform
   isSupported: () => boolean
   create: (input: PlatformNotificationInput) => PlatformNotification
   /** Injectable ownership seam; production uses an adapter-lifetime set. */
@@ -24,8 +25,9 @@ export interface PlatformNotificationDependencies {
 
 /**
  * Construct the Electron-facing adapter behind injectable platform seams. The
- * native banner stays silent; the Pi tile is explicit where the host surfaces a
- * notification icon.
+ * native banner stays silent. macOS owns sender identity through the application
+ * bundle; passing Electron's `icon` option there would add a second content
+ * image. Other platforms receive the explicit Pi tile.
  */
 export function createNativeNotificationAdapter(
   iconPath: string | null,
@@ -38,7 +40,7 @@ export function createNativeNotificationAdapter(
     deliver: (input: NativeNotificationInput, handlers: NativeNotificationHandlers): void => {
       const notification = dependencies.create({
         ...input,
-        ...(iconPath ? { icon: iconPath } : {}),
+        ...(iconPath && dependencies.platform !== "darwin" ? { icon: iconPath } : {}),
       })
       // Electron's Notification is a native EventEmitter whose JavaScript
       // wrapper must remain reachable until delivery finishes. A local-only

@@ -9,6 +9,8 @@ export interface DirEntry {
   path: string
   /** Whether the entry is a regular file or a directory. */
   kind: "file" | "dir"
+  /** Last-modified time as epoch milliseconds, for renderer-side sorting. */
+  mtimeMs: number
 }
 
 /** Options that shape a recursive walk of a workspace tree. */
@@ -103,7 +105,9 @@ export async function listDir(absPath: string): Promise<DirEntry[]> {
   for (const dirent of dirents) {
     const kind = dirent.isDirectory() ? "dir" : dirent.isFile() ? "file" : null
     if (kind === null) continue
-    entries.push({ name: dirent.name, path: join(absPath, dirent.name), kind })
+    const path = join(absPath, dirent.name)
+    const info = await stat(path)
+    entries.push({ name: dirent.name, path, kind, mtimeMs: info.mtimeMs })
   }
   entries.sort(compareEntries)
   return entries

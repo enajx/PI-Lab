@@ -2,6 +2,7 @@ import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/edit
 import { cn } from "@pi-lab/ui"
 import { Check, Settings2 } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { rememberCurrentSettingsReturnRoute } from "../../../routes/_shell/-settingsReturnRoute"
 import { allEditorThemes, DEFAULT_EDITOR_THEME_ID } from "../editorThemes"
 
 interface EditorSettingsMenuProps {
@@ -79,41 +80,6 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
           <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
             Editor settings
           </p>
-
-          <SelectRow
-            testId="editor-settings-theme"
-            label="Color theme"
-            value={selectedTheme}
-            groups={[
-              {
-                label: "Light",
-                options: themes
-                  .filter((theme) => theme.mode === "light")
-                  .map((theme) => ({ value: theme.id, label: theme.label })),
-              },
-              {
-                label: "Dark",
-                options: themes
-                  .filter((theme) => theme.mode === "dark")
-                  .map((theme) => ({ value: theme.id, label: theme.label })),
-              },
-            ]}
-            onChange={(editorTheme) => onChange?.({ editorTheme })}
-          />
-
-          <SelectRow
-            testId="editor-settings-run-destination"
-            label="Run Python in"
-            value={settings.pythonRunDestination ?? "central"}
-            options={[
-              { value: "central", label: "New tab" },
-              { value: "below-editor", label: "Below editor" },
-            ]}
-            onChange={(pythonRunDestination) =>
-              onChange?.({ pythonRunDestination: pythonRunDestination as PythonRunDestination })
-            }
-          />
-
           <ToggleRow
             testId="editor-settings-autosave"
             label="Autosave"
@@ -142,10 +108,61 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
             checked={settings.formatOnSave}
             onToggle={() => onChange?.({ formatOnSave: !settings.formatOnSave })}
           />
+          <MenuDivider />
+          <SelectRow
+            testId="editor-settings-theme"
+            label="Color theme"
+            value={selectedTheme}
+            groups={[
+              {
+                label: "Light",
+                options: themes
+                  .filter((theme) => theme.mode === "light")
+                  .map((theme) => ({ value: theme.id, label: theme.label })),
+              },
+              {
+                label: "Dark",
+                options: themes
+                  .filter((theme) => theme.mode === "dark")
+                  .map((theme) => ({ value: theme.id, label: theme.label })),
+              },
+            ]}
+            onChange={(editorTheme) => onChange?.({ editorTheme })}
+          />
+          <MenuDivider />
+          <SelectRow
+            testId="editor-settings-run-destination"
+            label="Terminal location"
+            value={settings.pythonRunDestination ?? "central"}
+            options={[
+              { value: "central", label: "New tab" },
+              { value: "below-editor", label: "Below editor" },
+            ]}
+            onChange={(pythonRunDestination) =>
+              onChange?.({ pythonRunDestination: pythonRunDestination as PythonRunDestination })
+            }
+          />
+          <MenuDivider />
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="editor-advanced-settings-link"
+            onClick={() => {
+              rememberCurrentSettingsReturnRoute()
+              window.location.hash = "#/settings?section=appearance&advanced=editor-typography"
+            }}
+            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-accent"
+          >
+            <span>Advanced settings</span>
+          </button>
         </div>
       ) : null}
     </div>
   )
+}
+
+function MenuDivider() {
+  return <hr className="my-1 border-0 border-border border-t" />
 }
 
 function SelectRow({

@@ -13,6 +13,13 @@ import { useTRPC } from "../../../../../trpc/react"
 /** Which kind of pane the central panel is currently showing. */
 export type ActiveRef = { type: "file"; relPath: string } | { type: "session"; id: string }
 
+/** Enough information to recreate a tab after the PTY daemon was lost on restart. */
+export type SessionLaunchConfig =
+  | { type: "terminal" }
+  | { type: "agent"; agentId: string; workspaceMode: "policy" | "main" | "worktree" }
+  | { type: "python"; relPath: string }
+  | { type: "auto-research" }
+
 /** A running agent/terminal pane (one tab) attached by `sessionId`. */
 export interface SessionPane {
   id: string
@@ -21,11 +28,15 @@ export interface SessionPane {
   label: string
   /** For agents: the worktree-policy outcome surfaced as a kind badge. */
   wsKind?: "branch" | "worktree"
+  /** Saved launch configuration used only when the recorded PTY is no longer live. */
+  launch?: SessionLaunchConfig
 }
 
 export interface BelowEditorRun {
   sessionId: string
   label: string
+  /** Python source used to recreate this terminal when its PTY no longer exists. */
+  relPath?: string
 }
 
 export interface AgentOption {
@@ -130,6 +141,7 @@ export function useCentralPanel({
     () => initialState?.belowEditorRun ?? null,
   )
   const [agentChooserOpen, setAgentChooserOpen] = useState(false)
+  const [restorationError, setRestorationError] = useState<string | null>(null)
   const belowEditorRunRef = useRef<BelowEditorRun | null>(null)
   belowEditorRunRef.current = belowEditorRun
   const [active, setActive] = useState<ActiveRef | null>(
@@ -158,6 +170,143 @@ export function useCentralPanel({
   const spawnTerminal = useMutation(trpc.workspaces.spawnTerminal.mutationOptions())
   const runPythonFile = useMutation(trpc.python.runFile.mutationOptions())
   const killTerminal = useMutation(trpc.terminal.kill.mutationOptions())
+
+  const restorationGeneration = useRef(0)
+  useEffect(() => {
+    const panes = initialState?.sessions ?? []
+    const savedBelowEditorRun = initialState?.belowEditorRun ?? null
+    if ((panes.length === 0 && !savedBelowEditorRun) || !workspaceId) return
+
+    const generation = restorationGeneration.current + 1
+    restorationGeneration.current = generation
+    const createdSessionIds: string[] = []
+    let applied = false
+    const isCurrent = (): boolean => restorationGeneration.current === generation
+    const reportError = (message: string): void => {
+      if (isCurrent()) setRestorationError(message)
+    }
+    const killUnclaimedSessions = (): void => {
+      for (const sessionId of createdSessionIds) {
+        void client.terminal.kill.mutate({ sessionId }).catch(() => {})
+      }
+    }
+
+    void client.terminal.list
+      .query()
+      .then(async (liveSessions) => {
+        const liveIds = new Set(
+          liveSessions.filter((session) => session.alive).map((session) => session.id),
+        )
+        const restorePane = async (pane: SessionPane): Promise<SessionPane | null> => {
+          if (liveIds.has(pane.sessionId)) return pane
+          if (!pane.launch) {
+            reportError(
+              `Could not restore ${pane.label}: its saved launch configuration is unavailable.`,
+            )
+            return null
+          }
+
+          if (pane.launch.type === "terminal") {
+            const result = await client.workspaces.spawnTerminal.mutate({
+              workspaceId,
+              cols: 80,
+              rows: 24,
+            })
+            createdSessionIds.push(result.sessionId)
+            return { ...pane, sessionId: result.sessionId }
+          }
+          if (pane.launch.type === "python") {
+            const result = await client.python.runFile.mutate({
+              workspaceId,
+              relPath: pane.launch.relPath,
+              cols: 80,
+              rows: 24,
+            })
+            createdSessionIds.push(result.sessionId)
+            return { ...pane, sessionId: result.sessionId }
+          }
+          if (pane.launch.type === "auto-research") {
+            const result = await client.sessions.startAutoResearch.mutate({ projectId })
+            createdSessionIds.push(result.sessionId)
+            return { ...pane, sessionId: result.sessionId, wsKind: result.kind }
+          }
+          const result = await client.sessions.start.mutate({
+            projectId,
+            agentId: pane.launch.agentId,
+            workspaceMode: pane.launch.workspaceMode,
+          })
+          createdSessionIds.push(result.sessionId)
+          return { ...pane, sessionId: result.sessionId, wsKind: result.kind }
+        }
+        const restored = await Promise.all(
+          panes.map((pane) =>
+            restorePane(pane).catch((error: unknown) => {
+              reportError(
+                `Could not restore ${pane.label}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              )
+              return null
+            }),
+          ),
+        )
+        const available = restored.filter((pane): pane is SessionPane => pane !== null)
+        let nextBelowEditorRun = savedBelowEditorRun
+        if (savedBelowEditorRun && !liveIds.has(savedBelowEditorRun.sessionId)) {
+          if (savedBelowEditorRun.relPath) {
+            await client.python.runFile
+              .mutate({
+                workspaceId,
+                relPath: savedBelowEditorRun.relPath,
+                cols: 80,
+                rows: 24,
+              })
+              .then((result) => {
+                createdSessionIds.push(result.sessionId)
+                nextBelowEditorRun = { ...savedBelowEditorRun, sessionId: result.sessionId }
+              })
+              .catch((error: unknown) => {
+                nextBelowEditorRun = null
+                reportError(
+                  `Could not restore ${savedBelowEditorRun.label}: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                )
+              })
+          } else {
+            nextBelowEditorRun = null
+            reportError(
+              `Could not restore ${savedBelowEditorRun.label}: its saved launch configuration is unavailable.`,
+            )
+          }
+        }
+        if (!isCurrent()) {
+          killUnclaimedSessions()
+          return
+        }
+        applied = true
+        sessionsRef.current = available
+        setSessions(available)
+        belowEditorRunRef.current = nextBelowEditorRun
+        setBelowEditorRun(nextBelowEditorRun)
+        setActive((current) => {
+          if (current?.type !== "session") return current
+          return available.some((pane) => pane.id === current.id) ? current : null
+        })
+      })
+      .catch((error: unknown) => {
+        reportError(
+          `Could not restore terminal and agent tabs: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+        if (!isCurrent()) killUnclaimedSessions()
+      })
+    return () => {
+      if (isCurrent()) restorationGeneration.current += 1
+      if (!applied) killUnclaimedSessions()
+    }
+  }, [client, initialState?.belowEditorRun, initialState?.sessions, projectId, workspaceId])
 
   const selectFile = useCallback(
     (relPath: string) => {
@@ -191,10 +340,16 @@ export function useCentralPanel({
     [editor],
   )
 
-  const closeSession = useCallback((id: string) => {
-    setSessions((prev) => prev.filter((session) => session.id !== id))
-    setActive((cur) => (cur?.type === "session" && cur.id === id ? null : cur))
-  }, [])
+  const closeSession = useCallback(
+    (id: string) => {
+      const closing = sessionsRef.current.find((session) => session.id === id)
+      if (closing) killTerminal.mutate({ sessionId: closing.sessionId })
+      sessionsRef.current = sessionsRef.current.filter((session) => session.id !== id)
+      setSessions(sessionsRef.current)
+      setActive((cur) => (cur?.type === "session" && cur.id === id ? null : cur))
+    },
+    [killTerminal],
+  )
 
   // Close the active tab (bound to ⌘W in the project view). Routes to the same
   // close path the tab's "x" button uses; no-op when nothing is active.
@@ -241,6 +396,7 @@ export function useCentralPanel({
                 sessionId: result.sessionId,
                 label: option?.label ?? "Agent",
                 wsKind: result.kind,
+                launch: { type: "agent", agentId, workspaceMode },
               },
             ])
             setActive({ type: "session", id })
@@ -289,7 +445,13 @@ export function useCentralPanel({
           const id = nextPaneId()
           setSessions((prev) => [
             ...prev,
-            { id, kind: "terminal", sessionId: result.sessionId, label: "Terminal" },
+            {
+              id,
+              kind: "terminal",
+              sessionId: result.sessionId,
+              label: "Terminal",
+              launch: { type: "terminal" },
+            },
           ])
           setActive({ type: "session", id })
         },
@@ -303,8 +465,9 @@ export function useCentralPanel({
     while (editor.tabs.some((tab) => tab.relPath === name)) {
       name = `untitled-${i++}.md`
     }
-    openFile(name)
-  }, [editor.tabs, openFile])
+    editor.openUntitled(name)
+    setActive({ type: "file", relPath: name })
+  }, [editor, editor.tabs])
 
   const runPython = useCallback(
     (override?: PythonRunDestination) => {
@@ -322,6 +485,7 @@ export function useCentralPanel({
                 const next = {
                   sessionId: result.sessionId,
                   label: `Run ${relPath.split("/").at(-1) ?? relPath}`,
+                  relPath,
                 }
                 belowEditorRunRef.current = next
                 setBelowEditorRun(next)
@@ -338,6 +502,7 @@ export function useCentralPanel({
                   kind: "terminal",
                   sessionId: result.sessionId,
                   label: `Run ${relPath.split("/").at(-1) ?? relPath}`,
+                  launch: { type: "python", relPath },
                 },
               ])
               setActive({ type: "session", id })
@@ -388,6 +553,7 @@ export function useCentralPanel({
     pendingTerminal: spawnTerminal.isPending,
     pendingPython: runPythonFile.isPending,
     launchError:
+      restorationError ??
       startSession.error?.message ??
       setProjectChoice.error?.message ??
       agentsQuery.error?.message ??

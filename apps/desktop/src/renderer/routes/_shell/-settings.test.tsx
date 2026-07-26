@@ -35,6 +35,33 @@ describe("SettingsView", () => {
     const header = control.closest("header")
     expect(header?.classList.contains("app-drag")).toBe(true)
     expect(control.classList.contains("app-no-drag")).toBe(true)
-    expect(header?.contains(screen.getByRole("heading", { name: "Settings" }))).toBe(true)
+    expect(screen.getByTestId("settings-back").textContent).toContain("Back")
+    expect(header?.className).toContain("pl-24")
+  })
+
+  test("opens the Appearance Advanced typography location from a deep link", async () => {
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "system.fonts": () => ({ families: ["Menlo"], error: null }),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: SettingsView })
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({
+        initialEntries: ["/?section=appearance&advanced=editor-typography"],
+      }),
+    })
+
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </AppProviders>,
+    )
+
+    expect(await screen.findByTestId("settings-section-appearance")).toBeTruthy()
+    expect(screen.getByTestId("appearance-advanced-editor-typography")).toBeTruthy()
+    expect(screen.getByTestId("settings-nav-appearance").getAttribute("data-active")).toBe("true")
   })
 })

@@ -1,12 +1,14 @@
 import type { EditorSettings } from "@pi-lab/local-db"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useRouterState } from "@tanstack/react-router"
 import {
   ChartArea,
   FileDiff,
+  FilePlus2,
   Files,
   FlaskConical,
   FolderGit2,
+  FolderPlus,
   Keyboard,
   LayoutDashboard,
   Library,
@@ -30,6 +32,15 @@ import {
   useSidebarCollapsed,
 } from "../preferences/preferences"
 import { useTheme } from "../providers/ThemeProvider"
+import {
+  type AddProjectRequest,
+  useAddProjectController,
+} from "../routes/_shell/components/AddProjectController"
+import {
+  type NewFileRequest,
+  useNewFileController,
+} from "../routes/_shell/components/NewFileController"
+import { setPendingNewFile, setPendingOpenFile } from "../routes/_shell/projects/-pendingOpenFile"
 import { useTRPC } from "../trpc/react"
 
 /** A single entry in the ⌘P palette: searchable label + the action it runs. */
@@ -58,6 +69,46 @@ const NAV_TARGETS = [
   { id: "settings", label: "Open Settings", icon: Settings, to: "/settings" },
 ] as const
 
+/** Build the palette's controller-backed New/Add Project command. */
+export function createAddProjectCommand(
+  openAddProject: (request: AddProjectRequest) => void,
+  navigateToProject: (projectId: string) => void,
+): PaletteCommand {
+  return {
+    id: "add-project",
+    label: "New/Add Project",
+    group: "Projects",
+    icon: FolderPlus,
+    run: () =>
+      openAddProject({
+        onAdded: (project) => navigateToProject(project.id),
+      }),
+  }
+}
+
+/** Build the palette command that dispatches the app-global project/path flow. */
+export function createNewFileCommand(
+  openNewFile: (request: NewFileRequest) => void,
+  navigateToFile: (projectId: string, relPath: string) => void,
+  initialProjectId?: string,
+): PaletteCommand {
+  return {
+    id: "new-file",
+    label: "New file",
+    group: "Projects",
+    icon: FilePlus2,
+    run: () => {
+      if (initialProjectId) {
+        setPendingNewFile(initialProjectId)
+        return
+      }
+      openNewFile({
+        onCreated: ({ projectId, relPath }) => navigateToFile(projectId, relPath),
+      })
+    },
+  }
+}
+
 /**
  * Builds the live ⌘P command list: param-less navigations, a couple of global view
  * toggles (theme, sidebar), the searchable Settings toggles (editor + project-view
@@ -68,6 +119,9 @@ const NAV_TARGETS = [
  */
 export function usePaletteCommands(): PaletteCommand[] {
   const navigate = useNavigate()
+  const { location } = useRouterState()
+  const { openAddProject } = useAddProjectController()
+  const { openNewFile } = useNewFileController()
   const { resolvedMode, toggleTheme } = useTheme()
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const trpc = useTRPC()
@@ -189,5 +243,26 @@ export function usePaletteCommands(): PaletteCommand[] {
     run: () => void navigate({ to: "/projects/$projectId", params: { projectId: project.id } }),
   }))
 
-  return [...navCommands, ...viewCommands, ...settingsCommands, ...projectCommands]
+  const addProjectCommand = createAddProjectCommand(openAddProject, (projectId) => {
+    void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+    void navigate({ to: "/projects/$projectId", params: { projectId } })
+  })
+  const activeProjectId = location.pathname.match(/^\/projects\/([^/]+)/)?.[1]
+  const newFileCommand = createNewFileCommand(
+    openNewFile,
+    (projectId, relPath) => {
+      setPendingOpenFile(projectId, relPath)
+      void navigate({ to: "/projects/$projectId", params: { projectId } })
+    },
+    activeProjectId,
+  )
+
+  return [
+    ...navCommands,
+    ...viewCommands,
+    ...settingsCommands,
+    addProjectCommand,
+    newFileCommand,
+    ...projectCommands,
+  ]
 }

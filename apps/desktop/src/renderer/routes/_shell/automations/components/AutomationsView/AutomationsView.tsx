@@ -1,9 +1,11 @@
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Workflow } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { CaffeineControl } from "../../../../../caffeine"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
+import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
+import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 import { AutomationRow } from "./components/AutomationRow"
@@ -30,6 +32,7 @@ export function AutomationsView({
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
   const [collapsed] = useSidebarCollapsed()
 
   const listQuery = useQuery(trpc.automations.list.queryOptions())
@@ -52,6 +55,26 @@ export function AutomationsView({
   const projects = projectsQuery.data ?? []
   const agents = agentsQuery.data ?? []
   const canCreate = projects.length > 0 && agents.length > 0
+  const findItems = useMemo<QuickFindItem[]>(
+    () =>
+      automations.map((automation) => ({
+        id: automation.id,
+        label: automation.name,
+        hint: automation.scheduleSummary,
+        icon: Workflow,
+      })),
+    [automations],
+  )
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!eventMatchesShortcut(event, "quick-open")) return
+      event.preventDefault()
+      setFindOpen(true)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   return (
     <div data-testid="automations-view" className="flex h-full w-full flex-col overflow-hidden">
@@ -118,6 +141,24 @@ export function AutomationsView({
           </ul>
         )}
       </div>
+      {findOpen ? (
+        <QuickFind
+          ariaLabel="Find a workflow"
+          placeholder="Find a workflow…"
+          scopeLabel="Workflows"
+          allowGlobalSearch
+          items={findItems}
+          emptyText="No matching workflows"
+          onSelect={(item) =>
+            document
+              .querySelector<HTMLElement>(`[data-automation-id="${item.id}"]`)
+              ?.scrollIntoView({
+                block: "nearest",
+              })
+          }
+          onClose={() => setFindOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }

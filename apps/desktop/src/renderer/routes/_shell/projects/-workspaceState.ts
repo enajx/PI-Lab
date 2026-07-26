@@ -18,9 +18,21 @@ const STORAGE_KEY = "pi-lab.projectWorkspaceState.v1"
 const CHANGE_EVENT = "pi-lab:project-workspace-state"
 let hydrated = false
 
-export function readProjectWorkspaceState(projectId: string): ProjectWorkspaceState | undefined {
+export function readProjectWorkspaceState(
+  projectId: string,
+  restoreTabs: boolean,
+): ProjectWorkspaceState | undefined {
   hydrate()
-  return projectWorkspaceStates.get(projectId)
+  const state = projectWorkspaceStates.get(projectId)
+  if (!state || restoreTabs) return state
+  return {
+    ...state,
+    buffers: [],
+    activeRelPath: null,
+    sessions: [],
+    active: null,
+    belowEditorRun: null,
+  }
 }
 
 export function writeProjectWorkspaceState(

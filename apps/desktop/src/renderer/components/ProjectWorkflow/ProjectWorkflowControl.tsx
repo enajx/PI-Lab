@@ -71,6 +71,8 @@ export function ProjectWorkflowControl({
   variant,
   testId,
   instructions,
+  disabled,
+  disabledReason,
 }: {
   projectId: string
   projectName: string
@@ -80,6 +82,8 @@ export function ProjectWorkflowControl({
   testId: string
   /** Extra prompt instructions for the fetch task (from Settings); ignored otherwise. */
   instructions?: string
+  disabled?: boolean
+  disabledReason?: string
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -117,11 +121,12 @@ export function ProjectWorkflowControl({
         : "idle"
 
   const triggerRun = () => {
-    if (running) return
+    if (running || disabled) return
     run.mutate({ projectId, task, ...(instructions !== undefined ? { instructions } : {}) })
   }
 
   const onClick = () => {
+    if (disabled) return
     // Every click opens the window so the run is watchable from the first click.
     // triggerRun is a no-op while a run is already in flight (it guards on
     // `running`), so a running control just opens the window to watch; an idle
@@ -165,10 +170,14 @@ export function ProjectWorkflowControl({
         type="button"
         data-testid={testId}
         data-state={state}
+        disabled={disabled}
         aria-label={ariaLabel}
-        title={meta.label}
+        title={disabledReason ?? meta.label}
         data-feature-label={meta.label}
-        data-feature-help={`${meta.label} for ${projectName} — runs as a background task; click while running to watch its live output, or when done to view the result and re-check`}
+        data-feature-help={
+          disabledReason ??
+          `${meta.label} for ${projectName} — runs as a background task; click while running to watch its live output, or when done to view the result and re-check`
+        }
         onClick={onClick}
         className={cn(variant === "compact" ? compact : labeled, STATE_TINT[state])}
       >

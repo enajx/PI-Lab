@@ -76,9 +76,13 @@ export interface EditorBuffersApi {
   setActiveRelPath: (relPath: string | null) => void
   /** Open a file (or focus it if already open) and make it the active buffer. */
   openFile: (relPath: string) => Promise<void>
+  /** Open a blank, unsaved buffer without creating a file on disk. */
+  openUntitled: (relPath: string) => void
   closeFile: (relPath: string) => void
   onEdit: (relPath: string, content: string) => void
   saveFile: (relPath: string) => Promise<boolean>
+  /** Save an untitled buffer to a user-chosen project-relative path. */
+  saveAs: (relPath: string, targetRelPath: string) => Promise<boolean>
   error: string | null
   tabs: { relPath: string; dirty: boolean }[]
   diagnosticsSource: DiagnosticsSource | undefined
@@ -216,6 +220,25 @@ export function useEditorBuffers({
     [client, workspaceId, runDiagnostics],
   )
 
+  const openUntitled = useCallback((relPath: string) => {
+    setError(null)
+    setBuffers((previous) => {
+      if (previous.some((buffer) => buffer.relPath === relPath)) return previous
+      return [
+        ...previous,
+        {
+          relPath,
+          content: "",
+          savedContent: "",
+          baseline: { mtimeMs: 0, size: 0 },
+          externalChange: false,
+          epoch: 0,
+        },
+      ]
+    })
+    setActiveRelPath(relPath)
+  }, [])
+
   const closeFile = useCallback((relPath: string) => {
     setBuffers((prev) => {
       const next = prev.filter((buffer) => buffer.relPath !== relPath)
@@ -294,6 +317,42 @@ export function useEditorBuffers({
       }
     },
     [client, workspaceId, onSaved, runDiagnostics],
+  )
+
+  const saveAs = useCallback(
+    async (relPath: string, targetRelPath: string) => {
+      const buffer = buffersRef.current.find((entry) => entry.relPath === relPath)
+      if (!buffer) return false
+      setError(null)
+      try {
+        await client.files.write.mutate({
+          workspaceId,
+          relPath: targetRelPath,
+          content: buffer.content,
+        })
+        const stat = await client.files.stat.query({ workspaceId, relPath: targetRelPath })
+        setBuffers((current) =>
+          current.map((entry) =>
+            entry.relPath === relPath
+              ? {
+                  ...entry,
+                  relPath: targetRelPath,
+                  savedContent: entry.content,
+                  baseline: { mtimeMs: stat.mtimeMs, size: stat.size },
+                  externalChange: false,
+                }
+              : entry,
+          ),
+        )
+        setActiveRelPath((current) => (current === relPath ? targetRelPath : current))
+        onSaved?.(targetRelPath)
+        return true
+      } catch (cause) {
+        setError(`Could not save ${targetRelPath}: ${String(cause)}`)
+        return false
+      }
+    },
+    [client, onSaved, workspaceId],
   )
 
   const refreshPythonRuntime = useCallback(async (): Promise<void> => {
@@ -466,9 +525,11 @@ export function useEditorBuffers({
     activeRelPath,
     setActiveRelPath,
     openFile,
+    openUntitled,
     closeFile,
     onEdit,
     saveFile,
+    saveAs,
     error,
     tabs,
     diagnosticsSource,

@@ -2,6 +2,7 @@ import {
   DEFAULT_CAFFEINE_SETTINGS,
   DEFAULT_EDITOR_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
+  DEFAULT_PROJECT_TEMPLATE_SETTINGS,
   type EditorSettings,
   settings,
 } from "@pi-lab/local-db"
@@ -37,6 +38,7 @@ describe("settings.get", () => {
     expect(result.caffeine).toEqual(DEFAULT_CAFFEINE_SETTINGS)
     expect(result.caffeine.mode).toBe("off")
     expect(result.caffeine.scope).toBe("system-only")
+    expect(result.projectTemplate).toEqual(DEFAULT_PROJECT_TEMPLATE_SETTINGS)
   })
 
   it("deep-defaults diagnostics off for a legacy editor JSON blob", async () => {
@@ -63,6 +65,23 @@ describe("settings.get", () => {
       customEditorThemes: [],
       pythonRunDestination: "central",
     })
+  })
+})
+
+describe("settings.updateProjectTemplate", () => {
+  it("persists the default Markdown selection and template parent independently", async () => {
+    await harness.caller.settings.updateProjectTemplate({
+      initializationMarkdownFiles: ["AGENTS.md", "TODO.md"],
+    })
+    const updated = await harness.caller.settings.updateProjectTemplate({
+      defaultTemplateParentPath: "/Users/example/projects",
+    })
+
+    expect(updated).toEqual({
+      initializationMarkdownFiles: ["AGENTS.md", "TODO.md"],
+      defaultTemplateParentPath: "/Users/example/projects",
+    })
+    expect((await harness.caller.settings.get()).projectTemplate).toEqual(updated)
   })
 })
 

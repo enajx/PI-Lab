@@ -55,8 +55,8 @@ describe("projectGradient", () => {
 
   test("animation timing sits in the documented ranges", () => {
     const { animation } = projectGradient(99, PALETTE)
-    expect(animation.durationSec).toBeGreaterThanOrEqual(8)
-    expect(animation.durationSec).toBeLessThanOrEqual(12)
+    expect(animation.durationSec).toBeGreaterThanOrEqual(6)
+    expect(animation.durationSec).toBeLessThanOrEqual(9)
     // A negative (mid-cycle) phase offset.
     expect(animation.delaySec).toBeLessThanOrEqual(0)
   })
@@ -68,13 +68,13 @@ describe("projectGradient", () => {
   })
 
   // Property-based: invariants that must hold for ALL seeds.
-  test("base duration is always within 8..12s and delay is always in (-dur, 0]", () => {
+  test("base duration is always within 6..9s and delay is always in (-dur, 0]", () => {
     fc.assert(
       fc.property(fc.integer({ min: 0, max: 0xffffffff }), (seed) => {
         const { animation } = projectGradient(seed, PALETTE)
         return (
-          animation.durationSec >= 8 &&
-          animation.durationSec <= 12 &&
+          animation.durationSec >= 6 &&
+          animation.durationSec <= 9 &&
           animation.delaySec <= 0 &&
           animation.delaySec > -animation.durationSec
         )

@@ -27,7 +27,10 @@ export function buildMainWindowOptions(
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
       sandbox: true,
+      webSecurity: true,
+      webviewTag: false,
     },
   }
 }

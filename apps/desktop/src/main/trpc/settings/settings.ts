@@ -11,6 +11,7 @@ import {
   type NotificationEventSettings,
   type NotificationSettings,
   type PiLabDatabase,
+  type ProjectTemplateSettings,
   SETTINGS_ROW_ID,
   type Settings,
   settings,
@@ -100,6 +101,11 @@ const notificationsPatch = z.object({
   workflowStart: notificationEventPatch.optional(),
   workflowCompletion: notificationEventPatch.optional(),
   workflowFailure: notificationEventPatch.optional(),
+})
+
+const projectTemplatePatch = z.object({
+  initializationMarkdownFiles: z.array(z.string().min(1)).max(100).optional(),
+  defaultTemplateParentPath: z.string().min(1).nullable().optional(),
 })
 
 type NotificationEventPatch = Partial<NotificationEventSettings>
@@ -235,6 +241,27 @@ export function writeCaffeineSettings(
   return next
 }
 
+/** Persist the Start-from-template defaults without clobbering the other choice. */
+export function writeProjectTemplateSettings(
+  db: PiLabDatabase,
+  patch: Partial<ProjectTemplateSettings>,
+): ProjectTemplateSettings {
+  const current = getSettingsOrDefaults(db).projectTemplate
+  const next: ProjectTemplateSettings = {
+    initializationMarkdownFiles:
+      patch.initializationMarkdownFiles ?? current.initializationMarkdownFiles,
+    defaultTemplateParentPath: patch.defaultTemplateParentPath ?? current.defaultTemplateParentPath,
+  }
+  db.insert(settings)
+    .values({ id: SETTINGS_ROW_ID, projectTemplate: next, updatedAt: Date.now() })
+    .onConflictDoUpdate({
+      target: settings.id,
+      set: { projectTemplate: next, updatedAt: Date.now() },
+    })
+    .run()
+  return next
+}
+
 export const settingsRouter = router({
   /** The current settings row, or schema defaults when none has been persisted. */
   get: publicProcedure.query(({ ctx }): Settings & { agents: AgentSettings } => ({
@@ -262,6 +289,13 @@ export const settingsRouter = router({
   updateAgents: publicProcedure
     .input(agentsPatch)
     .mutation(({ ctx, input }): AgentSettings => writeAgentSettings(ctx.db, input)),
+
+  /** Patch Start-from-template defaults (relative template Markdown paths + parent folder). */
+  updateProjectTemplate: publicProcedure
+    .input(projectTemplatePatch)
+    .mutation(
+      ({ ctx, input }): ProjectTemplateSettings => writeProjectTemplateSettings(ctx.db, input),
+    ),
 
   /**
    * Patch global notification mute, per-event enablement, and bundled sound

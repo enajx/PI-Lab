@@ -1,5 +1,5 @@
-import { readdir } from "node:fs/promises"
-import { isAbsolute, join, relative, resolve, sep } from "node:path"
+import { copyFile, lstat, readdir, rm } from "node:fs/promises"
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { readTextFile, statFile, writeTextFile } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
@@ -23,6 +23,10 @@ const relPathInput = z.object({
 
 const writeInput = relPathInput.extend({
   content: z.string(),
+})
+
+const importInput = z.object({
+  sourcePath: z.string().min(1),
 })
 
 /** One file in the template listing, addressed by its template-relative name. */
@@ -127,6 +131,70 @@ export const templateRouter = router({
       const target = resolveInsideTemplate(resolveWritableTemplateDir(), input.relPath)
       await writeTextFile(target, input.content)
       return { bytes: Buffer.byteLength(input.content, "utf8") }
+    }),
+
+  /**
+   * Copy a user-picked file into the writable template. The external
+   * source path is deliberately accepted only here in main; the destination is
+   * always flattened to its filename and jailed to the template directory.
+   */
+  import: publicProcedure
+    .input(importInput)
+    .mutation(async ({ input }): Promise<TemplateFileEntry> => {
+      await seedWritableTemplate()
+      const source = resolve(input.sourcePath)
+      const sourceInfo = await lstat(source)
+      if (!sourceInfo.isFile()) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Template imports must be ordinary files",
+        })
+      }
+
+      const name = basename(source)
+      const target = resolveInsideTemplate(resolveWritableTemplateDir(), name)
+      try {
+        await lstat(target)
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `A template file already exists: ${name}`,
+        })
+      } catch (error) {
+        if (!isNotFound(error)) throw error
+      }
+      await copyFile(source, target)
+      return { name, relPath: name, kind: "file" }
+    }),
+
+  /** Remove an immediate file from the writable template, never a directory. */
+  remove: publicProcedure
+    .input(relPathInput)
+    .mutation(async ({ input }): Promise<{ relPath: string }> => {
+      await seedWritableTemplate()
+      if (basename(input.relPath) !== input.relPath) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Template files must be at the template root",
+        })
+      }
+      const target = resolveInsideTemplate(resolveWritableTemplateDir(), input.relPath)
+      let info: Awaited<ReturnType<typeof lstat>>
+      try {
+        info = await lstat(target)
+      } catch (error) {
+        if (isNotFound(error)) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Template file not found: ${input.relPath}`,
+          })
+        }
+        throw error
+      }
+      if (!info.isFile() && !info.isSymbolicLink()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Only template files can be removed" })
+      }
+      await rm(target)
+      return { relPath: input.relPath }
     }),
 })
 

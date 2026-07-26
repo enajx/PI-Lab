@@ -1,5 +1,6 @@
-import { DATA_FILE_KIND_LABELS } from "@pi-lab/shared"
-import { useQuery } from "@tanstack/react-query"
+import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { ArrayGrid } from "../ArrayGrid"
@@ -14,10 +15,20 @@ import { MetricChart } from "../MetricChart"
  * vertical scroll (AGENTS.md Pitfalls #3); the fetch is keyed on the project + path so switching
  * files re-fetches cleanly.
  */
-export function AnalysisPreview({ projectId, relPath }: { projectId: string; relPath: string }) {
+export function AnalysisPreview({
+  projectId,
+  relPath,
+  kind,
+}: {
+  projectId: string
+  relPath: string
+  kind: DataFileKind
+}) {
   const trpc = useTRPC()
+  const interactive = kind === "report" || kind === "marimo"
   const preview = useQuery({
     ...trpc.science.analysis.preview.queryOptions({ projectId, relPath }),
+    enabled: !interactive,
     staleTime: 30_000,
   })
 
@@ -32,8 +43,17 @@ export function AnalysisPreview({ projectId, relPath }: { projectId: string; rel
           {relPath}
         </span>
       </div>
-      <div data-testid="analysis-preview" className="min-h-0 flex-1 overflow-auto p-4">
-        {preview.isLoading ? (
+      <div
+        data-testid="analysis-preview"
+        className={`min-h-0 flex-1 ${interactive ? "overflow-hidden" : "overflow-auto p-4"}`}
+      >
+        {interactive ? (
+          <InteractivePreview
+            projectId={projectId}
+            relPath={relPath}
+            kind={kind === "marimo" ? "marimo" : "report"}
+          />
+        ) : preview.isLoading ? (
           <p className="text-muted-foreground text-sm">Loading preview…</p>
         ) : preview.isError ? (
           <p
@@ -46,6 +66,151 @@ export function AnalysisPreview({ projectId, relPath }: { projectId: string; rel
           <PreviewBody preview={preview.data} />
         ) : null}
       </div>
+    </div>
+  )
+}
+
+type InteractiveStatus = "starting" | "running" | "stopping" | "stopped" | "error"
+
+function InteractivePreview({
+  projectId,
+  relPath,
+  kind,
+}: {
+  projectId: string
+  relPath: string
+  kind: "report" | "marimo"
+}) {
+  const trpc = useTRPC()
+  const ownerId = useRef(`analysis-${crypto.randomUUID()}`)
+  const [status, setStatus] = useState<InteractiveStatus>("starting")
+  const [url, setUrl] = useState<string | null>(null)
+  const [runtime, setRuntime] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const leaseId = useRef<string | null>(null)
+  const open = useMutation(trpc.science.analysis.openInteractive.mutationOptions())
+  const close = useMutation(trpc.science.analysis.closeInteractive.mutationOptions())
+
+  useEffect(() => {
+    let current = true
+    const effectLeaseId = crypto.randomUUID()
+    leaseId.current = effectLeaseId
+    if (attempt > 0) open.reset()
+    setStatus("starting")
+    setUrl(null)
+    setRuntime(null)
+    setError(null)
+    void open
+      .mutateAsync({ ownerId: ownerId.current, leaseId: effectLeaseId, projectId, relPath })
+      .then(
+        (result) => {
+          if (!current) return
+          setUrl(result.url)
+          setRuntime(result.runtime ?? null)
+          setStatus("running")
+        },
+        (reason: Error) => {
+          if (!current) return
+          setError(reason.message || `Failed to start ${kind === "marimo" ? "marimo" : "report"}`)
+          setStatus("error")
+        },
+      )
+    return () => {
+      current = false
+      void close
+        .mutateAsync({ ownerId: ownerId.current, leaseId: effectLeaseId })
+        .catch((reason) => console.error("Failed to close interactive Analysis preview", reason))
+    }
+  }, [attempt, close.mutateAsync, kind, open.mutateAsync, open.reset, projectId, relPath])
+
+  const stop = async () => {
+    const currentLeaseId = leaseId.current
+    if (!currentLeaseId) return
+    setStatus("stopping")
+    setUrl(null)
+    try {
+      await close.mutateAsync({ ownerId: ownerId.current, leaseId: currentLeaseId })
+      setStatus("stopped")
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to stop marimo")
+      setStatus("error")
+    }
+  }
+
+  if (status === "starting") {
+    return (
+      <InteractiveMessage testId="analysis-interactive-starting">
+        {kind === "marimo" ? "Starting marimo…" : "Opening interactive report…"}
+      </InteractiveMessage>
+    )
+  }
+  if (status === "error") {
+    return (
+      <InteractiveMessage testId="analysis-interactive-error">
+        <span className="text-destructive">{error}</span>
+        <button
+          type="button"
+          className="rounded-md border border-border px-2 py-1 text-xs"
+          onClick={() => setAttempt((value) => value + 1)}
+        >
+          Retry
+        </button>
+      </InteractiveMessage>
+    )
+  }
+  if (status === "stopping" || status === "stopped") {
+    return (
+      <InteractiveMessage testId={`analysis-interactive-${status}`}>
+        {status === "stopping" ? "Stopping marimo…" : "marimo stopped"}
+        {status === "stopped" ? (
+          <button
+            type="button"
+            className="rounded-md border border-border px-2 py-1 text-xs"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            Start
+          </button>
+        ) : null}
+      </InteractiveMessage>
+    )
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {kind === "marimo" ? (
+        <div className="flex shrink-0 items-center justify-between border-border border-b px-3 py-1.5 text-xs">
+          <span data-testid="analysis-marimo-status">Running{runtime ? ` · ${runtime}` : ""}</span>
+          <button
+            type="button"
+            className="rounded-md border border-border px-2 py-1"
+            onClick={() => void stop()}
+          >
+            Stop
+          </button>
+        </div>
+      ) : null}
+      {url ? (
+        <iframe
+          data-testid={kind === "marimo" ? "analysis-preview-marimo" : "analysis-preview-html"}
+          title={kind === "marimo" ? "Live marimo notebook" : "Interactive HTML report"}
+          src={url}
+          sandbox="allow-scripts allow-same-origin allow-forms"
+          referrerPolicy="no-referrer"
+          className="min-h-0 w-full flex-1 border-0 bg-white"
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function InteractiveMessage({ testId, children }: { testId: string; children: React.ReactNode }) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex h-full items-center justify-center gap-3 p-4 text-muted-foreground text-sm"
+    >
+      {children}
     </div>
   )
 }

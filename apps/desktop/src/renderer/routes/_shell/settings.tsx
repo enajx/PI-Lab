@@ -1,7 +1,7 @@
 import { Button, cn } from "@pi-lab/ui"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { CaffeineControl } from "../../caffeine"
 import { useSidebarFeatureHelp } from "../../preferences/preferences"
 import { readSettingsReturnRoute } from "./-settingsReturnRoute"
@@ -37,10 +37,6 @@ import {
  * control to the view that opened Settings. The header is an app-drag strip with left padding so the macOS
  * traffic lights don't overlap the title or Back button.
  */
-export const Route = createFileRoute("/_shell/settings")({
-  component: SettingsView,
-})
-
 const SECTIONS = [
   {
     id: "general",
@@ -122,12 +118,43 @@ const SECTIONS = [
   },
 ] as const
 
+type SettingsSectionId = (typeof SECTIONS)[number]["id"]
+
+interface SettingsSearch {
+  section?: SettingsSectionId
+  advanced?: "editor-typography"
+}
+
+function isSettingsSection(value: unknown): value is SettingsSectionId {
+  return SECTIONS.some((section) => section.id === value)
+}
+
+export const Route = createFileRoute("/_shell/settings")({
+  validateSearch: (search): SettingsSearch => ({
+    section: isSettingsSection(search.section) ? search.section : undefined,
+    advanced: search.advanced === "editor-typography" ? search.advanced : undefined,
+  }),
+  component: SettingsView,
+})
+
 export function SettingsView() {
   const navigate = useNavigate()
-  const [activeId, setActiveId] = useState<string>(SECTIONS[0].id)
+  const search = useSearch({ strict: false }) as SettingsSearch
+  const [activeId, setActiveId] = useState<SettingsSectionId>(search.section ?? SECTIONS[0].id)
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
   const featureHelp = useFeatureHelp(showFeatureHelp)
   const active = SECTIONS.find((section) => section.id === activeId) ?? SECTIONS[0]
+
+  useEffect(() => {
+    if (search.section) setActiveId(search.section)
+  }, [search.section])
+
+  useEffect(() => {
+    if (activeId !== "appearance" || search.advanced !== "editor-typography") return
+    const target = document.getElementById("appearance-advanced")
+    target?.scrollIntoView?.({ block: "start" })
+  }, [activeId, search.advanced])
+
   const onBack = () => {
     const previous = readSettingsReturnRoute()
     void navigate({ to: previous.pathname as never, search: previous.search as never })
@@ -135,21 +162,21 @@ export function SettingsView() {
 
   return (
     <div data-testid="settings-view" className="flex h-full w-full flex-col overflow-hidden">
-      <header className="app-drag flex h-14 shrink-0 items-center gap-3 border-border border-b pr-6 pl-20">
+      <header className="app-drag flex h-14 shrink-0 items-center gap-3 border-border border-b pr-6 pl-24">
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          size="sm"
           data-testid="settings-back"
           aria-label="Back"
           title="Back"
           data-feature-help="Return to the view that opened Settings"
-          className="app-no-drag size-7 text-foreground"
+          className="app-no-drag h-10 gap-2 px-3 font-normal text-base text-muted-foreground hover:bg-accent/60 hover:text-foreground"
           onClick={onBack}
         >
           <ArrowLeft aria-hidden />
+          Back
         </Button>
-        <h1 className="font-semibold text-foreground text-sm tracking-tight">Settings</h1>
         <CaffeineControl className="ml-auto" />
       </header>
 
@@ -166,7 +193,10 @@ export function SettingsView() {
               data-active={section.id === active.id}
               data-feature-label={section.label}
               data-feature-help={section.description}
-              onClick={() => setActiveId(section.id)}
+              onClick={() => {
+                setActiveId(section.id)
+                void navigate({ to: "/settings", search: { section: section.id } })
+              }}
               className={cn(
                 "rounded-md px-2 py-1.5 text-left text-sm transition-colors",
                 section.id === active.id

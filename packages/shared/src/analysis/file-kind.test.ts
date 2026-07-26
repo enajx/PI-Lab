@@ -9,6 +9,7 @@ import {
   DATA_FILE_CATEGORY_LABELS,
   type DataFileCategory,
   type DataFileKind,
+  isMarimoNotebookSource,
   isPreviewableKind,
 } from "./file-kind"
 
@@ -79,6 +80,18 @@ describe("classifyDataFile", () => {
       expect(classifyAnalysisArtifact(path, "file")).toBeNull()
     }
     expect(classifyAnalysisArtifact("results", "directory")).toBeNull()
+  })
+
+  test("recognizes marimo notebook source without admitting ordinary Python source", () => {
+    expect(
+      isMarimoNotebookSource(
+        "import marimo\n\n__generated_with = '0.14.0'\napp = marimo.App(width='medium')\n",
+      ),
+    ).toBe(true)
+    expect(isMarimoNotebookSource("import marimo as mo\napp = mo.App()\n")).toBe(true)
+    expect(isMarimoNotebookSource("from marimo import App\napp = App()\n")).toBe(true)
+    expect(isMarimoNotebookSource("import marimo\nprint('not a notebook')\n")).toBe(false)
+    expect(isMarimoNotebookSource("print('ordinary source')\n")).toBe(false)
   })
 
   test("is case-insensitive on the extension", () => {
@@ -179,6 +192,7 @@ describe("categoryOf", () => {
   test("maps the remaining kinds to their own categories", () => {
     expect(categoryOf("image")).toBe("image")
     expect(categoryOf("notebook")).toBe("notebook")
+    expect(categoryOf("marimo")).toBe("notebook")
     expect(categoryOf("plot")).toBe("plot")
     expect(categoryOf("markdown")).toBe("text")
     expect(categoryOf("text")).toBe("text")
@@ -223,6 +237,8 @@ describe("isPreviewableKind", () => {
     expect(isPreviewableKind("markdown")).toBe(true)
     expect(isPreviewableKind("text")).toBe(true)
     expect(isPreviewableKind("npy")).toBe(true)
+    expect(isPreviewableKind("report")).toBe(true)
+    expect(isPreviewableKind("marimo")).toBe(true)
 
     expect(isPreviewableKind("parquet")).toBe(false)
     expect(isPreviewableKind("npz")).toBe(false)

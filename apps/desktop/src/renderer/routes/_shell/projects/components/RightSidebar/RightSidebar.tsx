@@ -135,13 +135,14 @@ function buildPanelTabs(options: {
   showFilesPanel: boolean
   showSkills: boolean
   showCodeChanges: boolean
+  gitAvailable: boolean
   pinnedPanels: string[]
 }): PanelTab[] {
   return [
     ...BASE_TABS,
     ...(options.showFilesPanel ? [] : [FILES_TAB]),
     ...(options.showSkills ? [SKILLS_TAB] : []),
-    ...(options.showCodeChanges ? [CODE_CHANGES_TAB] : []),
+    ...(options.showCodeChanges && options.gitAvailable ? [CODE_CHANGES_TAB] : []),
     ...options.pinnedPanels.map(pinnedTab),
   ]
 }
@@ -158,13 +159,20 @@ export interface RightSidebarPanel {
  * preferences the sidebar does, so switching a panel from the project command palette
  * always targets a tab that actually exists.
  */
-export function useRightSidebarPanels(pinnedPanels: string[]): RightSidebarPanel[] {
+export function useRightSidebarPanels(
+  pinnedPanels: string[],
+  gitAvailable?: boolean,
+): RightSidebarPanel[] {
   const [showCodeChanges] = useShowCodeChanges()
   const [showSkills] = useShowSkillsPanel()
   const [showFilesPanel] = useShowFilesPanel()
-  return buildPanelTabs({ showFilesPanel, showSkills, showCodeChanges, pinnedPanels }).map(
-    (tab) => ({ id: tab.id, label: tab.label }),
-  )
+  return buildPanelTabs({
+    showFilesPanel,
+    showSkills,
+    showCodeChanges,
+    gitAvailable: gitAvailable !== false,
+    pinnedPanels,
+  }).map((tab) => ({ id: tab.id, label: tab.label }))
 }
 
 /**
@@ -187,6 +195,7 @@ export function RightSidebar({
   pinnedPanels = [],
   onPinFile,
   onUnpinFile,
+  gitAvailable,
 }: {
   projectId: string
   workspaceId: string
@@ -205,12 +214,21 @@ export function RightSidebar({
   onPinFile?: (relPath: string) => void
   /** Remove a pinned panel. */
   onUnpinFile?: (relPath: string) => void
+  /** Whether this project's folder has Git features available. */
+  gitAvailable?: boolean
 }) {
   const [showCodeChanges, setShowCodeChanges] = useShowCodeChanges()
   const [showSkills, setShowSkills] = useShowSkillsPanel()
   const [showFilesPanel] = useShowFilesPanel()
   const [pinPickerOpen, setPinPickerOpen] = useState(false)
-  const tabs = buildPanelTabs({ showFilesPanel, showSkills, showCodeChanges, pinnedPanels })
+  const gitEnabled = gitAvailable !== false
+  const tabs = buildPanelTabs({
+    showFilesPanel,
+    showSkills,
+    showCodeChanges,
+    gitAvailable: gitEnabled,
+    pinnedPanels,
+  })
   // Selection is controlled when the route passes `activeId` (so the palette can switch
   // panels reactively); otherwise the sidebar owns it internally, seeded once from
   // `initialActiveId`. `onActiveIdChange` still fires in both modes for persistence.
@@ -302,6 +320,7 @@ export function RightSidebar({
         <ViewOptionsMenu
           showCodeChanges={showCodeChanges}
           showSkills={showSkills}
+          gitAvailable={gitEnabled}
           onToggleCodeChanges={() => setShowCodeChanges(!showCodeChanges)}
           onToggleSkills={() => setShowSkills(!showSkills)}
         />
@@ -344,11 +363,13 @@ export function RightSidebar({
 function ViewOptionsMenu({
   showCodeChanges,
   showSkills,
+  gitAvailable,
   onToggleCodeChanges,
   onToggleSkills,
 }: {
   showCodeChanges: boolean
   showSkills: boolean
+  gitAvailable: boolean
   onToggleCodeChanges: () => void
   onToggleSkills: () => void
 }) {
@@ -412,8 +433,13 @@ function ViewOptionsMenu({
           <ToggleRow
             testId="right-sidebar-toggle-changes"
             label="Code changes"
-            description="Show the git working-tree diff panel"
+            description={
+              gitAvailable
+                ? "Show the git working-tree diff panel"
+                : "Initialize Git to review Code changes."
+            }
             checked={showCodeChanges}
+            disabled={!gitAvailable}
             onToggle={onToggleCodeChanges}
           />
         </div>
@@ -427,22 +453,24 @@ interface ToggleRowProps {
   label: string
   description: string
   checked: boolean
+  disabled?: boolean
   onToggle: () => void
 }
 
 /** A single on/off view-option row with a checkbox-style affordance. */
-function ToggleRow({ testId, label, description, checked, onToggle }: ToggleRowProps) {
+function ToggleRow({ testId, label, description, checked, disabled, onToggle }: ToggleRowProps) {
   return (
     <button
       type="button"
       role="menuitemcheckbox"
       aria-checked={checked}
+      disabled={disabled}
       data-testid={testId}
       data-checked={checked}
       data-feature-label={label}
       data-feature-help={description}
       onClick={onToggle}
-      className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
+      className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
     >
       <span
         className={cn(

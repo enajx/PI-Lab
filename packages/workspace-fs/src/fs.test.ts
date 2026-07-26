@@ -102,9 +102,11 @@ describe("listDir", () => {
     const src = entries.find((e) => e.name === "src")
     expect(src?.kind).toBe("dir")
     expect(src?.path).toBe(join(root, "src"))
+    expect(src?.mtimeMs).toBeGreaterThan(0)
 
     const readme = entries.find((e) => e.name === "README.md")
     expect(readme?.kind).toBe("file")
+    expect(readme?.mtimeMs).toBeGreaterThan(0)
 
     // Directories must sort ahead of files.
     const firstFileIdx = entries.findIndex((e) => e.kind === "file")

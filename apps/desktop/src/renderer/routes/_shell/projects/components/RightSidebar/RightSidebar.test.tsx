@@ -21,7 +21,11 @@ import { RightSidebar } from "./RightSidebar"
  * to drop the sidebar (mirrored by {@link CollapsibleHarness} here).
  */
 
-function renderSidebar(onOpenFile = vi.fn(), overrides: FakeHandlers = {}) {
+function renderSidebar(
+  onOpenFile = vi.fn(),
+  overrides: FakeHandlers = {},
+  props: { gitAvailable?: boolean } = {},
+) {
   const onCollapse = vi.fn()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
@@ -38,6 +42,7 @@ function renderSidebar(onOpenFile = vi.fn(), overrides: FakeHandlers = {}) {
         workspaceId="ws-1"
         onOpenFile={onOpenFile}
         onCollapse={onCollapse}
+        gitAvailable={props.gitAvailable}
       />
     </AppProviders>,
   )
@@ -132,6 +137,17 @@ describe("RightSidebar", () => {
 
     expect(screen.getByTestId("panel-tab-changes")).toBeTruthy()
     expect(window.localStorage.getItem("pi-lab.projectView.showCodeChanges")).toBe("true")
+  })
+
+  test("disables Code changes with an Initialize Git explanation for a non-Git folder", () => {
+    renderSidebar(vi.fn(), {}, { gitAvailable: false })
+
+    fireEvent.click(screen.getByTestId("right-sidebar-settings"))
+    const toggle = screen.getByTestId("right-sidebar-toggle-changes")
+    expect(toggle.hasAttribute("disabled")).toBe(true)
+    expect(toggle.getAttribute("data-feature-help")).toContain("Initialize Git")
+    fireEvent.click(toggle)
+    expect(screen.queryByTestId("panel-tab-changes")).toBeNull()
   })
 
   test("the gear independently reveals and persists the optional Skills panel", () => {
@@ -315,7 +331,7 @@ function seedWorkspaceState(projectId: string) {
 }
 
 function PinnedHarness({ projectId }: { projectId: string }) {
-  const [restored] = useState(() => readProjectWorkspaceState(projectId))
+  const [restored] = useState(() => readProjectWorkspaceState(projectId, true))
   const [pinned, setPinned] = useState<string[]>(() => restored?.pinnedPanels ?? [])
   const [activeId, setActiveId] = useState<string | null>(
     () => restored?.rightSidebarActiveId ?? null,
@@ -401,7 +417,7 @@ describe("RightSidebar pinned Markdown panels", () => {
     await screen.findByTestId("panel-tab-pinned:notes.md")
 
     // Persisted through the real workspace-state writer.
-    expect(readProjectWorkspaceState("p-persist")?.pinnedPanels).toEqual(["notes.md"])
+    expect(readProjectWorkspaceState("p-persist", true)?.pinnedPanels).toEqual(["notes.md"])
 
     // A fresh mount (app relaunch) restores the pinned panel from that state.
     view.unmount()
@@ -436,6 +452,6 @@ describe("RightSidebar pinned Markdown panels", () => {
     await waitFor(() => expect(screen.queryByTestId("panel-tab-pinned:notes.md")).toBeNull())
     // The active-tab fallback still resolves — Research (the first tab) is shown.
     expect(await screen.findByTestId("panel-research")).toBeTruthy()
-    expect(readProjectWorkspaceState("p-unpin")?.pinnedPanels).toEqual([])
+    expect(readProjectWorkspaceState("p-unpin", true)?.pinnedPanels).toEqual([])
   })
 })

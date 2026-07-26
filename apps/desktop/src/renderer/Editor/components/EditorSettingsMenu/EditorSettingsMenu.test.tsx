@@ -52,6 +52,28 @@ describe("EditorSettingsMenu", () => {
     expect(screen.queryByTestId("editor-settings-checker-pyrefly")).toBeNull()
   })
 
+  test("puts toggles first and exposes a single Advanced settings link", () => {
+    render(<EditorSettingsMenu settings={SETTINGS} />)
+    fireEvent.click(screen.getByTestId("editor-settings"))
+
+    const menu = screen.getByTestId("editor-settings-menu")
+    const rows = Array.from(menu.querySelectorAll("button, select"))
+    expect(rows.slice(0, 4).map((row) => row.getAttribute("data-testid"))).toEqual([
+      "editor-settings-autosave",
+      "editor-settings-vim",
+      "editor-settings-diagnostics",
+      "editor-settings-format-on-save",
+    ])
+    expect(screen.getAllByRole("separator")).toHaveLength(3)
+    expect(screen.getByLabelText("Terminal location")).toBeTruthy()
+    expect(screen.queryByText("Typography…")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("editor-advanced-settings-link"))
+    expect(window.location.hash).toBe("#/settings?section=appearance&advanced=editor-typography")
+    expect(screen.queryByTestId("editor-settings-font-family")).toBeNull()
+    expect(screen.queryByTestId("editor-settings-font-size")).toBeNull()
+  })
+
   test("toggling autosave patches just that field", () => {
     const onChange = vi.fn()
     render(<EditorSettingsMenu settings={SETTINGS} onChange={onChange} />)
@@ -106,7 +128,7 @@ describe("EditorSettingsMenu", () => {
     expect(onChange).toHaveBeenCalledWith({ editorTheme: custom.id })
   })
 
-  test("changes the persisted Run Python destination", () => {
+  test("changes the persisted Terminal location", () => {
     const onChange = vi.fn()
     render(<EditorSettingsMenu settings={SETTINGS} onChange={onChange} />)
     fireEvent.click(screen.getByTestId("editor-settings"))

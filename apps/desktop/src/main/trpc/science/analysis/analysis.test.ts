@@ -2,7 +2,7 @@
 // a temp SQLite DB with the real migrations and a real temp git repo (AGENTS.md
 // md/engineering/testing-and-build.md). Data files are written into the repo and classified/previewed off real
 // bytes — no filesystem mocking.
-import { chmod, mkdir, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
@@ -99,6 +99,39 @@ describe("science.analysis.listFiles", () => {
     expect(listing.truncated).toBe(false)
     // README.md from the fixture commit is also discovered (markdown).
     expect(listing.total).toBeGreaterThanOrEqual(5)
+  })
+
+  test("discovers marimo notebooks but continues to exclude ordinary Python source", async () => {
+    await writeRepoFile(
+      "reports/live_notebook.py",
+      "import marimo\n\napp = marimo.App()\n\nif __name__ == '__main__':\n    app.run()\n",
+    )
+    await writeRepoFile("reports/script.py", "import marimo\nprint('ordinary script')\n")
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const kindByRel = new Map<string, string>()
+    for (const group of listing.groups) {
+      for (const file of group.files) kindByRel.set(file.relPath, group.kind)
+    }
+
+    expect(kindByRel.get("reports/live_notebook.py")).toBe("marimo")
+    expect(kindByRel.has("reports/script.py")).toBe(false)
+  })
+
+  test("recognizes a large marimo notebook from its bounded source prefix", async () => {
+    await writeRepoFile(
+      "reports/large.py",
+      `import marimo\napp = marimo.App()\n${"# generated cell\n".repeat(6_000)}`,
+    )
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+
+    expect(
+      listing.groups
+        .flatMap((group) => group.files)
+        .find((file) => file.relPath === "reports/large.py")?.kind,
+    ).toBe("marimo")
   })
 
   test("lists the scientific artifact whitelist and excludes source/unknown files", async () => {
@@ -212,6 +245,92 @@ describe("science.analysis.listFiles", () => {
     await expect(
       h.caller.science.analysis.listFiles({ projectId: "missing" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+})
+
+describe("science.analysis.openInteractive", () => {
+  test("HTML reports return an isolated URL without sending document bytes over IPC", async () => {
+    await writeRepoFile(
+      "reports/interactive.html",
+      "<!doctype html><script src='./asset.js'></script>",
+    )
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.openInteractive({
+      ownerId: "owner-report",
+      leaseId: "lease-report",
+      projectId: project.id,
+      relPath: "reports/interactive.html",
+    })
+
+    expect(preview).toEqual({
+      type: "html",
+      url: "pi-lab-report://test/report.html",
+    })
+    expect(h.analysisInteractive.reportStarts).toEqual([
+      {
+        ownerId: "owner-report",
+        generation: 1,
+        repoPath: h.repoDir,
+        absPath: join(h.repoDir, "reports/interactive.html"),
+      },
+    ])
+  })
+
+  test("marimo starts in the project Python runtime and close is idempotent", async () => {
+    await writeRepoFile("reports/live.py", "import marimo\napp = marimo.App()\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+
+    const opened = await h.caller.science.analysis.openInteractive({
+      ownerId: "owner-marimo",
+      leaseId: "lease-marimo",
+      projectId: project.id,
+      relPath: "reports/live.py",
+    })
+    await h.caller.science.analysis.closeInteractive({
+      ownerId: "owner-marimo",
+      leaseId: "lease-marimo",
+    })
+    await h.caller.science.analysis.closeInteractive({
+      ownerId: "owner-marimo",
+      leaseId: "lease-marimo",
+    })
+
+    expect(opened.type).toBe("marimo")
+    expect(h.analysisInteractive.marimoStarts).toHaveLength(1)
+    expect(h.analysisInteractive.marimoStarts[0]).toMatchObject({
+      ownerId: "owner-marimo",
+      cwd: h.repoDir,
+      absPath: join(h.repoDir, "reports/live.py"),
+      portRange: { start: 41_000, end: 41_009 },
+    })
+    expect(h.analysisInteractive.closes).toEqual([
+      { ownerId: "owner-marimo", leaseId: "lease-marimo" },
+      { ownerId: "owner-marimo", leaseId: "lease-marimo" },
+    ])
+  })
+})
+
+describe("science.analysis.createTemplate", () => {
+  test("creates ready-to-run templates under reports without overwriting an existing file", async () => {
+    await writeRepoFile("reports/report.html", "existing")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+
+    const html = await h.caller.science.analysis.createTemplate({
+      projectId: project.id,
+      kind: "html",
+    })
+    const notebook = await h.caller.science.analysis.createTemplate({
+      projectId: project.id,
+      kind: "marimo",
+    })
+
+    expect(html).toEqual({ relPath: "reports/report-1.html" })
+    expect(await readFile(join(h.repoDir, html.relPath), "utf8")).toContain("Interactive report")
+    expect(notebook).toEqual({ relPath: "reports/notebook.py" })
+    expect(await readFile(join(h.repoDir, notebook.relPath), "utf8")).toContain(
+      "app = marimo.App()",
+    )
   })
 })
 

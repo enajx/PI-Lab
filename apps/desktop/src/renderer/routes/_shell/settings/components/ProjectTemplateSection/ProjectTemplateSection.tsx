@@ -1,10 +1,24 @@
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { FilePlus2, Trash2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
 import { DEFAULT_EDITOR_SETTINGS } from "../../../../../Editor/hooks/useEditorBuffers"
 import { useTRPC } from "../../../../../trpc/react"
 import { SettingsSection } from "../SettingsControls"
+
+// Keep this renderer fallback local. Importing the local-db package at runtime
+// would pull its SQLite implementation into the browser bundle.
+const DEFAULT_PROJECT_TEMPLATE_SETTINGS = {
+  initializationMarkdownFiles: [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "EXPERIMENT_TRACKING_SQLITE.md",
+    "RESEARCH.md",
+    "TODO.md",
+  ],
+  defaultTemplateParentPath: null,
+}
 
 /**
  * Project template editor (Settings → "Project template"). Edits the writable
@@ -14,8 +28,7 @@ import { SettingsSection } from "../SettingsControls"
  * and saves via `template.write`.
  *
  * The template is seeded once on first run, so the user's edits persist across app
- * updates — and newly bundled files won't appear automatically. `CLAUDE.md` is a
- * symlink, so editing it writes through to `AGENTS.md`.
+ * updates — and newly bundled files won't appear automatically.
  *
  * We deliberately do NOT use `useEditorBuffers` (it requires a workspace + the
  * `files.*` router); only the editor theme + vim toggle are reused from
@@ -28,9 +41,15 @@ export function ProjectTemplateSection() {
   const listQuery = useQuery(trpc.template.list.queryOptions())
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editor = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
+  const templateSettings = settingsQuery.data?.projectTemplate ?? DEFAULT_PROJECT_TEMPLATE_SETTINGS
 
   const files = listQuery.data ?? []
   const [selected, setSelected] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    relPath: string
+    x: number
+    y: number
+  } | null>(null)
   const activeRelPath = selected ?? files[0]?.relPath ?? null
 
   const readQuery = useQuery({
@@ -68,6 +87,52 @@ export function ProjectTemplateSection() {
     }),
   )
 
+  const pickFile = useMutation(trpc.system.pickFile.mutationOptions())
+  const importTemplateFile = useMutation(
+    trpc.template.import.mutationOptions({
+      onSuccess: (file) => {
+        setSelected(file.relPath)
+        void queryClient.invalidateQueries({ queryKey: trpc.template.list.queryKey() })
+        void queryClient.invalidateQueries({ queryKey: trpc.template.read.queryKey() })
+      },
+    }),
+  )
+  const updateTemplateDefaults = useMutation(
+    trpc.settings.updateProjectTemplate.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
+      },
+    }),
+  )
+
+  const removeTemplateFile = useMutation(
+    trpc.template.remove.mutationOptions({
+      onSuccess: ({ relPath }) => {
+        const nextDefaults = templateSettings.initializationMarkdownFiles.filter(
+          (path) => path !== relPath,
+        )
+        if (nextDefaults.length !== templateSettings.initializationMarkdownFiles.length) {
+          updateTemplateDefaults.mutate({ initializationMarkdownFiles: nextDefaults })
+        }
+        setSelected((current) => (current === relPath ? null : current))
+        setContextMenu(null)
+        void queryClient.invalidateQueries({ queryKey: trpc.template.list.queryKey() })
+        void queryClient.invalidateQueries({ queryKey: trpc.template.read.queryKey() })
+      },
+    }),
+  )
+
+  useEffect(() => {
+    if (contextMenu === null) return
+    const close = () => setContextMenu(null)
+    window.addEventListener("mousedown", close)
+    window.addEventListener("keydown", close)
+    return () => {
+      window.removeEventListener("mousedown", close)
+      window.removeEventListener("keydown", close)
+    }
+  }, [contextMenu])
+
   const handleChange = (doc: string) => {
     draftRef.current = doc
     setDirty(doc !== savedContent)
@@ -78,12 +143,79 @@ export function ProjectTemplateSection() {
     write.mutate({ relPath: activeRelPath, content: draftRef.current })
   }
 
+  const handleImport = async () => {
+    const sourcePath = await pickFile.mutateAsync()
+    if (sourcePath === null) return
+    await importTemplateFile.mutateAsync({ sourcePath })
+  }
+
+  const toggleDefaultFile = (relPath: string) => {
+    const selected = templateSettings.initializationMarkdownFiles
+    const next = selected.includes(relPath)
+      ? selected.filter((path) => path !== relPath)
+      : [...selected, relPath]
+    updateTemplateDefaults.mutate({ initializationMarkdownFiles: next })
+  }
+
   return (
     <SettingsSection
       testId="settings-section-project-template"
       title="Project template"
-      description="The starter files copied into every new project. Seeded once on first run — your edits persist across updates, and newly bundled files won't appear automatically. CLAUDE.md is a symlink, so editing it writes through to AGENTS.md."
+      description="The starter files copied into every new project. Seeded once on first run — your edits persist across updates, and newly bundled files won't appear automatically."
     >
+      <div
+        className="mb-4 rounded-lg border border-border p-3"
+        data-testid="template-default-files"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-medium text-sm">Files included by default</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="template-import-file"
+            disabled={pickFile.isPending || importTemplateFile.isPending}
+            onClick={() => void handleImport()}
+          >
+            <FilePlus2 className="size-3.5" aria-hidden />
+            Import template file
+          </Button>
+        </div>
+        <p className="mt-1 text-muted-foreground text-xs">
+          Choose the starter files preselected when you start a project from this template.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {files.map((file) => {
+            const included = templateSettings.initializationMarkdownFiles.includes(file.relPath)
+            return (
+              <button
+                key={file.relPath}
+                type="button"
+                aria-pressed={included}
+                data-testid={`template-default-${file.relPath}`}
+                disabled={updateTemplateDefaults.isPending}
+                onClick={() => toggleDefaultFile(file.relPath)}
+                className={cn(
+                  "rounded-md border px-2 py-1 font-mono text-xs transition-colors",
+                  included
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                {included ? "✓ " : ""}
+                {file.name}
+              </button>
+            )
+          })}
+        </div>
+        {updateTemplateDefaults.error || importTemplateFile.error || pickFile.error ? (
+          <p className="mt-2 text-destructive text-xs" data-testid="template-default-files-error">
+            {updateTemplateDefaults.error?.message ??
+              importTemplateFile.error?.message ??
+              pickFile.error?.message}
+          </p>
+        ) : null}
+      </div>
       <div
         data-testid="template-editor"
         className="flex h-[28rem] min-h-0 overflow-hidden rounded-lg border border-border"
@@ -101,6 +233,12 @@ export function ProjectTemplateSection() {
               data-feature-label={file.name}
               data-feature-help="Edit this starter file used when creating future projects"
               onClick={() => handleSelect(file.relPath)}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                if (!removeTemplateFile.isPending) {
+                  setContextMenu({ relPath: file.relPath, x: event.clientX, y: event.clientY })
+                }
+              }}
               className={cn(
                 "rounded-md px-2 py-1.5 text-left font-mono text-xs transition-colors",
                 file.relPath === activeRelPath
@@ -154,16 +292,37 @@ export function ProjectTemplateSection() {
             )}
           </div>
 
-          {write.error ? (
+          {write.error || removeTemplateFile.error ? (
             <p
               data-testid="template-error"
               className="shrink-0 cursor-text select-text border-border border-t px-3 py-2 text-destructive text-xs"
             >
-              {write.error.message}
+              {write.error?.message ?? removeTemplateFile.error?.message}
             </p>
           ) : null}
         </div>
       </div>
+      {contextMenu !== null ? (
+        <div
+          role="menu"
+          data-testid="template-file-context-menu"
+          className="fixed z-50 w-40 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="template-file-remove"
+            disabled={removeTemplateFile.isPending}
+            onClick={() => removeTemplateFile.mutate({ relPath: contextMenu.relPath })}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            <Trash2 className="size-4" aria-hidden />
+            Remove
+          </button>
+        </div>
+      ) : null}
     </SettingsSection>
   )
 }

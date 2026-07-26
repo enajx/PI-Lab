@@ -2,7 +2,8 @@
 // a temp SQLite DB with real migrations, real temp git repos, an in-process
 // pty-daemon for launchAgent, and an injected fake agent. Full cleanup per test.
 import { existsSync } from "node:fs"
-import { writeFile } from "node:fs/promises"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { agentSessions } from "@pi-lab/local-db"
 import type { TerminalAgent } from "@pi-lab/shared"
@@ -74,6 +75,22 @@ describe("workspaces.create (worktree)", () => {
     expect(Array.isArray(branches)).toBe(true)
   })
 
+  test("rejects worktrees for a non-Git project with an Initialize Git explanation", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-workspace-"))
+    const project = await h.caller.projects.open({ path: plain })
+
+    await expect(
+      h.caller.workspaces.create({
+        projectId: project.id,
+        kind: "worktree",
+        name: "Unavailable",
+      }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("Initialize Git"),
+    })
+  })
+
   test("two worktree workspaces get non-overlapping port ranges", async () => {
     const a = await h.caller.workspaces.create({
       projectId,
@@ -127,6 +144,17 @@ describe("workspaces.changes", () => {
     const untracked = await h.caller.workspaces.changes({ id: workspace.id })
     expect(untracked.some((c) => c.path === "scratch.txt" && c.status === "untracked")).toBe(true)
   })
+
+  test("explains that Code changes requires Git", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-changes-"))
+    const project = await h.caller.projects.open({ path: plain })
+    const workspace = await h.caller.workspaces.ensureMain({ projectId: project.id })
+
+    await expect(h.caller.workspaces.changes({ id: workspace.id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("Initialize Git"),
+    })
+  })
 })
 
 describe("workspaces.remove", () => {
@@ -172,6 +200,38 @@ describe("workspaces.launchAgent", () => {
 
     await waitFor(() => chunks.join("").includes("AGENT-OK"))
     expect(chunks.join("")).toContain("AGENT-OK")
+  })
+
+  test("simultaneous launches cannot multiplex agents in a non-Git folder", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-workspace-race-"))
+    const project = await h.caller.projects.open({ path: plain })
+    const workspace = await h.caller.workspaces.ensureMain({ projectId: project.id })
+
+    const results = await Promise.allSettled([
+      h.caller.workspaces.launchAgent({
+        workspaceId: workspace.id,
+        agentId: WORKSPACE_PROMPT_AGENT.id,
+      }),
+      h.caller.workspaces.launchAgent({
+        workspaceId: workspace.id,
+        agentId: WORKSPACE_PROMPT_AGENT.id,
+      }),
+    ])
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    const rejected = results.find((result) => result.status === "rejected")
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: {
+        code: "PRECONDITION_FAILED",
+        message: expect.stringContaining("one agent"),
+      },
+    })
+
+    const started = results.find((result) => result.status === "fulfilled")
+    if (started?.status === "fulfilled") {
+      await h.caller.terminal.kill({ sessionId: started.value.sessionId })
+    }
   })
 
   test("an unknown agent id is NOT_FOUND", async () => {

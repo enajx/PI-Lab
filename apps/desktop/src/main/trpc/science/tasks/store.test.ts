@@ -34,6 +34,7 @@ async function fixture(name: string): Promise<{ root: string; project: Project }
       color: null,
       thumbnail: null,
       gradient: null,
+      digitalRain: false,
       metadata: null,
       agentConfig: null,
       sortIndex: 0,

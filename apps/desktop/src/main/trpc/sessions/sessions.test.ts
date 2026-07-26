@@ -4,6 +4,8 @@
 // long-lived so a session can be held open across a second start). Full cleanup
 // per test; concurrency assertions poll with timeouts, never fixed sleeps.
 import { existsSync, readFileSync } from "node:fs"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { agentSessions, settings } from "@pi-lab/local-db"
 import { DaemonClient } from "@pi-lab/pty-daemon"
@@ -309,6 +311,72 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
     // Release the held session.
     await h.caller.terminal.kill({ sessionId: first.sessionId })
+  })
+
+  test("a non-Git project permits one main agent but rejects worktrees and a concurrent agent", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-agent-"))
+    const plainProject = await h.caller.projects.open({ path: plain })
+
+    await expect(
+      h.caller.sessions.start({
+        projectId: plainProject.id,
+        agentId: "fake-agent",
+        workspaceMode: "worktree",
+      }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("Initialize Git"),
+    })
+
+    const first = await h.caller.sessions.start({
+      projectId: plainProject.id,
+      agentId: "long-fake-agent",
+    })
+    expect(first.kind).toBe("branch")
+    await waitFor(() => h.activityMonitor.liveAgentCount(plainProject.id) === 1)
+
+    await expect(
+      h.caller.sessions.start({
+        projectId: plainProject.id,
+        agentId: "fake-agent",
+      }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("one agent"),
+    })
+
+    await h.caller.terminal.kill({ sessionId: first.sessionId })
+  })
+
+  test("simultaneous non-Git starts cannot race into two live agents", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-agent-race-"))
+    const plainProject = await h.caller.projects.open({ path: plain })
+
+    const results = await Promise.allSettled([
+      h.caller.sessions.start({
+        projectId: plainProject.id,
+        agentId: "long-fake-agent",
+      }),
+      h.caller.sessions.start({
+        projectId: plainProject.id,
+        agentId: "long-fake-agent",
+      }),
+    ])
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    const rejected = results.find((result) => result.status === "rejected")
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: {
+        code: "PRECONDITION_FAILED",
+        message: expect.stringContaining("one agent"),
+      },
+    })
+
+    const started = results.find((result) => result.status === "fulfilled")
+    if (started?.status === "fulfilled") {
+      await h.caller.terminal.kill({ sessionId: started.value.sessionId })
+    }
   })
 
   test("a source-file-bound launch stays in the main checkout despite a live agent", async () => {

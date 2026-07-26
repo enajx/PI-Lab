@@ -2,6 +2,7 @@ import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
@@ -14,13 +15,17 @@ import {
 import {
   RIGHT_SIDEBAR_MAX_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
+  readRestoreProjectTabs,
   useFetchExperimentsInstructions,
+  useNonGitNoticeDismissed,
   useRightSidebarWidth,
   useSidebarCollapsed,
 } from "../../../preferences/preferences"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
+import { useOptionalNewFileController } from "../components/NewFileController"
 import { titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
 import { clearPendingLaunch, readPendingLaunch } from "./-pendingLaunch"
+import { clearPendingOpenFile, usePendingOpenFile } from "./-pendingOpenFile"
 import { clearPendingTaskSession, readPendingTaskSession } from "./-pendingTaskSession"
 import {
   readProjectWorkspaceState,
@@ -70,11 +75,15 @@ export function ProjectWorkspace({
   activation: ProjectNotificationSearch
 }) {
   const trpc = useTRPC()
+  const newFileController = useOptionalNewFileController()
   const client = useTRPCClient()
   const queryClient = useQueryClient()
   const pendingTaskSession = useRef(readPendingTaskSession(projectId)).current
   const pendingLaunch = useRef(readPendingLaunch(projectId)).current
-  const restoredWorkspaceState = useRef(readProjectWorkspaceState(projectId)).current
+  const pendingOpenFile = usePendingOpenFile(projectId)
+  const restoredWorkspaceState = useRef(
+    readProjectWorkspaceState(projectId, readRestoreProjectTabs()),
+  ).current
 
   useEffect(() => {
     if (pendingTaskSession) clearPendingTaskSession(projectId)
@@ -85,6 +94,27 @@ export function ProjectWorkspace({
   }, [pendingLaunch, projectId])
 
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
+  const capabilitiesQuery = useQuery(trpc.projects.capabilities.queryOptions({ id: projectId }))
+  const initializeGit = useMutation(
+    trpc.projects.initializeGit.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.projects.capabilities.queryKey({ id: projectId }),
+        })
+        void queryClient.invalidateQueries({
+          queryKey: trpc.projects.get.queryKey({ id: projectId }),
+        })
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+      },
+    }),
+  )
+  const gitAvailable = capabilitiesQuery.data?.git === true
+  const [nonGitNoticeDismissed, setNonGitNoticeDismissed] = useNonGitNoticeDismissed(projectId)
+  const gitDisabledReason = capabilitiesQuery.isError
+    ? `Could not check Git availability: ${capabilitiesQuery.error.message}`
+    : capabilitiesQuery.isPending
+      ? "Checking Git availability…"
+      : "Initialize Git to run Git-state-aware project workflows."
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editorSettings: EditorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
 
@@ -183,6 +213,7 @@ export function ProjectWorkspace({
             kind: "agent",
             sessionId: result.sessionId,
             label: "Auto-research",
+            launch: { type: "auto-research" },
           }),
       },
     )
@@ -209,6 +240,21 @@ export function ProjectWorkspace({
     runPendingLaunch.current()
   }, [pendingLaunch, workspaceId])
 
+  const handledPendingOpenFile = useRef<number | null>(null)
+  useEffect(() => {
+    if (
+      !pendingOpenFile ||
+      !workspaceId ||
+      handledPendingOpenFile.current === pendingOpenFile.token
+    ) {
+      return
+    }
+    handledPendingOpenFile.current = pendingOpenFile.token
+    clearPendingOpenFile(projectId, pendingOpenFile.token)
+    if (pendingOpenFile.kind === "new") controller.openNewMarkdown()
+    else if (pendingOpenFile.relPath) controller.openFile(pendingOpenFile.relPath)
+  }, [controller.openFile, controller.openNewMarkdown, pendingOpenFile, projectId, workspaceId])
+
   // Card-triggered and in-view auto-research launch failures surface here (no
   // silent failure — AGENTS.md), so a failed launch never leaves the view stuck.
   const launchError = startAutoResearch.error?.message ?? null
@@ -228,6 +274,14 @@ export function ProjectWorkspace({
       kind: activation.notificationKind,
       sessionId: activation.notificationSessionId,
       label: activation.notificationLabel ?? activation.notificationAgentId ?? "Terminal",
+      launch:
+        activation.notificationKind === "agent"
+          ? {
+              type: "agent",
+              agentId: activation.notificationAgentId,
+              workspaceMode: "policy",
+            }
+          : { type: "terminal" },
     })
   }, [
     activation.notificationAgentId,
@@ -276,6 +330,8 @@ export function ProjectWorkspace({
             variant="labeled"
             testId="project-view-fetch-experiments"
             instructions={fetchInstructions}
+            disabled={!gitAvailable}
+            disabledReason={gitDisabledReason}
           />
           <ProjectWorkflowControl
             projectId={projectId}
@@ -283,10 +339,57 @@ export function ProjectWorkspace({
             task="summary"
             variant="labeled"
             testId="project-view-summary"
+            disabled={!gitAvailable}
+            disabledReason={gitDisabledReason}
           />
           <CaffeineControl />
         </div>
       </header>
+
+      {capabilitiesQuery.isError ? (
+        <section
+          data-testid="project-git-capability-error"
+          role="alert"
+          className="shrink-0 rounded-md border border-destructive/35 bg-destructive/8 px-3 py-2 text-destructive text-xs"
+        >
+          Could not check Git availability: {capabilitiesQuery.error.message}
+        </section>
+      ) : null}
+
+      {capabilitiesQuery.data?.git === false && !nonGitNoticeDismissed ? (
+        <section
+          data-testid="non-git-project-notice"
+          style={{ marginRight: rightSidebarCollapsed ? 0 : rightSidebarWidth + 12 }}
+          className="flex shrink-0 items-center gap-2 rounded-md border border-amber-500/35 bg-amber-500/8 px-3 py-1.5 text-xs"
+        >
+          <p className="min-w-0 flex-1 truncate cursor-text select-text text-muted-foreground">
+            <span className="font-medium text-foreground">This project is not git tracked.</span>{" "}
+            Initialize Git for worktrees and concurrent agents.
+          </p>
+          <button
+            type="button"
+            onClick={() => initializeGit.mutate({ id: projectId })}
+            disabled={initializeGit.isPending}
+            className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-medium text-foreground disabled:opacity-60"
+          >
+            {initializeGit.isPending ? "Initializing…" : "Initialize Git"}
+          </button>
+          {initializeGit.error ? (
+            <span role="alert" className="text-destructive">
+              {initializeGit.error.message}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Dismiss Git notice"
+            title="Dismiss Git notice"
+            onClick={() => setNonGitNoticeDismissed(true)}
+            className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-amber-500/15 hover:text-foreground"
+          >
+            <X className="size-3.5" aria-hidden />
+          </button>
+        </section>
+      ) : null}
 
       {launchError ? (
         <p
@@ -304,11 +407,24 @@ export function ProjectWorkspace({
               controller={controller}
               client={client}
               workspaceId={workspaceId}
+              projectName={project?.name}
               settings={editorSettings}
+              gitAvailable={gitAvailable}
               onUpdateEditorSettings={onUpdateEditorSettings}
               rightSidebarCollapsed={rightSidebarCollapsed}
               onExpandRightSidebar={() => setRightSidebarCollapsed(false)}
               onPinFile={pinPanel}
+              onSaveUntitled={
+                newFileController
+                  ? (relPath) =>
+                      newFileController.openNewFile({
+                        initialProjectId: projectId,
+                        onCreated: ({ relPath: targetRelPath }) => {
+                          void controller.editor.saveAs(relPath, targetRelPath)
+                        },
+                      })
+                  : undefined
+              }
             />
           </div>
           {rightSidebarCollapsed ? null : (
@@ -332,6 +448,7 @@ export function ProjectWorkspace({
                 pinnedPanels={pinnedPanels}
                 onPinFile={pinPanel}
                 onUnpinFile={unpinPanel}
+                gitAvailable={gitAvailable}
               />
             </div>
           )}
@@ -339,6 +456,7 @@ export function ProjectWorkspace({
             controller={controller}
             workspaceId={workspaceId}
             pinnedPanels={pinnedPanels}
+            gitAvailable={gitAvailable}
             onSelectPanel={(panelId) => {
               setRightSidebarActiveId(panelId)
               setRightSidebarCollapsed(false)

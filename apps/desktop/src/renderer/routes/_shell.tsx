@@ -10,6 +10,8 @@ import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
 import { useTRPC } from "../trpc/react"
 import { rememberSettingsReturnRoute } from "./_shell/-settingsReturnRoute"
+import { AddProjectControllerProvider } from "./_shell/components/AddProjectController"
+import { NewFileControllerProvider } from "./_shell/components/NewFileController"
 import { Sidebar } from "./_shell/components/Sidebar"
 import { useTitleBarTrafficLights } from "./_shell/titleBar"
 
@@ -88,26 +90,28 @@ function ShellLayout() {
   )
 
   return (
-    <>
-      <NotificationBridge />
-      {redirectToSetup || awaitingSetupDecision ? (
-        <div
-          data-testid="setup-gate-loading"
-          className="flex h-screen w-screen bg-background text-foreground"
-        />
-      ) : isFullScreen ? (
-        <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-          {content}
-        </div>
-      ) : (
-        <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-          <Sidebar />
-          {content}
-        </div>
-      )}
-      {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
-      {findProjectsOpen ? <ProjectsFind onClose={() => setFindProjectsOpen(false)} /> : null}
-    </>
+    <AddProjectControllerProvider>
+      <NewFileControllerProvider>
+        <NotificationBridge />
+        {redirectToSetup || awaitingSetupDecision ? (
+          <div
+            data-testid="setup-gate-loading"
+            className="flex h-screen w-screen bg-background text-foreground"
+          />
+        ) : isFullScreen ? (
+          <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+            {content}
+          </div>
+        ) : (
+          <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+            <Sidebar />
+            {content}
+          </div>
+        )}
+        {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
+        {findProjectsOpen ? <ProjectsFind onClose={() => setFindProjectsOpen(false)} /> : null}
+      </NewFileControllerProvider>
+    </AddProjectControllerProvider>
   )
 }
 
@@ -149,6 +153,7 @@ function useGlobalShortcuts(pathname: string, search: unknown, onCommandPalette:
   routeRef.current = { pathname, search }
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (routeRef.current.pathname.startsWith("/settings")) return
       if (eventMatchesShortcut(event, "open-settings")) {
         event.preventDefault()
         rememberSettingsReturnRoute(routeRef.current)
@@ -156,6 +161,14 @@ function useGlobalShortcuts(pathname: string, search: unknown, onCommandPalette:
       } else if (eventMatchesShortcut(event, "command-palette")) {
         event.preventDefault()
         paletteRef.current()
+      } else if (
+        eventMatchesShortcut(event, "quick-open") &&
+        routeRef.current.pathname.startsWith("/projects/")
+      ) {
+        // This listener is installed before transient Settings listeners, so it prevents a
+        // just-closed shortcut recorder from swallowing ⌘F during navigation back to a project.
+        event.preventDefault()
+        window.dispatchEvent(new Event("pi-lab:open-project-file-finder"))
       }
     }
     window.addEventListener("keydown", onKeyDown, true)

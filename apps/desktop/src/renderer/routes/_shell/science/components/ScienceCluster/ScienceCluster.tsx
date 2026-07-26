@@ -370,6 +370,8 @@ export function ScienceCluster() {
         <QuickFind
           ariaLabel="Find a machine"
           placeholder="Find a machine…"
+          scopeLabel="Cluster machines"
+          allowGlobalSearch
           items={findItems}
           emptyText="No matching machines"
           onSelect={(item) => focusMachine(item.id)}

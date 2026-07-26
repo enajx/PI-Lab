@@ -18,8 +18,8 @@ import { Sidebar } from "./Sidebar"
  * real `Sidebar` under the app providers + a memory router (so its `<Link>`s
  * resolve) with a faked tRPC client. jsdom suffices — the sidebar is plain DOM
  * (no Radix). We cover the unified workspace nav (Workflows still reachable), the
- * persisted project ordering, and the Add-project dropdown (the template item is
- * now a direct folder pick, not an inline name form).
+ * persisted project ordering, and the Add-project dropdown including the
+ * template-project details and Markdown-file chooser.
  */
 
 function renderSidebar(handlers: FakeHandlers = {}) {
@@ -86,13 +86,22 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("add-project-folder")).toBeNull()
   })
 
-  test("the template item picks a target folder and creates — no inline name form", async () => {
+  test("the template item collects a name, location, and selected Markdown files", async () => {
     let templateInput: unknown
     renderSidebar({
-      "system.pickDirectory": () => "/tmp/target",
+      "template.list": () => [
+        { name: "AGENTS.md", relPath: "AGENTS.md", kind: "file" },
+        { name: "TODO.md", relPath: "TODO.md", kind: "file" },
+      ],
+      "settings.get": () => ({
+        projectTemplate: {
+          initializationMarkdownFiles: ["AGENTS.md"],
+          defaultTemplateParentPath: null,
+        },
+      }),
       "projects.createFromTemplate": (input) => {
         templateInput = input
-        return { id: "tmpl", name: "tmpl", repoPath: "/tmp/target" }
+        return { id: "tmpl", name: "tmpl", repoPath: "/tmp/projects/Study" }
       },
     })
     await waitFor(() => expect(screen.getByTestId("add-project")).toBeTruthy())
@@ -100,9 +109,92 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByTestId("add-project"))
     fireEvent.click(screen.getByTestId("add-project-template"))
 
-    // No inline name form any more — it's a direct folder pick → createFromTemplate.
-    expect(screen.queryByTestId("add-project-template-form")).toBeNull()
-    await waitFor(() => expect(templateInput).toEqual({ targetDir: "/tmp/target" }))
+    expect(screen.getByTestId("add-project-template-form")).toBeTruthy()
+    await screen.findByText("AGENTS.md")
+    fireEvent.change(screen.getByTestId("add-project-template-name"), {
+      target: { value: "Study" },
+    })
+    fireEvent.change(screen.getByTestId("add-project-template-location"), {
+      target: { value: "/tmp/projects" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+
+    await waitFor(() =>
+      expect(templateInput).toEqual({
+        targetDir: "/tmp/projects/Study",
+        templateFiles: ["AGENTS.md"],
+        externalFiles: [],
+      }),
+    )
+  })
+
+  test("clicking outside a template-file preview closes it", async () => {
+    renderSidebar({
+      "template.list": () => [{ name: "AGENTS.md", relPath: "AGENTS.md", kind: "file" }],
+      "template.read": () => ({ exists: true, content: "# Agents" }),
+      "settings.get": () => ({
+        projectTemplate: {
+          initializationMarkdownFiles: ["AGENTS.md"],
+          defaultTemplateParentPath: null,
+        },
+      }),
+    })
+    await waitFor(() => expect(screen.getByTestId("add-project")).toBeTruthy())
+
+    fireEvent.click(screen.getByTestId("add-project"))
+    fireEvent.click(screen.getByTestId("add-project-template"))
+    fireEvent.click(await screen.findByRole("button", { name: "AGENTS.md" }))
+
+    const preview = await screen.findByRole("dialog", { name: "Preview AGENTS.md" })
+    expect(preview).toBeTruthy()
+    fireEvent.click(screen.getByTestId("template-file-preview-overlay"))
+
+    expect(screen.queryByRole("dialog", { name: "Preview AGENTS.md" })).toBeNull()
+  })
+
+  test("a file added to one project instance does not change the Settings template", async () => {
+    let createInput: unknown
+    let templateSettingsWrites = 0
+    renderSidebar({
+      "template.list": () => [{ name: "AGENTS.md", relPath: "AGENTS.md", kind: "file" }],
+      "settings.get": () => ({
+        projectTemplate: {
+          initializationMarkdownFiles: ["AGENTS.md"],
+          defaultTemplateParentPath: null,
+        },
+      }),
+      "system.pickFile": () => "/tmp/project-only.txt",
+      "settings.updateProjectTemplate": () => {
+        templateSettingsWrites += 1
+        return {}
+      },
+      "projects.createFromTemplate": (input) => {
+        createInput = input
+        return { id: "instance", name: "instance", repoPath: "/tmp/projects/Instance" }
+      },
+    })
+    await waitFor(() => expect(screen.getByTestId("add-project")).toBeTruthy())
+
+    fireEvent.click(screen.getByTestId("add-project"))
+    fireEvent.click(screen.getByTestId("add-project-template"))
+    fireEvent.click(await screen.findByRole("button", { name: "Add file" }))
+    await screen.findByText("project-only.txt")
+    fireEvent.change(screen.getByTestId("add-project-template-name"), {
+      target: { value: "Instance" },
+    })
+    fireEvent.change(screen.getByTestId("add-project-template-location"), {
+      target: { value: "/tmp/projects" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+
+    await waitFor(() =>
+      expect(createInput).toEqual({
+        targetDir: "/tmp/projects/Instance",
+        templateFiles: ["AGENTS.md"],
+        externalFiles: ["/tmp/project-only.txt"],
+      }),
+    )
+    expect(templateSettingsWrites).toBe(0)
   })
 
   test("Escape closes the menu", async () => {
@@ -195,6 +287,49 @@ describe("Sidebar", () => {
     expect(screen.getByTestId("project-agent-status").getAttribute("data-status")).toBe("working")
   })
 
+  test("marks a project with unsaved open-file edits and clears the marker after save", async () => {
+    writeProjectWorkspaceState("a", {
+      buffers: [
+        {
+          relPath: "notes.md",
+          content: "draft",
+          savedContent: "saved",
+          baseline: { mtimeMs: 1, size: 5 },
+          externalChange: false,
+          epoch: 0,
+        },
+      ],
+      activeRelPath: "notes.md",
+      sessions: [],
+      active: { type: "file", relPath: "notes.md" },
+      belowEditorRun: null,
+    })
+    const { unmount } = renderSidebar({
+      "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],
+    })
+    await waitFor(() => expect(screen.getByTestId("project-unsaved-edits")).toBeTruthy())
+    unmount()
+
+    writeProjectWorkspaceState("a", {
+      buffers: [
+        {
+          relPath: "notes.md",
+          content: "saved",
+          savedContent: "saved",
+          baseline: { mtimeMs: 1, size: 5 },
+          externalChange: false,
+          epoch: 0,
+        },
+      ],
+      activeRelPath: "notes.md",
+      sessions: [],
+      active: { type: "file", relPath: "notes.md" },
+      belowEditorRun: null,
+    })
+    renderSidebar({ "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }] })
+    await waitFor(() => expect(screen.queryByTestId("project-unsaved-edits")).toBeNull())
+  })
+
   test("an expanded project row uses its thumbnail as the project badge", async () => {
     const { container } = renderSidebar({
       "projects.list": () => [
@@ -261,6 +396,76 @@ describe("Sidebar", () => {
       .map((el) => el.getAttribute("data-project-id"))
     // Stored ids first (c, a), then the not-yet-stored id (b) in natural order.
     expect(ids).toEqual(["c", "a", "b"])
+  })
+
+  test("hides archived projects in both sidebar layouts and can reveal and restore them", async () => {
+    let projects = [
+      { id: "visible", name: "Visible", repoPath: "/visible", archivedAt: null },
+      { id: "hidden", name: "Hidden", repoPath: "/hidden", archivedAt: 123 },
+    ]
+    const archivedCalls: unknown[] = []
+    const rendered = renderSidebar({
+      "projects.list": () => projects,
+      "projects.setArchived": (input) => {
+        archivedCalls.push(input)
+        const { id, archived } = input as { id: string; archived: boolean }
+        projects = projects.map((row) =>
+          row.id === id ? { ...row, archivedAt: archived ? Date.now() : null } : row,
+        )
+        return projects.find((row) => row.id === id)
+      },
+    })
+
+    await screen.findByText("Visible")
+    expect(screen.queryByText("Hidden")).toBeNull()
+    fireEvent.click(screen.getByTestId("sidebar-show-hidden-projects"))
+    const revealed = await screen.findByText("Hidden")
+    const revealedRow = revealed.closest('[data-testid="project-item"]')
+    expect(revealedRow?.getAttribute("data-hidden")).toBe("true")
+    expect(revealedRow?.className).toContain("opacity-60")
+
+    fireEvent.contextMenu(revealed)
+    fireEvent.click(screen.getByTestId("project-restore"))
+    await waitFor(() => expect(archivedCalls).toEqual([{ id: "hidden", archived: false }]))
+    await waitFor(() => expect(screen.queryByTestId("sidebar-show-hidden-projects")).toBeNull())
+
+    rendered.unmount()
+    window.localStorage.setItem("pi-lab.sidebar.collapsed", "true")
+    projects = projects.map((row) =>
+      row.id === "hidden" ? { ...row, archivedAt: Date.now() } : row,
+    )
+    renderSidebar({ "projects.list": () => projects })
+    await screen.findByTitle("Visible")
+    expect(screen.queryByTitle("Hidden")).toBeNull()
+    expect(screen.getByTestId("sidebar-show-hidden-projects").getAttribute("aria-label")).toBe(
+      "Show hidden projects (1)",
+    )
+    fireEvent.click(screen.getByTestId("sidebar-show-hidden-projects"))
+    expect((await screen.findByTitle("Hidden")).getAttribute("data-hidden")).toBe("true")
+  })
+
+  test("a project context menu hides a project without removing it", async () => {
+    let projects: Array<{
+      id: string
+      name: string
+      repoPath: string
+      archivedAt: number | null
+    }> = [{ id: "a", name: "Alpha", repoPath: "/a", archivedAt: null }]
+    const archivedCalls: unknown[] = []
+    renderSidebar({
+      "projects.list": () => projects,
+      "projects.setArchived": (input) => {
+        archivedCalls.push(input)
+        projects = projects.map((row) => ({ ...row, archivedAt: Date.now() }))
+        return projects[0]
+      },
+    })
+    fireEvent.contextMenu(await screen.findByTestId("project-item"))
+    fireEvent.click(screen.getByTestId("project-hide"))
+
+    await waitFor(() => expect(archivedCalls).toEqual([{ id: "a", archived: true }]))
+    await waitFor(() => expect(screen.queryByTestId("project-item")).toBeNull())
+    expect(screen.getByTestId("sidebar-show-hidden-projects")).toBeTruthy()
   })
 
   test("the title-bar app icon is absent across all theme modes", async () => {

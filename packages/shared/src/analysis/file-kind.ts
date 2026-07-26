@@ -23,6 +23,7 @@ export type DataFileKind =
   | "json"
   | "image"
   | "notebook"
+  | "marimo"
   | "parquet"
   | "dataset"
   | "npy"
@@ -121,6 +122,7 @@ export const ALL_DATA_FILE_KINDS: readonly DataFileKind[] = [
   "json",
   "image",
   "notebook",
+  "marimo",
   "parquet",
   "dataset",
   "npy",
@@ -139,6 +141,7 @@ export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
   json: "JSON",
   image: "Images",
   notebook: "Notebooks",
+  marimo: "marimo",
   parquet: "Parquet",
   dataset: "Datasets",
   npy: "NumPy",
@@ -170,6 +173,7 @@ const CATEGORY_BY_KIND: Readonly<Record<DataFileKind, DataFileCategory>> = {
   npz: "data",
   image: "image",
   notebook: "notebook",
+  marimo: "notebook",
   plot: "plot",
   report: "text",
   markdown: "text",
@@ -249,11 +253,37 @@ export function classifyAnalysisArtifact(
 }
 
 /**
+ * Conservatively identify a marimo notebook from a bounded Python source
+ * prefix. Merely importing marimo is not enough: the file must also construct
+ * an App through the imported module/alias or a direct `App` import. This keeps
+ * ordinary Python source out of Analysis discovery.
+ */
+export function isMarimoNotebookSource(source: string): boolean {
+  const moduleImport = source.match(
+    /(?:^|\n)\s*import\s+marimo(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?/m,
+  )
+  if (moduleImport) {
+    const moduleName = moduleImport[1] ?? "marimo"
+    const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    if (new RegExp(`\\b${escaped}\\.App\\s*\\(`).test(source)) return true
+  }
+
+  const directImport = source.match(
+    /(?:^|\n)\s*from\s+marimo\s+import\s+(?:[^#\n]*,\s*)?App(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?/m,
+  )
+  if (!directImport) return false
+  const appName = directImport[1] ?? "App"
+  const escaped = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`\\b${escaped}\\s*\\(`).test(source)
+}
+
+/**
  * Whether a kind is one Analysis can render a meaningful inline preview for
- * (table / chart / array / image / pretty-JSON / text head). A raw `.npy` array
- * is decoded into a chart or array view, so it is previewable; `.npz` (a zip of
- * arrays we don't unpack), `parquet`, `dataset`, `plot`, `notebook`, `report`,
- * and `other` fall back to a metadata-only card — the UI uses this to decide.
+ * (table / chart / array / image / pretty-JSON / text head / isolated web
+ * surface). Raw `.npy` arrays decode into a chart or grid; HTML reports and
+ * marimo notebooks open in their isolated interactive surface. `.npz` (a zip
+ * of arrays we don't unpack), `parquet`, `dataset`, `plot`, `notebook`, and
+ * `other` fall back to a metadata-only card.
  */
 export function isPreviewableKind(kind: DataFileKind): boolean {
   return (
@@ -261,6 +291,8 @@ export function isPreviewableKind(kind: DataFileKind): boolean {
     kind === "tsv" ||
     kind === "json" ||
     kind === "image" ||
+    kind === "marimo" ||
+    kind === "report" ||
     kind === "markdown" ||
     kind === "text" ||
     kind === "npy"

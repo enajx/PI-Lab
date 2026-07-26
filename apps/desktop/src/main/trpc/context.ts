@@ -24,6 +24,7 @@ import {
 } from "../python"
 import type { CredentialCipher } from "../setup/credentials"
 import { liveSetupProbe, type SetupProbe } from "../setup/probe"
+import type { AnalysisInteractivePort } from "./science/analysis/interactive"
 
 /**
  * Per-request context for the main-process appRouter.
@@ -82,6 +83,7 @@ export interface AppContext {
   pyToolsExec: PyToolsExec
   discoverPythonEnvironments: PythonEnvironmentDiscoverer
   resolvePythonRuntime: PythonRuntimeResolver
+  analysisInteractive: AnalysisInteractivePort
   notifications: NotificationBrokers
   activityMonitor: ActivityMonitorPort
   notificationService: NotificationService
@@ -145,11 +147,22 @@ export const TEST_AGENT: TerminalAgent = {
   defaultArgs: ["-e", "process.stdout.write('AGENT-UI-OK\\n')"],
 }
 
+/** A test-only agent that keeps producing output, for live-activity UI E2E coverage. */
+export const TEST_ACTIVITY_AGENT_ID = "test-activity"
+
+export const TEST_ACTIVITY_AGENT: TerminalAgent = {
+  id: TEST_ACTIVITY_AGENT_ID,
+  label: "Test Activity",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: ["-e", "setInterval(()=>process.stdout.write('AGENT-ACTIVE\\n'),100)"],
+}
+
 /**
  * Build the launchable agent catalog for an app instance. In test mode the
  * deterministic {@link TEST_AGENT} is appended so the E2E has an assertable agent
  * to launch; in normal use it's just the built-ins (md/engineering/architecture.md (agent runtime)).
  */
 export function buildAgentCatalog(testMode: boolean): readonly TerminalAgent[] {
-  return testMode ? [...BUILTIN_AGENTS, TEST_AGENT] : BUILTIN_AGENTS
+  return testMode ? [...BUILTIN_AGENTS, TEST_AGENT, TEST_ACTIVITY_AGENT] : BUILTIN_AGENTS
 }

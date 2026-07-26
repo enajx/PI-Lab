@@ -14,7 +14,8 @@ import { buildLaunchArgv, getAgent } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
-import { addWorktree, type GitChange, GitError, removeWorktree, status } from "../../git"
+import { addWorktree, type GitChange, GitError, isGitRepo, removeWorktree, status } from "../../git"
+import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import { getOrCreateBranchWorkspace } from "../sessions/sessions"
 import { publicProcedure, router } from "../trpc"
 import { managedWorktreePath } from "./worktreePath"
@@ -105,6 +106,12 @@ export async function createWorkspace(
   const project = db.select().from(projects).where(eq(projects.id, args.projectId)).get()
   if (!project) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${args.projectId}` })
+  }
+  if (args.kind === "worktree" && !(await isGitRepo(project.repoPath))) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Git worktrees are unavailable for this folder. Initialize Git first.",
+    })
   }
 
   // Slot index = existing workspace count, so each new workspace gets the next
@@ -281,6 +288,12 @@ export const workspacesRouter = router({
       throw new TRPCError({ code: "NOT_FOUND", message: `No workspace ${input.id}` })
     }
     const dir = workspaceWorkingDir(ctx.db, workspace)
+    if (!(await isGitRepo(dir))) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Code changes requires Git. Initialize Git for this project first.",
+      })
+    }
     return status(dir)
   }),
 
@@ -312,6 +325,19 @@ export const workspacesRouter = router({
       }
 
       const dir = workspaceWorkingDir(ctx.db, workspace)
+      const project = ctx.db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, workspace.projectId))
+        .get()
+      const gitAvailable = project ? await isGitRepo(project.repoPath) : true
+      if (project && !gitAvailable && ctx.activityMonitor.liveAgentCount(project.id) > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "A non-Git project can run only one agent at a time. Close the live agent or Initialize Git.",
+        })
+      }
       const [catalogCommand, ...args] = buildLaunchArgv(agent)
       const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[
         agent.id
@@ -325,25 +351,33 @@ export const workspacesRouter = router({
         })
       }
 
-      const client = await ctx.getDaemonClient()
-      const launchEnvironment = await ctx.getAgentLaunchEnvironment()
-      const session = await client.spawn({
-        command,
-        args,
-        cwd: dir,
-        env: { ...launchEnvironment, ...agent.env },
-        cols: input.cols,
-        rows: input.rows,
-      })
-      await ctx.activityMonitor.track({
-        sessionId: session.id,
+      const session = await withAgentLaunchGuard({
         projectId: workspace.projectId,
-        workspaceId: workspace.id,
-        agentId: agent.id,
-        workflowRunId: null,
-        turnArmed: false,
-        cols: input.cols,
-        rows: input.rows,
+        gitAvailable,
+        liveAgentCount: () => ctx.activityMonitor.liveAgentCount(workspace.projectId),
+        launch: async () => {
+          const client = await ctx.getDaemonClient()
+          const launchEnvironment = await ctx.getAgentLaunchEnvironment()
+          const spawned = await client.spawn({
+            command,
+            args,
+            cwd: dir,
+            env: { ...launchEnvironment, ...agent.env },
+            cols: input.cols,
+            rows: input.rows,
+          })
+          await ctx.activityMonitor.track({
+            sessionId: spawned.id,
+            projectId: workspace.projectId,
+            workspaceId: workspace.id,
+            agentId: agent.id,
+            workflowRunId: null,
+            turnArmed: false,
+            cols: input.cols,
+            rows: input.rows,
+          })
+          return spawned
+        },
       })
 
       // Mark the workspace active so "recent" ordering reflects the launch.

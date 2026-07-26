@@ -6,6 +6,7 @@ import {
   classifyAnalysisArtifact,
   classifyDataFile,
   type DataFileKind,
+  isMarimoNotebookSource,
 } from "@pi-lab/shared"
 import { DEFAULT_IGNORED_DIRS } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
@@ -26,6 +27,8 @@ import { TRPCError } from "@trpc/server"
  * silently dropping files (AGENTS.md — no silent caps).
  */
 export const MAX_LISTED_FILES = 2000
+/** Max Python prefix read while deciding whether a `.py` file is a marimo notebook. */
+export const MAX_MARIMO_SOURCE_BYTES = 64 * 1024
 
 /**
  * Extra noise directories pruned from the Analysis walk, on top of
@@ -160,7 +163,10 @@ async function walkAnalysisArtifacts(
         if (dirent.name.startsWith(".")) continue
         const abs = join(dir, dirent.name)
         if (dirent.isFile()) {
-          const kind = classifyAnalysisArtifact(dirent.name, "file")
+          let kind = classifyAnalysisArtifact(dirent.name, "file")
+          if (kind === null && extname(dirent.name).toLowerCase() === ".py") {
+            kind = (await isMarimoNotebookFile(abs)) ? "marimo" : null
+          }
           if (kind !== null) artifacts.push({ abs, kind })
         } else if (dirent.isDirectory() && !ignored.has(dirent.name)) {
           const kind = classifyAnalysisArtifact(dirent.name, "directory")
@@ -174,6 +180,19 @@ async function walkAnalysisArtifacts(
   }
 
   return artifacts
+}
+
+/** Read only a bounded prefix and positively identify a marimo notebook. */
+export async function isMarimoNotebookFile(abs: string): Promise<boolean> {
+  const file = await open(abs, "r")
+  try {
+    const buffer = Buffer.allocUnsafe(MAX_MARIMO_SOURCE_BYTES + 1)
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
+    const inspectedBytes = Math.min(bytesRead, MAX_MARIMO_SOURCE_BYTES)
+    return isMarimoNotebookSource(buffer.subarray(0, inspectedBytes).toString("utf8"))
+  } finally {
+    await file.close()
+  }
 }
 
 // ── Preview ──────────────────────────────────────────────────────────────────

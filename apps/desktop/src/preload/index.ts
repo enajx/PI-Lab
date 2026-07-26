@@ -9,8 +9,10 @@ import { exposeElectronTRPC } from "trpc-electron/main"
  * Runs under `contextIsolation: true` + `sandbox: true`: nothing from Node leaks
  * to the page except the small, explicit surface below.
  */
-exposeElectronTRPC()
+if (process.isMainFrame) {
+  exposeElectronTRPC()
 
-contextBridge.exposeInMainWorld("piLab", {
-  platform: process.platform,
-})
+  contextBridge.exposeInMainWorld("piLab", {
+    platform: process.platform,
+  })
+}

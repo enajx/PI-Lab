@@ -4,6 +4,8 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  CodeXml,
+  Eye,
   FolderOpen,
   Info,
   TerminalSquare,
@@ -36,6 +38,9 @@ interface EditorStatusBarProps {
   listPythonEnvironments: () => Promise<RouterOutputs["python"]["options"]>
   selectPythonEnvironment: (path: string | null) => Promise<boolean>
   choosePythonEnvironment: (kind: "directory" | "interpreter") => Promise<boolean>
+  /** Markdown buffers can switch their source/render presentation from the lower status bar. */
+  markdownMode?: "render" | "source"
+  onMarkdownModeChange?: (mode: "render" | "source") => void
 }
 
 /**
@@ -58,6 +63,8 @@ export function EditorStatusBar({
   listPythonEnvironments,
   selectPythonEnvironment,
   choosePythonEnvironment,
+  markdownMode,
+  onMarkdownModeChange,
 }: EditorStatusBarProps) {
   return (
     <div
@@ -84,6 +91,40 @@ export function EditorStatusBar({
           </>
         ) : null}
       </div>
+      {markdownMode && onMarkdownModeChange ? (
+        <fieldset
+          data-testid="markdown-mode-toggle"
+          aria-label="Markdown view"
+          className="flex shrink-0 items-center rounded border border-border bg-background p-0.5"
+        >
+          <button
+            type="button"
+            aria-label="Render Markdown"
+            aria-pressed={markdownMode === "render"}
+            onClick={() => onMarkdownModeChange("render")}
+            className={
+              markdownMode === "render"
+                ? "flex size-4 items-center justify-center rounded-sm bg-accent text-foreground"
+                : "flex size-4 items-center justify-center rounded-sm hover:bg-accent/60"
+            }
+          >
+            <Eye className="size-3" aria-hidden />
+          </button>
+          <button
+            type="button"
+            aria-label="Source Markdown"
+            aria-pressed={markdownMode === "source"}
+            onClick={() => onMarkdownModeChange("source")}
+            className={
+              markdownMode === "source"
+                ? "flex size-4 items-center justify-center rounded-sm bg-accent text-foreground"
+                : "flex size-4 items-center justify-center rounded-sm hover:bg-accent/60"
+            }
+          >
+            <CodeXml className="size-3" aria-hidden />
+          </button>
+        </fieldset>
+      ) : null}
     </div>
   )
 }

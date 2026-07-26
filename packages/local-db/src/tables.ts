@@ -82,6 +82,28 @@ export interface NotificationEventSettings {
   sound: NotificationSound
 }
 
+/**
+ * Defaults used by Start from template. Paths are relative to the writable
+ * project template so they remain portable between computers and app updates.
+ */
+export interface ProjectTemplateSettings {
+  /** Markdown files preselected when creating a project from the template. */
+  initializationMarkdownFiles: string[]
+  /** Optional parent folder proposed for new template projects. */
+  defaultTemplateParentPath: string | null
+}
+
+export const DEFAULT_PROJECT_TEMPLATE_SETTINGS: ProjectTemplateSettings = {
+  initializationMarkdownFiles: [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "EXPERIMENT_TRACKING_SQLITE.md",
+    "RESEARCH.md",
+    "TODO.md",
+  ],
+  defaultTemplateParentPath: null,
+}
+
 /** App-wide notification preferences persisted on the singleton settings row. */
 export interface NotificationSettings {
   /** Suppress all native banners and custom sounds. */
@@ -362,6 +384,13 @@ export const projects = sqliteTable(
      */
     gradient: text("gradient", { mode: "json" }).$type<ProjectGradient>(),
     /**
+     * Whether the dashboard card renders the project-owned ASCII Digital Rain
+     * artwork. This is mutually exclusive with an imported thumbnail and a
+     * generated gradient; its source characters are deliberately sampled anew
+     * from project files for every app launch.
+     */
+    digitalRain: integer("digital_rain", { mode: "boolean" }).notNull().default(false),
+    /**
      * Extra user-entered project metadata (collaborators, publishing venue,
      * deadline, emoji tags, reference links) edited via the card's "Edit project…"
      * dialog and shown under the card title ({@link ProjectMetadata}). One JSON blob
@@ -545,6 +574,11 @@ export const settings = sqliteTable("settings", {
     .notNull()
     .$type<CaffeineSettings>()
     .default(DEFAULT_CAFFEINE_SETTINGS),
+  /** Defaults for the Start from template dialog. */
+  projectTemplate: text("project_template", { mode: "json" })
+    .notNull()
+    .$type<ProjectTemplateSettings>()
+    .default(DEFAULT_PROJECT_TEMPLATE_SETTINGS),
   /** Locally-known v2 Teams (names/colors only — no remote identity). */
   knownTeams: text("known_teams", { mode: "json" }).notNull().$type<KnownTeam[]>().default([]),
   /**

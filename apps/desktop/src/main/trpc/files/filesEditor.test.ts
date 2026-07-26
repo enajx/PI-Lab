@@ -3,7 +3,8 @@
 // with real migrations and a real temp git repo. These prove the file tree, the
 // quick-open fuzzy search, and the external-change fingerprint the built-in
 // editor relies on, including that all three honor the path-traversal jail.
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { createHarness, type Harness } from "../testHarness"
@@ -94,7 +95,15 @@ describe("files.tree", () => {
     await h.caller.files.write({ workspaceId: ws.id, relPath: "src/lib/util.py", content: "" })
 
     const child = await h.caller.files.tree({ workspaceId: ws.id, relPath: "src" })
-    expect(child).toEqual([{ name: "lib", relPath: "src/lib", kind: "dir" }])
+    expect(child).toEqual([
+      {
+        name: "lib",
+        relPath: "src/lib",
+        kind: "dir",
+        type: "folder",
+        mtimeMs: expect.any(Number),
+      },
+    ])
   })
 
   test("omits .git and node_modules noise", async () => {
@@ -112,6 +121,64 @@ describe("files.tree", () => {
     const ws = await makeWorkspace()
     await expect(
       h.caller.files.tree({ workspaceId: ws.id, relPath: "../.." }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+})
+
+describe("files.createFile / createFolder", () => {
+  test("creates an empty folder and file and exposes sortable metadata", async () => {
+    const ws = await makeWorkspace()
+
+    await h.caller.files.createFolder({ workspaceId: ws.id, relPath: "notes" })
+    const created = await h.caller.files.createFile({
+      workspaceId: ws.id,
+      relPath: "notes/idea.MD",
+    })
+
+    expect(created).toEqual({ relPath: "notes/idea.MD" })
+    expect(await readFile(join(ws.dir, "notes", "idea.MD"), "utf8")).toBe("")
+    expect((await stat(join(ws.dir, "notes"))).isDirectory()).toBe(true)
+    expect(await h.caller.files.tree({ workspaceId: ws.id, relPath: "notes" })).toEqual([
+      {
+        name: "idea.MD",
+        relPath: "notes/idea.MD",
+        kind: "file",
+        type: "md",
+        mtimeMs: expect.any(Number),
+      },
+    ])
+  })
+
+  test("rejects duplicate entries without overwriting them", async () => {
+    const ws = await makeWorkspace()
+    await h.caller.files.createFolder({ workspaceId: ws.id, relPath: "notes" })
+    await h.caller.files.createFile({ workspaceId: ws.id, relPath: "notes/idea.md" })
+
+    await expect(
+      h.caller.files.createFolder({ workspaceId: ws.id, relPath: "notes" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+    await expect(
+      h.caller.files.createFile({ workspaceId: ws.id, relPath: "notes/idea.md" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+    expect(await readFile(join(ws.dir, "notes", "idea.md"), "utf8")).toBe("")
+  })
+
+  test("rejects traversal, absolute paths, missing parents, and symlink-parent escapes", async () => {
+    const ws = await makeWorkspace()
+    const outside = await mkdtemp(join(tmpdir(), "pi-lab-create-outside-"))
+    await symlink(outside, join(ws.dir, "outside-link"))
+
+    await expect(
+      h.caller.files.createFile({ workspaceId: ws.id, relPath: "../escaped.md" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(
+      h.caller.files.createFolder({ workspaceId: ws.id, relPath: join(outside, "absolute") }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(
+      h.caller.files.createFile({ workspaceId: ws.id, relPath: "missing/child.md" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await expect(
+      h.caller.files.createFile({ workspaceId: ws.id, relPath: "outside-link/escaped.md" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 })

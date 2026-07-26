@@ -65,6 +65,13 @@ beforeEach(async () => {
       interpreterPath: process.execPath,
       runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
     }),
+    analysisInteractive: {
+      begin: async () => 1,
+      openReport: async () => ({ type: "html", url: "pi-lab-report://unused/" }),
+      startMarimo: async () => ({ type: "marimo", url: "http://127.0.0.1/" }),
+      close: async () => {},
+      dispose: () => {},
+    },
     notifications,
     activityMonitor: {
       track: async () => {},

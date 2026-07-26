@@ -9,6 +9,8 @@
 // record + emitting a terminal stream event). Tests therefore start a run and
 // then wait for it to settle via `status`.
 import { existsSync, writeFileSync } from "node:fs"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectWorkflowRuns, type WorkflowTask } from "@pi-lab/local-db"
 import type { TerminalAgent } from "@pi-lab/shared"
@@ -126,6 +128,27 @@ async function openClaudeProject(runner: NonInteractiveProcessRunner) {
   await harness.caller.agents.setProjectChoice({ projectId: project.id, agentId: "claude-code" })
   return { harness, projectId: project.id }
 }
+
+describe("workflows.run — Git precondition", () => {
+  test("rejects a non-Git folder before launching its headless agent", async () => {
+    const { calls, runner } = makeRunner(() => ok("must not run"))
+    const harness = await createHarness([CODEX_AGENT], { runNonInteractiveProcess: runner })
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-workflow-"))
+    const project = await harness.caller.projects.open({ path: plain })
+
+    try {
+      await expect(
+        harness.caller.workflows.run({ projectId: project.id, task: "summary" }),
+      ).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: expect.stringContaining("Initialize Git"),
+      })
+      expect(calls).toHaveLength(0)
+    } finally {
+      await harness.dispose()
+    }
+  })
+})
 
 describe("workflows.run — git-state cache + re-run", () => {
   test("caches while git state is unchanged, re-runs when it changes", async () => {

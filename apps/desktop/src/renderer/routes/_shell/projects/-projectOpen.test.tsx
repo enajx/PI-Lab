@@ -1,11 +1,14 @@
 import { QueryClient } from "@tanstack/react-query"
-import { describe, expect, test, vi } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx) — reproduces the dev build's
 // effect double-invoke, which is what surfaced the "Opening project…" hang.
-import { render, screen } from "../../../test/render"
+import { act, render, screen, waitFor } from "../../../test/render"
+import { clearPendingOpenFile, setPendingOpenFile } from "./-pendingOpenFile"
 import { ProjectWorkspace } from "./$projectId"
+
+const { openFile } = vi.hoisted(() => ({ openFile: vi.fn() }))
 
 // Isolate the OPEN flow (does the project view finish opening?) from the central
 // panel / sidebar internals by stubbing the heavy children. This test renders
@@ -18,7 +21,7 @@ vi.mock("./components/CentralPanel", () => ({
   CentralPanel: () => <div data-testid="central-panel-stub" />,
   useCentralPanel: () => ({
     attachSession: () => {},
-    openFile: () => {},
+    openFile,
     editor: { active: null },
   }),
 }))
@@ -43,6 +46,11 @@ function renderWorkspaceUnderStrictMode() {
   )
 }
 
+afterEach(() => {
+  clearPendingOpenFile("p1")
+  openFile.mockClear()
+})
+
 describe("Project open", () => {
   test("resolves the main workspace and shows the project view under StrictMode", async () => {
     renderWorkspaceUnderStrictMode()
@@ -51,5 +59,19 @@ describe("Project open", () => {
     // "Opening project…" gate is gone.
     expect(await screen.findByTestId("central-panel-stub")).toBeTruthy()
     expect(screen.queryByText("Opening project…")).toBeNull()
+  })
+
+  test("opens every globally created file while the chosen project is already mounted", async () => {
+    renderWorkspaceUnderStrictMode()
+    await screen.findByTestId("central-panel-stub")
+
+    act(() => setPendingOpenFile("p1", "notes/first.md"))
+    await waitFor(() => expect(openFile).toHaveBeenCalledWith("notes/first.md"))
+
+    act(() => setPendingOpenFile("p1", "notes/second.md"))
+    await waitFor(() => {
+      expect(openFile).toHaveBeenCalledTimes(2)
+      expect(openFile).toHaveBeenLastCalledWith("notes/second.md")
+    })
   })
 })

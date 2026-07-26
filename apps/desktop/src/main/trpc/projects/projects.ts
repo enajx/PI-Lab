@@ -1,27 +1,36 @@
 import type { Stats } from "node:fs"
-import { cp, mkdir, readdir, stat } from "node:fs/promises"
-import { basename, join, resolve } from "node:path"
+import { cp, mkdir, readdir, readFile, realpath, stat } from "node:fs/promises"
+import { basename, extname, join, resolve } from "node:path"
 import { type PiLabDatabase, type Project, type ProjectMetadata, projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { GitError, isGitRepo, repoName, repoRoot, resolveDefaultBranch, runGit } from "../../git"
-import { resolveWritableTemplateDir, seedWritableTemplate } from "../template"
+import {
+  resolveInsideTemplate,
+  resolveWritableTemplateDir,
+  seedWritableTemplate,
+} from "../template"
 import { publicProcedure, router } from "../trpc"
 
 /**
- * Projects router — a PI Lab "project" is a local git repository opened as a
- * research unit (AGENTS.md "What PI Lab is", "Glossary"). The router is thin: each procedure validates
+ * Projects router — a PI Lab "project" is a local folder opened as a research
+ * unit, with Git capabilities when that folder is a repository. The router is thin: each procedure validates
  * input, calls the git layer and the injected Drizzle handle, and returns rows.
  * No orchestration, no cloud — just the local store.
  */
 
 const openInput = z.object({
-  /** Absolute path to a directory inside a git working tree. */
+  /** Absolute path to a Git working tree or ordinary local folder. */
   path: z.string().min(1),
 })
 
 const idInput = z.object({ id: z.string().min(1) })
+
+const setArchivedInput = z.object({
+  id: z.string().min(1),
+  archived: z.boolean(),
+})
 
 const setThumbnailInput = z.object({
   id: z.string().min(1),
@@ -46,6 +55,54 @@ const setGradientInput = z.object({
     .object({ seed: z.number().int(), palette: z.array(z.string().min(1)).min(1) })
     .nullable(),
 })
+
+const setDigitalRainInput = z.object({
+  id: z.string().min(1),
+  enabled: z.boolean(),
+})
+
+const DIGITAL_RAIN_TEXT_EXTENSIONS = new Set([
+  ".c",
+  ".cc",
+  ".css",
+  ".csv",
+  ".go",
+  ".h",
+  ".html",
+  ".java",
+  ".js",
+  ".json",
+  ".jsx",
+  ".md",
+  ".mjs",
+  ".py",
+  ".r",
+  ".rs",
+  ".sh",
+  ".sql",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".yaml",
+  ".yml",
+  ".zsh",
+])
+const DIGITAL_RAIN_IGNORED_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  ".turbo",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+])
+const DIGITAL_RAIN_MAX_CANDIDATES = 240
+const DIGITAL_RAIN_MAX_FILE_BYTES = 48 * 1024
+const DIGITAL_RAIN_FILES_PER_SAMPLE = 3
+const DIGITAL_RAIN_FALLBACK_CHARACTERS = "01<>[]{}()#$%*+=-:;/."
+const digitalRainCharactersByProjectId = new Map<string, string>()
 
 /**
  * Extra project metadata edited via the card's "Edit project…" dialog. Every field
@@ -83,25 +140,27 @@ const createFromTemplateInput = z.object({
    * name any source directory.
    */
   templateDir: z.string().optional(),
+  /** Specific template files, addressed relative to `templateDir`. */
+  templateFiles: z.array(z.string().min(1)).optional(),
+  /** Absolute files picked for this project only. */
+  externalFiles: z.array(z.string().min(1)).optional(),
 })
 
 /**
- * Verify `dir` is a git working tree, then upsert its project row keyed on the
- * repo's top-level path (re-opening refreshes metadata + `lastOpenedAt` rather
- * than duplicating). Shared by `open`, `clone`, and `createFromTemplate` so the
- * three entry points agree on a single verify-and-store path. Throws a clean
- * `BAD_REQUEST` when `dir` is not a repo.
+ * Upsert a Git working tree or ordinary local folder. Git inputs normalize to
+ * the repository top-level; plain folders retain their canonical selected path.
  */
-async function upsertProjectFromRepo(db: PiLabDatabase, dir: string): Promise<Project> {
-  if (!(await isGitRepo(dir))) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: `Not a git repository: ${dir}` })
+async function upsertProjectFromDirectory(db: PiLabDatabase, dir: string): Promise<Project> {
+  const requested = resolve(dir)
+  const directory = await statOrNull(requested)
+  if (!directory?.isDirectory()) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Not a directory: ${requested}` })
   }
 
-  // Normalize to the repo's top level so two sub-paths of one repo map to a
-  // single project row (repoPath is unique).
-  const root = await repoRoot(dir)
-  const name = await repoName(root)
-  const defaultBranch = await resolveDefaultBranch(root)
+  const git = await isGitRepo(requested)
+  const root = git ? await repoRoot(requested) : await realpath(requested)
+  const name = git ? await repoName(root) : basename(root) || root
+  const defaultBranch = git ? await resolveDefaultBranch(root) : null
   const now = Date.now()
 
   const existing = db.select().from(projects).where(eq(projects.repoPath, root)).get()
@@ -149,16 +208,146 @@ async function statOrNull(dir: string): Promise<Stats | null> {
   }
 }
 
+/** Collect a deliberately small, text-only candidate set without entering build or VCS output. */
+async function findDigitalRainCandidates(repoPath: string): Promise<string[]> {
+  const candidates: string[] = []
+  const directories = [repoPath]
+
+  while (directories.length > 0 && candidates.length < DIGITAL_RAIN_MAX_CANDIDATES) {
+    const directory = directories.pop()
+    if (!directory) continue
+    const entries = await readdir(directory, { withFileTypes: true })
+    for (const entry of entries) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) {
+        if (!DIGITAL_RAIN_IGNORED_DIRECTORIES.has(entry.name)) directories.push(path)
+        continue
+      }
+      if (entry.isFile() && DIGITAL_RAIN_TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+        candidates.push(path)
+      }
+      if (candidates.length >= DIGITAL_RAIN_MAX_CANDIDATES) break
+    }
+  }
+
+  return candidates
+}
+
+/** Choose distinct source files with no sorting or full-project scan. */
+function chooseDigitalRainFiles(paths: string[]): string[] {
+  const choices = [...paths]
+  const count = Math.min(DIGITAL_RAIN_FILES_PER_SAMPLE, choices.length)
+  for (let index = 0; index < count; index += 1) {
+    const picked = index + Math.floor(Math.random() * (choices.length - index))
+    ;[choices[index], choices[picked]] = [choices[picked] as string, choices[index] as string]
+  }
+  return choices.slice(0, count)
+}
+
+/** Keep only printable ASCII so every glyph is legible in the compact canvas. */
+function toDigitalRainCharacters(text: string): string {
+  let characters = ""
+  for (const character of text) {
+    const code = character.charCodeAt(0)
+    if (code >= 33 && code <= 126) characters += character
+    if (characters.length >= DIGITAL_RAIN_MAX_FILE_BYTES) break
+  }
+  return characters
+}
+
+/**
+ * Sample small, bounded text fragments from this project for its current app
+ * session. The result is never persisted: the next PI Lab launch samples anew.
+ */
+async function sampleDigitalRainCharacters(repoPath: string): Promise<string> {
+  const candidates = await findDigitalRainCandidates(repoPath)
+  let characters = ""
+  for (const path of chooseDigitalRainFiles(candidates)) {
+    const details = await stat(path)
+    if (details.size > DIGITAL_RAIN_MAX_FILE_BYTES) continue
+    characters += toDigitalRainCharacters(await readFile(path, "utf8"))
+  }
+  return characters || DIGITAL_RAIN_FALLBACK_CHARACTERS
+}
+
 export const projectsRouter = router({
   /**
-   * Open a directory as a project: verify it's a git repo, resolve its root,
-   * display name, and default branch, then upsert by `repoPath` (re-opening an
-   * existing project refreshes its metadata and `lastOpenedAt` rather than
-   * duplicating it). Returns the stored row.
+   * Open a Git repository or ordinary local folder as a project.
    */
   open: publicProcedure.input(openInput).mutation(({ ctx, input }): Promise<Project> => {
-    return upsertProjectFromRepo(ctx.db, resolve(input.path))
+    return upsertProjectFromDirectory(ctx.db, resolve(input.path))
   }),
+
+  /** Report Git capability from the live filesystem rather than stale database state. */
+  capabilities: publicProcedure
+    .input(idInput)
+    .query(async ({ ctx, input }): Promise<{ git: boolean }> => {
+      const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+      if (!project) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      }
+      return { git: await isGitRepo(project.repoPath) }
+    }),
+
+  /** Bounded, fresh-per-launch source characters for a project's Digital Rain card artwork. */
+  digitalRainCharacters: publicProcedure
+    .input(idInput)
+    .query(async ({ ctx, input }): Promise<{ characters: string }> => {
+      const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+      if (!project) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      }
+      const existing = digitalRainCharactersByProjectId.get(project.id)
+      if (existing) return { characters: existing }
+      const characters = await sampleDigitalRainCharacters(project.repoPath)
+      digitalRainCharactersByProjectId.set(project.id, characters)
+      return { characters }
+    }),
+
+  /** Explicitly turn a plain-folder project into a Git repository in place. */
+  initializeGit: publicProcedure
+    .input(idInput)
+    .mutation(async ({ ctx, input }): Promise<Project> => {
+      const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+      if (!project) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      }
+      try {
+        if (!(await isGitRepo(project.repoPath))) {
+          await runGit(project.repoPath, ["init", "-b", "main"])
+        }
+        const head = await runGit(project.repoPath, ["rev-parse", "--verify", "HEAD"], {
+          allowFailure: true,
+        })
+        if (!head.stdout.trim()) {
+          await runGit(project.repoPath, [
+            "-c",
+            "user.name=PI Lab",
+            "-c",
+            "user.email=pi-lab@localhost",
+            "-c",
+            "commit.gpgSign=false",
+            "commit",
+            "--allow-empty",
+            "--no-verify",
+            "-m",
+            "Initialize Git",
+          ])
+        }
+      } catch (error) {
+        if (error instanceof GitError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message, cause: error })
+        }
+        throw error
+      }
+      const defaultBranch = (await resolveDefaultBranch(project.repoPath)) ?? "main"
+      return ctx.db
+        .update(projects)
+        .set({ defaultBranch, updatedAt: Date.now() })
+        .where(eq(projects.id, project.id))
+        .returning()
+        .get()
+    }),
 
   /**
    * Clone a remote into `parentDir` and open the result as a project. The target
@@ -193,7 +382,7 @@ export const projectsRouter = router({
       throw error
     }
 
-    return upsertProjectFromRepo(ctx.db, target)
+    return upsertProjectFromDirectory(ctx.db, target)
   }),
 
   /**
@@ -240,14 +429,23 @@ export const projectsRouter = router({
       // Copy the template's contents in, preserving symlinks (e.g. CLAUDE.md ->
       // AGENTS.md) and skipping editor/VCS cruft so the new repo starts clean.
       try {
-        await cp(templateDir, target, {
-          recursive: true,
-          verbatimSymlinks: true,
-          filter: (src) => {
-            const base = basename(src)
-            return base !== ".DS_Store" && base !== ".git"
-          },
-        })
+        if (input.templateFiles || input.externalFiles) {
+          await copySelectedInitializationFiles({
+            templateDir,
+            targetDir: target,
+            templateFiles: input.templateFiles ?? [],
+            externalFiles: input.externalFiles ?? [],
+          })
+        } else {
+          await cp(templateDir, target, {
+            recursive: true,
+            verbatimSymlinks: true,
+            filter: (src) => {
+              const base = basename(src)
+              return base !== ".DS_Store" && base !== ".git"
+            },
+          })
+        }
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error)
         throw new TRPCError({
@@ -272,10 +470,14 @@ export const projectsRouter = router({
         }
       }
 
-      return upsertProjectFromRepo(ctx.db, target)
+      return upsertProjectFromDirectory(ctx.db, target)
     }),
 
-  /** Active (non-archived) projects, most-recently-opened first. */
+  /**
+   * Every opened project, most-recently-opened first. Archived rows remain in
+   * this public list so project-aware surfaces and direct routes keep working;
+   * Dashboard and sidebar apply their own presentational visibility filter.
+   */
   list: publicProcedure.query(({ ctx }): Project[] => {
     return ctx.db.select().from(projects).orderBy(desc(projects.lastOpenedAt)).all()
   }),
@@ -300,6 +502,25 @@ export const projectsRouter = router({
   }),
 
   /**
+   * Hide or restore a project without deleting its row, files, sessions, or
+   * related records. `archivedAt` is the durable hidden-state marker; callers
+   * continue receiving archived projects from `list`.
+   */
+  setArchived: publicProcedure.input(setArchivedInput).mutation(({ ctx, input }): Project => {
+    const now = Date.now()
+    const row = ctx.db
+      .update(projects)
+      .set({ archivedAt: input.archived ? now : null, updatedAt: now })
+      .where(eq(projects.id, input.id))
+      .returning()
+      .get()
+    if (!row) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+    }
+    return row
+  }),
+
+  /**
    * Set (or clear, with `dataUrl: null`) the project's dashboard card thumbnail.
    * The renderer drops an image file onto a card and reads it into a `data:` URL,
    * which we persist verbatim; clearing reverts the card to its seeded gradient.
@@ -312,7 +533,7 @@ export const projectsRouter = router({
       // it (dataUrl: null) leaves the gradient column untouched.
       .set({
         thumbnail: input.dataUrl,
-        ...(input.dataUrl ? { gradient: null } : {}),
+        ...(input.dataUrl ? { gradient: null, digitalRain: false } : {}),
         updatedAt: Date.now(),
       })
       .where(eq(projects.id, input.id))
@@ -337,7 +558,29 @@ export const projectsRouter = router({
       .update(projects)
       .set({
         gradient: input.gradient,
-        ...(input.gradient ? { thumbnail: null } : {}),
+        ...(input.gradient ? { thumbnail: null, digitalRain: false } : {}),
+        updatedAt: Date.now(),
+      })
+      .where(eq(projects.id, input.id))
+      .returning()
+      .get()
+    if (!row) {
+      throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+    }
+    return row
+  }),
+
+  /**
+   * Enable the project-owned ASCII Digital Rain artwork. Enabling it replaces
+   * the imported image or generated gradient, while disabling it leaves the
+   * prior blank artwork state for the renderer to seed a gradient as usual.
+   */
+  setDigitalRain: publicProcedure.input(setDigitalRainInput).mutation(({ ctx, input }): Project => {
+    const row = ctx.db
+      .update(projects)
+      .set({
+        digitalRain: input.enabled,
+        ...(input.enabled ? { thumbnail: null, gradient: null } : {}),
         updatedAt: Date.now(),
       })
       .where(eq(projects.id, input.id))
@@ -384,3 +627,51 @@ export const projectsRouter = router({
     return row
   }),
 })
+
+interface CopySelectedInitializationFilesInput {
+  templateDir: string
+  targetDir: string
+  templateFiles: string[]
+  externalFiles: string[]
+}
+
+/**
+ * Copy the files chosen in the template dialog. Template entries are
+ * jailed to the configured template; externally picked files may live anywhere
+ * but must be ordinary files. Flattening them into the new project's
+ * root makes the dialog's displayed file names exactly match what is created.
+ */
+async function copySelectedInitializationFiles({
+  templateDir,
+  targetDir,
+  templateFiles,
+  externalFiles,
+}: CopySelectedInitializationFilesInput): Promise<void> {
+  const copiedNames = new Set<string>()
+  const sources = [
+    ...templateFiles.map((relPath) => ({
+      path: resolveInsideTemplate(templateDir, relPath),
+      label: relPath,
+    })),
+    ...externalFiles.map((filePath) => ({ path: resolve(filePath), label: filePath })),
+  ]
+
+  for (const source of sources) {
+    const info = await statOrNull(source.path)
+    if (!info?.isFile()) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: `Initialization file not found: ${source.label}`,
+      })
+    }
+    const name = basename(source.path)
+    if (copiedNames.has(name)) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `Two initialization files have the same name: ${name}`,
+      })
+    }
+    copiedNames.add(name)
+    await cp(source.path, join(targetDir, name), { verbatimSymlinks: true })
+  }
+}

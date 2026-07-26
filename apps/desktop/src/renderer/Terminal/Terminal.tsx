@@ -229,6 +229,8 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     <div
       ref={containerRef}
       data-testid="terminal"
+      data-input-kind={inputKind}
+      data-session-id={sessionId}
       style={{ ...paneStyle, background: "var(--background)" }}
     />
   )

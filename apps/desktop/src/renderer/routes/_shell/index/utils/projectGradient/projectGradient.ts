@@ -102,7 +102,9 @@ export function projectGradient(seed: number, palette: readonly string[]): Proje
   // A dedicated stream for motion/timing so it never shifts if layer seeding changes.
   const pick = mulberry32(seed >>> 0)
   const motion = MOTIONS[Math.floor(pick() * MOTIONS.length)] ?? MOTIONS[0]
-  const durationSec = 8 + Math.floor(pick() * 5) // 8..12
+  // A brisker cadence keeps active-project drift legible at card scale without
+  // changing the compositor-only implementation.
+  const durationSec = 6 + Math.floor(pick() * 4) // 6..9
   // A negative phase on a 0.1s grid, strictly within one cycle: (-dur, 0].
   const delaySec = -(Math.floor(pick() * durationSec * 10) / 10)
 

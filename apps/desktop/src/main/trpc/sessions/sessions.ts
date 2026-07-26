@@ -14,6 +14,8 @@ import { TRPCError } from "@trpc/server"
 import { and, eq, ne } from "drizzle-orm"
 import { z } from "zod"
 import { readProjectAgentConfig } from "../../agents/projectConfig"
+import { isGitRepo } from "../../git"
+import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
@@ -154,6 +156,21 @@ export async function startAgentSession(
   if (!project) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
   }
+  const gitAvailable = await isGitRepo(project.repoPath)
+  const liveCount = ctx.activityMonitor.liveAgentCount(project.id)
+  if (!gitAvailable && input.workspaceMode === "worktree") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Worktree agents require Git. Initialize Git for this project first.",
+    })
+  }
+  if (!gitAvailable && liveCount > 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "A non-Git project can run only one agent at a time. Close the live agent or Initialize Git.",
+    })
+  }
 
   const agent = getAgent(input.agentId, ctx.agentCatalog)
   if (!agent) {
@@ -174,9 +191,8 @@ export async function startAgentSession(
 
   const appSettings = getSettingsOrDefaults(ctx.db)
   const { worktreePerAgent } = appSettings
-  const liveCount = ctx.activityMonitor.liveAgentCount(project.id)
   const kind =
-    input.workspaceMode === "main"
+    !gitAvailable || input.workspaceMode === "main"
       ? "branch"
       : input.workspaceMode === "worktree"
         ? "worktree"
@@ -200,26 +216,34 @@ export async function startAgentSession(
   // here aborts the start before any PTY is spawned, so it can't orphan a session.
   if (input.onWorkspaceReady) await input.onWorkspaceReady(dir, workspace)
 
-  const client = await ctx.getDaemonClient()
-  const launchEnvironment = await ctx.getAgentLaunchEnvironment()
-  const session = await client.spawn({
-    command,
-    args,
-    cwd: dir,
-    env: { ...launchEnvironment, ...agent.env },
-    cols: input.cols ?? 80,
-    rows: input.rows ?? 24,
-  })
-
-  await ctx.activityMonitor.track({
-    sessionId: session.id,
+  const session = await withAgentLaunchGuard({
     projectId: project.id,
-    workspaceId: workspace.id,
-    agentId: agent.id,
-    workflowRunId: input.workflowRunId ?? null,
-    turnArmed: Boolean(input.prompt?.trim()),
-    cols: input.cols ?? 80,
-    rows: input.rows ?? 24,
+    gitAvailable,
+    liveAgentCount: () => ctx.activityMonitor.liveAgentCount(project.id),
+    launch: async () => {
+      const client = await ctx.getDaemonClient()
+      const launchEnvironment = await ctx.getAgentLaunchEnvironment()
+      const spawned = await client.spawn({
+        command,
+        args,
+        cwd: dir,
+        env: { ...launchEnvironment, ...agent.env },
+        cols: input.cols ?? 80,
+        rows: input.rows ?? 24,
+      })
+
+      await ctx.activityMonitor.track({
+        sessionId: spawned.id,
+        projectId: project.id,
+        workspaceId: workspace.id,
+        agentId: agent.id,
+        workflowRunId: input.workflowRunId ?? null,
+        turnArmed: Boolean(input.prompt?.trim()),
+        cols: input.cols ?? 80,
+        rows: input.rows ?? 24,
+      })
+      return spawned
+    },
   })
 
   // Mark the workspace active so "recent" ordering reflects the launch.

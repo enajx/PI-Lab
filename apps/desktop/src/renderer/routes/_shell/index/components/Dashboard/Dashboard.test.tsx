@@ -59,6 +59,7 @@ function project(
   name: string,
   thumbnail: string | null = null,
   gradient: { seed: number; palette: string[] } | null = null,
+  archivedAt: number | null = null,
 ) {
   return {
     id,
@@ -69,7 +70,7 @@ function project(
     thumbnail,
     gradient,
     sortIndex: 0,
-    archivedAt: null,
+    archivedAt,
     createdAt: 0,
     updatedAt: 0,
     lastOpenedAt: 0,
@@ -102,6 +103,71 @@ describe("Dashboard", () => {
     expect(statuses.every((el) => el.getAttribute("data-state") === "idle")).toBe(true)
   })
 
+  test("hides archived cards by default, reveals them dimmed, and restores them from the card menu", async () => {
+    let projects = [
+      project("visible", "Visible Project", null, { seed: 1, palette: ["#111"] }),
+      project("hidden", "Hidden Project", null, { seed: 2, palette: ["#222"] }, 123),
+    ]
+    const archivedCalls: unknown[] = []
+    renderDashboard({
+      "projects.list": () => projects,
+      "workspaces.list": () => [],
+      "projects.setArchived": (input) => {
+        archivedCalls.push(input)
+        const { id, archived } = input as { id: string; archived: boolean }
+        projects = projects.map((row) =>
+          row.id === id ? { ...row, archivedAt: archived ? Date.now() : null } : row,
+        )
+        return projects.find((row) => row.id === id)
+      },
+    })
+
+    await screen.findByText("Visible Project")
+    expect(screen.queryByText("Hidden Project")).toBeNull()
+    expect(screen.getByTestId("dashboard-show-hidden-projects").textContent).toContain(
+      "Show hidden (1)",
+    )
+
+    fireEvent.click(screen.getByTestId("dashboard-show-hidden-projects"))
+    const hiddenCard = (await screen.findByText("Hidden Project")).closest(
+      '[data-testid="project-card"]',
+    )
+    if (!(hiddenCard instanceof HTMLElement)) throw new Error("Hidden project card missing")
+    expect(hiddenCard.getAttribute("data-hidden")).toBe("true")
+    expect(hiddenCard.className).toContain("opacity-60")
+
+    fireEvent.contextMenu(
+      hiddenCard.querySelector('[data-testid="project-card-image"]') as HTMLElement,
+    )
+    fireEvent.click(await screen.findByTestId("project-card-menu-restore"))
+
+    await waitFor(() => expect(archivedCalls).toEqual([{ id: "hidden", archived: false }]))
+    await waitFor(() => expect(screen.queryByTestId("dashboard-show-hidden-projects")).toBeNull())
+    expect(screen.getByText("Hidden Project")).toBeTruthy()
+  })
+
+  test("hides a visible project from its card menu without deleting other project state", async () => {
+    let projects = [project("p1", "Hide Me", null, { seed: 1, palette: ["#111"] })]
+    const archivedCalls: unknown[] = []
+    renderDashboard({
+      "projects.list": () => projects,
+      "workspaces.list": () => [],
+      "projects.setArchived": (input) => {
+        archivedCalls.push(input)
+        const { id } = input as { id: string }
+        projects = projects.map((row) => (row.id === id ? { ...row, archivedAt: Date.now() } : row))
+        return projects[0]
+      },
+    })
+
+    fireEvent.contextMenu(await screen.findByTestId("project-card-image"))
+    fireEvent.click(await screen.findByTestId("project-card-menu-hide"))
+
+    await waitFor(() => expect(archivedCalls).toEqual([{ id: "p1", archived: true }]))
+    await waitFor(() => expect(screen.queryByTestId("project-card")).toBeNull())
+    expect(screen.getByTestId("dashboard-show-hidden-projects")).toBeTruthy()
+  })
+
   test("a project with a working agent reads as active", async () => {
     renderDashboard({
       "projects.list": () => [project("p1", "Active Project")],
@@ -123,7 +189,7 @@ describe("Dashboard", () => {
     await screen.findByTestId("project-card")
     expect(screen.queryByTestId("card-size-slider")).toBeNull()
     expect(screen.getByTestId("dashboard-grid").getAttribute("data-card-grid-base-column")).toBe(
-      "200",
+      "220",
     )
     expect(screen.getByTestId("project-card-grid-item").getAttribute("data-card-span")).toBe("1x1")
     expect(screen.getByTestId("card-resize-handle")).toBeTruthy()
@@ -288,7 +354,60 @@ describe("Dashboard", () => {
       expect(screen.getByTestId("dashboard-empty")).toBeTruthy()
     })
     expect(screen.queryByTestId("project-card")).toBeNull()
-    expect(screen.getByTestId("dashboard-grid").hidden).toBe(true)
+    expect(screen.getByRole("button", { name: "New project" })).toBeTruthy()
+    expect(screen.getByTestId("dashboard-grid").hidden).toBe(false)
+    expect(screen.queryByTestId("project-card-grid-item")).toBeNull()
+    expect(screen.queryByTestId("card-resize-handle")).toBeNull()
+  })
+
+  test("keeps the New project card last and outside persisted project-card layout state", async () => {
+    renderDashboard({
+      "projects.list": () => [project("p1", "Photon Drift"), project("p2", "Lattice QCD")],
+      "workspaces.list": () => [],
+    })
+
+    await screen.findAllByTestId("project-card-grid-item")
+    const trigger = screen.getByRole("button", { name: "New project" })
+    const shadowCard = trigger.closest('[data-testid="new-project-card"]')
+    if (!(shadowCard instanceof HTMLElement)) throw new Error("New project card missing")
+    const grid = screen.getByTestId("dashboard-grid")
+
+    expect(grid.lastElementChild).toBe(shadowCard)
+    expect(shadowCard.hasAttribute("data-card-grid-item")).toBe(false)
+    expect(screen.getAllByTestId("project-card-grid-item")).toHaveLength(2)
+    expect(screen.getAllByTestId("card-resize-handle")).toHaveLength(2)
+  })
+
+  test("opens the shared three-option Add Project chooser from the keyboard-accessible card", async () => {
+    renderDashboard({ "projects.list": () => [] })
+
+    const trigger = await screen.findByRole("button", { name: "New project" })
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+    fireEvent.click(trigger)
+
+    expect(screen.getByTestId("add-project-menu")).toBeTruthy()
+    expect(screen.getByTestId("add-project-folder")).toBeTruthy()
+    expect(screen.getByTestId("add-project-clone")).toBeTruthy()
+    expect(screen.getByTestId("add-project-template")).toBeTruthy()
+  })
+
+  test("surfaces Add Project errors from the Dashboard card", async () => {
+    renderDashboard({
+      "projects.list": () => [],
+      "system.pickDirectory": () => {
+        throw new Error("Folder picker unavailable")
+      },
+    })
+
+    fireEvent.click(await screen.findByRole("button", { name: "New project" }))
+    fireEvent.click(screen.getByTestId("add-project-folder"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("add-project-error").textContent).toContain(
+        "Folder picker unavailable",
+      )
+    })
   })
 
   test("clears legacy per-card spans when the result becomes empty", async () => {
@@ -304,7 +423,8 @@ describe("Dashboard", () => {
     await queryClient.invalidateQueries()
 
     await screen.findByTestId("dashboard-empty")
-    expect(screen.getByTestId("dashboard-grid").hidden).toBe(true)
+    expect(screen.getByTestId("dashboard-grid").hidden).toBe(false)
+    expect(screen.getByRole("button", { name: "New project" })).toBeTruthy()
     await waitFor(() => {
       expect(window.localStorage.getItem("pi-lab.cardGrid.dashboard.spans")).toBeNull()
     })

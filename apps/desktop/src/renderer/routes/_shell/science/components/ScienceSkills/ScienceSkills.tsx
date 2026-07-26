@@ -207,6 +207,8 @@ export function ScienceSkills() {
         <QuickFind
           ariaLabel="Find a skill"
           placeholder="Find a skill…"
+          scopeLabel="Skills"
+          allowGlobalSearch
           // The skills currently shown in this tab (narrowed by the search box, if any).
           items={filtered.map(
             (skill): QuickFindItem => ({

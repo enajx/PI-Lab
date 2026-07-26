@@ -38,6 +38,10 @@ import {
   DEFAULT_SSH_EXEC,
   DEFAULT_WORKFLOW_PROCESS_RUNNER,
 } from "./trpc/context"
+import {
+  AnalysisInteractiveController,
+  registerAnalysisReportScheme,
+} from "./trpc/science/analysis/interactiveController"
 import { seedWritableTemplate } from "./trpc/template"
 import { installAppMenu } from "./window/appMenu"
 import { createMainWindow } from "./window/mainWindow"
@@ -65,6 +69,7 @@ export type { AppRouter } from "./trpc/appRouter"
 // name from package.json `name` (`@pi-lab/desktop`) and scatters Chromium state
 // under an `@pi-lab/` folder. Must precede any getPath("userData") access.
 app.setName("PI Lab")
+registerAnalysisReportScheme()
 
 // Step 1 — redirect on-disk state before Electron (or the DB) touches the
 // default userData path. Honors PI_LAB_DATA_DIR (md/engineering/testing-and-build.md).
@@ -102,6 +107,7 @@ let ipcHandler: ReturnType<typeof createIPCHandler> | null = null
 // child's stdio-pipe EOF). Production keeps the daemon detached so sessions
 // survive a restart.
 const terminalSupervisor = new TerminalSupervisor(isTestMode ? { reapDaemonOnDispose: true } : {})
+const analysisInteractive = new AnalysisInteractiveController()
 
 // The launchable agent catalog. In test mode it includes the deterministic
 // test-echo agent so the E2E can launch an assertable agent (md/engineering/testing-and-build.md).
@@ -154,6 +160,7 @@ function createAppContext(): AppContext {
     pyToolsExec: DEFAULT_PY_TOOLS_EXEC,
     discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
     resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
+    analysisInteractive,
     notifications: notificationBrokers,
     activityMonitor,
     notificationService,
@@ -211,6 +218,7 @@ app
 
     // Step 3 — migrate the DB; the renderer's `app-ready` marker proves this ran.
     const dbStatus = initDatabase()
+    analysisInteractive.installProtocolHandler()
     console.log(
       `[pi-lab] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
     )
@@ -282,4 +290,5 @@ app.on("before-quit", () => {
   activityMonitor?.dispose()
   activityRegistry.dispose()
   terminalSupervisor.dispose()
+  analysisInteractive.dispose()
 })

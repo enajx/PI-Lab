@@ -20,6 +20,7 @@ import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react"
@@ -36,7 +37,6 @@ import {
   useFilesPanelWidth,
   useShowFilesPanel,
 } from "../../../../../preferences/preferences"
-import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { Terminal } from "../../../../../Terminal"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { KindBadge } from "../KindBadge"
@@ -49,7 +49,10 @@ interface CentralPanelProps {
   client: PiLabTrpcClient
   /** Main-checkout workspace — drives quick-open search + file reads. */
   workspaceId: string
+  /** Project name used by the contextual fuzzy-search scope label. */
+  projectName?: string
   settings: EditorSettings
+  gitAvailable?: boolean
   onUpdateEditorSettings: (patch: Partial<EditorSettings>) => void
   /** When the right sidebar is collapsed, the panel toolbar shows a button to
    * bring it back (the sidebar isn't mounted to host its own expand affordance). */
@@ -61,6 +64,7 @@ interface CentralPanelProps {
    * (the right-sidebar Files tab is hidden while the left panel is on).
    */
   onPinFile?: (relPath: string) => void
+  onSaveUntitled?: (relPath: string) => void
 }
 
 /**
@@ -76,11 +80,14 @@ export function CentralPanel({
   controller,
   client,
   workspaceId,
+  projectName,
   settings,
+  gitAvailable,
   onUpdateEditorSettings,
   rightSidebarCollapsed,
   onExpandRightSidebar,
   onPinFile,
+  onSaveUntitled,
 }: CentralPanelProps) {
   const { editor, sessions, active } = controller
   const [quickOpen, setQuickOpen] = useState(false)
@@ -90,16 +97,13 @@ export function CentralPanel({
   const [filesWidth, setFilesWidth] = useFilesPanelWidth()
   const runDestination = settings.pythonRunDestination ?? "central"
 
-  // Quick-open (⌘F, rebindable) opens the file palette from anywhere in the view.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (eventMatchesShortcut(event, "quick-open")) {
-        event.preventDefault()
-        setQuickOpen(true)
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+  // The shell owns the actual keyboard chord so its capture listener always runs before any
+  // transient panel. This project view receives the resulting intent.
+  useLayoutEffect(() => {
+    const onOpenProjectFileFinder = () => setQuickOpen(true)
+    window.addEventListener("pi-lab:open-project-file-finder", onOpenProjectFileFinder)
+    return () =>
+      window.removeEventListener("pi-lab:open-project-file-finder", onOpenProjectFileFinder)
   }, [])
 
   useEffect(() => {
@@ -395,7 +399,7 @@ export function CentralPanel({
             const isActive = active?.type === "session" && active.id === session.id
             return (
               <div
-                key={session.id}
+                key={`${session.id}:${session.sessionId}`}
                 data-testid="central-session"
                 data-session-kind={session.kind}
                 className={cn("min-h-0 flex-1 flex-col", isActive ? "flex" : "hidden")}
@@ -417,6 +421,7 @@ export function CentralPanel({
                 belowEditorRun={controller.belowEditorRun}
                 onCloseBelowEditorRun={controller.closeBelowEditorRun}
                 client={client}
+                onSaveUntitled={onSaveUntitled}
               />
             </div>
           ) : null}
@@ -436,6 +441,7 @@ export function CentralPanel({
       {quickOpen ? (
         <QuickOpen
           workspaceId={workspaceId}
+          projectName={projectName}
           onOpenFile={openFile}
           onClose={() => setQuickOpen(false)}
         />
@@ -447,6 +453,7 @@ export function CentralPanel({
           initialAgentId={controller.preferredAgentId}
           pending={controller.pendingAgent}
           error={controller.launchError}
+          gitAvailable={gitAvailable !== false}
           onStart={controller.launchChosenAgent}
           onClose={controller.closeAgentChooser}
         />
@@ -488,6 +495,7 @@ function NewAgentDialog({
   initialAgentId,
   pending,
   error,
+  gitAvailable,
   onStart,
   onClose,
 }: {
@@ -495,6 +503,7 @@ function NewAgentDialog({
   initialAgentId: string
   pending: boolean
   error: string | null
+  gitAvailable: boolean
   onStart: (agentId: string, workspaceMode: "main" | "worktree") => void
   onClose: () => void
 }) {
@@ -532,7 +541,9 @@ function NewAgentDialog({
               New session
             </h2>
             <p className="mt-1 text-muted-foreground text-xs">
-              Start a CLI coding agent in the project’s main checkout or its own worktree.
+              {gitAvailable
+                ? "Start a CLI coding agent in the project’s main checkout or its own worktree."
+                : "Start one CLI coding agent in this folder. Initialize Git to use worktrees or concurrent agents."}
             </p>
           </div>
           <button type="button" aria-label="Close new session" onClick={onClose}>
@@ -625,7 +636,8 @@ function NewAgentDialog({
             </label>
             <label
               className={cn(
-                "cursor-pointer rounded-md border p-2 text-sm",
+                "rounded-md border p-2 text-sm",
+                gitAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-50",
                 workspaceMode === "worktree" ? "border-primary bg-primary/5" : "border-border",
               )}
             >
@@ -635,6 +647,7 @@ function NewAgentDialog({
                 aria-label="Worktree"
                 value="worktree"
                 checked={workspaceMode === "worktree"}
+                disabled={!gitAvailable}
                 onChange={() => setWorkspaceMode("worktree")}
                 className="sr-only"
               />
@@ -679,6 +692,7 @@ function FileSurface({
   belowEditorRun,
   onCloseBelowEditorRun,
   client,
+  onSaveUntitled,
 }: {
   editor: EditorBuffersApi
   settings: EditorSettings
@@ -687,8 +701,12 @@ function FileSurface({
   belowEditorRun: CentralPanelController["belowEditorRun"]
   onCloseBelowEditorRun: () => void
   client: PiLabTrpcClient
+  onSaveUntitled?: (relPath: string) => void
 }) {
   const active = editor.active
+  const markdownActive = active ? isMarkdownPath(active.relPath) : false
+  const [markdownModes, setMarkdownModes] = useState<Record<string, "render" | "source">>({})
+  const markdownMode = active ? (markdownModes[active.relPath] ?? "render") : "render"
   return (
     <>
       {active?.externalChange ? (
@@ -710,12 +728,19 @@ function FileSurface({
             relPath={active.relPath}
             initialDoc={active.content}
             onChange={(doc) => editor.onEdit(active.relPath, doc)}
-            onSave={() => void editor.saveFile(active.relPath)}
+            onSave={() => {
+              if (/^untitled(?:-\d+)?\.md$/i.test(active.relPath)) {
+                onSaveUntitled?.(active.relPath)
+                return
+              }
+              void editor.saveFile(active.relPath)
+            }}
             onRun={isPythonPath(active.relPath) ? onRunPython : undefined}
             vim={settings.vim}
             theme={settings.editorTheme}
             customThemes={settings.customEditorThemes ?? []}
             diagnostics={editor.diagnosticsSource}
+            markdownMode={markdownActive ? markdownMode : undefined}
           />
         ) : null}
       </div>
@@ -738,9 +763,19 @@ function FileSurface({
         listPythonEnvironments={editor.listPythonEnvironments}
         selectPythonEnvironment={editor.selectPythonEnvironment}
         choosePythonEnvironment={editor.choosePythonEnvironment}
+        markdownMode={markdownActive ? markdownMode : undefined}
+        onMarkdownModeChange={
+          active
+            ? (mode) => setMarkdownModes((current) => ({ ...current, [active.relPath]: mode }))
+            : undefined
+        }
       />
     </>
   )
+}
+
+function isMarkdownPath(relPath: string): boolean {
+  return /\.(?:md|markdown|mdx)$/i.test(relPath)
 }
 
 function BelowEditorTerminal({
@@ -916,7 +951,7 @@ function Launcher({
       <div className="flex flex-wrap items-center justify-center gap-2">
         <LauncherButton
           testId="launcher-agent"
-          icon={<Play className="size-4" aria-hidden />}
+          icon={<Bot className="size-4" aria-hidden />}
           label="New agent"
           description="Start a coding agent in this project workspace."
           disabled={pendingAgent}

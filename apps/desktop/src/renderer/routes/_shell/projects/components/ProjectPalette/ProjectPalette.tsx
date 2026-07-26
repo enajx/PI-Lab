@@ -27,18 +27,21 @@ export function ProjectPalette({
   controller,
   workspaceId,
   pinnedPanels,
+  gitAvailable,
   onSelectPanel,
 }: {
   controller: CentralPanelController
   workspaceId: string
   /** Working-dir-relative `.md` paths pinned as sidebar panels (for the switch-panel list). */
   pinnedPanels: string[]
+  /** Whether Git-backed project panels are available. */
+  gitAvailable?: boolean
   /** Switch (and reveal) the right-sidebar panel with this id. */
   onSelectPanel: (panelId: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
-  const panels = useRightSidebarPanels(pinnedPanels)
+  const panels = useRightSidebarPanels(pinnedPanels, gitAvailable)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

@@ -13,3 +13,14 @@ export function rememberSettingsReturnRoute(route: SettingsReturnRoute): void {
 export function readSettingsReturnRoute(): SettingsReturnRoute {
   return returnRoute ?? { pathname: "/", search: {} }
 }
+
+/** Capture the current hash-router location before a plain settings deep link. */
+export function rememberCurrentSettingsReturnRoute(): void {
+  if (typeof window === "undefined") return
+  const fragment = window.location.hash.replace(/^#/, "") || "/"
+  const url = new URL(fragment, "https://pi-lab.local")
+  rememberSettingsReturnRoute({
+    pathname: url.pathname,
+    search: Object.fromEntries(url.searchParams),
+  })
+}

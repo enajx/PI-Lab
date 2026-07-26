@@ -120,6 +120,20 @@
       "when": 1784727519730,
       "tag": "0016_shallow_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1785060090564,
+      "tag": "0017_chubby_cerebro",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1785072507374,
+      "tag": "0018_dry_millenium_guard",
+      "breakpoints": true
     }
   ]
 }

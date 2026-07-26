@@ -9,9 +9,13 @@ function notificationHarness() {
 }
 
 describe("createNativeNotificationAdapter", () => {
-  test("passes the resolved Pi tile to native notification construction", () => {
+  test.each([
+    "linux",
+    "win32",
+  ] as const)("passes the resolved Pi tile to native notification construction on %s", (platform) => {
     const harness = notificationHarness()
     const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+      platform,
       isSupported: () => true,
       create: harness.create,
     })
@@ -30,9 +34,30 @@ describe("createNativeNotificationAdapter", () => {
     expect(harness.show).toHaveBeenCalledOnce()
   })
 
+  test("omits a content icon on macOS so the app bundle provides sender identity once", () => {
+    const harness = notificationHarness()
+    const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+      platform: "darwin",
+      isSupported: () => true,
+      create: harness.create,
+    })
+
+    adapter.deliver(
+      { title: "Agent waiting", body: "Codex needs input", silent: true },
+      { onClick: vi.fn(), onFailure: vi.fn() },
+    )
+
+    expect(harness.create).toHaveBeenCalledWith({
+      title: "Agent waiting",
+      body: "Codex needs input",
+      silent: true,
+    })
+  })
+
   test("omits the icon when the asset could not be resolved", () => {
     const harness = notificationHarness()
     const adapter = createNativeNotificationAdapter(null, {
+      platform: "win32",
       isSupported: () => true,
       create: harness.create,
     })
@@ -54,6 +79,7 @@ describe("createNativeNotificationAdapter", () => {
     const onClick = vi.fn()
     const onFailure = vi.fn()
     const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+      platform: "linux",
       isSupported: () => true,
       create: harness.create,
     })
@@ -73,6 +99,7 @@ describe("createNativeNotificationAdapter", () => {
     const retained = new Set<ReturnType<typeof harness.create>>()
     const onClick = vi.fn()
     const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+      platform: "win32",
       isSupported: () => true,
       create: harness.create,
       retainedNotifications: retained,

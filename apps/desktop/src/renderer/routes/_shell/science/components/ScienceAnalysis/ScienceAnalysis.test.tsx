@@ -1,7 +1,7 @@
 import type { Project } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ScienceAnalysis } from "./ScienceAnalysis"
@@ -30,6 +30,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     color: null,
     thumbnail: null,
     gradient: null,
+    digitalRain: false,
     metadata: null,
     agentConfig: null,
     sortIndex: 0,
@@ -60,6 +61,30 @@ function listing(files: Array<{ relPath: string; name: string; kind: string }>) 
 }
 
 describe("ScienceAnalysis", () => {
+  test("creates HTML and marimo reports from the Analysis header", async () => {
+    const createTemplate = vi.fn(() => ({ relPath: "reports/report-2.html" }))
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([{ relPath: "reports/report-2.html", name: "report-2.html", kind: "report" }]),
+      "science.analysis.createTemplate": createTemplate,
+      "science.analysis.openInteractive": () => ({ type: "html", url: "pi-lab-report://test" }),
+      "science.analysis.closeInteractive": () => undefined,
+    })
+
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "p1"),
+    )
+    fireEvent.click(await screen.findByTestId("analysis-new-html-report"))
+    await waitFor(() =>
+      expect(createTemplate).toHaveBeenCalledWith({ projectId: "p1", kind: "html" }),
+    )
+    fireEvent.click(screen.getByTestId("analysis-new-marimo-notebook"))
+    await waitFor(() =>
+      expect(createTemplate).toHaveBeenCalledWith({ projectId: "p1", kind: "marimo" }),
+    )
+  })
+
   test("renders a row per discovered file", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
@@ -194,6 +219,138 @@ describe("ScienceAnalysis", () => {
     await waitFor(() => {
       expect(screen.getByTestId("analysis-preview-metadata")).toBeTruthy()
     })
+  })
+
+  test("selecting an HTML report renders a script-only sandbox without app capabilities", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([{ relPath: "reports/live.html", name: "live.html", kind: "report" }]),
+      "science.analysis.openInteractive": () => ({
+        type: "html",
+        url: "pi-lab-report://report-token/live.html",
+      }),
+      "science.analysis.closeInteractive": () => undefined,
+    })
+
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+
+    const frame = (await screen.findByTestId("analysis-preview-html")) as HTMLIFrameElement
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-same-origin allow-forms")
+    expect(frame.getAttribute("src")).toBe("pi-lab-report://report-token/live.html")
+    expect(frame.hasAttribute("allow")).toBe(false)
+  })
+
+  test("marimo startup errors are visible and switching artifacts requests cleanup", async () => {
+    const closes: unknown[] = []
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          { relPath: "reports/live.py", name: "live.py", kind: "marimo" },
+          { relPath: "data.csv", name: "data.csv", kind: "csv" },
+        ]),
+      "science.analysis.openInteractive": () =>
+        Promise.reject(new Error("marimo is not installed")),
+      "science.analysis.closeInteractive": (input) => {
+        closes.push(input)
+      },
+      "science.analysis.preview": () => ({
+        type: "table",
+        headers: ["value"],
+        rows: [["1"]],
+        totalRows: 1,
+        truncated: false,
+      }),
+    })
+
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(2))
+    // Canonical grouping places CSV before marimo, so select by stable path.
+    fireEvent.click(
+      document.querySelector(
+        '[data-testid="analysis-file"][data-rel-path="reports/live.py"]',
+      ) as HTMLElement,
+    )
+    expect((await screen.findByTestId("analysis-interactive-error")).textContent).toContain(
+      "marimo is not installed",
+    )
+
+    fireEvent.click(
+      document.querySelector(
+        '[data-testid="analysis-file"][data-rel-path="data.csv"]',
+      ) as HTMLElement,
+    )
+    await waitFor(() => expect(closes).toHaveLength(1))
+  })
+
+  test("rapid interactive switches scope stale cleanup to the prior preview lease", async () => {
+    const opens: Array<Record<string, unknown>> = []
+    const closes: Array<Record<string, unknown>> = []
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          { relPath: "reports/first.html", name: "first.html", kind: "report" },
+          { relPath: "reports/second.html", name: "second.html", kind: "report" },
+        ]),
+      "science.analysis.openInteractive": (input) => {
+        opens.push(input as Record<string, unknown>)
+        return {
+          type: "html",
+          url: `pi-lab-report://report-token/${String((input as Record<string, unknown>).relPath)}`,
+        }
+      },
+      "science.analysis.closeInteractive": (input) => {
+        closes.push(input as Record<string, unknown>)
+      },
+    })
+
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(2))
+    fireEvent.click(
+      document.querySelector(
+        '[data-testid="analysis-file"][data-rel-path="reports/first.html"]',
+      ) as HTMLElement,
+    )
+    await screen.findByTestId("analysis-preview-html")
+
+    fireEvent.click(
+      document.querySelector(
+        '[data-testid="analysis-file"][data-rel-path="reports/second.html"]',
+      ) as HTMLElement,
+    )
+    await waitFor(() => expect(opens).toHaveLength(2))
+    await waitFor(() => expect(closes).toHaveLength(1))
+
+    expect(opens[0]?.ownerId).toBe(opens[1]?.ownerId)
+    expect(closes[0]?.leaseId).toBe(opens[0]?.leaseId)
+    expect(closes[0]?.leaseId).not.toBe(opens[1]?.leaseId)
+  })
+
+  test("marimo exposes running, stopping, and stopped states", async () => {
+    let finishClose: () => void = () => {}
+    const closing = new Promise<void>((resolve) => {
+      finishClose = resolve
+    })
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([{ relPath: "reports/live.py", name: "live.py", kind: "marimo" }]),
+      "science.analysis.openInteractive": () => ({
+        type: "marimo",
+        url: "http://127.0.0.1:41000/",
+        runtime: "project/.venv",
+      }),
+      "science.analysis.closeInteractive": () => closing,
+    })
+
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+    expect(await screen.findByTestId("analysis-marimo-status")).toBeTruthy()
+    expect(screen.getByTestId("analysis-marimo-status").textContent).toContain("project/.venv")
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
+    expect(await screen.findByTestId("analysis-interactive-stopping")).toBeTruthy()
+    finishClose()
+    expect(await screen.findByTestId("analysis-interactive-stopped")).toBeTruthy()
   })
 
   test("the search filter fuzzy-matches and highlights the visible rows", async () => {

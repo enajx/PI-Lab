@@ -1,6 +1,6 @@
 import { BUILTIN_AGENTS } from "@pi-lab/shared"
 import { describe, expect, test } from "vitest"
-import { buildAgentCatalog, TEST_AGENT_ID } from "./context"
+import { buildAgentCatalog, TEST_ACTIVITY_AGENT_ID, TEST_AGENT_ID } from "./context"
 
 describe("buildAgentCatalog", () => {
   test("normal mode is exactly the built-ins (no test agent leaks in)", () => {
@@ -14,9 +14,12 @@ describe("buildAgentCatalog", () => {
     // Built-ins are preserved, in order, ahead of the test agent.
     expect(catalog.slice(0, BUILTIN_AGENTS.length)).toEqual(BUILTIN_AGENTS)
     const testAgent = catalog.find((agent) => agent.id === TEST_AGENT_ID)
+    const activityAgent = catalog.find((agent) => agent.id === TEST_ACTIVITY_AGENT_ID)
     expect(testAgent).toBeDefined()
     // It runs a local binary with a marker-emitting one-liner — no network/creds.
     expect(testAgent?.command).toBe(process.execPath)
     expect(testAgent?.defaultArgs?.join(" ")).toContain("AGENT-UI-OK")
+    expect(activityAgent?.command).toBe(process.execPath)
+    expect(activityAgent?.defaultArgs?.join(" ")).toContain("AGENT-ACTIVE")
   })
 })

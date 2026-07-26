@@ -15,8 +15,8 @@ import { useEmojiTagPalette } from "../../../../../preferences/preferences"
  *
  * Emoji tags draw from a single GLOBAL palette ({@link useEmojiTagPalette}) shared
  * across every project: a chip is *active* when assigned to THIS project, clicking
- * toggles that assignment only, "+" adds a new emoji to the global palette, and
- * right-clicking a chip removes it from the palette.
+ * toggles that assignment only, "+" opens a cross-platform emoji picker whose
+ * choice joins the global palette, and right-clicking a chip removes it from it.
  */
 
 /**
@@ -73,6 +73,55 @@ function normalizeMetadata(input: {
 const FIELD_CLASS =
   "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
 
+// A compact, dependency-free picker keeps the selection experience consistent on
+// every desktop platform instead of relying on an OS-specific character viewer.
+const EMOJI_PICKER_OPTIONS = [
+  "😀",
+  "😂",
+  "🥳",
+  "😍",
+  "🤔",
+  "🙌",
+  "👏",
+  "💪",
+  "🧠",
+  "💡",
+  "🔥",
+  "✨",
+  "⭐",
+  "🌟",
+  "🚀",
+  "🛰️",
+  "🔬",
+  "🧪",
+  "🧬",
+  "📊",
+  "📈",
+  "📝",
+  "📚",
+  "💻",
+  "⚙️",
+  "🛠️",
+  "🔭",
+  "🧮",
+  "🌍",
+  "🌱",
+  "☀️",
+  "🌙",
+  "🐍",
+  "🦾",
+  "🤖",
+  "🦠",
+  "🧫",
+  "🧲",
+  "⚛️",
+  "🔗",
+  "💼",
+  "🥭",
+  "🐬",
+  "☑️",
+] as const
+
 export function EditProjectDialog({
   project,
   onClose,
@@ -94,19 +143,23 @@ export function EditProjectDialog({
   // already on the project (e.g. 🧠🔥) stays visible and manageable even if it was
   // never added to the palette.
   const [palette, setPalette] = useEmojiTagPalette()
-  const [addingEmoji, setAddingEmoji] = useState<boolean>(false)
-  const [emojiInput, setEmojiInput] = useState<string>("")
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState<boolean>(false)
   const paletteChips = [...palette, ...emojiTags.filter((emoji) => !palette.includes(emoji))]
 
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
+      if (event.key !== "Escape") return
+      if (emojiPickerOpen) {
+        setEmojiPickerOpen(false)
+        return
+      }
+      onClose()
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [onClose])
+  }, [emojiPickerOpen, onClose])
 
   // Toggle whether THIS project is tagged with `emoji` (project-only; the global
   // palette is untouched).
@@ -116,14 +169,11 @@ export function EditProjectDialog({
     )
   }
 
-  // Add a typed/pasted emoji to the GLOBAL palette and auto-assign it here.
-  const addEmojiToPalette = (raw: string) => {
-    const emoji = raw.trim()
-    if (emoji.length === 0) return
+  // Add a picker choice to the GLOBAL palette and auto-assign it here.
+  const addEmojiToPalette = (emoji: string) => {
     if (!palette.includes(emoji)) setPalette([...palette, emoji])
     setEmojiTags((current) => (current.includes(emoji) ? current : [...current, emoji]))
-    setEmojiInput("")
-    setAddingEmoji(false)
+    setEmojiPickerOpen(false)
   }
 
   // Right-click: drop `emoji` from the global palette and unassign it from this
@@ -228,39 +278,16 @@ export function EditProjectDialog({
                   </button>
                 )
               })}
-              {addingEmoji ? (
-                <input
-                  // biome-ignore lint/a11y/noAutofocus: revealed on demand by the "+" control; focusing it is the point.
-                  autoFocus
-                  type="text"
-                  data-testid="edit-project-emoji-input"
-                  aria-label="Add an emoji to the palette"
-                  className="size-8 rounded-md border border-brand bg-background text-center text-base outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-                  value={emojiInput}
-                  onChange={(event) => setEmojiInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault()
-                      addEmojiToPalette(emojiInput)
-                    }
-                  }}
-                  onBlur={() => {
-                    setEmojiInput("")
-                    setAddingEmoji(false)
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  data-testid="edit-project-emoji-add"
-                  aria-label="Add an emoji to the palette"
-                  title="Add an emoji to the palette"
-                  onClick={() => setAddingEmoji(true)}
-                  className="flex size-8 items-center justify-center rounded-md border border-border border-dashed text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-                >
-                  <Plus className="size-4" aria-hidden />
-                </button>
-              )}
+              <button
+                type="button"
+                data-testid="edit-project-emoji-add"
+                aria-label="Choose an emoji to add to the palette"
+                title="Choose an emoji"
+                onClick={() => setEmojiPickerOpen(true)}
+                className="flex size-8 items-center justify-center rounded-md border border-border border-dashed text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              >
+                <Plus className="size-4" aria-hidden />
+              </button>
             </div>
             <span className="text-[11px] text-muted-foreground">
               Click to tag this project · right-click a tag to remove it from the palette
@@ -327,6 +354,42 @@ export function EditProjectDialog({
           </button>
         </div>
       </div>
+
+      {emojiPickerOpen ? (
+        // biome-ignore lint/a11y/noStaticElementInteractions: this is the picker backdrop; its visible dialog contains the keyboard-accessible choices, and Escape closes it.
+        // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled at dialog level and provides the keyboard dismissal path.
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-background/50 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setEmojiPickerOpen(false)
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose an emoji"
+            data-testid="edit-project-emoji-picker"
+            className="w-full max-w-sm rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
+          >
+            <p className="mb-2 font-medium text-sm">Choose an emoji</p>
+            <div className="grid grid-cols-8 gap-1">
+              {EMOJI_PICKER_OPTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  data-testid="edit-project-emoji-picker-choice"
+                  data-emoji={emoji}
+                  aria-label={`Add ${emoji}`}
+                  onClick={() => addEmojiToPalette(emoji)}
+                  className="flex size-9 items-center justify-center rounded-md text-lg transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

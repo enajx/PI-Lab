@@ -18,7 +18,7 @@ import { and, eq } from "drizzle-orm"
 import { z } from "zod"
 import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { nonInteractiveFailure } from "../../automations/dispatch"
-import { computeGitStateHash } from "../../git"
+import { computeGitStateHash, isGitRepo } from "../../git"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
@@ -445,6 +445,12 @@ export async function runProjectWorkflow(
   const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
   if (!project) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+  }
+  if (!(await isGitRepo(project.repoPath))) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Project workflows require Git. Initialize Git for this project first.",
+    })
   }
 
   const currentHash = await computeGitStateHash(project.repoPath)

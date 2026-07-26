@@ -136,6 +136,7 @@ export function ScienceTasks() {
       sessionId: result.sessionId,
       label: task.title,
       wsKind: result.kind,
+      launch: { type: "agent", agentId, workspaceMode: "main" },
     })
     await navigate({ to: "/projects/$projectId", params: { projectId: task.projectId } })
   }

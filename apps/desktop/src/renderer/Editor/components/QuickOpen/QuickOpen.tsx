@@ -1,9 +1,13 @@
+import { fuzzyMatch } from "@pi-lab/shared"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { FolderGit2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTRPC } from "../../../trpc/react"
 
 interface QuickOpenProps {
   workspaceId: string
+  /** Name of the active project, shown in the scope label when available. */
+  projectName?: string
   /** Open the chosen file into the editor (working-dir-relative path). */
   onOpenFile: (relPath: string) => void
   /** Dismiss the palette without opening anything. */
@@ -23,11 +27,18 @@ const DEBOUNCE_MS = 120
  * Results scroll in a native bounded list (AGENTS.md Pitfalls #3). The palette owns no
  * file I/O — it only turns a chosen path into an `onOpenFile` call.
  */
-export function QuickOpen({ workspaceId, onOpenFile, onClose, filter }: QuickOpenProps) {
+export function QuickOpen({
+  workspaceId,
+  projectName,
+  onOpenFile,
+  onClose,
+  filter,
+}: QuickOpenProps) {
   const trpc = useTRPC()
   const [query, setQuery] = useState("")
   const [debounced, setDebounced] = useState("")
   const [highlight, setHighlight] = useState(0)
+  const [global, setGlobal] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   // Focus the input as soon as the palette mounts.
@@ -61,6 +72,13 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose, filter }: QuickOpe
   )
   const allHits = debounced.trim().length > 0 ? (searchQuery.data ?? []) : []
   const hits = filter ? allHits.filter((hit) => filter(hit.relPath)) : allHits
+  const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
+  const globalProjects = useMemo(() => {
+    const needle = query.trim()
+    return needle
+      ? projects.filter((project) => fuzzyMatch(needle, project.name) !== null)
+      : projects
+  }, [projects, query])
 
   // Reset the highlight to the top whenever the query (and thus the result set)
   // changes, so Enter always targets the best match for the current input.
@@ -70,6 +88,14 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose, filter }: QuickOpe
   }, [debounced])
 
   const choose = (index: number) => {
+    if (global) {
+      const project = globalProjects[index]
+      if (project) {
+        onClose()
+        window.location.hash = `#/projects/${project.id}`
+      }
+      return
+    }
     const hit = hits[index]
     if (hit) onOpenFile(hit.relPath)
   }
@@ -87,6 +113,10 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose, filter }: QuickOpe
     } else if (event.key === "Enter") {
       event.preventDefault()
       choose(highlight)
+    } else if (event.key === "Tab") {
+      event.preventDefault()
+      setGlobal((value) => !value)
+      setHighlight(0)
     }
   }
 
@@ -123,8 +153,50 @@ export function QuickOpen({ workspaceId, onOpenFile, onClose, filter }: QuickOpe
           placeholder="Search files by name…"
           className="shrink-0 border-border border-b bg-transparent px-4 py-3 text-foreground text-sm outline-none placeholder:text-muted-foreground"
         />
+        <div
+          data-testid="quick-open-scope"
+          className="border-border border-b px-4 py-1.5 text-muted-foreground text-xs"
+        >
+          Searching: {global ? "All projects" : (projectName ?? "Current project")}
+          <span className="ml-2 opacity-70">
+            {global ? "Tab to search in current project" : "Tab to search in all projects"}
+          </span>
+        </div>
         <ul className="min-h-0 flex-1 overflow-y-auto py-1">
-          {hits.length === 0 ? (
+          {global ? (
+            globalProjects.length === 0 ? (
+              <li
+                data-testid="quick-open-empty"
+                className="px-4 py-2 text-muted-foreground/70 text-xs"
+              >
+                No projects yet
+              </li>
+            ) : (
+              globalProjects.map((project, index) => (
+                <li key={project.id}>
+                  <button
+                    type="button"
+                    data-testid="quick-open-project-result"
+                    data-project-id={project.id}
+                    data-highlighted={index === highlight}
+                    onClick={() => choose(index)}
+                    onMouseEnter={() => setHighlight(index)}
+                    className={
+                      index === highlight
+                        ? "flex w-full items-center gap-2 bg-accent px-4 py-1.5 text-left text-foreground text-xs"
+                        : "flex w-full items-center gap-2 px-4 py-1.5 text-left text-muted-foreground text-xs hover:bg-accent/60"
+                    }
+                  >
+                    <FolderGit2 className="size-3.5 shrink-0 opacity-70" />
+                    <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                      {project.name}
+                    </span>
+                    <span className="truncate text-muted-foreground/70">{project.repoPath}</span>
+                  </button>
+                </li>
+              ))
+            )
+          ) : hits.length === 0 ? (
             <li
               data-testid="quick-open-empty"
               className="px-4 py-2 text-muted-foreground/70 text-xs"

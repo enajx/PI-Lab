@@ -1,7 +1,10 @@
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared"
 import { cn } from "@pi-lab/ui"
+import { useQuery } from "@tanstack/react-query"
+import { FolderGit2 } from "lucide-react"
 import type { ComponentType } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useTRPC } from "../trpc/react"
 
 /** One row in a {@link QuickFind} list. */
 export interface QuickFindItem {
@@ -34,6 +37,8 @@ export function QuickFind({
   emptyText,
   onSelect,
   onClose,
+  scopeLabel,
+  allowGlobalSearch = false,
 }: {
   ariaLabel: string
   placeholder: string
@@ -41,11 +46,35 @@ export function QuickFind({
   emptyText: string
   onSelect: (item: QuickFindItem) => void
   onClose: () => void
+  /** Visible description of the contextual results, e.g. "Project files". */
+  scopeLabel?: string
+  /** Tab cycles this contextual finder to the app-wide project finder. */
+  allowGlobalSearch?: boolean
 }) {
   const [query, setQuery] = useState("")
   const [highlight, setHighlight] = useState(0)
+  const [global, setGlobal] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
+  const trpc = useTRPC()
+  const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
+  const globalItems = useMemo<QuickFindItem[]>(
+    () =>
+      projects.map((project) => ({
+        id: project.id,
+        label: project.name,
+        hint: project.repoPath,
+        icon: FolderGit2,
+      })),
+    [projects],
+  )
+  const activeItems = global ? globalItems : items
+  const activeEmptyText = global
+    ? globalItems.length === 0
+      ? "No projects yet"
+      : "No matching projects"
+    : emptyText
+  const activeScopeLabel = global ? "All projects" : (scopeLabel ?? ariaLabel)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -53,8 +82,8 @@ export function QuickFind({
 
   const ranked = useMemo<RankedItem[]>(() => {
     const q = query.trim()
-    if (!q) return items.map((item) => ({ item, positions: [] }))
-    return items
+    if (!q) return activeItems.map((item) => ({ item, positions: [] }))
+    return activeItems
       .map((item) => ({ item, match: fuzzyMatch(q, item.label) }))
       .filter(
         (entry): entry is { item: QuickFindItem; match: { score: number; positions: number[] } } =>
@@ -62,7 +91,7 @@ export function QuickFind({
       )
       .sort((a, b) => b.match.score - a.match.score)
       .map((entry) => ({ item: entry.item, positions: entry.match.positions }))
-  }, [query, items])
+  }, [query, activeItems])
 
   const clamped = Math.min(highlight, Math.max(ranked.length - 1, 0))
 
@@ -81,7 +110,11 @@ export function QuickFind({
     const entry = ranked[index]
     if (!entry) return
     onClose()
-    onSelect(entry.item)
+    if (global) {
+      window.location.hash = `#/projects/${entry.item.id}`
+    } else {
+      onSelect(entry.item)
+    }
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -97,6 +130,10 @@ export function QuickFind({
     } else if (event.key === "Enter") {
       event.preventDefault()
       choose(clamped)
+    } else if (event.key === "Tab" && allowGlobalSearch) {
+      event.preventDefault()
+      setGlobal((value) => !value)
+      setHighlight(0)
     }
   }
 
@@ -131,13 +168,20 @@ export function QuickFind({
           placeholder={placeholder}
           className="shrink-0 border-border border-b bg-transparent px-4 py-3 text-foreground text-sm outline-none placeholder:text-muted-foreground"
         />
+        <div
+          data-testid="quick-find-scope"
+          className="border-border border-b px-4 py-1.5 text-muted-foreground text-xs"
+        >
+          Searching: {activeScopeLabel}
+          {allowGlobalSearch ? <span className="ml-2 opacity-70">Tab to switch</span> : null}
+        </div>
         <ul ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">
           {ranked.length === 0 ? (
             <li
               data-testid="quick-find-empty"
               className="px-4 py-2 text-muted-foreground/70 text-xs"
             >
-              {emptyText}
+              {activeEmptyText}
             </li>
           ) : (
             ranked.map((entry, index) => {

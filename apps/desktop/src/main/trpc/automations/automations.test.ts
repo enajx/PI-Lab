@@ -3,6 +3,8 @@
 // in-process pty-daemon + fake agent. Covers CRUD, prompt-version snapshotting,
 // the computed nextRunAt, runNow firing through the real session-start flow, and
 // the scheduler firing a due automation via the SAME dispatch path.
+import { mkdir } from "node:fs/promises"
+import { join } from "node:path"
 import { agentSessions, automationRuns, automations } from "@pi-lab/local-db"
 import type { TerminalAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
@@ -103,6 +105,7 @@ function harnessContext(): AppContext {
       interpreterPath: process.execPath,
       runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
     }),
+    analysisInteractive: h.analysisInteractive,
     notifications: createNotificationBrokers(),
     activityMonitor: h.activityMonitor,
     notificationService: h.notificationService,
@@ -380,6 +383,70 @@ describe("runNow — fires via the real session-start flow", () => {
 })
 
 describe("runNow — non-interactive process lifecycle", () => {
+  test("non-Git projects cannot race or mix non-interactive and interactive agents", async () => {
+    let finish: (result: NonInteractiveProcessResult) => void = () => {}
+    const completion = new Promise<NonInteractiveProcessResult>((resolve) => {
+      finish = resolve
+    })
+    const runner = vi.fn<NonInteractiveProcessRunner>(async () => ({ completion }))
+    await resetHarness([CODEX_ONE_SHOT_AGENT, WORKFLOW_AGENT], runner)
+    const plainDir = join(h.dataDir, "plain-automation")
+    await mkdir(plainDir)
+    const plainProject = await h.caller.projects.open({ path: plainDir })
+    const createAutomation = (name: string) =>
+      h.caller.automations.create({
+        projectId: plainProject.id,
+        agentId: CODEX_ONE_SHOT_AGENT.id,
+        executionMode: "noninteractive" as const,
+        name,
+        prompt: "review",
+        recurrenceRule: DAILY_9,
+        timezone: "UTC",
+      })
+    const first = await createAutomation("First")
+    const second = await createAutomation("Second")
+
+    const [firstRun, secondRun] = await Promise.all([
+      h.caller.automations.runNow({ id: first.id }),
+      h.caller.automations.runNow({ id: second.id }),
+    ])
+
+    expect(runner).toHaveBeenCalledTimes(1)
+    const simultaneousRuns = [firstRun.runId, secondRun.runId].map((runId) =>
+      h.db
+        .select()
+        .from(automationRuns)
+        .where(eq(automationRuns.id, runId ?? ""))
+        .get(),
+    )
+    expect(simultaneousRuns.filter((run) => run?.state === "running")).toHaveLength(1)
+    expect(simultaneousRuns.find((run) => run?.state === "failed")?.error).toContain("one agent")
+
+    const runningId = simultaneousRuns.find((run) => run?.state === "running")?.id ?? ""
+    finish({ code: 0, signal: null, error: null, stdout: "", stderr: "" })
+    await waitFor(
+      () =>
+        h.db.select().from(automationRuns).where(eq(automationRuns.id, runningId)).get()?.state ===
+        "completed",
+    )
+
+    const interactive = await h.caller.sessions.start({
+      projectId: plainProject.id,
+      agentId: WORKFLOW_AGENT.id,
+    })
+    await waitFor(() => h.activityMonitor.liveAgentCount(plainProject.id) === 1)
+    const third = await createAutomation("Third")
+    const thirdRun = await h.caller.automations.runNow({ id: third.id })
+    const thirdRow = h.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, thirdRun.runId ?? ""))
+      .get()
+    expect(thirdRow).toMatchObject({ state: "failed", error: expect.stringContaining("one agent") })
+    expect(runner).toHaveBeenCalledTimes(1)
+    await h.caller.terminal.kill({ sessionId: interactive.sessionId })
+  })
+
   test("runs exact argv in the active project and routes start/completion to the exact run", async () => {
     let finish: (result: NonInteractiveProcessResult) => void = () => {}
     const completion = new Promise<NonInteractiveProcessResult>((resolve) => {

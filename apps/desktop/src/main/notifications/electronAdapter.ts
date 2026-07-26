@@ -7,6 +7,7 @@ export function createElectronNativeNotificationAdapter(
   iconPath: string | null,
 ): NativeNotificationAdapter {
   return createNativeNotificationAdapter(iconPath, {
+    platform: process.platform,
     isSupported: () => Notification.isSupported(),
     create: (input) => new Notification(input),
   })

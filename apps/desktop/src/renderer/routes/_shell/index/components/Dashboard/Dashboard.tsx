@@ -1,9 +1,11 @@
 import { cn } from "@pi-lab/ui"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaffeineControl } from "../../../../../caffeine"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
-import { useSidebarCollapsed } from "../../../../../preferences/preferences"
+import { useShowHiddenProjects, useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { AddProjectMenu } from "../../../components/AddProjectMenu"
+import { ProjectVisibilityToggle } from "../../../components/ProjectVisibilityToggle"
 import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 import { ProjectCard } from "../ProjectCard"
 
@@ -19,10 +21,19 @@ import { ProjectCard } from "../ProjectCard"
  */
 export function Dashboard() {
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const [collapsed] = useSidebarCollapsed()
 
   const projects = projectsQuery.data ?? []
+  const hiddenCount =
+    projectsQuery.data === undefined
+      ? null
+      : projects.filter((project) => Boolean(project.archivedAt)).length
+  const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
+  const visibleProjects = showHidden ? projects : projects.filter((project) => !project.archivedAt)
+  const invalidateProjects = () =>
+    queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
 
   return (
     <div data-testid="dashboard" className="flex h-full flex-col">
@@ -34,6 +45,13 @@ export function Dashboard() {
       >
         <h1 className="font-semibold text-foreground text-sm tracking-tight">Projects Dashboard</h1>
         <div className={cn("flex shrink-0 items-center gap-3", titleBarControlClass(collapsed))}>
+          <ProjectVisibilityToggle
+            hiddenCount={hiddenCount ?? 0}
+            showHidden={showHidden}
+            collapsed={false}
+            testId="dashboard-show-hidden-projects"
+            onToggle={() => setShowHidden(!showHidden)}
+          />
           <CaffeineControl />
         </div>
       </header>
@@ -46,15 +64,23 @@ export function Dashboard() {
           >
             No projects yet.
           </p>
+        ) : visibleProjects.length === 0 ? (
+          <p
+            data-testid="dashboard-empty"
+            className="text-muted-foreground text-sm leading-relaxed"
+          >
+            All projects are hidden. Use Show hidden to restore one.
+          </p>
         ) : null}
         <CardGrid
           surface="dashboard"
-          cardIds={projectsQuery.data === undefined ? null : projects.map((project) => project.id)}
+          cardIds={
+            projectsQuery.data === undefined ? null : visibleProjects.map((project) => project.id)
+          }
           testId="dashboard-grid"
           className="gap-4"
-          hidden={projects.length === 0}
         >
-          {projects.map((project) => (
+          {visibleProjects.map((project) => (
             <ResizableCardGridItem
               key={project.id}
               cardId={project.id}
@@ -64,6 +90,7 @@ export function Dashboard() {
               <ProjectCard project={project} />
             </ResizableCardGridItem>
           ))}
+          <AddProjectMenu variant="dashboard-card" onAdded={() => void invalidateProjects()} />
         </CardGrid>
       </div>
     </div>

@@ -49,9 +49,27 @@ describe("CardGrid", () => {
     const grid = screen.getByTestId("test-grid")
     expect(screen.queryByRole("slider")).toBeNull()
     expect(grid.getAttribute("data-card-grid-scale")).toBe("1")
-    expect(grid.style.gridTemplateColumns).toContain("min(100%, 200px)")
+    expect(grid.style.gridTemplateColumns).toContain("min(100%, 220px)")
+    expect(grid.style.gridAutoRows).toContain("236px")
     expect(screen.getByTestId("item-alpha").getAttribute("data-card-span")).toBe("1x1")
     expect(screen.getByTestId("item-beta").getAttribute("data-card-span")).toBe("1x1")
+  })
+
+  test("keeps Dashboard columns bounded and left-aligned without changing Cluster fill", () => {
+    const dashboard = render(<GridHarness />)
+    const dashboardGrid = screen.getByTestId("test-grid")
+    expect(dashboardGrid.style.gridTemplateColumns).toBe(
+      "repeat(auto-fill, minmax(min(100%, 220px), 220px))",
+    )
+    expect(dashboardGrid.style.justifyContent).toBe("start")
+
+    dashboard.unmount()
+    render(<GridHarness surface="cluster" />)
+    const clusterGrid = screen.getByTestId("test-grid")
+    expect(clusterGrid.style.gridTemplateColumns).toBe(
+      "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    )
+    expect(clusterGrid.style.justifyContent).toBe("")
   })
 
   test("an invisible corner drag scales every card progressively and persists one surface value", () => {
@@ -64,7 +82,7 @@ describe("CardGrid", () => {
 
     const grid = screen.getByTestId("test-grid")
     expect(grid.getAttribute("data-card-grid-scale")).toBe("1.2")
-    expect(grid.style.gridTemplateColumns).toContain("min(100%, 240px)")
+    expect(grid.style.gridTemplateColumns).toContain("min(100%, 264px)")
     expect(window.localStorage.getItem("pi-lab.cardGrid.dashboard.scale")).toBe("1.2")
     expect(screen.getByTestId("item-alpha").getAttribute("data-card-span")).toBe("1x1")
     expect(screen.getByTestId("item-beta").getAttribute("data-card-span")).toBe("1x1")
@@ -73,6 +91,19 @@ describe("CardGrid", () => {
     unmount()
     render(<GridHarness />)
     expect(screen.getByTestId("test-grid").getAttribute("data-card-grid-scale")).toBe("1.2")
+  })
+
+  test("a vertical corner drag also resizes the shared Dashboard cards", () => {
+    render(<GridHarness />)
+    const handle = firstResizeHandle()
+
+    dispatchPointer(handle, "pointerdown", { button: 0, pointerId: 8, clientX: 0, clientY: 0 })
+    dispatchPointer(window, "pointermove", { pointerId: 8, clientX: 0, clientY: 128 })
+
+    const grid = screen.getByTestId("test-grid")
+    expect(grid.getAttribute("data-card-grid-scale")).toBe("1.2")
+    expect(grid.style.gridTemplateColumns).toContain("264px")
+    expect(grid.style.gridAutoRows).toContain("283px")
   })
 
   test("keyboard resizing is smooth, global, accessible, and clamps safely", () => {

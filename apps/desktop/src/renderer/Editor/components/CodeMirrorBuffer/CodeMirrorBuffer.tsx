@@ -1,12 +1,24 @@
 import { type Diagnostic, linter, lintGutter } from "@codemirror/lint"
-import { Compartment, EditorState } from "@codemirror/state"
+import { Compartment, EditorState, Prec } from "@codemirror/state"
 import { EditorView, keymap } from "@codemirror/view"
 import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { vim } from "@replit/codemirror-vim"
 import { basicSetup } from "codemirror"
-import { useEffect, useRef } from "react"
+import { type CSSProperties, useEffect, useRef, useState } from "react"
+import {
+  editorFontFamilyCss,
+  useEditorFontFamily,
+  useEditorFontSize,
+} from "../../../preferences/preferences"
 import { languageForPath } from "../../utils/languageForPath"
 import { editorThemeExtension } from "../editorThemes"
+import {
+  MARKDOWN_BLOCK_COMMANDS,
+  type MarkdownMode,
+  type MarkdownProjectEntry,
+  type MarkdownSlashCommand,
+  markdownRenderExtension,
+} from "./markdownEditing"
 
 /**
  * Source of diagnostics for one buffer. Given the current document text it
@@ -61,7 +73,33 @@ interface CodeMirrorBufferProps {
    * function re-runs the linter.
    */
   diagnostics?: DiagnosticsSource
+  /** Markdown-only source presentation. Render is WYSIWYM; Source is unstyled raw text. */
+  markdownMode?: MarkdownMode
+  /** Retained for callers while Markdown links move to the `@` completion follow-up. */
+  projectEntries?: MarkdownProjectEntry[]
 }
+
+interface MarkdownToolbarState {
+  from: number
+  to: number
+  top: number
+  left: number
+}
+
+interface MarkdownSlashState {
+  from: number
+  to: number
+  query: string
+  top: number
+  left: number
+}
+
+interface MarkdownOverlayState {
+  toolbar: MarkdownToolbarState | null
+  slash: MarkdownSlashState | null
+}
+
+const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: null }
 
 /**
  * Thin React wrapper around a CodeMirror 6 `EditorView` (md/engineering/architecture.md (renderer); spec:
@@ -89,9 +127,41 @@ export function CodeMirrorBuffer({
   theme,
   customThemes,
   diagnostics,
+  markdownMode,
+  projectEntries: _projectEntries,
 }: CodeMirrorBufferProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const [fontFamily] = useEditorFontFamily()
+  const [fontSize] = useEditorFontSize()
+  const markdown = isMarkdownPath(relPath)
+  const activeMarkdownMode: MarkdownMode = markdownMode ?? "source"
+  const [markdownOverlay, setMarkdownOverlay] =
+    useState<MarkdownOverlayState>(EMPTY_MARKDOWN_OVERLAY)
+  const [activeSlashIndex, setActiveSlashIndex] = useState(0)
+  const [slashGroup, setSlashGroup] = useState<MarkdownSlashCommand | null>(null)
+  const slashCommands = MARKDOWN_BLOCK_COMMANDS
+  const matchingSlashCommands = markdownOverlay.slash
+    ? (slashGroup?.children ?? slashCommands).filter((command) =>
+        slashGroup
+          ? true
+          : command.label.toLowerCase().includes(markdownOverlay.slash?.query.toLowerCase() ?? ""),
+      )
+    : []
+  const selectedSlashIndex = Math.min(activeSlashIndex, matchingSlashCommands.length - 1)
+  const markdownOverlayRef = useRef(markdownOverlay)
+  const matchingSlashCommandsRef = useRef(matchingSlashCommands)
+  const selectedSlashIndexRef = useRef(selectedSlashIndex)
+  markdownOverlayRef.current = markdownOverlay
+  matchingSlashCommandsRef.current = matchingSlashCommands
+  selectedSlashIndexRef.current = selectedSlashIndex
+
+  useEffect(() => {
+    if (selectedSlashIndex < 0) return
+    document
+      .getElementById(`markdown-slash-option-${selectedSlashIndex}`)
+      ?.scrollIntoView({ block: "nearest" })
+  }, [selectedSlashIndex])
 
   // Latest callbacks captured in refs so the one-time mount effect always calls
   // through to the current handlers without re-creating the view on each render.
@@ -107,6 +177,7 @@ export function CodeMirrorBuffer({
   const vimCompartment = useRef(new Compartment()).current
   const themeCompartment = useRef(new Compartment()).current
   const lintCompartment = useRef(new Compartment()).current
+  const markdownCompartment = useRef(new Compartment()).current
 
   // Build the view exactly once. Deps are intentionally empty: live changes flow
   // through the compartments / callback refs below, never a remount.
@@ -134,9 +205,87 @@ export function CodeMirrorBuffer({
       },
     ])
 
+    const updateMarkdownOverlay = (view: EditorView) => {
+      const next = readMarkdownOverlay(view, host)
+      const previous = markdownOverlayRef.current.slash
+      if (previous?.from !== next.slash?.from || previous?.query !== next.slash?.query) {
+        setActiveSlashIndex(0)
+        setSlashGroup(null)
+      }
+      markdownOverlayRef.current = next
+      setMarkdownOverlay(next)
+    }
+
     const changeListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+      if (
+        markdown &&
+        (update.docChanged ||
+          update.selectionSet ||
+          update.geometryChanged ||
+          update.viewportChanged)
+      ) {
+        updateMarkdownOverlay(update.view)
+      }
     })
+
+    const markdownMenuKeys = Prec.highest(
+      keymap.of([
+        {
+          key: "ArrowDown",
+          run: () => {
+            const trigger = markdownOverlayRef.current.slash
+            const commands = matchingSlashCommandsRef.current
+            if (!markdown || !trigger || commands.length === 0) return false
+            setActiveSlashIndex((current) => (current + 1) % commands.length)
+            return true
+          },
+        },
+        {
+          key: "ArrowUp",
+          run: () => {
+            const trigger = markdownOverlayRef.current.slash
+            const commands = matchingSlashCommandsRef.current
+            if (!markdown || !trigger || commands.length === 0) return false
+            setActiveSlashIndex((current) => (current - 1 + commands.length) % commands.length)
+            return true
+          },
+        },
+        {
+          key: "Enter",
+          run: (view) => {
+            const trigger = markdownOverlayRef.current.slash
+            const commands = matchingSlashCommandsRef.current
+            if (markdown && trigger && commands.length > 0) {
+              const command = commands[selectedSlashIndexRef.current]
+              if (!command) return false
+              if (command.children) {
+                setSlashGroup(command)
+                setActiveSlashIndex(0)
+                return true
+              }
+              applySlashCommand(view, trigger, command)
+              return true
+            }
+            return markdown ? continueMarkdownList(view) : false
+          },
+        },
+        {
+          key: "Escape",
+          run: () => {
+            if (!markdownOverlayRef.current.slash) return false
+            if (slashGroup) {
+              setSlashGroup(null)
+              setActiveSlashIndex(0)
+              return true
+            }
+            markdownOverlayRef.current = EMPTY_MARKDOWN_OVERLAY
+            setMarkdownOverlay(EMPTY_MARKDOWN_OVERLAY)
+            return true
+          },
+        },
+      ]),
+    )
 
     const state = EditorState.create({
       doc: initialDoc,
@@ -152,7 +301,12 @@ export function CodeMirrorBuffer({
         // Layered over basicSetup's default highlight; the structural height theme
         // below only sets layout, so the two never conflict on color.
         themeCompartment.of(editorThemeExtension(theme, customThemes)),
+        editorTypographyExtension,
         lintCompartment.of(lintExtension(diagnostics)),
+        markdownCompartment.of(
+          markdown && activeMarkdownMode === "render" ? markdownRenderExtension : [],
+        ),
+        markdownMenuKeys,
         changeListener,
         EditorView.lineWrapping,
         // Constrain the view to its bounded host so it scrolls internally instead of
@@ -168,6 +322,7 @@ export function CodeMirrorBuffer({
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
     view.focus()
+    if (markdown) updateMarkdownOverlay(view)
 
     return () => {
       view.destroy()
@@ -205,9 +360,277 @@ export function CodeMirrorBuffer({
     })
   }, [diagnostics, lintCompartment])
 
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: markdownCompartment.reconfigure(
+        markdown && activeMarkdownMode === "render" ? markdownRenderExtension : [],
+      ),
+    })
+  }, [activeMarkdownMode, markdown, markdownCompartment])
+
+  const formatSelection = (prefix: string, suffix: string, placeholder: string) => {
+    const view = viewRef.current
+    const range = markdownOverlay.toolbar
+    if (!view || !range) return
+    const selected = view.state.sliceDoc(range.from, range.to) || placeholder
+    const replacement = `${prefix}${selected}${suffix}`
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: replacement },
+      selection: {
+        anchor: range.from + prefix.length,
+        head: range.from + prefix.length + selected.length,
+      },
+    })
+    view.focus()
+  }
+
+  const insertSlashCommand = (command: MarkdownSlashCommand) => {
+    const view = viewRef.current
+    const trigger = markdownOverlay.slash
+    if (!view || !trigger) return
+    if (command.children) {
+      setSlashGroup(command)
+      setActiveSlashIndex(0)
+      return
+    }
+    applySlashCommand(view, trigger, command)
+    view.focus()
+  }
+
   return (
-    <div ref={hostRef} data-testid="editor-buffer" className="min-h-0 flex-1 overflow-hidden" />
+    <div data-testid="editor-buffer" className="relative min-h-0 flex-1 overflow-hidden">
+      <div
+        ref={hostRef}
+        className="h-full min-h-0 overflow-hidden"
+        style={editorTypographyStyle(fontFamily, fontSize)}
+      />
+      {markdownOverlay.toolbar ? (
+        <div
+          role="toolbar"
+          aria-label="Markdown formatting"
+          data-testid="markdown-selection-toolbar"
+          className="absolute z-30 flex items-center gap-0.5 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          style={{
+            top: markdownOverlay.toolbar.top,
+            left: markdownOverlay.toolbar.left,
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <MarkdownFormatButton
+            label="Bold"
+            text="B"
+            className="font-bold"
+            onClick={() => formatSelection("**", "**", "bold text")}
+          />
+          <MarkdownFormatButton
+            label="Italic"
+            text="I"
+            className="italic"
+            onClick={() => formatSelection("_", "_", "italic text")}
+          />
+          <MarkdownFormatButton
+            label="Strikethrough"
+            text="S"
+            className="line-through"
+            onClick={() => formatSelection("~~", "~~", "struck text")}
+          />
+          <MarkdownFormatButton
+            label="Inline code"
+            text="&lt;/&gt;"
+            className="font-mono text-[10px]"
+            onClick={() => formatSelection("`", "`", "code")}
+          />
+          <MarkdownFormatButton
+            label="Link"
+            text="↗"
+            onClick={() => formatSelection("[", "](url)", "link text")}
+          />
+        </div>
+      ) : null}
+      {markdownOverlay.slash ? (
+        <div
+          role="listbox"
+          aria-label="Markdown blocks"
+          aria-activedescendant={
+            selectedSlashIndex >= 0 ? `markdown-slash-option-${selectedSlashIndex}` : undefined
+          }
+          tabIndex={-1}
+          data-testid="markdown-slash-menu"
+          className="absolute z-30 max-h-56 w-64 overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+          style={{ top: markdownOverlay.slash.top, left: markdownOverlay.slash.left }}
+        >
+          {matchingSlashCommands.length > 0 ? (
+            matchingSlashCommands.map((command, index) => (
+              <button
+                key={command.id}
+                id={`markdown-slash-option-${index}`}
+                type="button"
+                role="option"
+                aria-selected={index === selectedSlashIndex}
+                aria-label={command.label}
+                className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-accent ${
+                  index === selectedSlashIndex ? "bg-accent" : ""
+                }`}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  insertSlashCommand(command)
+                }}
+              >
+                <span className="text-xs">{command.label}</span>
+                <span className="truncate text-[11px] text-muted-foreground">{command.hint}</span>
+              </button>
+            ))
+          ) : (
+            <p className="px-2 py-2 text-muted-foreground text-xs">No Markdown block matches.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
   )
+}
+
+const editorTypographyExtension = EditorView.theme({
+  "&": {
+    fontFamily: "var(--pi-lab-editor-font-family)",
+    fontSize: "var(--pi-lab-editor-font-size)",
+  },
+  ".cm-content": {
+    fontFamily: "var(--pi-lab-editor-font-family)",
+    fontSize: "var(--pi-lab-editor-font-size)",
+  },
+  ".cm-gutters": {
+    fontFamily: "var(--pi-lab-editor-font-family)",
+    fontSize: "var(--pi-lab-editor-font-size)",
+  },
+})
+
+function editorTypographyStyle(fontFamily: string, fontSize: number): CSSProperties {
+  return {
+    "--pi-lab-editor-font-family": editorFontFamilyCss(fontFamily),
+    "--pi-lab-editor-font-size": `${fontSize}px`,
+  } as CSSProperties
+}
+
+function MarkdownFormatButton({
+  label,
+  text,
+  className,
+  onClick,
+}: {
+  label: string
+  text: string
+  className?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={`flex h-7 min-w-7 items-center justify-center rounded px-1.5 text-xs hover:bg-accent ${className ?? ""}`}
+      onClick={onClick}
+    >
+      {text}
+    </button>
+  )
+}
+
+function applySlashCommand(
+  view: EditorView,
+  trigger: MarkdownSlashState,
+  command: MarkdownSlashCommand,
+) {
+  const cursor = trigger.from + (command.cursorOffset ?? command.insert.length)
+  view.dispatch({
+    changes: { from: trigger.from, to: trigger.to, insert: command.insert },
+    selection: { anchor: cursor },
+  })
+}
+
+/** Continue ordinary, ordered, and task Markdown lists without changing other Enter behavior. */
+function continueMarkdownList(view: EditorView): boolean {
+  const selection = view.state.selection.main
+  if (!selection.empty) return false
+  const line = view.state.doc.lineAt(selection.head)
+  if (selection.head !== line.to) return false
+
+  const task = /^(\s*)([-+*])\s+\[([ xX])\]\s*(.*)$/.exec(line.text)
+  const ordered = /^(\s*)(\d+)([.)])\s+(.*)$/.exec(line.text)
+  const bullet = /^(\s*)([-+*])\s+(.*)$/.exec(line.text)
+  const match = task ?? ordered ?? bullet
+  if (!match) return false
+
+  const content = match.at(-1) ?? ""
+  if (!content.trim()) {
+    const indent = match[1] ?? ""
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: indent },
+      selection: { anchor: line.from + indent.length },
+    })
+    return true
+  }
+  const prefix = task
+    ? `${task[1] ?? ""}${task[2] ?? "-"} [ ] `
+    : ordered
+      ? `${ordered[1] ?? ""}${Number(ordered[2] ?? "0") + 1}${ordered[3] ?? "."} `
+      : `${bullet?.[1] ?? ""}${bullet?.[2] ?? "-"} `
+  const insert = `\n${prefix}`
+  view.dispatch({
+    changes: { from: line.to, to: line.to, insert },
+    selection: { anchor: line.to + insert.length },
+  })
+  return true
+}
+
+function isMarkdownPath(relPath: string): boolean {
+  return /\.(?:md|markdown|mdx)$/i.test(relPath)
+}
+
+function readMarkdownOverlay(view: EditorView, host: HTMLElement): MarkdownOverlayState {
+  const selection = view.state.selection.main
+  if (!selection.empty) {
+    const start = overlayPosition(view, selection.from, host, true)
+    return {
+      toolbar: { from: selection.from, to: selection.to, ...start },
+      slash: null,
+    }
+  }
+
+  const line = view.state.doc.lineAt(selection.head)
+  const beforeCursor = line.text.slice(0, selection.head - line.from)
+  const slashMatch = /(?:^|\s)\/([a-z0-9 -]*)$/i.exec(beforeCursor)
+  if (!slashMatch) return EMPTY_MARKDOWN_OVERLAY
+  const slashIndex = beforeCursor.lastIndexOf("/")
+  const start = line.from + slashIndex
+  const position = overlayPosition(view, selection.head, host, false)
+  return {
+    toolbar: null,
+    slash: {
+      from: start,
+      to: selection.head,
+      query: (slashMatch[1] ?? "").trim(),
+      ...position,
+    },
+  }
+}
+
+function overlayPosition(
+  view: EditorView,
+  position: number,
+  host: HTMLElement,
+  above: boolean,
+): { top: number; left: number } {
+  if (typeof Range === "undefined" || typeof Range.prototype.getClientRects !== "function") {
+    return { top: above ? 8 : 32, left: 8 }
+  }
+  const coordinates = view.coordsAtPos(position)
+  const bounds = host.getBoundingClientRect()
+  if (!coordinates) return { top: above ? 8 : 32, left: 8 }
+  const desiredTop = above ? coordinates.top - bounds.top - 38 : coordinates.bottom - bounds.top + 6
+  return {
+    top: Math.max(8, desiredTop),
+    left: Math.max(8, Math.min(coordinates.left - bounds.left, Math.max(8, bounds.width - 288))),
+  }
 }
 
 /**

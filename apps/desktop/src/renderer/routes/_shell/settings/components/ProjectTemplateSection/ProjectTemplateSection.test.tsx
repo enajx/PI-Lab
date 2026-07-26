@@ -57,16 +57,29 @@ const DEFAULT_SETTINGS: EditorSettings = {
 
 let store: Record<string, string>
 let written: Array<{ relPath: string; content: string }>
+let templateDefaultWrites: Array<{ initializationMarkdownFiles?: string[] }>
+let imported: string[]
+let removed: string[]
 
 beforeEach(() => {
   store = { "AGENTS.md": "agents body", "RESEARCH.md": "research body" }
   written = []
+  templateDefaultWrites = []
+  imported = []
+  removed = []
 })
 
 function baseHandlers(overrides: FakeHandlers = {}): FakeHandlers {
   return {
-    "settings.get": () => ({ editor: DEFAULT_SETTINGS }),
+    "settings.get": () => ({
+      editor: DEFAULT_SETTINGS,
+      projectTemplate: {
+        initializationMarkdownFiles: ["AGENTS.md", "RESEARCH.md"],
+        defaultTemplateParentPath: null,
+      },
+    }),
     "template.list": () => [
+      { name: ".gitignore", relPath: ".gitignore", kind: "file" as const },
       { name: "AGENTS.md", relPath: "AGENTS.md", kind: "file" as const },
       { name: "RESEARCH.md", relPath: "RESEARCH.md", kind: "file" as const },
     ],
@@ -80,6 +93,21 @@ function baseHandlers(overrides: FakeHandlers = {}): FakeHandlers {
       written.push({ relPath, content })
       store[relPath] = content
       return { bytes: content.length }
+    },
+    "template.import": (input) => {
+      const { sourcePath } = input as { sourcePath: string }
+      imported.push(sourcePath)
+      return { name: "IMPORTED.md", relPath: "IMPORTED.md", kind: "file" as const }
+    },
+    "template.remove": (input) => {
+      const { relPath } = input as { relPath: string }
+      removed.push(relPath)
+      return { relPath }
+    },
+    "system.pickFile": () => "/tmp/imported.md",
+    "settings.updateProjectTemplate": (input) => {
+      templateDefaultWrites.push(input as { initializationMarkdownFiles?: string[] })
+      return input
     },
     ...overrides,
   }
@@ -96,10 +124,12 @@ function renderSection(handlers: FakeHandlers = baseHandlers()) {
 }
 
 describe("ProjectTemplateSection", () => {
-  test("lists template files and shows the first file's content by default", async () => {
+  test("lists template files and loads a selected file's content", async () => {
     renderSection()
     await screen.findByTestId("template-file-AGENTS.md")
     expect(screen.getByTestId("template-file-RESEARCH.md")).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId("template-file-AGENTS.md"))
 
     await waitFor(() => expect(screen.getByTestId("buffer-doc").textContent).toBe("agents body"))
     expect(screen.getByTestId("buffer-path").textContent).toBe("AGENTS.md")
@@ -115,6 +145,7 @@ describe("ProjectTemplateSection", () => {
 
   test("editing then saving writes through template.write and clears the dirty state", async () => {
     renderSection()
+    fireEvent.click(await screen.findByTestId("template-file-AGENTS.md"))
     await waitFor(() => expect(screen.getByTestId("buffer-doc").textContent).toBe("agents body"))
 
     // Clean ⇒ Save disabled.
@@ -135,6 +166,53 @@ describe("ProjectTemplateSection", () => {
     )
     await waitFor(() =>
       expect(screen.getByTestId("template-save").getAttribute("disabled")).not.toBeNull(),
+    )
+  })
+
+  test("persists the Markdown files included by default", async () => {
+    renderSection()
+    const agents = await screen.findByTestId("template-default-AGENTS.md")
+    expect(agents.getAttribute("aria-pressed")).toBe("true")
+
+    fireEvent.click(agents)
+
+    await waitFor(() =>
+      expect(templateDefaultWrites).toContainEqual({
+        initializationMarkdownFiles: ["RESEARCH.md"],
+      }),
+    )
+  })
+
+  test("allows every template file to be selected by default", async () => {
+    renderSection()
+    const gitignore = await screen.findByTestId("template-default-.gitignore")
+    expect(gitignore.getAttribute("disabled")).toBeNull()
+    expect(gitignore.textContent).toBe(".gitignore")
+    fireEvent.click(gitignore)
+    await waitFor(() =>
+      expect(templateDefaultWrites).toContainEqual({
+        initializationMarkdownFiles: ["AGENTS.md", "RESEARCH.md", ".gitignore"],
+      }),
+    )
+  })
+
+  test("imports a template file through the native picker", async () => {
+    renderSection()
+    fireEvent.click(await screen.findByTestId("template-import-file"))
+    await waitFor(() => expect(imported).toEqual(["/tmp/imported.md"]))
+  })
+
+  test("offers Remove when right-clicking a template file", async () => {
+    renderSection()
+    fireEvent.contextMenu(await screen.findByTestId("template-file-RESEARCH.md"), {
+      clientX: 24,
+      clientY: 32,
+    })
+    expect(await screen.findByTestId("template-file-context-menu")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("template-file-remove"))
+    await waitFor(() => expect(removed).toEqual(["RESEARCH.md"]))
+    await waitFor(() =>
+      expect(templateDefaultWrites).toContainEqual({ initializationMarkdownFiles: ["AGENTS.md"] }),
     )
   })
 })

@@ -12,6 +12,7 @@ import {
   NotificationsSection,
   ProjectViewSection,
   SectionsSection,
+  ShortcutsSection,
 } from "./SettingsSections"
 
 /**
@@ -23,7 +24,10 @@ import {
 
 function renderSection(node: React.ReactNode, handlers: FakeHandlers = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const client = createFakeTrpcClient(handlers)
+  const client = createFakeTrpcClient({
+    "system.fonts": () => ({ families: [], error: null }),
+    ...handlers,
+  })
   render(
     <AppProviders client={client} queryClient={queryClient}>
       {node}
@@ -37,6 +41,60 @@ beforeEach(() => {
 })
 
 describe("Settings sections", () => {
+  test("Shortcuts rejects a conflicting chord, preserves the prior binding, and stays ready to retry", async () => {
+    renderSection(<ShortcutsSection />)
+
+    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘P")
+    expect(screen.getByTestId("shortcut-quick-open").textContent).toBe("⌘F")
+
+    fireEvent.click(screen.getByTestId("shortcut-command-palette-rebind"))
+    fireEvent.keyDown(window, { key: "f", metaKey: true })
+
+    const conflict = await screen.findByRole("alert")
+    expect(conflict.textContent).toContain("⌘F")
+    expect(conflict.textContent).toContain("Quick open file")
+    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("Press keys…")
+    expect(window.localStorage.getItem("pi-lab.shortcuts")).not.toContain(
+      '"command-palette":"Mod+f"',
+    )
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    await waitFor(() =>
+      expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘K"),
+    )
+    expect(screen.queryByRole("alert")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("shortcut-command-palette-rebind"))
+    fireEvent.keyDown(window, { key: "f", metaKey: true })
+    expect(await screen.findByRole("alert")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("shortcut-command-palette-rebind"))
+
+    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘K")
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  test("Shortcuts refuses a reset when another action uses the default chord", async () => {
+    renderSection(<ShortcutsSection />)
+
+    fireEvent.click(screen.getByTestId("shortcut-command-palette-rebind"))
+    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    fireEvent.click(screen.getByTestId("shortcut-quick-open-rebind"))
+    fireEvent.keyDown(window, { key: "p", metaKey: true })
+
+    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘K")
+    expect(screen.getByTestId("shortcut-quick-open").textContent).toBe("⌘P")
+
+    fireEvent.click(screen.getByTestId("shortcut-command-palette-reset"))
+
+    const conflict = await screen.findByRole("alert")
+    expect(conflict.textContent).toContain("⌘P")
+    expect(conflict.textContent).toContain("Quick open file")
+    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("Press keys…")
+
+    fireEvent.click(screen.getByTestId("shortcut-command-palette-rebind"))
+    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘K")
+  })
+
   test("Appearance mode picker toggles the .dark class", async () => {
     renderSection(<AppearanceSection />)
     // ThemeProvider defaults to light and applies it on mount (no .dark).
@@ -48,7 +106,7 @@ describe("Settings sections", () => {
 
   test("Appearance gallery selects and applies a named app theme", async () => {
     renderSection(<AppearanceSection />)
-    expect(screen.getAllByRole("button")).toHaveLength(9)
+    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(9)
     expect(screen.getByRole("button", { name: "Default" }).getAttribute("aria-pressed")).toBe(
       "true",
     )
@@ -69,6 +127,61 @@ describe("Settings sections", () => {
     expect(screen.queryByTestId("settings-caffeine-animation")).toBeNull()
   })
 
+  test("Appearance Advanced persists bounded global editor typography and resets it", async () => {
+    renderSection(<AppearanceSection />, {
+      "system.fonts": () => ({
+        families: ["Avenir Next", "Menlo"],
+        error: null,
+      }),
+    })
+
+    const family = await screen.findByTestId<HTMLSelectElement>("settings-editor-font-family")
+    expect(family.textContent).toContain("System monospace (default)")
+    await waitFor(() => expect(family.textContent).toContain("Avenir Next"))
+
+    fireEvent.change(family, { target: { value: "Avenir Next" } })
+    const size = screen.getByTestId<HTMLInputElement>("settings-editor-font-size")
+    fireEvent.change(size, { target: { value: "999" } })
+
+    expect(window.localStorage.getItem("pi-lab.editor.fontFamily")).toBe("Avenir Next")
+    expect(window.localStorage.getItem("pi-lab.editor.fontSize")).toBe("24")
+
+    fireEvent.click(screen.getByTestId("settings-editor-font-reset"))
+    expect(family.value).toBe("default")
+    expect(size.value).toBe("14")
+  })
+
+  test("Appearance Advanced keeps the safe default visible when font detection fails", async () => {
+    renderSection(<AppearanceSection />, {
+      "system.fonts": () => ({
+        families: [],
+        error: "System fonts could not be detected. The default monospace font is still available.",
+      }),
+    })
+
+    expect((await screen.findByTestId("settings-editor-font-error")).textContent).toContain(
+      "default monospace font",
+    )
+    expect(
+      screen.getByRole<HTMLSelectElement>("combobox", { name: "Editor font family" }).value,
+    ).toBe("default")
+  })
+
+  test("Appearance Advanced persists global Digital Rain density and speed", async () => {
+    renderSection(<AppearanceSection />)
+
+    const density = await screen.findByTestId<HTMLSelectElement>("settings-digital-rain-density")
+    const speed = screen.getByTestId<HTMLSelectElement>("settings-digital-rain-speed")
+    expect(density.value).toBe("normal")
+    expect(speed.value).toBe("normal")
+
+    fireEvent.change(density, { target: { value: "dense" } })
+    fireEvent.change(speed, { target: { value: "slow" } })
+
+    expect(window.localStorage.getItem("pi-lab.digitalRain.density")).toBe("dense")
+    expect(window.localStorage.getItem("pi-lab.digitalRain.speed")).toBe("slow")
+  })
+
   test("General section round-trips confirm-on-quit through settings.updateGeneral", async () => {
     const patches: unknown[] = []
     renderSection(<GeneralSection />, {
@@ -82,6 +195,18 @@ describe("Settings sections", () => {
     expect(screen.getByTestId("settings-run-setup").textContent).toBe("Run setup again")
     fireEvent.click(screen.getByTestId("settings-confirm-quit"))
     await waitFor(() => expect(patches).toContainEqual({ confirmOnQuit: false }))
+  })
+
+  test("General restores project tabs by default and lets the user turn restoration off", async () => {
+    renderSection(<GeneralSection />, {
+      "settings.get": () => ({ confirmOnQuit: true, worktreePerAgent: false }),
+    })
+
+    const toggle = await screen.findByTestId("settings-restore-project-tabs")
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(window.localStorage.getItem("pi-lab.projectView.restoreTabs")).toBe("false")
   })
 
   test("Agents section persists config storage and executable overrides", async () => {

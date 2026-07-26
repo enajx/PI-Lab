@@ -7,7 +7,7 @@ import type {
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useLayoutEffect, useState } from "react"
 import { type CaffeineMode, type CaffeineScope, useCaffeine } from "../../../../caffeine"
 import {
   allEditorThemes,
@@ -20,9 +20,18 @@ import {
   playNotificationSound,
 } from "../../../../notifications/sounds"
 import {
+  EDITOR_FONT_DEFAULT_FAMILY,
+  EDITOR_FONT_DEFAULT_SIZE,
+  EDITOR_FONT_MAX_SIZE,
+  EDITOR_FONT_MIN_SIZE,
   useDefaultAgentId,
+  useDigitalRainDensity,
+  useDigitalRainSpeed,
+  useEditorFontFamily,
+  useEditorFontSize,
   useExperimentalV2,
   useFetchExperimentsInstructions,
+  useRestoreProjectTabs,
   useShowAnalysisSection,
   useShowClusterSection,
   useShowCodeChanges,
@@ -33,6 +42,7 @@ import {
 import { type ThemeMode, useTheme } from "../../../../providers/ThemeProvider"
 import {
   bindingFromEvent,
+  findShortcutConflict,
   formatBinding,
   SHORTCUTS,
   useShortcutBindings,
@@ -65,6 +75,7 @@ export function GeneralSection() {
     }),
   )
   const confirmOnQuit = settingsQuery.data?.confirmOnQuit ?? true
+  const [restoreProjectTabs, setRestoreProjectTabs] = useRestoreProjectTabs()
 
   return (
     <SettingsSection
@@ -78,6 +89,13 @@ export function GeneralSection() {
         description="Ask before quitting while agents are running."
         checked={confirmOnQuit}
         onChange={(value) => updateGeneral.mutate({ confirmOnQuit: value })}
+      />
+      <ToggleField
+        testId="settings-restore-project-tabs"
+        label="Restore project tabs"
+        description="Reopen files and restore terminal and agent tabs when PI Lab relaunches."
+        checked={restoreProjectTabs}
+        onChange={setRestoreProjectTabs}
       />
       <div className="flex items-center justify-between gap-4 px-4 py-3">
         <div>
@@ -105,6 +123,26 @@ export function GeneralSection() {
 /** Appearance — independent whole-app palette and light/dark/system mode. */
 export function AppearanceSection() {
   const { mode, setMode } = useTheme()
+  const trpc = useTRPC()
+  const fontsQuery = useQuery(trpc.system.fonts.queryOptions())
+  const [fontFamily, setFontFamily] = useEditorFontFamily()
+  const [fontSize, setFontSize] = useEditorFontSize()
+  const [digitalRainDensity, setDigitalRainDensity] = useDigitalRainDensity()
+  const [digitalRainSpeed, setDigitalRainSpeed] = useDigitalRainSpeed()
+  const detectedFamilies = fontsQuery.data?.families ?? []
+  const familyOptions = [
+    { value: EDITOR_FONT_DEFAULT_FAMILY, label: "System monospace (default)" },
+    ...(fontFamily !== EDITOR_FONT_DEFAULT_FAMILY && !detectedFamilies.includes(fontFamily)
+      ? [{ value: fontFamily, label: `${fontFamily} (currently unavailable)` }]
+      : []),
+    ...detectedFamilies.map((family) => ({ value: family, label: family })),
+  ]
+  const fontError =
+    fontsQuery.data?.error ??
+    (fontsQuery.error
+      ? "System fonts could not be detected. The default monospace font is still available."
+      : null)
+
   return (
     <SettingsSection
       testId="settings-section-appearance"
@@ -124,6 +162,102 @@ export function AppearanceSection() {
         onChange={(value) => setMode(value as ThemeMode)}
       />
       <AppThemeGallery />
+      <div
+        id="appearance-advanced"
+        data-testid="appearance-advanced-editor-typography"
+        className="flex flex-col gap-1 px-4 py-3"
+      >
+        <h3 className="font-medium text-sm">Advanced</h3>
+        <p className="text-muted-foreground text-xs">
+          These controls apply globally across PI Lab.
+        </p>
+      </div>
+      <SelectField
+        testId="settings-editor-font-family"
+        label="Editor font family"
+        description={
+          fontsQuery.isPending
+            ? "Detecting fonts installed on this system…"
+            : "System-installed fonts."
+        }
+        value={fontFamily}
+        options={familyOptions}
+        onChange={setFontFamily}
+      />
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div className="flex min-w-0 flex-col">
+          <label htmlFor="settings-editor-font-size" className="text-foreground text-sm">
+            Editor font size
+          </label>
+          <span className="text-muted-foreground text-xs">
+            {EDITOR_FONT_MIN_SIZE}–{EDITOR_FONT_MAX_SIZE} pixels.
+          </span>
+        </div>
+        <input
+          id="settings-editor-font-size"
+          data-testid="settings-editor-font-size"
+          type="number"
+          min={EDITOR_FONT_MIN_SIZE}
+          max={EDITOR_FONT_MAX_SIZE}
+          step={1}
+          value={fontSize}
+          onChange={(event) => setFontSize(Number(event.target.value))}
+          className="w-20 rounded-md border border-border bg-background px-2 py-1 text-foreground text-sm outline-none"
+        />
+      </div>
+      {fontError ? (
+        <p
+          role="alert"
+          data-testid="settings-editor-font-error"
+          className="px-4 py-3 text-amber-700 text-xs dark:text-amber-300"
+        >
+          {fontError}
+        </p>
+      ) : null}
+      <div className="flex justify-end px-4 py-3">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-testid="settings-editor-font-reset"
+          onClick={() => {
+            setFontFamily(EDITOR_FONT_DEFAULT_FAMILY)
+            setFontSize(EDITOR_FONT_DEFAULT_SIZE)
+          }}
+        >
+          Reset editor typography
+        </Button>
+      </div>
+      <div className="border-border border-t px-4 pt-3">
+        <h4 className="font-medium text-sm">Digital Rain thumbnails</h4>
+        <p className="mt-1 text-muted-foreground text-xs">
+          Black-and-white ASCII rain uses freshly sampled project files every time PI Lab launches.
+        </p>
+      </div>
+      <SelectField
+        testId="settings-digital-rain-density"
+        label="Digital Rain density"
+        description="Caps the number of visible streams in every Digital Rain thumbnail."
+        value={digitalRainDensity}
+        options={[
+          { value: "sparse", label: "Sparse" },
+          { value: "normal", label: "Normal" },
+          { value: "dense", label: "Dense" },
+        ]}
+        onChange={(value) => setDigitalRainDensity(value as typeof digitalRainDensity)}
+      />
+      <SelectField
+        testId="settings-digital-rain-speed"
+        label="Digital Rain speed"
+        description="Sets the low-frequency animation rate for every Digital Rain thumbnail."
+        value={digitalRainSpeed}
+        options={[
+          { value: "slow", label: "Slow" },
+          { value: "normal", label: "Normal" },
+          { value: "fast", label: "Fast" },
+        ]}
+        onChange={(value) => setDigitalRainSpeed(value as typeof digitalRainSpeed)}
+      />
     </SettingsSection>
   )
 }
@@ -863,20 +997,60 @@ export function ExperimentalSection() {
 export function ShortcutsSection() {
   const { bindingFor, setBinding, resetBinding } = useShortcutBindings()
   const [recording, setRecording] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<{
+    binding: string
+    existingLabel: string
+    targetLabel: string
+  } | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!recording) return
     const onKeyDown = (event: KeyboardEvent) => {
       event.preventDefault()
+      event.stopPropagation()
       const binding = bindingFromEvent(event)
       if (binding) {
+        const existing = findShortcutConflict(recording, binding, bindingFor)
+        if (existing) {
+          const target = SHORTCUTS.find((shortcut) => shortcut.id === recording)
+          setConflict({
+            binding,
+            existingLabel: existing.label,
+            targetLabel: target?.label ?? "this action",
+          })
+          return
+        }
+        setConflict(null)
         setBinding(recording, binding)
         setRecording(null)
       }
     }
     window.addEventListener("keydown", onKeyDown, { capture: true })
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true })
-  }, [recording, setBinding])
+  }, [bindingFor, recording, setBinding])
+
+  const toggleRecording = (shortcutId: string): void => {
+    setConflict(null)
+    setRecording((current) => (current === shortcutId ? null : shortcutId))
+  }
+
+  const resetShortcut = (shortcutId: string): void => {
+    const target = SHORTCUTS.find((shortcut) => shortcut.id === shortcutId)
+    if (!target) return
+    const existing = findShortcutConflict(shortcutId, target.defaultBinding, bindingFor)
+    if (existing) {
+      setConflict({
+        binding: target.defaultBinding,
+        existingLabel: existing.label,
+        targetLabel: target.label,
+      })
+      setRecording(shortcutId)
+      return
+    }
+    setConflict(null)
+    if (recording === shortcutId) setRecording(null)
+    resetBinding(shortcutId)
+  }
 
   return (
     <SettingsSection
@@ -884,6 +1058,16 @@ export function ShortcutsSection() {
       title="Shortcuts"
       description="App-global shortcuts can be rebound; editor keys are shown for reference."
     >
+      {conflict ? (
+        <p
+          role="alert"
+          data-testid="shortcut-conflict"
+          className="cursor-text select-text bg-destructive/10 px-4 py-3 text-destructive text-xs"
+        >
+          {formatBinding(conflict.binding)} cannot be used for {conflict.targetLabel} because it is
+          already assigned to {conflict.existingLabel}. Choose another shortcut or cancel.
+        </p>
+      ) : null}
       {SHORTCUTS.map((shortcut) => (
         <div key={shortcut.id} className="flex items-center justify-between gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-col">
@@ -903,7 +1087,7 @@ export function ShortcutsSection() {
                   type="button"
                   data-testid={`shortcut-${shortcut.id}-rebind`}
                   data-feature-help="Record a new key combination for this app shortcut"
-                  onClick={() => setRecording((cur) => (cur === shortcut.id ? null : shortcut.id))}
+                  onClick={() => toggleRecording(shortcut.id)}
                   className="rounded-md border border-border px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
                 >
                   {recording === shortcut.id ? "Cancel" : "Rebind"}
@@ -912,7 +1096,7 @@ export function ShortcutsSection() {
                   type="button"
                   data-testid={`shortcut-${shortcut.id}-reset`}
                   data-feature-help="Restore this shortcut's default key combination"
-                  onClick={() => resetBinding(shortcut.id)}
+                  onClick={() => resetShortcut(shortcut.id)}
                   className="rounded-md px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
                 >
                   Reset

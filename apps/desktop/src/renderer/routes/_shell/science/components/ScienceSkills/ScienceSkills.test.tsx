@@ -31,6 +31,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     color: null,
     thumbnail: null,
     gradient: null,
+    digitalRain: false,
     metadata: null,
     agentConfig: null,
     sortIndex: 0,

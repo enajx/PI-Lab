@@ -8,8 +8,8 @@ import { EditProjectDialog } from "./EditProjectDialog"
  *
  *   - Emoji tags now draw from a single GLOBAL palette (a renderer preference,
  *     persisted to localStorage). Chips are the union of the palette and the
- *     project's own tags; clicking toggles assignment for THIS project; "+" adds a
- *     new emoji to the palette; right-click removes one from the palette.
+ *     project's own tags; clicking toggles assignment for THIS project; "+" opens
+ *     an emoji picker; right-click removes one from the palette.
  *   - External links are URL-only (no per-link label input); the stored `label`
  *     field is left untouched server-side but never collected here.
  *
@@ -23,6 +23,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     color: null,
     thumbnail: null,
     gradient: { seed: 1, palette: ["#FFC700"] },
+    digitalRain: false,
     metadata: null,
     agentConfig: null,
     sortIndex: 0,
@@ -80,13 +81,18 @@ describe("EditProjectDialog — emoji palette", () => {
     expect(onSave).toHaveBeenCalledWith({ emojiTags: ["🔬"] })
   })
 
-  test("the '+' control adds a typed emoji to the palette and assigns it here", () => {
+  test("the '+' control opens an emoji picker whose selection joins the palette and assigns it here", () => {
     const { onSave } = renderDialog(project({ id: "e3", name: "C", metadata: null }))
 
     fireEvent.click(screen.getByTestId("edit-project-emoji-add"))
-    const input = screen.getByTestId("edit-project-emoji-input")
-    fireEvent.change(input, { target: { value: "🦾" } })
-    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.queryByTestId("edit-project-emoji-input")).toBeNull()
+    const picker = screen.getByTestId("edit-project-emoji-picker")
+    fireEvent.click(
+      picker.querySelector<HTMLElement>('[data-emoji="🦾"]') ??
+        (() => {
+          throw new Error("no picker choice for 🦾")
+        })(),
+    )
 
     // The new emoji joins the palette, active (assigned) for this project.
     expect(chipFor("🦾").getAttribute("aria-pressed")).toBe("true")
@@ -95,6 +101,16 @@ describe("EditProjectDialog — emoji palette", () => {
 
     fireEvent.click(screen.getByTestId("edit-project-save"))
     expect(onSave).toHaveBeenCalledWith({ emojiTags: ["🦾"] })
+  })
+
+  test("the picker includes the requested project-tag emoji", () => {
+    renderDialog(project({ id: "e-requested", name: "Requested", metadata: null }))
+
+    fireEvent.click(screen.getByTestId("edit-project-emoji-add"))
+    const picker = screen.getByTestId("edit-project-emoji-picker")
+    for (const emoji of ["💼", "🥭", "🐬", "☑️"]) {
+      expect(picker.querySelector(`[data-emoji="${emoji}"]`)).not.toBeNull()
+    }
   })
 
   test("right-clicking a chip removes it from the palette and unassigns it here", () => {

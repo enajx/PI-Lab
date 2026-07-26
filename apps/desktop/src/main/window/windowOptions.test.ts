@@ -23,4 +23,21 @@ describe("buildMainWindowOptions", () => {
     expect(options.titleBarStyle).toBe("hiddenInset")
     expect(options.trafficLightPosition).toEqual({ x: 16, y: 18 })
   })
+
+  test("keeps embedded report and marimo frames outside the Electron capability boundary", () => {
+    const preferences = buildMainWindowOptions(
+      null,
+      "/repo/out/preload/index.js",
+      "linux",
+    ).webPreferences
+
+    expect(preferences).toMatchObject({
+      contextIsolation: true,
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
+      sandbox: true,
+      webSecurity: true,
+      webviewTag: false,
+    })
+  })
 })
