@@ -5,9 +5,15 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { TRPCError } from "@trpc/server"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createHarness, type Harness } from "../../testHarness"
-import { MAX_CHART_POINTS, MAX_LISTED_FILES, MAX_TABLE_ROWS, MAX_TEXT_BYTES } from "./discover"
+import {
+  MAX_CHART_POINTS,
+  MAX_LISTED_FILES,
+  MAX_NPY_BYTES,
+  MAX_TABLE_ROWS,
+  MAX_TEXT_BYTES,
+} from "./discover"
 
 let h: Harness
 
@@ -58,6 +64,19 @@ function makeNpy(shape: number[], values: number[]): Buffer {
     data.writeDoubleLE(v, i * 8)
   })
 
+  return Buffer.concat([prefix, Buffer.from(header, "ascii"), data])
+}
+
+/** Build a version 1 NumPy file with chosen raw bytes and header fields. */
+function makeRawNpy(shape: string, descr: string, fortran: boolean, data: Buffer): Buffer {
+  let header = `{'descr': '${descr}', 'fortran_order': ${fortran ? "True" : "False"}, 'shape': (${shape}), }`
+  const pad = (64 - ((10 + header.length + 1) % 64)) % 64
+  header += `${" ".repeat(pad)}\n`
+  const prefix = Buffer.alloc(10)
+  prefix[0] = 0x93
+  prefix.write("NUMPY", 1, "ascii")
+  prefix[6] = 1
+  prefix.writeUInt16LE(header.length, 8)
   return Buffer.concat([prefix, Buffer.from(header, "ascii"), data])
 }
 
@@ -190,6 +209,33 @@ describe("science.analysis.listFiles", () => {
     expect(allRel.some((r) => r.includes("node_modules"))).toBe(false)
     expect(allRel.some((r) => r.includes("__pycache__"))).toBe(false)
     expect(allRel.some((r) => r.startsWith(".git/"))).toBe(false)
+  })
+
+  test("keeps research outputs in build, out and dist", async () => {
+    for (const folder of ["build", "out", "dist"]) {
+      await writeRepoFile(`${folder}/result.npy`, makeNpy([1], [1]))
+    }
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const paths = listing.groups.flatMap((group) => group.files.map((file) => file.relPath))
+    expect(paths).toEqual(
+      expect.arrayContaining(["build/result.npy", "out/result.npy", "dist/result.npy"]),
+    )
+  })
+
+  test("reports an unreadable child as a partial listing", async () => {
+    await writeRepoFile("visible/data.csv", "a\n1\n")
+    await writeRepoFile("private/data.csv", "a\n2\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const privateDir = join(h.repoDir, "private")
+    await chmod(privateDir, 0)
+    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    await chmod(privateDir, 0o755)
+    expect(listing.groups.flatMap((group) => group.files.map((file) => file.relPath))).toContain(
+      "visible/data.csv",
+    )
+    expect(listing.partial).toBe(true)
+    expect(listing.skipped).toContain("private")
   })
 
   test("hides dotfiles (basename starting with a dot)", async () => {
@@ -553,6 +599,170 @@ describe("science.analysis.preview", () => {
       ["4", "5", "6"],
     ])
     expect(preview.truncated).toBe(false)
+  })
+
+  test.each([
+    ["<f8", "setFloat64", 8, -1.25],
+    [">f4", "setFloat32", 4, -1.25],
+    ["<i8", "setBigInt64", 8, -12],
+    [">i4", "setInt32", 4, -12],
+    ["<i2", "setInt16", 2, -12],
+    ["|i1", "setInt8", 1, -12],
+    [">u8", "setBigUint64", 8, 12],
+    ["<u4", "setUint32", 4, 12],
+    [">u2", "setUint16", 2, 12],
+    ["|u1", "setUint8", 1, 12],
+  ] as const)("decodes dtype %s through preview", async (descr, setter, width, value) => {
+    const data = Buffer.alloc(width)
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const numeric = setter.includes("Big") ? BigInt(value) : value
+    if (width === 1) {
+      ;(view[setter] as (offset: number, value: never) => void)(0, numeric as never)
+    } else {
+      ;(view[setter] as (offset: number, value: never, littleEndian: boolean) => void)(
+        0,
+        numeric as never,
+        descr.startsWith("<"),
+      )
+    }
+    await writeRepoFile("dtype.npy", makeRawNpy("1,", descr, false, data))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "dtype.npy",
+    })
+    if (preview.type !== "chart") throw new Error("expected chart")
+    expect(preview.series[0]?.values).toEqual([value])
+  })
+
+  test("Fortran order and nonfinite values preserve the visible grid", async () => {
+    const data = Buffer.alloc(6 * 8)
+    const values = [1, 4, Number.NaN, 5, 3, Number.POSITIVE_INFINITY]
+    values.forEach((value, index) => {
+      data.writeDoubleBE(value, index * 8)
+    })
+    await writeRepoFile("fortran.npy", makeRawNpy("2, 3", ">f8", true, data))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "fortran.npy",
+    })
+    if (preview.type !== "array") throw new Error("expected array")
+    expect(preview.rows).toEqual([
+      ["1", "", "3"],
+      ["4", "5", ""],
+    ])
+  })
+
+  test("large chart decodes only sampled values", async () => {
+    const count = 1_000_000
+    const data = Buffer.alloc(count * 8)
+    data.writeDoubleLE(17, 0)
+    data.writeDoubleLE(29, 1000 * 8)
+    await writeRepoFile("sample.npy", makeRawNpy(`${count},`, "<f8", false, data))
+    const reads = vi.spyOn(DataView.prototype, "getFloat64")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "sample.npy",
+    })
+    const readCount = reads.mock.calls.length
+    reads.mockRestore()
+    if (preview.type !== "chart") throw new Error("expected chart")
+    expect(preview.x).toHaveLength(MAX_CHART_POINTS)
+    expect(preview.series[0]?.values.slice(0, 2)).toEqual([17, 29])
+    expect(readCount).toBeLessThanOrEqual(MAX_CHART_POINTS)
+  })
+
+  test("large grid decodes only visible cells", async () => {
+    const data = Buffer.alloc(1000 * 1000 * 8)
+    data.writeDoubleLE(11, 0)
+    data.writeDoubleLE(22, 1000 * 8)
+    await writeRepoFile("grid.npy", makeRawNpy("1000, 1000", "<f8", false, data))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const reads = vi.spyOn(DataView.prototype, "getFloat64")
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "grid.npy",
+    })
+    const readCount = reads.mock.calls.length
+    reads.mockRestore()
+    if (preview.type !== "array") throw new Error("expected array")
+    expect(preview.rows).toHaveLength(200)
+    expect(preview.columns).toHaveLength(32)
+    expect(preview.rows[0]?.[0]).toBe("11")
+    expect(preview.rows[1]?.[0]).toBe("22")
+    expect(readCount).toBeLessThanOrEqual(200 * 32)
+  })
+
+  test.each([
+    "1.5",
+    "-1,",
+    "2.2,",
+    "9007199254740992,",
+    "2, 9007199254740991",
+  ])("rejects malformed or unsafe shape %s", async (shape) => {
+    await writeRepoFile("bad-shape.npy", makeRawNpy(shape, "<f8", false, Buffer.alloc(8)))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "bad-shape.npy",
+    })
+    expect(preview.type).toBe("metadata")
+  })
+
+  test("rejects an out-of-bounds header and an unsupported version", async () => {
+    const badHeader = makeRawNpy("1,", "<f8", false, Buffer.alloc(8))
+    badHeader.writeUInt16LE(65535, 8)
+    const badVersion = makeRawNpy("1,", "<f8", false, Buffer.alloc(8))
+    badVersion[7] = 99
+    await writeRepoFile("bad-header.npy", badHeader)
+    await writeRepoFile("bad-version.npy", badVersion)
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    for (const relPath of ["bad-header.npy", "bad-version.npy"]) {
+      const preview = await h.caller.science.analysis.preview({ projectId: project.id, relPath })
+      expect(preview.type).toBe("metadata")
+    }
+  })
+
+  test("rejects a very high-rank header without expanding its dimensions", async () => {
+    const shape = `${"1, ".repeat(100_000)}1`
+    const header = `{'descr': '<f8', 'fortran_order': False, 'shape': (${shape}), }\n`
+    const prefix = Buffer.alloc(12)
+    prefix[0] = 0x93
+    prefix.write("NUMPY", 1, "ascii")
+    prefix[6] = 2
+    prefix.writeUInt32LE(header.length, 8)
+    await writeRepoFile("high-rank.npy", Buffer.concat([prefix, Buffer.from(header, "ascii")]))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const maps = vi.spyOn(Array.prototype, "map")
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "high-rank.npy",
+    })
+    const expandedShape = maps.mock.contexts.some(
+      (context) => Array.isArray(context) && context.length >= 100_000,
+    )
+    maps.mockRestore()
+    expect(preview.type).toBe("metadata")
+    expect(expandedShape).toBe(false)
+  })
+
+  test("zero dimensions remain valid and the source cap returns metadata", async () => {
+    await writeRepoFile("empty.npy", makeRawNpy("0, 3", "<f8", false, Buffer.alloc(0)))
+    await writeRepoFile("oversized.npy", Buffer.alloc(MAX_NPY_BYTES + 1))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const empty = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "empty.npy",
+    })
+    if (empty.type !== "array") throw new Error("expected array")
+    expect(empty.rows).toEqual([])
+    const oversized = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "oversized.npy",
+    })
+    expect(oversized.type).toBe("metadata")
   })
 
   test("a malformed .npy → metadata fallback with a note", async () => {

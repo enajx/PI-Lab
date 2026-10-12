@@ -5,7 +5,13 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  type Locator,
+  test,
+} from "@playwright/test"
 import { DaemonClient } from "../packages/pty-daemon/src/index"
 
 /**
@@ -93,10 +99,12 @@ test("dashboard shows a directly resizable project card", async () => {
   // card, rather than leaving the action row visually detached.
   await card.hover()
   const actions = card.getByTestId("project-card-actions")
-  expect(await image.evaluate((element) => getComputedStyle(element).filter)).not.toBe("none")
-  expect(await actions.evaluate((element) => getComputedStyle(element).filter)).not.toBe("none")
+  const filterOf = (locator: Locator) => () =>
+    locator.evaluate((element) => getComputedStyle(element).filter)
+  await expect.poll(filterOf(image)).not.toBe("none")
+  await expect.poll(filterOf(actions)).not.toBe("none")
   await actions.hover()
-  expect(await actions.evaluate((element) => getComputedStyle(element).filter)).not.toBe("none")
+  await expect.poll(filterOf(actions)).not.toBe("none")
 
   // A card's context menu is available from its body, not only its artwork.
   await card.getByTestId("project-card-body").click({ button: "right", position: { x: 24, y: 24 } })
@@ -178,6 +186,74 @@ test("dashboard shows a directly resizable project card", async () => {
   })
   expect(artwork.backgroundImage).toContain("data:image/svg+xml")
   expect(artwork.animationName).toMatch(/^pi-lab-gradient-(meander|turn|breathe|weave|orbit|rock)$/)
+})
+
+test("Project summary stays viewport-sized when opened from a hovered card", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+
+  const card = window.getByTestId("project-card")
+  const summary = card.getByTestId("project-card-summary")
+  await expect(summary).toBeVisible({ timeout: 30_000 })
+
+  await summary.hover()
+  await summary.click()
+
+  const backdrop = window.getByTestId("workflow-result-backdrop")
+  await expect(backdrop).toBeVisible()
+  const viewport = await window.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }))
+  const samples = await backdrop.evaluate(
+    (element) =>
+      new Promise<
+        Array<{
+          x: number
+          y: number
+          width: number
+          height: number
+          display: string
+          visibility: string
+        }>
+      >((resolve) => {
+        const frames: Array<{
+          x: number
+          y: number
+          width: number
+          height: number
+          display: string
+          visibility: string
+        }> = []
+        const sample = () => {
+          const rect = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          frames.push({
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            display: style.display,
+            visibility: style.visibility,
+          })
+          if (frames.length === 24) resolve(frames)
+          else requestAnimationFrame(sample)
+        }
+        requestAnimationFrame(sample)
+      }),
+  )
+
+  expect(samples).toHaveLength(24)
+  for (const sample of samples) {
+    expect(sample.display).not.toBe("none")
+    expect(sample.visibility).toBe("visible")
+    expect(sample.x).toBeCloseTo(0, 0)
+    expect(sample.y).toBeCloseTo(0, 0)
+    expect(sample.width).toBeCloseTo(viewport.width, 0)
+    expect(sample.height).toBeCloseTo(viewport.height, 0)
+  }
+  await expect(window.getByTestId("workflow-result-dialog")).toBeVisible()
 })
 
 test("Digital Rain visibly moves while this project's agent is working", async () => {
@@ -499,4 +575,62 @@ test("leaving Settings restores the view that opened it", async () => {
   await expect(window.getByTestId("settings-view")).toBeVisible()
   await window.getByTestId("settings-back").click()
   await expect(window.getByTestId("project-view")).toBeVisible()
+})
+
+test("the Appearance Pi icon gallery renders every preview and remembers the pick", async () => {
+  let window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-appearance").click()
+  await expect(window.getByTestId("settings-section-appearance")).toBeVisible()
+
+  const gallery = window.getByTestId("settings-app-icon-fonts")
+  await expect(gallery).toBeVisible()
+  await expect(gallery.locator("button")).toHaveCount(12)
+
+  // The whole point of shipping pre-rendered PNGs: assert they actually decoded
+  // in the real renderer. A broken asset URL still renders a <img> in jsdom, so
+  // only an end-to-end check can catch a bundling regression here.
+  await expect
+    .poll(
+      async () =>
+        await gallery
+          .locator("img")
+          .evaluateAll((nodes) =>
+            nodes.every((node) => (node as HTMLImageElement).naturalWidth > 0),
+          ),
+      { timeout: 15_000 },
+    )
+    .toBe(true)
+
+  // Avenir Next — Medium is what the app actually ships, so it starts selected.
+  await expect(window.getByTestId("settings-app-icon-font-avenir-next-medium")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+
+  await window.getByTestId("settings-app-icon-font-didot-bold").click()
+  await expect(window.getByTestId("settings-app-icon-font-didot-bold")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+
+  await app.close()
+  await launchApp()
+  window = await app.firstWindow()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-appearance").click()
+  await expect(window.getByTestId("settings-app-icon-font-didot-bold")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+
+  // Keep the shared Electron profile neutral for later E2E cases.
+  await window.getByTestId("settings-app-icon-font-avenir-next-medium").click()
+  await expect(window.getByTestId("settings-app-icon-font-avenir-next-medium")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
 })

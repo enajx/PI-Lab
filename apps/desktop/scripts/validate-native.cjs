@@ -1,27 +1,11 @@
 #!/usr/bin/env node
 // @ts-check
 /**
- * Validate that the desktop's native modules are present and loadable under the
- * Electron ABI (AGENTS.md Pitfalls #4). Native-module ABI mismatches fail at *runtime*,
- * not at build time, so this is a hard gate before/after packaging: it loads each
- * `.node` addon the way the app does and exits nonzero (loudly) on any failure.
- *
- * Two run modes:
- *   - default (no arg): validate the modules resolved from `apps/desktop`
- *     (the rebuilt-in-place store copies). Used by `package` / `package:prod` after
- *     `@electron/rebuild`, before electron-builder packs.
- *   - `--app <path-to-.app-or-appOutDir>`: validate the `.node` binaries INSIDE a
- *     packaged app's `app.asar.unpacked/node_modules`, proving the unpacked native
- *     addons ship + load under the Electron ABI. (We load the `.node` files
- *     directly rather than the full JS module: in the package the modules' pure-JS
- *     halves + their deps like `bindings` live inside `app.asar`, reachable only
- *     via Electron's asar-aware resolver in the real app — the running-app smoke
- *     test, `e2e/packaged-smoke.spec.ts`, covers that path end to end.)
- *
- * MUST be run with Electron's `ELECTRON_RUN_AS_NODE=1` (so `process.versions.modules`
- * is Electron's ABI). The build scripts invoke it that way; running under plain Node
- * validates the Node ABI instead (which is what `bun run test` needs) — the script
- * reports whichever runtime it's under so the caller can tell.
+ * Validate actual native loading under the consuming Node or Electron runtime.
+ * Default mode opens an in-memory SQLite database and loads the PTY addons from
+ * the checkout. --app loads the target binaries from app.asar.unpacked using the
+ * packages' current layouts. Packaged SQLite and terminal smoke tests also prove
+ * the full JS resolver and daemon path in the real app.
  */
 
 const { existsSync, readdirSync, statSync } = require("node:fs")
@@ -31,13 +15,13 @@ const ABI = process.versions.modules
 const RUNTIME = process.versions.electron ? `Electron ${process.versions.electron}` : "Node"
 const DESKTOP_DIR = join(__dirname, "..")
 
-/** Parse `--app <path>` if present (resolved to absolute — require() needs it). */
+/** @returns {string|null} Parse the optional packaged-app path. */
 function parseAppArg() {
   const i = process.argv.indexOf("--app")
   return i !== -1 && process.argv[i + 1] ? resolve(process.cwd(), process.argv[i + 1]) : null
 }
 
-/** Find an `app.asar.unpacked/node_modules` dir under a packaged app/out dir. */
+/** @param {string} appPath @returns {string[]} Find unpacked native directories. */
 function findUnpackedModules(appPath) {
   /** @type {string[]} */
   const found = []
@@ -58,7 +42,7 @@ function findUnpackedModules(appPath) {
   return found
 }
 
-/** Load + smoke-test better-sqlite3 from a base resolution path. */
+/** @param {string[]} fromPaths Open and query SQLite through its package. */
 function checkBetterSqlite3(fromPaths) {
   const Database = require(require.resolve("better-sqlite3", { paths: fromPaths }))
   const db = new Database(":memory:")
@@ -67,23 +51,15 @@ function checkBetterSqlite3(fromPaths) {
   if (row?.x !== 1) throw new Error("better-sqlite3 query returned unexpected result")
 }
 
-/** Load + smoke-test node-pty (and, on macOS, assert its spawn-helper is executable). */
+/** @param {string[]} fromPaths Load PTY addons and required helper files. */
 function checkNodePty(fromPaths) {
   const ptyPath = require.resolve("node-pty", { paths: fromPaths })
   const pty = require(ptyPath)
   if (typeof pty.spawn !== "function") throw new Error("node-pty has no spawn()")
-  // spawn-helper is a macOS-only concern: binding.gyp builds it under OS=="mac"
-  // only, and node-pty exec()s it solely on the __APPLE__ posix_spawn path (Linux
-  // uses forkpty directly, with no helper). So require it on darwin, not all POSIX.
-  if (process.platform === "darwin") {
-    const moduleDir = join(ptyPath, "..", "..") // lib/index.js → node-pty/
-    const helper = join(moduleDir, "build", "Release", "spawn-helper")
-    if (!existsSync(helper)) throw new Error(`spawn-helper missing at ${helper}`)
-    const mode = statSync(helper).mode
-    if ((mode & 0o111) === 0) throw new Error(`spawn-helper not executable: ${helper}`)
-  }
+  checkPtyBinaries(resolve(ptyPath, "../.."))
 }
 
+/** @param {string} label @param {string[]} fromPaths Validate checkout dependencies. */
 function run(label, fromPaths) {
   const checks = [
     ["better-sqlite3", () => checkBetterSqlite3(fromPaths)],
@@ -98,10 +74,63 @@ function run(label, fromPaths) {
 }
 
 /**
- * Validate the packaged app's unpacked native addons by loading the raw `.node`
- * binaries directly (asserting Electron-ABI compatibility) and checking the
- * node-pty spawn-helper is executable.
+ * @param {string} moduleDir
+ * @param {string[]} candidates
+ * @returns {string} First existing binary in the runtime loader's order.
  */
+function nativeBinary(moduleDir, candidates) {
+  const found = candidates.map((candidate) => join(moduleDir, candidate)).find(existsSync)
+  if (!found) throw new Error(`native binary missing under ${moduleDir}: ${candidates.join(", ")}`)
+  return found
+}
+
+/** @param {string} moduleDir @returns {string} SQLite 13 prebuild or source-build path. */
+function sqliteBinary(moduleDir) {
+  const platform =
+    process.platform === "linux" && !process.report.getReport().header.glibcVersionRuntime
+      ? "linuxmusl"
+      : process.platform
+  return nativeBinary(moduleDir, [
+    `prebuilds/${platform}-${process.arch}.node`,
+    "build/Debug/better_sqlite3.node",
+    "build/Release/better_sqlite3.node",
+  ])
+}
+
+/** @param {string} moduleDir Load PTY binaries and verify their platform helpers. */
+function checkPtyBinaries(moduleDir) {
+  const names = process.platform === "win32" ? ["pty", "conpty", "conpty_console_list"] : ["pty"]
+  for (const name of names) {
+    const file = nativeBinary(moduleDir, [
+      `build/Release/${name}.node`,
+      `build/Debug/${name}.node`,
+      `prebuilds/${process.platform}-${process.arch}/${name}.node`,
+    ])
+    require(file)
+    const nativeDir = resolve(file, "..")
+    if (process.platform === "darwin") {
+      const helper = join(nativeDir, "spawn-helper")
+      if (!existsSync(helper)) throw new Error(`spawn-helper missing at ${helper}`)
+      if ((statSync(helper).mode & 0o111) !== 0o111) {
+        throw new Error(`spawn-helper not executable: ${helper}`)
+      }
+    }
+    if (process.platform === "win32") {
+      const helpers =
+        name === "pty"
+          ? ["winpty.dll", "winpty-agent.exe"]
+          : name === "conpty"
+            ? ["conpty/conpty.dll", "conpty/OpenConsole.exe"]
+            : []
+      for (const helper of helpers) {
+        const helperPath = join(nativeDir, helper)
+        if (!existsSync(helperPath)) throw new Error(`PTY helper missing at ${helperPath}`)
+      }
+    }
+  }
+}
+
+/** @param {string} appPath Load target native binaries from the packaged app. */
 function runPackaged(appPath) {
   const unpacked = findUnpackedModules(appPath)
   if (unpacked.length === 0) {
@@ -111,24 +140,12 @@ function runPackaged(appPath) {
     console.log(`  packaged: ${nm}`)
 
     process.stdout.write("  • better-sqlite3 (.node) ... ")
-    const sqliteNode = join(nm, "better-sqlite3", "build", "Release", "better_sqlite3.node")
-    if (!existsSync(sqliteNode)) throw new Error(`missing ${sqliteNode}`)
+    const sqliteNode = sqliteBinary(join(nm, "better-sqlite3"))
     require(sqliteNode) // throws on ABI mismatch
     process.stdout.write("ok\n")
 
     process.stdout.write("  • node-pty (.node + spawn-helper) ... ")
-    const ptyNode = join(nm, "node-pty", "build", "Release", "pty.node")
-    if (!existsSync(ptyNode)) throw new Error(`missing ${ptyNode}`)
-    require(ptyNode) // throws on ABI mismatch
-    // spawn-helper is macOS-only (gyp OS=="mac" + __APPLE__ runtime path); Linux
-    // packs only pty.node and uses forkpty, so don't require a helper there.
-    if (process.platform === "darwin") {
-      const helper = join(nm, "node-pty", "build", "Release", "spawn-helper")
-      if (!existsSync(helper)) throw new Error(`spawn-helper missing at ${helper}`)
-      if ((statSync(helper).mode & 0o111) === 0) {
-        throw new Error(`spawn-helper not executable: ${helper}`)
-      }
-    }
+    checkPtyBinaries(join(nm, "node-pty"))
     process.stdout.write("ok\n")
   }
   console.log(`validate:native — packaged OK (runtime: ${RUNTIME}, module ABI ${ABI})`)

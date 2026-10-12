@@ -5,8 +5,8 @@ import { createFakeTrpcClient } from "../../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx) — reproduces the dev build's
 // effect double-invoke, which is what surfaced the "Opening project…" hang.
 import { act, render, screen, waitFor } from "../../../test/render"
+import { ProjectWorkspace } from "./-ProjectWorkspace"
 import { clearPendingOpenFile, setPendingOpenFile } from "./-pendingOpenFile"
-import { ProjectWorkspace } from "./$projectId"
 
 const { openFile } = vi.hoisted(() => ({ openFile: vi.fn() }))
 

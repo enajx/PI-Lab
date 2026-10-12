@@ -15,7 +15,7 @@ export function ChangesPanel({ workspaceId }: { workspaceId: string }) {
   const changesQuery = useQuery(
     trpc.workspaces.changes.queryOptions(
       { id: workspaceId },
-      { refetchInterval: CHANGES_REFETCH_MS },
+      { staleTime: 0, refetchInterval: CHANGES_REFETCH_MS },
     ),
   )
   const changes = changesQuery.data ?? []

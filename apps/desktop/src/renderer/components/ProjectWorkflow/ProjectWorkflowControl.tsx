@@ -2,9 +2,12 @@ import type { WorkflowTask } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CloudDownload, FileText, type LucideIcon } from "lucide-react"
-import { useState } from "react"
+import { lazy, Suspense, useState } from "react"
 import { useTRPC } from "../../trpc/react"
-import { WorkflowResultDialog } from "./WorkflowResultDialog"
+
+const WorkflowResultDialog = lazy(() =>
+  import("./WorkflowResultDialog").then((module) => ({ default: module.WorkflowResultDialog })),
+)
 
 /**
  * The stateful control for a background project workflow ("Project summary" /
@@ -17,7 +20,7 @@ import { WorkflowResultDialog } from "./WorkflowResultDialog"
  * live from the very first click. States:
  *   - `idle`    — never run; clicking starts a background run AND opens the window
  *                 on the live activity stream.
- *   - `running` — a run is in flight; the control shows a flowing orange sweep.
+ *   - `running` — a run is in flight; the control shows a moving orange underline.
  *                 Clicking opens the result window to watch the agent's live output.
  *   - `done`    — a cached result exists; clicking opens the result window (the
  *                 report rendered as markdown, plus the run's log) AND re-checks
@@ -53,8 +56,8 @@ const TASK_META: Record<WorkflowTask, TaskMeta> = {
   },
 }
 
-// State tints. Only a *running* control is coloured — a brand-orange border
-// behind the flowing orange sweep, so "thinking" is the one thing that stands out.
+// State tints. Only a *running* control is coloured — a brand-orange underline
+// moves beneath it, so "thinking" is the one thing that stands out.
 // A done control is deliberately neutral (no green — the result lives in the
 // window); an errored one shows a subtle red so a failure is never hidden.
 const STATE_TINT: Record<WorkflowControlState, string> = {
@@ -93,6 +96,7 @@ export function ProjectWorkflowControl({
     trpc.workflows.status.queryOptions(
       { projectId },
       {
+        staleTime: 0,
         // Poll only while a run is in flight, so both surfaces converge to the
         // completed state without polling forever.
         refetchInterval: (query) => {
@@ -195,25 +199,27 @@ export function ProjectWorkflowControl({
             <span>{state === "running" ? "Working" : meta.label}</span>
           </>
         )}
-        {/* The orange snake travelling around the edge — only while working. */}
-        {state === "running" ? <span className="pi-lab-workflow-snake" aria-hidden /> : null}
+        {/* A compositor-friendly moving underline — only while working. */}
+        {state === "running" ? <span className="pi-lab-workflow-sweep" aria-hidden /> : null}
       </button>
 
       {dialogOpen ? (
-        <WorkflowResultDialog
-          projectId={projectId}
-          task={task}
-          title={meta.label}
-          reportHeading={meta.reportHeading}
-          projectName={projectName}
-          running={state === "running"}
-          result={record?.result ?? ""}
-          errorMessage={record?.errorMessage ?? null}
-          lastCheckedAt={record?.lastCheckedAt ?? 0}
-          guidance={meta.guidance}
-          onRecheck={recheck}
-          onClose={() => setDialogOpen(false)}
-        />
+        <Suspense fallback={<div role="status">Loading workflow result…</div>}>
+          <WorkflowResultDialog
+            projectId={projectId}
+            task={task}
+            title={meta.label}
+            reportHeading={meta.reportHeading}
+            projectName={projectName}
+            running={state === "running"}
+            result={record?.result ?? ""}
+            errorMessage={record?.errorMessage ?? null}
+            lastCheckedAt={record?.lastCheckedAt ?? 0}
+            guidance={meta.guidance}
+            onRecheck={recheck}
+            onClose={() => setDialogOpen(false)}
+          />
+        </Suspense>
       ) : null}
     </>
   )

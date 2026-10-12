@@ -1,6 +1,5 @@
-import type { Dirent } from "node:fs"
-import { open, readdir, readFile, stat } from "node:fs/promises"
-import { extname, join, relative } from "node:path"
+import { open, readFile, stat } from "node:fs/promises"
+import { extname, relative } from "node:path"
 import {
   ALL_DATA_FILE_KINDS,
   classifyAnalysisArtifact,
@@ -8,7 +7,7 @@ import {
   type DataFileKind,
   isMarimoNotebookSource,
 } from "@pi-lab/shared"
-import { DEFAULT_IGNORED_DIRS } from "@pi-lab/workspace-fs"
+import { walkWorkspace } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 
 /**
@@ -31,25 +30,10 @@ export const MAX_LISTED_FILES = 2000
 export const MAX_MARIMO_SOURCE_BYTES = 64 * 1024
 
 /**
- * Extra noise directories pruned from the Analysis walk, on top of
- * `workspace-fs`'s `DEFAULT_IGNORED_DIRS` (`.git`, `node_modules`, …). Heavy or
- * uninteresting trees that would dilute a data browser (Python caches,
- * virtualenvs, build outputs, editor dirs).
+ * Analysis-only noise directories. Research artifacts in build/out/dist remain
+ * visible, while the shared walker excludes dependency, cache, and VCS trees.
  */
-const EXTRA_IGNORED_DIRS = [
-  "__pycache__",
-  ".venv",
-  "venv",
-  "env",
-  ".mypy_cache",
-  ".pytest_cache",
-  ".ipynb_checkpoints",
-  "build",
-  "out",
-  ".next",
-  ".idea",
-  ".vscode",
-] as const
+const EXTRA_IGNORED_DIRS = [".next", ".idea", ".vscode"] as const
 
 /** One discovered artifact, tagged with its kind and lightweight metadata. */
 export interface DataFileEntry {
@@ -79,6 +63,10 @@ export interface DataFileListing {
   total: number
   /** True iff the walk hit {@link MAX_LISTED_FILES} and stopped early. */
   truncated: boolean
+  /** True when an artifact or child directory vanished or could not be read. */
+  partial: boolean
+  /** Repo-relative paths skipped due to expected access or disappearance errors. */
+  skipped: string[]
 }
 
 /**
@@ -88,19 +76,22 @@ export interface DataFileListing {
  * `.zarr` directories are collected as one metadata-only dataset and pruned.
  */
 export async function discoverDataFiles(repoPath: string): Promise<DataFileListing> {
-  const candidates = await walkAnalysisArtifacts(repoPath, MAX_LISTED_FILES + 1)
+  const walk = await walkAnalysisArtifacts(repoPath, MAX_LISTED_FILES + 1)
+  const candidates = walk.artifacts
   const truncated = candidates.length > MAX_LISTED_FILES
   const kept = truncated ? candidates.slice(0, MAX_LISTED_FILES) : candidates
 
   const entries: DataFileEntry[] = []
+  const skipped = [...walk.skipped]
   for (const { abs, kind } of kept) {
     const relPath = toPosix(relative(repoPath, abs))
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
-    } catch {
-      // Vanished or unreadable between walk and stat — skip it.
+    } catch (error) {
+      if (!isExpectedChildError(error)) throw error
+      skipped.push(relPath)
       continue
     }
     entries.push({
@@ -127,7 +118,7 @@ export async function discoverDataFiles(repoPath: string): Promise<DataFileListi
     groups.push({ kind, files })
   }
 
-  return { groups, total: entries.length, truncated }
+  return { groups, total: entries.length, truncated, partial: skipped.length > 0, skipped }
 }
 
 interface AnalysisArtifactCandidate {
@@ -136,50 +127,45 @@ interface AnalysisArtifactCandidate {
 }
 
 /**
- * Breadth-first whitelist-aware traversal. Unlike the generic workspace walker,
- * rejected files do not consume `limit`. Directory artifacts are collected only
- * for `.zarr`; all other eligible artifacts are regular files.
+ * Whitelist-aware visitor over the shared breadth-first walker. Rejected files
+ * do not consume `limit`. A `.zarr` directory is collected and pruned.
  */
 async function walkAnalysisArtifacts(
   repoPath: string,
   limit: number,
-): Promise<AnalysisArtifactCandidate[]> {
-  const ignored = new Set([...DEFAULT_IGNORED_DIRS, ...EXTRA_IGNORED_DIRS])
+): Promise<{ artifacts: AnalysisArtifactCandidate[]; skipped: string[] }> {
   const artifacts: AnalysisArtifactCandidate[] = []
-  let frontier = [repoPath]
-
-  while (frontier.length > 0 && artifacts.length < limit) {
-    const next: string[] = []
-    for (const dir of frontier) {
-      let dirents: Dirent[]
-      try {
-        dirents = await readdir(dir, { withFileTypes: true })
-      } catch {
-        continue
-      }
-      dirents.sort((a, b) => a.name.localeCompare(b.name))
-
-      for (const dirent of dirents) {
-        if (dirent.name.startsWith(".")) continue
-        const abs = join(dir, dirent.name)
-        if (dirent.isFile()) {
-          let kind = classifyAnalysisArtifact(dirent.name, "file")
-          if (kind === null && extname(dirent.name).toLowerCase() === ".py") {
-            kind = (await isMarimoNotebookFile(abs)) ? "marimo" : null
-          }
-          if (kind !== null) artifacts.push({ abs, kind })
-        } else if (dirent.isDirectory() && !ignored.has(dirent.name)) {
-          const kind = classifyAnalysisArtifact(dirent.name, "directory")
-          if (kind !== null) artifacts.push({ abs, kind })
-          else next.push(abs)
+  const result = await walkWorkspace(
+    repoPath,
+    { ignore: EXTRA_IGNORED_DIRS, includeHidden: false },
+    async (entry) => {
+      if (entry.kind === "dir") {
+        const kind = classifyAnalysisArtifact(entry.name, "directory")
+        if (kind !== null) {
+          artifacts.push({ abs: entry.path, kind })
+          return artifacts.length >= limit ? "stop" : "prune"
         }
-        if (artifacts.length >= limit) return artifacts
+        return "continue"
       }
-    }
-    frontier = next
-  }
+      let kind = classifyAnalysisArtifact(entry.name, "file")
+      if (kind === null && extname(entry.name).toLowerCase() === ".py") {
+        kind = (await isMarimoNotebookFile(entry.path)) ? "marimo" : null
+      }
+      if (kind !== null) artifacts.push({ abs: entry.path, kind })
+      return artifacts.length >= limit ? "stop" : "continue"
+    },
+  )
+  return { artifacts, skipped: result.skipped }
+}
 
-  return artifacts
+/** Expected child failures report a partial listing; other failures surface. */
+function isExpectedChildError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    ["EACCES", "EPERM", "ENOENT"].includes(String(error.code))
+  )
 }
 
 /** Read only a bounded prefix and positively identify a marimo notebook. */
@@ -609,12 +595,12 @@ const NPY_DTYPES: Readonly<Record<string, NpyDtype>> = {
 
 /** A successfully decoded `.npy` 1-D/2-D numeric array (row-major values). */
 interface DecodedNpy {
-  /** Row-major flattened values (length = product of `shape`). */
-  values: Float64Array
   /** Array shape: `[n]` for 1-D, `[rows, cols]` for 2-D. */
   shape: number[]
   /** Original dtype descr (e.g. `<f8`). */
   dtype: string
+  /** Read one logical cell directly from its source bytes. */
+  readValue: (row: number, col: number) => number
 }
 
 /** Parse the `.npy` header dict text into descr / fortran_order / shape. */
@@ -625,17 +611,24 @@ function parseNpyHeader(
   const fortran = header.match(/'fortran_order'\s*:\s*(True|False)/)
   const shapeText = header.match(/'shape'\s*:\s*\(([^)]*)\)/)
   if (!descr || !fortran || !shapeText) return null
-  const shape = (shapeText[1] ?? "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-    .map((part) => Number.parseInt(part, 10))
-    .filter((n) => Number.isFinite(n))
+  const rawShape = (shapeText[1] ?? "").trim()
+  if (rawShape === "")
+    return { descr: descr[1] ?? "", fortranOrder: fortran[1] === "True", shape: [] }
+  const firstComma = rawShape.indexOf(",")
+  if (firstComma < 0) return null
+  const secondComma = rawShape.indexOf(",", firstComma + 1)
+  if (secondComma >= 0 && rawShape.slice(secondComma + 1).trim() !== "") return null
+  const first = rawShape.slice(0, firstComma).trim()
+  const second = rawShape.slice(firstComma + 1, secondComma >= 0 ? secondComma : undefined).trim()
+  if (secondComma >= 0 && second === "") return null
+  if (!/^\d+$/.test(first) || (second !== "" && !/^\d+$/.test(second))) return null
+  const shape = second === "" ? [Number(first)] : [Number(first), Number(second)]
+  if (!shape.every((dimension) => Number.isSafeInteger(dimension) && dimension >= 0)) return null
   return { descr: descr[1] ?? "", fortranOrder: fortran[1] === "True", shape }
 }
 
 /**
- * Decode a `.npy` buffer into a 1-D/2-D numeric array. Pure and total: any
+ * Decode a `.npy` header into a 1-D/2-D numeric source accessor. Any
  * malformed/unsupported input (bad magic, an unsupported dtype, >2 dimensions,
  * a scalar, or truncated data) yields `null` rather than throwing, so the caller
  * can degrade to a metadata card.
@@ -650,12 +643,14 @@ export function decodeNpy(buf: Buffer): DecodedNpy | null {
 
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
   const major = buf[6]
+  const minor = buf[7]
   let headerLen: number
   let headerStart: number
-  if (major === 1) {
+  if (major === 1 && minor === 0) {
     headerLen = view.getUint16(8, true)
     headerStart = 10
-  } else if (major === 2 || major === 3) {
+  } else if ((major === 2 || major === 3) && minor === 0) {
+    if (buf.length < 12) return null
     headerLen = view.getUint32(8, true)
     headerStart = 12
   } else {
@@ -663,36 +658,37 @@ export function decodeNpy(buf: Buffer): DecodedNpy | null {
   }
 
   const dataOffset = headerStart + headerLen
+  if (!Number.isSafeInteger(dataOffset) || dataOffset > buf.length) return null
   const header = buf.toString("utf8", headerStart, dataOffset)
   const parsed = parseNpyHeader(header)
   if (!parsed) return null
   // Only 1-D / 2-D numeric arrays are renderable; scalars and N-D arrays fall back.
   if (parsed.shape.length === 0 || parsed.shape.length > 2) return null
 
-  const littleEndian = parsed.descr.startsWith("<") || parsed.descr.startsWith("|")
+  const marker = parsed.descr[0]
+  if (marker !== "<" && marker !== ">" && marker !== "|" && marker !== "=") return null
+  const littleEndian =
+    marker === "<" ||
+    marker === "|" ||
+    (marker === "=" && new Uint8Array(new Uint16Array([1]).buffer)[0] === 1)
   const dtype = NPY_DTYPES[parsed.descr.slice(1)]
   if (!dtype) return null
 
-  const total = parsed.shape.reduce((a, b) => a * b, 1)
-  if (dataOffset + total * dtype.width > buf.length) return null
-
-  const values = new Float64Array(total)
-  if (parsed.fortranOrder && parsed.shape.length === 2) {
-    // Column-major source → row-major destination.
-    const [rows = 0, cols = 0] = parsed.shape
-    for (let c = 0; c < cols; c++) {
-      for (let r = 0; r < rows; r++) {
-        const offset = dataOffset + (c * rows + r) * dtype.width
-        values[r * cols + c] = dtype.read(view, offset, littleEndian)
-      }
-    }
-  } else {
-    for (let i = 0; i < total; i++) {
-      values[i] = dtype.read(view, dataOffset + i * dtype.width, littleEndian)
-    }
+  let total = 1
+  for (const dimension of parsed.shape) {
+    total *= dimension
+    if (!Number.isSafeInteger(total)) return null
   }
+  const byteCount = total * dtype.width
+  if (!Number.isSafeInteger(byteCount) || byteCount > buf.length - dataOffset) return null
 
-  return { values, shape: parsed.shape, dtype: parsed.descr }
+  const [rowCount = 0, colCount = 1] = parsed.shape
+  const readValue = (row: number, col: number): number => {
+    const index =
+      parsed.fortranOrder && parsed.shape.length === 2 ? col * rowCount + row : row * colCount + col
+    return dtype.read(view, dataOffset + index * dtype.width, littleEndian)
+  }
+  return { readValue, shape: parsed.shape, dtype: parsed.descr }
 }
 
 /**
@@ -708,7 +704,25 @@ async function previewNpy(
   meta: (note?: string) => MetadataPreview,
 ): Promise<DataFilePreview> {
   if (size > MAX_NPY_BYTES) return meta("Array too large to decode inline")
-  const decoded = decodeNpy(await readFile(abs))
+  const file = await open(abs, "r")
+  let source = Buffer.allocUnsafe(Math.min(MAX_NPY_BYTES + 1, Math.max(4096, size + 1)))
+  let length = 0
+  try {
+    while (length < MAX_NPY_BYTES + 1) {
+      if (length === source.length) {
+        const grown = Buffer.allocUnsafe(Math.min(MAX_NPY_BYTES + 1, source.length * 2))
+        source.copy(grown, 0, 0, length)
+        source = grown
+      }
+      const result = await file.read(source, length, source.length - length, length)
+      if (result.bytesRead === 0) break
+      length += result.bytesRead
+    }
+  } finally {
+    await file.close()
+  }
+  if (length > MAX_NPY_BYTES) return meta("Array too large to decode inline")
+  const decoded = decodeNpy(source.subarray(0, length))
   if (!decoded) return meta("Could not decode .npy array")
 
   if (decoded.shape.length === 1) return npyChart(decoded, relPath)
@@ -718,9 +732,17 @@ async function previewNpy(
 /** A 1-D `.npy` array → a single-series line chart over its row index. */
 function npyChart(decoded: DecodedNpy, relPath: string): ChartPreview {
   const label = baseNameWithoutExt(relPath)
-  const xAll = Array.from(decoded.values, (_, i) => i)
-  const values = Array.from(decoded.values, (v) => (Number.isFinite(v) ? v : null))
-  return downsampleChart("index", xAll, [label], [values])
+  const count = decoded.shape[0] ?? 0
+  const truncated = count > MAX_CHART_POINTS
+  const stride = truncated ? Math.ceil(count / MAX_CHART_POINTS) : 1
+  const x: number[] = []
+  const values: Array<number | null> = []
+  for (let row = 0; row < count; row += stride) {
+    x.push(row)
+    const value = decoded.readValue(row, 0)
+    values.push(Number.isFinite(value) ? value : null)
+  }
+  return { type: "chart", xLabel: "index", x, series: [{ label, values }], truncated }
 }
 
 /** A 2-D `.npy` array → a bounded grid (rows × columns, both capped). */
@@ -733,7 +755,7 @@ function npyArray(decoded: DecodedNpy): ArrayPreview {
   const rows: string[][] = []
   for (let r = 0; r < shownRows; r++) {
     const row: string[] = []
-    for (let c = 0; c < shownCols; c++) row.push(formatCell(decoded.values[r * colCount + c]))
+    for (let c = 0; c < shownCols; c++) row.push(formatCell(decoded.readValue(r, c)))
     rows.push(row)
   }
 

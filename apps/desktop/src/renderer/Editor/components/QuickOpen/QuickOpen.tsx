@@ -1,4 +1,4 @@
-import { fuzzyMatch } from "@pi-lab/shared"
+import { fuzzyMatch } from "@pi-lab/shared/search/fuzzy"
 import { useQuery } from "@tanstack/react-query"
 import { FolderGit2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -65,12 +65,12 @@ export function QuickOpen({
   const searchQuery = useQuery(
     trpc.files.search.queryOptions(
       { workspaceId, query: debounced, limit: 50 },
-      // An empty query returns [] from the router; keep results around briefly so
-      // arrowing/selecting doesn't re-walk on every render.
-      { staleTime: 5_000, enabled: debounced.trim().length > 0 },
+      // Keep results around briefly so arrowing/selecting doesn't re-walk on
+      // every render.
+      { staleTime: 5_000, enabled: !global && debounced.trim().length > 0 },
     ),
   )
-  const allHits = debounced.trim().length > 0 ? (searchQuery.data ?? []) : []
+  const allHits = debounced.trim().length > 0 ? (searchQuery.data?.hits ?? []) : []
   const hits = filter ? allHits.filter((hit) => filter(hit.relPath)) : allHits
   const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
   const globalProjects = useMemo(() => {
@@ -106,7 +106,9 @@ export function QuickOpen({
       onClose()
     } else if (event.key === "ArrowDown") {
       event.preventDefault()
-      setHighlight((value) => Math.min(value + 1, Math.max(hits.length - 1, 0)))
+      setHighlight((value) =>
+        Math.min(value + 1, Math.max((global ? globalProjects : hits).length - 1, 0)),
+      )
     } else if (event.key === "ArrowUp") {
       event.preventDefault()
       setHighlight((value) => Math.max(value - 1, 0))
@@ -162,6 +164,24 @@ export function QuickOpen({
             {global ? "Tab to search in current project" : "Tab to search in all projects"}
           </span>
         </div>
+        {!global && searchQuery.data?.partial && (
+          <div
+            data-testid="quick-open-partial"
+            role="status"
+            className="border-border border-b px-4 py-2 text-amber-500 text-xs"
+          >
+            Some folders could not be searched: {searchQuery.data.skipped.join(", ")}
+          </div>
+        )}
+        {!global && searchQuery.isError && (
+          <div
+            data-testid="quick-open-error"
+            role="alert"
+            className="border-border border-b px-4 py-2 text-destructive text-xs"
+          >
+            File search failed: {searchQuery.error.message}
+          </div>
+        )}
         <ul className="min-h-0 flex-1 overflow-y-auto py-1">
           {global ? (
             globalProjects.length === 0 ? (

@@ -1,6 +1,7 @@
 import type { WorkflowTask } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import type { WorkflowOutputEvent } from "../../../main/trpc/workflows"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
 import { useTRPCClient } from "../../trpc/react"
@@ -133,7 +134,7 @@ export function WorkflowResultDialog({
 
   const isError = errorMessage !== null
 
-  return (
+  return createPortal(
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is a click-to-dismiss surface; Escape (bound above) is the keyboard equivalent, and focus stays on the dialog's own controls.
     // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismissal mirrors Escape, which is already handled; a key handler here would duplicate it.
     <div
@@ -259,6 +260,7 @@ export function WorkflowResultDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

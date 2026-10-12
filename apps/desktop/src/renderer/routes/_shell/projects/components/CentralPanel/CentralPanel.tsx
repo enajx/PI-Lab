@@ -31,6 +31,7 @@ import { EditorStatusBar } from "../../../../../Editor/components/EditorStatusBa
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import type { EditorBuffersApi } from "../../../../../Editor/hooks/useEditorBuffers"
 import { isPythonPath } from "../../../../../Editor/utils/pythonDiagnostics"
+import { rejectedReadMessage } from "../../../../../Editor/utils/rejectedRead"
 import {
   FILES_PANEL_MAX_WIDTH,
   FILES_PANEL_MIN_WIDTH,
@@ -363,6 +364,22 @@ export function CentralPanel({
         >
           {editor.error}
         </p>
+      ) : null}
+
+      {editor.rejectedRead ? (
+        <div
+          data-testid="editor-rejected-read"
+          className="shrink-0 border-border border-b px-4 py-2 text-sm"
+        >
+          <p>{rejectedReadMessage(editor.rejectedRead)}</p>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => void editor.revealRejectedRead()}
+          >
+            Reveal in Finder
+          </button>
+        </div>
       ) : null}
 
       <div className="flex min-h-0 flex-1">
@@ -715,9 +732,26 @@ function FileSurface({
           className="flex shrink-0 items-center gap-2 border-border border-b bg-amber-500/10 px-4 py-2 text-amber-600 text-xs dark:text-amber-400"
         >
           <span className="select-text">
-            {active.relPath} changed on disk and you have unsaved edits. Save to overwrite, or close
-            without saving to keep the on-disk version.
+            {active.relPath} changed on disk while you were editing. Autosave is paused.
           </span>
+          <button
+            type="button"
+            className="shrink-0 underline"
+            onClick={() => {
+              void editor.overwriteFile(active.relPath)
+            }}
+          >
+            Overwrite disk
+          </button>
+          <button
+            type="button"
+            className="shrink-0 underline"
+            onClick={() => {
+              void editor.reloadFile(active.relPath)
+            }}
+          >
+            Reload from disk
+          </button>
         </div>
       ) : null}
 

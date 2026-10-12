@@ -10,6 +10,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
+import { ProjectActivityProvider } from "../../../-ProjectActivity"
 import { Dashboard } from "./Dashboard"
 
 /**
@@ -30,6 +31,7 @@ function renderDashboard(handlers: FakeHandlers) {
       const { id } = input as { id: string }
       return project(id, id)
     },
+    "projects.thumbnail": () => ({ dataUrl: null, tooLarge: false }),
     ...handlers,
   })
 
@@ -47,8 +49,10 @@ function renderDashboard(handlers: FakeHandlers) {
 
   const result = render(
     <AppProviders client={client} queryClient={queryClient}>
-      {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
-      <RouterProvider router={router as any} />
+      <ProjectActivityProvider>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </ProjectActivityProvider>
     </AppProviders>,
   )
   return { ...result, queryClient, router }
@@ -67,7 +71,7 @@ function project(
     name,
     defaultBranch: "main",
     color: null,
-    thumbnail,
+    hasThumbnail: thumbnail !== null,
     gradient,
     sortIndex: 0,
     archivedAt,
@@ -220,7 +224,7 @@ describe("Dashboard", () => {
     expect(field.style.getPropertyValue("--layer-a-duration")).toMatch(/^\d+(?:\.\d+)?s$/)
     expect(
       Number.parseFloat(field.style.getPropertyValue("--layer-a-duration")),
-    ).toBeGreaterThanOrEqual(8)
+    ).toBeGreaterThanOrEqual(6)
     expect(screen.getByTestId("project-card-gradient-grain")).toBeTruthy()
   })
 
@@ -245,7 +249,7 @@ describe("Dashboard", () => {
     expect(gradient.palette.length).toBeGreaterThan(0)
   })
 
-  test("right-click generates a new gradient sampled from the current theme", async () => {
+  test("right-click → Set thumbnail generates a new gradient sampled from the current theme", async () => {
     const calls: unknown[] = []
     renderDashboard({
       "projects.list": () => [
@@ -260,7 +264,8 @@ describe("Dashboard", () => {
 
     const image = await screen.findByTestId("project-card-image")
     fireEvent.contextMenu(image)
-    fireEvent.click(await screen.findByTestId("project-card-menu-gradient"))
+    fireEvent.click(await screen.findByTestId("project-card-menu-thumbnail"))
+    fireEvent.click(await screen.findByTestId("project-card-artwork-gradient"))
 
     await waitFor(() => expect(calls).toHaveLength(1))
     const { gradient } = calls[0] as { gradient: { seed: number; palette: string[] } }
@@ -273,6 +278,7 @@ describe("Dashboard", () => {
   test("a card with a thumbnail renders no gradient layer", async () => {
     renderDashboard({
       "projects.list": () => [project("p1", "Pictured Project", "data:image/png;base64,AAAA")],
+      "projects.thumbnail": () => ({ dataUrl: "data:image/png;base64,AAAA", tooLarge: false }),
       "workspaces.list": () => [],
     })
 
@@ -282,9 +288,11 @@ describe("Dashboard", () => {
     expect(screen.queryByTestId("project-card-gradient")).toBeNull()
     expect(screen.queryByTestId("project-card-gradient-layer")).toBeNull()
     expect(screen.queryByTestId("project-card-gradient-grain")).toBeNull()
-    expect(screen.getByTestId("project-card-image").querySelector("img")?.getAttribute("src")).toBe(
-      "data:image/png;base64,AAAA",
-    )
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("project-card-image").querySelector("img")?.getAttribute("src"),
+      ).toBe("data:image/png;base64,AAAA")
+    })
   })
 
   test("clicking the card's thumbnail region opens the project", async () => {
@@ -327,14 +335,18 @@ describe("Dashboard", () => {
     })
 
     const image = await screen.findByTestId("project-card-image")
-    const file = new File(["pixels"], "thumbnail.png", { type: "image/png" })
+    const file = new File(
+      [Buffer.from("R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "base64")],
+      "thumbnail.gif",
+      { type: "image/gif" },
+    )
     fireEvent.drop(image, { dataTransfer: { files: [file] } })
 
     await waitFor(() => {
       expect(updates).toHaveLength(1)
     })
     expect(updates[0]).toMatchObject({ id: "p1" })
-    expect((updates[0] as { dataUrl: string }).dataUrl).toMatch(/^data:image\/png;base64,/)
+    expect((updates[0] as { dataUrl: string }).dataUrl).toMatch(/^data:image\/gif;base64,/)
   })
 
   test("using the resize handle does not navigate the project card", async () => {

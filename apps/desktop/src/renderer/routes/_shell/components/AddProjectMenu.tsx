@@ -78,12 +78,14 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   })
   const templateList = useQuery({
     ...trpc.template.list.queryOptions(),
+    staleTime: 0,
     enabled: mode === "template",
   })
   const settings = useQuery({ ...trpc.settings.get.queryOptions(), enabled: mode === "template" })
   const updateTemplateSettings = useMutation(trpc.settings.updateProjectTemplate.mutationOptions())
   const previewQuery = useQuery({
     ...trpc.template.read.queryOptions({ relPath: previewFilePath ?? "" }),
+    staleTime: 0,
     enabled: previewFilePath !== null,
   })
 
@@ -648,7 +650,7 @@ function InitializationFileRow({
   )
 }
 
-function commonProjectParent(projects: Project[]): string | null {
+function commonProjectParent(projects: Array<Pick<Project, "repoPath">>): string | null {
   if (projects.length === 0) return null
   const parents = projects.map((project) => parentPath(project.repoPath))
   const first = parents[0]

@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { Terminal } from "../../Terminal"
-import { useTRPCClient } from "../../trpc/react"
+import { lazy, Suspense } from "react"
 import { HealthBanner } from "./components/HealthBanner"
 import { Dashboard } from "./index/components/Dashboard"
 import { readTerminalSpawnOverride } from "./utils/terminalSpawnOverride"
@@ -16,6 +15,10 @@ import { readTerminalSpawnOverride } from "./utils/terminalSpawnOverride"
  * without a standalone route. In normal use no params are present and the home is
  * always the dashboard.
  */
+const TerminalSeam = lazy(() =>
+  import("./index/components/TerminalSeam").then((module) => ({ default: module.TerminalSeam })),
+)
+
 export const Route = createFileRoute("/_shell/")({
   component: IndexView,
 })
@@ -27,31 +30,13 @@ function IndexView() {
 
   return (
     <HealthBanner>
-      {termSpawn ? <TerminalSeam termSpawn={termSpawn} /> : <Dashboard />}
+      {termSpawn ? (
+        <Suspense fallback={<div role="status">Loading terminal…</div>}>
+          <TerminalSeam termSpawn={termSpawn} />
+        </Suspense>
+      ) : (
+        <Dashboard />
+      )}
     </HealthBanner>
-  )
-}
-
-/** The standalone-terminal test seam (md/engineering/testing-and-build.md), gated to `?termcmd` runs. */
-function TerminalSeam({
-  termSpawn,
-}: {
-  termSpawn: { command?: string; args?: string[]; inputKind: "agent" | "terminal" }
-}) {
-  // Reuse the ONE app-wide tRPC client (the same instance backing TanStack
-  // Query). A second `ipcLink` over the same channel cross-wires responses, so
-  // the terminal must share, not create, the client.
-  const client = useTRPCClient()
-  return (
-    <div className="flex h-full flex-col gap-4 p-8">
-      <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
-        <Terminal
-          client={client}
-          inputKind={termSpawn.inputKind}
-          command={termSpawn.command}
-          args={termSpawn.args}
-        />
-      </section>
-    </div>
   )
 }

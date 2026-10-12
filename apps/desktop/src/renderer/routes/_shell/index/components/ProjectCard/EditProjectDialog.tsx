@@ -127,7 +127,7 @@ export function EditProjectDialog({
   onClose,
   onSave,
 }: {
-  project: Project
+  project: Pick<Project, "name" | "metadata">
   onClose: () => void
   onSave: (metadata: ProjectMetadata | null) => void
 }) {

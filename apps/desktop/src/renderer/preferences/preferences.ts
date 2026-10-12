@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_ID } from "@pi-lab/shared"
+import { DEFAULT_AGENT_ID } from "@pi-lab/shared/agents/catalog"
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 
 /**
@@ -234,6 +234,20 @@ export const FILES_PANEL_MAX_WIDTH = 480
 export const FILES_PANEL_DEFAULT_WIDTH = 224
 export const useFilesPanelWidth = (): [number, (next: number) => void] =>
   useNumberPref(FILES_PANEL_WIDTH_KEY, FILES_PANEL_DEFAULT_WIDTH)
+
+// --- App icon: which Pi treatment the user currently favours ----------------
+// Comparison-only. This records a *pick*, never app identity: the shipped icon
+// stays the outlined face pinned in `icons/icon.manifest.json` until a pick is
+// explicitly promoted. Stored as a free string (like the editor font family) so
+// this layer stays unaware of the gallery's catalogue; the gallery validates the
+// value against the treatments it actually ships.
+export const APP_ICON_PI_FONT_DEFAULT = "avenir-next-medium"
+const APP_ICON_PI_FONT_KEY = "pi-lab.appearance.iconPiFont"
+export const useAppIconPiFont = (): [string, (next: string) => void] => {
+  const [stored, setStored] = useStringPref(APP_ICON_PI_FONT_KEY, APP_ICON_PI_FONT_DEFAULT)
+  const font = stored.trim().length > 0 ? stored : APP_ICON_PI_FONT_DEFAULT
+  return [font, setStored]
+}
 
 // --- File tree: one global sort shared by every project/tree placement -------
 export type FileTreeSort = "name-asc" | "name-desc" | "type" | "modified"

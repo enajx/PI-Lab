@@ -37,10 +37,17 @@ interface ScheduledTask {
 
 class ManualTime implements ActivityClock, ActivityScheduler {
   private current = 1_000
+  private nowStep = 0
   private readonly tasks: ScheduledTask[] = []
 
   now(): number {
-    return this.current
+    const at = this.current
+    this.current += this.nowStep
+    return at
+  }
+
+  setNowStep(ms: number): void {
+    this.nowStep = ms
   }
 
   schedule(delayMs: number, callback: () => void): ActivityTimer {
@@ -194,6 +201,7 @@ interface AgentMonitorFixture {
   monitor: ActivityMonitor
   createRegistry: () => ActivityRegistry
   createMonitor: (registry: ActivityRegistry) => ActivityMonitor
+  writeCount: () => number
   dispose: () => void
 }
 
@@ -248,6 +256,7 @@ function setupAgentMonitor(): AgentMonitorFixture {
       getMonitorClient: async () => daemon,
       notifications,
       scheduler: time,
+      clock: time,
       terminalFactory: () => {
         let screen = ""
         return {
@@ -278,6 +287,8 @@ function setupAgentMonitor(): AgentMonitorFixture {
     monitor,
     createRegistry,
     createMonitor,
+    writeCount: () =>
+      (sqlite.prepare("SELECT total_changes() AS count").get() as { count: number }).count,
     dispose: () => {
       for (const trackedMonitor of monitors) trackedMonitor.dispose()
       for (const trackedRegistry of registries) trackedRegistry.dispose()
@@ -288,6 +299,185 @@ function setupAgentMonitor(): AgentMonitorFixture {
 }
 
 describe("ActivityMonitor agent completion notifications", () => {
+  test("bounds SQLite writes while many exited sessions remain in the registry", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    for (let index = 0; index < 80; index += 1) {
+      const sessionId = `exited-${index}`
+      await fixture.monitor.track({
+        sessionId,
+        projectId: "project-1",
+        workspaceId: "workspace-1",
+        agentId: "codex",
+        workflowRunId: null,
+        turnArmed: false,
+        cols: 80,
+        rows: 24,
+      })
+      fixture.registry.processExited(sessionId, null)
+    }
+    for (const sessionId of ["active-1", "active-2", "active-3"]) {
+      await fixture.monitor.track({
+        sessionId,
+        projectId: "project-1",
+        workspaceId: "workspace-1",
+        agentId: "codex",
+        workflowRunId: null,
+        turnArmed: false,
+        cols: 80,
+        rows: 24,
+      })
+    }
+
+    const beforeOutput = fixture.writeCount()
+    for (let index = 0; index < 40; index += 1) {
+      fixture.daemon.emitSessionScreen("active-1", `Processing ${index}`)
+      fixture.time.advance(10)
+    }
+    expect(fixture.writeCount()).toBe(beforeOutput)
+    fixture.time.advance(610)
+    expect(fixture.writeCount() - beforeOutput).toBe(1)
+
+    fixture.monitor.userInput("active-1", "\r")
+    expect(fixture.writeCount() - beforeOutput).toBe(2)
+    fixture.daemon.emitSessionScreen("active-1", "OpenAI Codex\n\n› ")
+    fixture.time.setNowStep(1)
+    fixture.time.advance(WAITING_CONFIRMATION_MS)
+    fixture.time.setNowStep(0)
+    expect(fixture.writeCount() - beforeOutput).toBe(3)
+    fixture.time.advance(1_000)
+    expect(fixture.writeCount() - beforeOutput).toBe(3)
+    expect(
+      fixture.db
+        .select({ state: agentSessions.state, turnArmed: agentSessions.turnArmed })
+        .from(agentSessions)
+        .where(eq(agentSessions.sessionId, "active-1"))
+        .get(),
+    ).toEqual({ state: "waiting", turnArmed: false })
+  })
+
+  test("flushes a pending activity timestamp on dispose", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    await fixture.monitor.track({
+      sessionId: "active-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      agentId: "codex",
+      workflowRunId: null,
+      turnArmed: false,
+      cols: 80,
+      rows: 24,
+    })
+    fixture.time.advance(100)
+    const beforeOutput = fixture.writeCount()
+    fixture.daemon.emitSessionScreen("active-1", "Processing")
+    expect(fixture.writeCount()).toBe(beforeOutput)
+    fixture.monitor.dispose()
+    expect(fixture.writeCount() - beforeOutput).toBe(1)
+    expect(
+      fixture.db
+        .select({ updatedAt: agentSessions.updatedAt })
+        .from(agentSessions)
+        .where(eq(agentSessions.sessionId, "active-1"))
+        .get(),
+    ).toEqual({ updatedAt: fixture.time.now() })
+  })
+
+  test("stores exit with a pending timestamp immediately and cancels the later write", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    await fixture.monitor.track({
+      sessionId: "active-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      agentId: "codex",
+      workflowRunId: null,
+      turnArmed: false,
+      cols: 80,
+      rows: 24,
+    })
+    fixture.time.advance(100)
+    const beforeOutput = fixture.writeCount()
+    fixture.daemon.emitSessionScreen("active-1", "Processing")
+    expect(fixture.writeCount()).toBe(beforeOutput)
+    fixture.time.advance(100)
+    fixture.registry.processExited("active-1", null)
+    expect(fixture.writeCount() - beforeOutput).toBe(1)
+    expect(
+      fixture.db
+        .select({
+          state: agentSessions.state,
+          updatedAt: agentSessions.updatedAt,
+          exitedAt: agentSessions.exitedAt,
+        })
+        .from(agentSessions)
+        .where(eq(agentSessions.sessionId, "active-1"))
+        .get(),
+    ).toEqual({ state: "exited", updatedAt: fixture.time.now(), exitedAt: fixture.time.now() })
+    fixture.time.advance(1_000)
+    expect(fixture.writeCount() - beforeOutput).toBe(1)
+  })
+
+  test("assigns a workflow launch timestamp once and retains it after restart", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    fixture.db
+      .insert(automations)
+      .values({
+        id: "automation-1",
+        projectId: "project-1",
+        name: "Workflow",
+        agentId: "codex",
+        recurrenceRule: "FREQ=DAILY",
+        timezone: "UTC",
+      })
+      .run()
+    fixture.db
+      .insert(automationRuns)
+      .values({
+        id: "run-1",
+        automationId: "automation-1",
+        scheduledFor: 1_000,
+        state: "pending",
+      })
+      .run()
+    await fixture.monitor.track({
+      sessionId: "terminal-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      agentId: "codex",
+      workflowRunId: "run-1",
+      turnArmed: true,
+      cols: 80,
+      rows: 24,
+    })
+    const launchedAt = fixture.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, "run-1"))
+      .get()?.launchedAt
+    expect(launchedAt).toBe(fixture.time.now())
+    const beforeOutput = fixture.writeCount()
+    for (let index = 0; index < 40; index += 1) {
+      fixture.daemon.emitScreen(`Processing workflow ${index}`)
+      fixture.time.advance(10)
+    }
+    expect(fixture.writeCount()).toBe(beforeOutput)
+    fixture.time.advance(610)
+    expect(fixture.writeCount() - beforeOutput).toBe(1)
+    fixture.monitor.dispose()
+    fixture.registry.dispose()
+    const restored = fixture.createMonitor(fixture.createRegistry())
+    await restored.reconcile()
+    fixture.daemon.emitScreen("Still processing workflow")
+    fixture.time.advance(1_000)
+    expect(
+      fixture.db.select().from(automationRuns).where(eq(automationRuns.id, "run-1")).get()
+        ?.launchedAt,
+    ).toBe(launchedAt)
+  })
+
   test("separates initial workflow completion from later ad-hoc turn completion", async () => {
     const fixture = setupAgentMonitor()
     onTestFinished(fixture.dispose)

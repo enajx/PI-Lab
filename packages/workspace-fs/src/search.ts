@@ -1,6 +1,7 @@
 import { relative } from "node:path"
 import { fuzzyScore } from "@pi-lab/shared"
-import { type WalkOptions, walkFiles } from "./fs"
+import type { WalkOptions } from "./fs"
+import { walkWorkspace } from "./walk"
 
 /** A single ranked search hit. */
 export interface SearchHit {
@@ -17,6 +18,14 @@ export interface SearchOptions extends WalkOptions {
 }
 
 const DEFAULT_RESULT_LIMIT = 50
+const QUICK_OPEN_OUTPUT_DIRS = ["build", "out", "dist", ".next"] as const
+
+/** Ranked matches with any expected paths skipped during traversal. */
+export interface SearchResult {
+  hits: SearchHit[]
+  partial: boolean
+  skipped: string[]
+}
 
 /**
  * Walk `root`, fuzzy-score every file against `query`, and return the best
@@ -31,24 +40,34 @@ export async function searchFiles(
   root: string,
   query: string,
   opts: SearchOptions = {},
-): Promise<SearchHit[]> {
+): Promise<SearchResult> {
   const trimmed = query.trim()
-  if (trimmed.length === 0) return []
+  if (trimmed.length === 0) return { hits: [], partial: false, skipped: [] }
 
-  const resultLimit = opts.limit ?? DEFAULT_RESULT_LIMIT
-  // Walk without the result limit — that caps *files scanned*, not *hits*.
-  const { limit: _ignored, ...walkOpts } = opts
-  const files = await walkFiles(root, walkOpts satisfies WalkOptions)
-
+  const resultLimit = Math.max(0, opts.limit ?? DEFAULT_RESULT_LIMIT)
   const hits: SearchHit[] = []
-  for (const path of files) {
-    const rel = toForwardSlashes(relative(root, path))
-    const score = fuzzyScore(trimmed, rel)
-    if (score > 0) hits.push({ path, score })
-  }
+  const walk = await walkWorkspace(
+    root,
+    { ignore: [...QUICK_OPEN_OUTPUT_DIRS, ...(opts.ignore ?? [])], maxDepth: opts.maxDepth },
+    (entry) => {
+      if (entry.kind !== "file") return "continue"
+      const path = entry.path
+      const rel = toForwardSlashes(relative(root, path))
+      const score = fuzzyScore(trimmed, rel)
+      if (score <= 0 || resultLimit === 0) return "continue"
+      const hit = { path, score }
+      const worst = hits[hits.length - 1]
+      if (hits.length === resultLimit && worst && compareHits(hit, worst) >= 0) {
+        return "continue"
+      }
+      const index = hits.findIndex((existing) => compareHits(hit, existing) < 0)
+      hits.splice(index < 0 ? hits.length : index, 0, hit)
+      if (hits.length > resultLimit) hits.pop()
+      return "continue"
+    },
+  )
 
-  hits.sort(compareHits)
-  return hits.slice(0, resultLimit)
+  return { hits, partial: walk.partial, skipped: walk.skipped }
 }
 
 function compareHits(a: SearchHit, b: SearchHit): number {

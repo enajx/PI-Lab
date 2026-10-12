@@ -1,9 +1,9 @@
+import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FilePlus2, Trash2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
-import { DEFAULT_EDITOR_SETTINGS } from "../../../../../Editor/hooks/useEditorBuffers"
 import { useTRPC } from "../../../../../trpc/react"
 import { SettingsSection } from "../SettingsControls"
 
@@ -38,7 +38,7 @@ export function ProjectTemplateSection() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
-  const listQuery = useQuery(trpc.template.list.queryOptions())
+  const listQuery = useQuery(trpc.template.list.queryOptions(undefined, { staleTime: 0 }))
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editor = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
   const templateSettings = settingsQuery.data?.projectTemplate ?? DEFAULT_PROJECT_TEMPLATE_SETTINGS
@@ -54,6 +54,7 @@ export function ProjectTemplateSection() {
 
   const readQuery = useQuery({
     ...trpc.template.read.queryOptions({ relPath: activeRelPath ?? "" }),
+    staleTime: 0,
     enabled: activeRelPath !== null,
   })
   const savedContent = readQuery.data?.content ?? ""

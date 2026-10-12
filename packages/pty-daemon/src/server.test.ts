@@ -16,11 +16,44 @@ let socketDir: string
 let socketPath: string
 let server: DaemonServer
 const clients: DaemonClient[] = []
+let reapedIds: string[]
+let retainingConnectionsAtReap: number[]
+
+/** Inspect the live connections' subscription maps for retained references. */
+function connectionSubscriptions(): Map<string, () => void>[] {
+  const connections = (
+    server as unknown as {
+      connections: Set<{ subscriptions: Map<string, () => void> }>
+    }
+  ).connections
+  return Array.from(connections, (connection) => connection.subscriptions)
+}
+
+/** Hold a weak reference to a session without adding a production debug API. */
+function weakSession(sessionId: string): WeakRef<object> {
+  const sessions = (server as unknown as { store: { sessions: Map<string, object> } }).store
+    .sessions
+  const session = sessions.get(sessionId)
+  if (!session) throw new Error(`missing session ${sessionId}`)
+  return new WeakRef(session)
+}
 
 beforeEach(async () => {
   socketDir = await mkdtemp(join(tmpdir(), "pi-lab-ptyd-"))
   socketPath = join(socketDir, "daemon.sock")
-  server = new DaemonServer({ socketPath })
+  reapedIds = []
+  retainingConnectionsAtReap = []
+  server = new DaemonServer({
+    socketPath,
+    store: {
+      onSessionReaped: (sessionId) => {
+        reapedIds.push(sessionId)
+        retainingConnectionsAtReap.push(
+          connectionSubscriptions().filter((subscriptions) => subscriptions.has(sessionId)).length,
+        )
+      },
+    },
+  })
   await server.listen()
 })
 
@@ -84,6 +117,71 @@ describe("spawn + stream + exit", () => {
     expect(output).toContain("hello")
     expect(exitCode).toBe(0)
   })
+})
+
+describe("session reaping", () => {
+  test("persistent connections release each reaped session after late attachment", async () => {
+    const first = await newClient()
+    const second = await newClient()
+    const firstExits = new Set<string>()
+    const secondExits = new Set<string>()
+    first.on("exit", (event) => firstExits.add(event.sessionId))
+    second.on("exit", (event) => secondExits.add(event.sessionId))
+
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const sessions = await Promise.all(
+        Array.from({ length: 3 }, (_, index) =>
+          first.spawn({
+            command: NODE,
+            args: ["-e", `process.stdout.write('FINAL-${cycle}-${index}'); process.exit(0)`],
+          }),
+        ),
+      )
+      const ids = sessions.map((session) => session.id)
+      await waitFor(() => ids.every((id) => firstExits.has(id)))
+
+      for (const [index, id] of ids.entries()) {
+        const attached = await second.attach(id)
+        expect(attached.session.alive).toBe(false)
+        expect(attached.scrollback).toContain(`FINAL-${cycle}-${index}`)
+        await waitFor(() => secondExits.has(id))
+      }
+      expect(connectionSubscriptions().map((subscriptions) => subscriptions.size)).toEqual([3, 3])
+
+      await waitFor(() => ids.every((id) => reapedIds.includes(id)), 8_000)
+      expect(connectionSubscriptions().map((subscriptions) => subscriptions.size)).toEqual([0, 0])
+      expect((await first.list()).some((session) => ids.includes(session.id))).toBe(false)
+    }
+    expect(retainingConnectionsAtReap).toEqual(Array(6).fill(0))
+  }, 20_000)
+
+  test.skipIf(typeof globalThis.gc !== "function")(
+    "reaped sessions become collectible while connections stay open",
+    async () => {
+      const first = await newClient()
+      const second = await newClient()
+      const references: WeakRef<object>[] = []
+
+      for (let cycle = 0; cycle < 2; cycle++) {
+        const sessions = await Promise.all(
+          Array.from({ length: 3 }, () =>
+            first.spawn({ command: NODE, args: ["-e", "process.exit(0)"] }),
+          ),
+        )
+        const ids = sessions.map((session) => session.id)
+        references.push(...ids.map(weakSession))
+        await Promise.all(ids.map((id) => second.attach(id)))
+
+        await waitFor(() => ids.every((id) => reapedIds.includes(id)), 8_000)
+        expect(connectionSubscriptions().map((subscriptions) => subscriptions.size)).toEqual([0, 0])
+        await waitFor(() => {
+          globalThis.gc?.()
+          return references.every((reference) => reference.deref() === undefined)
+        })
+      }
+    },
+    20_000,
+  )
 })
 
 describe("interactive write/echo", () => {

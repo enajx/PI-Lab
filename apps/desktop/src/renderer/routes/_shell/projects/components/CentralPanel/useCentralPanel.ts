@@ -48,6 +48,7 @@ export interface AgentOption {
 
 /** Restorable project workspace state, retained only while the app is running. */
 export interface CentralPanelRestoreState {
+  omittedBuffers?: import("../../-workspaceRecovery").OmittedBuffer[]
   buffers: OpenBuffer[]
   activeRelPath: string | null
   sessions: SessionPane[]
@@ -100,6 +101,7 @@ interface UseCentralPanelArgs {
   /** State retained after temporarily navigating away from this project. */
   initialState?: CentralPanelRestoreState
   onStateChange?: (state: CentralPanelRestoreState) => void
+  onBuffersChange?: (buffers: OpenBuffer[]) => void
 }
 
 /**
@@ -120,6 +122,7 @@ export function useCentralPanel({
   initialSession,
   initialState,
   onStateChange,
+  onBuffersChange,
 }: UseCentralPanelArgs): CentralPanelController {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -130,6 +133,7 @@ export function useCentralPanel({
     onSaved,
     initialBuffers: initialState?.buffers,
     initialActiveRelPath: initialState?.activeRelPath,
+    onBuffersChange,
   })
   const initialPane = useRef<SessionPane | null>(
     !initialState && initialSession ? { ...initialSession, id: "pane-1" } : null,
@@ -153,19 +157,50 @@ export function useCentralPanel({
   sessionsRef.current = sessions
   const idCounter = useRef(highestPaneNumber(sessions))
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Buffer changes trigger publication; the synchronous accessor supplies the latest revision.
   useEffect(() => {
     onStateChange?.({
-      buffers: editor.buffers,
+      buffers: editor.bufferAccess.read(),
       activeRelPath: editor.activeRelPath,
       sessions,
       active,
       belowEditorRun,
     })
-  }, [active, belowEditorRun, editor.activeRelPath, editor.buffers, onStateChange, sessions])
+  }, [
+    active,
+    belowEditorRun,
+    editor.activeRelPath,
+    editor.buffers,
+    editor.bufferAccess.read,
+    onStateChange,
+    sessions,
+  ])
+
+  const restoringPaths = useRef(false)
+  useEffect(() => {
+    if (!workspaceId || restoringPaths.current) return
+    const paths = (initialState?.omittedBuffers ?? []).filter((buffer) => !buffer.untitled)
+    if (paths.length === 0) return
+    restoringPaths.current = true
+    let live = true
+    void (async () => {
+      for (const descriptor of paths) {
+        if (!live) return
+        await editor.openFile(descriptor.relPath)
+      }
+      if (live && initialState?.activeRelPath) editor.setActiveRelPath(initialState.activeRelPath)
+    })()
+    return () => {
+      live = false
+      restoringPaths.current = false
+    }
+  }, [workspaceId, initialState, editor.openFile, editor.setActiveRelPath])
 
   const startSession = useMutation(trpc.sessions.start.mutationOptions())
-  const agentsQuery = useQuery(trpc.agents.list.queryOptions())
-  const projectChoiceQuery = useQuery(trpc.agents.projectChoice.queryOptions({ projectId }))
+  const agentsQuery = useQuery(trpc.agents.list.queryOptions(undefined, { staleTime: 0 }))
+  const projectChoiceQuery = useQuery(
+    trpc.agents.projectChoice.queryOptions({ projectId }, { staleTime: 0 }),
+  )
   const setProjectChoice = useMutation(trpc.agents.setProjectChoice.mutationOptions())
   const spawnTerminal = useMutation(trpc.workspaces.spawnTerminal.mutationOptions())
   const runPythonFile = useMutation(trpc.python.runFile.mutationOptions())
@@ -333,7 +368,10 @@ export function useCentralPanel({
         if (cur?.type !== "file" || cur.relPath !== relPath) return cur
         // Mirror the editor's own fallback: focus the last remaining buffer (or
         // the launcher when none are left), not always the launcher.
-        const next = editor.buffers.filter((buffer) => buffer.relPath !== relPath).at(-1)
+        const next = editor.bufferAccess
+          .read()
+          .filter((buffer) => buffer.relPath !== relPath)
+          .at(-1)
         return next ? { type: "file", relPath: next.relPath } : null
       })
     },

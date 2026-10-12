@@ -22,7 +22,7 @@ export function ScienceTasks() {
     refetchInterval: 5_000,
     refetchOnWindowFocus: true,
   })
-  const agents = useQuery(trpc.agents.list.queryOptions())
+  const agents = useQuery(trpc.agents.list.queryOptions(undefined, { staleTime: 0 }))
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: trpc.science.tasks.list.queryKey() })

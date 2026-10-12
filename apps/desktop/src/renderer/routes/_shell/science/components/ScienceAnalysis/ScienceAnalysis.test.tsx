@@ -104,6 +104,32 @@ describe("ScienceAnalysis", () => {
     expect(paths).toEqual(["data/metrics.csv", "config.json"])
   })
 
+  test("shows a partial warning alongside readable files", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([{ relPath: "data.csv", name: "data.csv", kind: "csv" }]),
+        partial: true,
+        skipped: ["private"],
+      }),
+    })
+    expect(await screen.findByTestId("analysis-file")).toBeTruthy()
+    expect(screen.getByTestId("analysis-partial").textContent).toContain("1")
+  })
+
+  test("shows a partial warning when no child was readable", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([]),
+        partial: true,
+        skipped: ["private"],
+      }),
+    })
+    expect(await screen.findByTestId("analysis-partial")).toBeTruthy()
+    expect(screen.getByTestId("science-analysis-empty")).toBeTruthy()
+  })
+
   test("selecting a CSV file renders a table preview", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],

@@ -55,8 +55,8 @@ function testSeamQuery(): string {
  * Create the single application window and load the renderer.
  *
  * Security posture (md/engineering/architecture.md (process model)): context isolation ON, node integration OFF,
- * sandboxed renderer; the only main↔renderer bridge is the preload's
- * `exposeElectronTRPC()`. In dev the renderer comes from the Vite dev server
+ * sandboxed renderer; preload exposes tRPC and the narrow shutdown request/response
+ * bridge. In dev the renderer comes from the Vite dev server
  * (`ELECTRON_RENDERER_URL`); in a packaged build it's the built HTML that sits
  * at `out/renderer/index.html`, i.e. `../renderer/index.html` next to this
  * compiled `out/main/index.js`.
@@ -66,7 +66,7 @@ export function createMainWindow(iconPath: string | null): BrowserWindow {
     buildMainWindowOptions(iconPath, join(__dirname, "../preload/index.js"), process.platform),
   )
 
-  window.once("ready-to-show", () => window.show())
+  window.once("ready-to-show", () => (isTestMode ? window.showInactive() : window.show()))
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", (event, navigationUrl) => {
     const currentUrl = window.webContents.getURL()

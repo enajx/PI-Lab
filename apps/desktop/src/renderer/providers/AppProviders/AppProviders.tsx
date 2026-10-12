@@ -25,7 +25,11 @@ interface AppProvidersProps {
  */
 export function AppProviders({ children, client, queryClient }: AppProvidersProps) {
   const [trpcClient] = useState<PiLabTrpcClient>(() => client ?? createPiLabTrpcClient())
-  const [queryClientInstance] = useState<QueryClient>(() => queryClient ?? new QueryClient())
+  const [queryClientInstance] = useState<QueryClient>(
+    () =>
+      queryClient ??
+      new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: false } } }),
+  )
 
   return (
     <QueryClientProvider client={queryClientInstance}>

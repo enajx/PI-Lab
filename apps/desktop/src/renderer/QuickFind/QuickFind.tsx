@@ -1,4 +1,4 @@
-import { fuzzyMatch, highlightSegments } from "@pi-lab/shared"
+import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { cn } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { FolderGit2 } from "lucide-react"

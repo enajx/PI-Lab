@@ -9,10 +9,12 @@ import { QuickFind, type QuickFindItem } from "../QuickFind"
 import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute"
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
 import { useTRPC } from "../trpc/react"
+import { ProjectActivityProvider } from "./_shell/-ProjectActivity"
 import { rememberSettingsReturnRoute } from "./_shell/-settingsReturnRoute"
 import { AddProjectControllerProvider } from "./_shell/components/AddProjectController"
 import { NewFileControllerProvider } from "./_shell/components/NewFileController"
 import { Sidebar } from "./_shell/components/Sidebar"
+import { WorkspaceRecoveryController } from "./_shell/components/WorkspaceRecoveryController"
 import { useTitleBarTrafficLights } from "./_shell/titleBar"
 
 /**
@@ -90,28 +92,31 @@ function ShellLayout() {
   )
 
   return (
-    <AddProjectControllerProvider>
-      <NewFileControllerProvider>
-        <NotificationBridge />
-        {redirectToSetup || awaitingSetupDecision ? (
-          <div
-            data-testid="setup-gate-loading"
-            className="flex h-screen w-screen bg-background text-foreground"
-          />
-        ) : isFullScreen ? (
-          <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-            {content}
-          </div>
-        ) : (
-          <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-            <Sidebar />
-            {content}
-          </div>
-        )}
-        {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
-        {findProjectsOpen ? <ProjectsFind onClose={() => setFindProjectsOpen(false)} /> : null}
-      </NewFileControllerProvider>
-    </AddProjectControllerProvider>
+    <ProjectActivityProvider>
+      <AddProjectControllerProvider>
+        <NewFileControllerProvider>
+          <WorkspaceRecoveryController />
+          <NotificationBridge />
+          {redirectToSetup || awaitingSetupDecision ? (
+            <div
+              data-testid="setup-gate-loading"
+              className="flex h-screen w-screen bg-background text-foreground"
+            />
+          ) : isFullScreen ? (
+            <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+              {content}
+            </div>
+          ) : (
+            <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+              <Sidebar />
+              {content}
+            </div>
+          )}
+          {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
+          {findProjectsOpen ? <ProjectsFind onClose={() => setFindProjectsOpen(false)} /> : null}
+        </NewFileControllerProvider>
+      </AddProjectControllerProvider>
+    </ProjectActivityProvider>
   )
 }
 

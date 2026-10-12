@@ -24,6 +24,7 @@ import {
 } from "../python"
 import type { CredentialCipher } from "../setup/credentials"
 import { liveSetupProbe, type SetupProbe } from "../setup/probe"
+import type { ThumbnailImageProcessor } from "./projects/thumbnailImage"
 import type { AnalysisInteractivePort } from "./science/analysis/interactive"
 
 /**
@@ -80,6 +81,8 @@ export interface AppContext {
   sshExec: SshExec
   httpFetch: HttpFetch
   openPath: OpenPath
+  /** Electron shell.showItemInFolder, injected for deterministic router tests. */
+  revealPath: (path: string) => void | Promise<void>
   pyToolsExec: PyToolsExec
   discoverPythonEnvironments: PythonEnvironmentDiscoverer
   resolvePythonRuntime: PythonRuntimeResolver
@@ -88,6 +91,7 @@ export interface AppContext {
   activityMonitor: ActivityMonitorPort
   notificationService: NotificationService
   caffeine: CaffeineControllerPort
+  thumbnailImageProcessor: ThumbnailImageProcessor
 }
 
 /**

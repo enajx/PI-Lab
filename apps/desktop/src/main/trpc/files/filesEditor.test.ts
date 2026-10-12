@@ -190,18 +190,19 @@ describe("files.search", () => {
     await h.caller.files.write({ workspaceId: ws.id, relPath: "src/plot.py", content: "" })
     await h.caller.files.write({ workspaceId: ws.id, relPath: "docs/notes.md", content: "" })
 
-    const hits = await h.caller.files.search({ workspaceId: ws.id, query: "analy" })
-    const paths = hits.map((hit) => hit.relPath)
+    const result = await h.caller.files.search({ workspaceId: ws.id, query: "analy" })
+    const paths = result.hits.map((hit) => hit.relPath)
     expect(paths).toContain("src/analysis.py")
     expect(paths).not.toContain("docs/notes.md")
-    expect(hits.every((hit) => hit.score > 0)).toBe(true)
+    expect(result.hits.every((hit) => hit.score > 0)).toBe(true)
+    expect(result).toMatchObject({ partial: false, skipped: [] })
   })
 
   test("an empty query returns no hits", async () => {
     const ws = await makeWorkspace()
     await h.caller.files.write({ workspaceId: ws.id, relPath: "main.py", content: "" })
     const hits = await h.caller.files.search({ workspaceId: ws.id, query: "  " })
-    expect(hits).toEqual([])
+    expect(hits).toEqual({ hits: [], partial: false, skipped: [] })
   })
 
   test("respects the result limit", async () => {
@@ -210,6 +211,6 @@ describe("files.search", () => {
       await h.caller.files.write({ workspaceId: ws.id, relPath: `note${i}.py`, content: "" })
     }
     const hits = await h.caller.files.search({ workspaceId: ws.id, query: "note", limit: 2 })
-    expect(hits.length).toBe(2)
+    expect(hits.hits.length).toBe(2)
   })
 })

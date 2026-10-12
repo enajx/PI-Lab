@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test } from "vitest"
 import { AppProviders } from "../../../../../../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../../../../../../test/fakeTrpcClient"
@@ -20,7 +20,12 @@ function renderPanel(read: (input: unknown) => { exists: boolean; content: strin
   // Retries off so an unexpected handler error surfaces immediately rather than
   // hanging the test behind backoff.
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const client = createFakeTrpcClient({ "files.read": read })
+  const client = createFakeTrpcClient({
+    "files.read": (input) => {
+      const result = read(input)
+      return { status: result.exists ? "text" : "missing", ...result }
+    },
+  })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
       <ResearchPanel workspaceId="ws-1" />
@@ -74,4 +79,37 @@ describe("ResearchPanel", () => {
       expect(received).toEqual({ workspaceId: "ws-1", relPath: "RESEARCH.md" })
     })
   })
+})
+
+test.each([
+  "oversized",
+  "binary",
+])("rejected %s document shows size and reveal action (mocked IPC)", async (status) => {
+  const revealed: unknown[] = []
+  const client = createFakeTrpcClient({
+    "files.read": () => ({
+      status,
+      exists: true,
+      size: 10_000_001,
+      limit: 10_000_000,
+      baseline: { exists: true, size: 10_000_001, mtimeMs: 1 },
+    }),
+    "files.reveal": (input) => {
+      revealed.push(input)
+    },
+  })
+  render(
+    <AppProviders
+      client={client}
+      queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <ResearchPanel workspaceId="ws-1" />
+    </AppProviders>,
+  )
+  expect((await screen.findByTestId("panel-research-rejected")).textContent).toContain(
+    "10,000,001 bytes",
+  )
+  expect(screen.queryByTestId("markdown")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Reveal in Finder" }))
+  await waitFor(() => expect(revealed).toEqual([{ workspaceId: "ws-1", relPath: "RESEARCH.md" }]))
 })

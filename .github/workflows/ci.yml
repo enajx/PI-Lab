@@ -71,14 +71,9 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run docs:build
 
-  # ── Unit + integration tests (NODE ABI) ─────────────────────────────────────
-  # CRITICAL — ABI sequencing (AGENTS.md §13): native modules install prebuilt for
-  # the host *Node* ABI, which is exactly what Vitest (`bun run test`) needs. This
-  # job NEVER runs `@electron/rebuild`, so the Node ABI is never disturbed here.
-  # The Electron ABI lives only in the separate `e2e` job — the two never collide
-  # in one checkout.
+  # Unit and integration tests validate native loading under Node.
   test:
-    name: Test (Node ABI)
+    name: Test (Node)
     strategy:
       fail-fast: false
       matrix:
@@ -99,22 +94,17 @@ jobs:
       - name: Linux native build deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbfile-dev
-      # Full install (WITH scripts) so native modules build prebuilt for Node ABI.
+      # Install native prebuilds or compile node-pty when no prebuild matches.
       - run: bun install --frozen-lockfile
-      # Normalize node-pty's build/Release (seeds it from the macOS prebuild +
-      # restores spawn-helper's exec bit; no-op on Linux). ABI-neutral — node-pty
-      # is N-API — so it never disturbs the Node-ABI install this job relies on.
+      # Prepare the macOS PTY helper, then validate both native modules in Node.
       - name: Setup native modules (node-pty)
         run: bun run --cwd apps/desktop setup:native
       - run: bun run test
 
-  # ── Whole-app E2E (ELECTRON ABI) ────────────────────────────────────────────
-  # Rebuilds the native modules for Electron's ABI, builds the app, and drives it
-  # via Playwright `_electron`. Runs in a SEPARATE checkout from `test` so the
-  # Electron rebuild never clobbers the Node-ABI install the test job relies on.
-  # Linux has no display → wrap Electron in `xvfb-run`; macOS runs it invisibly.
+  # Whole-app E2E validates the same N-API binaries under Electron.
+  # Linux needs xvfb for Electron's display; macOS runs without a visible window.
   e2e:
-    name: E2E (Electron ABI)
+    name: E2E (Electron)
     strategy:
       fail-fast: false
       matrix:
@@ -141,16 +131,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbfile-dev xvfb
       - run: bun install --frozen-lockfile
-      # Seed node-pty's build/Release from the macOS prebuild (+restore spawn-helper
-      # exec bit) so it's the single source of truth electron-builder packages and
-      # validate:native checks. No-op on Linux (node-gyp already built pty.node).
+      # Prepare the macOS PTY helper and check native loading under Node.
       - name: Setup native modules (node-pty)
         run: bun run --cwd apps/desktop setup:native
-      # Flip native modules to the Electron ABI (better-sqlite3 recompiles; node-pty
-      # is N-API and unaffected). MUST come before building/launching the app.
-      - name: Rebuild native modules (Electron ABI)
-        run: bun run --cwd apps/desktop rebuild:native:electron
-      # Validate the rebuilt addons load under Electron before we package/launch.
+      # Native modules also must load under the Electron runtime that runs E2E.
       - name: Validate native modules
         run: bun run --cwd apps/desktop validate:native
       - run: bun run build

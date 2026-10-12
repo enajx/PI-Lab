@@ -27,7 +27,10 @@ function formatInstant(ms: number): string {
 export function RunsHistory({ automationId, targetRunId }: RunsHistoryProps) {
   const trpc = useTRPC()
   const runsQuery = useQuery(
-    trpc.automations.listRuns.queryOptions({ automationId, limit: 20, targetRunId }),
+    trpc.automations.listRuns.queryOptions(
+      { automationId, limit: 20, targetRunId },
+      { staleTime: 0 },
+    ),
   )
   const runs = runsQuery.data ?? []
   const targetRef = useRef<HTMLLIElement>(null)

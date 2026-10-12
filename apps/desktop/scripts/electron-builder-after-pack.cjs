@@ -2,7 +2,7 @@
 /**
  * electron-builder `afterPack` hook (AGENTS.md Pitfalls #4).
  *
- * node-pty exec()s a small `spawn-helper` binary for every PTY it opens. The
+ * On macOS node-pty exec()s `spawn-helper` for every PTY it opens. The
  * executable bit can be lost when the file is copied into the packaged app
  * (and into the asar-unpacked tree), which makes every terminal/agent launch
  * fail at runtime — not at build time. We restore `+x` on any `spawn-helper`
@@ -13,6 +13,7 @@
 
 const { chmodSync, existsSync, readdirSync, statSync } = require("node:fs")
 const { join } = require("node:path")
+const { Arch } = require("electron-builder")
 
 /** @param {string} dir @param {string} name @returns {string[]} */
 function findByName(dir, name) {
@@ -32,25 +33,27 @@ function findByName(dir, name) {
 
 /** @param {import("electron-builder").AfterPackContext} context */
 exports.default = async function afterPack(context) {
-  if (context.electronPlatformName === "win32") return
+  if (context.electronPlatformName === "linux") {
+    const targetArch = Arch[context.arch]
+    if (process.platform !== "linux" || process.arch !== targetArch) {
+      throw new Error(
+        `Linux node-pty requires a Linux build host with the target architecture: target linux/${targetArch}, host ${process.platform}/${process.arch}. Package one target on its matching Linux host (--linux --${targetArch}).`,
+      )
+    }
+    return
+  }
+  if (context.electronPlatformName !== "darwin") return
 
   // Search the whole app output dir; spawn-helper lives in the asar-unpacked
   // node-pty under Resources, and electron-builder lays that out per-platform.
   const root = context.appOutDir
   const helpers = findByName(root, "spawn-helper")
-  for (const helper of helpers) {
-    try {
-      const mode = statSync(helper).mode
-      // Add owner/group/other execute bits (0o111).
-      chmodSync(helper, mode | 0o111)
-      console.log(`[after-pack] +x ${helper}`)
-    } catch (err) {
-      console.warn(`[after-pack] could not chmod ${helper}: ${String(err)}`)
-    }
+  if (helpers.length === 0) {
+    throw new Error("[after-pack] no node-pty spawn-helper found (check asarUnpack)")
   }
-  // Only macOS ships a spawn-helper (gyp OS=="mac"); on Linux its absence is normal
-  // (node-pty uses forkpty), so don't cry wolf there.
-  if (helpers.length === 0 && context.electronPlatformName === "darwin") {
-    console.warn("[after-pack] no node-pty spawn-helper found to chmod (check asarUnpack)")
+  for (const helper of helpers) {
+    const mode = statSync(helper).mode
+    chmodSync(helper, mode | 0o111)
+    console.log(`[after-pack] +x ${helper}`)
   }
 }

@@ -4,6 +4,7 @@ import {
   createContext,
   type FormEvent,
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -18,12 +19,14 @@ export interface NewFileResult {
 
 export interface NewFileRequest {
   onCreated: (created: NewFileResult) => void
+  onCancel?: () => void
   /** Project already in context when the save request started. */
   initialProjectId?: string
 }
 
 interface NewFileController {
   openNewFile: (request: NewFileRequest) => void
+  chooseNewFile: (projectId: string) => Promise<NewFileResult | null>
 }
 
 const NewFileControllerContext = createContext<NewFileController | null>(null)
@@ -48,8 +51,16 @@ export function NewFileControllerProvider({ children }: { children: ReactNode })
 
   const close = (): void => {
     if (pending) return
+    request?.onCancel?.()
     setRequest(null)
   }
+  const chooseNewFile = useCallback(
+    (initialProjectId: string): Promise<NewFileResult | null> =>
+      new Promise((resolve) => {
+        setRequest({ initialProjectId, onCreated: resolve, onCancel: () => resolve(null) })
+      }),
+    [],
+  )
 
   useEffect(() => {
     if (open) return
@@ -67,11 +78,14 @@ export function NewFileControllerProvider({ children }: { children: ReactNode })
   useEffect(() => {
     if (!open) return
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !pending) setRequest(null)
+      if (event.key === "Escape" && !pending) {
+        request?.onCancel?.()
+        setRequest(null)
+      }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [open, pending])
+  }, [open, pending, request])
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
@@ -96,7 +110,7 @@ export function NewFileControllerProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <NewFileControllerContext.Provider value={{ openNewFile: setRequest }}>
+    <NewFileControllerContext.Provider value={{ openNewFile: setRequest, chooseNewFile }}>
       {children}
       {open ? (
         <div

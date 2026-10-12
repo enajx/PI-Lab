@@ -1,4 +1,4 @@
-import { fuzzyMatch } from "@pi-lab/shared"
+import { fuzzyMatch } from "@pi-lab/shared/search/fuzzy"
 import { Button, cn, Input } from "@pi-lab/ui"
 import {
   Bot,

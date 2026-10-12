@@ -32,4 +32,4 @@ export type ProjectListItem = RouterOutputs["projects"]["list"][number]
 export type FileTreeEntry = RouterOutputs["files"]["tree"][number]
 
 /** One quick-open hit as returned by `files.search`. */
-export type FileSearchHit = RouterOutputs["files"]["search"][number]
+export type FileSearchHit = RouterOutputs["files"]["search"]["hits"][number]

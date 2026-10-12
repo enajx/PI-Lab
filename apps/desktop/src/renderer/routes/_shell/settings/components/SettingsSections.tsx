@@ -5,6 +5,7 @@ import type {
   ProjectConfigStorage,
 } from "@pi-lab/local-db"
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
+import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useLayoutEffect, useState } from "react"
@@ -13,7 +14,6 @@ import {
   allEditorThemes,
   DEFAULT_EDITOR_THEME_ID,
 } from "../../../../Editor/components/editorThemes"
-import { DEFAULT_EDITOR_SETTINGS } from "../../../../Editor/hooks/useEditorBuffers"
 import {
   NOTIFICATION_SOUND_OPTIONS,
   type NotificationSoundId,
@@ -49,6 +49,7 @@ import {
 } from "../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../trpc/react"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
+import { AppIconGallery } from "./AppIconGallery"
 import { AppThemeGallery } from "./AppThemeGallery"
 import { SelectField, SettingsSection, TextAreaField, ToggleField } from "./SettingsControls"
 
@@ -162,6 +163,7 @@ export function AppearanceSection() {
         onChange={(value) => setMode(value as ThemeMode)}
       />
       <AppThemeGallery />
+      <AppIconGallery />
       <div
         id="appearance-advanced"
         data-testid="appearance-advanced-editor-typography"
@@ -471,7 +473,7 @@ export function EditorSection() {
 export function AgentsSection() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const agentsQuery = useQuery(trpc.agents.list.queryOptions())
+  const agentsQuery = useQuery(trpc.agents.list.queryOptions(undefined, { staleTime: 0 }))
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const [defaultAgent, setDefaultAgent] = useDefaultAgentId()
   const updateGeneral = useMutation(

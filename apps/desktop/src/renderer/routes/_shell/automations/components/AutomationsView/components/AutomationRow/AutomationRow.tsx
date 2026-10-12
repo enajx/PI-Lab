@@ -72,7 +72,10 @@ export function AutomationRow({
   // Lightweight latest-run peek for the status dot (only when collapsed; the
   // expanded history fetches the full list).
   const runsQuery = useQuery(
-    trpc.automations.listRuns.queryOptions({ automationId: automation.id, limit: 1 }),
+    trpc.automations.listRuns.queryOptions(
+      { automationId: automation.id, limit: 1 },
+      { staleTime: 0 },
+    ),
   )
   const latest = runsQuery.data?.[0]
 

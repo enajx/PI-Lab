@@ -94,8 +94,12 @@ export function DigitalRainThumbnail({
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect()
-      width = Math.max(1, Math.round(rect.width || canvas.clientWidth || 320))
-      height = Math.max(1, Math.round(rect.height || canvas.clientHeight || 128))
+      const nextWidth = Math.max(1, Math.round(rect.width || canvas.clientWidth || 320))
+      const nextHeight = Math.max(1, Math.round(rect.height || canvas.clientHeight || 128))
+      // Same size (e.g. the observer's initial callback): keep the current picture.
+      if (streams.length > 0 && nextWidth === width && nextHeight === height) return
+      width = nextWidth
+      height = nextHeight
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
       canvas.width = Math.round(width * dpr)
       canvas.height = Math.round(height * dpr)

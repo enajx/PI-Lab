@@ -1,4 +1,4 @@
-import { fuzzyMatch, highlightSegments } from "@pi-lab/shared"
+import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { cn } from "@pi-lab/ui"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { type PaletteCommand, usePaletteCommands } from "./usePaletteCommands"

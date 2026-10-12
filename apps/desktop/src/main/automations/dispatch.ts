@@ -59,24 +59,16 @@ export async function dispatchAutomation(
   }
 
   try {
-    const result = await startAgentSession(ctx, {
+    await startAgentSession(ctx, {
       projectId: automation.projectId,
       agentId: automation.agentId,
       prompt: automation.prompt,
       name: automation.name,
       workflowRunId: run.id,
     })
-    const updated = ctx.db
-      .update(automationRuns)
-      .set({
-        state: "running",
-        workspaceId: result.workspaceId,
-        sessionId: result.sessionId,
-        launchedAt: Date.now(),
-      })
-      .where(eq(automationRuns.id, run.id))
-      .returning()
-      .get()
+    // The activity monitor records the pending-to-running transition during
+    // startAgentSession, including the single launch timestamp.
+    const updated = ctx.db.select().from(automationRuns).where(eq(automationRuns.id, run.id)).get()
     return updated ?? run
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to launch session"

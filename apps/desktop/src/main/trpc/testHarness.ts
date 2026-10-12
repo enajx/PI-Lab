@@ -234,6 +234,7 @@ export interface HarnessOptions {
   httpFetch?: HttpFetch
   /** File-open for the library router's folder source (defaults to {@link FAKE_OPEN_PATH}). */
   openPath?: OpenPath
+  revealPath?: (path: string) => void | Promise<void>
   /** Python-tools exec for the diagnostics router (defaults to {@link FAKE_PY_TOOLS_EXEC}). */
   pyToolsExec?: PyToolsExec
   /** Workspace Python resolver (defaults to a deterministic Node-backed runtime). */
@@ -274,6 +275,7 @@ export async function createHarness(
     | "sshExec"
     | "httpFetch"
     | "openPath"
+    | "revealPath"
     | "pyToolsExec"
     | "discoverPythonEnvironments"
     | "resolvePythonRuntime"
@@ -355,6 +357,7 @@ export async function createHarness(
     sshExec: options.sshExec ?? FAKE_SSH_EXEC,
     httpFetch: options.httpFetch ?? FAKE_HTTP_FETCH,
     openPath: options.openPath ?? FAKE_OPEN_PATH,
+    revealPath: options.revealPath ?? (() => {}),
     pyToolsExec: options.pyToolsExec ?? FAKE_PY_TOOLS_EXEC,
     discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
     resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,
@@ -363,6 +366,14 @@ export async function createHarness(
     activityMonitor,
     notificationService,
     caffeine,
+    thumbnailImageProcessor: {
+      inspect: () => ({
+        width: 1,
+        height: 1,
+        badgeDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA=",
+      }),
+      inspectWebP: async () => null,
+    },
   }
   const caller = createCaller(context)
 

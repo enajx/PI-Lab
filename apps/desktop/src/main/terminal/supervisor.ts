@@ -75,8 +75,8 @@ export function resolveDaemonEntry(): string {
 /**
  * Plan the child launch. We run the daemon with the *current executable* in
  * pure-Node mode (`ELECTRON_RUN_AS_NODE=1`): Electron's bundled Node executes
- * the bundle as a plain Node process, which is the ABI node-pty is prebuilt for
- * here (Node ABI 137). Using `process.execPath` avoids depending on a system
+ * the bundle as a plain Node process and loads the same N-API node-pty addon.
+ * Using `process.execPath` avoids depending on a system
  * `node` being on PATH in the packaged app. The socket path is passed both as an
  * explicit argv (the daemon's `resolveSocketPath` prefers it) and via the env so
  * the child is unambiguous.

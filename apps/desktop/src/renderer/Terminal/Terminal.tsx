@@ -163,6 +163,10 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
             if (event.type === "data") xterm.write(event.chunk)
             else xterm.write(`\r\n[pi-lab] session exited (code ${event.exitCode ?? "?"})\r\n`)
           },
+          onError: (error) => {
+            if (cancelled) return
+            xterm.write(`\r\n[pi-lab] terminal connection failed: ${error.message}\r\n`)
+          },
         },
       )
       unsubscribe = () => subscription.unsubscribe()

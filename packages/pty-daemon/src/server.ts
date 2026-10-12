@@ -89,7 +89,14 @@ export class DaemonServer {
 
   constructor(options: DaemonServerOptions) {
     this.socketPath = options.socketPath
-    this.store = new SessionStore(options.store)
+    const onSessionReaped = options.store?.onSessionReaped
+    this.store = new SessionStore({
+      ...options.store,
+      onSessionReaped: (sessionId) => {
+        for (const connection of this.connections) connection.detach(sessionId)
+        onSessionReaped?.(sessionId)
+      },
+    })
     this.server = createServer((socket) => this.handleConnection(socket))
   }
 

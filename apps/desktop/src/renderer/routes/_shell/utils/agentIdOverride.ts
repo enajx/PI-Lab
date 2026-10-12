@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_ID } from "@pi-lab/shared"
+import { DEFAULT_AGENT_ID } from "@pi-lab/shared/agents/catalog"
 
 /**
  * Test seam (md/engineering/testing-and-build.md): the "Open agent" action launches a real external

@@ -35,9 +35,9 @@ export function AutomationsView({
   const [findOpen, setFindOpen] = useState(false)
   const [collapsed] = useSidebarCollapsed()
 
-  const listQuery = useQuery(trpc.automations.list.queryOptions())
+  const listQuery = useQuery(trpc.automations.list.queryOptions(undefined, { staleTime: 0 }))
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
-  const agentsQuery = useQuery(trpc.agents.list.queryOptions())
+  const agentsQuery = useQuery(trpc.agents.list.queryOptions(undefined, { staleTime: 0 }))
 
   const invalidateList = () =>
     queryClient.invalidateQueries({ queryKey: trpc.automations.list.queryKey() })

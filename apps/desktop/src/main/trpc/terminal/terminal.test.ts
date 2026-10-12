@@ -14,7 +14,7 @@ import type { Unsubscribable } from "@trpc/server/observable"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { createNotificationBrokers, NotificationService } from "../../notifications"
 import { appRouter } from "../appRouter"
-import { DEFAULT_AGENT_CATALOG } from "../context"
+import { type AppContext, DEFAULT_AGENT_CATALOG } from "../context"
 import { createCallerFactory } from "../trpc"
 import type { TerminalEvent } from "./terminal"
 
@@ -26,6 +26,7 @@ let socketPath: string
 let server: DaemonServer
 let client: DaemonClient
 let caller: ReturnType<typeof createCaller>
+let callerContext: AppContext
 let terminalActivityCount: number
 const subscriptions: Unsubscribable[] = []
 
@@ -41,7 +42,8 @@ beforeEach(async () => {
   // The terminal router never reads `db`, `sshExec`, or `httpFetch`; stubs keep
   // the context typed without standing up SQLite (or ssh / network) for a
   // pure-PTY test.
-  caller = createCaller({
+  callerContext = {
+    thumbnailImageProcessor: { inspect: () => null, inspectWebP: async () => null },
     db: {} as PiLabDatabase,
     skillsHomeDir: socketDir,
     getDaemonClient: async () => client,
@@ -57,6 +59,7 @@ beforeEach(async () => {
       throw new Error("httpFetch unused in terminal tests")
     },
     openPath: async () => "",
+    revealPath: () => {},
     pyToolsExec: async () => ({ stdout: "", stderr: "", code: null, notFound: true }),
     discoverPythonEnvironments: async () => [],
     resolvePythonRuntime: async () => ({
@@ -107,7 +110,8 @@ beforeEach(async () => {
       },
       beginMeaningfulActivity: () => () => {},
     },
-  })
+  }
+  caller = createCaller(callerContext)
 })
 
 afterEach(async () => {
@@ -147,6 +151,21 @@ async function collect(sessionId: string): Promise<{
 }
 
 describe("terminal router", () => {
+  test("onData reports daemon acquisition failure to its observer", async () => {
+    caller = createCaller({
+      ...callerContext,
+      getDaemonClient: async () => {
+        throw new Error("daemon unavailable")
+      },
+    })
+    const errors: Error[] = []
+    const stream = await caller.terminal.onData({ sessionId: "missing-session" })
+    subscriptions.push(stream.subscribe({ error: (error: Error) => errors.push(error) }))
+
+    await waitFor(() => errors.length > 0, 1000)
+    expect(errors[0]?.message).toContain("daemon unavailable")
+  })
+
   test("spawn + onData streams a marker and a final exit", async () => {
     const { sessionId } = await caller.terminal.spawn({
       command: NODE,

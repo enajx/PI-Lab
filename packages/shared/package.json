@@ -4,7 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./agents/catalog": "./src/agents/catalog.ts",
+    "./agents/command": "./src/agents/command.ts",
+    "./analysis/file-kind": "./src/analysis/file-kind.ts",
+    "./automations/recurrence": "./src/automations/recurrence.ts",
+    "./names/slugify": "./src/names/slugify.ts",
+    "./search/fuzzy": "./src/search/fuzzy.ts",
+    "./terminal/links": "./src/terminal/links.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

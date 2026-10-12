@@ -24,7 +24,7 @@ type HarnessStatus = {
 export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const environment = useQuery(trpc.setup.environment.queryOptions())
+  const environment = useQuery(trpc.setup.environment.queryOptions(undefined, { staleTime: 0 }))
   const settings = useQuery(trpc.settings.get.queryOptions())
   const [, setDefaultAgent] = useDefaultAgentId()
   const [selectedAgent, setSelectedAgent] = useState<"claude-code" | "codex" | null>(null)

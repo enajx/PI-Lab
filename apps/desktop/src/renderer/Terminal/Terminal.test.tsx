@@ -6,6 +6,7 @@ import { Terminal } from "./Terminal"
 const xtermHarness = vi.hoisted(() => ({
   customKeyHandler: null as ((event: KeyboardEvent) => boolean) | null,
   dataHandler: null as ((data: string) => void) | null,
+  writes: [] as string[],
 }))
 
 vi.mock("@xterm/addon-fit", () => ({
@@ -23,7 +24,9 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon(): void {}
     open(): void {}
     focus(): void {}
-    write(): void {}
+    write(data: string): void {
+      xtermHarness.writes.push(data)
+    }
     dispose(): void {}
 
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void {
@@ -58,6 +61,7 @@ describe("Terminal macOS custom key integration", () => {
     vi.restoreAllMocks()
     xtermHarness.customKeyHandler = null
     xtermHarness.dataHandler = null
+    xtermHarness.writes.length = 0
   })
 
   test("writes a mapped key once and leaves plain Enter to xterm", async () => {
@@ -94,5 +98,28 @@ describe("Terminal macOS custom key integration", () => {
     expect(plainEnter.defaultPrevented).toBe(false)
     expect(write).toHaveBeenCalledTimes(2)
     expect(write).toHaveBeenLastCalledWith({ sessionId: "agent-session", data: "\r" })
+  })
+
+  test("shows a subscription failure in the terminal", async () => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock)
+    const errorHandler = { current: null as ((error: Error) => void) | null }
+    const client = {
+      terminal: {
+        onData: {
+          subscribe: (_input: unknown, handlers: { onError: (error: Error) => void }) => {
+            errorHandler.current = handlers.onError
+            return { unsubscribe: () => {} }
+          },
+        },
+        write: { mutate: vi.fn(async () => ({ ok: true as const })) },
+        resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
+      },
+    } as unknown as PiLabTrpcClient
+
+    render(<Terminal client={client} inputKind="terminal" sessionId="agent-session" />)
+    await waitFor(() => expect(errorHandler.current).not.toBeNull())
+    errorHandler.current?.(new Error("daemon unavailable"))
+
+    expect(xtermHarness.writes.join("")).toContain("daemon unavailable")
   })
 })

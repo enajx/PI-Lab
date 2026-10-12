@@ -1,4 +1,5 @@
 // @ts-check
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: electron-builder expands ${arch} for each target.
 /**
  * electron-builder configuration for the PI Lab desktop app (md/engineering/testing-and-build.md (build & ship), P11).
  *
@@ -30,37 +31,46 @@ const NOTARIZE = Boolean(
   process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID,
 )
 
+// Keep only compiled app outputs and audited runtime dependencies.
+// Put this list inside each platform files array. A global files FileSet plus
+// platform-only excludes creates a second permissive app matcher in the builder.
+/** @type {string[]} */
+const APP_FILES = [
+  "out/**",
+  "package.json",
+  "!**/*.{ts,tsx,map,md}",
+  "!**/{test,tests,__tests__,example,examples,docs,doc}/**",
+  // These are the emitted main/daemon externals and their runtime dependency
+  // tree. validate:package rejects a new external or transitive dependency
+  // missing from this list before electron-builder runs.
+  "!**/node_modules/!(@jsquash|@trpc|@xterm|better-sqlite3|copy-anything|drizzle-orm|is-what|node-pty|omggif|superjson|trpc-electron|wasm-feature-detect|zod)/**",
+  "!**/node_modules/@jsquash/!(webp)/**",
+  "!**/node_modules/@trpc/!(server)/**",
+  "!**/node_modules/@xterm/!(headless)/**",
+  // Keep native runtime libraries and target prebuilds; discard source builds,
+  // headers and debug symbols. Per-platform filters below retain matching
+  // prebuilds, including Windows ConPTY and winpty helpers.
+  "!**/node_modules/{better-sqlite3,node-pty}/{src,deps,scripts}/**",
+  "!**/node_modules/{better-sqlite3,node-pty}/binding.gyp",
+  "!**/node_modules/{better-sqlite3,node-pty}/build/Debug/**",
+  "!**/node_modules/{better-sqlite3,node-pty}/build/Release/{obj.target,.deps}/**",
+  "!**/node_modules/{better-sqlite3,node-pty}/**/*.{o,a,pdb,Makefile,mk,gypi}",
+  "!**/node_modules/node-addon-api/**",
+  "!**/node_modules/node-pty/bin/**",
+]
+
 /** @type {import("electron-builder").Configuration} */
 const config = {
   appId: "com.pi-lab.desktop",
   productName: "PI Lab",
-  // Avoid rebuilding native deps via node-gyp during packaging — we drive the
-  // Electron-ABI rebuild ourselves (@electron/rebuild) in the build scripts so
-  // the ABI is explicit and validated (validate:native).
+  // Both native modules use N-API. Validate the installed binaries under Node
+  // and Electron before packaging instead of rebuilding or swapping ABIs.
   npmRebuild: false,
   buildDependenciesFromSource: false,
   directories: {
     output: "release",
     buildResources: "build",
   },
-  // What lands inside the app. The compiled `out/**` tree carries main/preload/
-  // renderer/pty-daemon + the copied drizzle migrations. The native modules are
-  // pulled in via node_modules (electron-builder copies production deps); we keep
-  // them and explicitly drop the source-only workspace packages (already inlined
-  // into `out/**` by electron-vite) and the prebuilt-but-unused node-pty variants.
-  files: [
-    "out/**",
-    "package.json",
-    "!**/*.{ts,tsx,map,md}",
-    "!**/{test,tests,__tests__,example,examples,docs,doc}/**",
-    // node-pty ships prebuilds for every platform + a node-gyp-build `bin/` copy;
-    // only `build/Release` is loaded (see node-pty utils.js) — `setup:native` seeds
-    // it from the macOS prebuild / Linux builds it from source — so trim the rest to
-    // keep the package lean and the loaded ABI unambiguous.
-    "!**/node_modules/node-pty/prebuilds/**",
-    "!**/node_modules/node-pty/bin/**",
-    "!**/node_modules/node-pty/build/Release/{obj.target,.deps}/**",
-  ],
   // Native `.node` addons + node-pty's `spawn-helper` executable MUST live outside
   // the asar so they can be dlopen'd / exec'd at runtime.
   asarUnpack: ["**/node_modules/better-sqlite3/**", "**/node_modules/node-pty/**"],
@@ -77,6 +87,18 @@ const config = {
   // (asar packing can drop it; node-pty exec()s this file for every PTY).
   afterPack: "./scripts/electron-builder-after-pack.cjs",
   mac: {
+    files: [
+      ...APP_FILES,
+      "!**/node_modules/better-sqlite3/prebuilds/!(darwin-${arch}).node",
+      "!**/node_modules/node-pty/prebuilds/!(darwin-${arch})/**",
+    ],
+    // Electron 40 also ships grammatical variants for these same languages.
+    electronLanguages: ["en", "en_GB", "zh_CN", "zh_TW", "ko", "ja", "es", "es_419"].flatMap(
+      (locale) => [
+        locale,
+        ...["FEMININE", "MASCULINE", "NEUTER"].map((variant) => `${locale}_${variant}`),
+      ],
+    ),
     target: [
       { target: "dmg", arch: ["arm64"] },
       { target: "dir", arch: ["arm64"] },
@@ -94,11 +116,23 @@ const config = {
     notarize: NOTARIZE ? { teamId: /** @type {string} */ (process.env.APPLE_TEAM_ID) } : false,
   },
   linux: {
+    files: [
+      ...APP_FILES,
+      "!**/node_modules/better-sqlite3/prebuilds/!(linux-${arch}|linuxmusl-${arch}).node",
+      "!**/node_modules/node-pty/prebuilds/!(linux-${arch})/**",
+    ],
+    electronLanguages: ["en-US", "en-GB", "zh-CN", "zh-TW", "ko", "ja", "es", "es-419"],
     target: [{ target: "AppImage", arch: ["x64", "arm64"] }],
     category: "Development",
     icon: "build/icon.png",
   },
   win: {
+    files: [
+      ...APP_FILES,
+      "!**/node_modules/better-sqlite3/prebuilds/!(win32-${arch}).node",
+      "!**/node_modules/node-pty/prebuilds/!(win32-${arch})/**",
+    ],
+    electronLanguages: ["en-US", "en-GB", "zh-CN", "zh-TW", "ko", "ja", "es", "es-419"],
     target: [{ target: "nsis", arch: ["x64"] }],
     // electron-builder derives the multi-resolution .ico from this png at pack
     // time (we don't generate .ico locally — no Windows tooling on the dev host).

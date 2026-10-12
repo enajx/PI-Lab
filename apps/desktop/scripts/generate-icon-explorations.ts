@@ -38,6 +38,31 @@ const REPO_ROOT = resolve(HERE, "..", "..", "..")
 const OUTPUT_DIR = join(REPO_ROOT, "icons-temp")
 const SUPPLEMENTAL_FONTS = "/System/Library/Fonts/Supplemental"
 
+/**
+ * Downscaled copies of the same explorations, committed as renderer assets so the
+ * Settings → Appearance comparison gallery can show them without shipping four
+ * 1024px masters' worth of pixels — and without any runtime font tooling.
+ */
+export const PREVIEW_SIZE = 256
+export const PREVIEW_DIR = join(
+  REPO_ROOT,
+  "apps",
+  "desktop",
+  "src",
+  "renderer",
+  "routes",
+  "_shell",
+  "settings",
+  "components",
+  "AppIconGallery",
+  "icons",
+)
+
+/** `07-avenir-next-medium.png` → `avenir-next-medium`: the stable id shared with the renderer. */
+export function explorationId(fileName: string): string {
+  return fileName.replace(/^\d+-/, "").replace(/\.png$/, "")
+}
+
 export const ICON_EXPLORATIONS: readonly IconExploration[] = [
   {
     fileName: "01-baskerville-regular.png",
@@ -143,6 +168,12 @@ only the declared font file, so system fallback cannot change the glyph.
 bun apps/desktop/scripts/generate-icon-explorations.ts
 \`\`\`
 
+The same run also writes ${PREVIEW_SIZE}px copies to
+\`apps/desktop/src/renderer/routes/_shell/settings/components/AppIconGallery/icons/\`,
+which the Settings → Appearance comparison gallery ships. That gallery is
+preview-only: it records which treatment the user favours and never touches
+\`icons/icon.svg\`, its manifest digests, or the packaged bundle icon.
+
 | Preview | File | Font style | Local font source |
 | --- | --- | --- | --- |
 ${rows}
@@ -185,6 +216,13 @@ export function generateIconExplorations(): void {
   for (const entry of readdirSync(OUTPUT_DIR)) {
     if (entry.toLowerCase().endsWith(".png")) {
       rmSync(join(OUTPUT_DIR, entry))
+    }
+  }
+
+  mkdirSync(PREVIEW_DIR, { recursive: true })
+  for (const entry of readdirSync(PREVIEW_DIR)) {
+    if (entry.toLowerCase().endsWith(".png")) {
+      rmSync(join(PREVIEW_DIR, entry))
     }
   }
 
@@ -252,6 +290,20 @@ export function generateIconExplorations(): void {
         "8",
         "-strip",
         `PNG32:${output}`,
+      ],
+      { stdio: "inherit" },
+    )
+    const preview = join(PREVIEW_DIR, `${explorationId(fileName)}.png`)
+    execFileSync(
+      "magick",
+      [
+        output,
+        "-resize",
+        `${PREVIEW_SIZE}x${PREVIEW_SIZE}`,
+        "-depth",
+        "8",
+        "-strip",
+        `PNG32:${preview}`,
       ],
       { stdio: "inherit" },
     )

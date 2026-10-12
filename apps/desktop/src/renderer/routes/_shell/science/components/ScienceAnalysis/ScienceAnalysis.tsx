@@ -6,9 +6,8 @@ import {
   DATA_FILE_KIND_LABELS,
   type DataFileCategory,
   type DataFileKind,
-  fuzzyMatch,
-  highlightSegments,
-} from "@pi-lab/shared"
+} from "@pi-lab/shared/analysis/file-kind"
+import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChartArea, FileCode2, FilePlus2, FileText, Search } from "lucide-react"
@@ -305,7 +304,25 @@ export function ScienceAnalysis() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {allFiles.length === 0 && !listing.isLoading ? (
+              {listing.data?.partial ? (
+                <p
+                  data-testid="analysis-partial"
+                  role="status"
+                  className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
+                  title={listing.data.skipped.join("\n")}
+                >
+                  Some project paths could not be read ({listing.data.skipped.length}).
+                </p>
+              ) : null}
+              {listing.isError ? (
+                <p
+                  data-testid="analysis-list-error"
+                  role="alert"
+                  className="p-4 text-destructive text-xs"
+                >
+                  Could not read project data files: {listing.error.message}
+                </p>
+              ) : allFiles.length === 0 && !listing.isLoading ? (
                 <EmptyState />
               ) : (
                 <div className="flex flex-col gap-3 p-3">

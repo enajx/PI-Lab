@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
-import { getSettingsOrDefaults } from "@pi-lab/local-db"
-import { app, BrowserWindow, safeStorage, shell } from "electron"
+import { getSettingsOrDefaults, MigrationFailure } from "@pi-lab/local-db"
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
 import {
   type ActivityMonitorPort,
@@ -38,6 +39,7 @@ import {
   DEFAULT_SSH_EXEC,
   DEFAULT_WORKFLOW_PROCESS_RUNNER,
 } from "./trpc/context"
+import { electronThumbnailImageProcessor } from "./trpc/projects/electronThumbnailImage"
 import {
   AnalysisInteractiveController,
   registerAnalysisReportScheme,
@@ -45,6 +47,7 @@ import {
 import { seedWritableTemplate } from "./trpc/template"
 import { installAppMenu } from "./window/appMenu"
 import { createMainWindow } from "./window/mainWindow"
+import { installShutdownGuard } from "./window/shutdownGuard"
 
 export type { AppRouter } from "./trpc/appRouter"
 
@@ -96,6 +99,7 @@ if (!isTestMode && !app.requestSingleInstanceLock()) {
 // reserved here so future wiring stays gated behind one flag (md/engineering/testing-and-build.md).
 
 let ipcHandler: ReturnType<typeof createIPCHandler> | null = null
+const shutdownGuard = installShutdownGuard({ app, ipcMain, createRequestId: randomUUID })
 
 // The PTY daemon supervisor is created once and shared across the app's life.
 // It adopts a daemon a prior run left detached, or spawns one (md/engineering/architecture.md (process model)); it
@@ -157,6 +161,8 @@ function createAppContext(): AppContext {
     httpFetch: DEFAULT_HTTP_FETCH,
     // Library folder source opens PDFs with the OS default app (md/engineering/architecture.md).
     openPath: (path) => shell.openPath(path),
+    revealPath: (path) => shell.showItemInFolder(path),
+    thumbnailImageProcessor: electronThumbnailImageProcessor,
     pyToolsExec: DEFAULT_PY_TOOLS_EXEC,
     discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
     resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
@@ -184,6 +190,7 @@ function startAutomationScheduler(): void {
 }
 
 function boot(window: BrowserWindow): void {
+  shutdownGuard.attachWindow(window)
   // One IPC handler for the app's lifetime; re-attach windows rather than
   // re-create it (avoids duplicate handlers when a window is reopened).
   if (ipcHandler) {
@@ -208,6 +215,9 @@ function ensureMainWindow(): BrowserWindow {
 app
   .whenReady()
   .then(async () => {
+    // Test runs stay in the background on macOS: no Dock icon, no ⌘Tab entry, and
+    // macOS does not hand focus to the app when another app quits.
+    if (isTestMode && process.platform === "darwin") app.setActivationPolicy("accessory")
     const dock = app.dock
     applyMacDockIcon(
       appIconPath,
@@ -258,8 +268,7 @@ app
     installAppMenu()
 
     // Steps 4 + 5 — wire tRPC, then open the window.
-    const window = createMainWindow(appIconPath)
-    boot(window)
+    ensureMainWindow()
 
     // macOS: recreate the window when the dock icon is clicked with none open.
     app.on("activate", () => {
@@ -270,6 +279,9 @@ app
   })
   .catch((error) => {
     console.error("[pi-lab] fatal during boot:", error)
+    if (error instanceof MigrationFailure) {
+      dialog.showErrorBox("PI Lab database could not be opened", error.message)
+    }
     app.quit()
   })
 
@@ -284,7 +296,8 @@ app.on("window-all-closed", () => {
 // running so live terminals/agents survive the app restarting — the whole reason
 // it is a separate process (md/engineering/architecture.md (process model)). In test mode
 // dispose also reaps that daemon (see TerminalSupervisor construction above).
-app.on("before-quit", () => {
+app.on("will-quit", () => {
+  shutdownGuard.dispose()
   automationScheduler?.stop()
   caffeineController?.dispose()
   activityMonitor?.dispose()

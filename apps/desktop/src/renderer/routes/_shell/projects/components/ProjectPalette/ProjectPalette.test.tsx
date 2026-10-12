@@ -28,9 +28,9 @@ function makeController(): CentralPanelController {
 
 function baseHandlers(overrides: FakeHandlers = {}): FakeHandlers {
   return {
-    "files.read": () => ({ exists: true, content: "# Research\n" }),
+    "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
     "files.tree": () => [{ name: "main.py", relPath: "main.py", kind: "file" as const }],
-    "files.search": () => [{ relPath: "main.py" }],
+    "files.search": () => ({ hits: [{ relPath: "main.py" }], partial: false, skipped: [] }),
     "workspaces.changes": () => [],
     "science.skills.list": () => ({ skills: [], roots: [] }),
     ...overrides,

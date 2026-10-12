@@ -55,7 +55,7 @@ test("plain folders work and Git features unlock after Initialize Git", async ()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
 
   const notice = window.getByTestId("non-git-project-notice")
-  await expect(notice).toContainText("Files, editor, terminals, Tasks, Analysis, and one agent")
+  await expect(notice).toContainText("This project is not git tracked.")
   await expect(window.getByTestId("project-view-summary")).toBeDisabled()
   await expect(window.getByTestId("project-view-fetch-experiments")).toBeDisabled()
 

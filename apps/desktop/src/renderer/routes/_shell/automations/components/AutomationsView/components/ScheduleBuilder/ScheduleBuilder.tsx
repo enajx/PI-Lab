@@ -1,4 +1,9 @@
-import { buildRrule, matchPreset, type SchedulePreset, type Weekday } from "@pi-lab/shared"
+import {
+  buildRrule,
+  matchPreset,
+  type SchedulePreset,
+  type Weekday,
+} from "@pi-lab/shared/automations/recurrence"
 import { Input, Label } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"

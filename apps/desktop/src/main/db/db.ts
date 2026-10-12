@@ -10,7 +10,7 @@ import { resolveBundledMigrationsDir } from "./migrationsDir"
 export interface DbStatus {
   /** Number of migrations Drizzle considers applied. */
   appliedCount: number
-  /** True when journal-drift self-healing ran on this boot. */
+  /** Compatibility status, always false: unknown migration journals now stop startup. */
   recovered: boolean
   /** Newest migration tag (e.g. "0001_branch_workspace_unique"), or null. */
   latestTag: string | null
@@ -36,8 +36,8 @@ function readLatestTag(migrationsFolder: string): string | null {
 }
 
 /**
- * Open the local SQLite DB and apply all migrations (self-healing on journal
- * drift — handled inside `@pi-lab/local-db`). Must run before any router that
+ * Open the local SQLite DB and apply migrations from a recognized journal.
+ * Unknown states stop with a backup and visible error. Must run before any router that
  * touches the DB. Idempotent; the resolved path honors `PI_LAB_DATA_DIR`.
  */
 export function initDatabase(): DbStatus {

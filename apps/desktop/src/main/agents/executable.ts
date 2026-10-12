@@ -37,7 +37,7 @@ export const liveAgentLaunchEnvironment: AgentLaunchEnvironmentResolver = () => 
   }
   if (!loginEnvironment) {
     const shell = process.env.SHELL?.trim() || "/bin/bash"
-    loginEnvironment = execFileAsync(shell, ["-ilc", "env -0"], {
+    const probe = execFileAsync(shell, ["-ilc", "env -0"], {
       env: process.env,
       maxBuffer: 2 * 1024 * 1024,
       timeout: 5_000,
@@ -45,6 +45,11 @@ export const liveAgentLaunchEnvironment: AgentLaunchEnvironmentResolver = () => 
       ({ stdout }) =>
         ({ ...process.env, ...parseNullEnvironment(stdout) }) as Record<string, string>,
     )
+    const cached = probe.catch((error: unknown) => {
+      if (loginEnvironment === cached) loginEnvironment = null
+      throw error
+    })
+    loginEnvironment = cached
   }
   return loginEnvironment
 }

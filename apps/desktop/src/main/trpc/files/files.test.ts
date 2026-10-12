@@ -3,22 +3,26 @@
 // read/write round-trip inside a workspace's working dir and that a path
 // escaping that dir (`../outside`) is rejected. Plus a pure unit on the jailing
 // helper so the guard's edge cases don't need disk.
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import * as workspaceFs from "@pi-lab/workspace-fs"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createHarness, type Harness } from "../testHarness"
 import { resolveInsideDir } from "./files"
 
 let h: Harness
 let projectId: string
+const revealPath = vi.fn()
 
 beforeEach(async () => {
-  h = await createHarness()
+  revealPath.mockReset()
+  h = await createHarness(undefined, { revealPath })
   const project = await h.caller.projects.open({ path: h.repoDir })
   projectId = project.id
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await h.dispose()
 })
 
@@ -46,7 +50,7 @@ describe("files.read / files.write round-trip", () => {
 
     const result = await h.caller.files.read({ workspaceId: ws.id, relPath: "RESEARCH.md" })
     expect(result.exists).toBe(true)
-    expect(result.content).toBe("# Research\n\nfindings\n")
+    expect("content" in result ? result.content : undefined).toBe("# Research\n\nfindings\n")
 
     // The file really landed on disk inside the worktree, not elsewhere.
     expect(await readFile(join(ws.dir, "RESEARCH.md"), "utf8")).toBe("# Research\n\nfindings\n")
@@ -60,7 +64,7 @@ describe("files.read / files.write round-trip", () => {
       content: "- [ ] task\n",
     })
     const result = await h.caller.files.read({ workspaceId: ws.id, relPath: "notes/deep/todo.md" })
-    expect(result.content).toBe("- [ ] task\n")
+    expect("content" in result ? result.content : undefined).toBe("- [ ] task\n")
   })
 
   test("reading a file that already exists on disk works", async () => {
@@ -68,14 +72,14 @@ describe("files.read / files.write round-trip", () => {
     await writeFile(join(ws.dir, "TODO.md"), "- [x] done\n")
     const result = await h.caller.files.read({ workspaceId: ws.id, relPath: "TODO.md" })
     expect(result.exists).toBe(true)
-    expect(result.content).toBe("- [x] done\n")
+    expect("content" in result ? result.content : undefined).toBe("- [x] done\n")
   })
 
   test("reading a missing file yields exists:false, not an error", async () => {
     const ws = await makeWorkspace()
     const result = await h.caller.files.read({ workspaceId: ws.id, relPath: "RESEARCH.md" })
     expect(result.exists).toBe(false)
-    expect(result.content).toBe("")
+    expect("content" in result ? result.content : undefined).toBe("")
   })
 })
 
@@ -143,4 +147,70 @@ describe("resolveInsideDir (pure)", () => {
   test("rejects an absolute path", () => {
     expect(() => resolveInsideDir(base, "/etc/passwd")).toThrow(/relative/)
   })
+})
+
+test("read and post-write verification return text with its own disk fingerprint", async () => {
+  const ws = await makeWorkspace()
+  const content = "paired UTF-8 text: π\n"
+  const written = await h.caller.files.write({ workspaceId: ws.id, relPath: "paired.txt", content })
+  const actual = await stat(join(ws.dir, "paired.txt"))
+  expect(written).toMatchObject({
+    bytes: Buffer.byteLength(content),
+    baseline: { mtimeMs: actual.mtimeMs, size: actual.size },
+    matchesWrittenContent: true,
+  })
+  const read = await h.caller.files.read({ workspaceId: ws.id, relPath: "paired.txt" })
+  expect(read).toMatchObject({ content, baseline: { mtimeMs: actual.mtimeMs, size: actual.size } })
+})
+
+test("post-write verification reports a real external replacement (injected timing)", async () => {
+  const ws = await makeWorkspace()
+  const write = workspaceFs.writeTextFile
+  vi.spyOn(workspaceFs, "writeTextFile").mockImplementationOnce(async (path, content) => {
+    await write(path, content)
+    await writeFile(path, "external replacement")
+  })
+  const result = await h.caller.files.write({
+    workspaceId: ws.id,
+    relPath: "paired.txt",
+    content: "local",
+  })
+  expect(result.matchesWrittenContent).toBe(false)
+  const current = await stat(join(ws.dir, "paired.txt"))
+  expect(result.baseline).toEqual({ exists: true, mtimeMs: current.mtimeMs, size: current.size })
+  expect(await readFile(join(ws.dir, "paired.txt"), "utf8")).toBe("external replacement")
+})
+
+test("bounded router reads reject oversize/binary contents and still verify saves above 10 MB", async () => {
+  const ws = await makeWorkspace()
+  const content = `${"x".repeat(10_000_000)}😀`
+  const written = await h.caller.files.write({ workspaceId: ws.id, relPath: "large.txt", content })
+  expect(written.matchesWrittenContent).toBe(true)
+  expect(written).not.toHaveProperty("content")
+  expect(written.baseline.size).toBe(10_000_004)
+  const read = await h.caller.files.read({ workspaceId: ws.id, relPath: "large.txt" })
+  expect(read).toMatchObject({ status: "oversized", size: 10_000_004 })
+  expect(read).not.toHaveProperty("content")
+  await writeFile(join(ws.dir, "binary.txt"), Buffer.from([0xff, 65]))
+  const binary = await h.caller.files.read({ workspaceId: ws.id, relPath: "binary.txt" })
+  expect(binary).toMatchObject({ status: "binary", size: 2 })
+  expect(binary).not.toHaveProperty("content")
+})
+
+test("Reveal in Finder passes jailed real files to the adapter and rejects symlink escapes", async () => {
+  const { symlink, realpath } = await import("node:fs/promises")
+  const ws = await makeWorkspace()
+  await writeFile(join(ws.dir, "local.txt"), "local")
+  const reveal = revealPath
+  await h.caller.files.reveal({ workspaceId: ws.id, relPath: "local.txt" })
+  expect(reveal).toHaveBeenCalledWith(await realpath(join(ws.dir, "local.txt")))
+  await expect(
+    h.caller.files.reveal({ workspaceId: ws.id, relPath: "../outside" }),
+  ).rejects.toMatchObject({ code: "FORBIDDEN" })
+  await writeFile(join(h.repoDir, "outside.txt"), "outside")
+  await symlink(join(h.repoDir, "outside.txt"), join(ws.dir, "escape.txt"))
+  await expect(
+    h.caller.files.reveal({ workspaceId: ws.id, relPath: "escape.txt" }),
+  ).rejects.toMatchObject({ code: "FORBIDDEN" })
+  expect(reveal).toHaveBeenCalledTimes(1)
 })

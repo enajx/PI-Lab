@@ -15,7 +15,9 @@ import {
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { promisify } from "node:util"
+import { projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
+import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { isGitRepo } from "../../git"
 import { createHarness, type Harness } from "../testHarness"
@@ -351,7 +353,7 @@ describe("projects.list / get / touch / remove", () => {
 describe("projects.setThumbnail", () => {
   const DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA="
 
-  test("persists a data-URL thumbnail and surfaces it in list/get", async () => {
+  test("keeps thumbnail bytes out of lists and serves card and badge separately", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     expect(project.thumbnail).toBeNull()
 
@@ -360,7 +362,60 @@ describe("projects.setThumbnail", () => {
 
     expect((await h.caller.projects.get({ id: project.id })).thumbnail).toBe(DATA_URL)
     const listed = (await h.caller.projects.list()).find((p) => p.id === project.id)
-    expect(listed?.thumbnail).toBe(DATA_URL)
+    expect(listed?.hasThumbnail).toBe(true)
+    expect(listed).not.toHaveProperty("thumbnail")
+    expect(await h.caller.projects.thumbnail({ id: project.id, variant: "card" })).toEqual({
+      dataUrl: DATA_URL,
+      tooLarge: false,
+    })
+    const badge = await h.caller.projects.thumbnail({ id: project.id, variant: "badge" })
+    expect(badge.dataUrl).toMatch(/^data:image\/png;base64,/)
+    expect(badge.tooLarge).toBe(false)
+  })
+
+  test("rejects an oversized GIF and keeps prior artwork", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setThumbnail({ id: project.id, dataUrl: DATA_URL })
+    const gif = Buffer.alloc(1_000_001)
+    gif.write("GIF89a", 0, "ascii")
+    gif.writeUInt16LE(1, 6)
+    gif.writeUInt16LE(1, 8)
+    const oversizedGif = `data:image/gif;base64,${gif.toString("base64")}`
+    await expect(
+      h.caller.projects.setThumbnail({ id: project.id, dataUrl: oversizedGif }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await h.caller.projects.get({ id: project.id })).thumbnail).toBe(DATA_URL)
+  })
+
+  test("accepts a GIF at exactly 1,000,000 decoded bytes", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const gif = Buffer.alloc(1_000_000)
+    gif.write("GIF89a", 0, "ascii")
+    gif.writeUInt16LE(1, 6)
+    gif.writeUInt16LE(1, 8)
+    const dataUrl = `data:image/gif;base64,${gif.toString("base64")}`
+    await h.caller.projects.setThumbnail({ id: project.id, dataUrl })
+    expect(await h.caller.projects.thumbnail({ id: project.id, variant: "card" })).toEqual({
+      dataUrl,
+      tooLarge: false,
+    })
+  })
+
+  test("an old oversized row has a visible fallback and can be cleared", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const oldDataUrl = `data:image/png;base64,${Buffer.alloc(1_000_001).toString("base64")}`
+    h.db.update(projects).set({ thumbnail: oldDataUrl }).where(eq(projects.id, project.id)).run()
+    const listed = (await h.caller.projects.list()).find((row) => row.id === project.id)
+    expect(listed?.hasThumbnail).toBe(true)
+    expect(listed).not.toHaveProperty("thumbnail")
+    expect(await h.caller.projects.thumbnail({ id: project.id, variant: "card" })).toEqual({
+      dataUrl: null,
+      tooLarge: true,
+    })
+    await h.caller.projects.setThumbnail({ id: project.id, dataUrl: null })
+    expect(
+      (await h.caller.projects.list()).find((row) => row.id === project.id)?.hasThumbnail,
+    ).toBe(false)
   })
 
   test("clears the thumbnail with dataUrl: null", async () => {
@@ -377,6 +432,16 @@ describe("projects.setThumbnail", () => {
     await expect(
       h.caller.projects.setThumbnail({ id: project.id, dataUrl: "https://example.com/x.png" }),
     ).rejects.toBeInstanceOf(TRPCError)
+  })
+
+  test("rejects a truncated PNG as BAD_REQUEST before decoding", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await expect(
+      h.caller.projects.setThumbnail({
+        id: project.id,
+        dataUrl: `data:image/png;base64,${Buffer.from("89504e470d0a1a0a", "hex").toString("base64")}`,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 
   test("throws NOT_FOUND for an unknown project", async () => {

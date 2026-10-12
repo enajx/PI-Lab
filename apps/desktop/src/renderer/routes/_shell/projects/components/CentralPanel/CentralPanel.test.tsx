@@ -164,16 +164,21 @@ afterEach(() => {
 function baseHandlers(treeName = "main.py", overrides: FakeHandlers = {}): FakeHandlers {
   return {
     "files.tree": () => [{ name: treeName, relPath: treeName, kind: "file" as const }],
-    "files.read": () => ({ exists: diskStat.exists, content: diskContent }),
+    "files.read": () => ({
+      status: diskStat.exists ? "text" : "missing",
+      exists: diskStat.exists,
+      content: diskContent,
+      baseline: diskStat,
+    }),
     "files.stat": () => diskStat,
     "files.write": (input) => {
       const { relPath, content } = input as { relPath: string; content: string }
       written.push({ relPath, content })
       diskContent = content
       diskStat = { exists: true, mtimeMs: diskStat.mtimeMs + 10, size: content.length }
-      return { bytes: content.length }
+      return { bytes: content.length, baseline: diskStat, matchesWrittenContent: true }
     },
-    "files.search": () => [],
+    "files.search": () => ({ hits: [], partial: false, skipped: [] }),
     "diagnostics.check": (input) => {
       const { relPath, typeChecker, lint } = input as {
         relPath: string
@@ -1371,7 +1376,7 @@ describe("CentralPanel — editor behaviour", () => {
           calls.push("save")
           const { relPath, content } = input as { relPath: string; content: string }
           written.push({ relPath, content })
-          return { bytes: content.length }
+          return { bytes: content.length, baseline: diskStat, matchesWrittenContent: true }
         },
         "diagnostics.format": () => {
           calls.push("format")
@@ -1612,4 +1617,50 @@ describe("CentralPanel — editor behaviour", () => {
     await waitFor(() => expect(formatCalls).toBe(1))
     await waitFor(() => expect(screen.getByTestId("buffer-doc").textContent).toContain("formatted"))
   })
+})
+
+test("Python Run is blocked by an external conflict and shows explicit resolution actions", async () => {
+  const run = vi.fn(() => ({ sessionId: "run", runtime: ENV_RUNTIME }))
+  renderPanel(baseHandlers("main.py", { "python.runFile": run }))
+  await openFile()
+  fireEvent.click(screen.getByTestId("buffer-type"))
+  diskContent = "external"
+  diskStat = { exists: true, mtimeMs: 9999, size: 8 }
+  fireEvent.click(screen.getByTestId("buffer-run"))
+  await waitFor(() => expect(screen.getByTestId("editor-external-warning")).toBeTruthy())
+  expect(run).not.toHaveBeenCalled()
+  expect(written).toHaveLength(0)
+  expect(screen.getByRole("button", { name: "Overwrite disk" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Reload from disk" }))
+  await waitFor(() => expect(screen.getByTestId("buffer-doc").textContent).toBe("external"))
+  expect(screen.queryByTestId("editor-external-warning")).toBeNull()
+})
+
+test.each([
+  "failed",
+  "stale",
+] as const)("Python Run is blocked after a %s save (mocked IPC)", async (outcome) => {
+  let release!: () => void
+  const boundary = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const write = vi.fn(async () => {
+    await boundary
+    if (outcome === "failed") throw new Error("write failed")
+    return { bytes: 12, baseline: diskStat, matchesWrittenContent: true }
+  })
+  const run = vi.fn(() => ({ sessionId: "run", runtime: ENV_RUNTIME }))
+  renderPanel(baseHandlers("main.py", { "files.write": write, "python.runFile": run }))
+  await openFile()
+  fireEvent.click(screen.getByTestId("buffer-run"))
+  await waitFor(() => expect(write).toHaveBeenCalled())
+  if (outcome === "stale") fireEvent.click(screen.getByTestId("buffer-type"))
+  await act(async () => {
+    release()
+    await boundary
+  })
+  if (outcome === "failed")
+    await waitFor(() => expect(screen.getByText(/Could not save main.py/)).toBeTruthy())
+  else expect(screen.getByTestId("central-tab-dirty")).toBeTruthy()
+  expect(run).not.toHaveBeenCalled()
 })

@@ -1,9 +1,17 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  cpSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import Database from "better-sqlite3"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { runMigrations } from "./migrate"
+import { MigrationFailure, runMigrations } from "./migrate"
 import { resolveMigrationsDir } from "./paths"
 import { getSettingsOrDefaults } from "./settings"
 import { DEFAULT_CAFFEINE_SETTINGS, DEFAULT_NOTIFICATION_SETTINGS, settings } from "./tables"
@@ -273,27 +281,123 @@ describe("runMigrations", () => {
     }
   })
 
-  it("self-heals when the journal is wiped but the schema already exists", () => {
-    // First run lays down the full schema + journal.
-    const first = runMigrations(dbPath)
-    first.sqlite.close()
-
-    // Simulate journal/state drift: drop Drizzle's bookkeeping table while the
-    // real tables stay. A naive migrate would now re-run 0000 and explode on
-    // "table projects already exists".
-    const raw = new Database(dbPath)
-    raw.exec("DROP TABLE __drizzle_migrations")
-    raw.close()
-
-    const healed = runMigrations(dbPath)
-    try {
-      expect(healed.recovered).toBe(true)
-      // Recovery preserves data: the kept tables are still present.
-      const tables = tableNames(dbPath)
-      expect(tables).toContain("projects")
-      expect(tables).toContain("workspaces")
-    } finally {
-      healed.sqlite.close()
+  it.each(["current", "older"])("stops safely with a missing journal on a %s schema", (version) => {
+    const migrations = join(dataDir, "fixture-migrations")
+    cpSync(resolveMigrationsDir(), migrations, { recursive: true })
+    if (version === "older") {
+      const path = join(migrations, "meta", "_journal.json")
+      const journal = JSON.parse(readFileSync(path, "utf8"))
+      journal.entries.pop()
+      writeFileSync(path, JSON.stringify(journal))
     }
+    const first = runMigrations(dbPath, migrations)
+    first.sqlite.exec("DROP TABLE __drizzle_migrations")
+    first.sqlite
+      .prepare("INSERT INTO settings (id, theme, updated_at) VALUES (1, 'dark', 1234)")
+      .run()
+    // Keep the writer open with WAL data not checkpointed: a raw file copy loses it.
+    let failure: unknown
+    try {
+      runMigrations(dbPath)
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(Error)
+    expect(String(failure)).toContain("backup")
+    const backupName = readdirSync(dataDir).find((name) => name.startsWith("local.db.backup-"))
+    expect(backupName).toBeDefined()
+    const backup = new Database(join(dataDir, backupName as string))
+    expect(backup.prepare("SELECT theme FROM settings").get()).toEqual({ theme: "dark" })
+    expect(backup.pragma("integrity_check", { simple: true })).toBe("ok")
+    backup.close()
+    expect(
+      first.sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE name='__drizzle_migrations'")
+        .get(),
+    ).toBeUndefined()
+    first.sqlite.close()
+    expect(columnNames(dbPath, "projects").has("digital_rain")).toBe(version === "current")
+  })
+
+  it("rejects an unrecognized journal watermark without trusting it", () => {
+    const first = runMigrations(dbPath)
+    first.sqlite
+      .prepare(
+        "UPDATE __drizzle_migrations SET hash = 'baseline-recovery' WHERE rowid = (SELECT MAX(rowid) FROM __drizzle_migrations)",
+      )
+      .run()
+    first.sqlite.close()
+    expect(() => runMigrations(dbPath)).toThrow(/journal/i)
+  })
+
+  it("rejects missing schema effects even when the complete journal is present", () => {
+    const first = runMigrations(dbPath)
+    first.sqlite.exec("ALTER TABLE projects DROP COLUMN digital_rain")
+    first.sqlite.close()
+    expect(() => runMigrations(dbPath)).toThrow(/schema/i)
+    expect(columnNames(dbPath, "projects")).not.toContain("digital_rain")
+  })
+
+  it("reports an unreadable database without replacing its bytes", () => {
+    const original = "not a SQLite database".repeat(100)
+    writeFileSync(dbPath, original)
+    expect(() => runMigrations(dbPath)).toThrow(MigrationFailure)
+    expect(readFileSync(dbPath, "utf8")).toBe(original)
+  })
+
+  it("reports backup creation failure and preserves the original database", () => {
+    const first = runMigrations(dbPath)
+    first.sqlite.exec("DROP TABLE __drizzle_migrations")
+    chmodSync(dataDir, 0o500)
+    try {
+      expect(() => runMigrations(dbPath)).toThrow(/backup could not be created/)
+      expect(
+        first.sqlite.prepare("SELECT name FROM sqlite_master WHERE name='projects'").get(),
+      ).toEqual({ name: "projects" })
+    } finally {
+      chmodSync(dataDir, 0o700)
+      first.sqlite.close()
+    }
+  })
+
+  it("does not advance the journal after a migration transaction rolls back", () => {
+    const migrations = join(dataDir, "failing-migrations")
+    cpSync(resolveMigrationsDir(), migrations, { recursive: true })
+    const journalPath = join(migrations, "meta", "_journal.json")
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"))
+    const last = journal.entries.at(-1)
+    journal.entries.push({ ...last, idx: last.idx + 1, when: last.when + 1, tag: "0019_failure" })
+    writeFileSync(journalPath, JSON.stringify(journal))
+    writeFileSync(
+      join(migrations, "0019_failure.sql"),
+      "CREATE TABLE rollback_probe (id INTEGER);--> statement-breakpoint\nCREATE TABLE projects (id TEXT);",
+    )
+    const first = runMigrations(dbPath)
+    const count = first.appliedCount
+    first.sqlite.close()
+    expect(() => runMigrations(dbPath, migrations)).toThrow(/backup/i)
+    const raw = new Database(dbPath)
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM __drizzle_migrations").get()).toEqual({
+      n: count,
+    })
+    expect(
+      raw.prepare("SELECT name FROM sqlite_master WHERE name='rollback_probe'").get(),
+    ).toBeUndefined()
+    raw.close()
+  })
+
+  it("stops on an inconsistent partial schema and leaves its rows available", () => {
+    const raw = new Database(dbPath)
+    raw.exec(
+      "CREATE TABLE projects (id TEXT); CREATE TABLE workspaces (id TEXT); INSERT INTO projects VALUES ('keep-me');",
+    )
+    raw.close()
+    expect(() => runMigrations(dbPath)).toThrow(/backup/i)
+    const check = new Database(dbPath)
+    expect(check.prepare("SELECT * FROM projects").all()).toEqual([{ id: "keep-me" }])
+    expect(
+      check.prepare("SELECT name FROM sqlite_master WHERE name='__drizzle_migrations'").get(),
+    ).toBeUndefined()
+    check.close()
   })
 })

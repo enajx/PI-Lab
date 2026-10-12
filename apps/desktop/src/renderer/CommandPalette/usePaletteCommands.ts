@@ -1,4 +1,5 @@
 import type { EditorSettings } from "@pi-lab/local-db"
+import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import {
@@ -24,7 +25,6 @@ import {
   Waypoints,
 } from "lucide-react"
 import type { ComponentType } from "react"
-import { DEFAULT_EDITOR_SETTINGS } from "../Editor/hooks/useEditorBuffers"
 import {
   useExperimentalV2,
   useShowCodeChanges,

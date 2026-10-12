@@ -1,4 +1,3 @@
-import type { Project } from "@pi-lab/local-db"
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router"
@@ -32,7 +31,11 @@ import {
   useSidebarWidth,
 } from "../../../../preferences/preferences"
 import { useTRPC } from "../../../../trpc/react"
+import type { ProjectSummary } from "../../../../trpc/useProjectThumbnail"
+import { useProjectThumbnail } from "../../../../trpc/useProjectThumbnail"
+import { useProjectActivityStates } from "../../-ProjectActivity"
 import { rememberSettingsReturnRoute } from "../../-settingsReturnRoute"
+import type { ProjectState } from "../../index/utils/deriveProjectState"
 import {
   type ProjectWorkspaceState,
   readProjectWorkspaceState,
@@ -306,7 +309,7 @@ export function Sidebar() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
-  const agentActivityQuery = useQuery(trpc.sessions.activity.queryOptions())
+  const projectActivityStates = useProjectActivityStates()
   const projects = projectsQuery.data ?? []
   const hiddenCount =
     projectsQuery.data === undefined
@@ -420,7 +423,7 @@ export function Sidebar() {
                 project={project}
                 collapsed={collapsed}
                 workspaceState={readProjectWorkspaceState(project.id, restoreProjectTabs)}
-                agentStatus={projectAgentStatus(project.id, agentActivityQuery.data ?? [])}
+                agentStatus={projectAgentStatus(projectActivityStates.get(project.id) ?? "idle")}
                 reorder={collapsed ? null : projectRowProps(project.id)}
                 onContextMenu={(event) => {
                   event.preventDefault()
@@ -918,7 +921,7 @@ function ProjectItem({
   reorder,
   onContextMenu,
 }: {
-  project: Project
+  project: ProjectSummary
   collapsed: boolean
   workspaceState: ProjectWorkspaceState | undefined
   agentStatus: ProjectAgentStatus
@@ -931,7 +934,9 @@ function ProjectItem({
   const [sessionsExpanded, setSessionsExpanded] = useState(true)
   const agentSessions = workspaceState?.sessions.filter((session) => session.kind === "agent") ?? []
   const hasUnsavedEdits =
-    workspaceState?.buffers.some((buffer) => buffer.content !== buffer.savedContent) ?? false
+    workspaceState?.buffers.some(
+      (buffer) => buffer.externalChange || buffer.content !== buffer.savedContent,
+    ) ?? false
 
   if (collapsed) {
     return (
@@ -1051,15 +1056,9 @@ function UnsavedProjectMarker() {
 
 type ProjectAgentStatus = "empty" | "working" | "paused"
 
-function projectAgentStatus(
-  projectId: string,
-  activity: ReadonlyArray<{ projectId: string; state: "working" | "waiting" | "exited" }>,
-): ProjectAgentStatus {
-  const states = activity
-    .filter((record) => record.projectId === projectId)
-    .map((record) => record.state)
-  if (states.includes("working")) return "working"
-  if (states.includes("waiting")) return "paused"
+function projectAgentStatus(state: ProjectState): ProjectAgentStatus {
+  if (state === "attention") return "paused"
+  if (state === "active") return "working"
   return "empty"
 }
 
@@ -1087,16 +1086,17 @@ function ProjectAgentStatusRing({ status }: { status: ProjectAgentStatus }) {
   )
 }
 
-function ProjectBadge({ project, isActive }: { project: Project; isActive: boolean }) {
+function ProjectBadge({ project, isActive }: { project: ProjectSummary; isActive: boolean }) {
+  const thumbnail = useProjectThumbnail(project, "badge")
   const badgeClassName = cn(
     "flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-medium uppercase",
     isActive ? "bg-accent-foreground/10" : "bg-accent",
   )
 
-  if (project.thumbnail) {
+  if (thumbnail.dataUrl) {
     return (
       <span aria-hidden className={badgeClassName}>
-        <img src={project.thumbnail} alt="" className="size-full object-cover" />
+        <img src={thumbnail.dataUrl} alt="" className="size-full object-cover" />
       </span>
     )
   }

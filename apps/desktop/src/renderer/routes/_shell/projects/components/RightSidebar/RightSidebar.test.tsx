@@ -29,7 +29,7 @@ function renderSidebar(
   const onCollapse = vi.fn()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
-    "files.read": () => ({ exists: true, content: "# Research\n" }),
+    "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
     "files.tree": () => [{ name: "main.py", relPath: "main.py", kind: "file" as const }],
     "workspaces.changes": () => [],
     "science.skills.list": () => ({ skills: [], roots: [] }),
@@ -78,7 +78,7 @@ function CollapsibleHarness({ onOpenFile = vi.fn() }: { onOpenFile?: () => void 
 function renderCollapsible() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
-    "files.read": () => ({ exists: true, content: "# Research\n" }),
+    "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
     "files.tree": () => [{ name: "main.py", relPath: "main.py", kind: "file" as const }],
     "workspaces.changes": () => [],
     "science.skills.list": () => ({ skills: [], roots: [] }),
@@ -229,7 +229,7 @@ describe("RightSidebar", () => {
     const requested: string[] = []
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const client = createFakeTrpcClient({
-      "files.read": () => ({ exists: true, content: "# Research\n" }),
+      "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
       "files.tree": () => [],
       "workspaces.changes": () => [],
       "science.skills.list": (input) => {
@@ -364,9 +364,13 @@ function renderPinned(projectId: string, overrides: FakeHandlers = {}) {
   seedWorkspaceState(projectId)
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
-    "files.read": () => ({ exists: true, content: "# Pinned notes\n" }),
+    "files.read": () => ({ status: "text", exists: true, content: "# Pinned notes\n" }),
     "files.tree": () => [{ name: "notes.md", relPath: "notes.md", kind: "file" as const }],
-    "files.search": () => [{ relPath: "notes.md" }, { relPath: "main.py" }],
+    "files.search": () => ({
+      hits: [{ relPath: "notes.md" }, { relPath: "main.py" }],
+      partial: false,
+      skipped: [],
+    }),
     "workspaces.changes": () => [],
     "science.skills.list": () => ({ skills: [], roots: [] }),
     ...overrides,
@@ -434,9 +438,9 @@ describe("RightSidebar pinned Markdown panels", () => {
     })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const client = createFakeTrpcClient({
-      "files.read": () => ({ exists: true, content: "# Pinned notes\n" }),
+      "files.read": () => ({ status: "text", exists: true, content: "# Pinned notes\n" }),
       "files.tree": () => [],
-      "files.search": () => [],
+      "files.search": () => ({ hits: [], partial: false, skipped: [] }),
       "workspaces.changes": () => [],
       "science.skills.list": () => ({ skills: [], roots: [] }),
     })

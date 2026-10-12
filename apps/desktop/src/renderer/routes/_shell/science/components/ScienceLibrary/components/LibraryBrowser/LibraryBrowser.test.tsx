@@ -48,6 +48,30 @@ const browseHandlers: FakeHandlers = {
 }
 
 describe("LibraryBrowser", () => {
+  test("shows a Zotero error and recovers on manual Refresh", async () => {
+    let available = false
+    const listCollections = vi.fn((_input: unknown) =>
+      available
+        ? { ok: true, collections: [collection("C1", "Recovered")] }
+        : { ok: false, reason: "error", message: "Zotero is unavailable" },
+    )
+    renderBrowser(
+      { kind: "zotero", canWrite: false, rootLabel: "Zotero library" },
+      { "science.library.listCollections": listCollections },
+    )
+    await waitFor(() => expect(screen.getByText("Zotero is unavailable")).toBeTruthy())
+    expect(listCollections).toHaveBeenCalledTimes(1)
+
+    available = true
+    fireEvent.click(screen.getByTestId("library-refresh"))
+    await waitFor(() => expect(screen.getByText("Recovered")).toBeTruthy())
+    expect(
+      listCollections.mock.calls.filter(
+        ([input]) => (input as { parentKey?: string } | undefined)?.parentKey === undefined,
+      ).length,
+    ).toBe(2)
+  })
+
   test("renders the root view: All items + collections, with the cursor on All items", async () => {
     renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
     await waitFor(() => {

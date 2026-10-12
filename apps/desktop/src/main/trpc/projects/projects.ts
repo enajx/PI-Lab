@@ -3,7 +3,7 @@ import { cp, mkdir, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, extname, join, resolve } from "node:path"
 import { type PiLabDatabase, type Project, type ProjectMetadata, projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
-import { desc, eq } from "drizzle-orm"
+import { desc, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { GitError, isGitRepo, repoName, repoRoot, resolveDefaultBranch, runGit } from "../../git"
 import {
@@ -12,6 +12,7 @@ import {
   seedWritableTemplate,
 } from "../template"
 import { publicProcedure, router } from "../trpc"
+import { readStoredThumbnail, validateThumbnail } from "./thumbnailImage"
 
 /**
  * Projects router — a PI Lab "project" is a local folder opened as a research
@@ -40,8 +41,12 @@ const setThumbnailInput = z.object({
    * the renderer reads the dropped file into one, so the row stays self-contained
    * (no external paths to dangle).
    */
-  dataUrl: z.string().startsWith("data:").nullable(),
+  dataUrl: z.string().startsWith("data:").max(1_400_000).nullable(),
 })
+
+const thumbnailInput = idInput.extend({ variant: z.enum(["card", "badge"]) })
+
+export type ProjectSummary = Omit<Project, "thumbnail"> & { hasThumbnail: boolean }
 
 const setGradientInput = z.object({
   id: z.string().min(1),
@@ -478,8 +483,39 @@ export const projectsRouter = router({
    * this public list so project-aware surfaces and direct routes keep working;
    * Dashboard and sidebar apply their own presentational visibility filter.
    */
-  list: publicProcedure.query(({ ctx }): Project[] => {
-    return ctx.db.select().from(projects).orderBy(desc(projects.lastOpenedAt)).all()
+  list: publicProcedure.query(({ ctx }): ProjectSummary[] => {
+    const rows = ctx.db
+      .select({
+        id: projects.id,
+        repoPath: projects.repoPath,
+        name: projects.name,
+        defaultBranch: projects.defaultBranch,
+        color: projects.color,
+        hasThumbnail: sql<number>`${projects.thumbnail} IS NOT NULL`,
+        gradient: projects.gradient,
+        digitalRain: projects.digitalRain,
+        metadata: projects.metadata,
+        agentConfig: projects.agentConfig,
+        sortIndex: projects.sortIndex,
+        archivedAt: projects.archivedAt,
+        createdAt: projects.createdAt,
+        updatedAt: projects.updatedAt,
+        lastOpenedAt: projects.lastOpenedAt,
+      })
+      .from(projects)
+      .orderBy(desc(projects.lastOpenedAt))
+      .all()
+    return rows.map(({ hasThumbnail, ...fields }) => ({
+      ...fields,
+      hasThumbnail: Boolean(hasThumbnail),
+    }))
+  }),
+
+  /** Load one cached artwork variant only when its card or badge is on screen. */
+  thumbnail: publicProcedure.input(thumbnailInput).query(async ({ ctx, input }) => {
+    const row = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+    return await readStoredThumbnail(row.thumbnail, input.variant, ctx.thumbnailImageProcessor)
   }),
 
   /** A single project by id, or throws NOT_FOUND. */
@@ -527,6 +563,7 @@ export const projectsRouter = router({
    * Returns the updated row so the dashboard re-renders from the mutation result.
    */
   setThumbnail: publicProcedure.input(setThumbnailInput).mutation(({ ctx, input }): Project => {
+    if (input.dataUrl) validateThumbnail(input.dataUrl, ctx.thumbnailImageProcessor)
     const row = ctx.db
       .update(projects)
       // Setting a thumbnail replaces the gradient (one artwork at a time); clearing

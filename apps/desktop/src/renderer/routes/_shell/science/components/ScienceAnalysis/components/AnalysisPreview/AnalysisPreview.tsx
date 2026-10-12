@@ -1,4 +1,4 @@
-import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared"
+import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysis/file-kind"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"

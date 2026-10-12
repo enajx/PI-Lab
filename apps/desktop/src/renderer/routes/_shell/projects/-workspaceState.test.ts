@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from "vitest"
+import { WorkspaceRecoveryStore } from "./-workspaceRecovery"
 import {
   readProjectWorkspaceState,
+  workspaceRecovery,
   writeProjectWorkspaceState,
   writeProjectWorkspaceViewState,
 } from "./-workspaceState"
@@ -42,7 +44,9 @@ describe("project workspace restoration preference", () => {
       pinnedPanels: ["PROJECT.md"],
     })
 
-    const restored = readProjectWorkspaceState(projectId, false)
+    expect(readProjectWorkspaceState(projectId, false)?.buffers[0]?.content).toBe("# Draft")
+    workspaceRecovery().flush()
+    const restored = new WorkspaceRecoveryStore(window.localStorage).read(projectId, false)
 
     expect(restored).toMatchObject({
       buffers: [],

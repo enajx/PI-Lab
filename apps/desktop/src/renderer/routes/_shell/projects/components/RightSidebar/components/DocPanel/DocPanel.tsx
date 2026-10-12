@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
+import { rejectedReadMessage } from "../../../../../../../Editor/utils/rejectedRead"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { Markdown } from "../Markdown"
 
@@ -29,6 +30,7 @@ interface DocPanelProps {
  */
 export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }: DocPanelProps) {
   const trpc = useTRPC()
+  const reveal = useMutation(trpc.files.reveal.mutationOptions())
   const docQuery = useQuery(
     trpc.files.read.queryOptions(
       { workspaceId, relPath },
@@ -52,6 +54,18 @@ export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }
           >
             {docQuery.error.message}
           </p>
+        ) : docQuery.data?.status === "oversized" || docQuery.data?.status === "binary" ? (
+          <div data-testid={`${testId}-rejected`} className="text-sm">
+            <p>{rejectedReadMessage({ ...docQuery.data, relPath })}</p>
+            <button
+              type="button"
+              className="underline"
+              onClick={() => reveal.mutate({ workspaceId, relPath })}
+            >
+              Reveal in Finder
+            </button>
+            {reveal.error ? <p role="alert">{reveal.error.message}</p> : null}
+          </div>
         ) : docQuery.data?.exists && docQuery.data.content.trim().length > 0 ? (
           <Markdown content={docQuery.data.content} />
         ) : (

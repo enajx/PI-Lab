@@ -39,9 +39,9 @@ function copyMigrationsPlugin(): Plugin {
  *
  * node-pty (a native `.node` addon) is forced external — bundling it would break
  * at runtime — so the daemon `require`s it from node_modules at launch. It is
- * prebuilt for Node ABI 137 here; the supervisor runs the daemon under Electron's
- * bundled Node (`ELECTRON_RUN_AS_NODE=1`), so that ABI is the one the daemon
- * loads, matching what `bun run test` (plain Node) uses too.
+ * built with N-API; the supervisor runs the daemon under Electron's bundled
+ * Node (`ELECTRON_RUN_AS_NODE=1`). Native-load checks validate the addon under
+ * both plain Node (unit tests) and Electron (the app and daemon).
  */
 function bundlePtyDaemonPlugin(): Plugin {
   const entry = resolve(__dirname, "src", "main", "terminal", "daemonEntry.ts")
@@ -55,6 +55,8 @@ function bundlePtyDaemonPlugin(): Plugin {
         logLevel: "warn",
         build: {
           outDir,
+          minify: "esbuild",
+          sourcemap: "hidden",
           emptyOutDir: true,
           ssr: entry,
           target: "node20",
@@ -135,6 +137,8 @@ export default defineConfig({
     ],
     build: {
       outDir: "out/main",
+      minify: "esbuild",
+      sourcemap: "hidden",
       lib: { entry: resolve(__dirname, "src/main/index.ts") },
       rollupOptions: { external: NATIVE_DEPS },
     },
@@ -143,6 +147,8 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ["trpc-electron"] })],
     build: {
       outDir: "out/preload",
+      minify: "esbuild",
+      sourcemap: "hidden",
       lib: { entry: resolve(__dirname, "src/preload/index.ts") },
     },
   },
@@ -181,6 +187,8 @@ export default defineConfig({
     ],
     build: {
       outDir: resolve(__dirname, "out/renderer"),
+      minify: "esbuild",
+      sourcemap: "hidden",
       rollupOptions: {
         input: resolve(__dirname, "src/renderer/index.html"),
       },

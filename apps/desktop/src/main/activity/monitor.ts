@@ -15,6 +15,7 @@ import {
   type RenderedTerminalFactory,
 } from "./renderedTerminal"
 import type {
+  ActivityClock,
   ActivityRegistryChange,
   ActivityScheduler,
   ActivityTimer,
@@ -63,6 +64,7 @@ export interface ActivityMonitorOptions {
   getMonitorClient: () => Promise<ActivityDaemonClient>
   notifications: NotificationService
   scheduler: ActivityScheduler
+  clock?: ActivityClock
   terminalFactory: RenderedTerminalFactory
   logger: Pick<Console, "warn">
 }
@@ -89,7 +91,34 @@ interface TerminalCommandRuntime {
   completionTimer: ActivityTimer | null
 }
 
+type AgentDurableFields = Pick<
+  AgentSession,
+  "state" | "turnArmed" | "waitingReason" | "waitingSince" | "exitedAt" | "updatedAt"
+>
+
+interface WorkflowDurableFields {
+  state: WorkflowRunActivityState
+  sessionId: string | null
+  workspaceId: string | null
+  launchedAt: number | null
+  completedAt: number | null
+  error: string | null
+}
+
+/** Select only fields written to the agent session row. */
+function agentDurableFields(record: AgentActivityRecord | AgentSession): AgentDurableFields {
+  return {
+    state: record.state,
+    turnArmed: record.turnArmed,
+    waitingReason: record.waitingReason,
+    waitingSince: record.waitingSince,
+    exitedAt: record.exitedAt,
+    updatedAt: record.updatedAt,
+  }
+}
+
 const RECONNECT_DELAY_MS = 1_000
+const ACTIVITY_TIMESTAMP_WRITE_DELAY_MS = 1_000
 export const TERMINAL_COMPLETION_CONFIRMATION_MS = 1_000
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal input can contain ANSI escape sequences.
 const TERMINAL_ANSI_ESCAPE = /\u001b\[[0-?]*[ -/]*[@-~]/g
@@ -101,6 +130,13 @@ export class ActivityMonitor implements ActivityMonitorPort {
   private readonly terminalCommands = new Map<string, TerminalCommandRuntime>()
   private readonly clients = new WeakSet<object>()
   private readonly previous = new Map<string, AgentActivityRecord>()
+  private readonly persistedAgents = new Map<string, AgentDurableFields>()
+  private readonly persistedWorkflows = new Map<string, WorkflowDurableFields>()
+  private readonly notificationOnlyTimestamps = new Map<string, number>()
+  private readonly pendingAgentTimestamps = new Map<
+    string,
+    { record: AgentActivityRecord; timer: ActivityTimer }
+  >()
   private readonly unsubscribeRegistry: () => void
   private reconnectTimer: { cancel(): void } | null = null
   private disposed = false
@@ -112,7 +148,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
   }
 
   async track(input: TrackAgentSession): Promise<void> {
-    const at = Date.now()
+    const at = this.options.clock?.now() ?? Date.now()
     this.options.db
       .insert(agentSessions)
       .values({
@@ -229,6 +265,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
     this.disposed = true
     this.reconnectTimer?.cancel()
     this.reconnectTimer = null
+    for (const sessionId of this.pendingAgentTimestamps.keys()) this.flushAgentTimestamp(sessionId)
     this.unsubscribeRegistry()
     for (const monitored of this.terminals.values()) monitored.terminal.dispose()
     this.terminals.clear()
@@ -443,7 +480,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
     for (const record of change.snapshot.sessions) {
       const prior = this.previous.get(record.sessionId)
       this.previous.set(record.sessionId, { ...record })
-      this.persistAgent(record)
+      this.persistAgent(record, prior)
       if (record.workflowRunId) this.persistWorkflow(record)
 
       if (
@@ -469,35 +506,143 @@ export class ActivityMonitor implements ActivityMonitorPort {
     }
   }
 
-  private persistAgent(record: AgentActivityRecord): void {
+  private persistAgent(
+    record: AgentActivityRecord,
+    previous: AgentActivityRecord | undefined,
+  ): void {
+    const prior =
+      this.persistedAgents.get(record.sessionId) ?? this.loadPersistedAgent(record.sessionId)
+    if (!prior) return
+    const next = agentDurableFields(record)
+    const changed: Partial<AgentDurableFields> = {}
+    if (next.state !== prior.state) changed.state = next.state
+    if (next.turnArmed !== prior.turnArmed) changed.turnArmed = next.turnArmed
+    if (next.waitingReason !== prior.waitingReason) changed.waitingReason = next.waitingReason
+    if (next.waitingSince !== prior.waitingSince) changed.waitingSince = next.waitingSince
+    if (next.exitedAt !== prior.exitedAt) changed.exitedAt = next.exitedAt
+    if (next.updatedAt !== prior.updatedAt) changed.updatedAt = next.updatedAt
+    if (Object.keys(changed).length === 0) return
+    if (
+      Object.keys(changed).length === 1 &&
+      changed.updatedAt !== undefined &&
+      previous !== undefined &&
+      previous.waitingNotifiedEpisode !== record.waitingNotifiedEpisode
+    ) {
+      this.notificationOnlyTimestamps.set(record.sessionId, record.updatedAt)
+      return
+    }
+    if (
+      Object.keys(changed).length === 1 &&
+      this.notificationOnlyTimestamps.get(record.sessionId) === record.updatedAt
+    ) {
+      return
+    }
+    this.notificationOnlyTimestamps.delete(record.sessionId)
+    if (Object.keys(changed).some((key) => key !== "updatedAt")) {
+      this.pendingAgentTimestamps.get(record.sessionId)?.timer.cancel()
+      this.pendingAgentTimestamps.delete(record.sessionId)
+      this.writeAgentFields(record.sessionId, changed, next)
+      return
+    }
+    const pending = this.pendingAgentTimestamps.get(record.sessionId)
+    if (pending) {
+      pending.record = record
+      return
+    }
+    const timer = this.options.scheduler.schedule(ACTIVITY_TIMESTAMP_WRITE_DELAY_MS, () =>
+      this.flushAgentTimestamp(record.sessionId),
+    )
+    this.pendingAgentTimestamps.set(record.sessionId, { record, timer })
+  }
+
+  /** Write the latest routine timestamp when its one-second window closes. */
+  private flushAgentTimestamp(sessionId: string): void {
+    const pending = this.pendingAgentTimestamps.get(sessionId)
+    if (!pending) return
+    pending.timer.cancel()
+    this.pendingAgentTimestamps.delete(sessionId)
+    const prior = this.persistedAgents.get(sessionId)
+    const next = agentDurableFields(pending.record)
+    if (!prior || prior.updatedAt === next.updatedAt) return
+    this.writeAgentFields(sessionId, { updatedAt: next.updatedAt }, next)
+  }
+
+  /** Read one durable baseline so registry publications do not rewrite an unchanged row. */
+  private loadPersistedAgent(sessionId: string): AgentDurableFields | null {
+    const row = this.options.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, sessionId))
+      .get()
+    if (!row) return null
+    const fields = agentDurableFields(row)
+    this.persistedAgents.set(sessionId, fields)
+    return fields
+  }
+
+  private writeAgentFields(
+    sessionId: string,
+    changed: Partial<AgentDurableFields>,
+    next: AgentDurableFields,
+  ): void {
     this.options.db
       .update(agentSessions)
-      .set({
-        state: record.state,
-        turnArmed: record.turnArmed,
-        waitingReason: record.waitingReason,
-        waitingSince: record.waitingSince,
-        exitedAt: record.exitedAt,
-        updatedAt: record.updatedAt,
-      })
-      .where(eq(agentSessions.sessionId, record.sessionId))
+      .set(changed)
+      .where(eq(agentSessions.sessionId, sessionId))
       .run()
+    this.persistedAgents.set(sessionId, next)
   }
 
   private persistWorkflow(record: AgentActivityRecord): void {
     if (!record.workflowRunId || !record.workflowState) return
+    const prior =
+      this.persistedWorkflows.get(record.workflowRunId) ??
+      this.loadPersistedWorkflow(record.workflowRunId)
+    if (!prior) return
+    const next: WorkflowDurableFields = {
+      state: record.workflowState,
+      sessionId: record.sessionId,
+      workspaceId: record.workspaceId,
+      launchedAt:
+        prior.state === "pending" && record.workflowState === "running" && prior.launchedAt === null
+          ? record.updatedAt
+          : prior.launchedAt,
+      completedAt: record.workflowCompletedAt,
+      error: record.workflowFailureReason,
+    }
+    const changed: Partial<WorkflowDurableFields> = {}
+    if (next.state !== prior.state) changed.state = next.state
+    if (next.sessionId !== prior.sessionId) changed.sessionId = next.sessionId
+    if (next.workspaceId !== prior.workspaceId) changed.workspaceId = next.workspaceId
+    if (next.launchedAt !== prior.launchedAt) changed.launchedAt = next.launchedAt
+    if (next.completedAt !== prior.completedAt) changed.completedAt = next.completedAt
+    if (next.error !== prior.error) changed.error = next.error
+    if (Object.keys(changed).length === 0) return
     this.options.db
       .update(automationRuns)
-      .set({
-        state: record.workflowState,
-        sessionId: record.sessionId,
-        workspaceId: record.workspaceId,
-        launchedAt: record.workflowState === "running" ? record.updatedAt : undefined,
-        completedAt: record.workflowCompletedAt,
-        error: record.workflowFailureReason,
-      })
+      .set(changed)
       .where(eq(automationRuns.id, record.workflowRunId))
       .run()
+    this.persistedWorkflows.set(record.workflowRunId, next)
+  }
+
+  private loadPersistedWorkflow(runId: string): WorkflowDurableFields | null {
+    const row = this.options.db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, runId))
+      .get()
+    if (!row) return null
+    const fields: WorkflowDurableFields = {
+      state: workflowState(row) ?? "pending",
+      sessionId: row.sessionId,
+      workspaceId: row.workspaceId,
+      launchedAt: row.launchedAt,
+      completedAt: row.completedAt,
+      error: row.error,
+    }
+    this.persistedWorkflows.set(runId, fields)
+    return fields
   }
 
   private notifyAgentWaiting(record: AgentActivityRecord): void {

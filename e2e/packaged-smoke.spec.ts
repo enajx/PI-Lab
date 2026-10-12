@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -9,13 +10,13 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
 
 /**
  * Packaged-app smoke (git history (build phases) P11 / AGENTS.md Pitfalls #4): launch the REAL packaged
- * `PI Lab.app` — not `out/main/index.js` — and assert it boots to `app-ready`.
+ * `PI Lab.app`, assert the database round-trip, then receive real PTY output.
  *
  * This is the only test that proves native modules load from the *packaged* app:
  * better-sqlite3 (DB init + migrate on boot) and node-pty (its `.node` +
  * `spawn-helper` in `app.asar.unpacked`) must resolve via the real app's
- * asar-aware resolver, with the Electron ABI. If the ABI were wrong or a native
- * module were missing/un-unpacked, boot would fail before `app-ready`.
+ * asar-aware resolver. The PTY assertion opens the daemon's real native path;
+ * boot alone only proves the SQLite path.
  *
  * It's GATED on the packaged build existing (`release/mac-arm64/PI Lab.app`) and
  * skips otherwise, so it never breaks `bun run e2e` on a checkout that only ran
@@ -28,6 +29,12 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
 const execFileAsync = promisify(execFile)
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = join(HERE, "..", "apps", "desktop")
+const desktopRequire = createRequire(join(DESKTOP_DIR, "package.json"))
+const builderRequire = createRequire(desktopRequire.resolve("electron-builder"))
+const appBuilderRequire = createRequire(builderRequire.resolve("app-builder-lib"))
+const { listPackage } = appBuilderRequire("@electron/asar") as {
+  listPackage: (path: string) => string[]
+}
 
 /** The packaged macOS binary (the `--dir`/dmg build output for this host). */
 const PACKAGED_BINARY = join(
@@ -84,6 +91,14 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
+test("packaged ASAR contains only runtime app roots and excludes source/debug maps", () => {
+  const archive = join(dirname(PACKAGED_BINARY), "..", "Resources", "app.asar")
+  const files = listPackage(archive)
+  const roots = [...new Set(files.map((file) => file.split("/").filter(Boolean)[0]))].sort()
+  expect(roots).toEqual(["node_modules", "out", "package.json"])
+  expect(files.filter((file) => /\.(?:map|ts|tsx)$/u.test(file))).toEqual([])
+})
+
 test("packaged PI Lab.app boots with native modules (better-sqlite3 + node-pty)", async () => {
   const window = await app.firstWindow()
 
@@ -95,4 +110,17 @@ test("packaged PI Lab.app boots with native modules (better-sqlite3 + node-pty)"
   // proving the packaged renderer + main + DB round-trip works.
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 60_000 })
   await expect(window.getByTestId("project-card")).toContainText("repo", { timeout: 60_000 })
+
+  // Use the same terminal seam as the development E2E, through this packaged
+  // renderer, main process and detached daemon. Keep the child alive until close.
+  const marker = "PACKAGED-PTY-OK"
+  const terminalUrl = new URL(window.url())
+  terminalUrl.searchParams.set("termcmd", process.execPath)
+  terminalUrl.searchParams.set(
+    "termargs",
+    JSON.stringify(["-e", `process.stdout.write('${marker}\\n'); process.stdin.resume()`]),
+  )
+  await window.goto(terminalUrl.toString())
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 60_000 })
+  await expect(window.getByTestId("terminal")).toContainText(marker, { timeout: 30_000 })
 })

@@ -65,10 +65,6 @@ mise.toml
 plans/local/
 project_examples/
 
-# Native-ABI binary cache — per-machine compiled better-sqlite3 binaries (one per
-# ABI) that native-abi.cjs swaps between the Node test ABI and Electron app ABI.
-apps/desktop/.native-abi-cache/
-
 # Desktop packaging — app icons are generated from icons/icon.png at build time
 # (release/ output is covered by the `release` rule above; entitlements plist IS tracked)
 apps/desktop/build/icon.png

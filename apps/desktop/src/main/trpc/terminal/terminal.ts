@@ -118,21 +118,23 @@ export const terminalRouter = router({
       let cancelled = false
 
       void (async () => {
-        const client = await ctx.getDaemonClient()
-        if (cancelled) return
-        client.on("data", onData)
-        client.on("exit", onExit)
-        cleanup = () => {
-          client.off("data", onData)
-          client.off("exit", onExit)
-          void client.detach(sessionId).catch(() => {})
-        }
         try {
+          const client = await ctx.getDaemonClient()
+          if (cancelled) return
+          client.on("data", onData)
+          client.on("exit", onExit)
+          cleanup = () => {
+            client.off("data", onData)
+            client.off("exit", onExit)
+            void client.detach(sessionId).catch(() => {})
+            cleanup = () => {}
+          }
           const { scrollback } = await client.attach(sessionId)
           if (cancelled) return
           if (scrollback.length > 0) emit.next({ type: "data", chunk: scrollback })
         } catch (error) {
-          emit.error(error instanceof Error ? error : new Error(String(error)))
+          cleanup()
+          if (!cancelled) emit.error(error instanceof Error ? error : new Error(String(error)))
         }
       })()
 

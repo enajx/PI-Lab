@@ -1,0 +1,222 @@
+import { EventEmitter } from "node:events"
+import type { App, BrowserWindow, IpcMain } from "electron"
+import { describe, expect, test, vi } from "vitest"
+import { SHUTDOWN_REQUEST_CHANNEL, SHUTDOWN_RESPONSE_CHANNEL } from "../../shared/shutdown"
+import { installShutdownGuard } from "./shutdownGuard"
+
+/** Mocked Electron public events. Real Electron shutdown is checked by the E2E flow. */
+function harness() {
+  const app = new EventEmitter()
+  const ipc = new EventEmitter()
+  const window = new EventEmitter()
+  const mainFrame = {}
+  const webContents = { mainFrame, send: vi.fn(), isDestroyed: vi.fn(() => false) }
+  const unload = { blocked: false }
+  const close = vi.fn(() => {
+    const event = {
+      defaultPrevented: false,
+      preventDefault: vi.fn(() => {
+        event.defaultPrevented = true
+      }),
+    }
+    window.emit("close", event)
+    const allowed = !event.defaultPrevented && !unload.blocked
+    if (allowed) window.emit("closed")
+    return allowed
+  })
+  const quit = vi.fn(() => {
+    const event = {
+      defaultPrevented: false,
+      preventDefault: vi.fn(() => {
+        event.defaultPrevented = true
+      }),
+    }
+    app.emit("before-quit", event)
+    if (!event.defaultPrevented) {
+      if (close()) app.emit("will-quit")
+    }
+  })
+  let sequence = 0
+  const guard = installShutdownGuard({
+    app: Object.assign(app, { quit }) as unknown as App,
+    ipcMain: ipc as IpcMain,
+    createRequestId: () => `request-${++sequence}`,
+  })
+  const electronWindow = Object.assign(window, {
+    webContents,
+    close,
+    isDestroyed: () => false,
+  }) as unknown as BrowserWindow
+  const respond = (value: unknown, sender: unknown, senderFrame: unknown): void => {
+    ipc.emit(SHUTDOWN_RESPONSE_CHANNEL, { sender, senderFrame }, value)
+  }
+  return {
+    app,
+    ipc,
+    window,
+    electronWindow,
+    webContents,
+    mainFrame,
+    unload,
+    close,
+    quit,
+    guard,
+    respond,
+  }
+}
+
+describe("shutdown guard through mocked Electron events", () => {
+  test("close and quit stay open until the current main-frame response allows them", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    const closed = vi.fn()
+    h.window.on("closed", closed)
+    h.close()
+    h.close()
+    expect(closed).not.toHaveBeenCalled()
+    expect(h.webContents.send).toHaveBeenCalledTimes(2)
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-1",
+      intent: "close",
+    })
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(closed).toHaveBeenCalledOnce()
+    expect(h.quit).not.toHaveBeenCalled()
+  })
+
+  test("canceled quit never reaches will-quit and a later attempt needs a new approval", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    const disposeServices = vi.fn()
+    h.app.on("will-quit", disposeServices)
+    h.quit()
+    h.respond({ requestId: "request-1", allow: false }, h.webContents, h.mainFrame)
+    expect(disposeServices).not.toHaveBeenCalled()
+    h.quit()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(disposeServices).not.toHaveBeenCalled()
+    h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
+    expect(disposeServices).toHaveBeenCalledOnce()
+    expect(h.webContents.send).toHaveBeenCalledTimes(2)
+  })
+
+  test("quit supersedes close on the same request and associated close does not prompt again", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.close()
+    h.quit()
+    h.quit()
+    h.close()
+    expect(h.webContents.send.mock.calls).toEqual([
+      [SHUTDOWN_REQUEST_CHANNEL, { requestId: "request-1", intent: "close" }],
+      [SHUTDOWN_REQUEST_CHANNEL, { requestId: "request-1", intent: "quit" }],
+      [SHUTDOWN_REQUEST_CHANNEL, { requestId: "request-1", intent: "quit" }],
+      [SHUTDOWN_REQUEST_CHANNEL, { requestId: "request-1", intent: "quit" }],
+    ])
+    const willQuit = vi.fn()
+    h.app.on("will-quit", willQuit)
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(willQuit).toHaveBeenCalledOnce()
+    expect(h.webContents.send).toHaveBeenCalledTimes(4)
+  })
+
+  test("malformed, stale, other-window, and child-frame responses cannot approve shutdown", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.quit()
+    const willQuit = vi.fn()
+    h.app.on("will-quit", willQuit)
+    for (const response of [
+      null,
+      [],
+      { requestId: "request-1", allow: "yes" },
+      { requestId: "old", allow: true },
+    ]) {
+      h.respond(response, h.webContents, h.mainFrame)
+    }
+    h.respond({ requestId: "request-1", allow: true }, {}, h.mainFrame)
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, {})
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, null)
+    expect(willQuit).not.toHaveBeenCalled()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(willQuit).toHaveBeenCalledOnce()
+  })
+
+  test("closed windows lose subscriptions and reopening uses only the new window", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.close()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(h.window.listenerCount("close")).toBe(0)
+    expect(h.window.listenerCount("closed")).toBe(0)
+    const reopened = harness()
+    h.guard.attachWindow(reopened.electronWindow)
+    reopened.close()
+    h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
+    expect(reopened.window.listenerCount("close")).toBe(1)
+    h.respond({ requestId: "request-2", allow: true }, reopened.webContents, reopened.mainFrame)
+    expect(reopened.window.listenerCount("close")).toBe(0)
+  })
+
+  test("startup failure without a window can quit and disposal removes all guard subscriptions", () => {
+    const h = harness()
+    const willQuit = vi.fn()
+    h.app.on("will-quit", willQuit)
+    h.quit()
+    expect(willQuit).toHaveBeenCalledOnce()
+    h.guard.attachWindow(h.electronWindow)
+    h.guard.dispose()
+    expect(h.window.listenerCount("close")).toBe(0)
+    expect(h.window.listenerCount("closed")).toBe(0)
+    expect(h.app.listenerCount("before-quit")).toBe(0)
+    expect(h.ipc.listenerCount(SHUTDOWN_RESPONSE_CHANNEL)).toBe(0)
+  })
+
+  test("another before-quit listener canceling approval requires a fresh request for quit and close", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    const cancel = (event: { preventDefault: () => void }): void => event.preventDefault()
+    h.app.on("before-quit", cancel)
+    h.quit()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    h.app.removeListener("before-quit", cancel)
+    h.close()
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-2",
+      intent: "close",
+    })
+    h.quit()
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-2",
+      intent: "quit",
+    })
+  })
+
+  test("renderer beforeunload canceling approved quit does not approve a later quit", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.unload.blocked = true
+    h.quit()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    h.unload.blocked = false
+    h.quit()
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-2",
+      intent: "quit",
+    })
+    h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
+    expect(h.window.listenerCount("close")).toBe(0)
+  })
+
+  test("destroyed renderer cannot throw while a shutdown attempt stays blocked", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.webContents.isDestroyed.mockReturnValue(true)
+    h.webContents.send.mockImplementation(() => {
+      throw new Error("destroyed renderer")
+    })
+    expect(() => h.quit()).not.toThrow()
+    expect(h.webContents.send).not.toHaveBeenCalled()
+    expect(h.window.listenerCount("close")).toBe(1)
+  })
+})

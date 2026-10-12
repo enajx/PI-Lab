@@ -14,6 +14,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 // StrictMode-wrapped render (see test/render.tsx): reproduces the dev build's
 // effect double-invoke so mount effects run as they do in the app.
 import { fireEvent, render, screen, waitFor, within } from "../../../../../test/render"
+import { ProjectActivityProvider } from "../../../-ProjectActivity"
 import { readPendingLaunch } from "../../../projects/-pendingLaunch"
 import { ProjectCard } from "./ProjectCard"
 
@@ -50,11 +51,14 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
 const IDLE_STATUS = { summary: null, fetchExperiments: null }
 
 function renderCard(p: Project, handlers: FakeHandlers = {}) {
+  const { thumbnail, ...fields } = p
+  const summary = { ...fields, hasThumbnail: thumbnail !== null }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "sessions.activity": () => [],
     "projects.capabilities": () => ({ git: true }),
     "workflows.status": () => IDLE_STATUS,
+    "projects.thumbnail": () => ({ dataUrl: thumbnail, tooLarge: false }),
     ...handlers,
   })
 
@@ -62,7 +66,7 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <ProjectCard project={p} />,
+    component: () => <ProjectCard project={summary} />,
   })
   const projectRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -79,8 +83,10 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
 
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
-      <RouterProvider router={router as any} />
+      <ProjectActivityProvider>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </ProjectActivityProvider>
     </AppProviders>,
   )
 }
@@ -95,6 +101,62 @@ const FULL_METADATA: ProjectMetadata = {
     { url: "https://example.com/code" },
   ],
 }
+
+describe("ProjectCard thumbnail", () => {
+  test("loads the card artwork variant separately from the project summary", async () => {
+    const requests: unknown[] = []
+    renderCard(project({ id: "p1", name: "Picture", thumbnail: "data:image/gif;base64,AAAA" }), {
+      "projects.thumbnail": (input) => {
+        requests.push(input)
+        return { dataUrl: "data:image/gif;base64,AAAA", tooLarge: false }
+      },
+    })
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("project-card-image").querySelector("img")?.getAttribute("src"),
+      ).toBe("data:image/gif;base64,AAAA")
+    })
+    expect(requests).toEqual([{ id: "p1", variant: "card" }])
+  })
+
+  test("a slow image read cannot replace a later gradient choice", async () => {
+    let pendingReader: { onload: (() => void) | null } | null = null
+    class SlowFileReader {
+      result = "data:image/gif;base64,AAAA"
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      onabort: (() => void) | null = null
+      readAsDataURL() {
+        pendingReader = this
+      }
+    }
+    vi.stubGlobal("FileReader", SlowFileReader)
+    const thumbnails: unknown[] = []
+    const gradients: unknown[] = []
+    renderCard(project({ id: "p1", name: "Picture" }), {
+      "projects.setThumbnail": (input) => {
+        thumbnails.push(input)
+        return project({ id: "p1", name: "Picture" })
+      },
+      "projects.setGradient": (input) => {
+        gradients.push(input)
+        return project({ id: "p1", name: "Picture" })
+      },
+    })
+    fireEvent.change(await screen.findByTestId("project-card-thumbnail-input"), {
+      target: { files: [new File(["GIF89a"], "slow.gif", { type: "image/gif" })] },
+    })
+    await waitFor(() => expect(pendingReader).not.toBeNull())
+    fireEvent.contextMenu(screen.getByTestId("project-card"))
+    fireEvent.click(screen.getByTestId("project-card-menu-thumbnail"))
+    fireEvent.click(screen.getByTestId("project-card-artwork-gradient"))
+    await waitFor(() => expect(gradients).toHaveLength(1))
+    ;(pendingReader as SlowFileReader | null)?.onload?.()
+    await Promise.resolve()
+    expect(thumbnails).toHaveLength(0)
+    vi.unstubAllGlobals()
+  })
+})
 
 describe("ProjectCard metadata", () => {
   test("Digital Rain refreshes from paused to working without remounting", async () => {
@@ -150,7 +212,7 @@ describe("ProjectCard metadata", () => {
     expect(image.className).toContain("group-hover:brightness-105")
     expect(image.className).toContain("group-hover:contrast-105")
     expect(image.className).toContain("group-hover:saturate-125")
-    expect(screen.getByTestId("project-card-digital-rain")).toBeTruthy()
+    expect(await screen.findByTestId("project-card-digital-rain")).toBeTruthy()
     const rainHover = screen.getByTestId("project-card-digital-rain-hover")
     expect(rainHover.className).toContain("group-hover:bg-white/[0.06]")
     expect(body.className).toContain("group-hover:brightness-105")
@@ -385,8 +447,9 @@ describe("ProjectCard background workflow controls", () => {
 
     const summary = await screen.findByTestId("project-card-summary")
     await waitFor(() => expect(summary.getAttribute("data-state")).toBe("running"))
-    // A running control shows the orange snake edge (the "thinking" animation).
-    expect(summary.querySelector(".pi-lab-workflow-snake")).toBeTruthy()
+    // A running control shows a transform-only moving underline, keeping the
+    // workflow window stable while the agent streams activity updates.
+    expect(summary.querySelector(".pi-lab-workflow-sweep")).toBeTruthy()
     // A running control is clickable (not disabled) so the user can watch it work.
     expect((summary as HTMLButtonElement).disabled).toBe(false)
 

@@ -1,5 +1,11 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { isUtf8 } from "node:buffer"
+import type { Stats } from "node:fs"
+import type { FileHandle } from "node:fs/promises"
+import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { walkWorkspace } from "./walk"
+
+export { DEFAULT_IGNORED_DIRS } from "./walk"
 
 /** A single entry produced when listing a directory's immediate children. */
 export interface DirEntry {
@@ -30,18 +36,8 @@ export interface WalkOptions {
 }
 
 /**
- * Directory names that are noise for a research/source workspace and are always
- * excluded from walks. Callers can extend this set via {@link WalkOptions.ignore}.
+ * A file's identity-on-disk fingerprint, used to detect out-of-band edits.
  */
-export const DEFAULT_IGNORED_DIRS: readonly string[] = [
-  ".git",
-  "node_modules",
-  ".turbo",
-  "dist",
-  ".cache",
-]
-
-/** A file's identity-on-disk fingerprint, used to detect out-of-band edits. */
 export interface FileStat {
   /** Whether the path exists. `false` ⇒ the other fields are zero. */
   exists: boolean
@@ -54,6 +50,132 @@ export interface FileStat {
 /** Read a file as UTF-8 text. */
 export async function readTextFile(absPath: string): Promise<string> {
   return readFile(absPath, "utf8")
+}
+
+/** Maximum UTF-8 bytes accepted by editor and document-panel reads. */
+export const EDITOR_MAX_BYTES = 10_000_000
+
+/** Rejected reads carry metadata only, never truncated editable content. */
+export type TextSnapshot =
+  | { status: "text"; exists: true; content: string; baseline: FileStat }
+  | { status: "missing"; exists: false; content: ""; baseline: FileStat }
+  | { status: "oversized"; exists: true; size: number; limit: number; baseline: FileStat }
+  | { status: "binary"; exists: true; size: number; baseline: FileStat }
+
+/** Read one stable version with bounded allocation, retrying changes and replacements. */
+export async function readTextSnapshot(absPath: string): Promise<TextSnapshot> {
+  const snapshot = await stableFileRead(absPath, async (handle, before) => {
+    if (before.size > EDITOR_MAX_BYTES) return { status: "oversized" as const }
+    const bytes = Buffer.allocUnsafe(Math.min(before.size + 1, EDITOR_MAX_BYTES + 1))
+    let used = 0
+    // Never trust the pre-read size: a writer may extend this open file.
+    let chunks: Buffer[] = []
+    let buffer = bytes
+    while (used <= EDITOR_MAX_BYTES) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null)
+      if (bytesRead === 0) break
+      used += bytesRead
+      chunks.push(buffer.subarray(0, bytesRead))
+      if (used > EDITOR_MAX_BYTES) return { status: "oversized" as const }
+      buffer = Buffer.allocUnsafe(Math.min(64 * 1024, EDITOR_MAX_BYTES + 1 - used))
+    }
+    const content = chunks.length === 1 && chunks[0] ? chunks[0] : Buffer.concat(chunks, used)
+    chunks = []
+    if (content.includes(0) || !isUtf8(content)) return { status: "binary" as const }
+    return { status: "text" as const, content: content.toString("utf8") }
+  })
+  if (!snapshot) return { status: "missing", exists: false, content: "", baseline: missingStat() }
+  const { result, baseline } = snapshot
+  if (result.status === "oversized")
+    return {
+      status: "oversized",
+      exists: true,
+      size: baseline.size,
+      limit: EDITOR_MAX_BYTES,
+      baseline,
+    }
+  if (result.status === "binary")
+    return { status: "binary", exists: true, size: baseline.size, baseline }
+  return { status: "text", exists: true, content: result.content, baseline }
+}
+
+/** Verify saves in chunks, independent of the editor opening cap and without a text echo. */
+export async function verifyWrittenText(
+  absPath: string,
+  content: string,
+): Promise<{ baseline: FileStat; matchesWrittenContent: boolean }> {
+  const snapshot = await stableFileRead(absPath, async (handle, before) => {
+    if (before.size !== Buffer.byteLength(content, "utf8")) return false
+    const actual = Buffer.allocUnsafe(64 * 1024 * 3)
+    for (let start = 0; start < content.length; ) {
+      let end = Math.min(start + 64 * 1024, content.length)
+      // Keep a surrogate pair together when encoding each piece.
+      const last = content.charCodeAt(end - 1)
+      if (end < content.length && last >= 0xd800 && last <= 0xdbff) end -= 1
+      const piece = content.slice(start, end)
+      const expected = Buffer.from(piece, "utf8")
+      if (expected.toString("utf8") !== piece) return false
+      let used = 0
+      while (used < expected.length) {
+        const { bytesRead } = await handle.read(actual, used, expected.length - used, null)
+        if (bytesRead === 0) return false
+        used += bytesRead
+      }
+      if (!actual.subarray(0, used).equals(expected)) return false
+      start = end
+    }
+    const { bytesRead } = await handle.read(actual, 0, 1, null)
+    return bytesRead === 0
+  })
+  return snapshot
+    ? { baseline: snapshot.baseline, matchesWrittenContent: snapshot.result }
+    : { baseline: missingStat(), matchesWrittenContent: false }
+}
+
+/** Pair a bounded reader's result with a coherent handle and path fingerprint. */
+async function stableFileRead<T>(
+  absPath: string,
+  read: (handle: FileHandle, before: Stats) => Promise<T>,
+): Promise<{ result: T; baseline: FileStat } | null> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const handle = await open(absPath, "r").catch((error: unknown) => {
+      if (isEnoent(error)) return null
+      throw error
+    })
+    if (!handle) return null
+    try {
+      const before = await handle.stat()
+      if (!before.isFile()) throw new Error(`Not a regular file: ${absPath}`)
+      const result = await read(handle, before)
+      const after = await handle.stat()
+      const current = await stat(absPath).catch((error: unknown) => {
+        if (isEnoent(error)) return null
+        throw error
+      })
+      if (current && sameFileVersion(before, after) && sameFileVersion(after, current)) {
+        return { result, baseline: { exists: true, mtimeMs: after.mtimeMs, size: after.size } }
+      }
+    } finally {
+      await handle.close()
+    }
+  }
+  throw new Error(`File kept changing while reading: ${absPath}`)
+}
+
+/** Missing paths use the same fingerprint for reads and save verification. */
+function missingStat(): FileStat {
+  return { exists: false, mtimeMs: 0, size: 0 }
+}
+
+/** Include inode and change time so replacements and equal-size edits are detected. */
+function sameFileVersion(first: Stats, second: Stats): boolean {
+  return (
+    first.dev === second.dev &&
+    first.ino === second.ino &&
+    first.size === second.size &&
+    first.mtimeMs === second.mtimeMs &&
+    first.ctimeMs === second.ctimeMs
+  )
 }
 
 /**
@@ -120,31 +242,19 @@ export async function listDir(absPath: string): Promise<DirEntry[]> {
  * shallowest files first, which is what a file picker wants.
  */
 export async function walkFiles(root: string, opts: WalkOptions = {}): Promise<string[]> {
-  const ignored = new Set([...DEFAULT_IGNORED_DIRS, ...(opts.ignore ?? [])])
   const limit = opts.limit ?? Number.POSITIVE_INFINITY
-  const maxDepth = opts.maxDepth ?? Number.POSITIVE_INFINITY
-
+  if (limit <= 0) return []
   const files: string[] = []
-  let frontier: string[] = [root]
-  let depth = 0
-
-  while (frontier.length > 0 && depth <= maxDepth && files.length < limit) {
-    const next: string[] = []
-    for (const dir of frontier) {
-      const dirents = await readdir(dir, { withFileTypes: true })
-      for (const dirent of dirents) {
-        if (dirent.isFile()) {
-          files.push(join(dir, dirent.name))
-          if (files.length >= limit) return files
-        } else if (dirent.isDirectory() && !ignored.has(dirent.name)) {
-          next.push(join(dir, dirent.name))
-        }
-      }
-    }
-    frontier = next
-    depth += 1
-  }
-
+  const result = await walkWorkspace(
+    root,
+    { ignore: opts.ignore, maxDepth: opts.maxDepth },
+    (entry) => {
+      if (entry.kind === "file") files.push(entry.path)
+      return files.length >= limit ? "stop" : "continue"
+    },
+  )
+  if (result.partial)
+    throw new Error(`Could not read workspace paths: ${result.skipped.join(", ")}`)
   return files
 }
 

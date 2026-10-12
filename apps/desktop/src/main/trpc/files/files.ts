@@ -4,9 +4,11 @@ import { type PiLabDatabase, type Workspace, workspaces } from "@pi-lab/local-db
 import {
   type FileStat,
   listDir,
-  readTextFile,
+  readTextSnapshot,
   searchFiles,
   statFile,
+  type TextSnapshot,
+  verifyWrittenText,
   writeTextFile,
 } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
@@ -60,12 +62,8 @@ const searchInput = z.object({
   limit: z.number().int().positive().max(200).default(50),
 })
 
-/** A file's contents plus whether it existed (so panels can show empty states). */
-export interface FileReadResult {
-  /** Whether the file existed; `false` ⇒ `content` is "". */
-  exists: boolean
-  content: string
-}
+/** Typed bounded editor read, with no content on rejected outcomes. */
+export type FileReadResult = TextSnapshot
 
 /** One entry in a directory listing, addressed relative to the working dir. */
 export interface FileTreeEntry {
@@ -86,6 +84,13 @@ export interface FileSearchHit {
   relPath: string
   /** Fuzzy score (higher is better). */
   score: number
+}
+
+/** Search hits and child paths that could not be inspected. */
+export interface FileSearchResult {
+  hits: FileSearchHit[]
+  partial: boolean
+  skipped: string[]
 }
 
 /** Fetch a workspace row or throw a clean NOT_FOUND. */
@@ -143,12 +148,7 @@ export const filesRouter = router({
     const workspace = requireWorkspace(ctx.db, input.workspaceId)
     const dir = workspaceWorkingDir(ctx.db, workspace)
     const target = resolveInsideDir(dir, input.relPath)
-    try {
-      return { exists: true, content: await readTextFile(target) }
-    } catch (error) {
-      if (isNotFound(error)) return { exists: false, content: "" }
-      throw error
-    }
+    return readTextSnapshot(target)
   }),
 
   /**
@@ -158,13 +158,36 @@ export const filesRouter = router({
    */
   write: publicProcedure
     .input(writeInput)
-    .mutation(async ({ ctx, input }): Promise<{ bytes: number }> => {
-      const workspace = requireWorkspace(ctx.db, input.workspaceId)
-      const dir = workspaceWorkingDir(ctx.db, workspace)
-      const target = resolveInsideDir(dir, input.relPath)
-      await writeTextFile(target, input.content)
-      return { bytes: Buffer.byteLength(input.content, "utf8") }
-    }),
+    .mutation(
+      async ({
+        ctx,
+        input,
+      }): Promise<{ bytes: number; baseline: FileStat; matchesWrittenContent: boolean }> => {
+        const workspace = requireWorkspace(ctx.db, input.workspaceId)
+        const dir = workspaceWorkingDir(ctx.db, workspace)
+        const target = resolveInsideDir(dir, input.relPath)
+        await writeTextFile(target, input.content)
+        const verified = await verifyWrittenText(target, input.content)
+        return {
+          bytes: Buffer.byteLength(input.content, "utf8"),
+          ...verified,
+        }
+      },
+    ),
+
+  /** Reveal only existing files whose real path stays inside this workspace. */
+  reveal: publicProcedure.input(readInput).mutation(async ({ ctx, input }): Promise<void> => {
+    const workspace = requireWorkspace(ctx.db, input.workspaceId)
+    const base = await realpath(workspaceWorkingDir(ctx.db, workspace))
+    const target = await realpath(resolveInsideDir(base, input.relPath))
+    const rel = relative(base, target)
+    if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Cannot reveal a path outside the workspace",
+      })
+    await ctx.revealPath(target)
+  }),
 
   /**
    * Fingerprint a file (mtime + size) without reading its bytes. The editor
@@ -222,17 +245,21 @@ export const filesRouter = router({
   /**
    * Fuzzy file-name search backing the `⌘F` quick-open palette. Scores every
    * file under the working dir against `query` (noise dirs like `.git` /
-   * `node_modules` are pruned by `walkFiles`) and returns the best matches with
+   * `node_modules` are pruned by the shared walker) and returns the best matches with
    * workspace-relative POSIX paths. An empty query yields no hits.
    */
   search: publicProcedure
     .input(searchInput)
-    .query(async ({ ctx, input }): Promise<FileSearchHit[]> => {
+    .query(async ({ ctx, input }): Promise<FileSearchResult> => {
       const workspace = requireWorkspace(ctx.db, input.workspaceId)
       const dir = workspaceWorkingDir(ctx.db, workspace)
       const base = resolve(dir)
-      const hits = await searchFiles(base, input.query, { limit: input.limit })
-      return hits.map((hit) => ({ relPath: toRelPosix(base, hit.path), score: hit.score }))
+      const result = await searchFiles(base, input.query, { limit: input.limit })
+      return {
+        hits: result.hits.map((hit) => ({ relPath: toRelPosix(base, hit.path), score: hit.score })),
+        partial: result.partial,
+        skipped: result.skipped,
+      }
     }),
 })
 
@@ -332,14 +359,4 @@ function nodeErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined
   const code = (error as { code?: unknown }).code
   return typeof code === "string" ? code : undefined
-}
-
-/** Whether an error is Node's "no such file or directory". */
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT"
-  )
 }

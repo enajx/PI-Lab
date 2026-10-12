@@ -7,6 +7,7 @@ import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { agentSessions, automationRuns, automations } from "@pi-lab/local-db"
 import type { TerminalAgent } from "@pi-lab/shared"
+import Database from "better-sqlite3"
 import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { dispatchAutomation } from "../../automations/dispatch"
@@ -97,6 +98,7 @@ function harnessContext(): AppContext {
       throw new Error("no network in tests")
     },
     openPath: async () => "",
+    revealPath: () => {},
     pyToolsExec: async () => ({ stdout: "", stderr: "", code: null, notFound: true }),
     discoverPythonEnvironments: async () => [],
     resolvePythonRuntime: async () => ({
@@ -110,6 +112,7 @@ function harnessContext(): AppContext {
     activityMonitor: h.activityMonitor,
     notificationService: h.notificationService,
     caffeine: h.caffeine,
+    thumbnailImageProcessor: { inspect: () => null, inspectWebP: async () => null },
   }
 }
 
@@ -326,6 +329,16 @@ describe("automations CRUD", () => {
 
 describe("runNow — fires via the real session-start flow", () => {
   test("tracks the initially launched interactive turn through completion", async () => {
+    const auditDb = new Database(join(h.dataDir, "local.db"))
+    auditDb.exec(`
+      CREATE TABLE launch_timestamp_audit (run_id TEXT NOT NULL, previous_at INTEGER, next_at INTEGER);
+      CREATE TRIGGER audit_launch_timestamp AFTER UPDATE OF launched_at ON automation_runs
+      BEGIN
+        INSERT INTO launch_timestamp_audit (run_id, previous_at, next_at)
+        VALUES (NEW.id, OLD.launched_at, NEW.launched_at);
+      END;
+    `)
+    auditDb.close()
     const created = await h.caller.automations.create({
       projectId,
       agentId: WORKFLOW_AGENT.id,
@@ -337,6 +350,12 @@ describe("runNow — fires via the real session-start flow", () => {
 
     const { runId } = await h.caller.automations.runNow({ id: created.id })
     expect(runId).toBeTruthy()
+    const launchedAt = h.db
+      .select({ launchedAt: automationRuns.launchedAt })
+      .from(automationRuns)
+      .where(eq(automationRuns.id, runId ?? ""))
+      .get()?.launchedAt
+    expect(launchedAt).toEqual(expect.any(Number))
 
     await waitFor(
       () =>
@@ -352,6 +371,14 @@ describe("runNow — fires via the real session-start flow", () => {
     expect(runs[0]?.workspaceId).toBeTruthy()
     expect(runs[0]?.sessionId).toBeTruthy()
     expect(runs[0]?.completedAt).toEqual(expect.any(Number))
+    expect(runs[0]?.launchedAt).toBe(launchedAt)
+
+    const recorded = new Database(join(h.dataDir, "local.db"))
+    const launchUpdates = recorded
+      .prepare("SELECT previous_at, next_at FROM launch_timestamp_audit WHERE run_id = ?")
+      .all(runId ?? "")
+    recorded.close()
+    expect(launchUpdates).toEqual([{ previous_at: null, next_at: launchedAt }])
 
     // runNow uses a fresh scheduledFor and never touches the cadence.
     const after = await h.caller.automations.get({ id: created.id })

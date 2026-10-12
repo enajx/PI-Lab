@@ -534,51 +534,44 @@
   }
 }
 
-/* The edge of a *running* background-workflow control comes alive: a brighter
-   brand-orange point travels AROUND the thin border like a snake, fading from
-   saturated to faint, so "the agent is thinking" reads at a glance. It's just the
-   1px edge — no bar. Rendered as a masked conic-gradient ring (only the border
-   padding shows) whose angle rotates. Reduced motion holds a static orange edge. */
-@property --pi-lab-snake-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
-.pi-lab-workflow-snake {
+/* A small orange highlight moves across the bottom edge of a *running*
+   background-workflow control. Its pseudo-element animates only `transform`, so
+   the live-result window remains stable while agent activity is streaming. */
+.pi-lab-workflow-sweep {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
+  inset-inline: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
   pointer-events: none;
-  background: conic-gradient(
-    from var(--pi-lab-snake-angle),
-    color-mix(in srgb, var(--color-brand) 10%, transparent),
-    var(--color-brand),
-    color-mix(in srgb, var(--color-brand) 10%, transparent)
-  );
-  /* Show ONLY the 1px padding ring (the border), never the interior. */
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  animation: pi-lab-workflow-snake 2.4s linear infinite;
 }
 
-@keyframes pi-lab-workflow-snake {
+.pi-lab-workflow-sweep::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 42%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, transparent, var(--color-brand), transparent);
+  animation: pi-lab-workflow-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+@keyframes pi-lab-workflow-sweep {
+  from {
+    transform: translateX(-115%);
+  }
+
   to {
-    --pi-lab-snake-angle: 360deg;
+    transform: translateX(255%);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pi-lab-workflow-snake {
+  .pi-lab-workflow-sweep::before {
     animation: none;
-    background: var(--color-brand);
+    width: 100%;
     opacity: 0.5;
   }
 }

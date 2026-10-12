@@ -1,53 +1,29 @@
+import { type ProjectWorkspaceState, WorkspaceRecoveryStore } from "./-workspaceRecovery"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 
-/**
- * In-memory project workspace state. Dashboard navigation intentionally tears down
- * route components, while a project workspace should feel continuous across
- * views and relaunches. Terminal panes are restored by session id; the PTY daemon
- * decides whether that session can still be attached.
- */
-export interface ProjectWorkspaceState extends CentralPanelRestoreState {
-  rightSidebarCollapsed: boolean
-  rightSidebarActiveId: string | null
-  /** Working-dir-relative `.md` paths the user pinned as right-sidebar panels. */
-  pinnedPanels: string[]
-}
+export type { ProjectWorkspaceState } from "./-workspaceRecovery"
 
-const projectWorkspaceStates = new Map<string, ProjectWorkspaceState>()
-const STORAGE_KEY = "pi-lab.projectWorkspaceState.v1"
-const CHANGE_EVENT = "pi-lab:project-workspace-state"
-let hydrated = false
+let store: WorkspaceRecoveryStore | undefined
+
+/** One live store survives project-route teardown while retaining the last durable snapshots. */
+export function workspaceRecovery(): WorkspaceRecoveryStore {
+  if (!store) store = new WorkspaceRecoveryStore(window.localStorage)
+  return store
+}
 
 export function readProjectWorkspaceState(
   projectId: string,
   restoreTabs: boolean,
 ): ProjectWorkspaceState | undefined {
-  hydrate()
-  const state = projectWorkspaceStates.get(projectId)
-  if (!state || restoreTabs) return state
-  return {
-    ...state,
-    buffers: [],
-    activeRelPath: null,
-    sessions: [],
-    active: null,
-    belowEditorRun: null,
-  }
+  return workspaceRecovery().read(projectId, restoreTabs)
 }
 
 export function writeProjectWorkspaceState(
   projectId: string,
   state: CentralPanelRestoreState,
+  workspaceId?: string,
 ): void {
-  hydrate()
-  const existing = projectWorkspaceStates.get(projectId)
-  projectWorkspaceStates.set(projectId, {
-    ...state,
-    rightSidebarCollapsed: existing?.rightSidebarCollapsed ?? false,
-    rightSidebarActiveId: existing?.rightSidebarActiveId ?? null,
-    pinnedPanels: existing?.pinnedPanels ?? [],
-  })
-  persist()
+  workspaceRecovery().write(projectId, state, workspaceId)
 }
 
 export function writeProjectWorkspaceViewState(
@@ -57,31 +33,9 @@ export function writeProjectWorkspaceViewState(
     "rightSidebarCollapsed" | "rightSidebarActiveId" | "pinnedPanels"
   >,
 ): void {
-  hydrate()
-  const existing = projectWorkspaceStates.get(projectId)
-  if (!existing) return
-  projectWorkspaceStates.set(projectId, { ...existing, ...view })
-  persist()
+  workspaceRecovery().writeView(projectId, view)
 }
 
-/** Subscribe to project-workspace changes made elsewhere in the renderer. */
 export function subscribeProjectWorkspaceState(onChange: () => void): () => void {
-  if (typeof window === "undefined") return () => {}
-  window.addEventListener(CHANGE_EVENT, onChange)
-  return () => window.removeEventListener(CHANGE_EVENT, onChange)
-}
-
-function hydrate(): void {
-  if (hydrated || typeof window === "undefined") return
-  hydrated = true
-  const serialized = window.localStorage.getItem(STORAGE_KEY)
-  if (!serialized) return
-  const entries = JSON.parse(serialized) as Array<[string, ProjectWorkspaceState]>
-  for (const [projectId, state] of entries) projectWorkspaceStates.set(projectId, state)
-}
-
-function persist(): void {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([...projectWorkspaceStates]))
-  window.dispatchEvent(new Event(CHANGE_EVENT))
+  return workspaceRecovery().subscribe(onChange)
 }

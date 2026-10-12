@@ -49,6 +49,13 @@ function renderDialog(
 }
 
 describe("WorkflowResultDialog", () => {
+  test("renders at the document root so card hover effects cannot contain or clip it", async () => {
+    renderDialog({})
+
+    const backdrop = await screen.findByTestId("workflow-result-backdrop")
+    expect(backdrop.parentElement).toBe(document.body)
+  })
+
   test("renders the printed report as markdown, not raw syntax", async () => {
     renderDialog({ result: "# Photon status\n\nDrift is **under control** now." })
 

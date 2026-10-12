@@ -9,7 +9,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, expect, test } from "vitest"
 import { AppProviders } from "../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../test/fakeTrpcClient"
-import { SettingsView } from "./settings"
+import { SettingsView } from "./settings/-SettingsView"
 
 describe("SettingsView", () => {
   test("keeps Caffeine clickable in the draggable Settings header", async () => {

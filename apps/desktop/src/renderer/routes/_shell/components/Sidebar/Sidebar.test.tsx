@@ -10,6 +10,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
+import { ProjectActivityProvider } from "../../-ProjectActivity"
 import { writeProjectWorkspaceState } from "../../projects/-workspaceState"
 import { Sidebar } from "./Sidebar"
 
@@ -45,11 +46,13 @@ function renderSidebar(handlers: FakeHandlers = {}) {
 
   const result = render(
     <AppProviders client={client} queryClient={queryClient}>
-      {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
-      <RouterProvider router={router as any} />
+      <ProjectActivityProvider>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </ProjectActivityProvider>
     </AppProviders>,
   )
-  return { ...result, router }
+  return { ...result, router, queryClient }
 }
 
 describe("Sidebar", () => {
@@ -287,15 +290,18 @@ describe("Sidebar", () => {
     expect(screen.getByTestId("project-agent-status").getAttribute("data-status")).toBe("working")
   })
 
-  test("marks a project with unsaved open-file edits and clears the marker after save", async () => {
+  test.each([
+    "unsaved",
+    "conflicted",
+  ] as const)("marks a project with %s open-file edits and clears the marker after save", async (state) => {
     writeProjectWorkspaceState("a", {
       buffers: [
         {
           relPath: "notes.md",
-          content: "draft",
+          content: state === "unsaved" ? "draft" : "saved",
           savedContent: "saved",
           baseline: { mtimeMs: 1, size: 5 },
-          externalChange: false,
+          externalChange: state === "conflicted",
           epoch: 0,
         },
       ],
@@ -331,20 +337,44 @@ describe("Sidebar", () => {
   })
 
   test("an expanded project row uses its thumbnail as the project badge", async () => {
+    const thumbnailRequests: unknown[] = []
     const { container } = renderSidebar({
       "projects.list": () => [
         {
           id: "a",
           name: "Alpha",
           repoPath: "/a",
-          thumbnail: "data:image/png;base64,AA==",
+          hasThumbnail: true,
         },
       ],
+      "projects.thumbnail": (input) => {
+        thumbnailRequests.push(input)
+        return { dataUrl: "data:image/png;base64,AA==", tooLarge: false }
+      },
     })
     await waitFor(() => expect(screen.getByTestId("project-item")).toBeTruthy())
 
-    const thumbnail = container.querySelector('[data-testid="project-sessions-toggle"] img')
-    expect(thumbnail?.getAttribute("src")).toBe("data:image/png;base64,AA==")
+    await waitFor(() => {
+      const thumbnail = container.querySelector('[data-testid="project-sessions-toggle"] img')
+      expect(thumbnail?.getAttribute("src")).toBe("data:image/png;base64,AA==")
+    })
+    expect(thumbnailRequests).toEqual([{ id: "a", variant: "badge" }])
+  })
+
+  test("clearing artwork hides a cached badge when the list flag becomes false", async () => {
+    let hasThumbnail = true
+    const { container, queryClient } = renderSidebar({
+      "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a", hasThumbnail }],
+      "projects.thumbnail": () => ({ dataUrl: "data:image/png;base64,AA==", tooLarge: false }),
+    })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="project-sessions-toggle"] img')).not.toBeNull()
+    })
+    hasThumbnail = false
+    await queryClient.invalidateQueries()
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="project-sessions-toggle"] img')).toBeNull()
+    })
   })
 
   test("the project badge toggles direct session links and a session opens in its project", async () => {

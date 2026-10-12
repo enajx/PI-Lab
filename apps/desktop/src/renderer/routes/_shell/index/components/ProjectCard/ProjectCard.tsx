@@ -1,4 +1,4 @@
-import type { Project, ProjectMetadata } from "@pi-lab/local-db"
+import type { ProjectMetadata } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -22,8 +22,10 @@ import {
   useDigitalRainSpeed,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { type ProjectSummary, useProjectThumbnail } from "../../../../../trpc/useProjectThumbnail"
+import { useProjectActivityState } from "../../../-ProjectActivity"
 import { setPendingLaunch } from "../../../projects/-pendingLaunch"
-import { deriveProjectState, type ProjectState } from "../../utils/deriveProjectState"
+import type { ProjectState } from "../../utils/deriveProjectState"
 import { hashString, projectGradient, sampleThemePalette } from "../../utils/projectGradient"
 import { DigitalRainThumbnail } from "./DigitalRainThumbnail"
 import { EditProjectDialog } from "./EditProjectDialog"
@@ -44,10 +46,9 @@ import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
  *     sets the thumbnail. Each artwork kind replaces the others (enforced
  *     server-side). A project with none yet captures a default gradient from the
  *     current theme on first render and persists it, so it stays fixed thereafter.
- *   - an **info area** — the project name and a status badge from
- *     `deriveProjectState`, with live agent activity determining whether the status
- *     is empty, working, or paused. An `active` project's gradient also drifts as a
- *     live activity cue.
+ *   - an **info area** — the project name and a status badge from shared live
+ *     agent activity. The status is idle, working, or paused. An `active`
+ *     project's gradient also drifts as a live activity cue.
  *
  * Clicking the card opens the project's route; right-clicking anywhere on it
  * opens the project menu at the pointer.
@@ -66,9 +67,6 @@ const STATUS_DOT: Record<ProjectState, string> = {
 }
 
 const GRADIENT_LAYER_NAMES = ["a", "b", "c"] as const
-// Activity is a tiny, shared read. Keep dashboard status badges and artwork cues
-// synchronized with the monitor without creating a per-frame renderer workload.
-const ACTIVITY_REFRESH_MS = 1_000
 
 // Compact, icon-forward card-action button — modeled on the Caffeine title-bar
 // control (small, subtle, bordered, `text-xs`). Icon-only so all three actions fit
@@ -78,7 +76,7 @@ const CARD_ACTION_CLASS =
   "inline-flex h-7 flex-1 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
 
 interface ProjectCardProps {
-  project: Project
+  project: ProjectSummary
 }
 
 export function ProjectCard({ project }: ProjectCardProps) {
@@ -92,22 +90,22 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const [digitalRainDensity] = useDigitalRainDensity()
   const [digitalRainSpeed] = useDigitalRainSpeed()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [thumbnailError, setThumbnailError] = useState<string | null>(null)
+  const artworkGenerationRef = useRef(0)
+  const thumbnail = useProjectThumbnail(project, "card")
 
-  const activityQuery = useQuery(
-    trpc.sessions.activity.queryOptions(undefined, { refetchInterval: ACTIVITY_REFRESH_MS }),
-  )
+  const state = useProjectActivityState(project.id)
   const capabilitiesQuery = useQuery(trpc.projects.capabilities.queryOptions({ id: project.id }))
   const gitAvailable =
     !capabilitiesQuery.isError && (capabilitiesQuery.data?.git ?? project.defaultBranch !== null)
   const gitDisabledReason = capabilitiesQuery.isError
     ? `Could not check Git availability: ${capabilitiesQuery.error.message}`
     : "Initialize Git to use this Git-backed action."
-  const agentStates = (activityQuery.data ?? [])
-    .filter((activity) => activity.projectId === project.id)
-    .map((activity) => activity.state)
 
-  const invalidateProjects = () =>
+  const invalidateProjects = () => {
     void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+    void queryClient.invalidateQueries({ queryKey: trpc.projects.thumbnail.pathKey() })
+  }
 
   const setThumbnail = useMutation(
     trpc.projects.setThumbnail.mutationOptions({ onSuccess: invalidateProjects }),
@@ -124,12 +122,6 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const setArchived = useMutation(
     trpc.projects.setArchived.mutationOptions({ onSuccess: invalidateProjects }),
   )
-
-  const state = deriveProjectState({
-    sessionCount: agentStates.includes("working") ? 1 : 0,
-    changeCount: 0,
-    attentionCount: agentStates.includes("waiting") ? 1 : 0,
-  })
 
   const openProject = () => {
     void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
@@ -148,9 +140,17 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
   const applyThumbnailFile = async (file: File | undefined) => {
     if (!file?.type.startsWith("image/")) return
-    const dataUrl = await readImageFileAsDataUrl(file)
-    if (!dataUrl) return
-    await setThumbnail.mutateAsync({ id: project.id, dataUrl })
+    const generation = ++artworkGenerationRef.current
+    setThumbnailError(null)
+    try {
+      const dataUrl = await readImageFileAsDataUrl(file)
+      if (generation !== artworkGenerationRef.current) return
+      await setThumbnail.mutateAsync({ id: project.id, dataUrl })
+    } catch (error) {
+      if (generation === artworkGenerationRef.current) {
+        setThumbnailError(error instanceof Error ? error.message : "Could not set this thumbnail.")
+      }
+    }
   }
 
   const onDrop = async (event: React.DragEvent) => {
@@ -169,7 +169,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   // card has no thumbnail, sample the current theme once to seed a default. The
   // default is persisted below so it (and its captured palette) stays fixed across
   // restarts and later theme changes.
-  const needsDefaultGradient = !project.digitalRain && !project.thumbnail && !project.gradient
+  const needsDefaultGradient = !project.digitalRain && !thumbnail.hasThumbnail && !project.gradient
   const defaultGradient = useMemo(
     () =>
       needsDefaultGradient ? { seed: hashString(project.id), palette: sampleThemePalette() } : null,
@@ -189,6 +189,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
   }, [needsDefaultGradient, defaultGradient, project.id, persistDefault])
 
   const generateGradient = () => {
+    artworkGenerationRef.current += 1
+    setThumbnailError(null)
     setGradient.mutate({
       id: project.id,
       gradient: { seed: Math.floor(Math.random() * 0x1_0000_0000), palette: sampleThemePalette() },
@@ -216,6 +218,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
   const chooseDigitalRain = () => {
     setChoosingArtwork(false)
+    artworkGenerationRef.current += 1
+    setThumbnailError(null)
     setDigitalRain.mutate({ id: project.id, enabled: true })
   }
 
@@ -283,7 +287,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
         data-testid="project-card-image"
         className="relative isolate h-32 w-full shrink-0 overflow-hidden transition-[filter] group-hover:brightness-105 group-hover:contrast-105 group-hover:saturate-125"
         style={
-          project.thumbnail
+          thumbnail.dataUrl
             ? undefined
             : { backgroundColor: project.digitalRain ? "#000" : "var(--muted)" }
         }
@@ -295,16 +299,20 @@ export function ProjectCard({ project }: ProjectCardProps) {
         onDragLeave={() => setIsDragOver(false)}
         onDrop={(event) => void onDrop(event)}
       >
-        {project.thumbnail ? (
-          <img src={project.thumbnail} alt="" className="size-full object-cover" />
+        {thumbnail.dataUrl ? (
+          <img src={thumbnail.dataUrl} alt="" className="size-full object-cover" />
         ) : project.digitalRain ? (
           <>
-            <DigitalRainThumbnail
-              characters={digitalRainCharactersQuery.data?.characters}
-              density={digitalRainDensity}
-              speed={digitalRainSpeed}
-              animate={state === "active"}
-            />
+            {/* Wait for the project's characters (or their failure, which falls back
+                to default glyphs) so the first paint is the final one. */}
+            {digitalRainCharactersQuery.isFetched && (
+              <DigitalRainThumbnail
+                characters={digitalRainCharactersQuery.data?.characters}
+                density={digitalRainDensity}
+                speed={digitalRainSpeed}
+                animate={state === "active"}
+              />
+            )}
             {/* Black and white pixels are already at the limits of CSS contrast,
                 so this subtle exposure layer makes the shared card-hover cue
                 visibly perceptible on a Digital Rain thumbnail too. */}
@@ -371,6 +379,27 @@ export function ProjectCard({ project }: ProjectCardProps) {
           </div>
         ) : null}
       </div>
+
+      {thumbnail.tooLarge ? (
+        <div role="alert" className="flex items-center justify-between gap-2 px-3 py-1 text-xs">
+          <span>Stored thumbnail is too large to display.</span>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              artworkGenerationRef.current += 1
+              setThumbnail.mutate({ id: project.id, dataUrl: null })
+            }}
+          >
+            Clear thumbnail
+          </button>
+        </div>
+      ) : null}
+      {thumbnailError ? (
+        <div role="alert" className="px-3 py-1 text-xs text-destructive">
+          {thumbnailError}
+        </div>
+      ) : null}
 
       {/* The entire flexible card body above the action divider opens the project.
           The title remains a real button for keyboard access; reference links

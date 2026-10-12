@@ -5,8 +5,8 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcC
 // StrictMode-wrapped render (see test/render.tsx): reproduces the dev build's
 // effect double-invoke so project-view mount effects are exercised as they run.
 import { fireEvent, render, screen, waitFor, within } from "../../../test/render"
+import { ProjectWorkspace } from "./-ProjectWorkspace"
 import { setPendingLaunch } from "./-pendingLaunch"
-import { ProjectWorkspace } from "./$projectId"
 
 // A card-launched session attaches to the central panel, which mounts a Terminal
 // per pane; stub it so a pane needs no live PTY (mirrors CentralPanel's own test).
