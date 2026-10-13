@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../i18n/language"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandler } from "../../../test/fakeTrpcClient"
 import { QuickOpen } from "./QuickOpen"
@@ -19,6 +20,15 @@ function renderQuickOpen(search: FakeHandler) {
 }
 
 describe("QuickOpen search status", () => {
+  test("translates search controls when the interface language changes", () => {
+    renderQuickOpen(() => ({ hits: [], partial: false, skipped: [] }))
+    act(() => setInterfaceLanguage("es"))
+    expect(screen.getByTestId<HTMLInputElement>("quick-open-input").placeholder).toBe(
+      "Buscar archivos por nombre…",
+    )
+    act(() => setInterfaceLanguage("en"))
+  })
+
   test("shows skipped child paths with matching files", async () => {
     renderQuickOpen(() => ({
       hits: [{ relPath: "src/main.py", score: 10 }],

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { ComponentProps } from "react"
-import { describe, expect, test, vi } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { type TaskRecord, type TaskSource, TasksWorkspace } from "./TasksWorkspace"
 
 const sources: TaskSource[] = [
@@ -97,6 +98,21 @@ function renderWorkspace(overrides: Partial<ComponentProps<typeof TasksWorkspace
 }
 
 describe("TasksWorkspace", () => {
+  afterEach(() => setInterfaceLanguage("en"))
+
+  test("shows task controls in the selected interface language", () => {
+    setInterfaceLanguage("es")
+    renderWorkspace()
+    expect(screen.getByText("Todos los proyectos")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Nueva tarea" })).toBeTruthy()
+  })
+
+  test("shows a known task validation error in the selected language", () => {
+    setInterfaceLanguage("es")
+    renderWorkspace({ error: "TODO Markdown changed since it was loaded" })
+    expect(screen.getByText("El Markdown de TODO cambió desde que se cargó")).toBeTruthy()
+  })
+
   test("defaults to a searchable all-project list", () => {
     renderWorkspace()
     expect(screen.getByTestId("tasks-list")).toBeTruthy()

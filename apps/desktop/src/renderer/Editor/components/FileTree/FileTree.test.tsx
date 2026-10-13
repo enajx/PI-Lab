@@ -27,6 +27,19 @@ function renderTree(handlers: FakeHandlers, onOpenFile = vi.fn()) {
 describe("FileTree creation and sorting", () => {
   beforeEach(() => window.localStorage.clear())
 
+  test("translates file controls while preserving file names", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "es")
+    renderTree({
+      "files.tree": () => [
+        { name: "notes.md", relPath: "notes.md", kind: "file", type: "md", mtimeMs: 1 },
+      ],
+    })
+
+    expect(await screen.findByRole("button", { name: "Archivo nuevo" })).toBeTruthy()
+    expect(screen.getByTestId("file-tree-root").textContent).toBe("Archivos")
+    expect((await screen.findByTestId("file-tree-file")).textContent).toBe("notes.md")
+  })
+
   test("creates inline in the selected folder, refreshes, and opens a new file", async () => {
     const entries = new Map<string, Entry[]>([
       ["", [{ name: "src", relPath: "src", kind: "dir", type: "folder", mtimeMs: 10 }]],

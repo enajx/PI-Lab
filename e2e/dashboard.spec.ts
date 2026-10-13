@@ -79,6 +79,25 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
+test("title bar agent status shows installed agents and current sessions", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const control = window.getByTestId("agent-status-control")
+  await expect(control).toBeVisible()
+  const agentBounds = await control.boundingBox()
+  const caffeineBounds = await window.getByTestId("caffeine-control").boundingBox()
+  expect(
+    agentBounds && caffeineBounds && agentBounds.x + agentBounds.width <= caffeineBounds.x,
+  ).toBe(true)
+  await control.click()
+  const panel = window.getByRole("dialog", { name: "Agent status" })
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText("Claude Code")
+  await expect(panel).toContainText("Codex")
+  await expect(panel).toContainText("Current sessions")
+  await expect(panel).toContainText("No current sessions.")
+})
+
 test("dashboard shows a directly resizable project card", async () => {
   const window = await app.firstWindow()
 

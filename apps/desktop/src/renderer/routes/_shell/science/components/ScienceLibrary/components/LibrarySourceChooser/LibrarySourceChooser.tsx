@@ -2,6 +2,7 @@ import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Cloud, FolderOpen, HardDrive } from "lucide-react"
 import { useState } from "react"
+import { useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { ZoteroConnectForm, type ZoteroConnectValues } from "../ZoteroConnectForm"
 
@@ -27,6 +28,7 @@ interface LibrarySourceChooserProps {
  * dialog and connects to the chosen path.
  */
 export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySourceChooserProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   // Live local-reachability hint; short-lived so reopening the tab re-checks, but not
   // hammered (a closed Zotero costs one ~2.5s probe per stale window, not per render).
@@ -54,10 +56,11 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
       className="mx-auto flex w-full max-w-3xl flex-col gap-4"
     >
       <div className="flex flex-col items-center gap-1 text-center">
-        <h2 className="font-semibold text-foreground text-sm">Choose a library source</h2>
+        <h2 className="font-semibold text-foreground text-sm">{t("Choose a library source")}</h2>
         <p className="max-w-md text-muted-foreground text-xs leading-relaxed">
-          Connect Zotero — locally or via the cloud Web API — or browse a folder of PDFs. You can
-          change this later in Settings.
+          {t(
+            "Connect Zotero locally or through the cloud Web API, or browse a folder of PDFs. You can change this later in Settings.",
+          )}
         </p>
       </div>
 
@@ -69,7 +72,7 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
         >
           <div className="flex items-center gap-2">
             <HardDrive className="size-4 text-muted-foreground" aria-hidden />
-            <span className="font-medium text-foreground text-sm">Zotero local</span>
+            <span className="font-medium text-foreground text-sm">{t("Zotero local")}</span>
             <span
               data-testid="zotero-local-detected"
               data-reachable={reachable}
@@ -79,37 +82,39 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
                   : "ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground"
               }
             >
-              {detect.isLoading ? "Checking…" : reachable ? "Detected ✓" : "Not detected"}
+              {detect.isLoading ? t("Checking…") : reachable ? t("Detected ✓") : t("Not detected")}
             </span>
           </div>
           <p className="text-muted-foreground text-xs leading-relaxed">
-            The running Zotero desktop app — no API key, works offline.
+            {t("The running Zotero desktop app needs no API key and works offline.")}
           </p>
           <div className="mt-auto flex items-center gap-2">
             <Button
               type="button"
               size="sm"
               data-testid="zotero-use-local"
-              data-feature-label="Use local Zotero"
-              data-feature-help="Browse the library in the running Zotero desktop app without an API key."
+              data-feature-label={t("Use local Zotero")}
+              data-feature-help={t(
+                "Browse the library in the running Zotero desktop app without an API key.",
+              )}
               disabled={isPending}
               onClick={() =>
                 onConnect({ kind: "zotero", mode: "local", libraryType: "user", libraryId: "0" })
               }
             >
-              Use local Zotero
+              {t("Use local Zotero")}
             </Button>
             <Button
               type="button"
               variant="ghost"
               size="sm"
               data-testid="zotero-local-advanced-toggle"
-              data-feature-label="Local Zotero options"
-              data-feature-help="Configure a specific local Zotero user or group library."
+              data-feature-label={t("Local Zotero options")}
+              data-feature-help={t("Configure a specific local Zotero user or group library.")}
               className="text-muted-foreground text-xs"
               onClick={() => setExpanded((cur) => (cur === "local" ? null : "local"))}
             >
-              Advanced
+              {t("Advanced")}
             </Button>
           </div>
         </div>
@@ -121,11 +126,11 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
         >
           <div className="flex items-center gap-2">
             <Cloud className="size-4 text-muted-foreground" aria-hidden />
-            <span className="font-medium text-foreground text-sm">Zotero cloud</span>
+            <span className="font-medium text-foreground text-sm">{t("Zotero cloud")}</span>
           </div>
           <p className="text-muted-foreground text-xs leading-relaxed">
-            Connect with a Zotero API key from <code className="font-mono">zotero.org</code>. Works
-            without the desktop app.
+            {t("Connect with a Zotero API key from")} <code className="font-mono">zotero.org</code>.{" "}
+            {t("Works without the desktop app.")}
           </p>
           <div className="mt-auto">
             <Button
@@ -133,11 +138,11 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
               size="sm"
               variant={expanded === "web" ? "secondary" : "default"}
               data-testid="zotero-use-web"
-              data-feature-label="Connect Zotero cloud"
-              data-feature-help="Connect a Zotero library using its cloud Web API credentials."
+              data-feature-label={t("Connect Zotero cloud")}
+              data-feature-help={t("Connect a Zotero library using its cloud Web API credentials.")}
               onClick={() => setExpanded((cur) => (cur === "web" ? null : "web"))}
             >
-              Connect with API key
+              {t("Connect with API key")}
             </Button>
           </div>
         </div>
@@ -149,22 +154,24 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
         >
           <div className="flex items-center gap-2">
             <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
-            <span className="font-medium text-foreground text-sm">Folder</span>
+            <span className="font-medium text-foreground text-sm">{t("Folder")}</span>
           </div>
           <p className="text-muted-foreground text-xs leading-relaxed">
-            Browse a folder of PDFs (with subfolders) — no Zotero needed. Read-only.
+            {t("Browse a folder of PDFs and its subfolders without Zotero. Read-only.")}
           </p>
           <div className="mt-auto">
             <Button
               type="button"
               size="sm"
               data-testid="library-source-folder-pick"
-              data-feature-label="Choose PDF folder"
-              data-feature-help="Browse a local folder of PDFs as a read-only research library."
+              data-feature-label={t("Choose PDF folder")}
+              data-feature-help={t(
+                "Browse a local folder of PDFs as a read-only research library.",
+              )}
               disabled={isPending || pickFolder.isPending}
               onClick={() => void chooseFolder()}
             >
-              Choose folder…
+              {t("Choose folder…")}
             </Button>
           </div>
         </div>

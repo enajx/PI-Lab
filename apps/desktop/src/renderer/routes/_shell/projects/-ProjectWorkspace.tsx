@@ -6,8 +6,11 @@ import { X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
+import { ProjectTypeChoice } from "../../../components/ProjectTypeChoice"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
+import { translateKnownError } from "../../../i18n/errors"
+import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import type { ProjectNotificationSearch } from "../../../notifications/activation"
 import {
   RIGHT_SIDEBAR_MAX_WIDTH,
@@ -20,7 +23,7 @@ import {
 } from "../../../preferences/preferences"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { useOptionalNewFileController } from "../components/NewFileController"
-import { titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
+import { AgentStatusControl, titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
 import { clearPendingLaunch, readPendingLaunch } from "./-pendingLaunch"
 import { clearPendingOpenFile, usePendingOpenFile } from "./-pendingOpenFile"
 import { clearPendingTaskSession, readPendingTaskSession } from "./-pendingTaskSession"
@@ -50,6 +53,8 @@ export function ProjectWorkspace({
   projectId: string
   activation: ProjectNotificationSearch
 }) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const newFileController = useOptionalNewFileController()
   const client = useTRPCClient()
@@ -87,10 +92,10 @@ export function ProjectWorkspace({
   const gitAvailable = capabilitiesQuery.data?.git === true
   const [nonGitNoticeDismissed, setNonGitNoticeDismissed] = useNonGitNoticeDismissed(projectId)
   const gitDisabledReason = capabilitiesQuery.isError
-    ? `Could not check Git availability: ${capabilitiesQuery.error.message}`
+    ? `${t("Could not check Git availability: ")}${translateKnownError(language, capabilitiesQuery.error.message)}`
     : capabilitiesQuery.isPending
-      ? "Checking Git availability…"
-      : "Initialize Git to run Git-state-aware project workflows."
+      ? t("Checking Git availability…")
+      : t("Initialize Git to run Git-state-aware project workflows.")
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editorSettings: EditorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
 
@@ -98,6 +103,14 @@ export function ProjectWorkspace({
     trpc.settings.updateEditor.mutationOptions({
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
+      },
+    }),
+  )
+  const setMainFile = useMutation(
+    trpc.projects.setDocumentPath.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.get.queryKey() })
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
       },
     }),
   )
@@ -294,7 +307,7 @@ export function ProjectWorkspace({
     return (
       <div className="p-8">
         <p data-testid="project-error" className="cursor-text select-text text-destructive text-sm">
-          {projectQuery.error.message}
+          {translateKnownError(language, projectQuery.error.message)}
         </p>
       </div>
     )
@@ -312,7 +325,7 @@ export function ProjectWorkspace({
       >
         <div className={cn("flex min-w-0 flex-col", titleBarControlClass(collapsed))}>
           <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
-            {project?.name ?? "Loading…"}
+            {project?.name ?? t("Loading…")}
           </h1>
           {project ? (
             <p className="cursor-text select-text truncate text-muted-foreground text-xs">
@@ -321,9 +334,16 @@ export function ProjectWorkspace({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {project ? (
+            <ProjectTypeChoice
+              projectId={projectId}
+              typeId={project.typeId}
+              testId="project-view-type"
+            />
+          ) : null}
           <ProjectWorkflowControl
             projectId={projectId}
-            projectName={project?.name ?? "Project"}
+            projectName={project?.name ?? t("Project")}
             task="fetch-experiments"
             variant="labeled"
             testId="project-view-fetch-experiments"
@@ -333,13 +353,14 @@ export function ProjectWorkspace({
           />
           <ProjectWorkflowControl
             projectId={projectId}
-            projectName={project?.name ?? "Project"}
+            projectName={project?.name ?? t("Project")}
             task="summary"
             variant="labeled"
             testId="project-view-summary"
             disabled={!gitAvailable}
             disabledReason={gitDisabledReason}
           />
+          <AgentStatusControl />
           <CaffeineControl />
         </div>
       </header>
@@ -350,7 +371,8 @@ export function ProjectWorkspace({
           role="alert"
           className="shrink-0 rounded-md border border-destructive/35 bg-destructive/8 px-3 py-2 text-destructive text-xs"
         >
-          Could not check Git availability: {capabilitiesQuery.error.message}
+          {t("Could not check Git availability: ")}
+          {translateKnownError(language, capabilitiesQuery.error.message)}
         </section>
       ) : null}
 
@@ -361,8 +383,10 @@ export function ProjectWorkspace({
           className="flex shrink-0 items-center gap-2 rounded-md border border-amber-500/35 bg-amber-500/8 px-3 py-1.5 text-xs"
         >
           <p className="min-w-0 flex-1 truncate cursor-text select-text text-muted-foreground">
-            <span className="font-medium text-foreground">This project is not git tracked.</span>{" "}
-            Initialize Git for worktrees and concurrent agents.
+            <span className="font-medium text-foreground">
+              {t("This project is not git tracked.")}
+            </span>{" "}
+            {t("Initialize Git for worktrees and concurrent agents.")}
           </p>
           <button
             type="button"
@@ -370,17 +394,17 @@ export function ProjectWorkspace({
             disabled={initializeGit.isPending}
             className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-medium text-foreground disabled:opacity-60"
           >
-            {initializeGit.isPending ? "Initializing…" : "Initialize Git"}
+            {initializeGit.isPending ? t("Initializing…") : t("Initialize Git")}
           </button>
           {initializeGit.error ? (
             <span role="alert" className="text-destructive">
-              {initializeGit.error.message}
+              {translateKnownError(language, initializeGit.error.message)}
             </span>
           ) : null}
           <button
             type="button"
-            aria-label="Dismiss Git notice"
-            title="Dismiss Git notice"
+            aria-label={t("Dismiss Git notice")}
+            title={t("Dismiss Git notice")}
             onClick={() => setNonGitNoticeDismissed(true)}
             className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-amber-500/15 hover:text-foreground"
           >
@@ -403,6 +427,11 @@ export function ProjectWorkspace({
           {saveAsError}
         </p>
       ) : null}
+      {setMainFile.error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {setMainFile.error.message}
+        </p>
+      ) : null}
       {workspaceId ? (
         <div className="flex min-h-0 flex-1 gap-3">
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -417,6 +446,9 @@ export function ProjectWorkspace({
               rightSidebarCollapsed={rightSidebarCollapsed}
               onExpandRightSidebar={() => setRightSidebarCollapsed(false)}
               onPinFile={pinPanel}
+              onSetMainFile={(relPath) =>
+                setMainFile.mutate({ id: projectId, kind: "main", relPath })
+              }
               onSaveUntitled={
                 newFileController
                   ? (relPath) => {
@@ -474,10 +506,10 @@ export function ProjectWorkspace({
         <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground text-sm">
           {ensureMain.isError ? (
             <span data-testid="project-error" className="cursor-text select-text text-destructive">
-              {ensureMain.error.message}
+              {translateKnownError(language, ensureMain.error.message)}
             </span>
           ) : (
-            "Opening project…"
+            t("Opening project…")
           )}
         </div>
       )}

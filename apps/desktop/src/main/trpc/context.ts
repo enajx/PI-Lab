@@ -162,11 +162,30 @@ export const TEST_ACTIVITY_AGENT: TerminalAgent = {
   defaultArgs: ["-e", "setInterval(()=>process.stdout.write('AGENT-ACTIVE\\n'),100)"],
 }
 
+/** A test-only planning CLI that writes a proposal through the real PTY boundary. */
+export const TEST_PLAN_AGENT: TerminalAgent = {
+  id: "test-plan",
+  label: "Test Plan",
+  command: process.execPath,
+  detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+  defaultArgs: [
+    "-e",
+    "require('fs').writeFileSync('PROPOSED_RESEARCH.md', '# Planned project\\n')",
+  ],
+  oneShotArgs: [
+    "-e",
+    "require('fs').writeFileSync('PROPOSED_RESEARCH.md', '# Planned project\\n')",
+  ],
+}
+
 /**
  * Build the launchable agent catalog for an app instance. In test mode the
  * deterministic {@link TEST_AGENT} is appended so the E2E has an assertable agent
  * to launch; in normal use it's just the built-ins (md/engineering/architecture.md (agent runtime)).
  */
 export function buildAgentCatalog(testMode: boolean): readonly TerminalAgent[] {
-  return testMode ? [...BUILTIN_AGENTS, TEST_AGENT, TEST_ACTIVITY_AGENT] : BUILTIN_AGENTS
+  return testMode
+    ? [...BUILTIN_AGENTS, TEST_AGENT, TEST_ACTIVITY_AGENT, TEST_PLAN_AGENT]
+    : BUILTIN_AGENTS
 }

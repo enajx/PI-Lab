@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { getSettingsOrDefaults, MigrationFailure } from "@pi-lab/local-db"
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
+import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
 import {
   type ActivityMonitorPort,
   ActivityRegistry,
@@ -15,6 +16,12 @@ import { dispatchAutomation } from "./automations/dispatch"
 import { AutomationScheduler } from "./automations/scheduler"
 import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
 import { getDb, initDatabase } from "./db/db"
+import {
+  getNativeLanguage,
+  loadNativeLanguage,
+  nativeText,
+  saveNativeLanguage,
+} from "./i18n/nativeLanguage"
 import { applyMacDockIcon, resolveAppIconPath } from "./identity/appIcon"
 import {
   createElectronAppFocusAdapter,
@@ -226,8 +233,13 @@ app
       { warn: (message) => console.warn(message) },
     )
 
+    loadNativeLanguage(app.getPath("userData"))
     // Step 3 — migrate the DB; the renderer's `app-ready` marker proves this ran.
     const dbStatus = initDatabase()
+    ipcMain.on(INTERFACE_LANGUAGE_CHANNEL, (_event, language: unknown) => {
+      if (language === getNativeLanguage()) return
+      if (saveNativeLanguage(app.getPath("userData"), language)) installAppMenu()
+    })
     analysisInteractive.installProtocolHandler()
     console.log(
       `[pi-lab] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
@@ -280,7 +292,7 @@ app
   .catch((error) => {
     console.error("[pi-lab] fatal during boot:", error)
     if (error instanceof MigrationFailure) {
-      dialog.showErrorBox("PI Lab database could not be opened", error.message)
+      dialog.showErrorBox(nativeText("PI Lab database could not be opened"), error.message)
     }
     app.quit()
   })

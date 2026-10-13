@@ -3,6 +3,7 @@ import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CloudDownload, FileText, type LucideIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
+import { useTranslate } from "../../i18n/language"
 import { useTRPC } from "../../trpc/react"
 
 const WorkflowResultDialog = lazy(() =>
@@ -88,6 +89,7 @@ export function ProjectWorkflowControl({
   disabled?: boolean
   disabledReason?: string
 }) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -156,12 +158,12 @@ export function ProjectWorkflowControl({
 
   const ariaLabel =
     state === "running"
-      ? `${meta.label} for ${projectName} — working`
+      ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("working")}`
       : state === "done"
-        ? `${meta.label} for ${projectName} — done, view result`
+        ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("done, view result")}`
         : state === "error"
-          ? `${meta.label} for ${projectName} — failed, view error`
-          : `${meta.label} for ${projectName}`
+          ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("failed, view error")}`
+          : `${t(meta.label)} ${t("for")} ${projectName}`
 
   const compact =
     "relative inline-flex h-7 flex-1 items-center justify-center rounded-md border outline-none transition-colors focus-visible:bg-accent/60 disabled:cursor-not-allowed"
@@ -176,11 +178,11 @@ export function ProjectWorkflowControl({
         data-state={state}
         disabled={disabled}
         aria-label={ariaLabel}
-        title={disabledReason ?? meta.label}
-        data-feature-label={meta.label}
+        title={disabledReason ?? t(meta.label)}
+        data-feature-label={t(meta.label)}
         data-feature-help={
           disabledReason ??
-          `${meta.label} for ${projectName} — runs as a background task; click while running to watch its live output, or when done to view the result and re-check`
+          `${t(meta.label)} ${t("for")} ${projectName} — ${t("Runs as a background task; click while running to watch its live output, or when done to view the result and re-check")}`
         }
         onClick={onClick}
         className={cn(variant === "compact" ? compact : labeled, STATE_TINT[state])}
@@ -196,7 +198,7 @@ export function ProjectWorkflowControl({
               className={cn("size-3.5 shrink-0", state === "running" && "opacity-70")}
               aria-hidden
             />
-            <span>{state === "running" ? "Working" : meta.label}</span>
+            <span>{state === "running" ? t("Working") : t(meta.label)}</span>
           </>
         )}
         {/* A compositor-friendly moving underline — only while working. */}
@@ -204,18 +206,18 @@ export function ProjectWorkflowControl({
       </button>
 
       {dialogOpen ? (
-        <Suspense fallback={<div role="status">Loading workflow result…</div>}>
+        <Suspense fallback={<div role="status">{t("Loading workflow result…")}</div>}>
           <WorkflowResultDialog
             projectId={projectId}
             task={task}
-            title={meta.label}
-            reportHeading={meta.reportHeading}
+            title={t(meta.label)}
+            reportHeading={t(meta.reportHeading)}
             projectName={projectName}
             running={state === "running"}
             result={record?.result ?? ""}
             errorMessage={record?.errorMessage ?? null}
             lastCheckedAt={record?.lastCheckedAt ?? 0}
-            guidance={meta.guidance}
+            guidance={t(meta.guidance)}
             onRecheck={recheck}
             onClose={() => setDialogOpen(false)}
           />

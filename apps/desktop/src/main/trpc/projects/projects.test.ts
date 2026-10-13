@@ -97,6 +97,54 @@ afterEach(async () => {
 })
 
 describe("projects.open", () => {
+  test.each([
+    { files: ["RESEARCH.md"], expected: "research" },
+    { files: ["PROJECT.md"], expected: "software" },
+    { files: ["RESEARCH.md", "PROJECT.md"], expected: "general" },
+    { files: [], expected: "general" },
+  ])("detects an existing folder type from only one root marker: $files", async ({
+    files,
+    expected,
+  }) => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-type-marker-"))
+    for (const file of files) await writeFile(join(plain, file), `# ${file}\n`)
+
+    const project = await h.caller.projects.open({ path: plain })
+
+    expect(project.typeId).toBe(expected)
+  })
+
+  test("ignores a root marker symlink and preserves an explicit type", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-type-marker-"))
+    const outside = await mkdtemp(join(tmpdir(), "pi-lab-type-outside-"))
+    await writeFile(join(outside, "RESEARCH.md"), "# Outside\n")
+    await symlink(join(outside, "RESEARCH.md"), join(plain, "RESEARCH.md"))
+
+    const opened = await h.caller.projects.open({ path: plain })
+    expect(opened.typeId).toBe("general")
+    await h.caller.projects.setType({ id: opened.id, typeId: "paper" })
+    await writeFile(join(plain, "PROJECT.md"), "# Software\n")
+    expect((await h.caller.projects.open({ path: plain })).typeId).toBe("paper")
+  })
+
+  test("detects a type for a legacy General row when reopened", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-type-legacy-"))
+    const opened = await h.caller.projects.open({ path: plain })
+    h.db.update(projects).set({ typeId: "general" }).where(eq(projects.id, opened.id)).run()
+    await writeFile(join(plain, "RESEARCH.md"), "# Existing research\n")
+
+    expect((await h.caller.projects.open({ path: plain })).typeId).toBe("research")
+  })
+
+  test("treats an obsolete custom type as unselected when reopened", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-type-obsolete-"))
+    const opened = await h.caller.projects.open({ path: plain })
+    h.db.update(projects).set({ typeId: "custom-old" }).where(eq(projects.id, opened.id)).run()
+    await writeFile(join(plain, "PROJECT.md"), "# Existing software\n")
+
+    expect((await h.caller.projects.open({ path: plain })).typeId).toBe("software")
+  })
+
   test("opening a git repo stores name + default branch", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     expect(project.name).toBe("repo")
@@ -147,6 +195,74 @@ describe("projects.open", () => {
     expect(again.id).toBe(first.id)
     const all = await h.caller.projects.list()
     expect(all).toHaveLength(1)
+  })
+})
+
+describe("project Markdown selections", () => {
+  test("creates TODO.md from the editable template without replacing an existing file", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await mkdir(join(h.dataDir, "template"), { recursive: true })
+    await writeFile(join(h.dataDir, "template", "TODO.md"), "# Custom template\n")
+
+    const result = await h.caller.projects.createTaskFile({ id: project.id })
+
+    expect(result.taskRelPath).toBe("TODO.md")
+    expect(await readFile(join(h.repoDir, "TODO.md"), "utf8")).toBe("# Custom template\n")
+    await expect(h.caller.projects.createTaskFile({ id: project.id })).rejects.toMatchObject({
+      code: "CONFLICT",
+    })
+    expect(await readFile(join(h.repoDir, "TODO.md"), "utf8")).toBe("# Custom template\n")
+  })
+
+  test("remembers one clear root TODO file when a project is opened", async () => {
+    await writeFile(join(h.repoDir, "Tasks-TODO.md"), "# Tasks\n")
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+
+    expect(project.taskRelPath).toBe("Tasks-TODO.md")
+    expect((await h.caller.projects.get({ id: project.id })).taskRelPath).toBe("Tasks-TODO.md")
+  })
+
+  test("remembers a nested task file and main readme across project reads", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await mkdir(join(h.repoDir, "notes"))
+    await writeFile(join(h.repoDir, "notes", "Work.md"), "# Work\n")
+    await writeFile(join(h.repoDir, "notes", "Overview.md"), "# Overview\n")
+
+    await h.caller.projects.setDocumentPath({
+      id: project.id,
+      kind: "tasks",
+      relPath: "notes/Work.md",
+    })
+    await h.caller.projects.setDocumentPath({
+      id: project.id,
+      kind: "main",
+      relPath: join(h.repoDir, "notes", "Overview.md"),
+    })
+
+    expect(await h.caller.projects.get({ id: project.id })).toMatchObject({
+      taskRelPath: "notes/Work.md",
+      mainRelPath: "notes/Overview.md",
+    })
+    expect((await h.caller.projects.list()).find((row) => row.id === project.id)).toMatchObject({
+      taskRelPath: "notes/Work.md",
+      mainRelPath: "notes/Overview.md",
+    })
+  })
+
+  test("refuses files outside the project, missing paths, and non-Markdown files", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const outside = await mkdtemp(join(tmpdir(), "pi-lab-outside-"))
+    await writeFile(join(outside, "outside.md"), "# Outside\n")
+    await symlink(join(outside, "outside.md"), join(h.repoDir, "escape.md"))
+    await writeFile(join(h.repoDir, "data.txt"), "text\n")
+
+    for (const relPath of ["../outside.md", "escape.md", "missing.md", "data.txt"]) {
+      await expect(
+        h.caller.projects.setDocumentPath({ id: project.id, kind: "tasks", relPath }),
+      ).rejects.toBeInstanceOf(TRPCError)
+    }
+    expect((await h.caller.projects.get({ id: project.id })).taskRelPath).toBeNull()
   })
 })
 
@@ -203,6 +319,7 @@ describe("projects.clone", () => {
 describe("projects.createFromTemplate", () => {
   test("copies the template in, skips cruft, inits a repo, and stores the project", async () => {
     const templateDir = await makeTemplate()
+    await writeFile(join(templateDir, "RESEARCH.md"), "# Template research\n")
     const parent = await mkdtemp(join(tmpdir(), "pi-lab-tpl-"))
     const targetDir = join(parent, "study")
 
@@ -210,6 +327,7 @@ describe("projects.createFromTemplate", () => {
 
     // A real git repo with a default branch, registered as exactly one project.
     expect(project.defaultBranch).toBe("main")
+    expect(project.typeId).toBe("general")
     expect(project.repoPath).toBe(await realpath(targetDir))
     expect(await isGitRepo(project.repoPath)).toBe(true)
     expect(await h.caller.projects.list()).toHaveLength(1)

@@ -9,6 +9,7 @@ import {
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_CAFFEINE_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
+  DEFAULT_PROJECT_TEMPLATE_SETTINGS,
   settings,
 } from "./tables"
 
@@ -43,6 +44,11 @@ describe("getSettingsOrDefaults", () => {
       expect(result.caffeine).toEqual(DEFAULT_CAFFEINE_SETTINGS)
       expect(result.caffeine.mode).toBe("off")
       expect(result.caffeine.scope).toBe("system-only")
+      expect(result.projectTemplate.projectTypes.map((type) => [type.id, type.name])).toEqual([
+        ["research", "Research project"],
+        ["software", "Software project"],
+        ["paper", "Paper"],
+      ])
 
       // The read must NOT have persisted a row.
       const row = db.select().from(settings).get()
@@ -58,6 +64,34 @@ describe("getSettingsOrDefaults", () => {
       db.insert(settings).values({ id: SETTINGS_ROW_ID, worktreePerAgent: true }).run()
       const result = getSettingsOrDefaults(db)
       expect(result.worktreePerAgent).toBe(true)
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it("upgrades a saved General/Paper type list while keeping edited Paper guidance", () => {
+    const { db, sqlite } = runMigrations(dbPath)
+    try {
+      db.insert(settings)
+        .values({
+          id: SETTINGS_ROW_ID,
+          projectTemplate: {
+            ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
+            projectTypes: [
+              { id: "general", name: "General project", guidance: "Old general guidance." },
+              { id: "paper", name: "Paper", guidance: "My paper guidance." },
+              { id: "my-type", name: "My type", guidance: "My custom guidance." },
+            ],
+          },
+        })
+        .run()
+
+      const types = getSettingsOrDefaults(db).projectTemplate.projectTypes
+      expect(types.map((type) => type.id)).toEqual(["research", "software", "paper"])
+      expect(types.find((type) => type.id === "paper")?.guidance).toBe("My paper guidance.")
+      expect(db.select().from(settings).get()?.projectTemplate.projectTypes.at(-1)?.guidance).toBe(
+        "My custom guidance.",
+      )
     } finally {
       sqlite.close()
     }

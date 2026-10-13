@@ -12,10 +12,13 @@ import {
   type NotificationSettings,
   type PiLabDatabase,
   type ProjectTemplateSettings,
+  type ProjectType,
   SETTINGS_ROW_ID,
   type Settings,
   settings,
 } from "@pi-lab/local-db"
+import { TRPCError } from "@trpc/server"
+import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { publicProcedure, router } from "../trpc"
 
@@ -106,6 +109,11 @@ const notificationsPatch = z.object({
 const projectTemplatePatch = z.object({
   initializationMarkdownFiles: z.array(z.string().min(1)).max(100).optional(),
   defaultTemplateParentPath: z.string().min(1).nullable().optional(),
+})
+
+const projectTypeGuidanceInput = z.object({
+  id: z.enum(["research", "software", "paper"]),
+  guidance: z.string().max(20_000),
 })
 
 type NotificationEventPatch = Partial<NotificationEventSettings>
@@ -251,12 +259,23 @@ export function writeProjectTemplateSettings(
     initializationMarkdownFiles:
       patch.initializationMarkdownFiles ?? current.initializationMarkdownFiles,
     defaultTemplateParentPath: patch.defaultTemplateParentPath ?? current.defaultTemplateParentPath,
+    projectTypes: patch.projectTypes ?? current.projectTypes,
   }
+  const storedTypes =
+    db
+      .select({ projectTemplate: settings.projectTemplate })
+      .from(settings)
+      .where(eq(settings.id, SETTINGS_ROW_ID))
+      .get()?.projectTemplate.projectTypes ?? []
+  const retainedTypes = storedTypes.filter(
+    (type) => !next.projectTypes.some((visible) => visible.id === type.id),
+  )
+  const storedNext = { ...next, projectTypes: [...next.projectTypes, ...retainedTypes] }
   db.insert(settings)
-    .values({ id: SETTINGS_ROW_ID, projectTemplate: next, updatedAt: Date.now() })
+    .values({ id: SETTINGS_ROW_ID, projectTemplate: storedNext, updatedAt: Date.now() })
     .onConflictDoUpdate({
       target: settings.id,
-      set: { projectTemplate: next, updatedAt: Date.now() },
+      set: { projectTemplate: storedNext, updatedAt: Date.now() },
     })
     .run()
   return next
@@ -296,6 +315,19 @@ export const settingsRouter = router({
     .mutation(
       ({ ctx, input }): ProjectTemplateSettings => writeProjectTemplateSettings(ctx.db, input),
     ),
+
+  /** Save editable guidance for one built-in project type. */
+  updateProjectTypeGuidance: publicProcedure
+    .input(projectTypeGuidanceInput)
+    .mutation(({ ctx, input }): ProjectType => {
+      const current = getSettingsOrDefaults(ctx.db).projectTemplate.projectTypes
+      const existing = current.find((type) => type.id === input.id)
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Project type not found" })
+      const saved = { ...existing, guidance: input.guidance }
+      const projectTypes = current.map((type) => (type.id === input.id ? saved : type))
+      writeProjectTemplateSettings(ctx.db, { projectTypes })
+      return saved
+    }),
 
   /**
    * Patch global notification mute, per-event enablement, and bundled sound

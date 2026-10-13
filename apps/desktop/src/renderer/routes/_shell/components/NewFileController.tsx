@@ -10,6 +10,8 @@ import {
   useId,
   useState,
 } from "react"
+import { translateKnownError } from "../../../i18n/errors"
+import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import { useTRPC } from "../../../trpc/react"
 
 export interface NewFileResult {
@@ -37,6 +39,8 @@ const NewFileControllerContext = createContext<NewFileController | null>(null)
  * an editor outside the project view.
  */
 export function NewFileControllerProvider({ children }: { children: ReactNode }) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const [request, setRequest] = useState<NewFileRequest | null>(null)
@@ -127,43 +131,43 @@ export function NewFileControllerProvider({ children }: { children: ReactNode })
           >
             <div>
               <h2 id={titleId} className="font-semibold text-sm">
-                New file
+                {t("New file")}
               </h2>
               <p className="mt-1 text-muted-foreground text-xs">
-                Choose a project and create a relative path inside it.
+                {t("Choose a project and create a relative path inside it.")}
               </p>
             </div>
 
             {projectsQuery.isError ? null : projectsQuery.isPending ? (
               <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
-                Loading projects…
+                {t("Loading projects…")}
               </p>
             ) : projectsQuery.data?.length === 0 ? (
               <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
-                Add a project before creating a file.
+                {t("Add a project before creating a file.")}
               </p>
             ) : (
               <>
                 <label className="flex flex-col gap-1.5 font-medium text-xs">
-                  Project
+                  {t("Project")}
                   <select
                     value={projectId}
                     onChange={(event) => setProjectId(event.target.value)}
                     disabled={pending}
                     className="rounded-md border border-border bg-background px-2 py-2 font-normal text-sm outline-none focus:border-ring"
                   >
-                    <option value="">Choose a project…</option>
+                    <option value="">{t("Choose a project…")}</option>
                     {(projectsQuery.data ?? []).map((project) => (
                       <option key={project.id} value={project.id}>
                         {project.name}
-                        {project.archivedAt ? " (hidden)" : ""} — {project.repoPath}
+                        {project.archivedAt ? ` (${t("hidden")})` : ""} — {project.repoPath}
                       </option>
                     ))}
                   </select>
                 </label>
 
                 <label className="flex flex-col gap-1.5 font-medium text-xs">
-                  File name
+                  {t("File name")}
                   <input
                     type="text"
                     value={relPath}
@@ -178,13 +182,13 @@ export function NewFileControllerProvider({ children }: { children: ReactNode })
 
             {error ? (
               <p role="alert" className="cursor-text select-text text-destructive text-xs">
-                {error.message}
+                {translateKnownError(language, error.message)}
               </p>
             ) : null}
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" disabled={pending} onClick={close}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 type="submit"
@@ -197,7 +201,7 @@ export function NewFileControllerProvider({ children }: { children: ReactNode })
                   relPath.trim().length === 0
                 }
               >
-                {pending ? "Creating…" : "Create and open"}
+                {pending ? t("Creating…") : t("Create and open")}
               </Button>
             </div>
           </form>

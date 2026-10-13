@@ -1,6 +1,7 @@
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { LogOut } from "lucide-react"
+import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { LibraryBrowser } from "./components/LibraryBrowser"
@@ -23,6 +24,7 @@ function folderName(folderPath: string): string {
  * Pitfalls #3.
  */
 export function ScienceLibrary() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
@@ -34,7 +36,7 @@ export function ScienceLibrary() {
   const rootLabel =
     status?.kind === "folder" && status.folderPath
       ? folderName(status.folderPath)
-      : "Zotero library"
+      : t("Zotero library")
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: trpc.science.library.getStatus.queryKey() })
@@ -56,14 +58,16 @@ export function ScienceLibrary() {
   return (
     <ScienceTabShell
       testId="science-library"
-      title="Library"
-      subtitle="Browse your Zotero library or a folder of PDFs"
+      title={t("Library")}
+      subtitle={t("Browse your Zotero library or a folder of PDFs")}
       actions={
         connected ? (
           <Button
             data-testid="library-disconnect"
-            data-feature-label="Disconnect library"
-            data-feature-help="Disconnect this library source so you can choose a different Zotero library or PDF folder."
+            data-feature-label={t("Disconnect library")}
+            data-feature-help={t(
+              "Disconnect this library source so you can choose a different Zotero library or PDF folder.",
+            )}
             variant="ghost"
             size="sm"
             className="h-8 gap-1.5 text-muted-foreground"
@@ -71,7 +75,7 @@ export function ScienceLibrary() {
             onClick={() => disconnect.mutate()}
           >
             <LogOut />
-            Disconnect
+            {t("Disconnect")}
           </Button>
         ) : null
       }

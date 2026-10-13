@@ -1,5 +1,6 @@
 import type { Workspace } from "@pi-lab/local-db"
 import { GitBranch, GitFork } from "lucide-react"
+import { useTranslate } from "../../../../../i18n/language"
 
 /**
  * Small badge surfacing the worktree policy outcome (md/engineering/architecture.md, agent
@@ -8,6 +9,7 @@ import { GitBranch, GitFork } from "lucide-react"
  * panel's agent tabs can both show it.
  */
 export function KindBadge({ kind }: { kind: Workspace["kind"] }) {
+  const t = useTranslate()
   const isWorktree = kind === "worktree"
   return (
     <span
@@ -20,7 +22,7 @@ export function KindBadge({ kind }: { kind: Workspace["kind"] }) {
       ) : (
         <GitBranch className="size-3" aria-hidden />
       )}
-      {isWorktree ? "worktree" : "main"}
+      {isWorktree ? t("worktree") : t("main")}
     </span>
   )
 }

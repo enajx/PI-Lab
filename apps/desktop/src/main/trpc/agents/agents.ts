@@ -11,6 +11,7 @@ export interface AgentOption {
   label: string
   available: boolean
   executable: string
+  oneShot: boolean
 }
 
 /**
@@ -34,6 +35,7 @@ export const agentsRouter = router({
           label: agent.label,
           available: resolved !== null,
           executable: resolved ?? candidate,
+          oneShot: agent.id === "codex" || agent.id === "claude-code" || Boolean(agent.oneShotArgs),
         }
       }),
     )

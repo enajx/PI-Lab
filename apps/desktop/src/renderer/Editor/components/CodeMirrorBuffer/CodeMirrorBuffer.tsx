@@ -5,6 +5,7 @@ import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { vim } from "@replit/codemirror-vim"
 import { basicSetup } from "codemirror"
 import { type CSSProperties, useEffect, useRef, useState } from "react"
+import { useTranslate } from "../../../i18n/language"
 import {
   editorFontFamilyCss,
   useEditorFontFamily,
@@ -75,8 +76,10 @@ interface CodeMirrorBufferProps {
   diagnostics?: DiagnosticsSource
   /** Markdown-only source presentation. Render is WYSIWYM; Source is unstyled raw text. */
   markdownMode?: MarkdownMode
-  /** Retained for callers while Markdown links move to the `@` completion follow-up. */
+  /** Optional local file choices for isolated editor use and tests. */
   projectEntries?: MarkdownProjectEntry[]
+  /** Search the current workspace for files matching a Markdown `@` query. */
+  searchProjectFiles?: (query: string) => Promise<MarkdownProjectEntry[]>
 }
 
 interface MarkdownToolbarState {
@@ -94,12 +97,21 @@ interface MarkdownSlashState {
   left: number
 }
 
+interface MarkdownMentionState {
+  from: number
+  to: number
+  query: string
+  top: number
+  left: number
+}
+
 interface MarkdownOverlayState {
   toolbar: MarkdownToolbarState | null
   slash: MarkdownSlashState | null
+  mention: MarkdownMentionState | null
 }
 
-const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: null }
+const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: null, mention: null }
 
 /**
  * Thin React wrapper around a CodeMirror 6 `EditorView` (md/engineering/architecture.md (renderer); spec:
@@ -128,8 +140,10 @@ export function CodeMirrorBuffer({
   customThemes,
   diagnostics,
   markdownMode,
-  projectEntries: _projectEntries,
+  projectEntries,
+  searchProjectFiles,
 }: CodeMirrorBufferProps) {
+  const t = useTranslate()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const [fontFamily] = useEditorFontFamily()
@@ -140,21 +154,38 @@ export function CodeMirrorBuffer({
     useState<MarkdownOverlayState>(EMPTY_MARKDOWN_OVERLAY)
   const [activeSlashIndex, setActiveSlashIndex] = useState(0)
   const [slashGroup, setSlashGroup] = useState<MarkdownSlashCommand | null>(null)
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
+  const [mentionEntries, setMentionEntries] = useState<MarkdownProjectEntry[]>([])
+  const [mentionLoading, setMentionLoading] = useState(false)
+  const [mentionError, setMentionError] = useState<string | null>(null)
   const slashCommands = MARKDOWN_BLOCK_COMMANDS
   const matchingSlashCommands = markdownOverlay.slash
     ? (slashGroup?.children ?? slashCommands).filter((command) =>
         slashGroup
           ? true
-          : command.label.toLowerCase().includes(markdownOverlay.slash?.query.toLowerCase() ?? ""),
+          : [command.label, t(command.label)].some((label) =>
+              label
+                .toLocaleLowerCase()
+                .includes(markdownOverlay.slash?.query.toLocaleLowerCase() ?? ""),
+            ),
       )
     : []
   const selectedSlashIndex = Math.min(activeSlashIndex, matchingSlashCommands.length - 1)
+  const selectedMentionIndex = Math.min(activeMentionIndex, mentionEntries.length - 1)
   const markdownOverlayRef = useRef(markdownOverlay)
   const matchingSlashCommandsRef = useRef(matchingSlashCommands)
   const selectedSlashIndexRef = useRef(selectedSlashIndex)
+  const mentionEntriesRef = useRef(mentionEntries)
+  const selectedMentionIndexRef = useRef(selectedMentionIndex)
+  const searchProjectFilesRef = useRef(searchProjectFiles)
+  const projectEntriesRef = useRef(projectEntries)
   markdownOverlayRef.current = markdownOverlay
   matchingSlashCommandsRef.current = matchingSlashCommands
   selectedSlashIndexRef.current = selectedSlashIndex
+  mentionEntriesRef.current = mentionEntries
+  selectedMentionIndexRef.current = selectedMentionIndex
+  searchProjectFilesRef.current = searchProjectFiles
+  projectEntriesRef.current = projectEntries
 
   useEffect(() => {
     if (selectedSlashIndex < 0) return
@@ -162,6 +193,50 @@ export function CodeMirrorBuffer({
       .getElementById(`markdown-slash-option-${selectedSlashIndex}`)
       ?.scrollIntoView({ block: "nearest" })
   }, [selectedSlashIndex])
+
+  useEffect(() => {
+    if (selectedMentionIndex < 0) return
+    document
+      .getElementById(`markdown-mention-option-${selectedMentionIndex}`)
+      ?.scrollIntoView({ block: "nearest" })
+  }, [selectedMentionIndex])
+
+  const mentionQuery = markdownOverlay.mention?.query ?? null
+  useEffect(() => {
+    setMentionEntries([])
+    setMentionError(null)
+    setMentionLoading(false)
+    if (!mentionQuery?.trim()) return
+
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      const search = searchProjectFilesRef.current
+      if (!search) {
+        const query = mentionQuery.toLowerCase()
+        setMentionEntries(
+          (projectEntriesRef.current ?? []).filter(
+            (entry) => entry.kind === "file" && entry.relPath.toLowerCase().includes(query),
+          ),
+        )
+        return
+      }
+      setMentionLoading(true)
+      void search(mentionQuery)
+        .then((entries) => {
+          if (!cancelled) setMentionEntries(entries.filter((entry) => entry.kind === "file"))
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) setMentionError(String(error))
+        })
+        .finally(() => {
+          if (!cancelled) setMentionLoading(false)
+        })
+    }, 120)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [mentionQuery])
 
   // Latest callbacks captured in refs so the one-time mount effect always calls
   // through to the current handlers without re-creating the view on each render.
@@ -212,6 +287,13 @@ export function CodeMirrorBuffer({
         setActiveSlashIndex(0)
         setSlashGroup(null)
       }
+      const previousMention = markdownOverlayRef.current.mention
+      if (
+        previousMention?.from !== next.mention?.from ||
+        previousMention?.query !== next.mention?.query
+      ) {
+        setActiveMentionIndex(0)
+      }
       markdownOverlayRef.current = next
       setMarkdownOverlay(next)
     }
@@ -234,6 +316,12 @@ export function CodeMirrorBuffer({
         {
           key: "ArrowDown",
           run: () => {
+            const mention = markdownOverlayRef.current.mention
+            const entries = mentionEntriesRef.current
+            if (markdown && mention && entries.length > 0) {
+              setActiveMentionIndex((current) => (current + 1) % entries.length)
+              return true
+            }
             const trigger = markdownOverlayRef.current.slash
             const commands = matchingSlashCommandsRef.current
             if (!markdown || !trigger || commands.length === 0) return false
@@ -244,6 +332,12 @@ export function CodeMirrorBuffer({
         {
           key: "ArrowUp",
           run: () => {
+            const mention = markdownOverlayRef.current.mention
+            const entries = mentionEntriesRef.current
+            if (markdown && mention && entries.length > 0) {
+              setActiveMentionIndex((current) => (current - 1 + entries.length) % entries.length)
+              return true
+            }
             const trigger = markdownOverlayRef.current.slash
             const commands = matchingSlashCommandsRef.current
             if (!markdown || !trigger || commands.length === 0) return false
@@ -254,6 +348,14 @@ export function CodeMirrorBuffer({
         {
           key: "Enter",
           run: (view) => {
+            const mention = markdownOverlayRef.current.mention
+            const entries = mentionEntriesRef.current
+            if (markdown && mention && entries.length > 0) {
+              const entry = entries[selectedMentionIndexRef.current]
+              if (!entry) return false
+              applyProjectLink(view, mention, entry, relPath)
+              return true
+            }
             const trigger = markdownOverlayRef.current.slash
             const commands = matchingSlashCommandsRef.current
             if (markdown && trigger && commands.length > 0) {
@@ -273,7 +375,8 @@ export function CodeMirrorBuffer({
         {
           key: "Escape",
           run: () => {
-            if (!markdownOverlayRef.current.slash) return false
+            if (!markdownOverlayRef.current.slash && !markdownOverlayRef.current.mention)
+              return false
             if (slashGroup) {
               setSlashGroup(null)
               setActiveSlashIndex(0)
@@ -397,6 +500,14 @@ export function CodeMirrorBuffer({
     view.focus()
   }
 
+  const insertProjectLink = (entry: MarkdownProjectEntry) => {
+    const view = viewRef.current
+    const mention = markdownOverlay.mention
+    if (!view || !mention) return
+    applyProjectLink(view, mention, entry, relPath)
+    view.focus()
+  }
+
   return (
     <div data-testid="editor-buffer" className="relative min-h-0 flex-1 overflow-hidden">
       <div
@@ -407,7 +518,7 @@ export function CodeMirrorBuffer({
       {markdownOverlay.toolbar ? (
         <div
           role="toolbar"
-          aria-label="Markdown formatting"
+          aria-label={t("Markdown formatting")}
           data-testid="markdown-selection-toolbar"
           className="absolute z-30 flex items-center gap-0.5 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
           style={{
@@ -417,31 +528,31 @@ export function CodeMirrorBuffer({
           onMouseDown={(event) => event.preventDefault()}
         >
           <MarkdownFormatButton
-            label="Bold"
+            label={t("Bold")}
             text="B"
             className="font-bold"
             onClick={() => formatSelection("**", "**", "bold text")}
           />
           <MarkdownFormatButton
-            label="Italic"
+            label={t("Italic")}
             text="I"
             className="italic"
             onClick={() => formatSelection("_", "_", "italic text")}
           />
           <MarkdownFormatButton
-            label="Strikethrough"
+            label={t("Strikethrough")}
             text="S"
             className="line-through"
             onClick={() => formatSelection("~~", "~~", "struck text")}
           />
           <MarkdownFormatButton
-            label="Inline code"
+            label={t("Inline code")}
             text="&lt;/&gt;"
             className="font-mono text-[10px]"
             onClick={() => formatSelection("`", "`", "code")}
           />
           <MarkdownFormatButton
-            label="Link"
+            label={t("Link")}
             text="↗"
             onClick={() => formatSelection("[", "](url)", "link text")}
           />
@@ -450,7 +561,7 @@ export function CodeMirrorBuffer({
       {markdownOverlay.slash ? (
         <div
           role="listbox"
-          aria-label="Markdown blocks"
+          aria-label={t("Markdown blocks")}
           aria-activedescendant={
             selectedSlashIndex >= 0 ? `markdown-slash-option-${selectedSlashIndex}` : undefined
           }
@@ -467,7 +578,7 @@ export function CodeMirrorBuffer({
                 type="button"
                 role="option"
                 aria-selected={index === selectedSlashIndex}
-                aria-label={command.label}
+                aria-label={t(command.label)}
                 className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-accent ${
                   index === selectedSlashIndex ? "bg-accent" : ""
                 }`}
@@ -476,12 +587,61 @@ export function CodeMirrorBuffer({
                   insertSlashCommand(command)
                 }}
               >
-                <span className="text-xs">{command.label}</span>
-                <span className="truncate text-[11px] text-muted-foreground">{command.hint}</span>
+                <span className="text-xs">{t(command.label)}</span>
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {t(command.hint)}
+                </span>
               </button>
             ))
           ) : (
-            <p className="px-2 py-2 text-muted-foreground text-xs">No Markdown block matches.</p>
+            <p className="px-2 py-2 text-muted-foreground text-xs">
+              {t("No Markdown block matches.")}
+            </p>
+          )}
+        </div>
+      ) : null}
+      {markdownOverlay.mention ? (
+        <div
+          role="listbox"
+          aria-label="Project files"
+          aria-activedescendant={
+            selectedMentionIndex >= 0
+              ? `markdown-mention-option-${selectedMentionIndex}`
+              : undefined
+          }
+          tabIndex={-1}
+          data-testid="markdown-mention-menu"
+          className="absolute z-30 max-h-56 w-72 overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+          style={{ top: markdownOverlay.mention.top, left: markdownOverlay.mention.left }}
+        >
+          {!markdownOverlay.mention.query.trim() ? (
+            <p className="px-2 py-2 text-muted-foreground text-xs">Type to find a project file.</p>
+          ) : mentionLoading ? (
+            <p className="px-2 py-2 text-muted-foreground text-xs">Searching project files…</p>
+          ) : mentionError ? (
+            <p className="px-2 py-2 text-destructive text-xs">File search failed: {mentionError}</p>
+          ) : mentionEntries.length > 0 ? (
+            mentionEntries.map((entry, index) => (
+              <button
+                key={entry.relPath}
+                id={`markdown-mention-option-${index}`}
+                type="button"
+                role="option"
+                aria-selected={index === selectedMentionIndex}
+                aria-label={entry.relPath}
+                className={`flex w-full rounded px-2 py-1.5 text-left text-xs hover:bg-accent ${
+                  index === selectedMentionIndex ? "bg-accent" : ""
+                }`}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  insertProjectLink(entry)
+                }}
+              >
+                <span className="truncate">{entry.relPath}</span>
+              </button>
+            ))
+          ) : (
+            <p className="px-2 py-2 text-muted-foreground text-xs">No project files match.</p>
           )}
         </div>
       ) : null}
@@ -547,6 +707,35 @@ function applySlashCommand(
   })
 }
 
+/** Replace an @ query with a link relative to the current Markdown file. */
+function applyProjectLink(
+  view: EditorView,
+  trigger: MarkdownMentionState,
+  entry: MarkdownProjectEntry,
+  sourcePath: string,
+) {
+  const sourceDirectory = sourcePath.split("/").slice(0, -1)
+  const targetParts = entry.relPath.split("/")
+  while (sourceDirectory.length > 0 && sourceDirectory[0] === targetParts[0]) {
+    sourceDirectory.shift()
+    targetParts.shift()
+  }
+  const destination = [...sourceDirectory.map(() => ".."), ...targetParts]
+    .map((part) =>
+      encodeURIComponent(part).replace(
+        /[()]/g,
+        (character) => `%${character.charCodeAt(0).toString(16)}`,
+      ),
+    )
+    .join("/")
+  const name = entry.name.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]")
+  const insert = `[${name}](${destination})`
+  view.dispatch({
+    changes: { from: trigger.from, to: trigger.to, insert },
+    selection: { anchor: trigger.from + insert.length },
+  })
+}
+
 /** Continue ordinary, ordered, and task Markdown lists without changing other Enter behavior. */
 function continueMarkdownList(view: EditorView): boolean {
   const selection = view.state.selection.main
@@ -593,11 +782,26 @@ function readMarkdownOverlay(view: EditorView, host: HTMLElement): MarkdownOverl
     return {
       toolbar: { from: selection.from, to: selection.to, ...start },
       slash: null,
+      mention: null,
     }
   }
 
   const line = view.state.doc.lineAt(selection.head)
   const beforeCursor = line.text.slice(0, selection.head - line.from)
+  const mentionMatch = /(?:^|[\s(])@([^\s@]*)$/.exec(beforeCursor)
+  if (mentionMatch) {
+    const mentionIndex = beforeCursor.lastIndexOf("@")
+    return {
+      toolbar: null,
+      slash: null,
+      mention: {
+        from: line.from + mentionIndex,
+        to: selection.head,
+        query: mentionMatch[1] ?? "",
+        ...overlayPosition(view, selection.head, host, false),
+      },
+    }
+  }
   const slashMatch = /(?:^|\s)\/([a-z0-9 -]*)$/i.exec(beforeCursor)
   if (!slashMatch) return EMPTY_MARKDOWN_OVERLAY
   const slashIndex = beforeCursor.lastIndexOf("/")
@@ -611,6 +815,7 @@ function readMarkdownOverlay(view: EditorView, host: HTMLElement): MarkdownOverl
       query: (slashMatch[1] ?? "").trim(),
       ...position,
     },
+    mention: null,
   }
 }
 

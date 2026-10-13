@@ -2,6 +2,7 @@ import { Button } from "@pi-lab/ui"
 import { useMutation } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
 import { useState } from "react"
+import { useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 
 interface AttachFileFlowProps {
@@ -19,6 +20,7 @@ type FlowState = { kind: "idle" } | { kind: "done" } | { kind: "error"; message:
  * the result is visible next to the item.
  */
 export function AttachFileFlow({ itemKey }: AttachFileFlowProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const pickFile = useMutation(trpc.system.pickFile.mutationOptions())
   const attach = useMutation(trpc.science.library.attachFile.mutationOptions())
@@ -34,12 +36,12 @@ export function AttachFileFlow({ itemKey }: AttachFileFlowProps) {
       setState(
         result.ok
           ? { kind: "done" }
-          : { kind: "error", message: result.message ?? "Couldn't attach the file." },
+          : { kind: "error", message: result.message ?? t("Couldn't attach the file.") },
       )
     } catch (error) {
       setState({
         kind: "error",
-        message: error instanceof Error ? error.message : "Attach failed.",
+        message: error instanceof Error ? error.message : t("Attach failed."),
       })
     }
   }
@@ -48,7 +50,7 @@ export function AttachFileFlow({ itemKey }: AttachFileFlowProps) {
     <div className="flex shrink-0 items-center gap-2">
       {state.kind === "done" ? (
         <span data-testid="library-item-attach-done" className="text-primary text-xs">
-          Attached ✓
+          {t("Attached ✓")}
         </span>
       ) : state.kind === "error" ? (
         <span
@@ -68,7 +70,7 @@ export function AttachFileFlow({ itemKey }: AttachFileFlowProps) {
         onClick={() => void run()}
       >
         <Paperclip className="size-3.5" />
-        {busy ? "Attaching…" : "Attach"}
+        {busy ? t("Attaching…") : t("Attach")}
       </Button>
     </div>
   )

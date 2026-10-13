@@ -2,6 +2,7 @@ import type { Project, ProjectMetadata, ProjectReferenceLink } from "@pi-lab/loc
 import { cn } from "@pi-lab/ui"
 import { Plus, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useTranslate } from "../../../../../i18n/language"
 import { useEmojiTagPalette } from "../../../../../preferences/preferences"
 
 /**
@@ -131,6 +132,7 @@ export function EditProjectDialog({
   onClose: () => void
   onSave: (metadata: ProjectMetadata | null) => void
 }) {
+  const t = useTranslate()
   const existing = project.metadata
   const [collaborators, setCollaborators] = useState<string>(existing?.collaborators ?? "")
   const [venue, setVenue] = useState<string>(existing?.venue ?? "")
@@ -205,42 +207,42 @@ export function EditProjectDialog({
         ref={rootRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`Edit ${project.name}`}
+        aria-label={`${t("Edit")} ${project.name}`}
         data-testid="edit-project-dialog"
         className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xl"
       >
         <div className="border-border border-b px-4 py-3">
-          <h2 className="font-medium text-foreground text-sm">Edit project</h2>
+          <h2 className="font-medium text-foreground text-sm">{t("Edit project")}</h2>
           <p className="truncate text-muted-foreground text-xs">{project.name}</p>
         </div>
 
         <div className="flex flex-col gap-3.5 overflow-y-auto px-4 py-4">
           <label className="flex flex-col gap-1">
-            <span className="font-medium text-foreground text-xs">Collaborators</span>
+            <span className="font-medium text-foreground text-xs">{t("Collaborators")}</span>
             <input
               type="text"
               data-testid="edit-project-collaborators"
               className={FIELD_CLASS}
               value={collaborators}
-              placeholder="e.g. Ada Lovelace, Alan Turing"
+              placeholder={t("e.g. Ada Lovelace, Alan Turing")}
               onChange={(event) => setCollaborators(event.target.value)}
             />
           </label>
 
           <label className="flex flex-col gap-1">
-            <span className="font-medium text-foreground text-xs">Publishing venue</span>
+            <span className="font-medium text-foreground text-xs">{t("Publishing venue")}</span>
             <input
               type="text"
               data-testid="edit-project-venue"
               className={FIELD_CLASS}
               value={venue}
-              placeholder="e.g. NeurIPS 2026"
+              placeholder={t("e.g. NeurIPS 2026")}
               onChange={(event) => setVenue(event.target.value)}
             />
           </label>
 
           <label className="flex flex-col gap-1">
-            <span className="font-medium text-foreground text-xs">Deadline</span>
+            <span className="font-medium text-foreground text-xs">{t("Deadline")}</span>
             <input
               type="date"
               data-testid="edit-project-deadline"
@@ -251,7 +253,7 @@ export function EditProjectDialog({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            <span className="font-medium text-foreground text-xs">Emoji tags</span>
+            <span className="font-medium text-foreground text-xs">{t("Emoji tags")}</span>
             <div className="flex flex-wrap items-center gap-1.5" data-testid="edit-project-emoji">
               {paletteChips.map((emoji) => {
                 const active = emojiTags.includes(emoji)
@@ -263,7 +265,7 @@ export function EditProjectDialog({
                     data-emoji={emoji}
                     data-active={active}
                     aria-pressed={active}
-                    title="Click to tag this project · right-click to remove from the palette"
+                    title={t("Click to tag this project · right-click to remove from the palette")}
                     onClick={() => toggleEmoji(emoji)}
                     onContextMenu={(event) => {
                       event.preventDefault()
@@ -281,8 +283,8 @@ export function EditProjectDialog({
               <button
                 type="button"
                 data-testid="edit-project-emoji-add"
-                aria-label="Choose an emoji to add to the palette"
-                title="Choose an emoji"
+                aria-label={t("Choose an emoji to add to the palette")}
+                title={t("Choose an emoji")}
                 onClick={() => setEmojiPickerOpen(true)}
                 className="flex size-8 items-center justify-center rounded-md border border-border border-dashed text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
@@ -290,12 +292,12 @@ export function EditProjectDialog({
               </button>
             </div>
             <span className="text-[11px] text-muted-foreground">
-              Click to tag this project · right-click a tag to remove it from the palette
+              {t("Click to tag this project · right-click a tag to remove it from the palette")}
             </span>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="font-medium text-foreground text-xs">External links</span>
+            <span className="font-medium text-foreground text-xs">{t("External links")}</span>
             <div className="flex flex-col gap-2" data-testid="edit-project-links">
               {links.map((link, index) => (
                 <div
@@ -308,13 +310,13 @@ export function EditProjectDialog({
                     data-testid="edit-project-link-url"
                     className={cn(FIELD_CLASS, "flex-1")}
                     value={link.url}
-                    placeholder="e.g. https://www.overleaf.com/project/…"
+                    placeholder={t("e.g. https://www.overleaf.com/project/…")}
                     onChange={(event) => updateLink(index, { url: event.target.value })}
                   />
                   <button
                     type="button"
                     data-testid="edit-project-link-remove"
-                    aria-label="Remove link"
+                    aria-label={t("Remove link")}
                     onClick={() => setLinks((current) => current.filter((_, i) => i !== index))}
                     className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
                   >
@@ -329,7 +331,7 @@ export function EditProjectDialog({
                 className="flex items-center gap-1.5 self-start rounded-md px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <Plus className="size-3.5" aria-hidden />
-                Add link
+                {t("Add link")}
               </button>
             </div>
           </div>
@@ -342,7 +344,7 @@ export function EditProjectDialog({
             onClick={onClose}
             className="rounded-md px-3 py-1.5 text-muted-foreground text-sm transition-colors hover:bg-accent/60 hover:text-foreground"
           >
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             type="button"
@@ -350,7 +352,7 @@ export function EditProjectDialog({
             onClick={save}
             className="rounded-md bg-brand px-3 py-1.5 font-medium text-brand-foreground text-sm transition-colors hover:bg-brand/90"
           >
-            Save
+            {t("Save")}
           </button>
         </div>
       </div>
@@ -367,11 +369,11 @@ export function EditProjectDialog({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Choose an emoji"
+            aria-label={t("Choose an emoji")}
             data-testid="edit-project-emoji-picker"
             className="w-full max-w-sm rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
           >
-            <p className="mb-2 font-medium text-sm">Choose an emoji</p>
+            <p className="mb-2 font-medium text-sm">{t("Choose an emoji")}</p>
             <div className="grid grid-cols-8 gap-1">
               {EMOJI_PICKER_OPTIONS.map((emoji) => (
                 <button
@@ -379,7 +381,7 @@ export function EditProjectDialog({
                   type="button"
                   data-testid="edit-project-emoji-picker-choice"
                   data-emoji={emoji}
-                  aria-label={`Add ${emoji}`}
+                  aria-label={`${t("Add")} ${emoji}`}
                   onClick={() => addEmojiToPalette(emoji)}
                   className="flex size-9 items-center justify-center rounded-md text-lg transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
                 >

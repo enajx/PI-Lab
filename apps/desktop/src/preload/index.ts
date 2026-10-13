@@ -1,5 +1,6 @@
-import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron"
+import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from "electron"
 import { exposeElectronTRPC } from "trpc-electron/main"
+import { INTERFACE_LANGUAGE_CHANNEL, isInterfaceLanguage } from "../shared/interfaceLanguage"
 import {
   isShutdownRequest,
   isShutdownResponse,
@@ -41,5 +42,11 @@ if (process.isMainFrame) {
   contextBridge.exposeInMainWorld("piLab", {
     platform: process.platform,
     shutdown,
+    setInterfaceLanguage(language: string): void {
+      if (isInterfaceLanguage(language)) ipcRenderer.send(INTERFACE_LANGUAGE_CHANNEL, language)
+    },
+    getPathForFile(file: File): string {
+      return webUtils.getPathForFile(file)
+    },
   })
 }

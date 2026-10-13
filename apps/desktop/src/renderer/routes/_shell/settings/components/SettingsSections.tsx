@@ -10,10 +10,18 @@ import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useLayoutEffect, useState } from "react"
 import { type CaffeineMode, type CaffeineScope, useCaffeine } from "../../../../caffeine"
+import { ProjectMarkdownChoice } from "../../../../components/ProjectMarkdownChoice"
+import { ProjectTypeChoice } from "../../../../components/ProjectTypeChoice"
 import {
   allEditorThemes,
   DEFAULT_EDITOR_THEME_ID,
 } from "../../../../Editor/components/editorThemes"
+import {
+  type InterfaceLanguage,
+  LANGUAGES,
+  useInterfaceLanguage,
+  useTranslate,
+} from "../../../../i18n/language"
 import {
   NOTIFICATION_SOUND_OPTIONS,
   type NotificationSoundId,
@@ -48,6 +56,7 @@ import {
   useShortcutBindings,
 } from "../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../trpc/react"
+import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
 import { AppIconGallery } from "./AppIconGallery"
 import { AppThemeGallery } from "./AppThemeGallery"
@@ -66,6 +75,8 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
 /** General — app-wide behavior (DB-backed via `settings.updateGeneral`). The default
  *  Settings landing (⌘,). */
 export function GeneralSection() {
+  const t = useTranslate()
+  const [language, setLanguage] = useInterfaceLanguage()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
@@ -84,6 +95,14 @@ export function GeneralSection() {
       title="General"
       description="App-wide behavior."
     >
+      <SelectField
+        testId="settings-interface-language"
+        label="Language"
+        description="Choose the language used by PI Lab."
+        value={language}
+        options={LANGUAGES.map((item) => ({ value: item.code, label: item.label }))}
+        onChange={(next) => setLanguage(next as InterfaceLanguage)}
+      />
       <ToggleField
         testId="settings-confirm-quit"
         label="Confirm on quit"
@@ -100,9 +119,9 @@ export function GeneralSection() {
       />
       <div className="flex items-center justify-between gap-4 px-4 py-3">
         <div>
-          <p className="text-sm">First-launch setup</p>
+          <p className="text-sm">{t("First-launch setup")}</p>
           <p className="text-muted-foreground text-xs">
-            Recheck harnesses and local integrations or change initial preferences.
+            {t("Recheck harnesses and local integrations or change initial preferences.")}
           </p>
         </div>
         <Button
@@ -114,7 +133,7 @@ export function GeneralSection() {
             window.location.hash = "#/setup"
           }}
         >
-          Run setup again
+          {t("Run setup again")}
         </Button>
       </div>
     </SettingsSection>
@@ -123,6 +142,7 @@ export function GeneralSection() {
 
 /** Appearance — independent whole-app palette and light/dark/system mode. */
 export function AppearanceSection() {
+  const t = useTranslate()
   const { mode, setMode } = useTheme()
   const trpc = useTRPC()
   const fontsQuery = useQuery(trpc.system.fonts.queryOptions())
@@ -169,9 +189,9 @@ export function AppearanceSection() {
         data-testid="appearance-advanced-editor-typography"
         className="flex flex-col gap-1 px-4 py-3"
       >
-        <h3 className="font-medium text-sm">Advanced</h3>
+        <h3 className="font-medium text-sm">{t("Advanced")}</h3>
         <p className="text-muted-foreground text-xs">
-          These controls apply globally across PI Lab.
+          {t("These controls apply globally across PI Lab.")}
         </p>
       </div>
       <SelectField
@@ -189,10 +209,10 @@ export function AppearanceSection() {
       <div className="flex items-center justify-between gap-4 px-4 py-3">
         <div className="flex min-w-0 flex-col">
           <label htmlFor="settings-editor-font-size" className="text-foreground text-sm">
-            Editor font size
+            {t("Editor font size")}
           </label>
           <span className="text-muted-foreground text-xs">
-            {EDITOR_FONT_MIN_SIZE}–{EDITOR_FONT_MAX_SIZE} pixels.
+            {EDITOR_FONT_MIN_SIZE}–{EDITOR_FONT_MAX_SIZE} {t("pixels.")}
           </span>
         </div>
         <input
@@ -227,13 +247,15 @@ export function AppearanceSection() {
             setFontSize(EDITOR_FONT_DEFAULT_SIZE)
           }}
         >
-          Reset editor typography
+          {t("Reset editor typography")}
         </Button>
       </div>
       <div className="border-border border-t px-4 pt-3">
-        <h4 className="font-medium text-sm">Digital Rain thumbnails</h4>
+        <h4 className="font-medium text-sm">{t("Digital Rain thumbnails")}</h4>
         <p className="mt-1 text-muted-foreground text-xs">
-          Black-and-white ASCII rain uses freshly sampled project files every time PI Lab launches.
+          {t(
+            "Black-and-white ASCII rain uses freshly sampled project files every time PI Lab launches.",
+          )}
         </p>
       </div>
       <SelectField
@@ -266,6 +288,7 @@ export function AppearanceSection() {
 
 /** Editor preferences persisted in the DB, including the in-editor gear controls. */
 export function EditorSection() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
@@ -405,9 +428,9 @@ export function EditorSection() {
       <div className="flex flex-col gap-3 px-4 py-3" data-testid="settings-editor-theme-gallery">
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-col">
-            <span className="text-foreground text-sm">Custom themes</span>
+            <span className="text-foreground text-sm">{t("Custom themes")}</span>
             <span className="text-muted-foreground text-xs">
-              Import one or more VS Code JSON color themes.
+              {t("Import one or more VS Code JSON color themes.")}
             </span>
           </div>
           <Button
@@ -418,7 +441,7 @@ export function EditorSection() {
             disabled={importThemes.isPending}
             onClick={() => void importCustomThemes()}
           >
-            Import themes…
+            {t("Import themes…")}
           </Button>
         </div>
         {customEditorThemes.length > 0 ? (
@@ -447,7 +470,7 @@ export function EditorSection() {
                   className="self-start text-[10px] opacity-75 hover:opacity-100"
                   onClick={() => removeCustomTheme(theme.id)}
                 >
-                  Remove
+                  {t("Remove")}
                 </button>
               </div>
             ))}
@@ -567,13 +590,18 @@ function AgentExecutableField({
   configured: string
   onSave: (value: string) => void
 }) {
+  const t = useTranslate()
   const [value, setValue] = useState(configured)
   return (
     <label className="flex items-center justify-between gap-4 px-4 py-3">
       <span className="min-w-0">
-        <span className="block text-sm">{agent.label} executable</span>
+        <span className="block text-sm">
+          {agent.label} {t("executable")}
+        </span>
         <span className="block truncate text-muted-foreground text-xs">
-          {agent.available ? `Detected: ${agent.executable}` : `Not found: ${agent.executable}`}
+          {agent.available
+            ? `${t("Detected:")} ${agent.executable}`
+            : `${t("Not found:")} ${agent.executable}`}
         </span>
       </span>
       <input
@@ -628,6 +656,7 @@ const NOTIFICATION_EVENTS: ReadonlyArray<{
 
 /** Native banner and custom-sound preferences, persisted together in the DB. */
 export function NotificationsSection() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
@@ -648,15 +677,17 @@ export function NotificationsSection() {
   ) => save({ ...notifications, [key]: { ...notifications[key], ...patch } })
 
   const preview = async (label: string, sound: NotificationSoundId) => {
-    setPreviewMessage(`Playing ${label} preview…`)
+    setPreviewMessage(`${t("Playing")} ${t(label)} ${t("preview…")}`)
     const result = await playNotificationSound(sound, { suppressed: false })
     if (result.status === "failed") {
       console.error("Notification sound preview failed", result.error)
-      setPreviewMessage(`Could not play ${label}: ${result.error.message}`)
+      setPreviewMessage(`${t("Could not play")} ${t(label)}: ${result.error.message}`)
       return
     }
     setPreviewMessage(
-      result.status === "silent" ? `${label} is set to Silent.` : `Played ${label} preview.`,
+      result.status === "silent"
+        ? `${t(label)} ${t("is set to Silent.")}`
+        : `${t("Played")} ${t(label)} ${t("preview.")}`,
     )
   }
 
@@ -682,15 +713,15 @@ export function NotificationsSection() {
             className="flex items-center justify-between gap-4 px-4 py-3"
           >
             <div className="flex min-w-0 flex-col">
-              <span className="text-foreground text-sm">{event.label}</span>
-              <span className="text-muted-foreground text-xs">{event.description}</span>
+              <span className="text-foreground text-sm">{t(event.label)}</span>
+              <span className="text-muted-foreground text-xs">{t(event.description)}</span>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 role="switch"
                 aria-checked={value.enabled}
-                aria-label={`${event.label} notifications`}
+                aria-label={`${t(event.label)} ${t("notifications")}`}
                 data-testid={`settings-notification-${event.key}-enabled`}
                 onClick={() => patchEvent(event.key, { enabled: !value.enabled })}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -704,7 +735,7 @@ export function NotificationsSection() {
                 />
               </button>
               <select
-                aria-label={`${event.label} sound`}
+                aria-label={`${t(event.label)} ${t("sound")}`}
                 data-testid={`settings-notification-${event.key}-sound`}
                 value={value.sound}
                 onChange={(change) =>
@@ -714,7 +745,7 @@ export function NotificationsSection() {
               >
                 {NOTIFICATION_SOUND_OPTIONS.map((sound) => (
                   <option key={sound.id} value={sound.id}>
-                    {sound.label}
+                    {t(sound.label)}
                   </option>
                 ))}
               </select>
@@ -722,11 +753,11 @@ export function NotificationsSection() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                aria-label={`Preview ${event.label} sound`}
+                aria-label={`${t("Preview")} ${t(event.label)} ${t("sound")}`}
                 data-testid={`settings-notification-${event.key}-preview`}
                 onClick={() => void preview(event.label, value.sound)}
               >
-                Preview
+                {t("Preview")}
               </Button>
             </div>
           </div>
@@ -745,6 +776,7 @@ export function NotificationsSection() {
 
 /** Persisted sleep-prevention mode and blocker scope, applied immediately by main. */
 export function CaffeineSection() {
+  const t = useTranslate()
   const { status, setMode, setScope } = useCaffeine()
 
   return (
@@ -782,7 +814,7 @@ export function CaffeineSection() {
         aria-live="polite"
         className="px-4 py-3 text-muted-foreground text-xs"
       >
-        Power blocker {status.held ? "active" : "idle"}.
+        {t("Power blocker")} {status.held ? t("active") : t("idle")}.
       </p>
     </SettingsSection>
   )
@@ -790,6 +822,7 @@ export function CaffeineSection() {
 
 /** Library — choose the source (Zotero local/cloud, or a folder of PDFs) + connect. */
 export function LibrarySection() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const status = useQuery(trpc.science.library.getStatus.queryOptions())
@@ -811,15 +844,15 @@ export function LibrarySection() {
   const connected = data?.connected ?? false
   const sourceLabel =
     data?.kind === "folder"
-      ? "Local folder"
+      ? t("Local folder")
       : data?.mode === "local"
-        ? "Zotero — Local desktop API"
-        : "Zotero — Cloud Web API"
+        ? t("Zotero — Local desktop API")
+        : t("Zotero — Cloud Web API")
   const detail =
     data?.kind === "folder"
-      ? `${data.folderPath} · read-only`
-      : `${data?.libraryType === "group" ? "Group" : "User"} library ${data?.libraryId} · ${
-          data?.canWrite ? "file attachment enabled" : "read-only"
+      ? `${data.folderPath} · ${t("read-only")}`
+      : `${data?.libraryType === "group" ? t("Group") : t("User")} ${t("library")} ${data?.libraryId} · ${
+          data?.canWrite ? t("file attachment enabled") : t("read-only")
         }`
 
   return (
@@ -832,7 +865,9 @@ export function LibrarySection() {
         <div className="flex flex-col gap-3 px-4 py-3">
           <div className="flex items-center justify-between gap-4">
             <div className="flex min-w-0 flex-col">
-              <span className="text-foreground text-sm">Connected — {sourceLabel}</span>
+              <span className="text-foreground text-sm">
+                {t("Connected")} — {sourceLabel}
+              </span>
               <span className="cursor-text select-text truncate text-muted-foreground text-xs">
                 {detail}
               </span>
@@ -842,17 +877,19 @@ export function LibrarySection() {
               variant="ghost"
               size="sm"
               data-testid="settings-library-disconnect"
-              data-feature-label="Disconnect library"
-              data-feature-help="Disconnect this library source so you can select a different Zotero library or PDF folder."
+              data-feature-label={t("Disconnect library")}
+              data-feature-help={t(
+                "Disconnect this library source so you can select a different Zotero library or PDF folder.",
+              )}
               className="shrink-0 text-muted-foreground"
               disabled={disconnect.isPending}
               onClick={() => disconnect.mutate()}
             >
-              Disconnect
+              {t("Disconnect")}
             </Button>
           </div>
           <p className="text-muted-foreground/70 text-xs">
-            To switch source, disconnect and choose again.
+            {t("To switch source, disconnect and choose again.")}
           </p>
         </div>
       ) : (
@@ -870,6 +907,18 @@ export function LibrarySection() {
 
 /** Project view — layout toggles for the project workspace. */
 export function ProjectViewSection() {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  const projects = projectsQuery.data ?? []
+  const [selectedProjectId, setSelectedProjectId] = useState("")
+  const [planningProjectId, setPlanningProjectId] = useState<string | null>(null)
+  const planningProject = useQuery({
+    ...trpc.projects.get.queryOptions({ id: planningProjectId ?? "" }),
+    enabled: planningProjectId !== null,
+  })
+  const selectedProject =
+    projects.find((project) => project.id === selectedProjectId) ?? projects[0]
   const [showCodeChanges, setShowCodeChanges] = useShowCodeChanges()
   const [showSkillsPanel, setShowSkillsPanel] = useShowSkillsPanel()
   return (
@@ -892,6 +941,59 @@ export function ProjectViewSection() {
         checked={showSkillsPanel}
         onChange={setShowSkillsPanel}
       />
+      <div className="flex flex-col gap-3 px-4 py-3">
+        <label htmlFor="settings-main-project" className="text-sm">
+          {t("Project files")}
+        </label>
+        <select
+          id="settings-main-project"
+          data-testid="settings-main-project"
+          aria-label={t("Project")}
+          value={selectedProject?.id ?? ""}
+          onChange={(event) => setSelectedProjectId(event.target.value)}
+          className="rounded border border-border bg-background px-2 py-1 text-sm"
+        >
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+        {selectedProject ? (
+          <>
+            <p className="text-xs">{t("Project type")}</p>
+            <ProjectTypeChoice
+              projectId={selectedProject.id}
+              typeId={selectedProject.typeId}
+              testId="settings-project-type"
+            />
+            <ProjectMarkdownChoice
+              key={selectedProject.id}
+              projectId={selectedProject.id}
+              kind="main"
+              currentPath={selectedProject.mainRelPath}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPlanningProjectId(selectedProject.id)}
+            >
+              {t("Plan this project")}
+            </Button>
+            {planningProjectId === selectedProject.id && planningProject.data ? (
+              <ProjectSetupWizard
+                project={planningProject.data}
+                optional={false}
+                onDone={() => setPlanningProjectId(null)}
+              />
+            ) : null}
+          </>
+        ) : (
+          <p className="text-muted-foreground text-xs">
+            {t("Add a project to choose its main readme.")}
+          </p>
+        )}
+      </div>
     </SettingsSection>
   )
 }
@@ -997,6 +1099,7 @@ export function ExperimentalSection() {
 
 /** Shortcuts — rebind the app-global shortcuts; editor keys shown for reference. */
 export function ShortcutsSection() {
+  const t = useTranslate()
   const { bindingFor, setBinding, resetBinding } = useShortcutBindings()
   const [recording, setRecording] = useState<string | null>(null)
   const [conflict, setConflict] = useState<{
@@ -1066,46 +1169,49 @@ export function ShortcutsSection() {
           data-testid="shortcut-conflict"
           className="cursor-text select-text bg-destructive/10 px-4 py-3 text-destructive text-xs"
         >
-          {formatBinding(conflict.binding)} cannot be used for {conflict.targetLabel} because it is
-          already assigned to {conflict.existingLabel}. Choose another shortcut or cancel.
+          {formatBinding(conflict.binding)} {t("cannot be used for")} {t(conflict.targetLabel)}{" "}
+          {t("because it is already assigned to")} {t(conflict.existingLabel)}.{" "}
+          {t("Choose another shortcut or cancel.")}
         </p>
       ) : null}
       {SHORTCUTS.map((shortcut) => (
         <div key={shortcut.id} className="flex items-center justify-between gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-col">
-            <span className="text-foreground text-sm">{shortcut.label}</span>
-            <span className="text-muted-foreground text-xs">{shortcut.description}</span>
+            <span className="text-foreground text-sm">{t(shortcut.label)}</span>
+            <span className="text-muted-foreground text-xs">{t(shortcut.description)}</span>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <kbd
               data-testid={`shortcut-${shortcut.id}`}
               className="min-w-12 rounded-md border border-border bg-muted px-2 py-1 text-center font-mono text-foreground text-xs"
             >
-              {recording === shortcut.id ? "Press keys…" : formatBinding(bindingFor(shortcut.id))}
+              {recording === shortcut.id
+                ? t("Press keys…")
+                : formatBinding(bindingFor(shortcut.id))}
             </kbd>
             {shortcut.editable ? (
               <>
                 <button
                   type="button"
                   data-testid={`shortcut-${shortcut.id}-rebind`}
-                  data-feature-help="Record a new key combination for this app shortcut"
+                  data-feature-help={t("Record a new key combination for this app shortcut")}
                   onClick={() => toggleRecording(shortcut.id)}
                   className="rounded-md border border-border px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
                 >
-                  {recording === shortcut.id ? "Cancel" : "Rebind"}
+                  {recording === shortcut.id ? t("Cancel") : t("Rebind")}
                 </button>
                 <button
                   type="button"
                   data-testid={`shortcut-${shortcut.id}-reset`}
-                  data-feature-help="Restore this shortcut's default key combination"
+                  data-feature-help={t("Restore this shortcut's default key combination")}
                   onClick={() => resetShortcut(shortcut.id)}
                   className="rounded-md px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
                 >
-                  Reset
+                  {t("Reset")}
                 </button>
               </>
             ) : (
-              <span className="text-muted-foreground/70 text-xs">reference</span>
+              <span className="text-muted-foreground/70 text-xs">{t("reference")}</span>
             )}
           </div>
         </div>

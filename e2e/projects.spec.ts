@@ -121,7 +121,7 @@ test("open a project, launch an agent, and see its changes", async () => {
   await window.getByTestId("panel-tab-todos").hover()
   await expect(window.getByTestId("sidebar-feature-help-label")).toHaveText("TODOs")
   await expect(window.getByTestId("sidebar-feature-help-description")).toHaveText(
-    "View the project's TODO.md, where project work items are tracked in Markdown.",
+    "View the project's selected task Markdown file.",
   )
 
   // The Research panel (the default right-sidebar tab) reads RESEARCH.md from the

@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { rejectedReadMessage } from "../../../../../../../Editor/utils/rejectedRead"
+import { translateKnownError } from "../../../../../../../i18n/errors"
+import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { Markdown } from "../Markdown"
 
@@ -19,8 +21,7 @@ interface DocPanelProps {
 
 /**
  * Shared panel that reads a single markdown doc from the workspace's working dir
- * via `files.read` and renders it (Research = `RESEARCH.md`, Todos =
- * `TODO.md`). A missing file is the *expected* empty state, not an error: the
+ * via `files.read` and renders it. A missing file is the *expected* empty state, not an error: the
  * router returns `{ exists: false }`, so we show a friendly prompt rather than a
  * failure (AGENTS.md "What PI Lab is" — these are plain files the user may not have authored
  * yet).
@@ -29,6 +30,8 @@ interface DocPanelProps {
  * native `overflow-y-auto` body — no Radix ScrollArea.
  */
 export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }: DocPanelProps) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const reveal = useMutation(trpc.files.reveal.mutationOptions())
   const docQuery = useQuery(
@@ -45,14 +48,14 @@ export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {docQuery.isPending ? (
           <p data-testid={`${testId}-loading`} className="text-muted-foreground text-sm">
-            Loading {relPath}…
+            {t("Loading")} {relPath}…
           </p>
         ) : docQuery.isError ? (
           <p
             data-testid={`${testId}-error`}
             className="cursor-text select-text text-destructive text-sm"
           >
-            {docQuery.error.message}
+            {translateKnownError(language, docQuery.error.message)}
           </p>
         ) : docQuery.data?.status === "oversized" || docQuery.data?.status === "binary" ? (
           <div data-testid={`${testId}-rejected`} className="text-sm">
@@ -62,9 +65,11 @@ export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }
               className="underline"
               onClick={() => reveal.mutate({ workspaceId, relPath })}
             >
-              Reveal in Finder
+              {t("Reveal in Finder")}
             </button>
-            {reveal.error ? <p role="alert">{reveal.error.message}</p> : null}
+            {reveal.error ? (
+              <p role="alert">{translateKnownError(language, reveal.error.message)}</p>
+            ) : null}
           </div>
         ) : docQuery.data?.exists && docQuery.data.content.trim().length > 0 ? (
           <Markdown content={docQuery.data.content} />

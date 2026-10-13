@@ -2,6 +2,7 @@ import { Badge, Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight, Play, Trash2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 import type { AutomationListItem } from "../../../../../../../trpc/types"
 import { RunsHistory } from "../RunsHistory"
@@ -17,9 +18,9 @@ interface AutomationRowProps {
 }
 
 /** Format an epoch-ms next-run instant for the row, or a dash when none. */
-function formatNextRun(nextRunAt: number | null): string {
+function formatNextRun(nextRunAt: number | null, language: string): string {
   if (nextRunAt === null) return "—"
-  return new Date(nextRunAt).toLocaleString(undefined, {
+  return new Date(nextRunAt).toLocaleString(language, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -38,6 +39,8 @@ export function AutomationRow({
   onChanged,
   targetRunId,
 }: AutomationRowProps) {
+  const [language] = useInterfaceLanguage()
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
@@ -95,8 +98,8 @@ export function AutomationRow({
         <button
           type="button"
           data-testid="toggle-runs"
-          aria-label={expanded ? "Hide runs" : "Show runs"}
-          data-feature-help="Expand or collapse this workflow's recent run history"
+          aria-label={t(expanded ? "Hide runs" : "Show runs")}
+          data-feature-help={t("Expand or collapse this workflow's recent run history")}
           className="shrink-0 text-muted-foreground hover:text-foreground"
           onClick={() => setExpanded((v) => !v)}
         >
@@ -117,7 +120,7 @@ export function AutomationRow({
                 variant={latest.state === "failed" ? "destructive" : "secondary"}
                 className="shrink-0"
               >
-                {latest.state}
+                {t(latest.state)}
               </Badge>
             ) : null}
           </div>
@@ -125,10 +128,10 @@ export function AutomationRow({
             <span data-testid="schedule-summary">{automation.scheduleSummary}</span>
             {projectName ? <span className="truncate">· {projectName}</span> : null}
             <label className="flex items-center gap-1">
-              <span>· Execution:</span>
+              <span>· {t("Execution:")}</span>
               <select
                 data-testid="automation-row-execution-mode"
-                aria-label={`Execution mode for ${automation.name}`}
+                aria-label={`${t("Execution mode for")} ${automation.name}`}
                 value={automation.executionMode}
                 disabled={setExecutionMode.isPending}
                 onChange={(event) =>
@@ -139,12 +142,13 @@ export function AutomationRow({
                 }
                 className="rounded border border-input bg-transparent px-1 py-0.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                <option value="interactive">Interactive</option>
-                <option value="noninteractive">Run to completion</option>
+                <option value="interactive">{t("Interactive")}</option>
+                <option value="noninteractive">{t("Run to completion")}</option>
               </select>
             </label>
             <span data-testid="next-run">
-              · Next: {automation.enabled ? formatNextRun(automation.nextRunAt) : "paused"}
+              · {t("Next:")}{" "}
+              {automation.enabled ? formatNextRun(automation.nextRunAt, language) : t("paused")}
             </span>
           </div>
         </div>
@@ -156,8 +160,8 @@ export function AutomationRow({
           size="sm"
           disabled={runNow.isPending}
           onClick={() => runNow.mutate({ id: automation.id })}
-          title="Run now"
-          data-feature-help="Start one run immediately without changing the workflow schedule"
+          title={t("Run now")}
+          data-feature-help={t("Start one run immediately without changing the workflow schedule")}
         >
           <Play aria-hidden />
         </Button>
@@ -169,14 +173,14 @@ export function AutomationRow({
           <input
             type="checkbox"
             data-testid="enabled-checkbox"
-            aria-label={automation.enabled ? "Pause workflow" : "Resume workflow"}
-            data-feature-help="Pause or resume future scheduled runs for this workflow"
+            aria-label={t(automation.enabled ? "Pause workflow" : "Resume workflow")}
+            data-feature-help={t("Pause or resume future scheduled runs for this workflow")}
             className="size-3.5 accent-brand"
             checked={automation.enabled}
             disabled={setEnabled.isPending}
             onChange={(e) => setEnabled.mutate({ id: automation.id, enabled: e.target.checked })}
           />
-          {automation.enabled ? "On" : "Off"}
+          {t(automation.enabled ? "On" : "Off")}
         </label>
 
         <Button
@@ -186,8 +190,8 @@ export function AutomationRow({
           size="sm"
           disabled={remove.isPending}
           onClick={() => remove.mutate({ id: automation.id })}
-          title="Delete"
-          data-feature-help="Remove this scheduled workflow from PI Lab"
+          title={t("Delete")}
+          data-feature-help={t("Remove this scheduled workflow from PI Lab")}
         >
           <Trash2 aria-hidden className="text-destructive" />
         </Button>

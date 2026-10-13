@@ -3,10 +3,12 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
 import { useEffect, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
+import { useTranslate } from "../../../i18n/language"
 import { useSidebarFeatureHelp } from "../../../preferences/preferences"
 import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
 import { FeatureHelpPanel, FeatureHelpRestoreButton, useFeatureHelp } from "../components/Sidebar"
+import { AgentStatusControl } from "../titleBar"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
 import {
   AgentsSection,
@@ -120,6 +122,7 @@ const SECTIONS = [
 ] as const
 
 export function SettingsView() {
+  const t = useTranslate()
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as SettingsSearch
   const [activeId, setActiveId] = useState<SettingsSectionId>(search.section ?? SECTIONS[0].id)
@@ -150,22 +153,25 @@ export function SettingsView() {
           variant="ghost"
           size="sm"
           data-testid="settings-back"
-          aria-label="Back"
-          title="Back"
-          data-feature-help="Return to the view that opened Settings"
+          aria-label={t("Back")}
+          title={t("Back")}
+          data-feature-help={t("Return to the view that opened Settings")}
           className="app-no-drag h-10 gap-2 px-3 font-normal text-base text-muted-foreground hover:bg-accent/60 hover:text-foreground"
           onClick={onBack}
         >
-          <ArrowLeft aria-hidden />
-          Back
+          <ArrowLeft aria-hidden className="rtl:rotate-180" />
+          {t("Back")}
         </Button>
-        <CaffeineControl className="ml-auto" />
+        <div className="ms-auto flex items-center gap-2">
+          <AgentStatusControl />
+          <CaffeineControl />
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
         <nav
-          aria-label="Settings sections"
-          className="flex w-48 shrink-0 flex-col gap-0.5 border-border border-r bg-sidebar p-2"
+          aria-label={t("Settings sections")}
+          className="flex w-48 shrink-0 flex-col gap-0.5 border-border border-e bg-sidebar p-2"
         >
           {SECTIONS.map((section) => (
             <button
@@ -173,20 +179,20 @@ export function SettingsView() {
               type="button"
               data-testid={`settings-nav-${section.id}`}
               data-active={section.id === active.id}
-              data-feature-label={section.label}
-              data-feature-help={section.description}
+              data-feature-label={t(section.label)}
+              data-feature-help={t(section.description)}
               onClick={() => {
                 setActiveId(section.id)
                 void navigate({ to: "/settings", search: { section: section.id } })
               }}
               className={cn(
-                "rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                "rounded-md px-2 py-1.5 text-start text-sm transition-colors",
                 section.id === active.id
                   ? "bg-accent font-medium text-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
               )}
             >
-              {section.label}
+              {t(section.label)}
             </button>
           ))}
           <div className="mt-auto border-sidebar-border border-t pt-3">

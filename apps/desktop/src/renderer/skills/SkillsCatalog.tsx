@@ -1,5 +1,6 @@
 import { Badge, cn } from "@pi-lab/ui"
 import { FlaskConical } from "lucide-react"
+import { useTranslate } from "../i18n/language"
 import { useShowGlobalSkills, useShowProjectSkills } from "../preferences/preferences"
 import type { RouterOutputs } from "../trpc/types"
 
@@ -46,6 +47,7 @@ export function SkillScopeControls({
   visibility: SkillScopeVisibility
   testIdPrefix: string
 }) {
+  const t = useTranslate()
   return (
     <div
       data-testid={`${testIdPrefix}-scope-controls`}
@@ -53,13 +55,15 @@ export function SkillScopeControls({
     >
       <ScopeButton
         testId={`${testIdPrefix}-show-project`}
-        label="Project-local"
+        label={t("Project-local")}
+        description={t("Show or hide project-local skills in every Skills view")}
         checked={visibility.showProject}
         onChange={visibility.setShowProject}
       />
       <ScopeButton
         testId={`${testIdPrefix}-show-global`}
-        label="Global"
+        label={t("Global")}
+        description={t("Show or hide global skills in every Skills view")}
         checked={visibility.showGlobal}
         onChange={visibility.setShowGlobal}
       />
@@ -70,11 +74,13 @@ export function SkillScopeControls({
 function ScopeButton({
   testId,
   label,
+  description,
   checked,
   onChange,
 }: {
   testId: string
   label: string
+  description: string
   checked: boolean
   onChange: (next: boolean) => void
 }) {
@@ -85,7 +91,7 @@ function ScopeButton({
       aria-checked={checked}
       data-testid={testId}
       data-feature-label={label}
-      data-feature-help={`Show or hide ${label.toLowerCase()} skills in every Skills view`}
+      data-feature-help={description}
       onClick={() => onChange(!checked)}
       className={cn(
         "rounded px-2 py-1 text-[11px] transition-colors",
@@ -105,6 +111,7 @@ export function skillKey(skill: SkillCatalogItem): string {
 
 /** Shared Cluster-style skill card with explicit scope and source labels. */
 export function SkillCard({ skill, selected }: { skill: SkillCatalogItem; selected: boolean }) {
+  const t = useTranslate()
   return (
     <div
       data-testid="skill-card"
@@ -123,7 +130,7 @@ export function SkillCard({ skill, selected }: { skill: SkillCatalogItem; select
           {skill.name}
         </span>
         <Badge data-testid="skill-scope" variant="outline">
-          {skill.scope === "project" ? "Project-local" : "Global"}
+          {t(skill.scope === "project" ? "Project-local" : "Global")}
         </Badge>
       </div>
       {skill.description ? (
@@ -152,6 +159,7 @@ export function SkillRootWarnings({
   roots: SkillCatalogRoot[]
   testIdPrefix: string
 }) {
+  const t = useTranslate()
   const warnings = roots.filter((root) => root.status === "unreadable" || root.status === "partial")
   if (warnings.length === 0) return null
   return (
@@ -161,7 +169,7 @@ export function SkillRootWarnings({
     >
       {warnings.map((root) => (
         <p key={`${root.scope}:${root.source}`}>
-          {root.detail ?? `Could not completely read ${root.source}.`}
+          {root.detail ?? `${t("Could not completely read")} ${root.source}.`}
         </p>
       ))}
     </div>

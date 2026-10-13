@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { lazy, Suspense } from "react"
+import { useTranslate } from "../../i18n/language"
 import { HealthBanner } from "./components/HealthBanner"
 import { Dashboard } from "./index/components/Dashboard"
 import { readTerminalSpawnOverride } from "./utils/terminalSpawnOverride"
@@ -24,6 +25,7 @@ export const Route = createFileRoute("/_shell/")({
 })
 
 function IndexView() {
+  const t = useTranslate()
   // Read once per render; the terminal E2E passes a deterministic program via the
   // URL. Present ⇒ render the terminal seam; absent ⇒ render the dashboard.
   const termSpawn = readTerminalSpawnOverride()
@@ -31,7 +33,7 @@ function IndexView() {
   return (
     <HealthBanner>
       {termSpawn ? (
-        <Suspense fallback={<div role="status">Loading terminal…</div>}>
+        <Suspense fallback={<div role="status">{t("Loading terminal…")}</div>}>
           <TerminalSeam termSpawn={termSpawn} />
         </Suspense>
       ) : (

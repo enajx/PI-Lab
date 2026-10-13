@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { createHarness, type Harness } from "../../testHarness"
@@ -14,6 +14,51 @@ afterEach(async () => {
 })
 
 describe("science.tasks router", () => {
+  test("remembers a clear root TODO discovered after the project was added", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    expect(project.taskRelPath).toBeNull()
+    await writeFile(join(h.repoDir, "Work-TODO.md"), "# Work\n- [ ] New task\n")
+
+    const listing = await h.caller.science.tasks.list()
+
+    expect(listing.sources.find((source) => source.projectId === project.id)?.relPath).toBe(
+      "Work-TODO.md",
+    )
+    expect((await h.caller.projects.get({ id: project.id })).taskRelPath).toBe("Work-TODO.md")
+  })
+
+  test("creates tasks in a selected nested Markdown file with a different name", async () => {
+    await mkdir(join(h.repoDir, "notes"))
+    await writeFile(join(h.repoDir, "notes", "Work.md"), "# Work\n- [ ] Existing nested\n")
+    await writeFile(join(h.repoDir, "TODO.md"), "# Old\n- [ ] Old task\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setDocumentPath({
+      id: project.id,
+      kind: "tasks",
+      relPath: "notes/Work.md",
+    })
+
+    const listing = await h.caller.science.tasks.list()
+    const source = listing.sources.find((candidate) => candidate.projectId === project.id)
+    if (!source?.revision) throw new Error("selected source missing")
+    expect(source.relPath).toBe("notes/Work.md")
+    expect(listing.tasks.map((task) => task.title)).toEqual(["Existing nested"])
+
+    await h.caller.science.tasks.create({
+      projectId: project.id,
+      relPath: "notes/Work.md",
+      expectedRevision: source.revision,
+      title: "Added nested",
+      details: "",
+      status: "planned",
+      priority: null,
+      labels: [],
+      owner: null,
+    })
+    expect(await readFile(join(h.repoDir, "notes", "Work.md"), "utf8")).toContain("Added nested")
+    expect(await readFile(join(h.repoDir, "TODO.md"), "utf8")).toBe("# Old\n- [ ] Old task\n")
+  })
+
   test("lists Markdown tasks and carries revisions through create and update", async () => {
     await writeFile(join(h.repoDir, "TODO.md"), "# Work\n- [ ] Existing\n")
     const project = await h.caller.projects.open({ path: h.repoDir })

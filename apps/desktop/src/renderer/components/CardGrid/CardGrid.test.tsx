@@ -106,6 +106,20 @@ describe("CardGrid", () => {
     expect(grid.style.gridAutoRows).toContain("283px")
   })
 
+  test("Arabic uses the lower-left resize corner and mirrored horizontal controls", () => {
+    document.documentElement.dir = "rtl"
+    render(<GridHarness />)
+    const handle = firstResizeHandle()
+    expect(handle.className).toContain("rtl:left-0")
+    dispatchPointer(handle, "pointerdown", { pointerId: 9, clientX: 100, clientY: 0 })
+    dispatchPointer(window, "pointermove", { pointerId: 9, clientX: 36, clientY: 64 })
+    expect(screen.getByTestId("test-grid").getAttribute("data-card-grid-scale")).toBe("1.2")
+    dispatchPointer(window, "pointerup", { pointerId: 9, clientX: 36, clientY: 64 })
+    fireEvent.keyDown(handle, { key: "ArrowLeft" })
+    expect(screen.getByTestId("test-grid").getAttribute("data-card-grid-scale")).toBe("1.25")
+    document.documentElement.dir = "ltr"
+  })
+
   test("keyboard resizing is smooth, global, accessible, and clamps safely", () => {
     render(<GridHarness />)
     const handle = firstResizeHandle()

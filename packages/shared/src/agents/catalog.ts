@@ -20,6 +20,8 @@ export interface TerminalAgent {
   detect: string
   /** Arguments always passed when launching this agent. */
   defaultArgs?: string[]
+  /** Arguments before the prompt for agents that support a one-shot draft. */
+  oneShotArgs?: string[]
   /** Extra environment variables to set for the launched process. */
   env?: Record<string, string>
 }

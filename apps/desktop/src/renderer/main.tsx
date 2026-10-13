@@ -2,10 +2,12 @@ import "@pi-lab/ui/styles/globals.css"
 import { RouterProvider } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
+import { initializeInterfaceLanguage } from "./i18n/language"
 import { AppProviders } from "./providers/AppProviders"
 import { createAppRouter } from "./router"
 
 const rootElement = document.getElementById("root")
+initializeInterfaceLanguage()
 if (!rootElement) {
   throw new Error("Renderer root element #root not found")
 }

@@ -18,7 +18,13 @@ afterEach(async () => {
 describe("agents catalog and project choice", () => {
   test("reports availability and remembers an app-memory project choice", async () => {
     expect(await h.caller.agents.list()).toEqual([
-      { id: FAKE_AGENT.id, label: FAKE_AGENT.label, available: true, executable: process.execPath },
+      {
+        id: FAKE_AGENT.id,
+        label: FAKE_AGENT.label,
+        available: true,
+        executable: process.execPath,
+        oneShot: false,
+      },
     ])
 
     expect(await h.caller.agents.projectChoice({ projectId })).toEqual({

@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { describe, expect, test, vi } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx): reproduces the dev build's
@@ -39,6 +39,73 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
 }
 
 describe("Project header", () => {
+  afterEach(() => window.localStorage.clear())
+
+  test("offers a compact project type choice while the workspace opens", async () => {
+    const choices: unknown[] = []
+    renderWorkspace({
+      "projects.get": () => ({
+        id: "p1",
+        name: "Photon Drift",
+        repoPath: "/tmp/photon-drift",
+        typeId: null,
+      }),
+      "settings.get": () => ({
+        projectTemplate: {
+          projectTypes: [
+            { id: "research", name: "Research project", guidance: "" },
+            { id: "software", name: "Software project", guidance: "" },
+            { id: "paper", name: "Paper", guidance: "" },
+          ],
+        },
+      }),
+      "projects.setType": (input) => {
+        choices.push(input)
+      },
+    })
+
+    const select = (await screen.findByTestId("project-view-type")) as HTMLSelectElement
+    expect(select.value).toBe("")
+    fireEvent.change(select, { target: { value: "paper" } })
+    await waitFor(() => expect(choices).toEqual([{ id: "p1", typeId: "paper" }]))
+  })
+
+  test("translates the project type choice and built-in names", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "es")
+    renderWorkspace({
+      "projects.get": () => ({
+        id: "p1",
+        name: "Photon Drift",
+        repoPath: "/tmp/photon-drift",
+        typeId: null,
+      }),
+      "settings.get": () => ({
+        projectTemplate: {
+          projectTypes: [
+            { id: "research", name: "Research project", guidance: "" },
+            { id: "software", name: "Software project", guidance: "" },
+            { id: "paper", name: "Paper", guidance: "" },
+          ],
+        },
+      }),
+    })
+
+    const select = await screen.findByTestId("project-view-type")
+    expect(select.getAttribute("aria-label")).toBe("Tipo de proyecto")
+    expect(within(select).getByRole("option", { name: "Elegir tipo" })).toBeTruthy()
+    expect(within(select).getByRole("option", { name: "Proyecto de investigación" })).toBeTruthy()
+    expect(within(select).getByRole("option", { name: "Proyecto de software" })).toBeTruthy()
+    expect(within(select).getByRole("option", { name: "Artículo" })).toBeTruthy()
+  })
+
+  test("translates the Git notice while preserving the project name", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "nb")
+    renderWorkspace({ "projects.capabilities": () => ({ git: false }) })
+
+    const notice = await screen.findByTestId("non-git-project-notice")
+    expect(notice.textContent).toContain("Dette prosjektet er ikke sporet med Git.")
+    expect(await screen.findByRole("heading", { name: "Photon Drift" })).toBeTruthy()
+  })
   test("renders the shared Caffeine control while the workspace opens", async () => {
     renderWorkspace()
 

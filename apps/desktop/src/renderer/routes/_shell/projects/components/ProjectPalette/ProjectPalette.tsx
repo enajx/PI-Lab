@@ -1,6 +1,7 @@
 import { Bot, FileText, PanelRight, TerminalSquare } from "lucide-react"
 import { useEffect, useState } from "react"
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
+import { useTranslate } from "../../../../../i18n/language"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import type { CentralPanelController } from "../CentralPanel"
@@ -39,6 +40,7 @@ export function ProjectPalette({
   /** Switch (and reveal) the right-sidebar panel with this id. */
   onSelectPanel: (panelId: string) => void
 }) {
+  const t = useTranslate()
   const [open, setOpen] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const panels = useRightSidebarPanels(pinnedPanels, gitAvailable)
@@ -57,25 +59,25 @@ export function ProjectPalette({
   const actions: PaletteAction[] = [
     {
       id: "open-agent",
-      label: "Open agent",
+      label: t("Open agent"),
       icon: Bot,
       run: controller.openAgentChooser,
     },
     {
       id: "open-terminal",
-      label: "Open terminal",
+      label: t("Open terminal"),
       icon: TerminalSquare,
       run: controller.openTerminal,
     },
     {
       id: "open-file",
-      label: "Open file…",
+      label: t("Open file…"),
       icon: FileText,
       run: () => setFilePickerOpen(true),
     },
     ...panels.map((panel: RightSidebarPanel) => ({
       id: `panel:${panel.id}`,
-      label: `Switch to ${panel.label} panel`,
+      label: `${t("Switch to")} ${t(panel.label)} ${t("panel")}`,
       icon: PanelRight,
       run: () => onSelectPanel(panel.id),
     })),
@@ -85,10 +87,10 @@ export function ProjectPalette({
     <>
       {open ? (
         <QuickFind
-          ariaLabel="Project command palette"
-          placeholder="Run a project action…"
+          ariaLabel={t("Project command palette")}
+          placeholder={t("Run a project action…")}
           items={actions}
-          emptyText="No matching actions"
+          emptyText={t("No matching actions")}
           onSelect={(item) => actions.find((action) => action.id === item.id)?.run()}
           onClose={() => setOpen(false)}
         />

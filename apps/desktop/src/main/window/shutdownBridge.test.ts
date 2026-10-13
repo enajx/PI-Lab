@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { INTERFACE_LANGUAGE_CHANNEL } from "../../shared/interfaceLanguage"
 import {
   SHUTDOWN_REQUEST_CHANNEL,
   SHUTDOWN_RESPONSE_CHANNEL,
@@ -78,5 +79,15 @@ describe("shutdown preload bridge with mocked Electron", () => {
     await loadPreload(false)
     expect(electron.expose).not.toHaveBeenCalled()
     expect(electron.exposeTRPC).not.toHaveBeenCalled()
+  })
+
+  test("interface language bridge sends only supported codes to main", async () => {
+    await loadPreload(true)
+    const exposed = electron.expose.mock.calls[0]?.[1] as {
+      setInterfaceLanguage: (language: string) => void
+    }
+    exposed.setInterfaceLanguage("ar")
+    exposed.setInterfaceLanguage("invalid")
+    expect(electron.send).toHaveBeenCalledExactlyOnceWith(INTERFACE_LANGUAGE_CHANNEL, "ar")
   })
 })

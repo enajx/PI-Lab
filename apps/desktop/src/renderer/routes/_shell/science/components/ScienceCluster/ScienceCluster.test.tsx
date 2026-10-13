@@ -2,6 +2,7 @@ import type { Machine } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ScienceCluster } from "./ScienceCluster"
@@ -48,6 +49,20 @@ describe("ScienceCluster", () => {
   // so persisted layout never leaks into the next case.
   beforeEach(() => {
     window.localStorage.clear()
+  })
+
+  test("shows machine setup and status in Norwegian", async () => {
+    setInterfaceLanguage("nb")
+    renderCluster({
+      "science.cluster.list": () => ({
+        machines: [machine({ id: "m1", host: "gpu-box" })],
+        hiddenCount: 0,
+      }),
+    })
+    expect(await screen.findByText("Overvåk datamaskiner fra SSH-oppsettet ditt")).toBeTruthy()
+    expect(await screen.findByText("ikke sjekket")).toBeTruthy()
+    expect(screen.getByText("Legg til maskin")).toBeTruthy()
+    setInterfaceLanguage("en")
   })
 
   test("renders a card per machine with its name and status", async () => {

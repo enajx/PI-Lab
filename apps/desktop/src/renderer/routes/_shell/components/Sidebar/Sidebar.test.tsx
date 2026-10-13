@@ -62,6 +62,29 @@ describe("Sidebar", () => {
     vi.unstubAllGlobals()
   })
 
+  test("translates navigation and help after choosing Spanish", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "es")
+    renderSidebar()
+
+    expect((await screen.findByTestId("nav-dashboard")).textContent).toContain("Panel de proyectos")
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Pasa el cursor o enfoca un control para saber qué hace.",
+    )
+  })
+
+  test("resizes from the inner edge when the interface is right-to-left", async () => {
+    document.documentElement.dir = "rtl"
+    renderSidebar()
+    const handle = await screen.findByTestId("sidebar-edge-drag")
+    Object.defineProperty(handle, "setPointerCapture", { value: vi.fn() })
+    expect(handle.className).toContain("end-0")
+    fireEvent(handle, new MouseEvent("pointerdown", { button: 0, clientX: 100, bubbles: true }))
+    fireEvent(window, new MouseEvent("pointermove", { clientX: 60, bubbles: true }))
+    expect(window.localStorage.getItem("pi-lab.sidebar.width")).toBe("280")
+    fireEvent(window, new MouseEvent("pointerup", { bubbles: true }))
+    document.documentElement.dir = "ltr"
+  })
+
   test("the Add-project trigger opens a menu with three options", async () => {
     renderSidebar()
     await waitFor(() => expect(screen.getByTestId("add-project")).toBeTruthy())
@@ -529,7 +552,7 @@ describe("Sidebar", () => {
     expect(titlebar.contains(collapse)).toBe(true)
     expect(navBody.contains(collapse)).toBe(false)
     expect(titlebar.className).not.toContain("justify-center")
-    expect(collapse.className).toContain("ml-auto")
+    expect(collapse.className).toContain("ms-auto")
     expect(collapse.className).toContain("app-no-drag")
 
     fireEvent.click(collapse)

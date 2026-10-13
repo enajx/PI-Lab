@@ -76,6 +76,11 @@ function baseHandlers(overrides: FakeHandlers = {}): FakeHandlers {
       projectTemplate: {
         initializationMarkdownFiles: ["AGENTS.md", "RESEARCH.md"],
         defaultTemplateParentPath: null,
+        projectTypes: [
+          { id: "research", name: "Research project", guidance: "Research default" },
+          { id: "software", name: "Software project", guidance: "Software default" },
+          { id: "paper", name: "Paper", guidance: "Paper default" },
+        ],
       },
     }),
     "template.list": () => [
@@ -124,6 +129,31 @@ function renderSection(handlers: FakeHandlers = baseHandlers()) {
 }
 
 describe("ProjectTemplateSection", () => {
+  test("edits built-in project-type guidance in Settings", async () => {
+    const saved: Array<{ id: string; guidance: string }> = []
+    renderSection(
+      baseHandlers({
+        "settings.updateProjectTypeGuidance": (input) => {
+          const guidance = input as { id: string; guidance: string }
+          saved.push(guidance)
+          return guidance
+        },
+      }),
+    )
+
+    fireEvent.change(await screen.findByLabelText("Research project guidance"), {
+      target: { value: "Describe experiments and results." },
+    })
+    fireEvent.click(
+      screen.getByTestId("project-type-research").querySelector("button") as HTMLElement,
+    )
+
+    await waitFor(() =>
+      expect(saved).toEqual([{ id: "research", guidance: "Describe experiments and results." }]),
+    )
+    expect(screen.queryByLabelText("New project type")).toBeNull()
+  })
+
   test("lists template files and loads a selected file's content", async () => {
     renderSection()
     await screen.findByTestId("template-file-AGENTS.md")

@@ -8,6 +8,7 @@ import {
 import { buildNonInteractiveLaunchArgv, getAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
 import { isGitRepo } from "../git"
+import { nativeText } from "../i18n/nativeLanguage"
 import { acquireAgentLaunchSlot } from "../trpc/agentLaunchGuard"
 import type { AppContext } from "../trpc/context"
 import { startAgentSession } from "../trpc/sessions/sessions"
@@ -81,7 +82,7 @@ export async function dispatchAutomation(
     const failed = updated ?? run
     ctx.notificationService.notify({
       eventType: "workflowFailure",
-      title: "Workflow failed",
+      title: nativeText("Workflow failed"),
       body: message,
       target: { type: "workflow", workflowId: automation.id, runId: run.id },
     })

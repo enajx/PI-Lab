@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -120,6 +120,60 @@ test("terminal pane sends macOS editing keys to the real PTY exactly once", asyn
 
   await agentInput.press("Shift+Enter")
   await expectLatestInput(agentTerminal, process.platform === "darwin" ? "1b5b31333b3275" : "0d")
+})
+
+test("dropping local files inserts quoted paths into the real PTY without Enter", async () => {
+  const filePaths = [join(dataDir, "file with spaces.txt"), join(dataDir, "lab's notes.txt")]
+  await Promise.all(filePaths.map((path) => writeFile(path, "drop me\n")))
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const terminal = window.getByTestId("terminal")
+  await expect(terminal).toContainText(MARKER, { timeout: 30_000 })
+
+  await window.evaluate(() => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.id = "terminal-drop-files"
+    input.multiple = true
+    document.body.append(input)
+  })
+  await window.locator("#terminal-drop-files").setInputFiles(filePaths)
+  await window.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>("#terminal-drop-files")
+    const terminal = document.querySelector<HTMLElement>('[data-testid="terminal"]')
+    if (!input?.files?.length || !terminal) throw new Error("Missing test files or terminal")
+    const transfer = new DataTransfer()
+    for (const file of input.files) transfer.items.add(file)
+    terminal.dispatchEvent(
+      new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    )
+  })
+
+  const quotedPaths = filePaths.map((path) => `'${path.replaceAll("'", "'\\''")}'`).join(" ")
+  await expectLatestInput(terminal, Buffer.from(quotedPaths).toString("hex"))
+})
+
+test("dropping a local folder inserts its path into the real PTY without Enter", async () => {
+  const folderPath = join(dataDir, "research folder")
+  await mkdir(folderPath)
+  await writeFile(join(folderPath, "notes.md"), "# Notes\n")
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const terminal = window.getByTestId("terminal")
+  await expect(terminal).toContainText(MARKER, { timeout: 30_000 })
+  const bounds = await terminal.boundingBox()
+  if (!bounds) throw new Error("Terminal has no bounds")
+  const session = await window.context().newCDPSession(window)
+  const drag = {
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height / 2,
+    data: { items: [], files: [folderPath], dragOperationsMask: 1 },
+  }
+  await session.send("Input.dispatchDragEvent", { type: "dragEnter", ...drag })
+  await session.send("Input.dispatchDragEvent", { type: "dragOver", ...drag })
+  await session.send("Input.dispatchDragEvent", { type: "drop", ...drag })
+
+  await expectLatestInput(terminal, Buffer.from(`'${folderPath}'`).toString("hex"))
 })
 
 async function expectLatestInput(terminal: Locator, expectedHex: string): Promise<void> {

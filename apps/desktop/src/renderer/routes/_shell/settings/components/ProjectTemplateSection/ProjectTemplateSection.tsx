@@ -4,8 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FilePlus2, Trash2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
+import { translateKnownError } from "../../../../../i18n/errors"
+import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 import { SettingsSection } from "../SettingsControls"
+import { ProjectTypesEditor } from "./ProjectTypesEditor"
 
 // Keep this renderer fallback local. Importing the local-db package at runtime
 // would pull its SQLite implementation into the browser bundle.
@@ -18,6 +21,7 @@ const DEFAULT_PROJECT_TEMPLATE_SETTINGS = {
     "TODO.md",
   ],
   defaultTemplateParentPath: null,
+  projectTypes: [],
 }
 
 /**
@@ -35,6 +39,8 @@ const DEFAULT_PROJECT_TEMPLATE_SETTINGS = {
  * `settings.get` so the buffer matches the user's editor preferences.
  */
 export function ProjectTemplateSection() {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
@@ -169,7 +175,7 @@ export function ProjectTemplateSection() {
         data-testid="template-default-files"
       >
         <div className="flex items-center justify-between gap-3">
-          <p className="font-medium text-sm">Files included by default</p>
+          <p className="font-medium text-sm">{t("Files included by default")}</p>
           <Button
             type="button"
             variant="outline"
@@ -179,11 +185,11 @@ export function ProjectTemplateSection() {
             onClick={() => void handleImport()}
           >
             <FilePlus2 className="size-3.5" aria-hidden />
-            Import template file
+            {t("Import template file")}
           </Button>
         </div>
         <p className="mt-1 text-muted-foreground text-xs">
-          Choose the starter files preselected when you start a project from this template.
+          {t("Choose the starter files preselected when you start a project from this template.")}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {files.map((file) => {
@@ -211,9 +217,13 @@ export function ProjectTemplateSection() {
         </div>
         {updateTemplateDefaults.error || importTemplateFile.error || pickFile.error ? (
           <p className="mt-2 text-destructive text-xs" data-testid="template-default-files-error">
-            {updateTemplateDefaults.error?.message ??
-              importTemplateFile.error?.message ??
-              pickFile.error?.message}
+            {translateKnownError(
+              language,
+              updateTemplateDefaults.error?.message ??
+                importTemplateFile.error?.message ??
+                pickFile.error?.message ??
+                "",
+            )}
           </p>
         ) : null}
       </div>
@@ -222,8 +232,8 @@ export function ProjectTemplateSection() {
         className="flex h-[28rem] min-h-0 overflow-hidden rounded-lg border border-border"
       >
         <nav
-          aria-label="Template files"
-          className="flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto border-border border-r bg-sidebar p-2"
+          aria-label={t("Template files")}
+          className="flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto border-border border-e bg-sidebar p-2"
         >
           {files.map((file) => (
             <button
@@ -232,7 +242,7 @@ export function ProjectTemplateSection() {
               data-testid={`template-file-${file.relPath}`}
               data-active={file.relPath === activeRelPath}
               data-feature-label={file.name}
-              data-feature-help="Edit this starter file used when creating future projects"
+              data-feature-help={t("Edit this starter file used when creating future projects")}
               onClick={() => handleSelect(file.relPath)}
               onContextMenu={(event) => {
                 event.preventDefault()
@@ -258,7 +268,7 @@ export function ProjectTemplateSection() {
               className="truncate font-mono text-foreground text-xs"
               data-testid="template-active"
             >
-              {activeRelPath ?? "No files"}
+              {activeRelPath ?? t("No files")}
               {dirty ? <span className="ml-1 text-muted-foreground">•</span> : null}
             </span>
             <Button
@@ -268,10 +278,10 @@ export function ProjectTemplateSection() {
               data-testid="template-save"
               className="h-6 px-2 text-xs"
               disabled={activeRelPath === null || !dirty || write.isPending}
-              data-feature-help="Save this template file for future projects"
+              data-feature-help={t("Save this template file for future projects")}
               onClick={handleSave}
             >
-              Save
+              {t("Save")}
             </Button>
           </div>
 
@@ -288,7 +298,7 @@ export function ProjectTemplateSection() {
               />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
-                {listQuery.isLoading ? "Loading…" : "Select a file to edit."}
+                {listQuery.isLoading ? t("Loading…") : t("Select a file to edit.")}
               </div>
             )}
           </div>
@@ -298,11 +308,15 @@ export function ProjectTemplateSection() {
               data-testid="template-error"
               className="shrink-0 cursor-text select-text border-border border-t px-3 py-2 text-destructive text-xs"
             >
-              {write.error?.message ?? removeTemplateFile.error?.message}
+              {translateKnownError(
+                language,
+                write.error?.message ?? removeTemplateFile.error?.message ?? "",
+              )}
             </p>
           ) : null}
         </div>
       </div>
+      <ProjectTypesEditor />
       {contextMenu !== null ? (
         <div
           role="menu"
@@ -320,7 +334,7 @@ export function ProjectTemplateSection() {
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-accent disabled:opacity-50"
           >
             <Trash2 className="size-4" aria-hidden />
-            Remove
+            {t("Remove")}
           </button>
         </div>
       ) : null}

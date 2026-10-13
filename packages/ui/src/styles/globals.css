@@ -575,3 +575,9 @@
     opacity: 0.5;
   }
 }
+
+/* Arabic interface copy reads right to left; source code and terminal output keep their own order. */
+html[dir="rtl"] .cm-editor,
+html[dir="rtl"] .xterm {
+  direction: ltr;
+}

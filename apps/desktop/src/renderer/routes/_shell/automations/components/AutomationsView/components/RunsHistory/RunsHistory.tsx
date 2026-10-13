@@ -1,6 +1,7 @@
 import { Badge } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
+import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 
 interface RunsHistoryProps {
@@ -10,8 +11,8 @@ interface RunsHistoryProps {
   targetRunId?: string
 }
 
-function formatInstant(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+function formatInstant(ms: number, language: string): string {
+  return new Date(ms).toLocaleString(language, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -25,6 +26,8 @@ function formatInstant(ms: number): string {
  * remain readable. A notification target focuses its exact run.
  */
 export function RunsHistory({ automationId, targetRunId }: RunsHistoryProps) {
+  const [language] = useInterfaceLanguage()
+  const t = useTranslate()
   const trpc = useTRPC()
   const runsQuery = useQuery(
     trpc.automations.listRuns.queryOptions(
@@ -41,12 +44,12 @@ export function RunsHistory({ automationId, targetRunId }: RunsHistoryProps) {
   }, [runs, targetRunId])
 
   if (runsQuery.isLoading) {
-    return <p className="text-muted-foreground text-xs">Loading runs…</p>
+    return <p className="text-muted-foreground text-xs">{t("Loading runs…")}</p>
   }
   if (runs.length === 0) {
     return (
       <p data-testid="runs-empty" className="text-muted-foreground text-xs">
-        No runs yet.
+        {t("No runs yet.")}
       </p>
     )
   }
@@ -69,9 +72,9 @@ export function RunsHistory({ automationId, targetRunId }: RunsHistoryProps) {
             variant={run.state === "failed" ? "destructive" : "secondary"}
             className="shrink-0"
           >
-            {run.state}
+            {t(run.state)}
           </Badge>
-          <span className="text-muted-foreground">{formatInstant(run.scheduledFor)}</span>
+          <span className="text-muted-foreground">{formatInstant(run.scheduledFor, language)}</span>
           {run.error ? (
             <span className="cursor-text select-text truncate text-destructive" title={run.error}>
               {run.error}

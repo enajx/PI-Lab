@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ScienceLibrary } from "./ScienceLibrary"
@@ -26,6 +27,18 @@ function collection(key: string, name: string, itemCount = 0, subcollectionCount
 }
 
 describe("ScienceLibrary", () => {
+  afterEach(() => setInterfaceLanguage("en"))
+
+  test("shows the source choice in the selected interface language", async () => {
+    setInterfaceLanguage("es")
+    renderLibrary({
+      "science.library.getStatus": () => ({ connected: false }),
+      "science.library.detectLocal": () => ({ reachable: true }),
+    })
+    expect(await screen.findByText("Elige una fuente para la biblioteca")).toBeTruthy()
+    expect(screen.getByText("Explora tu biblioteca Zotero o una carpeta de PDF")).toBeTruthy()
+  })
+
   test("shows the source chooser (three sources) when not connected", async () => {
     renderLibrary({
       "science.library.getStatus": () => ({ connected: false }),

@@ -6,13 +6,16 @@
  * "just now"; anything a week or more out falls back to an absolute date so the
  * phrasing never becomes "3 weeks ago"-vague for a stale check.
  */
-export function formatRelativeTime(epochMs: number, now: number = Date.now()): string {
-  const diffMs = epochMs - now
+export function formatRelativeTime(epochMs: number, locale: string, now?: number): string {
+  const diffMs = epochMs - (now ?? Date.now())
   const seconds = Math.round(diffMs / 1000)
   const absSeconds = Math.abs(seconds)
-  if (absSeconds < 5) return "just now"
+  if (absSeconds < 5)
+    return locale === "en"
+      ? "just now"
+      : new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(0, "second")
 
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" })
   if (absSeconds < 60) return rtf.format(seconds, "second")
 
   const minutes = Math.round(seconds / 60)
@@ -24,7 +27,7 @@ export function formatRelativeTime(epochMs: number, now: number = Date.now()): s
   const days = Math.round(hours / 24)
   if (Math.abs(days) < 7) return rtf.format(days, "day")
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     year: "numeric",

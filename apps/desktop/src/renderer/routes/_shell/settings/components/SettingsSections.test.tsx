@@ -41,6 +41,16 @@ beforeEach(() => {
 })
 
 describe("Settings sections", () => {
+  test("changes interface language and switches document direction for Arabic", () => {
+    renderSection(<GeneralSection />)
+    const language = screen.getByTestId<HTMLSelectElement>("settings-interface-language")
+    fireEvent.change(language, { target: { value: "ar" } })
+    expect(window.localStorage.getItem("pi-lab.interface.language")).toBe("ar")
+    expect(document.documentElement.lang).toBe("ar")
+    expect(document.documentElement.dir).toBe("rtl")
+    expect(screen.getByText("السلوك العام للتطبيق.")).toBeTruthy()
+  })
+
   test("Shortcuts rejects a conflicting chord, preserves the prior binding, and stays ready to retry", async () => {
     renderSection(<ShortcutsSection />)
 
@@ -458,6 +468,106 @@ describe("Settings sections", () => {
     renderSection(<ProjectViewSection />)
     fireEvent.click(screen.getByTestId("settings-show-skills"))
     expect(window.localStorage.getItem("pi-lab.projectView.showSkillsPanel")).toBe("true")
+  })
+
+  test("Project view selects the main Markdown file for the chosen project", async () => {
+    const selected: unknown[] = []
+    renderSection(<ProjectViewSection />, {
+      "projects.list": () => [
+        { id: "p1", name: "Alpha", mainRelPath: null },
+        { id: "p2", name: "Beta", mainRelPath: "RESEARCH.md" },
+      ],
+      "projects.setDocumentPath": (input) => {
+        selected.push(input)
+      },
+    })
+
+    await screen.findByRole("option", { name: "Beta" })
+    fireEvent.change(screen.getByTestId("settings-main-project"), { target: { value: "p2" } })
+    expect(screen.getByText("Main readme: RESEARCH.md")).toBeTruthy()
+    fireEvent.change(screen.getByRole("textbox", { name: "Main Markdown path" }), {
+      target: { value: "notes/Overview.md" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Select" }))
+
+    await waitFor(() =>
+      expect(selected).toEqual([{ id: "p2", kind: "main", relPath: "notes/Overview.md" }]),
+    )
+  })
+
+  test("Project view changes the chosen project's type", async () => {
+    const selected: unknown[] = []
+    renderSection(<ProjectViewSection />, {
+      "projects.list": () => [{ id: "p1", name: "Alpha", typeId: null, mainRelPath: null }],
+      "settings.get": () => ({
+        projectTemplate: {
+          projectTypes: [
+            { id: "research", name: "Research project", guidance: "" },
+            { id: "software", name: "Software project", guidance: "" },
+            { id: "paper", name: "Paper", guidance: "" },
+          ],
+        },
+      }),
+      "projects.setType": (input) => {
+        selected.push(input)
+      },
+    })
+
+    expect(((await screen.findByTestId("settings-project-type")) as HTMLSelectElement).value).toBe(
+      "",
+    )
+    await screen.findByRole("option", { name: "Paper" })
+    fireEvent.change(screen.getByTestId("settings-project-type"), {
+      target: { value: "paper" },
+    })
+    await waitFor(() => expect(selected).toEqual([{ id: "p1", typeId: "paper" }]))
+  })
+
+  test("Project view translates its project controls and built-in type names", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "es")
+    renderSection(<ProjectViewSection />, {
+      "projects.list": () => [{ id: "p1", name: "Alpha", typeId: null, mainRelPath: null }],
+      "settings.get": () => ({
+        projectTemplate: {
+          projectTypes: [
+            { id: "research", name: "Research project", guidance: "" },
+            { id: "software", name: "Software project", guidance: "" },
+            { id: "paper", name: "Paper", guidance: "" },
+          ],
+        },
+      }),
+    })
+
+    expect(await screen.findByLabelText("Tipo de proyecto")).toBeTruthy()
+    expect(await screen.findByRole("option", { name: "Proyecto de investigación" })).toBeTruthy()
+    expect(screen.getByRole("option", { name: "Proyecto de software" })).toBeTruthy()
+    expect(screen.getByRole("option", { name: "Artículo" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Planificar este proyecto" })).toBeTruthy()
+  })
+
+  test("Project view shows a known type error in the selected language", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "es")
+    renderSection(<ProjectViewSection />, {
+      "projects.list": () => [{ id: "p1", name: "Alpha", typeId: null, mainRelPath: null }],
+      "settings.get": () => ({
+        projectTemplate: {
+          projectTypes: [
+            { id: "research", name: "Research project", guidance: "" },
+            { id: "software", name: "Software project", guidance: "" },
+            { id: "paper", name: "Paper", guidance: "" },
+          ],
+        },
+      }),
+      "projects.setType": () => {
+        throw new Error("Unknown project type")
+      },
+    })
+
+    await screen.findByRole("option", { name: "Artículo" })
+    fireEvent.change(screen.getByLabelText("Tipo de proyecto"), {
+      target: { value: "paper" },
+    })
+    expect((await screen.findByRole("alert")).textContent).toContain("Tipo de proyecto desconocido")
   })
 
   test("Sections shows four rows; Cluster/Analysis toggle, Experiments/Research Heartbeat not-yet-available", () => {

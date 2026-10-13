@@ -119,6 +119,37 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       void trpc.terminal.write.mutate({ sessionId, data }).catch(() => {})
     }
 
+    /** Insert native paths as one shell argument each, leaving submission to the user. */
+    const onDrop = (event: DragEvent): void => {
+      const files = Array.from(event.dataTransfer?.files ?? [])
+      if (files.length === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (!sessionId) {
+        xterm.write("\r\n[pi-lab] terminal is not ready for dropped paths\r\n")
+        return
+      }
+      let paths: string[]
+      try {
+        paths = files.map((file) => window.piLab?.getPathForFile?.(file) ?? "")
+      } catch {
+        xterm.write("\r\n[pi-lab] could not read a dropped file path\r\n")
+        return
+      }
+      if (paths.some((path) => path.length === 0)) {
+        xterm.write("\r\n[pi-lab] could not read a dropped file path\r\n")
+        return
+      }
+      forwardInput(paths.map(quoteShellPath).join(" "))
+      xterm.focus()
+    }
+
+    const onDragOver = (event: DragEvent): void => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault()
+    }
+    container.addEventListener("dragover", onDragOver)
+    container.addEventListener("drop", onDrop)
+
     // xterm cannot choose the right Shift+Enter protocol without knowing
     // whether this PTY is a shell or an agent TUI. Returning false suppresses
     // xterm's own onData for mapped keys, avoiding a second write.
@@ -219,6 +250,8 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
 
     return () => {
       cancelled = true
+      container.removeEventListener("dragover", onDragOver)
+      container.removeEventListener("drop", onDrop)
       resizeObserver?.disconnect()
       inputDisposable?.dispose()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
@@ -238,6 +271,11 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       style={{ ...paneStyle, background: "var(--background)" }}
     />
   )
+}
+
+/** Quote one path as a POSIX shell argument, including apostrophes. */
+function quoteShellPath(path: string): string {
+  return `'${path.replaceAll("'", "'\\''")}'`
 }
 
 function isMacOSPlatform(platform: string): boolean {

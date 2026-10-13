@@ -1,5 +1,6 @@
 import { Button, Input, Label } from "@pi-lab/ui"
 import { useState } from "react"
+import { useTranslate } from "../../../../../../../i18n/language"
 import type { AgentOption, ProjectListItem } from "../../../../../../../trpc/types"
 import { ScheduleBuilder } from "../ScheduleBuilder"
 
@@ -51,6 +52,7 @@ export function CreateAutomationForm({
   onSubmit,
   onCancel,
 }: CreateAutomationFormProps) {
+  const t = useTranslate()
   const [name, setName] = useState("")
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "")
   const [agentId, setAgentId] = useState(agents[0]?.id ?? "")
@@ -92,21 +94,21 @@ export function CreateAutomationForm({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5 sm:col-span-2">
           <Label htmlFor="automation-name" className="text-muted-foreground text-xs">
-            Name <span className="text-destructive">*</span>
+            {t("Name")} <span className="text-destructive">*</span>
           </Label>
           <Input
             id="automation-name"
             data-testid="automation-name-input"
             autoFocus
             value={name}
-            placeholder="Nightly research sweep"
+            placeholder={t("Nightly research sweep")}
             onChange={(e) => setName(e.target.value)}
           />
         </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="automation-project" className="text-muted-foreground text-xs">
-            Project <span className="text-destructive">*</span>
+            {t("Project")} <span className="text-destructive">*</span>
           </Label>
           <select
             id="automation-project"
@@ -125,7 +127,7 @@ export function CreateAutomationForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="automation-agent" className="text-muted-foreground text-xs">
-            Agent <span className="text-destructive">*</span>
+            {t("Agent")} <span className="text-destructive">*</span>
           </Label>
           <select
             id="automation-agent"
@@ -144,7 +146,7 @@ export function CreateAutomationForm({
 
         <div className="flex flex-col gap-1.5 sm:col-span-2">
           <Label htmlFor="automation-execution-mode" className="text-muted-foreground text-xs">
-            Execution
+            {t("Execution")}
           </Label>
           <select
             id="automation-execution-mode"
@@ -155,26 +157,27 @@ export function CreateAutomationForm({
             }
             className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
-            <option value="interactive">Interactive session</option>
-            <option value="noninteractive">Run to completion</option>
+            <option value="interactive">{t("Interactive session")}</option>
+            <option value="noninteractive">{t("Run to completion")}</option>
           </select>
           <p className="text-muted-foreground text-xs">
-            Interactive opens an agent terminal. Run to completion uses the harness one-shot mode
-            and finishes from its exit status.
+            {t(
+              "Interactive opens an agent terminal. Run to completion uses the harness one-shot mode and finishes from its exit status.",
+            )}
           </p>
         </div>
       </div>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="automation-prompt" className="text-muted-foreground text-xs">
-          Prompt
+          {t("Prompt")}
         </Label>
         <textarea
           id="automation-prompt"
           data-testid="automation-prompt"
           value={prompt}
           rows={3}
-          placeholder="What should the agent do each run?"
+          placeholder={t("What should the agent do each run?")}
           onChange={(e) => setPrompt(e.target.value)}
           className="resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
@@ -186,7 +189,7 @@ export function CreateAutomationForm({
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button
           type="submit"
@@ -194,7 +197,7 @@ export function CreateAutomationForm({
           data-testid="create-automation-submit"
           disabled={isPending || !canSubmit}
         >
-          Create workflow
+          {t("Create workflow")}
         </Button>
       </div>
     </form>

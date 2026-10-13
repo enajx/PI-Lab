@@ -1,6 +1,7 @@
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { cn } from "@pi-lab/ui"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslate } from "../i18n/language"
 import { type PaletteCommand, usePaletteCommands } from "./usePaletteCommands"
 
 interface CommandPaletteProps {
@@ -23,6 +24,7 @@ interface RankedCommand {
  * query it shows every entry in registry order (navigations, view toggles, then projects).
  */
 export function CommandPalette({ onClose }: CommandPaletteProps) {
+  const t = useTranslate()
   const commands = usePaletteCommands()
   const [query, setQuery] = useState("")
   const [highlight, setHighlight] = useState(0)
@@ -94,8 +96,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
     >
       <button
         type="button"
-        aria-label="Close command palette"
-        data-feature-help="Close the command palette without running an action"
+        aria-label={t("Close command palette")}
+        data-feature-help={t("Close the command palette without running an action")}
         tabIndex={-1}
         onClick={onClose}
         className="-z-10 absolute inset-0 cursor-default bg-black/40"
@@ -105,17 +107,19 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         className="flex max-h-[60vh] w-full max-w-xl flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl"
         role="dialog"
         aria-modal="true"
-        aria-label="Command palette"
+        aria-label={t("Command palette")}
       >
         <input
           ref={inputRef}
           data-testid="command-palette-input"
-          aria-label="Search commands and projects"
-          data-feature-help="Search commands and open projects; press Enter to run the highlighted action"
+          aria-label={t("Search commands and projects")}
+          data-feature-help={t(
+            "Search commands and open projects; press Enter to run the highlighted action",
+          )}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Search commands and projects…"
+          placeholder={t("Search commands and projects…")}
           className="shrink-0 border-border border-b bg-transparent px-4 py-3 text-foreground text-sm outline-none placeholder:text-muted-foreground"
         />
         <ul ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -124,7 +128,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
               data-testid="command-palette-empty"
               className="px-4 py-2 text-muted-foreground/70 text-xs"
             >
-              No matching commands
+              {t("No matching commands")}
             </li>
           ) : (
             ranked.map((entry, index) => {
@@ -138,13 +142,13 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                     data-testid="command-palette-item"
                     data-command-id={command.id}
                     data-feature-label={command.label}
-                    data-feature-help="Run this command or open the selected project"
+                    data-feature-help={t("Run this command or open the selected project")}
                     data-index={index}
                     data-highlighted={selected}
                     onClick={() => choose(index)}
                     onMouseEnter={() => setHighlight(index)}
                     className={cn(
-                      "flex w-full items-center gap-2.5 px-4 py-1.5 text-left text-xs",
+                      "flex w-full items-center gap-2.5 px-4 py-1.5 text-start text-xs",
                       selected
                         ? "bg-accent text-foreground"
                         : "text-muted-foreground hover:bg-accent/60",

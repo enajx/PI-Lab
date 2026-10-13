@@ -22,6 +22,7 @@ export function buildLaunchArgv(agent: TerminalAgent, options: LaunchOptions = {
  * element and callers spawn the returned command without a shell.
  */
 export function buildNonInteractiveLaunchArgv(agent: TerminalAgent, prompt: string): string[] {
+  if (agent.oneShotArgs) return [agent.command, ...agent.oneShotArgs, prompt]
   // Permission/approval-bypass flags belong in different positions per CLI:
   // Claude takes `--dangerously-skip-permissions` as a global flag; Codex needs
   // `--skip-git-repo-check --dangerously-bypass-approvals-and-sandbox` AFTER the

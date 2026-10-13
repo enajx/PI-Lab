@@ -1,15 +1,17 @@
 import { cn } from "@pi-lab/ui"
+import { useTranslate } from "../../../../i18n/language"
 import { APP_THEMES, appThemeSwatch, useTheme } from "../../../../providers/ThemeProvider"
 
 export function AppThemeGallery() {
+  const t = useTranslate()
   const { resolvedMode, themeId, setThemeId } = useTheme()
 
   return (
     <div className="flex flex-col gap-3 px-4 py-4">
       <div className="flex min-w-0 flex-col">
-        <span className="text-foreground text-sm">App theme</span>
+        <span className="text-foreground text-sm">{t("App theme")}</span>
         <span className="text-muted-foreground text-xs">
-          Affects PI Lab’s interface; the code editor theme stays separate.
+          {t("Affects PI Lab’s interface; the code editor theme stays separate.")}
         </span>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="settings-app-themes">
@@ -19,12 +21,12 @@ export function AppThemeGallery() {
             <button
               key={theme.id}
               type="button"
-              aria-label={theme.label}
+              aria-label={t(theme.label)}
               aria-pressed={selected}
               data-testid={`settings-app-theme-${theme.id}`}
               onClick={() => setThemeId(theme.id)}
               className={cn(
-                "flex min-w-0 flex-col gap-2 rounded-md border bg-background p-2 text-left outline-none transition",
+                "flex min-w-0 flex-col gap-2 rounded-md border bg-background p-2 text-start outline-none transition",
                 "hover:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring",
                 selected ? "border-primary ring-1 ring-primary" : "border-border",
               )}
@@ -39,7 +41,7 @@ export function AppThemeGallery() {
                   />
                 ))}
               </span>
-              <span className="truncate text-foreground text-xs">{theme.label}</span>
+              <span className="truncate text-foreground text-xs">{t(theme.label)}</span>
             </button>
           )
         })}

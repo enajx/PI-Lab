@@ -1,17 +1,26 @@
 import type { Stats } from "node:fs"
-import { cp, mkdir, readdir, readFile, realpath, stat } from "node:fs/promises"
-import { basename, extname, join, resolve } from "node:path"
-import { type PiLabDatabase, type Project, type ProjectMetadata, projects } from "@pi-lab/local-db"
+import { constants } from "node:fs"
+import { copyFile, cp, mkdir, readdir, readFile, realpath, stat } from "node:fs/promises"
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import {
+  getSettingsOrDefaults,
+  type PiLabDatabase,
+  type Project,
+  type ProjectMetadata,
+  projects,
+} from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { desc, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { GitError, isGitRepo, repoName, repoRoot, resolveDefaultBranch, runGit } from "../../git"
+import { discoverTaskFile } from "../science/tasks/store"
 import {
   resolveInsideTemplate,
   resolveWritableTemplateDir,
   seedWritableTemplate,
 } from "../template"
 import { publicProcedure, router } from "../trpc"
+import { planningProcedures } from "./planning"
 import { readStoredThumbnail, validateThumbnail } from "./thumbnailImage"
 
 /**
@@ -129,6 +138,45 @@ const setMetadataInput = z.object({
     .nullable(),
 })
 
+const setDocumentPathInput = z.object({
+  id: z.string().min(1),
+  kind: z.enum(["tasks", "main"]),
+  relPath: z.string().min(1).nullable(),
+})
+
+/** Validate a selected Markdown file and retain a relative, portable path. */
+async function selectedMarkdownPath(repoPath: string, relPath: string): Promise<string> {
+  if (extname(relPath).toLowerCase() !== ".md") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Select a project Markdown file" })
+  }
+  const root = await realpath(repoPath)
+  const candidate = resolve(root, relPath)
+  const storedPath = relative(root, candidate)
+  if (
+    storedPath === "" ||
+    storedPath === ".." ||
+    storedPath.startsWith(`..${sep}`) ||
+    isAbsolute(storedPath)
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "File is outside this project" })
+  }
+  const file = await statOrNull(candidate)
+  if (!file?.isFile()) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `Markdown file not found: ${relPath}` })
+  }
+  const realCandidate = await realpath(candidate)
+  const realRelative = relative(root, realCandidate)
+  if (
+    realRelative === "" ||
+    realRelative === ".." ||
+    realRelative.startsWith(`..${sep}`) ||
+    isAbsolute(realRelative)
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "File is outside this project" })
+  }
+  return storedPath.split(sep).join("/")
+}
+
 const cloneInput = z.object({
   /** A git remote — http(s)/ssh/scp-style URL or a local path; git is the arbiter. */
   url: z.string().min(1),
@@ -155,7 +203,11 @@ const createFromTemplateInput = z.object({
  * Upsert a Git working tree or ordinary local folder. Git inputs normalize to
  * the repository top-level; plain folders retain their canonical selected path.
  */
-async function upsertProjectFromDirectory(db: PiLabDatabase, dir: string): Promise<Project> {
+async function upsertProjectFromDirectory(
+  db: PiLabDatabase,
+  dir: string,
+  detectExistingType: boolean,
+): Promise<Project> {
   const requested = resolve(dir)
   const directory = await statOrNull(requested)
   if (!directory?.isDirectory()) {
@@ -166,19 +218,54 @@ async function upsertProjectFromDirectory(db: PiLabDatabase, dir: string): Promi
   const root = git ? await repoRoot(requested) : await realpath(requested)
   const name = git ? await repoName(root) : basename(root) || root
   const defaultBranch = git ? await resolveDefaultBranch(root) : null
+  const taskFile = await discoverTaskFile(root)
+  const discoveredTaskPath = taskFile.state === "ready" ? taskFile.relPath : null
+  const detectedType = detectExistingType ? await detectProjectType(root) : null
   const now = Date.now()
 
   const existing = db.select().from(projects).where(eq(projects.repoPath, root)).get()
   if (existing) {
+    const explicitType =
+      existing.typeId === "research" ||
+      existing.typeId === "software" ||
+      existing.typeId === "paper"
+        ? existing.typeId
+        : null
     return db
       .update(projects)
-      .set({ name, defaultBranch, updatedAt: now, lastOpenedAt: now })
+      .set({
+        name,
+        defaultBranch,
+        taskRelPath: existing.taskRelPath ?? discoveredTaskPath,
+        typeId: explicitType ?? detectedType ?? "general",
+        updatedAt: now,
+        lastOpenedAt: now,
+      })
       .where(eq(projects.id, existing.id))
       .returning()
       .get()
   }
 
-  return db.insert(projects).values({ repoPath: root, name, defaultBranch }).returning().get()
+  return db
+    .insert(projects)
+    .values({
+      repoPath: root,
+      name,
+      defaultBranch,
+      taskRelPath: discoveredTaskPath,
+      typeId: detectedType ?? "general",
+    })
+    .returning()
+    .get()
+}
+
+/** Infer a type only when exactly one regular root marker is present. */
+async function detectProjectType(root: string): Promise<"research" | "software" | null> {
+  const entries = await readdir(root, { withFileTypes: true })
+  const hasResearch = entries.some((entry) => entry.name === "RESEARCH.md" && entry.isFile())
+  const hasSoftware = entries.some((entry) => entry.name === "PROJECT.md" && entry.isFile())
+  if (hasResearch === hasSoftware) return null
+  return hasResearch ? "research" : "software"
 }
 
 /**
@@ -276,11 +363,12 @@ async function sampleDigitalRainCharacters(repoPath: string): Promise<string> {
 }
 
 export const projectsRouter = router({
+  ...planningProcedures,
   /**
    * Open a Git repository or ordinary local folder as a project.
    */
   open: publicProcedure.input(openInput).mutation(({ ctx, input }): Promise<Project> => {
-    return upsertProjectFromDirectory(ctx.db, resolve(input.path))
+    return upsertProjectFromDirectory(ctx.db, resolve(input.path), true)
   }),
 
   /** Report Git capability from the live filesystem rather than stale database state. */
@@ -387,7 +475,7 @@ export const projectsRouter = router({
       throw error
     }
 
-    return upsertProjectFromDirectory(ctx.db, target)
+    return upsertProjectFromDirectory(ctx.db, target, true)
   }),
 
   /**
@@ -475,7 +563,7 @@ export const projectsRouter = router({
         }
       }
 
-      return upsertProjectFromDirectory(ctx.db, target)
+      return upsertProjectFromDirectory(ctx.db, target, false)
     }),
 
   /**
@@ -495,6 +583,9 @@ export const projectsRouter = router({
         gradient: projects.gradient,
         digitalRain: projects.digitalRain,
         metadata: projects.metadata,
+        taskRelPath: projects.taskRelPath,
+        mainRelPath: projects.mainRelPath,
+        typeId: projects.typeId,
         agentConfig: projects.agentConfig,
         sortIndex: projects.sortIndex,
         archivedAt: projects.archivedAt,
@@ -649,6 +740,79 @@ export const projectsRouter = router({
     }
     return row
   }),
+
+  /** Remember a project's chosen task source or main Markdown file. */
+  setDocumentPath: publicProcedure
+    .input(setDocumentPathInput)
+    .mutation(async ({ ctx, input }): Promise<Project> => {
+      const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      const path =
+        input.relPath === null ? null : await selectedMarkdownPath(project.repoPath, input.relPath)
+      const row = ctx.db
+        .update(projects)
+        .set({
+          ...(input.kind === "tasks" ? { taskRelPath: path } : { mainRelPath: path }),
+          updatedAt: Date.now(),
+        })
+        .where(eq(projects.id, project.id))
+        .returning()
+        .get()
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      return row
+    }),
+
+  /** Select one of the configured types for a project. */
+  setType: publicProcedure
+    .input(z.object({ id: z.string().min(1), typeId: z.string().min(1) }))
+    .mutation(({ ctx, input }): Project => {
+      const known = getSettingsOrDefaults(ctx.db).projectTemplate.projectTypes.some(
+        (type) => type.id === input.typeId,
+      )
+      if (!known) throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown project type" })
+      const row = ctx.db
+        .update(projects)
+        .set({ typeId: input.typeId, updatedAt: Date.now() })
+        .where(eq(projects.id, input.id))
+        .returning()
+        .get()
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      return row
+    }),
+
+  /** Copy the user's TODO template into a project with no TODO.md, then select it. */
+  createTaskFile: publicProcedure
+    .input(idInput)
+    .mutation(async ({ ctx, input }): Promise<Project> => {
+      const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      await seedWritableTemplate()
+      const source = resolveInsideTemplate(resolveWritableTemplateDir(), "TODO.md")
+      if (!(await statOrNull(source))?.isFile()) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "TODO.md is missing from the project template",
+        })
+      }
+      const target = join(project.repoPath, "TODO.md")
+      try {
+        await copyFile(source, target, constants.COPYFILE_EXCL)
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "TODO.md already exists in this project",
+          })
+        }
+        throw error
+      }
+      return ctx.db
+        .update(projects)
+        .set({ taskRelPath: "TODO.md", updatedAt: Date.now() })
+        .where(eq(projects.id, project.id))
+        .returning()
+        .get()
+    }),
 
   /** Bump `lastOpenedAt` so the project rises in "recent" ordering. */
   touch: publicProcedure.input(idInput).mutation(({ ctx, input }): Project => {

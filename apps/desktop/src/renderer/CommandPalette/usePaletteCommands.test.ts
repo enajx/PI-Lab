@@ -11,6 +11,9 @@ import { createAddProjectCommand, createNewFileCommand } from "./usePaletteComma
 const project: Project = {
   id: "project-added",
   metadata: null,
+  taskRelPath: null,
+  mainRelPath: null,
+  typeId: "general",
   agentConfig: null,
   repoPath: "/tmp/project-added",
   name: "Project Added",

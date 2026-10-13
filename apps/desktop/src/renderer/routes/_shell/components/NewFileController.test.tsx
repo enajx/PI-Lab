@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../i18n/language"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
 import { NewFileControllerProvider, useNewFileController } from "./NewFileController"
@@ -52,6 +53,39 @@ function renderController(
 }
 
 describe("NewFileControllerProvider", () => {
+  test("changes file creation labels with the selected language", async () => {
+    renderController(vi.fn(), {
+      "projects.list": () => projects,
+      "workspaces.ensureMain": () => ({ id: "unused" }),
+      "files.createFile": () => ({ relPath: "unused" }),
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Open new file flow" }))
+    act(() => setInterfaceLanguage("es"))
+    expect(await screen.findByRole("dialog", { name: "Archivo nuevo" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Crear y abrir" })).toBeTruthy()
+    act(() => setInterfaceLanguage("en"))
+  })
+
+  test("translates a known file creation validation error", async () => {
+    renderController(vi.fn(), {
+      "projects.list": () => projects,
+      "workspaces.ensureMain": () => ({ id: "workspace-alpha" }),
+      "files.createFile": () => {
+        throw new Error("A file or folder already exists at notes/idea.md")
+      },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Open new file flow" }))
+    act(() => setInterfaceLanguage("es"))
+    fireEvent.change(await screen.findByLabelText("Proyecto"), { target: { value: "alpha" } })
+    fireEvent.change(screen.getByLabelText("Nombre del archivo"), {
+      target: { value: "notes/idea.md" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Crear y abrir" }))
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Ya existe un archivo o carpeta en notes/idea.md",
+    )
+    act(() => setInterfaceLanguage("en"))
+  })
   test("asks for a project and file name, creates there, and reports the file", async () => {
     const onCreated = vi.fn()
     const ensureMain = vi.fn(() => ({ id: "workspace-alpha" }))

@@ -1,3 +1,4 @@
+import { useTranslate } from "../../../../../../../i18n/language"
 import type { GitChange } from "../../../../../../../trpc/types"
 
 interface ChangeListProps {
@@ -15,10 +16,11 @@ interface ChangeListProps {
  * collapses to a single muted line.
  */
 export function ChangeList({ changes, isPending, emptyTestId }: ChangeListProps) {
+  const t = useTranslate()
   if (changes.length === 0) {
     return (
       <p data-testid={emptyTestId} className="text-muted-foreground text-xs">
-        {isPending ? "Loading…" : "No changes"}
+        {t(isPending ? "Loading…" : "No changes")}
       </p>
     )
   }

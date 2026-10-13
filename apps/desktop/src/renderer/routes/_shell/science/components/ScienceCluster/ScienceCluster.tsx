@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { DownloadCloud, Eye, EyeOff, Plus, RefreshCw, Server } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
+import { useTranslate } from "../../../../../i18n/language"
 import { useClusterOrder } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
@@ -69,6 +70,7 @@ function orderMachines(machines: ClusterMachine[], order: string[]): ClusterMach
  * body owns its own scroll per AGENTS.md Pitfalls #3.
  */
 export function ScienceCluster() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
@@ -216,8 +218,8 @@ export function ScienceCluster() {
   return (
     <ScienceTabShell
       testId="science-cluster"
-      title="Cluster"
-      subtitle="Monitor compute machines from your ssh config"
+      title={t("Cluster")}
+      subtitle={t("Monitor compute machines from your ssh config")}
       actions={
         <>
           {hiddenCount > 0 ? (
@@ -225,12 +227,12 @@ export function ScienceCluster() {
               data-testid="show-hidden"
               variant="ghost"
               size="sm"
-              data-feature-help="Temporarily include machines hidden from the cluster grid"
+              data-feature-help={t("Temporarily include machines hidden from the cluster grid")}
               className="h-8 gap-1.5 text-muted-foreground"
               onClick={() => setShowHidden((v) => !v)}
             >
               {showHidden ? <EyeOff /> : <Eye />}
-              {showHidden ? "Hide hidden" : `Show hidden (${hiddenCount})`}
+              {showHidden ? t("Hide hidden") : `${t("Show hidden")} (${hiddenCount})`}
             </Button>
           ) : null}
           <Button
@@ -239,7 +241,9 @@ export function ScienceCluster() {
             size="sm"
             className="h-8 gap-1.5"
             disabled={machines.length === 0}
-            data-feature-help="Refresh reachability and CPU/GPU telemetry for every visible machine"
+            data-feature-help={t(
+              "Refresh reachability and CPU/GPU telemetry for every visible machine",
+            )}
             onClick={() => {
               for (const machine of machines) {
                 if (!machine.hidden) refreshStatus.mutate({ id: machine.id })
@@ -247,7 +251,7 @@ export function ScienceCluster() {
             }}
           >
             <RefreshCw />
-            Check all
+            {t("Check all")}
           </Button>
           <Button
             data-testid="import-ssh-config"
@@ -255,21 +259,21 @@ export function ScienceCluster() {
             size="sm"
             className="h-8 gap-1.5"
             disabled={importConfig.isPending}
-            data-feature-help="Import hosts from your SSH config into Cluster monitoring"
+            data-feature-help={t("Import hosts from your SSH config into Cluster monitoring")}
             onClick={() => setImportOptionsOpen((v) => !v)}
           >
             <DownloadCloud />
-            {importConfig.isPending ? "Importing…" : "Import from SSH config"}
+            {importConfig.isPending ? t("Importing…") : t("Import from SSH config")}
           </Button>
           <Button
             data-testid="add-machine"
             size="sm"
-            data-feature-help="Register a machine manually when it is not in your SSH config"
+            data-feature-help={t("Register a machine manually when it is not in your SSH config")}
             className="h-8 gap-1.5"
             onClick={() => setAdding((v) => !v)}
           >
             <Plus />
-            Add machine
+            {t("Add machine")}
           </Button>
         </>
       }
@@ -368,12 +372,12 @@ export function ScienceCluster() {
 
       {findOpen ? (
         <QuickFind
-          ariaLabel="Find a machine"
-          placeholder="Find a machine…"
-          scopeLabel="Cluster machines"
+          ariaLabel={t("Find a machine")}
+          placeholder={t("Find a machine…")}
+          scopeLabel={t("Cluster machines")}
           allowGlobalSearch
           items={findItems}
-          emptyText="No matching machines"
+          emptyText={t("No matching machines")}
           onSelect={(item) => focusMachine(item.id)}
           onClose={() => setFindOpen(false)}
         />
@@ -384,6 +388,7 @@ export function ScienceCluster() {
 
 /** Empty state shown when no machines have been imported or added yet. */
 function EmptyState({ onImport, importing }: { onImport: () => void; importing?: boolean }) {
+  const t = useTranslate()
   return (
     <div
       data-testid="science-cluster-empty"
@@ -391,15 +396,15 @@ function EmptyState({ onImport, importing }: { onImport: () => void; importing?:
     >
       <Server className="size-8 text-muted-foreground" aria-hidden />
       <div className="flex flex-col gap-1">
-        <p className="font-medium text-foreground text-sm">No machines yet</p>
+        <p className="font-medium text-foreground text-sm">{t("No machines yet")}</p>
         <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
-          Import the hosts from your <code className="font-mono">~/.ssh/config</code>, or add a
-          machine by hand to monitor a box that isn't in your ssh config.
+          {t("Import the hosts from your")} <code className="font-mono">~/.ssh/config</code>
+          {t(", or add a machine by hand to monitor a box that isn't in your ssh config.")}
         </p>
       </div>
       <Button size="sm" className="gap-1.5" disabled={importing} onClick={onImport}>
         <DownloadCloud />
-        {importing ? "Importing…" : "Import from SSH config"}
+        {importing ? t("Importing…") : t("Import from SSH config")}
       </Button>
     </div>
   )

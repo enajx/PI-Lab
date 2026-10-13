@@ -91,6 +91,14 @@ export interface ProjectTemplateSettings {
   initializationMarkdownFiles: string[]
   /** Optional parent folder proposed for new template projects. */
   defaultTemplateParentPath: string | null
+  /** Built-in and user-defined types with guidance for project instructions and drafts. */
+  projectTypes: ProjectType[]
+}
+
+export interface ProjectType {
+  id: string
+  name: string
+  guidance: string
 }
 
 export const DEFAULT_PROJECT_TEMPLATE_SETTINGS: ProjectTemplateSettings = {
@@ -102,6 +110,40 @@ export const DEFAULT_PROJECT_TEMPLATE_SETTINGS: ProjectTemplateSettings = {
     "TODO.md",
   ],
   defaultTemplateParentPath: null,
+  projectTypes: [
+    {
+      id: "research",
+      name: "Research project",
+      guidance: "Describe the research goal, experiments, results, and next steps.",
+    },
+    {
+      id: "software",
+      name: "Software project",
+      guidance: "Describe the software goal, design, implementation, tests, and next steps.",
+    },
+    {
+      id: "paper",
+      name: "Paper",
+      guidance: "Describe the paper question, claims, evidence, draft status, and next steps.",
+    },
+  ],
+}
+
+/** Keep the existing SQL column default stable; readers upgrade its type list. */
+const STORED_PROJECT_TEMPLATE_SQL_DEFAULT: ProjectTemplateSettings = {
+  ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
+  projectTypes: [
+    {
+      id: "general",
+      name: "General project",
+      guidance: "Describe the project goal, scope, current status, and next steps.",
+    },
+    {
+      id: "paper",
+      name: "Paper",
+      guidance: "Describe the paper question, claims, evidence, draft status, and next steps.",
+    },
+  ],
 }
 
 /** App-wide notification preferences persisted on the singleton settings row. */
@@ -397,6 +439,12 @@ export const projects = sqliteTable(
      * so the field group grows without a migration; null ⇒ none entered yet.
      */
     metadata: text("metadata", { mode: "json" }).$type<ProjectMetadata>(),
+    /** Selected Markdown task source, relative to the project root. Null uses discovery. */
+    taskRelPath: text("task_rel_path"),
+    /** Main Markdown file shown in the Research panel. Null uses RESEARCH.md. */
+    mainRelPath: text("main_rel_path"),
+    /** Selected type. The legacy "general" value now means no type has been chosen. */
+    typeId: text("type_id").notNull().default("general"),
     /** App-memory copy of project-specific agent choices. */
     agentConfig: text("agent_config", { mode: "json" }).$type<ProjectAgentConfig>(),
     /** Manual ordering in the sidebar; lower sorts first. */
@@ -578,7 +626,7 @@ export const settings = sqliteTable("settings", {
   projectTemplate: text("project_template", { mode: "json" })
     .notNull()
     .$type<ProjectTemplateSettings>()
-    .default(DEFAULT_PROJECT_TEMPLATE_SETTINGS),
+    .default(STORED_PROJECT_TEMPLATE_SQL_DEFAULT),
   /** Locally-known v2 Teams (names/colors only — no remote identity). */
   knownTeams: text("known_teams", { mode: "json" }).notNull().$type<KnownTeam[]>().default([]),
   /**

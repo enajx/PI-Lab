@@ -2,6 +2,7 @@ import type { Project } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../i18n/language"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
 import { AddProjectControllerProvider, useAddProjectController } from "./AddProjectController"
@@ -9,6 +10,9 @@ import { AddProjectControllerProvider, useAddProjectController } from "./AddProj
 const project: Project = {
   id: "project-added",
   metadata: null,
+  taskRelPath: null,
+  mainRelPath: null,
+  typeId: "general",
   agentConfig: null,
   repoPath: "/tmp/project-added",
   name: "Project Added",
@@ -46,6 +50,14 @@ function renderController(onAdded: (added: Project) => void, handlers: FakeHandl
 }
 
 describe("AddProjectControllerProvider", () => {
+  test("shows the project chooser in the selected language", () => {
+    setInterfaceLanguage("es")
+    renderController(vi.fn(), {})
+    fireEvent.click(screen.getByRole("button", { name: "Open controlled chooser" }))
+    expect(screen.getByTestId("add-project-folder").textContent).toContain("Abrir desde carpeta")
+    setInterfaceLanguage("en")
+  })
+
   test("opens the shared chooser and picker cancellation is a no-op", async () => {
     const onAdded = vi.fn()
     const openProject = vi.fn()
@@ -111,7 +123,24 @@ describe("AddProjectControllerProvider", () => {
     expect(onAdded).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId("add-project-folder"))
+    expect(await screen.findByRole("dialog", { name: "Plan this project" })).toBeTruthy()
+    expect(onAdded).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Maybe later" }))
     await waitFor(() => expect(onAdded).toHaveBeenCalledWith(project))
     expect(screen.queryByTestId("add-project-menu")).toBeNull()
+  })
+
+  test("offers planning after an existing folder is added", async () => {
+    const onAdded = vi.fn()
+    renderController(onAdded, {
+      "system.pickDirectory": () => "/tmp/project-added",
+      "projects.open": () => project,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Open controlled chooser" }))
+    fireEvent.click(screen.getByTestId("add-project-folder"))
+    expect(await screen.findByText("Plan this project?")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Plan this project" }))
+    expect(screen.getByRole("heading", { name: "Project setup" })).toBeTruthy()
+    expect(onAdded).not.toHaveBeenCalled()
   })
 })

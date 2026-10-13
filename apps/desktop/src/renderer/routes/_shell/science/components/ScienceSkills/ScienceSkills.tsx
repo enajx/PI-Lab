@@ -2,6 +2,7 @@ import { Input } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { FlaskConical, Search } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslate } from "../../../../../i18n/language"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import {
@@ -39,6 +40,7 @@ const EMPTY_SKILLS: SkillCatalogItem[] = []
  * its card into view.
  */
 export function ScienceSkills() {
+  const t = useTranslate()
   const trpc = useTRPC()
 
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
@@ -110,9 +112,9 @@ export function ScienceSkills() {
     projects.length > 0 ? (
       <select
         data-testid="skills-project-select"
-        aria-label="Skills project"
-        data-feature-label="Skills project"
-        data-feature-help="Choose which project repository to inspect for agent skills."
+        aria-label={t("Skills project")}
+        data-feature-label={t("Skills project")}
+        data-feature-help={t("Choose which project repository to inspect for agent skills.")}
         value={selectedId ?? ""}
         onChange={(event) => {
           setSelectedId(event.target.value)
@@ -131,8 +133,8 @@ export function ScienceSkills() {
   return (
     <ScienceTabShell
       testId="science-skills"
-      title="Skills"
-      subtitle="Browse project-local and global agent skills"
+      title={t("Skills")}
+      subtitle={t("Browse project-local and global agent skills")}
       actions={selector}
     >
       <div className="flex shrink-0 items-center gap-3 border-border border-b px-6 py-2">
@@ -140,12 +142,14 @@ export function ScienceSkills() {
           <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
           <Input
             data-testid="skills-search"
-            aria-label="Search skills"
-            data-feature-label="Search skills"
-            data-feature-help="Filter the selected project's declared agent skills by name or description."
+            aria-label={t("Search skills")}
+            data-feature-label={t("Search skills")}
+            data-feature-help={t(
+              "Filter the selected project's declared agent skills by name or description.",
+            )}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search skills…"
+            placeholder={t("Search skills…")}
             className="h-8 pl-8"
             disabled={skills.length === 0}
           />
@@ -160,22 +164,24 @@ export function ScienceSkills() {
           ) : skillsQuery.isError ? (
             <SkillsMessage
               testId="science-skills-error"
-              title="Skills could not be indexed"
+              title={t("Skills could not be indexed")}
               detail={skillsQuery.error.message}
               destructive={true}
             />
           ) : skillsQuery.isLoading ? (
             <SkillsMessage
               testId="science-skills-loading"
-              title="Indexing skills…"
-              detail="Reading the conventional project-local and global skill locations."
+              title={t("Indexing skills…")}
+              detail={t("Reading the conventional project-local and global skill locations.")}
               destructive={false}
             />
           ) : skills.length === 0 ? (
             <SkillsMessage
               testId="science-skills-empty"
-              title="No skills found"
-              detail="PI Lab checked .claude/skills, .codex/skills, and .agents/skills in this project and in your home directory."
+              title={t("No skills found")}
+              detail={t(
+                "PI Lab checked .claude/skills, .codex/skills, and .agents/skills in this project and in your home directory.",
+              )}
               destructive={false}
             />
           ) : (
@@ -185,7 +191,7 @@ export function ScienceSkills() {
                 data-testid="skills-count"
                 className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
               >
-                {filtered.length} of {skills.length} skills
+                {filtered.length} {t("of")} {skills.length} {t("skills")}
               </div>
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {filtered.map((skill) => {
@@ -195,7 +201,9 @@ export function ScienceSkills() {
               </div>
               {filtered.length === 0 && skills.length > 0 ? (
                 <p data-testid="skills-no-matches" className="text-muted-foreground text-xs">
-                  {query ? `No skills match “${query}”.` : "No skills are visible in these scopes."}
+                  {query
+                    ? `${t("No skills match")} “${query}”.`
+                    : t("No skills are visible in these scopes.")}
                 </p>
               ) : null}
             </>
@@ -205,20 +213,20 @@ export function ScienceSkills() {
 
       {findOpen ? (
         <QuickFind
-          ariaLabel="Find a skill"
-          placeholder="Find a skill…"
-          scopeLabel="Skills"
+          ariaLabel={t("Find a skill")}
+          placeholder={t("Find a skill…")}
+          scopeLabel={t("Skills")}
           allowGlobalSearch
           // The skills currently shown in this tab (narrowed by the search box, if any).
           items={filtered.map(
             (skill): QuickFindItem => ({
               id: skillKey(skill),
               label: skill.name,
-              hint: `${skill.scope === "project" ? "Project-local" : "Global"} · ${skill.source}`,
+              hint: `${t(skill.scope === "project" ? "Project-local" : "Global")} · ${skill.source}`,
               icon: FlaskConical,
             }),
           )}
-          emptyText="No matching skills"
+          emptyText={t("No matching skills")}
           // No open/trigger action for a skill yet (v2) — highlight + scroll its card.
           onSelect={(item) => setSelectedKey(item.id)}
           onClose={() => setFindOpen(false)}
@@ -230,6 +238,7 @@ export function ScienceSkills() {
 
 /** Shown when no project is open at all (nothing to scan for skills). */
 function NoProjectsState() {
+  const t = useTranslate()
   return (
     <div
       data-testid="science-skills-no-projects"
@@ -237,9 +246,9 @@ function NoProjectsState() {
     >
       <FlaskConical className="size-8 text-muted-foreground" aria-hidden />
       <div className="flex flex-col gap-1">
-        <p className="font-medium text-foreground text-sm">No projects open</p>
+        <p className="font-medium text-foreground text-sm">{t("No projects open")}</p>
         <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
-          Open a project from the sidebar to browse the skills declared in its repo.
+          {t("Open a project from the sidebar to browse the skills declared in its repo.")}
         </p>
       </div>
     </div>

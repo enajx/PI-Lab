@@ -1,7 +1,8 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import type { CentralPanelController } from "../CentralPanel"
@@ -93,6 +94,14 @@ beforeEach(() => {
 })
 
 describe("ProjectPalette", () => {
+  test("translates project actions and shared search controls", () => {
+    renderHarness(makeController())
+    pressPalette()
+    act(() => setInterfaceLanguage("es"))
+    expect(screen.getByText("Abrir agente")).toBeTruthy()
+    expect(screen.getByTestId("quick-find-scope").textContent).toContain("Buscando:")
+    act(() => setInterfaceLanguage("en"))
+  })
   test("⇧⌘P opens the project palette and lists the action kinds", () => {
     renderHarness(makeController())
     expect(screen.queryByTestId("quick-find")).toBeNull()

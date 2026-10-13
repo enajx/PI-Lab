@@ -1,5 +1,6 @@
 import { Button, cn } from "@pi-lab/ui"
 import { Eye, EyeOff } from "lucide-react"
+import { useTranslate } from "../../../i18n/language"
 
 /**
  * Shared recoverability control for hidden projects. Dashboard and sidebar use
@@ -21,9 +22,12 @@ export function ProjectVisibilityToggle({
   onToggle: () => void
   className?: string
 }) {
+  const t = useTranslate()
   if (hiddenCount === 0) return null
 
-  const label = showHidden ? "Hide hidden projects" : `Show hidden projects (${hiddenCount})`
+  const label = showHidden
+    ? t("Hide hidden projects")
+    : `${t("Show hidden projects")} (${hiddenCount})`
   return (
     <Button
       type="button"
@@ -33,11 +37,11 @@ export function ProjectVisibilityToggle({
       aria-label={label}
       aria-pressed={showHidden}
       title={collapsed ? label : undefined}
-      data-feature-label={showHidden ? "Hide hidden" : `Show hidden (${hiddenCount})`}
+      data-feature-label={showHidden ? t("Hide hidden") : `${t("Show hidden")} (${hiddenCount})`}
       data-feature-help={
         showHidden
-          ? "Return hidden projects to their normal hidden state"
-          : "Temporarily reveal projects hidden from the Dashboard and sidebar"
+          ? t("Return hidden projects to their normal hidden state")
+          : t("Temporarily reveal projects hidden from the Dashboard and sidebar")
       }
       className={cn(
         "h-8 gap-1.5 text-muted-foreground",
@@ -47,7 +51,7 @@ export function ProjectVisibilityToggle({
       onClick={onToggle}
     >
       {showHidden ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
-      {collapsed ? null : showHidden ? "Hide hidden" : `Show hidden (${hiddenCount})`}
+      {collapsed ? null : showHidden ? t("Hide hidden") : `${t("Show hidden")} (${hiddenCount})`}
     </Button>
   )
 }

@@ -109,6 +109,26 @@ function enableWorktreePerAgent(): void {
 }
 
 describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
+  test("title bar status lists live sessions with their agent, project, and state", async () => {
+    h.db
+      .insert(agentSessions)
+      .values({
+        sessionId: "live-status-session",
+        projectId,
+        agentId: LONG_FAKE_AGENT.id,
+        state: "working",
+      })
+      .run()
+    const status = await h.caller.sessions.status()
+    expect(status).toContainEqual({
+      sessionId: "live-status-session",
+      projectId,
+      projectName: expect.any(String),
+      agentId: LONG_FAKE_AGENT.id,
+      state: "working",
+    })
+  })
+
   test("no prior agent -> kind 'branch', cwd is the repo root, agent runs", async () => {
     const result = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
 

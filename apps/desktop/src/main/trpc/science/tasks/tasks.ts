@@ -1,6 +1,6 @@
 import { type PiLabDatabase, type Project, projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
-import { eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { z } from "zod"
 import { publicProcedure, router } from "../../trpc"
 import { createTask, deleteTask, listProjectTasks, moveTask, updateTask } from "./store"
@@ -44,13 +44,24 @@ function requireProject(db: PiLabDatabase, projectId: string): Project {
 
 /**
  * Markdown-backed task procedures. TODO Markdown remains the sole source of
- * truth; the local database is used only to enumerate and resolve projects.
+ * truth; the local database remembers each project's selected Markdown file.
  */
 export const tasksRouter = router({
   /** Aggregate tasks and source health from every local project. */
   list: publicProcedure.query(async ({ ctx }) => {
     const projectRows = ctx.db.select().from(projects).all()
-    return listProjectTasks(projectRows)
+    const listing = await listProjectTasks(projectRows)
+    for (const source of listing.sources) {
+      const project = projectRows.find((row) => row.id === source.projectId)
+      if (project && !project.taskRelPath && source.state === "ready" && source.relPath) {
+        ctx.db
+          .update(projects)
+          .set({ taskRelPath: source.relPath, updatedAt: Date.now() })
+          .where(and(eq(projects.id, project.id), isNull(projects.taskRelPath)))
+          .run()
+      }
+    }
+    return listing
   }),
 
   create: publicProcedure

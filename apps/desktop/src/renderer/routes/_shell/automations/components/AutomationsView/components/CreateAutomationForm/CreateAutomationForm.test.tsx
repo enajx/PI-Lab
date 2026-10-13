@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, test, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../../../../../i18n/language"
 import { AppProviders } from "../../../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../../../test/fakeTrpcClient"
 import { CreateAutomationForm } from "./CreateAutomationForm"
@@ -19,6 +20,7 @@ const AGENTS = [
     label: "Claude Code",
     available: true,
     executable: "/usr/bin/claude",
+    oneShot: true,
   },
 ]
 
@@ -38,15 +40,31 @@ function renderForm(handlers: FakeHandlers, onSubmit = vi.fn(), onCancel = vi.fn
   return { onSubmit, onCancel }
 }
 
+const NEXT_RUN = Date.UTC(2026, 9, 15, 10, 30)
 const validPreview: FakeHandlers = {
   "automations.previewSchedule": () => ({
     valid: true,
     summary: "Daily at 9:00 AM",
-    upcoming: [Date.now() + 3_600_000],
+    upcoming: [NEXT_RUN],
   }),
 }
 
 describe("CreateAutomationForm", () => {
+  afterEach(() => setInterfaceLanguage("en"))
+
+  test("translates controls but keeps the schedule preview supplied by the service", async () => {
+    act(() => setInterfaceLanguage("es"))
+    renderForm(validPreview)
+    expect(screen.getByRole("button", { name: "Crear flujo de trabajo" })).toBeTruthy()
+    expect(screen.getByLabelText("Repetir")).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByTestId("schedule-preview-summary").textContent).toBe("Daily at 9:00 AM")
+      expect(screen.getByTestId("schedule-preview").textContent).toContain(
+        new Date(NEXT_RUN).toLocaleString("es"),
+      )
+    })
+  })
+
   test("renders the schedule builder with a live preview", async () => {
     renderForm(validPreview)
     expect(screen.getByTestId("schedule-builder")).toBeTruthy()

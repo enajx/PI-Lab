@@ -15,7 +15,9 @@ import {
   Users,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { ProjectTypeChoice } from "../../../../../components/ProjectTypeChoice"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
+import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import {
   readFetchExperimentsInstructions,
   useDigitalRainDensity,
@@ -80,6 +82,7 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project }: ProjectCardProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -99,8 +102,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const gitAvailable =
     !capabilitiesQuery.isError && (capabilitiesQuery.data?.git ?? project.defaultBranch !== null)
   const gitDisabledReason = capabilitiesQuery.isError
-    ? `Could not check Git availability: ${capabilitiesQuery.error.message}`
-    : "Initialize Git to use this Git-backed action."
+    ? `${t("Could not check Git availability:")} ${capabilitiesQuery.error.message}`
+    : t("Initialize Git to use this Git-backed action.")
 
   const invalidateProjects = () => {
     void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
@@ -148,7 +151,9 @@ export function ProjectCard({ project }: ProjectCardProps) {
       await setThumbnail.mutateAsync({ id: project.id, dataUrl })
     } catch (error) {
       if (generation === artworkGenerationRef.current) {
-        setThumbnailError(error instanceof Error ? error.message : "Could not set this thumbnail.")
+        setThumbnailError(
+          error instanceof Error ? error.message : t("Could not set this thumbnail."),
+        )
       }
     }
   }
@@ -257,7 +262,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
       data-state={state}
       data-hidden={Boolean(project.archivedAt)}
       className={cn(
-        "group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card text-left",
+        "group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card text-start",
         isDragOver && "border-brand ring-2 ring-brand/40",
         project.archivedAt && "opacity-60 saturate-50",
       )}
@@ -375,14 +380,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
         ) : null}
         {isDragOver ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-foreground text-xs">
-            Drop image to set thumbnail
+            {t("Drop image to set thumbnail")}
           </div>
         ) : null}
       </div>
 
       {thumbnail.tooLarge ? (
         <div role="alert" className="flex items-center justify-between gap-2 px-3 py-1 text-xs">
-          <span>Stored thumbnail is too large to display.</span>
+          <span>{t("Stored thumbnail is too large to display.")}</span>
           <button
             type="button"
             className="underline"
@@ -391,7 +396,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
               setThumbnail.mutate({ id: project.id, dataUrl: null })
             }}
           >
-            Clear thumbnail
+            {t("Clear thumbnail")}
           </button>
         </div>
       ) : null}
@@ -418,8 +423,10 @@ export function ProjectCard({ project }: ProjectCardProps) {
           type="button"
           data-testid="project-card-open"
           data-feature-label={project.name}
-          data-feature-help={`Open the ${project.name} project workspace; right-click anywhere on the card to set a thumbnail or generate a new gradient`}
-          className="flex flex-col items-start gap-1.5 p-3 text-left outline-none transition-colors focus-visible:bg-accent/40"
+          data-feature-help={t(
+            "Open this project workspace; right-click anywhere on the card to set a thumbnail or generate a new gradient",
+          )}
+          className="flex flex-col items-start gap-1.5 p-3 text-start outline-none transition-colors focus-visible:bg-accent/40"
         >
           <div className="flex w-full items-center gap-2">
             <span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
@@ -431,7 +438,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
               className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
             >
               <span className={cn("size-2 rounded-full", STATUS_DOT[state])} aria-hidden />
-              {STATUS_LABEL[state]}
+              {t(STATUS_LABEL[state])}
             </span>
           </div>
         </button>
@@ -439,6 +446,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
         {/* Extra metadata (collaborators / venue / deadline / emoji tags / links)
             under the title — only the fields the user filled render. */}
         {project.metadata ? <ProjectCardMetadata metadata={project.metadata} /> : null}
+      </div>
+
+      <div className="px-3 pb-2">
+        <ProjectTypeChoice
+          projectId={project.id}
+          typeId={project.typeId}
+          testId={`project-card-type-${project.id}`}
+        />
       </div>
 
       {/* Card actions pinned to the bottom: launch a placeholder auto-research
@@ -453,12 +468,12 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <button
           type="button"
           data-testid="project-card-auto-research"
-          aria-label={`Auto-research ${project.name}`}
-          title={gitAvailable ? "Auto-research" : gitDisabledReason}
-          data-feature-label={`Auto-research ${project.name}`}
+          aria-label={`${t("Auto-research")} ${project.name}`}
+          title={gitAvailable ? t("Auto-research") : gitDisabledReason}
+          data-feature-label={`${t("Auto-research")} ${project.name}`}
           data-feature-help={
             gitAvailable
-              ? `Open an isolated worktree agent session for ${project.name} and seed a placeholder AUTORESEARCH.md`
+              ? t("Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md")
               : gitDisabledReason
           }
           disabled={!gitAvailable}
@@ -518,12 +533,12 @@ export function ProjectCard({ project }: ProjectCardProps) {
 }
 
 /** Format an ISO `YYYY-MM-DD` deadline as a readable local date (no TZ shift). */
-function formatDeadline(iso: string): string {
+function formatDeadline(iso: string, language: string, due: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
   if (!match) return iso
   const [, year, month, day] = match
   const date = new Date(Number(year), Number(month) - 1, Number(day))
-  return `Due ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
+  return `${due} ${date.toLocaleDateString(language, { month: "short", day: "numeric", year: "numeric" })}`
 }
 
 /**
@@ -532,6 +547,8 @@ function formatDeadline(iso: string): string {
  * so the block only shows what the user actually entered.
  */
 function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
+  const [language] = useInterfaceLanguage()
+  const t = useTranslate()
   const emojiTags = metadata.emojiTags ?? []
   const links = metadata.referenceLinks ?? []
   const hasAny =
@@ -560,7 +577,9 @@ function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
       {metadata.deadline ? (
         <div data-testid="project-card-deadline" className="flex items-center gap-1.5">
           <CalendarClock className="size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 truncate">{formatDeadline(metadata.deadline)}</span>
+          <span className="min-w-0 truncate">
+            {formatDeadline(metadata.deadline, language, t("Due"))}
+          </span>
         </div>
       ) : null}
       {emojiTags.length > 0 ? (
@@ -615,6 +634,7 @@ function ProjectCardMenu({
   hidden: boolean
   onSetHidden: () => void
 }) {
+  const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -647,34 +667,34 @@ function ProjectCardMenu({
         role="menuitem"
         data-testid="project-card-menu-thumbnail"
         onClick={onSetThumbnail}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60"
       >
         <ImagePlus className="size-4 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">Set thumbnail…</span>
+        <span className="min-w-0 truncate">{t("Set thumbnail…")}</span>
       </button>
       <button
         type="button"
         role="menuitem"
         data-testid="project-card-menu-edit"
         onClick={onEditProject}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60"
       >
         <Pencil className="size-4 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">Edit project…</span>
+        <span className="min-w-0 truncate">{t("Edit project…")}</span>
       </button>
       <button
         type="button"
         role="menuitem"
         data-testid={hidden ? "project-card-menu-restore" : "project-card-menu-hide"}
         onClick={onSetHidden}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60"
       >
         {hidden ? (
           <Eye className="size-4 shrink-0" aria-hidden />
         ) : (
           <EyeOff className="size-4 shrink-0" aria-hidden />
         )}
-        <span className="min-w-0 truncate">{hidden ? "Unhide project" : "Hide project"}</span>
+        <span className="min-w-0 truncate">{hidden ? t("Unhide project") : t("Hide project")}</span>
       </button>
     </div>
   )
@@ -691,6 +711,7 @@ function ProjectCardArtworkDialog({
   onGenerateGradient: () => void
   onChooseDigitalRain: () => void
 }) {
+  const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -714,38 +735,40 @@ function ProjectCardArtworkDialog({
         ref={rootRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Set thumbnail"
+        aria-label={t("Set thumbnail")}
         data-testid="project-card-artwork-dialog"
         className="w-full max-w-sm rounded-xl border border-border bg-card p-4 text-card-foreground shadow-xl"
       >
-        <h2 className="font-medium text-foreground text-sm">Set thumbnail</h2>
+        <h2 className="font-medium text-foreground text-sm">{t("Set thumbnail")}</h2>
         <p className="mt-1 text-muted-foreground text-xs">
-          Choose an image file, a new project gradient, or ASCII Digital Rain.
+          {t("Choose an image file, a new project gradient, or ASCII Digital Rain.")}
         </p>
         <div className="mt-4 grid gap-2">
           <button
             type="button"
             data-testid="project-card-artwork-file"
             onClick={onChooseFile}
-            className="flex items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            className="flex items-center gap-3 rounded-lg border border-border p-3 text-start transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
           >
             <ImagePlus className="size-5 shrink-0 text-muted-foreground" aria-hidden />
             <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="font-medium text-sm">Choose image file</span>
-              <span className="text-muted-foreground text-xs">Use an image or animated GIF.</span>
+              <span className="font-medium text-sm">{t("Choose image file")}</span>
+              <span className="text-muted-foreground text-xs">
+                {t("Use an image or animated GIF.")}
+              </span>
             </span>
           </button>
           <button
             type="button"
             data-testid="project-card-artwork-gradient"
             onClick={onGenerateGradient}
-            className="flex items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            className="flex items-center gap-3 rounded-lg border border-border p-3 text-start transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
           >
             <Sparkles className="size-5 shrink-0 text-muted-foreground" aria-hidden />
             <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="font-medium text-sm">Generate new gradient</span>
+              <span className="font-medium text-sm">{t("Generate new gradient")}</span>
               <span className="text-muted-foreground text-xs">
-                Create a new theme-sampled gradient.
+                {t("Create a new theme-sampled gradient.")}
               </span>
             </span>
           </button>
@@ -753,7 +776,7 @@ function ProjectCardArtworkDialog({
             type="button"
             data-testid="project-card-artwork-digital-rain"
             onClick={onChooseDigitalRain}
-            className="flex items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            className="flex items-center gap-3 rounded-lg border border-border p-3 text-start transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
           >
             <span
               className="flex size-5 shrink-0 items-center justify-center rounded bg-black font-mono text-[10px] text-white"
@@ -762,9 +785,9 @@ function ProjectCardArtworkDialog({
               01
             </span>
             <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="font-medium text-sm">Digital Rain</span>
+              <span className="font-medium text-sm">{t("Digital Rain")}</span>
               <span className="text-muted-foreground text-xs">
-                Animate ASCII sampled from this project&apos;s files.
+                {t("Animate ASCII sampled from this project's files.")}
               </span>
             </span>
           </button>
@@ -776,7 +799,7 @@ function ProjectCardArtworkDialog({
             onClick={onClose}
             className="rounded-md px-3 py-1.5 text-muted-foreground text-sm transition-colors hover:bg-accent/60 hover:text-foreground"
           >
-            Cancel
+            {t("Cancel")}
           </button>
         </div>
       </div>

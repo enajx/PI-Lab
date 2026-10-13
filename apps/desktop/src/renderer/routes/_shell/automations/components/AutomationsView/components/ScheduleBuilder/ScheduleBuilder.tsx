@@ -7,6 +7,7 @@ import {
 import { Input, Label } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
+import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 
 interface ScheduleBuilderProps {
@@ -58,6 +59,8 @@ function toHHMM(hour: number, minute: number): string {
  * whenever the rule fits an authored shape, and falls back to Custom otherwise.
  */
 export function ScheduleBuilder({ value, onChange, timezone }: ScheduleBuilderProps) {
+  const [language] = useInterfaceLanguage()
+  const t = useTranslate()
   const trpc = useTRPC()
   const matched = useMemo(() => matchPreset(value), [value])
   // The active mode is normally derived from the rule, but "Custom" is sticky:
@@ -101,7 +104,7 @@ export function ScheduleBuilder({ value, onChange, timezone }: ScheduleBuilderPr
     <div className="flex flex-col gap-3" data-testid="schedule-builder">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="schedule-mode" className="text-muted-foreground text-xs">
-          Repeat
+          {t("Repeat")}
         </Label>
         <select
           id="schedule-mode"
@@ -112,7 +115,7 @@ export function ScheduleBuilder({ value, onChange, timezone }: ScheduleBuilderPr
         >
           {MODE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {t(opt.label)}
             </option>
           ))}
         </select>
@@ -121,7 +124,7 @@ export function ScheduleBuilder({ value, onChange, timezone }: ScheduleBuilderPr
       {(preset.kind === "daily" || preset.kind === "weekdays" || preset.kind === "weekly") && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="schedule-time" className="text-muted-foreground text-xs">
-            Time
+            {t("Time")}
           </Label>
           <Input
             id="schedule-time"
@@ -143,7 +146,7 @@ export function ScheduleBuilder({ value, onChange, timezone }: ScheduleBuilderPr
       {preset.kind === "weekly" && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="schedule-weekday" className="text-muted-foreground text-xs">
-            Day of week
+            {t("Day of week")}
           </Label>
           <select
             id="schedule-weekday"
@@ -163,7 +166,7 @@ export function ScheduleBuilder({ value, onChange, timezone }: ScheduleBuilderPr
           >
             {WEEKDAY_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
-                {opt.label}
+                {t(opt.label)}
               </option>
             ))}
           </select>
@@ -198,13 +201,13 @@ export function ScheduleBuilder({ value, onChange, timezone }: ScheduleBuilderPr
             </p>
             {preview.data.upcoming.length > 0 ? (
               <p className="mt-0.5 text-muted-foreground">
-                Next: {new Date(preview.data.upcoming[0] ?? 0).toLocaleString()}
+                {t("Next:")} {new Date(preview.data.upcoming[0] ?? 0).toLocaleString(language)}
               </p>
             ) : null}
           </>
         ) : (
           <p className="text-destructive" data-testid="schedule-preview-invalid">
-            Enter a valid recurrence rule.
+            {t("Enter a valid recurrence rule.")}
           </p>
         )}
       </div>

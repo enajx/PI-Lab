@@ -1,6 +1,7 @@
 import { EditorView } from "@codemirror/view"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, test, vi } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../i18n/language"
 import {
   EDITOR_FONT_DEFAULT_FAMILY,
   useEditorFontFamily,
@@ -92,6 +93,50 @@ describe("CodeMirrorBuffer typography", () => {
 })
 
 describe("CodeMirrorBuffer Markdown editing", () => {
+  afterEach(() => setInterfaceLanguage("en"))
+
+  test("links to a project file from nested Markdown with a relative encoded path", async () => {
+    const onChange = vi.fn()
+    const rendered = render(
+      <CodeMirrorBuffer
+        relPath="docs/notes.md"
+        initialDoc="@res"
+        onChange={onChange}
+        onSave={vi.fn()}
+        projectEntries={[
+          { name: "results (final).csv", relPath: "data/results (final).csv", kind: "file" },
+        ]}
+      />,
+    )
+    const editor = findEditor(rendered.container)
+    act(() => editor.dispatch({ selection: { anchor: 4 } }))
+
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: "data/results (final).csv" })).toBeTruthy(),
+    )
+    fireEvent.keyDown(editor.contentDOM, { key: "Enter" })
+    expect(onChange).toHaveBeenLastCalledWith(
+      "[results (final).csv](../data/results%20%28final%29.csv)",
+    )
+  })
+
+  test("translates Markdown formatting controls", () => {
+    setInterfaceLanguage("es")
+    const rendered = render(
+      <CodeMirrorBuffer
+        relPath="notes.md"
+        initialDoc="important result"
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        markdownMode="render"
+        projectEntries={[]}
+      />,
+    )
+    act(() => findEditor(rendered.container).dispatch({ selection: { anchor: 0, head: 9 } }))
+    expect(screen.getByRole("toolbar", { name: "Formato Markdown" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Negrita" })).toBeTruthy()
+  })
+
   test("Render keeps source editable while styling Markdown structure, and Source removes it", () => {
     const markdown = [
       "# Sponsor kit",

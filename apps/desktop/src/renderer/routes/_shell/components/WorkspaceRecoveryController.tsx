@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import type { ShutdownBridge, ShutdownRequest } from "../../../../shared/shutdown"
 import { drainFileOperations } from "../../../Editor/hooks/useEditorBuffers/fileOperations"
+import { useTranslate } from "../../../i18n/language"
 import { readRestoreProjectTabs, useRestoreProjectTabs } from "../../../preferences/preferences"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { closeDiscardedBuffers, saveProjectBuffer } from "../projects/-workspaceEditorOperations"
@@ -13,12 +14,18 @@ import { useNewFileController } from "./NewFileController"
 
 declare global {
   interface Window {
-    piLab?: { platform: string; shutdown: ShutdownBridge }
+    piLab?: {
+      platform: string
+      shutdown: ShutdownBridge
+      getPathForFile?: (file: File) => string
+      setInterfaceLanguage?: (language: string) => void
+    }
   }
 }
 
 /** Own recovery warnings and native close decisions above project-route teardown. */
 export function WorkspaceRecoveryController() {
+  const t = useTranslate()
   const store = workspaceRecovery()
   const trpc = useTRPC()
   const client = useTRPCClient()
@@ -115,7 +122,7 @@ export function WorkspaceRecoveryController() {
           chooseNewFile,
         )
         if (!result.saved) {
-          setError(result.error ?? "Could not save all affected files. PI Lab is still open.")
+          setError(result.error ?? t("Could not save all affected files. PI Lab is still open."))
           setAffected(currentAffected())
           return
         }
@@ -125,7 +132,7 @@ export function WorkspaceRecoveryController() {
       const remaining = store.affected(readRestoreProjectTabs())
       if (remaining.length > 0) {
         setAffected(remaining)
-        setError("There are newer unsaved edits. PI Lab is still open.")
+        setError(t("There are newer unsaved edits. PI Lab is still open."))
         return
       }
       respond(true)
@@ -145,7 +152,7 @@ export function WorkspaceRecoveryController() {
       const latest = currentAffected()
       if (!store.discard(latest, closeDiscardedBuffers)) {
         setError(
-          "Could not remove the discarded drafts from recovery storage. PI Lab is still open.",
+          t("Could not remove the discarded drafts from recovery storage. PI Lab is still open."),
         )
         setAffected(currentAffected())
         return
@@ -155,7 +162,7 @@ export function WorkspaceRecoveryController() {
       const remaining = store.affected(readRestoreProjectTabs())
       if (remaining.length > 0) {
         setAffected(remaining)
-        setError("There are newer unsaved edits. PI Lab is still open.")
+        setError(t("There are newer unsaved edits. PI Lab is still open."))
         return
       }
       respond(true)
@@ -168,7 +175,7 @@ export function WorkspaceRecoveryController() {
   const warnings = store.warnings()
   if (!recoveryEnabled && store.affected(false).length > 0)
     warnings.push(
-      "Draft recovery is disabled. Current unsaved edits are not protected across relaunch.",
+      t("Draft recovery is disabled. Current unsaved edits are not protected across relaunch."),
     )
   return (
     <>
@@ -179,7 +186,7 @@ export function WorkspaceRecoveryController() {
           className="fixed right-4 bottom-4 z-40 max-w-lg rounded-md border border-border bg-popover p-3 text-xs shadow-lg"
         >
           {warnings.map((message) => (
-            <p key={message}>{message}</p>
+            <p key={message}>{t(message)}</p>
           ))}
         </div>
       ) : null}
@@ -192,11 +199,11 @@ export function WorkspaceRecoveryController() {
             className="w-[min(34rem,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-5 shadow-xl"
           >
             <h2 id="unsaved-changes-title" className="font-semibold">
-              Unsaved changes
+              {t("Unsaved changes")}
             </h2>
             <p className="mt-2 text-sm">
-              These edits are not protected by draft recovery. Save or discard them before{" "}
-              {request.intent === "quit" ? "quitting" : "closing the window"}.
+              {t("These edits are not protected by draft recovery. Save or discard them before")}{" "}
+              {request.intent === "quit" ? t("quitting") : t("closing the window")}.
             </p>
             <ul className="my-3 max-h-40 overflow-auto text-sm">
               {affected.map((item) => (
@@ -210,13 +217,13 @@ export function WorkspaceRecoveryController() {
             ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" disabled={busy} onClick={() => respond(false)}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button variant="ghost" disabled={busy} onClick={() => void discard()}>
-                Discard affected
+                {t("Discard affected")}
               </Button>
               <Button disabled={busy} onClick={() => void save()}>
-                {busy ? "Saving…" : "Save affected"}
+                {busy ? t("Saving…") : t("Save affected")}
               </Button>
             </div>
           </section>

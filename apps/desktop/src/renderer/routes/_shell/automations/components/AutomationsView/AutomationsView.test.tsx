@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { AutomationsView } from "./AutomationsView"
@@ -50,6 +51,14 @@ const baseHandlers: FakeHandlers = {
 }
 
 describe("AutomationsView", () => {
+  test("translates the workflow empty state after a language change", async () => {
+    renderView({ ...baseHandlers, "automations.list": () => [] })
+    await screen.findByTestId("automations-empty")
+    act(() => setInterfaceLanguage("es"))
+    expect(screen.getByText("Todavía no hay flujos de trabajo")).toBeTruthy()
+    act(() => setInterfaceLanguage("en"))
+  })
+
   test("renders the empty state when there are no automations", async () => {
     renderView({ ...baseHandlers, "automations.list": () => [] })
     await waitFor(() => {

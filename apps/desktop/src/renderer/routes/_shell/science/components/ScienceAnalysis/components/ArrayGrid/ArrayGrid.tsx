@@ -1,4 +1,5 @@
 import type { ArrayPreview } from "../../../../../../../../main/trpc/science/analysis"
+import { useTranslate } from "../../../../../../../i18n/language"
 
 /**
  * Grid renderer for an {@link ArrayPreview} — a decoded 2-D `.npy` array. Shows
@@ -8,20 +9,23 @@ import type { ArrayPreview } from "../../../../../../../../main/trpc/science/ana
  * `user-select: none`).
  */
 export function ArrayGrid({ preview }: { preview: ArrayPreview }) {
+  const t = useTranslate()
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 text-xs">
         <span className="rounded-sm bg-muted/60 px-1.5 py-0.5 font-mono text-muted-foreground">
           {preview.dtype}
         </span>
-        <span className="text-muted-foreground">shape [{preview.shape.join(" × ")}]</span>
+        <span className="text-muted-foreground">
+          {t("shape")} [{preview.shape.join(" × ")}]
+        </span>
       </div>
       {preview.rows.length === 0 ? (
         <p
           data-testid="analysis-preview-array-empty"
           className="select-text cursor-text text-muted-foreground text-sm"
         >
-          The array has no values to show.
+          {t("The array has no values to show.")}
         </p>
       ) : (
         <div className="overflow-auto rounded-md border border-border">
@@ -60,8 +64,8 @@ export function ArrayGrid({ preview }: { preview: ArrayPreview }) {
       )}
       {preview.truncated ? (
         <p className="text-amber-500 text-xs">
-          Array truncated — showing the first {preview.rows.length} rows and{" "}
-          {preview.columns.length} columns.
+          {t("Array truncated — showing the first")} {preview.rows.length} {t("rows and")}{" "}
+          {preview.columns.length} {t("columns.")}
         </p>
       ) : null}
     </div>

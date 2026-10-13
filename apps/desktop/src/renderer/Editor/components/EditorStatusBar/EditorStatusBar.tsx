@@ -11,6 +11,7 @@ import {
   TerminalSquare,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useTranslate } from "../../../i18n/language"
 import type { RouterOutputs } from "../../../trpc/types"
 import type { PythonRuntimeState } from "../../hooks/useEditorBuffers/useEditorBuffers"
 import type { DiagnosticCounts } from "../../utils/pythonDiagnostics"
@@ -66,6 +67,7 @@ export function EditorStatusBar({
   markdownMode,
   onMarkdownModeChange,
 }: EditorStatusBarProps) {
+  const t = useTranslate()
   return (
     <div
       data-testid="editor-status-bar"
@@ -94,12 +96,12 @@ export function EditorStatusBar({
       {markdownMode && onMarkdownModeChange ? (
         <fieldset
           data-testid="markdown-mode-toggle"
-          aria-label="Markdown view"
+          aria-label={t("Markdown view")}
           className="flex shrink-0 items-center rounded border border-border bg-background p-0.5"
         >
           <button
             type="button"
-            aria-label="Render Markdown"
+            aria-label={t("Render Markdown")}
             aria-pressed={markdownMode === "render"}
             onClick={() => onMarkdownModeChange("render")}
             className={
@@ -112,7 +114,7 @@ export function EditorStatusBar({
           </button>
           <button
             type="button"
-            aria-label="Source Markdown"
+            aria-label={t("Source Markdown")}
             aria-pressed={markdownMode === "source"}
             onClick={() => onMarkdownModeChange("source")}
             className={
@@ -142,6 +144,7 @@ function PythonRuntimeSummary({
   selectEnvironment,
   chooseEnvironment,
 }: PythonRuntimeSummaryProps) {
+  const t = useTranslate()
   const [open, setOpen] = useState(false)
   const [options, setOptions] = useState<RouterOutputs["python"]["options"]>([])
   const [loading, setLoading] = useState(false)
@@ -175,7 +178,7 @@ function PythonRuntimeSummary({
     try {
       setOptions(await listEnvironments())
     } catch (cause) {
-      setMenuError(`Could not list Python environments: ${String(cause)}`)
+      setMenuError(`${t("Could not list Python environments:")} ${String(cause)}`)
     } finally {
       setLoading(false)
     }
@@ -191,15 +194,17 @@ function PythonRuntimeSummary({
 
   const label =
     state.checking && !state.runtime
-      ? "Detecting Python…"
+      ? t("Detecting Python…")
       : state.error && !state.runtime
-        ? "Python env unavailable"
-        : (state.runtime?.displayName ?? "No virtual env")
+        ? t("Python env unavailable")
+        : (state.runtime?.displayName ?? t("No virtual env"))
   const strategy = state.runtime?.runStrategy
   const tooltip =
     state.error ??
     state.runtime?.interpreterPath ??
-    (strategy?.command ? [strategy.command, ...strategy.argsPrefix].join(" ") : "No Python runtime")
+    (strategy?.command
+      ? [strategy.command, ...strategy.argsPrefix].join(" ")
+      : t("No Python runtime"))
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -217,16 +222,16 @@ function PythonRuntimeSummary({
       {open ? (
         <div
           role="menu"
-          aria-label="Python environment"
-          className="absolute right-0 bottom-full z-30 mb-1 w-80 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          aria-label={t("Python environment")}
+          className="absolute end-0 bottom-full z-30 mb-1 w-80 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
         >
           <div className="px-2 py-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
-            Python environment
+            {t("Python environment")}
           </div>
-          {loading ? <div className="px-2 py-2 text-muted-foreground">Checking…</div> : null}
+          {loading ? <div className="px-2 py-2 text-muted-foreground">{t("Checking…")}</div> : null}
           {menuError ? (
             <div className="px-2 py-2 text-destructive" title={menuError}>
-              Environments unavailable
+              {t("Environments unavailable")}
             </div>
           ) : null}
           {state.error ? (
@@ -248,7 +253,7 @@ function PythonRuntimeSummary({
                     role="menuitem"
                     key={option.interpreterPath}
                     onClick={() => void select(option.path)}
-                    className="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left hover:bg-accent"
+                    className="flex w-full items-start gap-2 rounded px-2 py-1.5 text-start hover:bg-accent"
                   >
                     <span className="mt-0.5 w-3 shrink-0">
                       {selected ? <Check className="size-3" aria-hidden /> : null}
@@ -268,32 +273,32 @@ function PythonRuntimeSummary({
             type="button"
             role="menuitem"
             onClick={() => void select(null)}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-start text-xs hover:bg-accent"
           >
             <span className="w-3 shrink-0">
               {state.runtime?.source !== "selected" ? (
                 <Check className="size-3" aria-hidden />
               ) : null}
             </span>
-            Auto-detect
+            {t("Auto-detect")}
           </button>
           <button
             type="button"
             role="menuitem"
             onClick={() => void choose("directory")}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-start text-xs hover:bg-accent"
           >
             <FolderOpen className="size-3 shrink-0" aria-hidden />
-            Choose environment folder…
+            {t("Choose environment folder…")}
           </button>
           <button
             type="button"
             role="menuitem"
             onClick={() => void choose("interpreter")}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-start text-xs hover:bg-accent"
           >
             <TerminalSquare className="size-3 shrink-0" aria-hidden />
-            Choose Python interpreter…
+            {t("Choose Python interpreter…")}
           </button>
         </div>
       ) : null}
@@ -312,14 +317,15 @@ function DiagnosticsSummary({
   enabled: boolean
   onToggle: () => void
 }) {
+  const t = useTranslate()
   const title = enabled
-    ? "Python type checking is on. Click to turn it off."
-    : "Python type checking is off. Click to turn it on."
+    ? t("Python type checking is on. Click to turn it off.")
+    : t("Python type checking is off. Click to turn it on.")
   return (
     <button
       type="button"
       data-testid="editor-diagnostics-toggle"
-      aria-label={enabled ? "Turn Python type checking off" : "Turn Python type checking on"}
+      aria-label={enabled ? t("Turn Python type checking off") : t("Turn Python type checking on")}
       aria-pressed={enabled}
       title={title}
       onClick={onToggle}
@@ -345,29 +351,30 @@ function DiagnosticsContent({
 }: Pick<EditorStatusBarProps, "counts" | "missing" | "checking" | "hasRun"> & {
   enabled: boolean
 }) {
+  const t = useTranslate()
   if (!enabled) {
-    return <span className="text-muted-foreground/70">Type check: Off</span>
+    return <span className="text-muted-foreground/70">{t("Type check: Off")}</span>
   }
   if (missing.length > 0) {
     return (
       <span
         data-testid="editor-tools-missing"
         className="flex items-center gap-1 text-muted-foreground/80"
-        title={`Missing: ${missing.join(", ")}. Install uv (uvx ships with it) to enable Python diagnostics.`}
+        title={`${t("Missing:")} ${missing.join(", ")}. ${t("Install uv (uvx ships with it) to enable Python diagnostics.")}`}
       >
         <TerminalSquare className="size-3" aria-hidden />
-        Python tools unavailable (install uv)
+        {t("Python tools unavailable (install uv)")}
       </span>
     )
   }
   if (checking && !hasRun) {
     return (
       <span data-testid="editor-diagnostics-checking" className="text-muted-foreground/70">
-        Checking…
+        {t("Checking…")}
       </span>
     )
   }
-  if (!hasRun) return <span className="text-muted-foreground/70">Diagnostics on</span>
+  if (!hasRun) return <span className="text-muted-foreground/70">{t("Diagnostics on")}</span>
 
   const { errors, warnings, infos } = counts
   if (errors === 0 && warnings === 0 && infos === 0) {
@@ -377,7 +384,7 @@ function DiagnosticsContent({
         className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"
       >
         <CheckCircle2 className="size-3" aria-hidden />
-        No problems
+        {t("No problems")}
       </span>
     )
   }

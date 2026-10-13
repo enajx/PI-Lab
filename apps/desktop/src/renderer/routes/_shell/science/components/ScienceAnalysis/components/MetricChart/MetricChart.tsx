@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts"
 import type { ChartPreview } from "../../../../../../../../main/trpc/science/analysis"
+import { useTranslate } from "../../../../../../../i18n/language"
 
 /**
  * Line-chart renderer for a {@link ChartPreview} — a numeric metric log (a
@@ -58,6 +59,7 @@ function useMeasuredWidth(): { ref: React.RefObject<HTMLDivElement | null>; widt
 }
 
 export function MetricChart({ preview }: { preview: ChartPreview }) {
+  const t = useTranslate()
   const { ref, width } = useMeasuredWidth()
 
   // Transpose the columnar { x, series[] } payload into recharts' per-point rows
@@ -76,7 +78,7 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
         data-testid="analysis-preview-chart-empty"
         className="select-text cursor-text text-muted-foreground text-sm"
       >
-        No plottable points in this file.
+        {t("No plottable points in this file.")}
       </p>
     )
   }
@@ -141,7 +143,7 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
       </div>
       {preview.truncated ? (
         <p className="text-amber-500 text-xs">
-          Chart downsampled — the file has more points than are plotted.
+          {t("Chart downsampled — the file has more points than are plotted.")}
         </p>
       ) : null}
     </div>

@@ -2,6 +2,7 @@ import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysi
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
+import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { ArrayGrid } from "../ArrayGrid"
 import { MetricChart } from "../MetricChart"
@@ -24,6 +25,7 @@ export function AnalysisPreview({
   relPath: string
   kind: DataFileKind
 }) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const interactive = kind === "report" || kind === "marimo"
   const preview = useQuery({
@@ -54,13 +56,13 @@ export function AnalysisPreview({
             kind={kind === "marimo" ? "marimo" : "report"}
           />
         ) : preview.isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading preview…</p>
+          <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
         ) : preview.isError ? (
           <p
             data-testid="analysis-preview-error"
             className="select-text cursor-text text-destructive text-sm"
           >
-            {preview.error?.message ?? "Failed to load preview."}
+            {preview.error?.message ?? t("Failed to load preview.")}
           </p>
         ) : preview.data ? (
           <PreviewBody preview={preview.data} />
@@ -81,6 +83,7 @@ function InteractivePreview({
   relPath: string
   kind: "report" | "marimo"
 }) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const ownerId = useRef(`analysis-${crypto.randomUUID()}`)
   const [status, setStatus] = useState<InteractiveStatus>("starting")
@@ -112,7 +115,10 @@ function InteractivePreview({
         },
         (reason: Error) => {
           if (!current) return
-          setError(reason.message || `Failed to start ${kind === "marimo" ? "marimo" : "report"}`)
+          setError(
+            reason.message ||
+              `${t("Failed to start")} ${kind === "marimo" ? "marimo" : t("report")}`,
+          )
           setStatus("error")
         },
       )
@@ -122,7 +128,7 @@ function InteractivePreview({
         .mutateAsync({ ownerId: ownerId.current, leaseId: effectLeaseId })
         .catch((reason) => console.error("Failed to close interactive Analysis preview", reason))
     }
-  }, [attempt, close.mutateAsync, kind, open.mutateAsync, open.reset, projectId, relPath])
+  }, [attempt, close.mutateAsync, kind, open.mutateAsync, open.reset, projectId, relPath, t])
 
   const stop = async () => {
     const currentLeaseId = leaseId.current
@@ -133,7 +139,7 @@ function InteractivePreview({
       await close.mutateAsync({ ownerId: ownerId.current, leaseId: currentLeaseId })
       setStatus("stopped")
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to stop marimo")
+      setError(reason instanceof Error ? reason.message : t("Failed to stop marimo"))
       setStatus("error")
     }
   }
@@ -141,7 +147,7 @@ function InteractivePreview({
   if (status === "starting") {
     return (
       <InteractiveMessage testId="analysis-interactive-starting">
-        {kind === "marimo" ? "Starting marimo…" : "Opening interactive report…"}
+        {kind === "marimo" ? t("Starting marimo…") : t("Opening interactive report…")}
       </InteractiveMessage>
     )
   }
@@ -154,7 +160,7 @@ function InteractivePreview({
           className="rounded-md border border-border px-2 py-1 text-xs"
           onClick={() => setAttempt((value) => value + 1)}
         >
-          Retry
+          {t("Retry")}
         </button>
       </InteractiveMessage>
     )
@@ -162,14 +168,14 @@ function InteractivePreview({
   if (status === "stopping" || status === "stopped") {
     return (
       <InteractiveMessage testId={`analysis-interactive-${status}`}>
-        {status === "stopping" ? "Stopping marimo…" : "marimo stopped"}
+        {status === "stopping" ? t("Stopping marimo…") : t("marimo stopped")}
         {status === "stopped" ? (
           <button
             type="button"
             className="rounded-md border border-border px-2 py-1 text-xs"
             onClick={() => setAttempt((value) => value + 1)}
           >
-            Start
+            {t("Start")}
           </button>
         ) : null}
       </InteractiveMessage>
@@ -180,20 +186,23 @@ function InteractivePreview({
     <div className="flex h-full min-h-0 flex-col">
       {kind === "marimo" ? (
         <div className="flex shrink-0 items-center justify-between border-border border-b px-3 py-1.5 text-xs">
-          <span data-testid="analysis-marimo-status">Running{runtime ? ` · ${runtime}` : ""}</span>
+          <span data-testid="analysis-marimo-status">
+            {t("Running")}
+            {runtime ? ` · ${runtime}` : ""}
+          </span>
           <button
             type="button"
             className="rounded-md border border-border px-2 py-1"
             onClick={() => void stop()}
           >
-            Stop
+            {t("Stop")}
           </button>
         </div>
       ) : null}
       {url ? (
         <iframe
           data-testid={kind === "marimo" ? "analysis-preview-marimo" : "analysis-preview-html"}
-          title={kind === "marimo" ? "Live marimo notebook" : "Interactive HTML report"}
+          title={kind === "marimo" ? t("Live marimo notebook") : t("Interactive HTML report")}
           src={url}
           sandbox="allow-scripts allow-same-origin allow-forms"
           referrerPolicy="no-referrer"
@@ -217,6 +226,7 @@ function InteractiveMessage({ testId, children }: { testId: string; children: Re
 
 /** Dispatch one preview payload to its renderer. */
 function PreviewBody({ preview }: { preview: DataFilePreview }) {
+  const t = useTranslate()
   switch (preview.type) {
     case "table":
       return <TableBody preview={preview} />
@@ -229,7 +239,7 @@ function PreviewBody({ preview }: { preview: DataFilePreview }) {
         <img
           data-testid="analysis-preview-image"
           src={preview.dataUrl}
-          alt="File preview"
+          alt={t("File preview")}
           className="max-h-full max-w-full rounded-md border border-border object-contain"
         />
       )
@@ -261,6 +271,7 @@ function PreviewBody({ preview }: { preview: DataFilePreview }) {
 
 /** A sampled CSV/TSV table. */
 function TableBody({ preview }: { preview: Extract<DataFilePreview, { type: "table" }> }) {
+  const t = useTranslate()
   return (
     <div className="flex flex-col gap-2">
       <div className="overflow-auto rounded-md border border-border">
@@ -293,8 +304,8 @@ function TableBody({ preview }: { preview: Extract<DataFilePreview, { type: "tab
       </div>
       <p data-testid="analysis-preview-rowcount" className="text-muted-foreground text-xs">
         {preview.truncated
-          ? `Showing first ${preview.rows.length} of ${preview.totalRows}+ rows`
-          : `${preview.totalRows} ${preview.totalRows === 1 ? "row" : "rows"}`}
+          ? `${t("Showing first")} ${preview.rows.length} ${t("of")} ${preview.totalRows}+ ${t("rows")}`
+          : `${preview.totalRows} ${preview.totalRows === 1 ? t("row") : t("rows")}`}
       </p>
     </div>
   )
@@ -302,15 +313,17 @@ function TableBody({ preview }: { preview: Extract<DataFilePreview, { type: "tab
 
 /** Metadata-only fallback for kinds without an inline renderer. */
 function MetadataBody({ preview }: { preview: Extract<DataFilePreview, { type: "metadata" }> }) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   return (
     <div
       data-testid="analysis-preview-metadata"
       className="flex flex-col gap-2 rounded-md border border-border bg-card/40 p-4 text-sm"
     >
-      <Row label="Kind" value={DATA_FILE_KIND_LABELS[preview.kind]} />
-      <Row label="Size" value={formatSize(preview.size)} />
-      <Row label="Modified" value={new Date(preview.mtime).toLocaleString()} />
-      {preview.note ? <Row label="Note" value={preview.note} /> : null}
+      <Row label={t("Kind")} value={t(DATA_FILE_KIND_LABELS[preview.kind])} />
+      <Row label={t("Size")} value={formatSize(preview.size)} />
+      <Row label={t("Modified")} value={new Date(preview.mtime).toLocaleString(language)} />
+      {preview.note ? <Row label={t("Note")} value={preview.note} /> : null}
     </div>
   )
 }
@@ -327,8 +340,11 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function TruncatedNote() {
+  const t = useTranslate()
   return (
-    <p className="mt-2 text-amber-500 text-xs">Preview truncated — file is larger than shown.</p>
+    <p className="mt-2 text-amber-500 text-xs">
+      {t("Preview truncated — file is larger than shown.")}
+    </p>
   )
 }
 

@@ -9,11 +9,12 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx): reproduces the dev build's
 // effect double-invoke so mount effects run as they do in the app.
-import { fireEvent, render, screen, waitFor, within } from "../../../../../test/render"
+import { act, fireEvent, render, screen, waitFor, within } from "../../../../../test/render"
 import { ProjectActivityProvider } from "../../../-ProjectActivity"
 import { readPendingLaunch } from "../../../projects/-pendingLaunch"
 import { ProjectCard } from "./ProjectCard"
@@ -37,6 +38,9 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     // A stored gradient so the card doesn't try to persist a default on first render.
     gradient: { seed: 1, palette: ["#FFC700"] },
     metadata: null,
+    taskRelPath: null,
+    mainRelPath: null,
+    typeId: "general",
     agentConfig: null,
     sortIndex: 0,
     archivedAt: null,
@@ -103,6 +107,31 @@ const FULL_METADATA: ProjectMetadata = {
 }
 
 describe("ProjectCard thumbnail", () => {
+  test("shows an untyped project choice on the card without opening the workspace", async () => {
+    const choices: unknown[] = []
+    renderCard(project({ id: "p1", name: "Untyped", typeId: "general" }), {
+      "settings.get": () => ({
+        projectTemplate: {
+          projectTypes: [
+            { id: "research", name: "Research project", guidance: "" },
+            { id: "software", name: "Software project", guidance: "" },
+            { id: "paper", name: "Paper", guidance: "" },
+          ],
+        },
+      }),
+      "projects.setType": (input) => {
+        choices.push(input)
+      },
+    })
+
+    const select = (await screen.findByTestId("project-card-type-p1")) as HTMLSelectElement
+    expect(select.value).toBe("")
+    fireEvent.click(select)
+    fireEvent.change(select, { target: { value: "software" } })
+    await waitFor(() => expect(choices).toEqual([{ id: "p1", typeId: "software" }]))
+    expect(screen.queryByTestId("on-project-route")).toBeNull()
+  })
+
   test("loads the card artwork variant separately from the project summary", async () => {
     const requests: unknown[] = []
     renderCard(project({ id: "p1", name: "Picture", thumbnail: "data:image/gif;base64,AAAA" }), {
@@ -159,6 +188,20 @@ describe("ProjectCard thumbnail", () => {
 })
 
 describe("ProjectCard metadata", () => {
+  test("translates the card status and artwork chooser when language changes", async () => {
+    renderCard(project({ id: "translated", name: "Study" }))
+    act(() => setInterfaceLanguage("es"))
+    expect((await screen.findByTestId("project-card-status")).textContent).toContain(
+      "No hay agentes activos",
+    )
+    fireEvent.contextMenu(screen.getByTestId("project-card"))
+    expect(screen.getByTestId("project-card-menu-thumbnail").textContent).toContain(
+      "Establecer miniatura",
+    )
+    fireEvent.click(screen.getByTestId("project-card-menu-thumbnail"))
+    expect(screen.getByRole("dialog", { name: "Establecer miniatura" })).toBeTruthy()
+    act(() => setInterfaceLanguage("en"))
+  })
   test("Digital Rain refreshes from paused to working without remounting", async () => {
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
     let activity: Array<{ projectId: string; state: "working" | "waiting" }> = [

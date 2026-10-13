@@ -1,6 +1,7 @@
 import { automationRuns, automations } from "@pi-lab/local-db"
 import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { setNativeLanguage } from "../i18n/nativeLanguage"
 import type { NotificationRequest } from "../notifications"
 import { createHarness, type Harness } from "../trpc/testHarness"
 import { createWorkflowLifecycleReporter } from "./workflowLifecycle"
@@ -38,10 +39,28 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  setNativeLanguage("en")
   await h.dispose()
 })
 
 describe("workflow lifecycle reporter", () => {
+  test("uses the selected interface language for workflow notifications", () => {
+    setNativeLanguage("es")
+    const notify = vi.fn((_request: NotificationRequest) => "delivered" as const)
+    const reporter = createWorkflowLifecycleReporter(
+      { db: h.db, notifications: { notify }, now: () => 100 },
+      { source: "noninteractive", workflowId: automationId, runId, workflowName: "Mi flujo" },
+    )
+
+    expect(reporter.started()).toBe(true)
+    expect(reporter.completed()).toBe(true)
+    expect(
+      notify.mock.calls.map(([request]) => ({ title: request.title, body: request.body })),
+    ).toEqual([
+      { title: "Flujo de trabajo iniciado", body: "Mi flujo comenzó en modo no interactivo" },
+      { title: "Flujo de trabajo completado", body: "Mi flujo se completó" },
+    ])
+  })
   test("future chat producers use the same exact-run start/completion contract", () => {
     const notify = vi.fn((_request: NotificationRequest) => "delivered" as const)
     const reporter = createWorkflowLifecycleReporter(

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Project } from "@pi-lab/local-db"
@@ -36,6 +36,9 @@ async function fixture(name: string): Promise<{ root: string; project: Project }
       gradient: null,
       digitalRain: false,
       metadata: null,
+      taskRelPath: null,
+      mainRelPath: null,
+      typeId: "general",
       agentConfig: null,
       sortIndex: 0,
       archivedAt: null,
@@ -98,6 +101,18 @@ describe("TODO Markdown discovery and aggregation", () => {
       title: "Alpha task",
       id: null,
     })
+  })
+
+  test("reads a selected nested Markdown task file with a different name", async () => {
+    const { root, project } = await fixture("Custom")
+    await mkdir(join(root, "notes"))
+    await writeFile(join(root, "notes", "Work.md"), "# Work\n- [ ] Nested task\n")
+    await writeFile(join(root, "TODO.md"), "# Old\n- [ ] Old task\n")
+
+    const listing = await listProjectTasks([{ ...project, taskRelPath: "notes/Work.md" }])
+
+    expect(listing.sources[0]).toMatchObject({ state: "ready", relPath: "notes/Work.md" })
+    expect(listing.tasks.map((task) => task.title)).toEqual(["Nested task"])
   })
 })
 

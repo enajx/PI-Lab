@@ -25,6 +25,7 @@ import {
   Waypoints,
 } from "lucide-react"
 import type { ComponentType } from "react"
+import { useTranslate } from "../i18n/language"
 import {
   useExperimentalV2,
   useShowCodeChanges,
@@ -118,6 +119,7 @@ export function createNewFileCommand(
  * need a dispatch seam to be globally runnable.
  */
 export function usePaletteCommands(): PaletteCommand[] {
+  const t = useTranslate()
   const navigate = useNavigate()
   const { location } = useRouterState()
   const { openAddProject } = useAddProjectController()
@@ -264,5 +266,7 @@ export function usePaletteCommands(): PaletteCommand[] {
     addProjectCommand,
     newFileCommand,
     ...projectCommands,
-  ]
+  ].map((command) =>
+    command.id.startsWith("project-") ? command : { ...command, label: t(command.label) },
+  )
 }

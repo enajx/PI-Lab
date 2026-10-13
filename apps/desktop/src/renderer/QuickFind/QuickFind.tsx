@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { FolderGit2 } from "lucide-react"
 import type { ComponentType } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslate } from "../i18n/language"
 import { useTRPC } from "../trpc/react"
 
 /** One row in a {@link QuickFind} list. */
@@ -51,6 +52,7 @@ export function QuickFind({
   /** Tab cycles this contextual finder to the app-wide project finder. */
   allowGlobalSearch?: boolean
 }) {
+  const t = useTranslate()
   const [query, setQuery] = useState("")
   const [highlight, setHighlight] = useState(0)
   const [global, setGlobal] = useState(false)
@@ -71,10 +73,10 @@ export function QuickFind({
   const activeItems = global ? globalItems : items
   const activeEmptyText = global
     ? globalItems.length === 0
-      ? "No projects yet"
-      : "No matching projects"
+      ? t("No projects yet")
+      : t("No matching projects")
     : emptyText
-  const activeScopeLabel = global ? "All projects" : (scopeLabel ?? ariaLabel)
+  const activeScopeLabel = global ? t("All projects") : (scopeLabel ?? ariaLabel)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -144,8 +146,8 @@ export function QuickFind({
     >
       <button
         type="button"
-        aria-label="Close quick find"
-        data-feature-help="Close this search without opening a result"
+        aria-label={t("Close quick find")}
+        data-feature-help={t("Close this search without opening a result")}
         tabIndex={-1}
         onClick={onClose}
         className="-z-10 absolute inset-0 cursor-default bg-black/40"
@@ -162,7 +164,7 @@ export function QuickFind({
           data-testid="quick-find-input"
           aria-label={ariaLabel}
           value={query}
-          data-feature-help="Search the items available in this view"
+          data-feature-help={t("Search the items available in this view")}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
@@ -172,8 +174,8 @@ export function QuickFind({
           data-testid="quick-find-scope"
           className="border-border border-b px-4 py-1.5 text-muted-foreground text-xs"
         >
-          Searching: {activeScopeLabel}
-          {allowGlobalSearch ? <span className="ml-2 opacity-70">Tab to switch</span> : null}
+          {t("Searching:")} {activeScopeLabel}
+          {allowGlobalSearch ? <span className="ms-2 opacity-70">{t("Tab to switch")}</span> : null}
         </div>
         <ul ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">
           {ranked.length === 0 ? (
@@ -195,13 +197,13 @@ export function QuickFind({
                     data-testid="quick-find-item"
                     data-find-id={item.id}
                     data-feature-label={item.label}
-                    data-feature-help="Open this result in the current view"
+                    data-feature-help={t("Open this result in the current view")}
                     data-index={index}
                     data-highlighted={selected}
                     onClick={() => choose(index)}
                     onMouseEnter={() => setHighlight(index)}
                     className={cn(
-                      "flex w-full items-center gap-2.5 px-4 py-1.5 text-left text-xs",
+                      "flex w-full items-center gap-2.5 px-4 py-1.5 text-start text-xs",
                       selected
                         ? "bg-accent text-foreground"
                         : "text-muted-foreground hover:bg-accent/60",

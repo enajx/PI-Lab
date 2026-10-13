@@ -166,6 +166,19 @@ describe("explicit setup states", () => {
     ])
   })
 
+  test("reports a logged-out Codex CLI as needing sign-in", async () => {
+    const [status] = await detectHarnesses(
+      CATALOG.slice(1, 2),
+      {},
+      {
+        resolveExecutable: async (value) => value,
+        probe: async () => ({ code: 1, stdout: "Not logged in", stderr: "", timedOut: false }),
+        environment: {},
+      },
+    )
+    expect(status?.state).toBe("unauthenticated")
+  })
+
   test("drops secret-looking values even when they occupy account, method, or plan fields", async () => {
     const [status] = await detectHarnesses(
       CATALOG.slice(0, 1),

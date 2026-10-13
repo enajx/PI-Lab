@@ -2,11 +2,12 @@ import { cn } from "@pi-lab/ui"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaffeineControl } from "../../../../../caffeine"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
+import { useTranslate } from "../../../../../i18n/language"
 import { useShowHiddenProjects, useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { AddProjectMenu } from "../../../components/AddProjectMenu"
 import { ProjectVisibilityToggle } from "../../../components/ProjectVisibilityToggle"
-import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
+import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 import { ProjectCard } from "../ProjectCard"
 
 /**
@@ -20,6 +21,7 @@ import { ProjectCard } from "../ProjectCard"
  * richer per-card contents are intentionally deferred.
  */
 export function Dashboard() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
@@ -43,7 +45,9 @@ export function Dashboard() {
           titleBarHeaderClass(collapsed),
         )}
       >
-        <h1 className="font-semibold text-foreground text-sm tracking-tight">Projects Dashboard</h1>
+        <h1 className="font-semibold text-foreground text-sm tracking-tight">
+          {t("Projects Dashboard")}
+        </h1>
         <div className={cn("flex shrink-0 items-center gap-3", titleBarControlClass(collapsed))}>
           <ProjectVisibilityToggle
             hiddenCount={hiddenCount ?? 0}
@@ -52,6 +56,7 @@ export function Dashboard() {
             testId="dashboard-show-hidden-projects"
             onToggle={() => setShowHidden(!showHidden)}
           />
+          <AgentStatusControl />
           <CaffeineControl />
         </div>
       </header>
@@ -62,14 +67,14 @@ export function Dashboard() {
             data-testid="dashboard-empty"
             className="text-muted-foreground text-sm leading-relaxed"
           >
-            No projects yet.
+            {t("No projects yet.")}
           </p>
         ) : visibleProjects.length === 0 ? (
           <p
             data-testid="dashboard-empty"
             className="text-muted-foreground text-sm leading-relaxed"
           >
-            All projects are hidden. Use Show hidden to restore one.
+            {t("All projects are hidden. Use Show hidden to restore one.")}
           </p>
         ) : null}
         <CardGrid

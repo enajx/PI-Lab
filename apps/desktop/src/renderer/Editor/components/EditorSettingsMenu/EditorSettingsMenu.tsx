@@ -2,6 +2,7 @@ import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/edit
 import { cn } from "@pi-lab/ui"
 import { Check, Settings2 } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { useTranslate } from "../../../i18n/language"
 import { rememberCurrentSettingsReturnRoute } from "../../../routes/_shell/-settingsReturnRoute"
 import { allEditorThemes, DEFAULT_EDITOR_THEME_ID } from "../editorThemes"
 
@@ -29,6 +30,7 @@ interface EditorSettingsMenuProps {
  * shared UI kit has no popover primitive) with stable `data-testid`s for tests.
  */
 export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuProps) {
+  const t = useTranslate()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const labelId = useId()
@@ -61,9 +63,11 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
         data-testid="editor-settings"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Editor settings"
-        title="Editor settings"
-        data-feature-help="Configure autosave, Vim keybindings, Python diagnostics, and format-on-save for the built-in editor"
+        aria-label={t("Editor settings")}
+        title={t("Editor settings")}
+        data-feature-help={t(
+          "Configure autosave, Vim keybindings, Python diagnostics, and format-on-save for the built-in editor",
+        )}
         onClick={() => setOpen((value) => !value)}
         className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
@@ -75,10 +79,10 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
           data-testid="editor-settings-menu"
           role="menu"
           aria-labelledby={labelId}
-          className="absolute top-9 right-0 z-50 w-60 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          className="absolute top-9 end-0 z-50 w-60 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
         >
           <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
-            Editor settings
+            {t("Editor settings")}
           </p>
           <ToggleRow
             testId="editor-settings-autosave"
@@ -153,7 +157,7 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
             }}
             className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-accent"
           >
-            <span>Advanced settings</span>
+            <span>{t("Advanced settings")}</span>
           </button>
         </div>
       ) : null}
@@ -180,29 +184,30 @@ function SelectRow({
   groups?: Array<{ label: string; options: Array<{ value: string; label: string }> }>
   onChange: (value: string) => void
 }) {
+  const t = useTranslate()
   return (
     <label className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent">
-      <span>{label}</span>
+      <span>{t(label)}</span>
       <select
         data-testid={testId}
-        aria-label={label}
+        aria-label={t(label)}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="min-w-0 max-w-40 rounded border border-border bg-background px-1.5 py-1 text-foreground"
       >
         {groups
           ? groups.map((group) => (
-              <optgroup key={group.label} label={group.label}>
+              <optgroup key={group.label} label={t(group.label)}>
                 {group.options.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {t(option.label)}
                   </option>
                 ))}
               </optgroup>
             ))
           : options?.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {t(option.label)}
               </option>
             ))}
       </select>
@@ -220,6 +225,7 @@ interface ToggleRowProps {
 
 /** A single on/off preference row with a checkbox-style affordance. */
 function ToggleRow({ testId, label, description, checked, onToggle }: ToggleRowProps) {
+  const t = useTranslate()
   return (
     <button
       type="button"
@@ -227,10 +233,10 @@ function ToggleRow({ testId, label, description, checked, onToggle }: ToggleRowP
       aria-checked={checked}
       data-testid={testId}
       data-checked={checked}
-      data-feature-label={label}
-      data-feature-help={description}
+      data-feature-label={t(label)}
+      data-feature-help={t(description)}
       onClick={onToggle}
-      className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
+      className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-start transition-colors hover:bg-accent"
     >
       <span
         className={cn(
@@ -241,8 +247,8 @@ function ToggleRow({ testId, label, description, checked, onToggle }: ToggleRowP
         {checked ? <Check className="size-3" aria-hidden /> : null}
       </span>
       <span className="min-w-0">
-        <span className="block text-foreground text-xs">{label}</span>
-        <span className="block text-muted-foreground text-[11px]">{description}</span>
+        <span className="block text-foreground text-xs">{t(label)}</span>
+        <span className="block text-muted-foreground text-[11px]">{t(description)}</span>
       </span>
     </button>
   )

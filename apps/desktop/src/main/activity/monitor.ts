@@ -7,6 +7,7 @@ import {
 } from "@pi-lab/local-db"
 import type { AttachResult, DataEvent, ExitEvent, SessionInfo } from "@pi-lab/pty-daemon"
 import { eq, ne } from "drizzle-orm"
+import { nativeNotificationBody, nativeText } from "../i18n/nativeLanguage"
 import type { NotificationService } from "../notifications"
 import type { ActivityRegistry } from "./registry"
 import {
@@ -458,8 +459,8 @@ export class ActivityMonitor implements ActivityMonitorPort {
     runtime.baselineScreen = runtime.lastScreen
     this.options.notifications.notify({
       eventType: "terminalCompletion",
-      title: "Terminal command finished",
-      body: `${runtime.label} is ready for the next command`,
+      title: nativeText("Terminal command finished"),
+      body: nativeNotificationBody("terminalReady", runtime.label),
       target: {
         type: "terminal",
         projectId: runtime.projectId,
@@ -649,8 +650,8 @@ export class ActivityMonitor implements ActivityMonitorPort {
     if (!record.workspaceId) return
     this.options.notifications.notify({
       eventType: "agentInput",
-      title: "Agent needs input",
-      body: `${record.agentId} is waiting for ${waitingLabel(record)}`,
+      title: nativeText("Agent needs input"),
+      body: nativeNotificationBody("agentWaiting", record.agentId, waitingLabel(record)),
       target: {
         type: "agent",
         projectId: record.projectId,
@@ -665,8 +666,8 @@ export class ActivityMonitor implements ActivityMonitorPort {
     if (!record.workspaceId) return
     this.options.notifications.notify({
       eventType: "agentTurnCompletion",
-      title: "Agent finished its turn",
-      body: `${record.agentId} is ready for your next instruction`,
+      title: nativeText("Agent finished its turn"),
+      body: nativeNotificationBody("agentReady", record.agentId),
       target: {
         type: "agent",
         projectId: record.projectId,
@@ -690,10 +691,10 @@ export class ActivityMonitor implements ActivityMonitorPort {
     if (!run) return
     const title =
       eventType === "workflowStart"
-        ? "Workflow started"
+        ? nativeText("Workflow started")
         : eventType === "workflowCompletion"
-          ? "Workflow completed"
-          : "Workflow failed"
+          ? nativeText("Workflow completed")
+          : nativeText("Workflow failed")
     this.options.notifications.notify({
       eventType,
       title,
@@ -745,7 +746,9 @@ function workflowState(run: AutomationRun | null | undefined): WorkflowRunActivi
   return run.state
 }
 
-function waitingLabel(record: AgentActivityRecord): string {
+function waitingLabel(
+  record: AgentActivityRecord,
+): "permission" | "an answer" | "your next instruction" {
   if (record.waitingReason === "permission") return "permission"
   if (record.waitingReason === "question") return "an answer"
   return "your next instruction"

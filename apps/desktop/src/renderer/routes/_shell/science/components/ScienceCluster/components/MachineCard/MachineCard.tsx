@@ -2,6 +2,7 @@ import type { Machine } from "@pi-lab/local-db"
 import { Badge, Button, cn, Input } from "@pi-lab/ui"
 import { Check, Cpu, Eye, EyeOff, Loader2, Pencil, Radar, X } from "lucide-react"
 import { useState } from "react"
+import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import type { RouterOutputs } from "../../../../../../../trpc/types"
 
 /** Transient GPU / CPU telemetry from the most recent probe (not persisted). */
@@ -74,6 +75,7 @@ export function MachineCard({
   onAnnotate,
   isRefreshing,
 }: MachineCardProps) {
+  const t = useTranslate()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(machine.label ?? "")
   const status = statusFor(machine)
@@ -117,8 +119,8 @@ export function MachineCard({
             variant="ghost"
             size="icon"
             className="size-7"
-            aria-label="Annotate machine"
-            data-feature-help="Set a friendly display name while keeping the SSH host alias"
+            aria-label={t("Annotate machine")}
+            data-feature-help={t("Set a friendly display name while keeping the SSH host alias")}
             onClick={() => {
               setDraft(machine.label ?? "")
               setEditing(true)
@@ -131,11 +133,11 @@ export function MachineCard({
             variant="ghost"
             size="icon"
             className="size-7"
-            aria-label={machine.hidden ? "Unhide machine" : "Hide machine"}
+            aria-label={machine.hidden ? t("Unhide machine") : t("Hide machine")}
             data-feature-help={
               machine.hidden
-                ? "Restore this machine to the normal cluster view"
-                : "Remove this machine from the normal cluster view"
+                ? t("Restore this machine to the normal cluster view")
+                : t("Remove this machine from the normal cluster view")
             }
             onClick={onToggleHidden}
           >
@@ -150,7 +152,7 @@ export function MachineCard({
             data-testid="annotate-input"
             autoFocus
             value={draft}
-            placeholder="Annotation / display name"
+            placeholder={t("Annotation / display name")}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") commit()
@@ -163,7 +165,7 @@ export function MachineCard({
             variant="outline"
             size="icon"
             className="size-7"
-            aria-label="Save annotation"
+            aria-label={t("Save annotation")}
             onClick={commit}
           >
             <Check />
@@ -172,7 +174,7 @@ export function MachineCard({
             variant="ghost"
             size="icon"
             className="size-7"
-            aria-label="Cancel annotation"
+            aria-label={t("Cancel annotation")}
             onClick={() => setEditing(false)}
           >
             <X />
@@ -187,7 +189,7 @@ export function MachineCard({
           className="group/err relative flex items-center gap-1.5 text-muted-foreground text-xs"
         >
           <span className={cn("inline-block size-2 rounded-full", status.dot)} aria-hidden />
-          <span>{status.label}</span>
+          <span>{t(status.label)}</span>
           {machine.reachable === false && machine.statusDetail ? (
             <div
               data-testid="machine-status-detail"
@@ -203,11 +205,13 @@ export function MachineCard({
           size="sm"
           className="h-7 gap-1.5 px-2.5 text-xs"
           disabled={isRefreshing}
-          data-feature-help="Connect over SSH and refresh this machine's reachability and hardware usage"
+          data-feature-help={t(
+            "Connect over SSH and refresh this machine's reachability and hardware usage",
+          )}
           onClick={onRefresh}
         >
           {isRefreshing ? <Loader2 className="animate-spin" /> : <Radar />}
-          {isRefreshing ? "Checking…" : "Check"}
+          {isRefreshing ? t("Checking…") : t("Check")}
         </Button>
       </div>
 
@@ -241,6 +245,8 @@ function MachineTelemetryPanel({
   telemetry: MachineTelemetry
   checkedAt: number | null
 }) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const gpus = telemetry.gpus ?? []
   const busy = gpus.filter((gpu) => gpu.utilization >= GPU_BUSY_PERCENT).length
 
@@ -251,7 +257,7 @@ function MachineTelemetryPanel({
     >
       <div className="flex items-center justify-between gap-2 text-muted-foreground text-xs">
         <span data-testid="gpu-summary">
-          {gpus.length > 0 ? `${busy}/${gpus.length} GPUs busy` : "No GPUs reported"}
+          {gpus.length > 0 ? `${busy}/${gpus.length} ${t("GPUs busy")}` : t("No GPUs reported")}
         </span>
         {telemetry.cpuUsage != null ? (
           <span data-testid="cpu-usage" className="flex items-center gap-1">
@@ -262,8 +268,8 @@ function MachineTelemetryPanel({
       </div>
       {checkedAt != null ? (
         <p data-testid="machine-checked-at" className="text-muted-foreground/80 text-xs">
-          Checked{" "}
-          {new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(
+          {t("Checked")}{" "}
+          {new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit" }).format(
             new Date(checkedAt),
           )}
         </p>

@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useTranslate } from "../../../i18n/language"
 import { type FileTreeSort, useFileTreeSort } from "../../../preferences/preferences"
 import { useTRPC } from "../../../trpc/react"
 import type { FileTreeEntry } from "../../../trpc/types"
@@ -37,6 +38,8 @@ interface FileTreeProps {
   activeRelPath?: string | null
   /** Pin a `.md` file as a right-sidebar panel (enables the row's right-click menu). */
   onPinFile?: (relPath: string) => void
+  /** Make a Markdown file the project's main readme. */
+  onSetMainFile?: (relPath: string) => void
 }
 
 interface CreateDraft {
@@ -53,7 +56,14 @@ interface CreateDraft {
  * Scrolling is a native bounded `min-h-0 flex-1 overflow-y-auto` column
  * (AGENTS.md Pitfalls #3) — no Radix ScrollArea.
  */
-export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: FileTreeProps) {
+export function FileTree({
+  workspaceId,
+  onOpenFile,
+  activeRelPath,
+  onPinFile,
+  onSetMainFile,
+}: FileTreeProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [menu, setMenu] = useState<FileMenuState | null>(null)
@@ -96,12 +106,13 @@ export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: 
   )
 
   // Only offer the right-click menu when the host can act on a pin.
-  const onContextMenuFile: ContextMenuFile | undefined = onPinFile
-    ? (relPath, event) => {
-        event.preventDefault()
-        setMenu({ relPath, x: event.clientX, y: event.clientY })
-      }
-    : undefined
+  const onContextMenuFile: ContextMenuFile | undefined =
+    onPinFile || onSetMainFile
+      ? (relPath, event) => {
+          event.preventDefault()
+          setMenu({ relPath, x: event.clientX, y: event.clientY })
+        }
+      : undefined
 
   const startDraft = (kind: CreateDraft["kind"]) => {
     createFile.reset()
@@ -123,7 +134,7 @@ export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: 
     const name = draftName.trim()
     const error = validateEntryName(name)
     if (error) {
-      setValidationError(error)
+      setValidationError(t(error))
       return
     }
     const relPath = draft.parentRelPath ? `${draft.parentRelPath}/${name}` : name
@@ -142,16 +153,16 @@ export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: 
           type="button"
           data-testid="file-tree-root"
           data-selected={selectedDir === ""}
-          title="Use project root for new files and folders"
+          title={t("Use project root for new files and folders")}
           onClick={() => setSelectedDir("")}
           className="mr-auto rounded px-1 font-medium text-muted-foreground text-xs uppercase tracking-wide hover:text-foreground"
         >
-          Files
+          {t("Files")}
         </button>
         <button
           type="button"
-          aria-label="New file"
-          title={`New file in ${selectedDir || "project root"}`}
+          aria-label={t("New file")}
+          title={`${t("New file in ")}${selectedDir || t("project root")}`}
           onClick={() => startDraft("file")}
           className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -159,8 +170,8 @@ export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: 
         </button>
         <button
           type="button"
-          aria-label="New folder"
-          title={`New folder in ${selectedDir || "project root"}`}
+          aria-label={t("New folder")}
+          title={`${t("New folder in ")}${selectedDir || t("project root")}`}
           onClick={() => startDraft("folder")}
           className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -168,9 +179,9 @@ export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: 
         </button>
         <button
           type="button"
-          aria-label={`File sort: ${FILE_TREE_SORT_LABELS[sort]}`}
+          aria-label={`${t("File sort: ")}${t(FILE_TREE_SORT_LABELS[sort])}`}
           data-testid="file-tree-sort"
-          title={`Sort files: ${FILE_TREE_SORT_LABELS[sort]}. Click to cycle.`}
+          title={`${t("Sort files: ")}${t(FILE_TREE_SORT_LABELS[sort])}${t(". Click to cycle.")}`}
           onClick={nextSort}
           className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         >
@@ -218,6 +229,12 @@ export function FileTree({ workspaceId, onOpenFile, activeRelPath, onPinFile }: 
           onPinFile?.(relPath)
           setMenu(null)
         }}
+        onSetMain={(relPath) => {
+          onSetMainFile?.(relPath)
+          setMenu(null)
+        }}
+        canPin={Boolean(onPinFile)}
+        canSetMain={Boolean(onSetMainFile)}
       />
     </div>
   )
@@ -254,11 +271,18 @@ function FileTreeContextMenu({
   menu,
   onClose,
   onPin,
+  onSetMain,
+  canPin,
+  canSetMain,
 }: {
   menu: FileMenuState | null
   onClose: () => void
   onPin: (relPath: string) => void
+  onSetMain: (relPath: string) => void
+  canPin: boolean
+  canSetMain: boolean
 }) {
+  const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -286,19 +310,34 @@ function FileTreeContextMenu({
       className="fixed z-50 w-52 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
       style={{ left: menu.x, top: menu.y }}
     >
-      <button
-        type="button"
-        role="menuitem"
-        data-testid="file-tree-pin"
-        data-rel-path={menu.relPath}
-        data-feature-label="Pin as panel"
-        data-feature-help="Pin this Markdown file as a persistent panel in the project's right sidebar"
-        onClick={() => onPin(menu.relPath)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-      >
-        <Pin className="size-4 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">Pin as panel</span>
-      </button>
+      {canPin ? (
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="file-tree-pin"
+          data-rel-path={menu.relPath}
+          data-feature-label={t("Pin as panel")}
+          data-feature-help={t(
+            "Pin this Markdown file as a persistent panel in the project's right sidebar",
+          )}
+          onClick={() => onPin(menu.relPath)}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+        >
+          <Pin className="size-4 shrink-0" aria-hidden />
+          <span className="min-w-0 truncate">{t("Pin as panel")}</span>
+        </button>
+      ) : null}
+      {canSetMain ? (
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="file-tree-set-main"
+          onClick={() => onSetMain(menu.relPath)}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+        >
+          {t("Set as main readme")}
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -346,6 +385,7 @@ function TreeLevel({
   onSubmitDraft,
   onCancelDraft,
 }: TreeLevelProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const query = useQuery(
     trpc.files.tree.queryOptions(
@@ -358,7 +398,7 @@ function TreeLevel({
 
   const hasDraft = draft?.parentRelPath === relPath
   if (query.isPending && !hasDraft) {
-    return <LevelMessage depth={depth} testId="file-tree-loading" text="Loading…" />
+    return <LevelMessage depth={depth} testId="file-tree-loading" text={t("Loading…")} />
   }
   if (query.isError && !hasDraft) {
     return (
@@ -372,7 +412,7 @@ function TreeLevel({
   }
   const entries = sortEntries(query.data ?? [], sort)
   if (entries.length === 0 && depth === 0 && !hasDraft) {
-    return <LevelMessage depth={depth} testId="file-tree-empty" text="No files" />
+    return <LevelMessage depth={depth} testId="file-tree-empty" text={t("No files")} />
   }
 
   return (
@@ -462,6 +502,7 @@ function TreeNode({
   onSubmitDraft,
   onCancelDraft,
 }: TreeNodeProps) {
+  const t = useTranslate()
   const expanded = expandedDirs.has(entry.relPath)
   const selected = selectedDir === entry.relPath
   const indent = { paddingLeft: `${depth * 0.75 + 0.5}rem` }
@@ -474,8 +515,8 @@ function TreeNode({
           data-testid="file-tree-dir"
           data-rel-path={entry.relPath}
           data-selected={selected}
-          data-feature-label="Folder"
-          data-feature-help="Expand or collapse this folder in the project file tree"
+          data-feature-label={t("Folder")}
+          data-feature-help={t("Expand or collapse this folder in the project file tree")}
           onClick={() => {
             onSelectDir(entry.relPath)
             onToggleDir(entry.relPath)
@@ -527,8 +568,8 @@ function TreeNode({
         type="button"
         data-testid="file-tree-file"
         data-rel-path={entry.relPath}
-        data-feature-label="File"
-        data-feature-help="Open this project file in a built-in editor tab"
+        data-feature-label={t("File")}
+        data-feature-help={t("Open this project file in a built-in editor tab")}
         onClick={() => onOpenFile(entry.relPath)}
         // Right-click a Markdown file to pin it as a right-sidebar panel.
         onContextMenu={
@@ -551,7 +592,7 @@ function TreeNode({
           <Eye
             data-testid="file-tree-focused"
             className="ml-auto size-3.5 shrink-0 text-muted-foreground"
-            aria-label="Focused in editor"
+            aria-label={t("Focused in editor")}
           />
         ) : null}
       </button>
@@ -578,7 +619,8 @@ function CreateRow({
   onSubmit: () => void
   onCancel: () => void
 }) {
-  const label = kind === "file" ? "New file name" : "New folder name"
+  const t = useTranslate()
+  const label = kind === "file" ? t("New file name") : t("New folder name")
   return (
     <li
       data-testid="file-tree-create-row"
@@ -597,7 +639,7 @@ function CreateRow({
           aria-label={label}
           value={value}
           disabled={pending}
-          placeholder={kind === "file" ? "file name" : "folder name"}
+          placeholder={kind === "file" ? t("file name") : t("folder name")}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -612,8 +654,8 @@ function CreateRow({
         />
         <button
           type="button"
-          aria-label="Cancel creation"
-          title="Cancel"
+          aria-label={t("Cancel creation")}
+          title={t("Cancel")}
           onClick={onCancel}
           className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >

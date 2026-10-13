@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import type { PiLabTrpcClient } from "../trpc/client"
 import { Terminal } from "./Terminal"
@@ -121,5 +121,34 @@ describe("Terminal macOS custom key integration", () => {
     errorHandler.current?.(new Error("daemon unavailable"))
 
     expect(xtermHarness.writes.join("")).toContain("daemon unavailable")
+  })
+
+  test("inserts a dropped folder path without submitting it", async () => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock)
+    vi.stubGlobal("piLab", {
+      platform: "darwin",
+      getPathForFile: () => "/tmp/research folder",
+    })
+    const write = vi.fn(async () => ({ ok: true as const }))
+    const client = {
+      terminal: {
+        onData: { subscribe: () => ({ unsubscribe: () => {} }) },
+        write: { mutate: write },
+        resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
+      },
+    } as unknown as PiLabTrpcClient
+
+    const { getByTestId } = render(
+      <Terminal client={client} inputKind="terminal" sessionId="folder-session" />,
+    )
+    await waitFor(() => expect(xtermHarness.dataHandler).not.toBeNull())
+    fireEvent.drop(getByTestId("terminal"), {
+      dataTransfer: { files: [new File([], "research folder")] },
+    })
+
+    expect(write).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "folder-session",
+      data: "'/tmp/research folder'",
+    })
   })
 })

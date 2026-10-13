@@ -3,6 +3,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { FolderGit2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { CommandPalette } from "../CommandPalette"
+import { useTranslate } from "../i18n/language"
 import { NotificationBridge } from "../notifications/NotificationBridge"
 import { useSidebarCollapsed } from "../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../QuickFind"
@@ -122,6 +123,7 @@ function ShellLayout() {
 
 /** ⌘F outside a project/Library: fuzzy-find an opened project and jump to it. */
 function ProjectsFind({ onClose }: { onClose: () => void }) {
+  const t = useTranslate()
   const navigate = useNavigate()
   const trpc = useTRPC()
   const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
@@ -133,10 +135,10 @@ function ProjectsFind({ onClose }: { onClose: () => void }) {
   }))
   return (
     <QuickFind
-      ariaLabel="Find a project"
-      placeholder="Find a project…"
+      ariaLabel={t("Find a project")}
+      placeholder={t("Find a project…")}
       items={items}
-      emptyText={projects.length === 0 ? "No projects yet" : "No matching projects"}
+      emptyText={t(projects.length === 0 ? "No projects yet" : "No matching projects")}
       onSelect={(item) =>
         void navigate({ to: "/projects/$projectId", params: { projectId: item.id } })
       }

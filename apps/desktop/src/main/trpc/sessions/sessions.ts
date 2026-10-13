@@ -322,6 +322,21 @@ export async function startAutoResearch(
 }
 
 export const sessionsRouter = router({
+  /** Live sessions with enough context for the title bar status panel. */
+  status: publicProcedure.query(({ ctx }) =>
+    ctx.db
+      .select({
+        sessionId: agentSessions.sessionId,
+        projectId: agentSessions.projectId,
+        projectName: projects.name,
+        agentId: agentSessions.agentId,
+        state: agentSessions.state,
+      })
+      .from(agentSessions)
+      .innerJoin(projects, eq(agentSessions.projectId, projects.id))
+      .where(ne(agentSessions.state, "exited"))
+      .all(),
+  ),
   /** Live agent state, grouped by project in the renderer for project-level indicators. */
   activity: publicProcedure.query(({ ctx }) =>
     ctx.db

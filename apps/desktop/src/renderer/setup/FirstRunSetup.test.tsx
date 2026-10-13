@@ -38,6 +38,23 @@ function renderSetup(
 beforeEach(() => window.localStorage.clear())
 
 describe("FirstRunSetup", () => {
+  test("changes interface language during setup and persists the choice", async () => {
+    renderSetup({})
+    const language = await screen.findByLabelText<HTMLSelectElement>("Language")
+    expect(Array.from(language.options).map((option) => option.value)).toEqual([
+      "en",
+      "zh-CN",
+      "ko",
+      "ja",
+      "es",
+      "ar",
+      "nb",
+    ])
+    fireEvent.change(language, { target: { value: "es" } })
+    expect(await screen.findByRole("heading", { name: "Configurar PI Lab" })).toBeTruthy()
+    expect(window.localStorage.getItem("pi-lab.interface.language")).toBe("es")
+  })
+
   test("shows compact detected subscriptions and automatically chooses the only detected agent", async () => {
     renderSetup({})
 

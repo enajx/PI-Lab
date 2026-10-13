@@ -139,3 +139,33 @@ test("edits Markdown in Render and Source with formatting and slash tools", asyn
   expect(saved).toContain("| Column 1 | Column 2 |")
   expect(saved).toContain("@")
 })
+
+test("typed @ and the Link command complete project files as Markdown links", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("panel-tab-files").click()
+  await window.getByTestId("file-tree-file").filter({ hasText: MARKDOWN_FILE }).click()
+
+  const content = window.getByTestId("editor-buffer").locator(".cm-content")
+  await content.click()
+  await window.keyboard.press("ControlOrMeta+End")
+  await window.keyboard.press("Enter")
+  await window.keyboard.type("@res")
+  const fileMenu = window.getByRole("listbox", { name: "Project files" })
+  await expect(fileMenu.getByRole("option", { name: PROJECT_LINK_FILE })).toBeVisible()
+  await window.keyboard.press("Enter")
+  await expect(content).toContainText("[results.csv](data/results.csv)")
+
+  await window.keyboard.press("Enter")
+  await window.keyboard.type("/link")
+  await window.keyboard.press("Enter")
+  await window.keyboard.type("res")
+  await expect(fileMenu.getByRole("option", { name: PROJECT_LINK_FILE })).toBeVisible()
+  await window.keyboard.press("Enter")
+  await window.keyboard.press("ControlOrMeta+s")
+  await expect
+    .poll(async () => readFile(join(repoDir, MARKDOWN_FILE), "utf8"), { timeout: 30_000 })
+    .toContain("[results.csv](data/results.csv)\n[results.csv](data/results.csv)")
+})

@@ -3,7 +3,10 @@ import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { FilePlus2, FolderOpen, FolderPlus, GitFork, Plus, X } from "lucide-react"
 import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { translateKnownError } from "../../../i18n/errors"
+import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import { useTRPC } from "../../../trpc/react"
+import { ProjectSetupWizard } from "./ProjectSetupWizard"
 
 type AddProjectMenuProps =
   | {
@@ -28,8 +31,11 @@ type AddProjectMenuProps =
  * Sidebar never drift into separate project-creation experiences.
  */
 export function AddProjectMenu(props: AddProjectMenuProps) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const [localOpen, setLocalOpen] = useState(false)
+  const [setup, setSetup] = useState<{ project: Project; optional: boolean } | null>(null)
   const [mode, setMode] = useState<"menu" | "clone" | "template">("menu")
   const [highlight, setHighlight] = useState(0)
   const [url, setUrl] = useState("")
@@ -61,16 +67,22 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     [onControlledOpenChange],
   )
 
-  const onSuccess = (project: Project) => {
-    props.onAdded(project)
-    setOpen(false)
+  const onSuccess = (project: Project, optional: boolean) => {
+    setSetup({ project, optional })
+    if (!global) setOpen(false)
   }
   const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
-  const openProject = useMutation(trpc.projects.open.mutationOptions({ onSuccess }))
-  const cloneProject = useMutation(trpc.projects.clone.mutationOptions({ onSuccess }))
+  const openProject = useMutation(
+    trpc.projects.open.mutationOptions({ onSuccess: (project) => onSuccess(project, true) }),
+  )
+  const cloneProject = useMutation(
+    trpc.projects.clone.mutationOptions({ onSuccess: (project) => onSuccess(project, true) }),
+  )
   const pickFile = useMutation(trpc.system.pickFile.mutationOptions())
   const templateProject = useMutation(
-    trpc.projects.createFromTemplate.mutationOptions({ onSuccess }),
+    trpc.projects.createFromTemplate.mutationOptions({
+      onSuccess: (project) => onSuccess(project, false),
+    }),
   )
   const projectList = useQuery({
     ...trpc.projects.list.queryOptions(),
@@ -136,7 +148,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   }, [])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || setup) return
     const onPointerDown = (event: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
     }
@@ -162,7 +174,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
       window.removeEventListener("mousedown", onPointerDown)
       window.removeEventListener("keydown", onKeyDown)
     }
-  }, [global, highlight, mode, open, setOpen])
+  }, [global, highlight, mode, open, setOpen, setup])
 
   const openFromFolder = () => {
     pickDirectory.mutate(undefined, {
@@ -278,19 +290,21 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
         <button
           type="button"
           data-testid="dashboard-add-project"
-          aria-label="New project"
+          aria-label={t("New project")}
           aria-haspopup="menu"
           aria-expanded={open}
-          data-feature-label="New project"
-          data-feature-help="Open a folder, clone a repository, or create a project from the template"
+          data-feature-label={t("New project")}
+          data-feature-help={t(
+            "Open a folder, clone a repository, or create a project from the template",
+          )}
           onClick={() => setOpen(!open)}
           className="group flex h-full min-h-0 w-full flex-col items-center justify-center gap-2 rounded-xl border border-border/60 border-dashed bg-muted/15 px-5 text-center text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="flex size-9 items-center justify-center rounded-full border border-border/60 bg-background/50 transition-colors group-hover:border-border">
             <FolderPlus className="size-4" aria-hidden />
           </span>
-          <span className="font-medium text-sm">New project</span>
-          <span className="text-xs">Open, clone, or start from your template</span>
+          <span className="font-medium text-sm">{t("New project")}</span>
+          <span className="text-xs">{t("Open, clone, or start from your template")}</span>
         </button>
       ) : props.variant === "sidebar" ? (
         <Button
@@ -300,22 +314,24 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
           aria-haspopup="menu"
           aria-expanded={open}
           className={cn("w-full text-sm", collapsed ? "justify-center px-0" : "justify-start px-2")}
-          title={collapsed ? "Add project" : undefined}
-          data-feature-label="Add project"
-          data-feature-help="Open a folder, clone a repository, or create a project from the template"
+          title={collapsed ? t("Add project") : undefined}
+          data-feature-label={t("Add project")}
+          data-feature-help={t(
+            "Open a folder, clone a repository, or create a project from the template",
+          )}
           onClick={() => setOpen(!open)}
         >
           <FolderPlus aria-hidden />
-          {collapsed ? null : "Add project"}
+          {collapsed ? null : t("Add project")}
         </Button>
       ) : null}
 
-      {open ? (
+      {open && !setup ? (
         <>
           {global || templateDialog ? (
             <button
               type="button"
-              aria-label="Close New/Add Project"
+              aria-label={t("Close New/Add Project")}
               className="fixed inset-0 z-40 bg-black/40"
               onClick={() => setOpen(false)}
             />
@@ -340,7 +356,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
           >
             {mode !== "template" ? (
               <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
-                New/Add Project
+                {t("New/Add Project")}
               </p>
             ) : null}
 
@@ -349,8 +365,8 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                 <MenuItem
                   testId="add-project-folder"
                   icon={FolderOpen}
-                  label="Open from folder"
-                  description="Add an existing local project folder to PI Lab."
+                  label={t("Open from folder")}
+                  description={t("Add an existing local project folder to PI Lab.")}
                   onClick={openFromFolder}
                   disabled={pending}
                   selected={global && highlight === 0}
@@ -358,8 +374,8 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                 <MenuItem
                   testId="add-project-clone"
                   icon={GitFork}
-                  label="Clone from git repo"
-                  description="Clone a Git repository into a folder and add it as a project."
+                  label={t("Clone from git repo")}
+                  description={t("Clone a Git repository into a folder and add it as a project.")}
                   onClick={() => setMode("clone")}
                   disabled={pending}
                   selected={global && highlight === 1}
@@ -367,8 +383,8 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                 <MenuItem
                   testId="add-project-template"
                   icon={FilePlus2}
-                  label="Start from template"
-                  description="Create a new project folder from PI Lab's configured template."
+                  label={t("Start from template")}
+                  description={t("Create a new project folder from PI Lab's configured template.")}
                   onClick={startFromTemplate}
                   disabled={pending}
                   selected={global && highlight === 2}
@@ -389,13 +405,15 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                   className="font-medium text-muted-foreground text-xs"
                   htmlFor={`${labelId}-url`}
                 >
-                  Git repository URL
+                  {t("Git repository URL")}
                 </label>
                 <input
                   id={`${labelId}-url`}
                   data-testid="add-project-clone-url"
-                  data-feature-label="Git repository URL"
-                  data-feature-help="Enter the Git repository to clone into a new local project folder."
+                  data-feature-label={t("Git repository URL")}
+                  data-feature-help={t(
+                    "Enter the Git repository to clone into a new local project folder.",
+                  )}
                   type="text"
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
@@ -405,11 +423,13 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                 <Button
                   type="submit"
                   size="sm"
-                  data-feature-label="Choose folder and clone"
-                  data-feature-help="Choose a destination folder, clone the repository, and add it to PI Lab."
+                  data-feature-label={t("Choose folder and clone")}
+                  data-feature-help={t(
+                    "Choose a destination folder, clone the repository, and add it to PI Lab.",
+                  )}
                   disabled={pending || url.trim().length === 0}
                 >
-                  Choose folder & clone
+                  {t("Choose folder & clone")}
                 </Button>
               </form>
             ) : null}
@@ -424,31 +444,31 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                 }}
               >
                 <div>
-                  <h2 className="font-semibold text-base">Start from template</h2>
+                  <h2 className="font-semibold text-base">{t("Start from template")}</h2>
                   <p className="mt-1 text-muted-foreground text-xs">
-                    Choose the project details and Markdown files to start with.
+                    {t("Choose the project details and Markdown files to start with.")}
                   </p>
                 </div>
 
                 <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium">Project name</span>
+                  <span className="font-medium">{t("Project name")}</span>
                   <input
                     data-testid="add-project-template-name"
                     value={templateName}
                     onChange={(event) => setTemplateName(event.target.value)}
-                    placeholder="My research project"
+                    placeholder={t("My research project")}
                     className="w-full rounded-md border border-border bg-background px-2 py-1.5 outline-none focus:border-ring"
                   />
                 </label>
 
                 <div className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium">Location</span>
+                  <span className="font-medium">{t("Location")}</span>
                   <div className="flex gap-2">
                     <input
                       data-testid="add-project-template-location"
                       value={templateParentPath}
                       onChange={(event) => setTemplateParentPath(event.target.value)}
-                      placeholder="Choose a folder"
+                      placeholder={t("Choose a folder")}
                       className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 outline-none focus:border-ring"
                     />
                     <Button
@@ -458,7 +478,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                       onClick={pickTemplateLocation}
                       disabled={pending}
                     >
-                      Choose
+                      {t("Choose")}
                     </Button>
                   </div>
                   <Button
@@ -469,13 +489,13 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                     onClick={saveDefaultTemplateLocation}
                     disabled={pending || templateParentPath.trim().length === 0}
                   >
-                    Make this the default location
+                    {t("Make this the default location")}
                   </Button>
                 </div>
 
                 <div className="flex flex-col gap-1.5 text-sm">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">Files to include</span>
+                    <span className="font-medium">{t("Files to include")}</span>
                     <Button
                       type="button"
                       size="sm"
@@ -485,7 +505,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                       disabled={pending}
                     >
                       <Plus className="size-3" aria-hidden />
-                      Add file
+                      {t("Add file")}
                     </Button>
                   </div>
                   <div
@@ -494,7 +514,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                   >
                     {templateList.isLoading ? (
                       <p className="px-2 py-2 text-muted-foreground text-xs">
-                        Loading template files…
+                        {t("Loading template files…")}
                       </p>
                     ) : null}
                     {templateFiles.map((relPath) => (
@@ -524,7 +544,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                     {!templateList.isLoading &&
                     templateFiles.length + externalFiles.length === 0 ? (
                       <p className="px-2 py-2 text-muted-foreground text-xs">
-                        No Markdown files selected.
+                        {t("No Markdown files selected.")}
                       </p>
                     ) : null}
                   </div>
@@ -538,7 +558,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                     onClick={() => setMode("menu")}
                     disabled={pending}
                   >
-                    Back
+                    {t("Back")}
                   </Button>
                   <Button
                     type="submit"
@@ -550,7 +570,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                       /[\\/]/.test(templateName.trim())
                     }
                   >
-                    Create project
+                    {t("Create project")}
                   </Button>
                 </div>
               </form>
@@ -561,7 +581,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                 data-testid="add-project-error"
                 className="cursor-text select-text px-2 py-1 text-destructive text-xs leading-relaxed"
               >
-                {error.message}
+                {translateKnownError(language, error.message)}
               </p>
             ) : null}
           </div>
@@ -571,7 +591,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
               className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-6"
               role="dialog"
               aria-modal="true"
-              aria-label={`Preview ${previewFilePath}`}
+              aria-label={`${t("Preview")} ${previewFilePath}`}
               tabIndex={-1}
               onClick={(event) => {
                 if (event.target === event.currentTarget) setPreviewFilePath(null)
@@ -585,7 +605,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                   <span className="truncate font-mono text-sm">{previewFilePath}</span>
                   <button
                     type="button"
-                    aria-label="Close preview"
+                    aria-label={t("Close preview")}
                     className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                     onClick={() => setPreviewFilePath(null)}
                   >
@@ -594,15 +614,26 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                 </div>
                 <pre className="min-h-0 overflow-y-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed">
                   {previewQuery.isLoading
-                    ? "Loading…"
+                    ? t("Loading…")
                     : previewQuery.data?.exists
                       ? previewQuery.data.content
-                      : "This template file no longer exists."}
+                      : t("This template file no longer exists.")}
                 </pre>
               </div>
             </div>
           ) : null}
         </>
+      ) : null}
+      {setup ? (
+        <ProjectSetupWizard
+          project={setup.project}
+          optional={setup.optional}
+          onDone={(project) => {
+            setSetup(null)
+            if (global) setOpen(false)
+            props.onAdded(project)
+          }}
+        />
       ) : null}
     </div>
   )
@@ -621,6 +652,7 @@ function InitializationFileRow({
   onPreviewCancel?: () => void
   onPreview?: () => void
 }) {
+  const t = useTranslate()
   return (
     <div className="flex items-center gap-2 border-border border-b px-2 py-1.5 text-xs last:border-b-0">
       <button
@@ -637,7 +669,7 @@ function InitializationFileRow({
       </button>
       <button
         type="button"
-        aria-label={`Remove ${name}`}
+        aria-label={`${t("Remove")} ${name}`}
         className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         onClick={(event) => {
           event.stopPropagation()

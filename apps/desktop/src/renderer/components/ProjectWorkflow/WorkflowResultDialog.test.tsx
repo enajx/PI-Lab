@@ -1,10 +1,11 @@
 import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../i18n/language"
 import { AppProviders } from "../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx): reproduces the dev build's
 // effect double-invoke so the subscription mount effect runs as it does live.
-import { fireEvent, render, screen, waitFor, within } from "../../test/render"
+import { act, fireEvent, render, screen, waitFor, within } from "../../test/render"
 import { WorkflowResultDialog } from "./WorkflowResultDialog"
 
 /**
@@ -49,6 +50,16 @@ function renderDialog(
 }
 
 describe("WorkflowResultDialog", () => {
+  test("updates its activity and report controls when language changes", async () => {
+    renderDialog({ running: false, result: "" })
+    act(() => setInterfaceLanguage("es"))
+    expect(screen.getByText("Actividad del agente")).toBeTruthy()
+    expect(screen.getByTestId("workflow-result-recheck").textContent).toBe("Volver a comprobar")
+    expect(screen.getByTestId("workflow-result-last-checked").textContent).toContain(
+      "Última comprobación:",
+    )
+    act(() => setInterfaceLanguage("en"))
+  })
   test("renders at the document root so card hover effects cannot contain or clip it", async () => {
     renderDialog({})
 

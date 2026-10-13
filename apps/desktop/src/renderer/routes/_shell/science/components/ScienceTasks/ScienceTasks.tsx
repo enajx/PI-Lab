@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useMemo } from "react"
+import { ProjectMarkdownChoice } from "../../../../../components/ProjectMarkdownChoice"
+import { useTranslate } from "../../../../../i18n/language"
 import { readDefaultAgentId } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
@@ -13,6 +15,7 @@ function selectorFor(task: TaskRecord): { id: string } | { sourceStart: number }
 
 /** Global Tasks science tab. TODO Markdown remains the only task store. */
 export function ScienceTasks() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -144,27 +147,47 @@ export function ScienceTasks() {
   return (
     <ScienceTabShell
       testId="science-tasks"
-      title="Tasks"
-      subtitle="Every project's TODO Markdown, in one place"
+      title={t("Tasks")}
+      subtitle={t("Every project's TODO Markdown, in one place")}
     >
       {listing.isLoading ? (
         <div className="grid min-h-0 flex-1 place-items-center text-muted-foreground text-sm">
-          Loading tasks…
+          {t("Loading tasks…")}
         </div>
       ) : (
-        <TasksWorkspace
-          tasks={tasks}
-          sources={sources}
-          agents={agents.data ?? []}
-          defaultAgentId={readDefaultAgentId()}
-          busy={busy}
-          error={error}
-          onCreate={create}
-          onUpdate={update}
-          onDelete={remove}
-          onMove={move}
-          onRun={run}
-        />
+        <>
+          {sources
+            .filter((source) => source.state !== "ready")
+            .map((source) => (
+              <div
+                key={source.projectId}
+                data-testid={`tasks-source-choice-${source.projectId}`}
+                className="border-border border-b px-4 py-3"
+              >
+                <p className="mb-2 text-sm">
+                  {t("Choose a task file for {project}").replace("{project}", source.projectName)}
+                </p>
+                <ProjectMarkdownChoice
+                  projectId={source.projectId}
+                  kind="tasks"
+                  currentPath={source.relPath}
+                />
+              </div>
+            ))}
+          <TasksWorkspace
+            tasks={tasks}
+            sources={sources}
+            agents={agents.data ?? []}
+            defaultAgentId={readDefaultAgentId()}
+            busy={busy}
+            error={error}
+            onCreate={create}
+            onUpdate={update}
+            onDelete={remove}
+            onMove={move}
+            onRun={run}
+          />
+        </>
       )}
     </ScienceTabShell>
   )

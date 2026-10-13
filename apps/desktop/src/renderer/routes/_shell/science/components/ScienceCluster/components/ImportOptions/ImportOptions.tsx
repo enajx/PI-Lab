@@ -1,5 +1,6 @@
 import { Button, Input, Label } from "@pi-lab/ui"
 import { useState } from "react"
+import { useTranslate } from "../../../../../../../i18n/language"
 
 interface ImportOptionsProps {
   /** Import hosts from the given ssh-config path (empty ⇒ the default ~/.ssh/config). */
@@ -16,6 +17,7 @@ interface ImportOptionsProps {
  * matters — the source config path. A blank path imports from `~/.ssh/config`.
  */
 export function ImportOptions({ onImport, onClose, isPending }: ImportOptionsProps) {
+  const t = useTranslate()
   const [path, setPath] = useState("")
 
   return (
@@ -25,22 +27,23 @@ export function ImportOptions({ onImport, onClose, isPending }: ImportOptionsPro
     >
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="ssh-config-path" className="text-muted-foreground text-xs">
-          SSH config path
+          {t("SSH config path")}
         </Label>
         <Input
           id="ssh-config-path"
           data-testid="ssh-config-path"
           value={path}
-          placeholder="~/.ssh/config (default)"
+          placeholder={`~/.ssh/config (${t("default")})`}
           onChange={(e) => setPath(e.target.value)}
         />
         <p className="text-muted-foreground text-xs">
-          Leave blank to import from your default <code className="font-mono">~/.ssh/config</code>.
+          {t("Leave blank to import from your default")}{" "}
+          <code className="font-mono">~/.ssh/config</code>.
         </p>
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onClose}>
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button
           size="sm"
@@ -48,7 +51,7 @@ export function ImportOptions({ onImport, onClose, isPending }: ImportOptionsPro
           disabled={isPending}
           onClick={() => onImport(path.trim() || undefined)}
         >
-          {isPending ? "Importing…" : "Import"}
+          {isPending ? t("Importing…") : t("Import")}
         </Button>
       </div>
     </div>

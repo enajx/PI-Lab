@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../i18n/language"
 import { AppProviders } from "../providers/AppProviders"
 import { createFakeTrpcClient } from "../test/fakeTrpcClient"
 import { CaffeineControl, nextCaffeineMode } from "./CaffeineControl"
@@ -27,6 +28,14 @@ function renderControl(initialStatus: CaffeineStatus) {
 }
 
 describe("CaffeineControl", () => {
+  test("updates visible mode and accessible help when language changes", async () => {
+    renderControl({ mode: "auto", scope: "system-only", held: false })
+    const control = await screen.findByTestId("caffeine-control")
+    act(() => setInterfaceLanguage("es"))
+    expect(control.textContent).toContain("Automático")
+    expect(control.getAttribute("aria-label")).toContain("Automático")
+    act(() => setInterfaceLanguage("en"))
+  })
   test("cycles Off to On to Auto to Off through the public caffeine mutation", async () => {
     const { modeUpdates } = renderControl({
       mode: "off",

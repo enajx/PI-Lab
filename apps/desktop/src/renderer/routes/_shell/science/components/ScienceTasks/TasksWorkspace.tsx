@@ -19,6 +19,8 @@ import {
   X,
 } from "lucide-react"
 import { type DragEvent, type FormEvent, type ReactNode, useMemo, useState } from "react"
+import { translateKnownError } from "../../../../../i18n/errors"
+import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 
 export type TaskStatus = "backlog" | "planned" | "wip" | "done"
 
@@ -173,6 +175,8 @@ export function TasksWorkspace({
   onMove,
   onRun,
 }: TasksWorkspaceProps) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const [view, setView] = useState<ViewMode>("list")
   const [listMode, setListMode] = useState<ListMode>("plain")
   const [boardMode, setBoardMode] = useState<BoardMode>("headings")
@@ -220,14 +224,14 @@ export function TasksWorkspace({
       <div className="flex flex-wrap items-center gap-2 border-border border-b px-4 py-2">
         <select
           data-testid="tasks-project-filter"
-          aria-label="Project filter"
-          title="Filter tasks by project"
-          data-feature-help="Filter tasks by project"
+          aria-label={t("Project filter")}
+          title={t("Filter tasks by project")}
+          data-feature-help={t("Filter tasks by project")}
           value={projectId}
           onChange={(event) => setProjectId(event.target.value)}
           className="h-8 rounded-md border border-border bg-background px-2 text-sm"
         >
-          <option value="">All projects</option>
+          <option value="">{t("All projects")}</option>
           {sources.map((source) => (
             <option key={source.projectId} value={source.projectId}>
               {source.projectName}
@@ -241,40 +245,42 @@ export function TasksWorkspace({
           />
           <Input
             data-testid="tasks-search"
-            aria-label="Search tasks"
-            title="Search task titles, details, projects, headings, owners, and labels"
-            data-feature-help="Search task titles, details, projects, headings, owners, and labels"
+            aria-label={t("Search tasks")}
+            title={t("Search task titles, details, projects, headings, owners, and labels")}
+            data-feature-help={t(
+              "Search task titles, details, projects, headings, owners, and labels",
+            )}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search tasks"
+            placeholder={t("Search tasks")}
             className="h-8 pl-8"
           />
         </div>
         <FilterSelect
-          label="All statuses"
-          description="Filter tasks by status"
+          label={t("All statuses")}
+          description={t("Filter tasks by status")}
           value={status}
           values={STATUS_ORDER}
-          render={(value) => STATUS_LABEL[value as TaskStatus]}
+          render={(value) => t(STATUS_LABEL[value as TaskStatus])}
           onChange={setStatus}
         />
         <FilterSelect
-          label="All priorities"
-          description="Filter tasks by priority"
+          label={t("All priorities")}
+          description={t("Filter tasks by priority")}
           value={priority}
           values={priorities}
           onChange={setPriority}
         />
         <FilterSelect
-          label="All owners"
-          description="Filter tasks by owner"
+          label={t("All owners")}
+          description={t("Filter tasks by owner")}
           value={owner}
           values={owners}
           onChange={setOwner}
         />
         <FilterSelect
-          label="All labels"
-          description="Filter tasks by label"
+          label={t("All labels")}
+          description={t("Filter tasks by label")}
           value={label}
           values={labels}
           onChange={setLabel}
@@ -282,23 +288,25 @@ export function TasksWorkspace({
         <Button
           variant="ghost"
           size="sm"
-          aria-label={showDone ? "Hide done" : "Show done"}
-          data-feature-help={
-            showDone ? "Hide completed tasks from this view" : "Reveal completed tasks in this view"
-          }
+          aria-label={t(showDone ? "Hide done" : "Show done")}
+          data-feature-help={t(
+            showDone
+              ? "Hide completed tasks from this view"
+              : "Reveal completed tasks in this view",
+          )}
           aria-pressed={showDone}
           onClick={() => setShowDone((current) => !current)}
           className="h-8 gap-1.5 text-muted-foreground"
         >
           {showDone ? <EyeOff /> : <Eye />}
-          {showDone ? "Hide done" : "Show done"}
+          {t(showDone ? "Hide done" : "Show done")}
         </Button>
         <div
           data-testid="tasks-toolbar-controls"
           className="ml-auto flex shrink-0 items-center gap-1.5"
         >
           <fieldset
-            aria-label="Grouping"
+            aria-label={t("Grouping")}
             data-testid="tasks-group-toggle"
             className="flex rounded-md border border-border bg-muted/30 p-0.5"
           >
@@ -306,16 +314,16 @@ export function TasksWorkspace({
               <>
                 <ViewButton
                   active={listMode === "plain"}
-                  label="No grouping"
-                  description="Show all tasks in one flat list"
+                  label={t("No grouping")}
+                  description={t("Show all tasks in one flat list")}
                   onClick={() => setListMode("plain")}
                 >
                   <Ungroup />
                 </ViewButton>
                 <ViewButton
                   active={listMode === "headings"}
-                  label="Group by headings"
-                  description="Organize tasks using the TODO Markdown headings"
+                  label={t("Group by headings")}
+                  description={t("Organize tasks using the TODO Markdown headings")}
                   onClick={() => setListMode("headings")}
                 >
                   <ListTree />
@@ -325,16 +333,16 @@ export function TasksWorkspace({
               <>
                 <ViewButton
                   active={boardMode === "headings"}
-                  label="Group by headings"
-                  description="Organize tasks using the TODO Markdown headings"
+                  label={t("Group by headings")}
+                  description={t("Organize tasks using the TODO Markdown headings")}
                   onClick={() => setBoardMode("headings")}
                 >
                   <Heading2 />
                 </ViewButton>
                 <ViewButton
                   active={boardMode === "status"}
-                  label="Group by Kanban"
-                  description="Organize tasks into Todo, In Progress, and Done"
+                  label={t("Group by Kanban")}
+                  description={t("Organize tasks into Todo, In Progress, and Done")}
                   onClick={() => setBoardMode("status")}
                 >
                   <SquareKanban />
@@ -343,22 +351,22 @@ export function TasksWorkspace({
             )}
           </fieldset>
           <fieldset
-            aria-label="View"
+            aria-label={t("View")}
             data-testid="tasks-view-toggle"
             className="flex rounded-md border border-border bg-muted/30 p-0.5"
           >
             <ViewButton
               active={view === "list"}
-              label="List view"
-              description="Show tasks as compact rows"
+              label={t("List view")}
+              description={t("Show tasks as compact rows")}
               onClick={() => setView("list")}
             >
               <List />
             </ViewButton>
             <ViewButton
               active={view === "board"}
-              label="Kanban view"
-              description="Show tasks as draggable columns"
+              label={t("Kanban view")}
+              description={t("Show tasks as draggable columns")}
               onClick={() => setView("board")}
             >
               <Columns3 />
@@ -369,24 +377,24 @@ export function TasksWorkspace({
           size="sm"
           className="h-8 gap-1.5"
           disabled={writableSources.length === 0 || busy}
-          data-feature-help="Create a task in a project's TODO Markdown"
+          data-feature-help={t("Create a task in a project's TODO Markdown")}
           onClick={() => setCreating(true)}
         >
           <Plus className="size-4" />
-          New task
+          {t("New task")}
         </Button>
       </div>
 
-      {error ? <ErrorBanner message={error} /> : null}
+      {error ? <ErrorBanner message={translateKnownError(language, error)} /> : null}
       <SourceNotices sources={sources} />
 
       <div className="min-h-0 flex-1 overflow-auto">
         {filtered.length === 0 && view === "list" ? (
           <div data-testid="tasks-empty" className="grid h-full place-items-center p-8 text-center">
             <div>
-              <p className="font-medium text-sm">No tasks found</p>
+              <p className="font-medium text-sm">{t("No tasks found")}</p>
               <p className="mt-1 text-muted-foreground text-xs">
-                Tasks remain ordinary checkbox items in each project&apos;s TODO Markdown.
+                {t("Tasks remain ordinary checkbox items in each project's TODO Markdown.")}
               </p>
             </div>
           </div>
@@ -518,6 +526,7 @@ function HeadingTaskList({
   onRun: (task: TaskRecord) => void
   onToggle: (task: TaskRecord) => void
 }) {
+  const t = useTranslate()
   return (
     <div data-testid="tasks-heading-list">
       {sources.map((source) => {
@@ -544,7 +553,7 @@ function HeadingTaskList({
         }
         const ungrouped = taskGroups.get("ungrouped")
         if (ungrouped?.length) {
-          groups.push({ key: "ungrouped", title: "Ungrouped", tasks: ungrouped })
+          groups.push({ key: "ungrouped", title: t("Ungrouped"), tasks: ungrouped })
         }
         return (
           <section
@@ -588,6 +597,7 @@ function TaskRows({
   onRun: (task: TaskRecord) => void
   onToggle: (task: TaskRecord) => void
 }) {
+  const t = useTranslate()
   return tasks.map((task) => (
     <article
       key={task.key}
@@ -596,8 +606,8 @@ function TaskRows({
     >
       <button
         type="button"
-        aria-label={task.status === "done" ? "Mark planned" : "Mark done"}
-        data-feature-help="Update this item's checkbox state in the project's TODO Markdown"
+        aria-label={t(task.status === "done" ? "Mark planned" : "Mark done")}
+        data-feature-help={t("Update this item's checkbox state in the project's TODO Markdown")}
         onClick={() => onToggle(task)}
         className={cn(
           "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
@@ -614,7 +624,9 @@ function TaskRows({
       <button
         type="button"
         data-feature-label={task.title}
-        data-feature-help="Edit this Markdown-backed task's title, details, status, and metadata"
+        data-feature-help={t(
+          "Edit this Markdown-backed task's title, details, status, and metadata",
+        )}
         onClick={() => onEdit(task)}
         className="min-w-0 flex-1 text-left"
       >
@@ -632,14 +644,14 @@ function TaskRows({
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
           <span>{task.projectName}</span>
           <ChevronRight className="size-3" />
-          <span>{task.heading?.path.join(" / ") ?? "Ungrouped"}</span>
+          <span>{task.heading?.path.join(" / ") ?? t("Ungrouped")}</span>
           {task.details ? <span className="truncate">· {firstLine(task.details)}</span> : null}
         </div>
       </button>
       <button
         type="button"
-        aria-label={`Run agent for ${task.title}`}
-        data-feature-help="Start an agent with this task's Markdown context as the prompt"
+        aria-label={`${t("Run agent for")} ${task.title}`}
+        data-feature-help={t("Start an agent with this task's Markdown context as the prompt")}
         onClick={() => onRun(task)}
         className="rounded p-1.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100 focus:opacity-100"
       >
@@ -647,8 +659,10 @@ function TaskRows({
       </button>
       <button
         type="button"
-        aria-label={`Edit ${task.title}`}
-        data-feature-help="Edit this Markdown-backed task's title, details, status, and metadata"
+        aria-label={`${t("Edit")} ${task.title}`}
+        data-feature-help={t(
+          "Edit this Markdown-backed task's title, details, status, and metadata",
+        )}
         onClick={() => onEdit(task)}
         className="rounded p-1.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100 focus:opacity-100"
       >
@@ -668,13 +682,14 @@ function alreadyInStatusLane(
 }
 
 function StatusBoard({ tasks, draggedKey, onDrag, onDrop, onEdit }: BoardProps) {
+  const t = useTranslate()
   return (
     <div className="p-4" data-testid="tasks-status-board">
       <AdaptiveBoardGrid>
         {KANBAN_LANES.map((lane) => (
           <BoardColumn
             key={lane.key}
-            title={lane.title}
+            title={t(lane.title)}
             tasks={tasks.filter((task) => lane.statuses.includes(task.status))}
             draggedKey={draggedKey}
             onDrag={onDrag}
@@ -711,6 +726,7 @@ function ColumnPicker({
   maxVisible: number
   onToggle: (key: string) => void
 }) {
+  const t = useTranslate()
   const [open, setOpen] = useState(false)
   const hiddenTaskCount = columns
     .filter((column) => !visibleKeys.includes(column.key))
@@ -719,19 +735,19 @@ function ColumnPicker({
   const hiddenTaskLabel =
     hiddenTaskCount === 0
       ? ""
-      : `, ${hiddenTaskCount} ${hiddenTaskCount === 1 ? "task" : "tasks"} in hidden columns`
+      : `, ${hiddenTaskCount} ${t(hiddenTaskCount === 1 ? "task" : "tasks")} ${t("in hidden columns")}`
   return (
     <div className="relative">
       <button
         type="button"
         aria-label={
           hiddenColumnCount > 0
-            ? `${label.replace("Choose columns", "Restore hidden columns")} (${hiddenColumnCount} hidden${hiddenTaskLabel})`
-            : `${label} (${visibleKeys.length} of ${columns.length})`
+            ? `${label.replace(t("Choose columns for"), t("Restore hidden columns for"))} (${hiddenColumnCount} ${t("hidden")}${hiddenTaskLabel})`
+            : `${label} (${visibleKeys.length} ${t("of")} ${columns.length})`
         }
         aria-expanded={open}
         aria-haspopup="menu"
-        data-feature-help="Choose which TODO Markdown headings appear as Kanban columns"
+        data-feature-help={t("Choose which TODO Markdown headings appear as Kanban columns")}
         onClick={() => setOpen((current) => !current)}
         className="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground text-xs hover:bg-accent hover:text-foreground"
       >
@@ -741,10 +757,12 @@ function ColumnPicker({
           <Columns3 className="size-3.5" />
         )}
         {hiddenColumnCount > 0
-          ? `Hidden ${hiddenColumnCount}`
-          : `Columns ${visibleKeys.length}/${columns.length}`}
+          ? `${t("Hidden")} ${hiddenColumnCount}`
+          : `${t("Columns")} ${visibleKeys.length}/${columns.length}`}
         {hiddenTaskCount > 0 ? (
-          <span className="text-amber-600 dark:text-amber-400">· {hiddenTaskCount} hidden</span>
+          <span className="text-amber-600 dark:text-amber-400">
+            · {hiddenTaskCount} {t("hidden")}
+          </span>
         ) : null}
       </button>
       {open ? (
@@ -761,11 +779,11 @@ function ColumnPicker({
                 type="button"
                 role="menuitemcheckbox"
                 aria-checked={visible}
-                aria-label={`${visible ? "Hide" : "Show"} ${column.title} column (${column.count} ${
-                  column.count === 1 ? "task" : "tasks"
-                })`}
+                aria-label={`${t(visible ? "Hide" : "Show")} ${column.title} ${t("column")} (${column.count} ${t(column.count === 1 ? "task" : "tasks")})`}
                 disabled={atLimit}
-                title={atLimit ? `Hide another column before showing ${column.title}` : undefined}
+                title={
+                  atLimit ? `${t("Hide another column before showing")} ${column.title}` : undefined
+                }
                 onClick={() => onToggle(column.key)}
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -812,6 +830,7 @@ function HeadingBoard({
   selections: Record<string, string[]>
   onSelectionChange: (projectId: string, keys: string[]) => void
 }) {
+  const t = useTranslate()
   return (
     <div className="flex flex-col gap-5 p-4" data-testid="tasks-heading-board">
       {sources
@@ -836,7 +855,7 @@ function HeadingBoard({
             columns.push({
               key: "ungrouped",
               visibilityKey: "ungrouped",
-              title: "Ungrouped",
+              title: t("Ungrouped"),
               tasks: ungrouped,
             })
           }
@@ -848,7 +867,7 @@ function HeadingBoard({
                   {source.projectName}
                 </h2>
                 <ColumnPicker
-                  label={`Choose columns for ${source.projectName}`}
+                  label={`${t("Choose columns for")} ${source.projectName}`}
                   columns={columns.map((column) => ({
                     key: column.visibilityKey,
                     title: column.title,
@@ -894,7 +913,7 @@ function HeadingBoard({
               </AdaptiveBoardGrid>
               {visibleKeys.length === 0 ? (
                 <p className="py-8 text-center text-muted-foreground text-xs">
-                  No Heading columns selected. Use Columns to show one.
+                  {t("No Heading columns selected. Use Columns to show one.")}
                 </p>
               ) : null}
             </section>
@@ -932,6 +951,7 @@ function BoardColumn({
   onDrop: (event: DragEvent) => void
   onEdit: (task: TaskRecord) => void
 }) {
+  const t = useTranslate()
   return (
     <fieldset
       aria-label={title}
@@ -950,8 +970,8 @@ function BoardColumn({
             variant="ghost"
             size="icon"
             className="size-6 shrink-0 text-muted-foreground"
-            aria-label={`Hide ${title} column`}
-            data-feature-help="Hide this heading column without changing the TODO Markdown"
+            aria-label={`${t("Hide")} ${title} ${t("column")}`}
+            data-feature-help={t("Hide this heading column without changing the TODO Markdown")}
             onClick={onHide}
           >
             <Eye className="size-3.5" />
@@ -967,7 +987,9 @@ function BoardColumn({
             data-testid="task-card"
             data-dragging={draggedKey === task.key}
             data-feature-label={task.title}
-            data-feature-help="Edit this Markdown-backed task or drag it to update the TODO Markdown"
+            data-feature-help={t(
+              "Edit this Markdown-backed task or drag it to update the TODO Markdown",
+            )}
             onDragStart={() => onDrag(task.key)}
             onDragEnd={() => onDrag(null)}
             onClick={() => onEdit(task)}
@@ -986,10 +1008,11 @@ function BoardColumn({
 }
 
 function TaskBadges({ task }: { task: TaskRecord }) {
+  const t = useTranslate()
   return (
     <>
-      <Badge>{STATUS_LABEL[task.status]}</Badge>
-      {task.priority ? <Badge>{task.priority}</Badge> : null}
+      <Badge>{t(STATUS_LABEL[task.status])}</Badge>
+      {task.priority ? <Badge>{t(task.priority)}</Badge> : null}
       {task.owner ? <Badge>@{task.owner}</Badge> : null}
       {task.labels.map((value) => (
         <Badge key={value}>#{value}</Badge>
@@ -1007,6 +1030,7 @@ function Badge({ children }: { children: ReactNode }) {
 }
 
 function SourceNotices({ sources }: { sources: TaskSource[] }) {
+  const t = useTranslate()
   const notices = sources.filter(
     (source) => source.state === "ambiguous" || source.state === "error",
   )
@@ -1017,8 +1041,8 @@ function SourceNotices({ sources }: { sources: TaskSource[] }) {
         <p key={source.projectId}>
           <strong>{source.projectName}:</strong>{" "}
           {source.state === "ambiguous"
-            ? `multiple TODO Markdown files found (${source.candidates.join(", ")}); resolve the duplicate before editing tasks in PI Lab.`
-            : (source.error ?? "TODO Markdown could not be read.")}
+            ? `${t("multiple TODO Markdown files found")} (${source.candidates.join(", ")}); ${t("resolve the duplicate before editing tasks in PI Lab.")}`
+            : (source.error ?? t("TODO Markdown could not be read."))}
         </p>
       ))}
     </div>
@@ -1050,6 +1074,7 @@ function TaskEditorDialog({
   onSave: (projectId: string, relPath: string, draft: TaskDraft) => Promise<void>
   onDelete?: () => Promise<void>
 }) {
+  const t = useTranslate()
   const initialSource =
     sources.find((source) => source.projectId === (task?.projectId ?? initialProjectId)) ??
     sources[0]
@@ -1084,13 +1109,13 @@ function TaskEditorDialog({
   }
 
   return (
-    <Modal title={task ? "Edit task" : "New task"} onClose={onClose}>
+    <Modal title={t(task ? "Edit task" : "New task")} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         {!task ? (
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Project">
+            <Field label={t("Project")}>
               <select
-                aria-label="Project"
+                aria-label={t("Project")}
                 value={projectId}
                 onChange={(event) => {
                   const next = event.target.value
@@ -1107,9 +1132,9 @@ function TaskEditorDialog({
                 ))}
               </select>
             </Field>
-            <Field label="TODO file">
+            <Field label={t("TODO file")}>
               <select
-                aria-label="TODO file"
+                aria-label={t("TODO file")}
                 value={relPath}
                 onChange={(event) => setRelPath(event.target.value)}
                 className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
@@ -1123,66 +1148,66 @@ function TaskEditorDialog({
             </Field>
           </div>
         ) : null}
-        <Field label="Title">
+        <Field label={t("Title")}>
           <Input
-            aria-label="Title"
+            aria-label={t("Title")}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             autoFocus
           />
         </Field>
-        <Field label="Details">
+        <Field label={t("Details")}>
           <textarea
-            aria-label="Details"
+            aria-label={t("Details")}
             value={details}
             onChange={(event) => setDetails(event.target.value)}
             rows={7}
-            placeholder="Optional Markdown detail block"
+            placeholder={t("Optional Markdown detail block")}
             className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Stage">
+          <Field label={t("Stage")}>
             <select
-              aria-label="Stage"
+              aria-label={t("Stage")}
               value={status}
               onChange={(event) => setStatus(event.target.value as TaskStatus)}
               className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
             >
               {STATUS_ORDER.map((value) => (
                 <option key={value} value={value}>
-                  {STATUS_LABEL[value]}
+                  {t(STATUS_LABEL[value])}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="Priority">
+          <Field label={t("Priority")}>
             <select
-              aria-label="Priority"
+              aria-label={t("Priority")}
               value={priority}
               onChange={(event) => setPriority(event.target.value)}
               className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
             >
-              <option value="">None</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              <option value="">{t("None")}</option>
+              <option value="low">{t("Low")}</option>
+              <option value="medium">{t("Medium")}</option>
+              <option value="high">{t("High")}</option>
             </select>
           </Field>
-          <Field label="Labels">
+          <Field label={t("Labels")}>
             <Input
-              aria-label="Labels"
+              aria-label={t("Labels")}
               value={labels}
               onChange={(event) => setLabels(event.target.value)}
               placeholder="ui, parser"
             />
           </Field>
-          <Field label="Owner">
+          <Field label={t("Owner")}>
             <Input
-              aria-label="Owner"
+              aria-label={t("Owner")}
               value={owner}
               onChange={(event) => setOwner(event.target.value)}
-              placeholder="Optional"
+              placeholder={t("Optional")}
             />
           </Field>
         </div>
@@ -1198,16 +1223,16 @@ function TaskEditorDialog({
                 onClick={() => void onDelete()}
               >
                 <Trash2 className="size-4" />
-                Delete
+                {t("Delete")}
               </Button>
             ) : null}
           </div>
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="sm" onClick={onClose}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button type="submit" size="sm" disabled={busy || !title.trim()}>
-              Save
+              {t("Save")}
             </Button>
           </div>
         </div>
@@ -1231,16 +1256,17 @@ function RunTaskDialog({
   onClose: () => void
   onRun: (agentId: string, prompt: string) => Promise<void>
 }) {
+  const t = useTranslate()
   const [agentId, setAgentId] = useState(
     agents.some((agent) => agent.id === defaultAgentId) ? defaultAgentId : (agents[0]?.id ?? ""),
   )
   const [prompt, setPrompt] = useState(() => taskPrompt(task))
   return (
-    <Modal title="Run agent from task" onClose={onClose}>
+    <Modal title={t("Run agent from task")} onClose={onClose}>
       <div className="flex flex-col gap-4">
-        <Field label="Agent">
+        <Field label={t("Agent")}>
           <select
-            aria-label="Agent"
+            aria-label={t("Agent")}
             value={agentId}
             onChange={(event) => setAgentId(event.target.value)}
             className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
@@ -1252,9 +1278,9 @@ function RunTaskDialog({
             ))}
           </select>
         </Field>
-        <Field label="Prompt">
+        <Field label={t("Prompt")}>
           <textarea
-            aria-label="Prompt"
+            aria-label={t("Prompt")}
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             rows={10}
@@ -1262,18 +1288,18 @@ function RunTaskDialog({
           />
         </Field>
         <p className="text-muted-foreground text-xs">
-          Model and reasoning-effort controls are intentionally deferred.
+          {t("Model and reasoning-effort controls are intentionally deferred.")}
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button
             size="sm"
             disabled={busy || !agentId || !prompt.trim()}
             onClick={() => void onRun(agentId, prompt.trim())}
           >
-            Run agent
+            {t("Run agent")}
           </Button>
         </div>
       </div>
@@ -1290,6 +1316,7 @@ function Modal({
   onClose: () => void
   children: ReactNode
 }) {
+  const t = useTranslate()
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" role="presentation">
       <section
@@ -1302,7 +1329,7 @@ function Modal({
           <h2 className="font-semibold text-sm">{title}</h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t("Close")}
             onClick={onClose}
             className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           >

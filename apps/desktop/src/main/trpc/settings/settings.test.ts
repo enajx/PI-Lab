@@ -77,11 +77,52 @@ describe("settings.updateProjectTemplate", () => {
       defaultTemplateParentPath: "/Users/example/projects",
     })
 
-    expect(updated).toEqual({
+    expect(updated).toMatchObject({
       initializationMarkdownFiles: ["AGENTS.md", "TODO.md"],
       defaultTemplateParentPath: "/Users/example/projects",
     })
     expect((await harness.caller.settings.get()).projectTemplate).toEqual(updated)
+  })
+})
+
+describe("project types", () => {
+  it("starts with Research, Software, and Paper and stores editable guidance", async () => {
+    const initial = (await harness.caller.settings.get()).projectTemplate.projectTypes
+    expect(initial.map((type) => type.id)).toEqual(["research", "software", "paper"])
+
+    await harness.caller.settings.updateProjectTypeGuidance({
+      id: "paper",
+      guidance: "Focus on the manuscript and its evidence.",
+    })
+
+    expect((await harness.caller.settings.get()).projectTemplate.projectTypes).toEqual([
+      initial[0],
+      initial[1],
+      { ...initial[2], guidance: "Focus on the manuscript and its evidence." },
+    ])
+  })
+
+  it("keeps unknown saved type data without exposing it as a choice", async () => {
+    harness.db
+      .insert(settings)
+      .values({
+        id: 1,
+        projectTemplate: {
+          ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
+          projectTypes: [
+            ...DEFAULT_PROJECT_TEMPLATE_SETTINGS.projectTypes,
+            { id: "custom-old", name: "Old custom", guidance: "Keep this data" },
+          ],
+        },
+      })
+      .run()
+
+    expect((await harness.caller.settings.get()).projectTemplate.projectTypes).toHaveLength(3)
+    await harness.caller.settings.updateProjectTypeGuidance({ id: "research", guidance: "Edited" })
+    const stored = harness.db.select().from(settings).get()
+    expect(
+      stored?.projectTemplate.projectTypes.find((type) => type.id === "custom-old")?.guidance,
+    ).toBe("Keep this data")
   })
 })
 

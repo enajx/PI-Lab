@@ -20,7 +20,7 @@ export interface TaskSourceRange {
   line: number
 }
 
-/** One task projected from a project's root TODO Markdown file. */
+/** One task projected from a project's selected task Markdown file. */
 export interface ScienceTask {
   /** Stable when an id exists; revision-local until the first mutation otherwise. */
   key: string
@@ -41,7 +41,7 @@ export interface ScienceTask {
   source: TaskSourceRange
 }
 
-/** Discovery result for one project's root TODO Markdown source. */
+/** Discovery result for one project's task Markdown source. */
 export interface TaskSource {
   projectId: string
   projectName: string

@@ -1,6 +1,7 @@
 import type { Project, ProjectMetadata } from "@pi-lab/local-db"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { EditProjectDialog } from "./EditProjectDialog"
 
 /**
@@ -25,6 +26,9 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     gradient: { seed: 1, palette: ["#FFC700"] },
     digitalRain: false,
     metadata: null,
+    taskRelPath: null,
+    mainRelPath: null,
+    typeId: "general",
     agentConfig: null,
     sortIndex: 0,
     archivedAt: null,
@@ -54,6 +58,14 @@ beforeEach(() => {
 })
 
 describe("EditProjectDialog — emoji palette", () => {
+  test("updates the dialog copy when the interface language changes", () => {
+    renderDialog(project({ id: "localized", name: "Study", metadata: null }))
+    act(() => setInterfaceLanguage("es"))
+    expect(screen.getByRole("heading", { name: "Editar proyecto" })).toBeTruthy()
+    expect(screen.getByText("Colaboradores")).toBeTruthy()
+    act(() => setInterfaceLanguage("en"))
+  })
+
   test("shows the UNION of the global palette and the project's own tags", () => {
     // 🧠 and 🔥 are on the project but NOT in the default seed — they must still show.
     renderDialog(project({ id: "e1", name: "A", metadata: { emojiTags: ["🧠", "🔥"] } }))

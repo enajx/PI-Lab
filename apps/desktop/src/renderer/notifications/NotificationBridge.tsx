@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import { useTranslate } from "../i18n/language"
 import { useTRPCClient } from "../trpc/react"
 import { notificationActivationSchema } from "./activation"
 import { NOTIFICATION_SOUND_IDS, type NotificationSoundId, playNotificationSound } from "./sounds"
@@ -15,6 +16,7 @@ function isSoundId(value: unknown): value is NotificationSoundId {
  * uses the same bundled sound and focus suppression.
  */
 export function NotificationBridge() {
+  const t = useTranslate()
   const client = useTRPCClient()
   const navigate = useNavigate()
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
@@ -114,14 +116,16 @@ export function NotificationBridge() {
       data-testid="notification-delivery-error"
       className="fixed right-4 bottom-4 z-50 flex max-w-sm items-center gap-3 rounded-md border border-destructive/40 bg-background px-3 py-2 text-destructive text-sm shadow-lg"
     >
-      <span>Native notification unavailable: {deliveryError}</span>
+      <span>
+        {t("Native notification unavailable:")} {deliveryError}
+      </span>
       <button
         type="button"
-        aria-label="Dismiss notification delivery error"
+        aria-label={t("Dismiss notification delivery error")}
         className="rounded px-1 text-muted-foreground hover:text-foreground"
         onClick={() => setDeliveryError(null)}
       >
-        Dismiss
+        {t("Dismiss")}
       </button>
     </div>
   )

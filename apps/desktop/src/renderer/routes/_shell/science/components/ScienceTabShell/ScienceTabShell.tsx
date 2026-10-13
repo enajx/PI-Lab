@@ -2,7 +2,7 @@ import { cn } from "@pi-lab/ui"
 import type { ReactNode } from "react"
 import { CaffeineControl } from "../../../../../caffeine"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
-import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
+import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 
 interface ScienceTabShellProps {
   /** Tab title, rendered in the fixed header. */
@@ -46,6 +46,7 @@ export function ScienceTabShell({
         </div>
         <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
           {actions}
+          <AgentStatusControl />
           <CaffeineControl />
         </div>
       </header>

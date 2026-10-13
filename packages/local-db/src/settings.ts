@@ -9,6 +9,7 @@ import {
   DEFAULT_NOTIFICATION_SETTINGS,
   DEFAULT_PROJECT_TEMPLATE_SETTINGS,
   type EditorSettings,
+  type ProjectTemplateSettings,
   type Settings,
   settings,
 } from "./tables"
@@ -105,6 +106,21 @@ function editorSettingsWithDefaults(
   }
 }
 
+/** Keep saved guidance while showing only the current built-in project types. */
+function projectTemplateWithDefaults(
+  stored: Partial<ProjectTemplateSettings> | null | undefined,
+): ProjectTemplateSettings {
+  const savedTypes = stored?.projectTypes ?? []
+  const builtInTypes = DEFAULT_PROJECT_TEMPLATE_SETTINGS.projectTypes.map(
+    (type) => savedTypes.find((saved) => saved.id === type.id) ?? type,
+  )
+  return {
+    ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
+    ...stored,
+    projectTypes: builtInTypes,
+  }
+}
+
 /**
  * Read the singleton settings row, falling back to schema defaults when the
  * database has no row yet. Never writes.
@@ -116,10 +132,7 @@ export function getSettingsOrDefaults(db: PiLabDatabase): Settings {
     ...row,
     editor: editorSettingsWithDefaults(row.editor),
     notifications: notificationSettingsWithDefaults(row.notifications),
-    projectTemplate: {
-      ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
-      ...row.projectTemplate,
-    },
+    projectTemplate: projectTemplateWithDefaults(row.projectTemplate),
   }
 }
 

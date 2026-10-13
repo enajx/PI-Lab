@@ -21,6 +21,7 @@ function renderPanel(read: (input: unknown) => { exists: boolean; content: strin
   // hanging the test behind backoff.
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
+    "projects.get": () => ({ mainRelPath: null }),
     "files.read": (input) => {
       const result = read(input)
       return { status: result.exists ? "text" : "missing", ...result }
@@ -28,7 +29,7 @@ function renderPanel(read: (input: unknown) => { exists: boolean; content: strin
   })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ResearchPanel workspaceId="ws-1" />
+      <ResearchPanel projectId="p1" workspaceId="ws-1" />
     </AppProviders>,
   )
 }
@@ -79,6 +80,28 @@ describe("ResearchPanel", () => {
       expect(received).toEqual({ workspaceId: "ws-1", relPath: "RESEARCH.md" })
     })
   })
+
+  test("renders the project's selected main Markdown file", async () => {
+    let received: unknown
+    const client = createFakeTrpcClient({
+      "projects.get": () => ({ mainRelPath: "notes/Overview.md" }),
+      "files.read": (input) => {
+        received = input
+        return { status: "text", exists: true, content: "# Overview" }
+      },
+    })
+    render(
+      <AppProviders
+        client={client}
+        queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <ResearchPanel projectId="p1" workspaceId="ws-1" />
+      </AppProviders>,
+    )
+
+    expect(await screen.findByText("Overview")).toBeTruthy()
+    expect(received).toEqual({ workspaceId: "ws-1", relPath: "notes/Overview.md" })
+  })
 })
 
 test.each([
@@ -87,6 +110,7 @@ test.each([
 ])("rejected %s document shows size and reveal action (mocked IPC)", async (status) => {
   const revealed: unknown[] = []
   const client = createFakeTrpcClient({
+    "projects.get": () => ({ mainRelPath: null }),
     "files.read": () => ({
       status,
       exists: true,
@@ -103,7 +127,7 @@ test.each([
       client={client}
       queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <ResearchPanel workspaceId="ws-1" />
+      <ResearchPanel projectId="p1" workspaceId="ws-1" />
     </AppProviders>,
   )
   expect((await screen.findByTestId("panel-research-rejected")).textContent).toContain(

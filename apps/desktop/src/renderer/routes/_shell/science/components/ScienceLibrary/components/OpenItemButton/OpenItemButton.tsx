@@ -2,6 +2,7 @@ import { Button } from "@pi-lab/ui"
 import { useMutation } from "@tanstack/react-query"
 import { ExternalLink } from "lucide-react"
 import { useState } from "react"
+import { useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 
 interface OpenItemButtonProps {
@@ -16,6 +17,7 @@ interface OpenItemButtonProps {
  * open fails. Only used for the folder source; Zotero items link out via their URL.
  */
 export function OpenItemButton({ path }: OpenItemButtonProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const open = useMutation(trpc.science.library.openItem.mutationOptions())
   const [error, setError] = useState<string | null>(null)
@@ -24,9 +26,9 @@ export function OpenItemButton({ path }: OpenItemButtonProps) {
     setError(null)
     try {
       const result = await open.mutateAsync({ path })
-      if (!result.ok) setError(result.message ?? "Couldn't open the file.")
+      if (!result.ok) setError(result.message ?? t("Couldn't open the file."))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Open failed.")
+      setError(err instanceof Error ? err.message : t("Open failed."))
     }
   }
 
@@ -50,7 +52,7 @@ export function OpenItemButton({ path }: OpenItemButtonProps) {
         onClick={() => void run()}
       >
         <ExternalLink className="size-3.5" />
-        {open.isPending ? "Opening…" : "Open"}
+        {open.isPending ? t("Opening…") : t("Open")}
       </Button>
     </div>
   )

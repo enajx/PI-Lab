@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChartArea, FileCode2, FilePlus2, FileText, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
+import { useTranslate } from "../../../../../i18n/language"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
@@ -37,6 +38,7 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  * own their own scroll per AGENTS.md Pitfalls #3.
  */
 export function ScienceAnalysis() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
@@ -191,8 +193,8 @@ export function ScienceAnalysis() {
   return (
     <ScienceTabShell
       testId="science-analysis"
-      title="Analysis"
-      subtitle="Browse and preview the data files in a project's repo"
+      title={t("Analysis")}
+      subtitle={t("Browse and preview the data files in a project's repo")}
       actions={
         <>
           <button
@@ -205,7 +207,7 @@ export function ScienceAnalysis() {
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileCode2 className="size-3.5" aria-hidden />
-            HTML report
+            {t("HTML report")}
           </button>
           <button
             type="button"
@@ -217,7 +219,7 @@ export function ScienceAnalysis() {
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FilePlus2 className="size-3.5" aria-hidden />
-            Marimo report
+            {t("Marimo report")}
           </button>
         </>
       }
@@ -233,9 +235,9 @@ export function ScienceAnalysis() {
             <div className="flex shrink-0 items-center border-border border-b px-4 py-2">
               <select
                 data-testid="analysis-project-select"
-                aria-label="Analysis project"
-                data-feature-label="Analysis project"
-                data-feature-help="Choose which project repository to scan for data files."
+                aria-label={t("Analysis project")}
+                data-feature-label={t("Analysis project")}
+                data-feature-help={t("Choose which project repository to scan for data files.")}
                 value={selectedProjectId ?? ""}
                 onChange={(event) => setSelectedProjectId(event.target.value)}
                 className="h-8 w-full rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -253,12 +255,14 @@ export function ScienceAnalysis() {
                 <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
                 <Input
                   data-testid="analysis-search"
-                  aria-label="Search data files"
-                  data-feature-label="Search data files"
-                  data-feature-help="Filter this project's discovered data files by name or path."
+                  aria-label={t("Search data files")}
+                  data-feature-label={t("Search data files")}
+                  data-feature-help={t(
+                    "Filter this project's discovered data files by name or path.",
+                  )}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search files…"
+                  placeholder={t("Search files…")}
                   className="h-8 pl-8"
                   disabled={allFiles.length === 0}
                 />
@@ -266,7 +270,7 @@ export function ScienceAnalysis() {
               {categoriesPresent.length > 0 ? (
                 <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
                   <FilterChip
-                    label="All"
+                    label={t("All")}
                     active={categoryFilter === "all"}
                     onClick={() => selectCategory("all")}
                     testId="analysis-category-all"
@@ -274,7 +278,7 @@ export function ScienceAnalysis() {
                   {categoriesPresent.map((category) => (
                     <FilterChip
                       key={category}
-                      label={DATA_FILE_CATEGORY_LABELS[category]}
+                      label={t(DATA_FILE_CATEGORY_LABELS[category])}
                       active={categoryFilter === category}
                       onClick={() => selectCategory(category)}
                       testId={`analysis-category-${category}`}
@@ -285,7 +289,7 @@ export function ScienceAnalysis() {
               {subKindsPresent.length > 1 ? (
                 <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
                   <FilterChip
-                    label="All"
+                    label={t("All")}
                     active={kindFilter === null}
                     onClick={() => setKindFilter(null)}
                     testId="analysis-subkind-all"
@@ -293,7 +297,7 @@ export function ScienceAnalysis() {
                   {subKindsPresent.map((kind) => (
                     <FilterChip
                       key={kind}
-                      label={DATA_FILE_KIND_LABELS[kind]}
+                      label={t(DATA_FILE_KIND_LABELS[kind])}
                       active={kindFilter === kind}
                       onClick={() => setKindFilter(kind)}
                       testId={`analysis-subkind-${kind}`}
@@ -311,7 +315,7 @@ export function ScienceAnalysis() {
                   className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
                   title={listing.data.skipped.join("\n")}
                 >
-                  Some project paths could not be read ({listing.data.skipped.length}).
+                  {t("Some project paths could not be read")} ({listing.data.skipped.length}).
                 </p>
               ) : null}
               {listing.isError ? (
@@ -320,7 +324,7 @@ export function ScienceAnalysis() {
                   role="alert"
                   className="p-4 text-destructive text-xs"
                 >
-                  Could not read project data files: {listing.error.message}
+                  {t("Could not read project data files:")} {listing.error.message}
                 </p>
               ) : allFiles.length === 0 && !listing.isLoading ? (
                 <EmptyState />
@@ -331,15 +335,15 @@ export function ScienceAnalysis() {
                       data-testid="analysis-file-count"
                       className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
                     >
-                      {filtered.length} of {allFiles.length} files
+                      {filtered.length} {t("of")} {allFiles.length} {t("files")}
                     </span>
                     {listing.data?.truncated ? (
                       <span
                         data-testid="analysis-truncated"
                         className="text-[10px] text-amber-500"
-                        title="The repo has more data files than are shown"
+                        title={t("The repo has more data files than are shown")}
                       >
-                        truncated
+                        {t("truncated")}
                       </span>
                     ) : null}
                   </div>
@@ -348,7 +352,7 @@ export function ScienceAnalysis() {
                     <div key={group.category} className="flex flex-col gap-1">
                       <div className="flex items-center gap-2 px-1">
                         <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                          {DATA_FILE_CATEGORY_LABELS[group.category]}
+                          {t(DATA_FILE_CATEGORY_LABELS[group.category])}
                         </span>
                         <span className="text-[10px] text-muted-foreground/50">
                           {group.files.length}
@@ -372,7 +376,7 @@ export function ScienceAnalysis() {
                       data-testid="analysis-no-matches"
                       className="px-1 text-muted-foreground text-xs"
                     >
-                      No files match the current filter.
+                      {t("No files match the current filter.")}
                     </p>
                   ) : null}
                 </div>
@@ -397,12 +401,12 @@ export function ScienceAnalysis() {
 
       {findOpen ? (
         <QuickFind
-          ariaLabel="Find a file"
-          placeholder="Find a file…"
-          scopeLabel="Selected project files"
+          ariaLabel={t("Find a file")}
+          placeholder={t("Find a file…")}
+          scopeLabel={t("Selected project files")}
           allowGlobalSearch
           items={findItems}
-          emptyText="No matching files"
+          emptyText={t("No matching files")}
           onSelect={(item) => setSelectedRelPath(item.id)}
           onClose={() => setFindOpen(false)}
         />
@@ -425,6 +429,7 @@ function FileRow({
   selected: boolean
   onSelect: () => void
 }) {
+  const t = useTranslate()
   return (
     <button
       type="button"
@@ -433,7 +438,7 @@ function FileRow({
       data-kind={file.kind}
       aria-pressed={selected}
       data-feature-label={file.name}
-      data-feature-help="Open a read-only preview of this repository data file."
+      data-feature-help={t("Open a read-only preview of this repository data file.")}
       onClick={onSelect}
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
@@ -559,14 +564,15 @@ function FilterChip({
   onClick: () => void
   testId: string
 }) {
+  const t = useTranslate()
   return (
     <button
       type="button"
       data-testid={testId}
       data-active={active}
       aria-pressed={active}
-      data-feature-label={`${label} filter`}
-      data-feature-help="Filter the data-file list by format or analysis category."
+      data-feature-label={`${label} ${t("filter")}`}
+      data-feature-help={t("Filter the data-file list by format or analysis category.")}
       onClick={onClick}
       className={cn(
         badgeVariants({ variant: active ? "default" : "muted" }),
@@ -587,6 +593,7 @@ function formatSize(bytes: number): string {
 
 /** Shown when no project is open at all (nothing to scan). */
 function NoProjectsState() {
+  const t = useTranslate()
   return (
     <div
       data-testid="science-analysis-no-projects"
@@ -594,9 +601,9 @@ function NoProjectsState() {
     >
       <ChartArea className="size-8 text-muted-foreground" aria-hidden />
       <div className="flex flex-col gap-1">
-        <p className="font-medium text-foreground text-sm">No projects open</p>
+        <p className="font-medium text-foreground text-sm">{t("No projects open")}</p>
         <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
-          Open a project from the sidebar to browse the data files in its repo.
+          {t("Open a project from the sidebar to browse the data files in its repo.")}
         </p>
       </div>
     </div>
@@ -605,6 +612,7 @@ function NoProjectsState() {
 
 /** Shown when the selected project has no data/analysis files. */
 function EmptyState() {
+  const t = useTranslate()
   return (
     <div className="flex h-full items-center justify-center p-6">
       <div
@@ -613,10 +621,11 @@ function EmptyState() {
       >
         <ChartArea className="size-8 text-muted-foreground" aria-hidden />
         <div className="flex flex-col gap-1">
-          <p className="font-medium text-foreground text-sm">No data files found</p>
+          <p className="font-medium text-foreground text-sm">{t("No data files found")}</p>
           <p className="max-w-xs text-muted-foreground text-xs leading-relaxed">
-            Analysis lists the data files, images, notebooks, and plots discovered in the project's
-            repo.
+            {t(
+              "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.",
+            )}
           </p>
         </div>
       </div>
@@ -626,13 +635,14 @@ function EmptyState() {
 
 /** Right-pane placeholder before a file is selected. */
 function NoSelectionState() {
+  const t = useTranslate()
   return (
     <div
       data-testid="analysis-no-selection"
       className="flex h-full items-center justify-center p-6 text-center"
     >
       <p className="max-w-xs text-muted-foreground text-sm">
-        Select a file to preview its contents.
+        {t("Select a file to preview its contents.")}
       </p>
     </div>
   )

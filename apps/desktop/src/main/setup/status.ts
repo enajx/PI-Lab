@@ -110,6 +110,9 @@ function parseCodexStatus(
   const base = { id: "codex" as const, label, executable }
   if (output.timedOut) return { ...base, state: "error", message: "Status check timed out" }
   const normalized = `${output.stdout}\n${output.stderr}`.trim().toLowerCase()
+  if (normalized.includes("not logged in") || output.code !== 0) {
+    return { ...base, state: "unauthenticated" }
+  }
   if (normalized.includes("logged in")) {
     const method = normalized.includes("chatgpt")
       ? "ChatGPT"
@@ -119,9 +122,6 @@ function parseCodexStatus(
           ? "Access token"
           : undefined
     return { ...base, state: "authenticated", ...(method ? { method } : {}) }
-  }
-  if (normalized.includes("not logged in") || output.code !== 0) {
-    return { ...base, state: "unauthenticated" }
   }
   return { ...base, state: "error", message: "Codex returned an unknown status" }
 }

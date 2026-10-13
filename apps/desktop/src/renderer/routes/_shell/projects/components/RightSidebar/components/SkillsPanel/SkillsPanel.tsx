@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
+import { useTranslate } from "../../../../../../../i18n/language"
 import {
   SkillCard,
   SkillRootWarnings,
@@ -12,6 +13,7 @@ import { useTRPC } from "../../../../../../../trpc/react"
 
 /** Optional project-context visualization of the same read-only Skills catalog. */
 export function SkillsPanel({ projectId }: { projectId: string }) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const catalogQuery = useQuery(
     trpc.science.skills.list.queryOptions({ projectId }, { staleTime: 60_000 }),
@@ -24,8 +26,10 @@ export function SkillsPanel({ projectId }: { projectId: string }) {
     <section data-testid="panel-skills" className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-col gap-2 border-border border-b px-3 py-2">
         <div>
-          <h2 className="font-medium text-xs">Skills</h2>
-          <p className="text-[11px] text-muted-foreground">Project-local first, then global</p>
+          <h2 className="font-medium text-xs">{t("Skills")}</h2>
+          <p className="text-[11px] text-muted-foreground">
+            {t("Project-local first, then global")}
+          </p>
         </div>
         <SkillScopeControls visibility={visibility} testIdPrefix="panel-skills" />
       </div>
@@ -33,22 +37,22 @@ export function SkillsPanel({ projectId }: { projectId: string }) {
         {catalogQuery.isError ? (
           <SkillsMessage
             testId="panel-skills-error"
-            title="Skills could not be indexed"
+            title={t("Skills could not be indexed")}
             detail={catalogQuery.error.message}
             destructive={true}
           />
         ) : catalogQuery.isLoading ? (
           <SkillsMessage
             testId="panel-skills-loading"
-            title="Indexing skills…"
-            detail="Reading project-local and global skill locations."
+            title={t("Indexing skills…")}
+            detail={t("Reading project-local and global skill locations.")}
             destructive={false}
           />
         ) : skills.length === 0 ? (
           <SkillsMessage
             testId="panel-skills-empty"
-            title="No skills found"
-            detail="No SKILL.md files were found in the six conventional locations."
+            title={t("No skills found")}
+            detail={t("No SKILL.md files were found in the six conventional locations.")}
             destructive={false}
           />
         ) : (
@@ -59,7 +63,7 @@ export function SkillsPanel({ projectId }: { projectId: string }) {
                 data-testid="panel-skills-hidden"
                 className="text-center text-muted-foreground text-xs"
               >
-                No skills are visible in these scopes.
+                {t("No skills are visible in these scopes.")}
               </p>
             ) : (
               visibleSkills.map((skill) => (

@@ -1,7 +1,8 @@
 import type { Project } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, test, vi } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ScienceAnalysis } from "./ScienceAnalysis"
@@ -32,6 +33,9 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     gradient: null,
     digitalRain: false,
     metadata: null,
+    taskRelPath: null,
+    mainRelPath: null,
+    typeId: "general",
     agentConfig: null,
     sortIndex: 0,
     archivedAt: null,
@@ -61,6 +65,16 @@ function listing(files: Array<{ relPath: string; name: string; kind: string }>) 
 }
 
 describe("ScienceAnalysis", () => {
+  afterEach(() => setInterfaceLanguage("en"))
+
+  test("shows Analysis guidance in the selected interface language", async () => {
+    setInterfaceLanguage("zh-CN")
+    renderAnalysis({ "projects.list": () => [] })
+
+    expect(await screen.findByText("浏览和预览项目仓库中的数据文件")).toBeTruthy()
+    expect(screen.getByText("没有打开的项目")).toBeTruthy()
+  })
+
   test("creates HTML and marimo reports from the Analysis header", async () => {
     const createTemplate = vi.fn(() => ({ relPath: "reports/report-2.html" }))
     renderAnalysis({

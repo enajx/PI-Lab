@@ -32,6 +32,7 @@ import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import type { EditorBuffersApi } from "../../../../../Editor/hooks/useEditorBuffers"
 import { isPythonPath } from "../../../../../Editor/utils/pythonDiagnostics"
 import { rejectedReadMessage } from "../../../../../Editor/utils/rejectedRead"
+import { useTranslate } from "../../../../../i18n/language"
 import {
   FILES_PANEL_MAX_WIDTH,
   FILES_PANEL_MIN_WIDTH,
@@ -65,6 +66,7 @@ interface CentralPanelProps {
    * (the right-sidebar Files tab is hidden while the left panel is on).
    */
   onPinFile?: (relPath: string) => void
+  onSetMainFile?: (relPath: string) => void
   onSaveUntitled?: (relPath: string) => void
 }
 
@@ -88,8 +90,10 @@ export function CentralPanel({
   rightSidebarCollapsed,
   onExpandRightSidebar,
   onPinFile,
+  onSetMainFile,
   onSaveUntitled,
 }: CentralPanelProps) {
+  const t = useTranslate()
   const { editor, sessions, active } = controller
   const [quickOpen, setQuickOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -168,9 +172,11 @@ export function CentralPanel({
             type="button"
             data-testid="central-files-toggle"
             aria-pressed={showFilesPanel}
-            aria-label={showFilesPanel ? "Hide files panel" : "Show files panel"}
-            title={showFilesPanel ? "Hide files panel" : "Show files panel"}
-            data-feature-help="Show the project file tree beside the editor instead of in the right sidebar"
+            aria-label={showFilesPanel ? t("Hide files panel") : t("Show files panel")}
+            title={showFilesPanel ? t("Hide files panel") : t("Show files panel")}
+            data-feature-help={t(
+              "Show the project file tree beside the editor instead of in the right sidebar",
+            )}
             onClick={() => setShowFilesPanel(!showFilesPanel)}
             className={cn(
               "flex size-7 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
@@ -218,13 +224,13 @@ export function CentralPanel({
         </div>
 
         {/* Pane creation, file run, and editor settings — intentionally grouped. */}
-        <div className="flex shrink-0 items-center gap-0.5 border-border border-l bg-muted/30 px-1">
+        <div className="flex shrink-0 items-center gap-0.5 border-border border-s bg-muted/30 px-1">
           <div ref={addMenuRef} className="relative">
             <button
               type="button"
               data-testid="central-add-menu"
-              title="Add pane"
-              aria-label="Add pane"
+              title={t("Add pane")}
+              aria-label={t("Add pane")}
               aria-expanded={addMenuOpen}
               onClick={() => setAddMenuOpen((open) => !open)}
               className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -234,7 +240,7 @@ export function CentralPanel({
             {addMenuOpen ? (
               <div
                 data-testid="central-add-menu-options"
-                className="absolute top-8 right-0 z-30 w-36 rounded-md border border-border bg-popover p-1 shadow-lg"
+                className="absolute top-8 end-0 z-30 w-36 rounded-md border border-border bg-popover p-1 shadow-lg"
               >
                 <AddMenuButton
                   testId="central-add-agent"
@@ -269,9 +275,9 @@ export function CentralPanel({
           <button
             type="button"
             data-testid="central-new-agent"
-            title="New agent"
-            aria-label="New agent"
-            data-feature-help="Start the remembered coding agent in this project workspace"
+            title={t("New agent")}
+            aria-label={t("New agent")}
+            data-feature-help={t("Start the remembered coding agent in this project workspace")}
             disabled={controller.pendingAgent}
             onClick={controller.openAgent}
             className={cn(
@@ -284,9 +290,9 @@ export function CentralPanel({
           <button
             type="button"
             data-testid="central-new-terminal"
-            title="New terminal"
-            aria-label="New terminal"
-            data-feature-help="Open an interactive shell in this project workspace"
+            title={t("New terminal")}
+            aria-label={t("New terminal")}
+            data-feature-help={t("Open an interactive shell in this project workspace")}
             disabled={controller.pendingTerminal}
             onClick={controller.openTerminal}
             className={cn(
@@ -299,9 +305,9 @@ export function CentralPanel({
           <button
             type="button"
             data-testid="central-new-markdown"
-            title="New markdown"
-            aria-label="New markdown"
-            data-feature-help="Create an untitled Markdown file in the built-in editor"
+            title={t("New markdown")}
+            aria-label={t("New markdown")}
+            data-feature-help={t("Create an untitled Markdown file in the built-in editor")}
             onClick={controller.openNewMarkdown}
             className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
@@ -313,9 +319,11 @@ export function CentralPanel({
               <button
                 type="button"
                 data-testid="central-run-python"
-                title="Run Python (Mod+Enter)"
-                aria-label="Run Python"
-                data-feature-help="Save, format, and run the focused Python file using the destination selected in Editor settings"
+                title={t("Run Python (Mod+Enter)")}
+                aria-label={t("Run Python")}
+                data-feature-help={t(
+                  "Save, format, and run the focused Python file using the destination selected in Editor settings",
+                )}
                 disabled={controller.pendingPython}
                 onClick={() => controller.runPython(runDestination)}
                 className={cn(
@@ -333,9 +341,9 @@ export function CentralPanel({
             <button
               type="button"
               data-testid="right-sidebar-expand"
-              aria-label="Expand panel"
-              title="Expand panel"
-              data-feature-help="Restore the project details sidebar"
+              aria-label={t("Expand panel")}
+              title={t("Expand panel")}
+              data-feature-help={t("Restore the project details sidebar")}
               onClick={onExpandRightSidebar}
               className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
@@ -377,7 +385,7 @@ export function CentralPanel({
             className="underline"
             onClick={() => void editor.revealRejectedRead()}
           >
-            Reveal in Finder
+            {t("Reveal in Finder")}
           </button>
         </div>
       ) : null}
@@ -397,6 +405,7 @@ export function CentralPanel({
                 onOpenFile={controller.openFile}
                 activeRelPath={editor.active?.relPath}
                 onPinFile={onPinFile}
+                onSetMainFile={onSetMainFile}
               />
             </div>
             <EdgeResizeHandle
@@ -438,6 +447,7 @@ export function CentralPanel({
                 belowEditorRun={controller.belowEditorRun}
                 onCloseBelowEditorRun={controller.closeBelowEditorRun}
                 client={client}
+                workspaceId={workspaceId}
                 onSaveUntitled={onSaveUntitled}
               />
             </div>
@@ -490,6 +500,7 @@ function AddMenuButton({
   icon: ReactNode
   onClick: () => void
 }) {
+  const t = useTranslate()
   return (
     <button
       type="button"
@@ -498,7 +509,7 @@ function AddMenuButton({
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
     >
       {icon}
-      {label}
+      {t(label)}
     </button>
   )
 }
@@ -524,6 +535,7 @@ function NewAgentDialog({
   onStart: (agentId: string, workspaceMode: "main" | "worktree") => void
   onClose: () => void
 }) {
+  const t = useTranslate()
   const firstAvailable = agents.find((agent) => agent.available)?.id ?? ""
   const initial = agents.some((agent) => agent.id === initialAgentId && agent.available)
     ? initialAgentId
@@ -555,22 +567,24 @@ function NewAgentDialog({
         <div className="flex items-start justify-between border-border border-b p-4">
           <div>
             <h2 id="new-agent-title" className="font-semibold text-sm">
-              New session
+              {t("New session")}
             </h2>
             <p className="mt-1 text-muted-foreground text-xs">
               {gitAvailable
-                ? "Start a CLI coding agent in the project’s main checkout or its own worktree."
-                : "Start one CLI coding agent in this folder. Initialize Git to use worktrees or concurrent agents."}
+                ? t("Start a CLI coding agent in the project’s main checkout or its own worktree.")
+                : t(
+                    "Start one CLI coding agent in this folder. Initialize Git to use worktrees or concurrent agents.",
+                  )}
             </p>
           </div>
-          <button type="button" aria-label="Close new session" onClick={onClose}>
+          <button type="button" aria-label={t("Close new session")} onClick={onClose}>
             <X className="size-4" aria-hidden />
           </button>
         </div>
         <div className="grid grid-cols-2 gap-2 border-border border-b p-3">
           <button type="button" className="rounded border border-primary bg-primary/10 p-2 text-xs">
             <Bot className="mx-auto mb-1 size-4" aria-hidden />
-            Agent CLI
+            {t("Agent CLI")}
           </button>
           <button
             type="button"
@@ -578,7 +592,7 @@ function NewAgentDialog({
             className="rounded border border-border p-2 text-muted-foreground text-xs opacity-50"
           >
             <MessageSquare className="mx-auto mb-1 size-4" aria-hidden />
-            Chat
+            {t("Chat")}
           </button>
         </div>
         <div className="grid grid-cols-2 gap-2 p-4">
@@ -609,11 +623,11 @@ function NewAgentDialog({
                 <span className="flex items-center justify-between gap-3 text-sm">
                   {agent.label}
                   {agent.available ? (
-                    <CheckCircle2 className="size-4 text-emerald-600" aria-label="Detected" />
+                    <CheckCircle2 className="size-4 text-emerald-600" aria-label={t("Detected")} />
                   ) : (
                     <CircleHelp
                       className="size-4 text-muted-foreground"
-                      aria-label="Not detected"
+                      aria-label={t("Not detected")}
                     />
                   )}
                 </span>
@@ -623,16 +637,16 @@ function NewAgentDialog({
                     agent.available ? "text-emerald-600" : "text-muted-foreground",
                   )}
                 >
-                  {agent.available ? "Detected" : "Not detected"}
+                  {agent.available ? t("Detected") : t("Not detected")}
                 </span>
               </span>
             </label>
           ))}
           {agents.length === 0 ? (
-            <p className="text-destructive text-xs">No agent harnesses are configured.</p>
+            <p className="text-destructive text-xs">{t("No agent harnesses are configured.")}</p>
           ) : null}
           <fieldset className="col-span-2 grid grid-cols-2 gap-2 border-border border-t pt-3">
-            <legend className="mb-2 text-muted-foreground text-xs">Run agent in</legend>
+            <legend className="mb-2 text-muted-foreground text-xs">{t("Run agent in")}</legend>
             <label
               className={cn(
                 "cursor-pointer rounded-md border p-2 text-sm",
@@ -642,14 +656,16 @@ function NewAgentDialog({
               <input
                 type="radio"
                 name="agent-workspace"
-                aria-label="Main"
+                aria-label={t("Main")}
                 value="main"
                 checked={workspaceMode === "main"}
                 onChange={() => setWorkspaceMode("main")}
                 className="sr-only"
               />
-              Main
-              <span className="mt-0.5 block text-muted-foreground text-xs">Project checkout</span>
+              {t("Main")}
+              <span className="mt-0.5 block text-muted-foreground text-xs">
+                {t("Project checkout")}
+              </span>
             </label>
             <label
               className={cn(
@@ -661,15 +677,17 @@ function NewAgentDialog({
               <input
                 type="radio"
                 name="agent-workspace"
-                aria-label="Worktree"
+                aria-label={t("Worktree")}
                 value="worktree"
                 checked={workspaceMode === "worktree"}
                 disabled={!gitAvailable}
                 onChange={() => setWorkspaceMode("worktree")}
                 className="sr-only"
               />
-              Worktree
-              <span className="mt-0.5 block text-muted-foreground text-xs">Isolated checkout</span>
+              {t("Worktree")}
+              <span className="mt-0.5 block text-muted-foreground text-xs">
+                {t("Isolated checkout")}
+              </span>
             </label>
           </fieldset>
           {error ? (
@@ -684,7 +702,7 @@ function NewAgentDialog({
             onClick={onClose}
             className="rounded px-3 py-1.5 text-sm hover:bg-accent"
           >
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             type="button"
@@ -692,7 +710,7 @@ function NewAgentDialog({
             onClick={() => onStart(selected, workspaceMode)}
             className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm disabled:opacity-50"
           >
-            Start agent
+            {t("Start agent")}
           </button>
         </div>
       </div>
@@ -709,6 +727,7 @@ function FileSurface({
   belowEditorRun,
   onCloseBelowEditorRun,
   client,
+  workspaceId,
   onSaveUntitled,
 }: {
   editor: EditorBuffersApi
@@ -718,8 +737,10 @@ function FileSurface({
   belowEditorRun: CentralPanelController["belowEditorRun"]
   onCloseBelowEditorRun: () => void
   client: PiLabTrpcClient
+  workspaceId: string
   onSaveUntitled?: (relPath: string) => void
 }) {
+  const t = useTranslate()
   const active = editor.active
   const markdownActive = active ? isMarkdownPath(active.relPath) : false
   const [markdownModes, setMarkdownModes] = useState<Record<string, "render" | "source">>({})
@@ -732,7 +753,8 @@ function FileSurface({
           className="flex shrink-0 items-center gap-2 border-border border-b bg-amber-500/10 px-4 py-2 text-amber-600 text-xs dark:text-amber-400"
         >
           <span className="select-text">
-            {active.relPath} changed on disk while you were editing. Autosave is paused.
+            {active.relPath}
+            {t(" changed on disk while you were editing. Autosave is paused.")}
           </span>
           <button
             type="button"
@@ -741,7 +763,7 @@ function FileSurface({
               void editor.overwriteFile(active.relPath)
             }}
           >
-            Overwrite disk
+            {t("Overwrite disk")}
           </button>
           <button
             type="button"
@@ -750,7 +772,7 @@ function FileSurface({
               void editor.reloadFile(active.relPath)
             }}
           >
-            Reload from disk
+            {t("Reload from disk")}
           </button>
         </div>
       ) : null}
@@ -775,6 +797,22 @@ function FileSurface({
             customThemes={settings.customEditorThemes ?? []}
             diagnostics={editor.diagnosticsSource}
             markdownMode={markdownActive ? markdownMode : undefined}
+            searchProjectFiles={
+              markdownActive
+                ? async (query) => {
+                    const result = await client.files.search.query({
+                      workspaceId,
+                      query,
+                      limit: 50,
+                    })
+                    return result.hits.map(({ relPath }) => ({
+                      relPath,
+                      name: relPath.split("/").at(-1) ?? relPath,
+                      kind: "file" as const,
+                    }))
+                  }
+                : undefined
+            }
           />
         ) : null}
       </div>
@@ -821,6 +859,7 @@ function BelowEditorTerminal({
   client: PiLabTrpcClient
   onClose: () => void
 }) {
+  const t = useTranslate()
   const [collapsed, setCollapsed] = useState(false)
   const [height, setHeight] = useState(220)
 
@@ -860,7 +899,7 @@ function BelowEditorTerminal({
         <button
           type="button"
           data-testid="editor-run-terminal-collapse"
-          aria-label={collapsed ? "Reopen run terminal" : "Collapse run terminal"}
+          aria-label={collapsed ? t("Reopen run terminal") : t("Collapse run terminal")}
           onClick={() => setCollapsed((value) => !value)}
           className="text-muted-foreground hover:text-foreground"
         >
@@ -874,7 +913,7 @@ function BelowEditorTerminal({
         <button
           type="button"
           data-testid="editor-run-terminal-close"
-          aria-label="Close run terminal"
+          aria-label={t("Close run terminal")}
           onClick={onClose}
           className="text-muted-foreground hover:text-foreground"
         >
@@ -908,13 +947,14 @@ interface CentralTabProps {
 
 /** One central-panel tab: kind icon, label, a dirty dot for files, close button. */
 function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: CentralTabProps) {
+  const t = useTranslate()
   const Icon = kind === "agent" ? Bot : kind === "terminal" ? TerminalSquare : FileText
   const description =
     kind === "agent"
-      ? "Switch to this coding agent session."
+      ? t("Switch to this coding agent session.")
       : kind === "terminal"
-        ? "Switch to this interactive shell terminal."
-        : "Switch to this open file in the built-in editor."
+        ? t("Switch to this interactive shell terminal.")
+        : t("Switch to this open file in the built-in editor.")
   return (
     <div
       data-testid="central-tab"
@@ -949,8 +989,14 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
       <button
         type="button"
         data-testid="central-tab-close"
-        aria-label={`Close ${label}`}
-        data-feature-help={`Close this ${kind === "file" ? "editor file" : `${kind} session`} tab`}
+        aria-label={`${t("Close ")}${label}`}
+        data-feature-help={t(
+          kind === "file"
+            ? "Close this editor file tab"
+            : kind === "agent"
+              ? "Close this agent session tab"
+              : "Close this terminal session tab",
+        )}
         onClick={onClose}
         className="flex size-4 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent hover:text-foreground"
       >
@@ -976,12 +1022,13 @@ function Launcher({
   pendingAgent,
   pendingTerminal,
 }: LauncherActions) {
+  const t = useTranslate()
   return (
     <div
       data-testid="central-launcher"
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 text-muted-foreground"
     >
-      <p className="text-sm">Open something to get started</p>
+      <p className="text-sm">{t("Open something to get started")}</p>
       <div className="flex flex-wrap items-center justify-center gap-2">
         <LauncherButton
           testId="launcher-agent"
@@ -1026,18 +1073,19 @@ function LauncherButton({
   disabled?: boolean
   onClick: () => void
 }) {
+  const t = useTranslate()
   return (
     <button
       type="button"
       data-testid={testId}
-      data-feature-label={label}
-      data-feature-help={description}
+      data-feature-label={t(label)}
+      data-feature-help={t(description)}
       disabled={disabled}
       onClick={onClick}
       className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-foreground text-sm transition-colors hover:bg-accent disabled:opacity-50"
     >
       <span className="text-muted-foreground">{icon}</span>
-      {label}
+      {t(label)}
     </button>
   )
 }

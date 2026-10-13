@@ -1,5 +1,10 @@
 import { cn } from "@pi-lab/ui"
 import type { ReactNode } from "react"
+import { useTranslate } from "../../../../i18n/language"
+
+function translated(node: ReactNode, t: (english: string) => string): ReactNode {
+  return typeof node === "string" ? t(node) : node
+}
 
 /** A titled settings section with its rows in a bordered, divided card. */
 export function SettingsSection({
@@ -13,11 +18,14 @@ export function SettingsSection({
   testId?: string
   children: ReactNode
 }) {
+  const t = useTranslate()
   return (
     <section data-testid={testId} className="flex max-w-2xl flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h2 className="font-semibold text-base text-foreground">{title}</h2>
-        {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}
+        <h2 className="font-semibold text-base text-foreground">{t(title)}</h2>
+        {description ? (
+          <p className="text-muted-foreground text-sm">{translated(description, t)}</p>
+        ) : null}
       </div>
       <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
         {children}
@@ -28,10 +36,13 @@ export function SettingsSection({
 
 /** A label + supporting text on the left of a settings row. */
 function FieldLabel({ label, description }: { label: ReactNode; description?: ReactNode }) {
+  const t = useTranslate()
   return (
     <div className="flex min-w-0 flex-col">
-      <span className="text-foreground text-sm">{label}</span>
-      {description ? <span className="text-muted-foreground text-xs">{description}</span> : null}
+      <span className="text-foreground text-sm">{translated(label, t)}</span>
+      {description ? (
+        <span className="text-muted-foreground text-xs">{translated(description, t)}</span>
+      ) : null}
     </div>
   )
 }
@@ -52,6 +63,7 @@ export function ToggleField({
   onChange: (next: boolean) => void
   disabled?: boolean
 }) {
+  const t = useTranslate()
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">
       <FieldLabel label={label} description={description} />
@@ -59,9 +71,9 @@ export function ToggleField({
         type="button"
         role="switch"
         aria-checked={checked}
-        aria-label={typeof label === "string" ? label : undefined}
-        data-feature-label={typeof label === "string" ? label : undefined}
-        data-feature-help={typeof description === "string" ? description : undefined}
+        aria-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-help={typeof description === "string" ? t(description) : undefined}
         data-testid={testId}
         data-checked={checked}
         disabled={disabled}
@@ -99,16 +111,17 @@ export function TextAreaField({
   placeholder?: string
   onChange: (next: string) => void
 }) {
+  const t = useTranslate()
   return (
     <div className="flex flex-col gap-2 px-4 py-3">
       <FieldLabel label={label} description={description} />
       <textarea
         data-testid={testId}
-        aria-label={typeof label === "string" ? label : undefined}
-        data-feature-label={typeof label === "string" ? label : undefined}
-        data-feature-help={typeof description === "string" ? description : undefined}
+        aria-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-help={typeof description === "string" ? t(description) : undefined}
         value={value}
-        placeholder={placeholder}
+        placeholder={placeholder ? t(placeholder) : undefined}
         rows={3}
         onChange={(event) => onChange(event.target.value)}
         className="w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-foreground text-sm outline-none"
@@ -142,31 +155,32 @@ export function SelectField({
   groups?: { label: string; options: SelectOption[] }[]
   onChange: (next: string) => void
 }) {
+  const t = useTranslate()
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">
       <FieldLabel label={label} description={description} />
       <select
         data-testid={testId}
-        aria-label={typeof label === "string" ? label : undefined}
-        data-feature-label={typeof label === "string" ? label : undefined}
-        data-feature-help={typeof description === "string" ? description : undefined}
+        aria-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-help={typeof description === "string" ? t(description) : undefined}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-foreground text-sm outline-none"
       >
         {groups
           ? groups.map((group) => (
-              <optgroup key={group.label} label={group.label}>
+              <optgroup key={group.label} label={t(group.label)}>
                 {group.options.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {t(option.label)}
                   </option>
                 ))}
               </optgroup>
             ))
           : (options ?? []).map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {t(option.label)}
               </option>
             ))}
       </select>

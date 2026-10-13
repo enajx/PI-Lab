@@ -3,6 +3,7 @@ import { cn } from "@pi-lab/ui"
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import type { WorkflowOutputEvent } from "../../../main/trpc/workflows"
+import { useInterfaceLanguage, useTranslate } from "../../i18n/language"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
 import { useTRPCClient } from "../../trpc/react"
 import { formatRelativeTime } from "./relativeTime"
@@ -60,6 +61,8 @@ export function WorkflowResultDialog({
   onRecheck: () => Promise<unknown>
   onClose: () => void
 }) {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const client = useTRPCClient()
   const logRef = useRef<HTMLDivElement | null>(null)
   const [command, setCommand] = useState<string | null>(null)
@@ -147,28 +150,28 @@ export function WorkflowResultDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`${projectName} — ${title}`}
+        aria-label={`${projectName} — ${t(title)}`}
         data-testid="workflow-result-dialog"
         className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xl"
       >
         <div className="border-border border-b px-4 py-3">
           <h2 className="font-medium text-foreground text-sm">
-            {isError ? `${title} failed` : title}
+            {isError ? `${t(title)} ${t("failed")}` : t(title)}
           </h2>
           <p className="truncate text-muted-foreground text-xs">{projectName}</p>
         </div>
 
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-4">
           {/* Live agent activity — the "what is happening" view. */}
-          <section aria-label="Agent activity" className="flex flex-col gap-1">
+          <section aria-label={t("Agent activity")} className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-                Agent activity
+                {t("Agent activity")}
               </span>
               {running ? (
                 <span className="inline-flex items-center gap-1 text-brand text-xs">
                   <span className="size-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
-                  live
+                  {t("live")}
                 </span>
               ) : null}
             </div>
@@ -186,7 +189,7 @@ export function WorkflowResultDialog({
                 log
               ) : (
                 <span className="text-muted-foreground">
-                  {running ? "Waiting for output…" : "No output was captured for this run."}
+                  {running ? t("Waiting for output…") : t("No output was captured for this run.")}
                 </span>
               )}
             </div>
@@ -194,14 +197,14 @@ export function WorkflowResultDialog({
 
           {/* Report — working state while running, else the markdown result / error. */}
           <section className="flex flex-col gap-2">
-            <h3 className="font-medium text-foreground text-sm">{reportHeading}</h3>
+            <h3 className="font-medium text-foreground text-sm">{t(reportHeading)}</h3>
             {running ? (
               <p
                 data-testid="workflow-result-working"
                 className="flex items-center gap-2 text-muted-foreground text-sm"
               >
                 <span className="size-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
-                Working… the report appears here when the run finishes.
+                {t("Working… the report appears here when the run finishes.")}
               </p>
             ) : isError ? (
               <p
@@ -219,13 +222,13 @@ export function WorkflowResultDialog({
                 data-testid="workflow-result-updated"
                 className="cursor-text select-text text-foreground text-sm leading-relaxed"
               >
-                The run finished but printed no summary text.
+                {t("The run finished but printed no summary text.")}
               </p>
             )}
 
             {running || isError ? null : (
               <p data-testid="workflow-result-guidance" className="text-muted-foreground text-xs">
-                {guidance}
+                {t(guidance)}
               </p>
             )}
 
@@ -234,7 +237,7 @@ export function WorkflowResultDialog({
                 data-testid="workflow-result-last-checked"
                 className={cn("text-muted-foreground/80 text-xs")}
               >
-                Last checked: {formatRelativeTime(lastCheckedAt)}
+                {t("Last checked:")} {formatRelativeTime(lastCheckedAt, language)}
               </p>
             )}
           </section>
@@ -248,7 +251,7 @@ export function WorkflowResultDialog({
             disabled={running || rechecking}
             className="rounded-md border border-border px-3 py-1.5 font-medium text-foreground text-sm transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {rechecking || running ? "Rechecking…" : "Recheck"}
+            {rechecking || running ? t("Rechecking…") : t("Recheck")}
           </button>
           <button
             type="button"
@@ -256,7 +259,7 @@ export function WorkflowResultDialog({
             onClick={onClose}
             className="rounded-md bg-brand px-3 py-1.5 font-medium text-brand-foreground text-sm transition-colors hover:bg-brand/90"
           >
-            Close
+            {t("Close")}
           </button>
         </div>
       </div>

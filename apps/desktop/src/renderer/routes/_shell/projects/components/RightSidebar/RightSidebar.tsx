@@ -1,12 +1,15 @@
 import { cn } from "@pi-lab/ui"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, PanelRightClose, Pin, Settings2, X } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
+import { useTranslate } from "../../../../../i18n/language"
 import {
   useShowCodeChanges,
   useShowFilesPanel,
   useShowSkillsPanel,
 } from "../../../../../preferences/preferences"
+import { useTRPC } from "../../../../../trpc/react"
 import { ChangesPanel } from "./components/ChangesPanel"
 import { DocPanel } from "./components/DocPanel"
 import { FilesPanel } from "./components/FilesPanel"
@@ -21,6 +24,7 @@ interface PanelRenderContext {
   activeRelPath: string | null
   /** Pin a `.md` file as a right-sidebar panel (from the Files tree's right-click menu). */
   onPinFile: (relPath: string) => void
+  onSetMainFile: (relPath: string) => void
 }
 
 /** Tab-id prefix marking a user-pinned Markdown panel (the rest is its relPath). */
@@ -62,14 +66,19 @@ const BASE_TABS: readonly PanelTab[] = [
   {
     id: "research",
     label: "Research",
-    description: "Read the project's RESEARCH.md, where durable context and findings are kept.",
-    render: ({ workspaceId }) => <ResearchPanel workspaceId={workspaceId} />,
+    description:
+      "Read the project's selected main Markdown file, where durable context and findings are kept.",
+    render: ({ projectId, workspaceId }) => (
+      <ResearchPanel projectId={projectId} workspaceId={workspaceId} />
+    ),
   },
   {
     id: "todos",
     label: "TODOs",
-    description: "View the project's TODO.md, where project work items are tracked in Markdown.",
-    render: ({ workspaceId }) => <TodosPanel workspaceId={workspaceId} />,
+    description: "View the project's selected task Markdown file.",
+    render: ({ projectId, workspaceId }) => (
+      <TodosPanel projectId={projectId} workspaceId={workspaceId} />
+    ),
   },
 ]
 
@@ -77,12 +86,13 @@ const FILES_TAB: PanelTab = {
   id: "files",
   label: "Files",
   description: "Browse workspace files and open them in the built-in editor.",
-  render: ({ workspaceId, onOpenFile, activeRelPath, onPinFile }) => (
+  render: ({ workspaceId, onOpenFile, activeRelPath, onPinFile, onSetMainFile }) => (
     <FilesPanel
       workspaceId={workspaceId}
       onOpenFile={onOpenFile}
       activeRelPath={activeRelPath}
       onPinFile={onPinFile}
+      onSetMainFile={onSetMainFile}
     />
   ),
 }
@@ -94,20 +104,27 @@ function pinnedTab(relPath: string): PanelTab {
     id: `${PINNED_PREFIX}${relPath}`,
     label: name,
     description: `Pinned Markdown panel showing ${relPath}.`,
-    render: ({ workspaceId }) => (
-      <DocPanel
-        workspaceId={workspaceId}
-        relPath={relPath}
-        testId={`panel-pinned:${relPath}`}
-        emptyTitle={`${name} is empty`}
-        emptyHint={
-          <>
-            This pinned file (<code className="font-mono">{relPath}</code>) has no content yet.
-          </>
-        }
-      />
-    ),
+    render: ({ workspaceId }) => <PinnedDocPanel workspaceId={workspaceId} relPath={relPath} />,
   }
+}
+
+function PinnedDocPanel({ workspaceId, relPath }: { workspaceId: string; relPath: string }) {
+  const t = useTranslate()
+  return (
+    <DocPanel
+      workspaceId={workspaceId}
+      relPath={relPath}
+      testId={`panel-pinned:${relPath}`}
+      emptyTitle={`${basename(relPath)} ${t("is empty")}`}
+      emptyHint={
+        <>
+          {t("This pinned file (")}
+          <code className="font-mono">{relPath}</code>
+          {t(") has no content yet.")}
+        </>
+      }
+    />
+  )
 }
 
 const CODE_CHANGES_TAB: PanelTab = {
@@ -163,6 +180,7 @@ export function useRightSidebarPanels(
   pinnedPanels: string[],
   gitAvailable?: boolean,
 ): RightSidebarPanel[] {
+  const t = useTranslate()
   const [showCodeChanges] = useShowCodeChanges()
   const [showSkills] = useShowSkillsPanel()
   const [showFilesPanel] = useShowFilesPanel()
@@ -172,7 +190,7 @@ export function useRightSidebarPanels(
     showCodeChanges,
     gitAvailable: gitAvailable !== false,
     pinnedPanels,
-  }).map((tab) => ({ id: tab.id, label: tab.label }))
+  }).map((tab) => ({ id: tab.id, label: pinnedRelPath(tab.id) ? tab.label : t(tab.label) }))
 }
 
 /**
@@ -217,6 +235,17 @@ export function RightSidebar({
   /** Whether this project's folder has Git features available. */
   gitAvailable?: boolean
 }) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const setMain = useMutation(
+    trpc.projects.setDocumentPath.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.get.queryKey() })
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+      },
+    }),
+  )
   const [showCodeChanges, setShowCodeChanges] = useShowCodeChanges()
   const [showSkills, setShowSkills] = useShowSkillsPanel()
   const [showFilesPanel] = useShowFilesPanel()
@@ -258,7 +287,7 @@ export function RightSidebar({
       <div className="flex shrink-0 items-center gap-0.5 border-border border-b p-1">
         <div
           role="tablist"
-          aria-label="Project panels"
+          aria-label={t("Project panels")}
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
         >
           {tabs.map((tab) => {
@@ -272,8 +301,10 @@ export function RightSidebar({
                 aria-selected={selected}
                 data-testid={`panel-tab-${tab.id}`}
                 data-active={selected}
-                data-feature-label={tab.label}
-                data-feature-help={tab.description}
+                data-feature-label={pinnedRelPath(tab.id) ? tab.label : t(tab.label)}
+                data-feature-help={
+                  relPath ? `${t("Pinned Markdown panel showing ")}${relPath}.` : t(tab.description)
+                }
                 title={relPath ?? undefined}
                 onClick={() => selectTab(tab.id)}
                 className={cn(
@@ -283,7 +314,7 @@ export function RightSidebar({
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
-                {tab.label}
+                {relPath ? tab.label : t(tab.label)}
               </button>
             )
             if (relPath === null) return tabButton
@@ -294,9 +325,9 @@ export function RightSidebar({
                 <button
                   type="button"
                   data-testid={`right-sidebar-unpin:${relPath}`}
-                  aria-label={`Unpin ${tab.label}`}
-                  title="Unpin panel"
-                  data-feature-help="Remove this pinned Markdown panel from the sidebar"
+                  aria-label={`${t("Unpin ")}${tab.label}`}
+                  title={t("Unpin panel")}
+                  data-feature-help={t("Remove this pinned Markdown panel from the sidebar")}
                   onClick={() => onUnpinFile?.(relPath)}
                   className="-ml-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
@@ -309,9 +340,11 @@ export function RightSidebar({
         <button
           type="button"
           data-testid="right-sidebar-pin"
-          aria-label="Pin a Markdown panel"
-          title="Pin a Markdown panel"
-          data-feature-help="Pin a Markdown file as a persistent panel in this project's sidebar"
+          aria-label={t("Pin a Markdown panel")}
+          title={t("Pin a Markdown panel")}
+          data-feature-help={t(
+            "Pin a Markdown file as a persistent panel in this project's sidebar",
+          )}
           onClick={() => setPinPickerOpen(true)}
           className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
@@ -327,9 +360,9 @@ export function RightSidebar({
         <button
           type="button"
           data-testid="right-sidebar-collapse"
-          aria-label="Collapse panel"
-          title="Collapse panel"
-          data-feature-help="Hide the project details sidebar to give the editor more room"
+          aria-label={t("Collapse panel")}
+          title={t("Collapse panel")}
+          data-feature-help={t("Hide the project details sidebar to give the editor more room")}
           onClick={onCollapse}
           className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
@@ -337,7 +370,19 @@ export function RightSidebar({
         </button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        {active?.render({ projectId, workspaceId, onOpenFile, activeRelPath, onPinFile: pinFile })}
+        {setMain.error ? (
+          <p role="alert" className="px-4 py-2 text-destructive text-xs">
+            {setMain.error.message}
+          </p>
+        ) : null}
+        {active?.render({
+          projectId,
+          workspaceId,
+          onOpenFile,
+          activeRelPath,
+          onPinFile: pinFile,
+          onSetMainFile: (relPath) => setMain.mutate({ id: projectId, kind: "main", relPath }),
+        })}
       </div>
       {pinPickerOpen ? (
         <QuickOpen
@@ -373,6 +418,7 @@ function ViewOptionsMenu({
   onToggleCodeChanges: () => void
   onToggleSkills: () => void
 }) {
+  const t = useTranslate()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const labelId = useId()
@@ -401,9 +447,9 @@ function ViewOptionsMenu({
         data-testid="right-sidebar-settings"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="View options"
-        title="View options"
-        data-feature-help="Choose which optional panels appear in the project sidebar"
+        aria-label={t("View options")}
+        title={t("View options")}
+        data-feature-help={t("Choose which optional panels appear in the project sidebar")}
         onClick={() => setOpen((value) => !value)}
         className={cn(
           "flex size-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
@@ -418,10 +464,10 @@ function ViewOptionsMenu({
           data-testid="right-sidebar-settings-menu"
           role="menu"
           aria-labelledby={labelId}
-          className="absolute top-8 right-0 z-50 w-56 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          className="absolute top-8 end-0 z-50 w-56 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
         >
           <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
-            View options
+            {t("View options")}
           </p>
           <ToggleRow
             testId="right-sidebar-toggle-skills"
@@ -459,6 +505,7 @@ interface ToggleRowProps {
 
 /** A single on/off view-option row with a checkbox-style affordance. */
 function ToggleRow({ testId, label, description, checked, disabled, onToggle }: ToggleRowProps) {
+  const t = useTranslate()
   return (
     <button
       type="button"
@@ -467,8 +514,8 @@ function ToggleRow({ testId, label, description, checked, disabled, onToggle }: 
       disabled={disabled}
       data-testid={testId}
       data-checked={checked}
-      data-feature-label={label}
-      data-feature-help={description}
+      data-feature-label={t(label)}
+      data-feature-help={t(description)}
       onClick={onToggle}
       className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
     >
@@ -481,8 +528,8 @@ function ToggleRow({ testId, label, description, checked, disabled, onToggle }: 
         {checked ? <Check className="size-3" aria-hidden /> : null}
       </span>
       <span className="min-w-0">
-        <span className="block text-foreground text-xs">{label}</span>
-        <span className="block text-muted-foreground text-[11px]">{description}</span>
+        <span className="block text-foreground text-xs">{t(label)}</span>
+        <span className="block text-muted-foreground text-[11px]">{t(description)}</span>
       </span>
     </button>
   )

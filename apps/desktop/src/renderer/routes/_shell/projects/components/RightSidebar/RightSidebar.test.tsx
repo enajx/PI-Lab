@@ -29,6 +29,7 @@ function renderSidebar(
   const onCollapse = vi.fn()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
+    "projects.get": () => ({ mainRelPath: null, taskRelPath: null }),
     "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
     "files.tree": () => [{ name: "main.py", relPath: "main.py", kind: "file" as const }],
     "workspaces.changes": () => [],
@@ -78,6 +79,7 @@ function CollapsibleHarness({ onOpenFile = vi.fn() }: { onOpenFile?: () => void 
 function renderCollapsible() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
+    "projects.get": () => ({ mainRelPath: null, taskRelPath: null }),
     "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
     "files.tree": () => [{ name: "main.py", relPath: "main.py", kind: "file" as const }],
     "workspaces.changes": () => [],
@@ -95,6 +97,46 @@ beforeEach(() => {
 })
 
 describe("RightSidebar", () => {
+  test("TODO panel reads a clear discovered task source when no file is selected yet", async () => {
+    const readPaths: string[] = []
+    renderSidebar(vi.fn(), {
+      "science.tasks.list": () => ({
+        sources: [
+          {
+            projectId: "p1",
+            projectName: "Project",
+            state: "ready",
+            relPath: "Work-TODO.md",
+            candidates: ["Work-TODO.md"],
+            revision: "r1",
+            headings: [],
+            boardHeadings: [],
+          },
+        ],
+        tasks: [],
+      }),
+      "files.read": (input) => {
+        readPaths.push((input as { relPath: string }).relPath)
+        return { status: "text", exists: true, content: "# Work tasks\n" }
+      },
+    })
+
+    fireEvent.click(screen.getByTestId("panel-tab-todos"))
+    await waitFor(() => expect(readPaths).toContain("Work-TODO.md"))
+    await waitFor(() =>
+      expect(screen.getByTestId("panel-todos").textContent).toContain("Work tasks"),
+    )
+  })
+
+  test("translates panel tabs and view options", () => {
+    window.localStorage.setItem("pi-lab.interface.language", "nb")
+    renderSidebar()
+
+    expect(screen.getByTestId("panel-tab-research").textContent).toBe("Forskning")
+    fireEvent.click(screen.getByTestId("right-sidebar-settings"))
+    expect(screen.getByTestId("right-sidebar-settings-menu").textContent).toContain("Visningsvalg")
+  })
+
   test("shows Research / TODOs / Files, with no Status and no Code changes by default", () => {
     renderSidebar()
     expect(screen.getByTestId("panel-tab-research")).toBeTruthy()
@@ -108,10 +150,10 @@ describe("RightSidebar", () => {
   test("gives every project panel a concise purpose instead of its bare label", () => {
     renderSidebar()
     expect(screen.getByTestId("panel-tab-research").getAttribute("data-feature-help")).toBe(
-      "Read the project's RESEARCH.md, where durable context and findings are kept.",
+      "Read the project's selected main Markdown file, where durable context and findings are kept.",
     )
     expect(screen.getByTestId("panel-tab-todos").getAttribute("data-feature-help")).toBe(
-      "View the project's TODO.md, where project work items are tracked in Markdown.",
+      "View the project's selected task Markdown file.",
     )
     expect(screen.getByTestId("panel-tab-files").getAttribute("data-feature-help")).toBe(
       "Browse workspace files and open them in the built-in editor.",
@@ -364,6 +406,7 @@ function renderPinned(projectId: string, overrides: FakeHandlers = {}) {
   seedWorkspaceState(projectId)
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
+    "projects.get": () => ({ mainRelPath: null, taskRelPath: null }),
     "files.read": () => ({ status: "text", exists: true, content: "# Pinned notes\n" }),
     "files.tree": () => [{ name: "notes.md", relPath: "notes.md", kind: "file" as const }],
     "files.search": () => ({
@@ -383,6 +426,23 @@ function renderPinned(projectId: string, overrides: FakeHandlers = {}) {
 }
 
 describe("RightSidebar pinned Markdown panels", () => {
+  test("right-clicking Markdown offers to set the project's main readme", async () => {
+    const selected: unknown[] = []
+    renderPinned("p-main", {
+      "projects.setDocumentPath": (input) => {
+        selected.push(input)
+      },
+    })
+    fireEvent.click(screen.getByTestId("panel-tab-files"))
+    fireEvent.contextMenu(await screen.findByTestId("file-tree-file"))
+
+    fireEvent.click(screen.getByTestId("file-tree-set-main"))
+
+    await waitFor(() =>
+      expect(selected).toEqual([{ id: "p-main", kind: "main", relPath: "notes.md" }]),
+    )
+  })
+
   test("right-clicking a .md file in the tree offers Pin as panel, which adds a panel", async () => {
     renderPinned("p-tree")
     fireEvent.click(screen.getByTestId("panel-tab-files"))
@@ -438,6 +498,7 @@ describe("RightSidebar pinned Markdown panels", () => {
     })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const client = createFakeTrpcClient({
+      "projects.get": () => ({ mainRelPath: null, taskRelPath: null }),
       "files.read": () => ({ status: "text", exists: true, content: "# Pinned notes\n" }),
       "files.tree": () => [],
       "files.search": () => ({ hits: [], partial: false, skipped: [] }),

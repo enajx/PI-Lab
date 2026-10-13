@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useTranslate } from "../../i18n/language"
 import "./cardGrid.css"
 
 export const CARD_GRID_SURFACES = {
@@ -141,8 +142,8 @@ interface ResizableCardGridItemProps extends Omit<HTMLAttributes<HTMLElement>, "
   testId?: string
 }
 
-function scaleLabel(label: string, scale: number): string {
-  return `Resize all cards from ${label}, currently ${Math.round(scale * 100)} percent`
+function scaleLabel(label: string, scale: number, t: (english: string) => string): string {
+  return `${t("Resize all cards from")} ${label}, ${t("currently")} ${Math.round(scale * 100)} ${t("percent")}`
 }
 
 /**
@@ -160,12 +161,13 @@ export function ResizableCardGridItem({
   style,
   ...elementProps
 }: ResizableCardGridItemProps) {
+  const t = useTranslate()
   const context = useContext(CardGridContext)
   if (!context) throw new Error("ResizableCardGridItem must be rendered inside CardGrid")
 
   const cleanupRef = useRef<() => void>(() => undefined)
   const Element = as
-  const accessibleLabel = scaleLabel(label, context.scale)
+  const accessibleLabel = scaleLabel(label, context.scale, t)
 
   useEffect(() => () => cleanupRef.current(), [])
 
@@ -178,6 +180,7 @@ export function ResizableCardGridItem({
     const pointerId = event.pointerId
     const startX = event.clientX
     const startY = event.clientY
+    const direction = document.documentElement.dir === "rtl" ? -1 : 1
     const startScale = context.scale
     const target = event.currentTarget
     target.setPointerCapture?.(pointerId)
@@ -191,7 +194,7 @@ export function ResizableCardGridItem({
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return
       move.preventDefault()
-      const distance = (move.clientX - startX + move.clientY - startY) / 2
+      const distance = (direction * (move.clientX - startX) + move.clientY - startY) / 2
       context.setScale(startScale + distance / PIXELS_PER_SCALE_STEP)
     }
     const onUp = (up: PointerEvent) => {
@@ -212,8 +215,19 @@ export function ResizableCardGridItem({
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     let next = context.scale
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") next += KEYBOARD_STEP
-    if (event.key === "ArrowLeft" || event.key === "ArrowUp") next -= KEYBOARD_STEP
+    const rtl = document.documentElement.dir === "rtl"
+    if (
+      (event.key === "ArrowRight" && !rtl) ||
+      (event.key === "ArrowLeft" && rtl) ||
+      event.key === "ArrowDown"
+    )
+      next += KEYBOARD_STEP
+    if (
+      (event.key === "ArrowLeft" && !rtl) ||
+      (event.key === "ArrowRight" && rtl) ||
+      event.key === "ArrowUp"
+    )
+      next -= KEYBOARD_STEP
     if (event.key === "Home") next = DEFAULT_SCALE
     if (next === context.scale) return
     event.preventDefault()
@@ -237,8 +251,8 @@ export function ResizableCardGridItem({
         data-testid="card-resize-handle"
         data-card-id={cardId}
         aria-label={accessibleLabel}
-        data-feature-label={`Resize ${label}`}
-        data-feature-help="Drag the lower-right corner or use arrow keys to resize all cards"
+        data-feature-label={`${t("Resize")} ${label}`}
+        data-feature-help={t("Drag the lower-right corner or use arrow keys to resize all cards")}
         onPointerDown={onPointerDown}
         onKeyDown={onKeyDown}
         onClick={(event) => {
@@ -249,7 +263,7 @@ export function ResizableCardGridItem({
           event.preventDefault()
           event.stopPropagation()
         }}
-        className="app-no-drag absolute right-0 bottom-0 z-20 size-6 cursor-nwse-resize touch-none bg-transparent opacity-0 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="app-no-drag absolute end-0 bottom-0 z-20 size-6 cursor-nwse-resize touch-none bg-transparent opacity-0 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rtl:left-0 rtl:right-auto rtl:cursor-nesw-resize"
       >
         <span data-testid="card-resize-status" aria-live="polite" className="sr-only">
           {accessibleLabel}

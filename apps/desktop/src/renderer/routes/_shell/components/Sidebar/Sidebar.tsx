@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import {
   dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
@@ -306,6 +307,8 @@ interface ProjectMenuState {
  * AGENTS.md Pitfalls #3 — never a nested Radix ScrollArea).
  */
 export function Sidebar() {
+  const t = useTranslate()
+  const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
@@ -361,7 +364,7 @@ export function Sidebar() {
       data-testid="app-sidebar"
       data-collapsed={collapsed}
       className={cn(
-        "relative flex shrink-0 flex-col border-sidebar-border border-r bg-sidebar",
+        "relative flex shrink-0 flex-col border-sidebar-border border-e bg-sidebar",
         collapsed && "w-14",
       )}
       style={collapsed ? undefined : { width }}
@@ -375,12 +378,12 @@ export function Sidebar() {
         data-testid="sidebar-titlebar"
         className={cn(
           "app-drag flex h-11 shrink-0 items-center",
-          collapsed ? "justify-center px-2" : "pl-20 pr-2",
+          collapsed ? "justify-center px-2" : language === "ar" ? "px-2" : "pl-20 pr-2",
         )}
       >
         <CollapseToggle
           collapsed={collapsed}
-          className={collapsed ? undefined : "ml-auto"}
+          className={collapsed ? undefined : "ms-auto"}
           onToggle={() => setCollapsed(!collapsed)}
         />
       </div>
@@ -393,18 +396,18 @@ export function Sidebar() {
 
         {/* The project list is the scroll region. */}
         <nav
-          aria-label="Projects"
-          className="-mr-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto border-sidebar-border border-t pr-1 pt-3"
+          aria-label={t("Projects")}
+          className="-me-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto border-sidebar-border border-t pe-1 pt-3"
         >
           {collapsed ? null : (
             <Link
               to="/"
               data-testid="nav-project-dashboard"
-              data-feature-label="Projects Dashboard"
-              data-feature-help="Open Projects Dashboard to see every project at a glance"
+              data-feature-label={t("Projects Dashboard")}
+              data-feature-help={t("Open Projects Dashboard to see every project at a glance")}
               className="rounded px-2 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground focus-visible:text-foreground"
             >
-              Projects
+              {t("Projects")}
             </Link>
           )}
           {orderedProjects.length === 0 ? (
@@ -413,7 +416,7 @@ export function Sidebar() {
                 data-testid="projects-empty"
                 className="px-1 py-2 text-muted-foreground text-xs leading-relaxed"
               >
-                No projects yet.
+                {t("No projects yet.")}
               </p>
             )
           ) : (
@@ -501,13 +504,14 @@ export function FeatureHelpPanel({
   help: FeatureHelp | null
   onHide: () => void
 }) {
-  const label = help?.label ?? "What’s this?"
-  const description = help?.description ?? "Hover over or focus a control to learn what it does."
+  const t = useTranslate()
+  const label = help?.label ?? t("What’s this?")
+  const description = help?.description ?? t("Hover over or focus a control to learn what it does.")
   const showDescription = description !== label
 
   return (
     <section
-      aria-label="Feature help"
+      aria-label={t("Feature help")}
       data-testid="sidebar-feature-help"
       className="min-h-20 shrink-0 rounded-md border border-sidebar-border bg-sidebar-accent/35 p-2"
     >
@@ -520,11 +524,13 @@ export function FeatureHelpPanel({
         </p>
         <button
           type="button"
-          aria-label="Hide feature help"
-          title="Hide feature help"
-          data-feature-help="Hide this help panel; a compact Info button will remain to restore it"
+          aria-label={t("Hide feature help")}
+          title={t("Hide feature help")}
+          data-feature-help={t(
+            "Hide this help panel; a compact Info button will remain to restore it",
+          )}
           onClick={onHide}
-          className="-mr-1 -mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="-me-1 -mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <X className="size-3.5" aria-hidden />
         </button>
@@ -546,19 +552,20 @@ export function FeatureHelpRestoreButton({
   collapsed: boolean
   onRestore: () => void
 }) {
+  const t = useTranslate()
   return (
     <Button
       type="button"
       variant="ghost"
       size="sm"
-      aria-label="Show feature help"
-      title="Show feature help"
-      data-feature-help="Restore the lower-left panel that explains hovered controls"
+      aria-label={t("Show feature help")}
+      title={t("Show feature help")}
+      data-feature-help={t("Restore the lower-left panel that explains hovered controls")}
       onClick={onRestore}
       className={cn("text-muted-foreground", collapsed ? "justify-center px-0" : "justify-start")}
     >
       <Info aria-hidden />
-      {collapsed ? null : "Show help"}
+      {collapsed ? null : t("Show help")}
     </Button>
   )
 }
@@ -577,18 +584,19 @@ function CollapseToggle({
   className: string | undefined
   onToggle: () => void
 }) {
+  const t = useTranslate()
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon"
       data-testid="sidebar-collapse-toggle"
-      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
+      title={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
       data-feature-help={
         collapsed
-          ? "Expand the sidebar to show navigation labels"
-          : "Collapse the sidebar to its compact icon rail"
+          ? t("Expand the sidebar to show navigation labels")
+          : t("Collapse the sidebar to its compact icon rail")
       }
       aria-pressed={collapsed}
       className={cn("app-no-drag size-7 text-sidebar-foreground", className)}
@@ -619,6 +627,7 @@ function ProjectContextMenu({
   onSetHidden: (id: string, hidden: boolean) => void
   onDismissGitNotice: (id: string) => void
 }) {
+  const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -651,45 +660,51 @@ function ProjectContextMenu({
         role="menuitem"
         data-testid="project-dismiss-git-notice"
         onClick={() => onDismissGitNotice(menu.id)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60"
       >
         <X className="size-4 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">Dismiss Git warning</span>
+        <span className="min-w-0 truncate">{t("Dismiss Git warning")}</span>
       </button>
       <button
         type="button"
         role="menuitem"
         data-testid={menu.hidden ? "project-restore" : "project-hide"}
-        data-feature-label={menu.hidden ? "Unhide project" : "Hide project"}
+        data-feature-label={menu.hidden ? t("Unhide project") : t("Hide project")}
         data-feature-help={
           menu.hidden
-            ? "Restore this project to the Dashboard and sidebar."
-            : "Hide this project from the Dashboard and sidebar without removing its data."
+            ? t("Restore this project to the Dashboard and sidebar.")
+            : t("Hide this project from the Dashboard and sidebar without removing its data.")
         }
         onClick={() => onSetHidden(menu.id, !menu.hidden)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60"
       >
         {menu.hidden ? (
           <Eye className="size-4 shrink-0" aria-hidden />
         ) : (
           <EyeOff className="size-4 shrink-0" aria-hidden />
         )}
-        <span className="min-w-0 truncate">{menu.hidden ? "Unhide project" : "Hide project"}</span>
+        <span className="min-w-0 truncate">
+          {menu.hidden ? t("Unhide project") : t("Hide project")}
+        </span>
       </button>
       <button
         type="button"
         role="menuitem"
         data-testid="project-remove"
-        data-feature-label="Remove project"
-        data-feature-help="Remove this project from PI Lab without deleting any files from disk."
+        data-feature-label={t("Remove project")}
+        data-feature-help={t(
+          "Remove this project from PI Lab without deleting any files from disk.",
+        )}
         onClick={() => onRemove(menu.id)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-destructive/10"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-destructive text-sm transition-colors hover:bg-destructive/10"
       >
         <Trash2 className="size-4 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">Remove from PI Lab</span>
+        <span className="min-w-0 truncate">{t("Remove from PI Lab")}</span>
       </button>
       <p className="cursor-text select-text px-2 py-1 text-[11px] text-muted-foreground leading-snug">
-        Removes “{menu.name}” from the app only — the files on disk are left untouched.
+        {t("Removes “")}
+        {menu.name}
+        {t("” from the app only — the files on disk are left untouched.")}
       </p>
     </div>
   )
@@ -722,12 +737,13 @@ function EdgeResizeHandle({
     if (event.button !== 0) return
     event.preventDefault()
     const startX = event.clientX
+    const direction = document.documentElement.dir === "rtl" ? -1 : 1
     const startWidth = collapsed ? COLLAPSED_RAIL_WIDTH : width
     const target = event.currentTarget
     target.setPointerCapture(event.pointerId)
 
     const onMove = (move: PointerEvent) => {
-      const next = startWidth + (move.clientX - startX)
+      const next = startWidth + direction * (move.clientX - startX)
       if (next < COLLAPSE_SNAP_WIDTH) {
         setCollapsed(true)
         return
@@ -750,7 +766,7 @@ function EdgeResizeHandle({
     <div
       data-testid="sidebar-edge-drag"
       aria-hidden
-      className="app-no-drag absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-sidebar-border"
+      className="app-no-drag absolute inset-y-0 end-0 w-1 cursor-col-resize hover:bg-sidebar-border"
       onPointerDown={onPointerDown}
     />
   )
@@ -760,6 +776,7 @@ function EdgeResizeHandle({
  * Projects Dashboard entry — the top-of-sidebar link to the project cards ("/").
  */
 function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
+  const t = useTranslate()
   const { location } = useRouterState()
   const isActive = location.pathname === "/"
   return (
@@ -768,13 +785,13 @@ function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
         to="/"
         data-testid="nav-dashboard"
         data-active={isActive}
-        title={collapsed ? "Projects Dashboard" : undefined}
-        data-feature-label="Projects Dashboard"
-        data-feature-help="See every open project and its current activity at a glance"
+        title={collapsed ? t("Projects Dashboard") : undefined}
+        data-feature-label={t("Projects Dashboard")}
+        data-feature-help={t("See every open project and its current activity at a glance")}
         className={cn(navRowClass, collapsed && "justify-center", navStateClass(isActive))}
       >
         <LayoutDashboard className="size-4" aria-hidden />
-        {collapsed ? null : <span className="flex-1 truncate">Projects Dashboard</span>}
+        {collapsed ? null : <span className="flex-1 truncate">{t("Projects Dashboard")}</span>}
       </Link>
     </div>
   )
@@ -794,6 +811,7 @@ function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
  * Dashboard divider — the divider above the group lives on `DashboardNav`.
  */
 function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
+  const t = useTranslate()
   const { location } = useRouterState()
   const pathname = location.pathname
   const [navOrder, setNavOrder] = useNavOrder()
@@ -814,7 +832,7 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
 
   return (
     <nav
-      aria-label="Workspace"
+      aria-label={t("Workspace")}
       data-testid="science-nav"
       className="flex shrink-0 flex-col gap-0.5"
     >
@@ -830,9 +848,9 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
               data-science-tab={item.id}
               data-ready={false}
               aria-disabled
-              title={collapsed ? `${item.label} (soon)` : undefined}
-              data-feature-label={item.label}
-              data-feature-help={item.description}
+              title={collapsed ? `${t(item.label)} (${t("soon")})` : undefined}
+              data-feature-label={t(item.label)}
+              data-feature-help={t(item.description)}
               className={cn(
                 navRowClass,
                 "text-muted-foreground/50",
@@ -844,8 +862,8 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
               <Icon className="size-4" aria-hidden />
               {collapsed ? null : (
                 <>
-                  <span className="flex-1 truncate">{item.label}</span>
-                  <span className="text-[10px] uppercase tracking-wide">soon</span>
+                  <span className="flex-1 truncate">{t(item.label)}</span>
+                  <span className="text-[10px] uppercase tracking-wide">{t("soon")}</span>
                 </>
               )}
             </span>
@@ -860,9 +878,9 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
             data-science-tab={item.id}
             data-ready={true}
             data-active={isActive}
-            title={collapsed ? item.label : undefined}
-            data-feature-label={item.label}
-            data-feature-help={item.description}
+            title={collapsed ? t(item.label) : undefined}
+            data-feature-label={t(item.label)}
+            data-feature-help={t(item.description)}
             className={cn(
               navRowClass,
               collapsed ? "justify-center" : "cursor-grab",
@@ -872,7 +890,7 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
             {...reorder?.dragProps}
           >
             <Icon className="size-4" aria-hidden />
-            {collapsed ? null : <span className="flex-1 truncate">{item.label}</span>}
+            {collapsed ? null : <span className="flex-1 truncate">{t(item.label)}</span>}
           </Link>
         )
       })}
@@ -882,25 +900,28 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
 
 /** Settings entry (also reachable via ⌘,) — the lower row of the bottom cluster. */
 function SettingsNav({ collapsed }: { collapsed: boolean }) {
+  const t = useTranslate()
   const { location } = useRouterState()
   const isActive = location.pathname.startsWith("/settings")
   return (
     <nav
-      aria-label="Settings"
+      aria-label={t("Settings")}
       className="flex shrink-0 flex-col gap-0.5 border-sidebar-border border-t pt-2"
     >
       <Link
         to="/settings"
         data-testid="nav-settings"
         data-active={isActive}
-        title={collapsed ? "Settings" : undefined}
-        data-feature-label="Settings"
-        data-feature-help="Configure PI Lab appearance, agents, editor behavior, and integrations"
+        title={collapsed ? t("Settings") : undefined}
+        data-feature-label={t("Settings")}
+        data-feature-help={t(
+          "Configure PI Lab appearance, agents, editor behavior, and integrations",
+        )}
         onClick={() => rememberSettingsReturnRoute(location)}
         className={cn(navRowClass, collapsed && "justify-center", navStateClass(isActive))}
       >
         <Settings className="size-4" aria-hidden />
-        {collapsed ? null : <span className="flex-1 truncate">Settings</span>}
+        {collapsed ? null : <span className="flex-1 truncate">{t("Settings")}</span>}
       </Link>
     </nav>
   )
@@ -928,6 +949,7 @@ function ProjectItem({
   reorder?: RowReorder | null
   onContextMenu: (event: React.MouseEvent) => void
 }) {
+  const t = useTranslate()
   const params = useParams({ strict: false }) as { projectId?: string }
   const isActive = params.projectId === project.id
   const navigate = useNavigate()
@@ -955,7 +977,7 @@ function ProjectItem({
         )}
         title={project.name}
         data-feature-label={project.name}
-        data-feature-help={`Open the ${project.name} project workspace`}
+        data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace")}`}
       >
         <span className="relative">
           <ProjectBadge project={project} isActive={isActive} />
@@ -981,9 +1003,9 @@ function ProjectItem({
         <button
           type="button"
           data-testid="project-sessions-toggle"
-          aria-label={`${sessionsExpanded ? "Collapse" : "Expand"} ${project.name} sessions`}
+          aria-label={`${sessionsExpanded ? t("Collapse") : t("Expand")} ${project.name} ${t("sessions")}`}
           aria-expanded={sessionsExpanded}
-          title={`${sessionsExpanded ? "Collapse" : "Expand"} sessions`}
+          title={`${sessionsExpanded ? t("Collapse") : t("Expand")} ${t("sessions")}`}
           onClick={() => setSessionsExpanded((expanded) => !expanded)}
           className="group relative size-6 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -1008,12 +1030,12 @@ function ProjectItem({
           data-hidden={Boolean(project.archivedAt)}
           onContextMenu={onContextMenu}
           className={cn(
-            "min-w-0 flex-1 truncate text-left text-sm",
+            "min-w-0 flex-1 truncate text-start text-sm",
             project.archivedAt && "opacity-60",
           )}
           title={project.repoPath}
           data-feature-label={project.name}
-          data-feature-help={`Open the ${project.name} project workspace at ${project.repoPath}`}
+          data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace at ")}${project.repoPath}`}
         >
           {project.name}
         </Link>
@@ -1021,14 +1043,14 @@ function ProjectItem({
         <ProjectAgentStatusRing status={agentStatus} />
       </div>
       {sessionsExpanded && agentSessions.length > 0 ? (
-        <div data-testid="project-sessions" className="ml-6 flex flex-col gap-0.5 py-1">
+        <div data-testid="project-sessions" className="ms-6 flex flex-col gap-0.5 py-1">
           {agentSessions.map((session) => (
             <button
               type="button"
               key={session.id}
               data-testid="project-session"
               onClick={() => openSession(session.id)}
-              className="flex min-w-0 items-center gap-2 rounded-md py-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="flex min-w-0 items-center gap-2 rounded-md py-1 text-start text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               <Bot className="size-3.5 shrink-0" aria-hidden />
               <span className="truncate">{session.label}</span>
@@ -1043,12 +1065,13 @@ function ProjectItem({
 
 /** A project-level counterpart to an editor tab's dirty dot. */
 function UnsavedProjectMarker() {
+  const t = useTranslate()
   return (
     <span
       data-testid="project-unsaved-edits"
       role="img"
-      aria-label="Unsaved edits"
-      title="Unsaved edits"
+      aria-label={t("Unsaved edits")}
+      title={t("Unsaved edits")}
       className="block size-2 shrink-0 rounded-full border border-muted-foreground/70 bg-transparent"
     />
   )
@@ -1063,12 +1086,13 @@ function projectAgentStatus(state: ProjectState): ProjectAgentStatus {
 }
 
 function ProjectAgentStatusRing({ status }: { status: ProjectAgentStatus }) {
+  const t = useTranslate()
   const title =
     status === "empty"
-      ? "No active agents"
+      ? t("No active agents")
       : status === "working"
-        ? "Agent working"
-        : "Agent paused"
+        ? t("Agent working")
+        : t("Agent paused")
   return (
     <span
       data-testid="project-agent-status"

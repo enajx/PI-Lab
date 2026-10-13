@@ -1,7 +1,8 @@
 import type { Project } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ScienceSkills } from "./ScienceSkills"
@@ -33,6 +34,9 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     gradient: null,
     digitalRain: false,
     metadata: null,
+    taskRelPath: null,
+    mainRelPath: null,
+    typeId: "general",
     agentConfig: null,
     sortIndex: 0,
     archivedAt: null,
@@ -70,6 +74,14 @@ function catalog(skills: ReturnType<typeof skill>[]) {
 }
 
 describe("ScienceSkills", () => {
+  afterEach(() => setInterfaceLanguage("en"))
+
+  test("translates the Skills empty state when the interface language changes", async () => {
+    setInterfaceLanguage("es")
+    renderSkills({ "projects.list": () => [] })
+    expect(await screen.findByText("No hay proyectos abiertos")).toBeTruthy()
+  })
+
   test("renders a card per skill with its name and source badge", async () => {
     renderSkills({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],

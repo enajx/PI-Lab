@@ -1,3 +1,4 @@
+export { AgentStatusControl } from "./components/AgentStatusControl"
 export {
   TITLEBAR_LIGHTS_CLEARANCE,
   titleBarControlClass,

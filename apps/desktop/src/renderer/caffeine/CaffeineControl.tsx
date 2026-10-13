@@ -1,5 +1,6 @@
 import { cn } from "@pi-lab/ui"
 import { Coffee } from "lucide-react"
+import { useTranslate } from "../i18n/language"
 import { type CaffeineMode, useCaffeine } from "./useCaffeine"
 
 const MODE_LABELS: Record<CaffeineMode, string> = {
@@ -16,12 +17,13 @@ export function nextCaffeineMode(mode: CaffeineMode): CaffeineMode {
 
 /** Shared title-bar control rendered by every app route header. */
 export function CaffeineControl({ className }: { className?: string }) {
+  const t = useTranslate()
   const { status, setMode, isChanging } = useCaffeine()
   const nextMode = nextCaffeineMode(status.mode)
   const modeLabel = MODE_LABELS[status.mode]
   const nextLabel = MODE_LABELS[nextMode]
-  const title = "Prevent the computer from sleeping."
-  const ariaLabel = `Caffeine ${modeLabel}: prevent the computer from sleeping. Click to switch to ${nextLabel}.`
+  const title = t("Prevent the computer from sleeping.")
+  const ariaLabel = `${t("Caffeine")} ${t(modeLabel)}: ${t("Prevent the computer from sleeping. Click to switch to")} ${t(nextLabel)}.`
 
   return (
     <button
@@ -40,11 +42,11 @@ export function CaffeineControl({ className }: { className?: string }) {
         status.mode === "auto" && "border-border bg-muted/50 text-foreground hover:bg-muted",
         className,
       )}
-      data-feature-label="Caffeine"
-      data-feature-help="Prevent the computer from sleeping."
+      data-feature-label={t("Caffeine")}
+      data-feature-help={title}
     >
       <Coffee className="size-4" />
-      <span>{modeLabel}</span>
+      <span>{t(modeLabel)}</span>
     </button>
   )
 }

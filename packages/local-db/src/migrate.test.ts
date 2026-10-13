@@ -316,7 +316,7 @@ describe("runMigrations", () => {
         .get(),
     ).toBeUndefined()
     first.sqlite.close()
-    expect(columnNames(dbPath, "projects").has("digital_rain")).toBe(version === "current")
+    expect(columnNames(dbPath, "projects").has("type_id")).toBe(version === "current")
   })
 
   it("rejects an unrecognized journal watermark without trusting it", () => {
@@ -366,10 +366,11 @@ describe("runMigrations", () => {
     const journalPath = join(migrations, "meta", "_journal.json")
     const journal = JSON.parse(readFileSync(journalPath, "utf8"))
     const last = journal.entries.at(-1)
-    journal.entries.push({ ...last, idx: last.idx + 1, when: last.when + 1, tag: "0019_failure" })
+    const tag = `${String(last.idx + 1).padStart(4, "0")}_failure`
+    journal.entries.push({ ...last, idx: last.idx + 1, when: last.when + 1, tag })
     writeFileSync(journalPath, JSON.stringify(journal))
     writeFileSync(
-      join(migrations, "0019_failure.sql"),
+      join(migrations, `${tag}.sql`),
       "CREATE TABLE rollback_probe (id INTEGER);--> statement-breakpoint\nCREATE TABLE projects (id TEXT);",
     )
     const first = runMigrations(dbPath)

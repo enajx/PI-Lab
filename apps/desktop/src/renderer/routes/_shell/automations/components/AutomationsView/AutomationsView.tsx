@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Workflow } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { CaffeineControl } from "../../../../../caffeine"
+import { useTranslate } from "../../../../../i18n/language"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
-import { titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
+import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
 import { AutomationRow } from "./components/AutomationRow"
 import { AutomationsEmptyState } from "./components/AutomationsEmptyState"
 import { CreateAutomationForm } from "./components/CreateAutomationForm"
@@ -29,6 +30,7 @@ export function AutomationsView({
 }: {
   activation?: { workflowId: string; runId: string }
 }) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
@@ -88,10 +90,10 @@ export function AutomationsView({
           <Workflow className="size-4 shrink-0 text-brand" aria-hidden />
           <div className="flex min-w-0 flex-col gap-0.5">
             <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
-              Workflows
+              {t("Workflows")}
             </h1>
             <p className="truncate text-muted-foreground text-xs">
-              Scheduled &amp; looping agent runs
+              {t("Scheduled & looping agent runs")}
             </p>
           </div>
         </div>
@@ -101,12 +103,15 @@ export function AutomationsView({
             size="sm"
             disabled={!canCreate || creating}
             onClick={() => setCreating(true)}
-            title={canCreate ? undefined : "Open a project first"}
-            data-feature-help="Create a recurring agent run for a project, prompt, and schedule"
+            title={canCreate ? undefined : t("Open a project first")}
+            data-feature-help={t(
+              "Create a recurring agent run for a project, prompt, and schedule",
+            )}
           >
             <Plus aria-hidden />
-            New workflow
+            {t("New workflow")}
           </Button>
+          <AgentStatusControl />
           <CaffeineControl />
         </div>
       </header>
@@ -143,12 +148,12 @@ export function AutomationsView({
       </div>
       {findOpen ? (
         <QuickFind
-          ariaLabel="Find a workflow"
-          placeholder="Find a workflow…"
-          scopeLabel="Workflows"
+          ariaLabel={t("Find a workflow")}
+          placeholder={t("Find a workflow…")}
+          scopeLabel={t("Workflows")}
           allowGlobalSearch
           items={findItems}
-          emptyText="No matching workflows"
+          emptyText={t("No matching workflows")}
           onSelect={(item) =>
             document
               .querySelector<HTMLElement>(`[data-automation-id="${item.id}"]`)

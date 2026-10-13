@@ -352,6 +352,14 @@ async function openFile() {
 }
 
 describe("CentralPanel — panel", () => {
+  test("translates launcher controls without changing file data", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "es")
+    renderPanel()
+
+    expect(await screen.findByText("Abre algo para empezar")).toBeTruthy()
+    expect(screen.getByTestId("central-add-menu").getAttribute("aria-label")).toBe("Añadir panel")
+  })
+
   test("first robot launch chooses an available harness and remembers it", async () => {
     renderPanel()
     await waitFor(() =>

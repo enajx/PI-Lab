@@ -2,8 +2,9 @@ import { existsSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, test } from "vitest"
+import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../../../../test/fakeTrpcClient"
 import { AppIconGallery } from "./AppIconGallery"
@@ -32,6 +33,13 @@ beforeEach(() => {
 })
 
 describe("AppIconGallery", () => {
+  test("translates the comparison guidance when language changes", () => {
+    renderGallery()
+    act(() => setInterfaceLanguage("es"))
+    expect(screen.getByText("Icono de la aplicación")).toBeTruthy()
+    expect(screen.getByText("Incluido")).toBeTruthy()
+    act(() => setInterfaceLanguage("en"))
+  })
   test("every declared treatment ships a committed preview asset", () => {
     expect(PI_ICON_FONTS).toHaveLength(12)
     for (const font of PI_ICON_FONTS) {

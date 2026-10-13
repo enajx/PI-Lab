@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Dirent } from "node:fs"
-import { readdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { Project } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import {
@@ -55,13 +55,15 @@ export async function discoverTaskFile(repoPath: string): Promise<DiscoveredTask
   return { state: "ready", relPath, candidates }
 }
 
-/** Aggregate root TODO Markdown tasks across every local project. */
+/** Aggregate each project's selected or discovered Markdown task source. */
 export async function listProjectTasks(projectRows: Project[]): Promise<TaskListing> {
   const sources: TaskSource[] = []
   const tasks: ScienceTask[] = []
 
   for (const project of [...projectRows].sort((a, b) => a.name.localeCompare(b.name))) {
-    const discovered = await discoverTaskFile(project.repoPath)
+    const discovered = project.taskRelPath
+      ? { state: "ready" as const, relPath: project.taskRelPath, candidates: [project.taskRelPath] }
+      : await discoverTaskFile(project.repoPath)
     if (discovered.state !== "ready" || !discovered.relPath) {
       sources.push({
         projectId: project.id,
@@ -78,6 +80,7 @@ export async function listProjectTasks(projectRows: Project[]): Promise<TaskList
     }
 
     try {
+      await validateTaskRelPath(project, discovered.relPath)
       const content = await readFile(join(project.repoPath, discovered.relPath), "utf8")
       const document = parseTaskDocument(content, project, discovered.relPath)
       sources.push({
@@ -132,7 +135,7 @@ export async function createTask(input: CreateTaskInput): Promise<{
   task: ScienceTask
   revision: string
 }> {
-  validateTaskRelPath(input.relPath)
+  await validateTaskRelPath(input.project, input.relPath)
   const path = join(input.project.repoPath, input.relPath)
   const current = await readOptionalFile(path)
   assertRevision(current === null ? null : taskRevision(current), input.expectedRevision)
@@ -254,7 +257,7 @@ async function loadMutationTarget(input: MutationFile & { selector: TaskSelector
   task: ParsedTask
   path: string
 }> {
-  validateTaskRelPath(input.relPath)
+  await validateTaskRelPath(input.project, input.relPath)
   const path = join(input.project.repoPath, input.relPath)
   const content = await readRequiredFile(path)
   const revision = taskRevision(content)
@@ -309,12 +312,43 @@ function toPublicTask(task: ParsedTask): ScienceTask {
   }
 }
 
-function validateTaskRelPath(relPath: string): void {
-  if (basename(relPath) !== relPath || !TODO_MARKDOWN_NAME.test(relPath)) {
+async function validateTaskRelPath(project: Project, relPath: string): Promise<void> {
+  if (project.taskRelPath && project.taskRelPath !== relPath) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Tasks must be stored in a root Markdown filename containing todo",
+      message: "This is not the project's selected task source",
     })
+  }
+  if (!project.taskRelPath) {
+    if (basename(relPath) !== relPath || !TODO_MARKDOWN_NAME.test(relPath)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Select this Markdown file as the project's task source first",
+      })
+    }
+    return
+  }
+  const root = await realpath(project.repoPath)
+  const path = resolve(root, relPath)
+  const lexical = relative(root, path)
+  if (
+    isAbsolute(relPath) ||
+    lexical === "" ||
+    lexical === ".." ||
+    lexical.startsWith(`..${sep}`) ||
+    isAbsolute(lexical)
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Task file is outside this project" })
+  }
+  const target = await realpath(path)
+  const realRelative = relative(root, target)
+  if (
+    realRelative === "" ||
+    realRelative === ".." ||
+    realRelative.startsWith(`..${sep}`) ||
+    isAbsolute(realRelative)
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Task file is outside this project" })
   }
 }
 

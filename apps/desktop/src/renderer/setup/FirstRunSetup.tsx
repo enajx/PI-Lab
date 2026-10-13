@@ -3,6 +3,12 @@ import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, CircleAlert, CircleHelp, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import {
+  type InterfaceLanguage,
+  LANGUAGES,
+  useInterfaceLanguage,
+  useTranslate,
+} from "../i18n/language"
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from "../notifications/sounds"
 import { useDefaultAgentId } from "../preferences/preferences"
 import { type ThemeMode, useTheme } from "../providers/ThemeProvider"
@@ -35,6 +41,8 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const [soundPreview, setSoundPreview] = useState("")
   const loadedCompletionSound = useRef(false)
   const { mode, setMode } = useTheme()
+  const [language, setLanguage] = useInterfaceLanguage()
+  const t = useTranslate()
 
   useEffect(() => {
     if (!settings.data || loadedCompletionSound.current) return
@@ -92,14 +100,14 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   }
 
   const previewSound = () => {
-    setSoundPreview("Playing preview…")
+    setSoundPreview(t("Playing preview…"))
     void playNotificationSound(completionSound, { suppressed: false }).then((result) => {
       if (result.status === "failed") {
-        setSoundPreview(`Could not play preview: ${result.error.message}`)
+        setSoundPreview(`${t("Could not play preview:")} ${result.error.message}`)
         return
       }
       setSoundPreview(
-        result.status === "silent" ? "Silent selected." : "Played completion preview.",
+        result.status === "silent" ? t("Silent selected.") : t("Played completion preview."),
       )
     })
   }
@@ -117,30 +125,50 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     >
       <header className="app-drag flex h-14 shrink-0 items-center border-border border-b px-6">
         <h1 id="first-run-setup-title" className="font-semibold text-base">
-          Set up PI Lab
+          {t("Set up PI Lab")}
         </h1>
-        <span className="ml-3 text-muted-foreground text-xs">Local-only · no PI Lab account</span>
+        <span className="ms-3 text-muted-foreground text-xs">
+          {t("Local-only · no PI Lab account")}
+        </span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="app-no-drag ml-auto"
+          className="app-no-drag ms-auto"
           onClick={skipSetup}
           disabled={skip.isPending}
         >
-          Skip setup
+          {t("Skip setup")}
         </Button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-6 py-8">
           <section className="rounded-xl border border-border bg-card p-5">
+            <label className="flex flex-col gap-1.5 text-xs">
+              <span>{t("Language")}</span>
+              <select
+                aria-label={t("Language")}
+                value={language}
+                onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
+                className="rounded-md border border-border bg-background px-2 py-2"
+              >
+                {LANGUAGES.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h2 className="font-medium text-sm">Coding agents</h2>
+                <h2 className="font-medium text-sm">{t("Coding agents")}</h2>
                 <p className="mt-1 text-muted-foreground text-xs">
-                  Detected CLI subscriptions are ready to use. Choose a default only if you want
-                  one.
+                  {t(
+                    "Detected CLI subscriptions are ready to use. Choose a default only if you want one.",
+                  )}
                 </p>
               </div>
               <Button
@@ -151,11 +179,13 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 disabled={environment.isFetching}
               >
                 <RefreshCw className="size-3.5" aria-hidden />
-                Recheck
+                {t("Recheck")}
               </Button>
             </div>
             {environment.isPending ? (
-              <p className="text-muted-foreground text-sm">Checking your local environment…</p>
+              <p className="text-muted-foreground text-sm">
+                {t("Checking your local environment…")}
+              </p>
             ) : (
               <>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -180,43 +210,43 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                   ))}
                 </div>
                 {selectedAgent === null ? (
-                  <p className="mt-3 text-muted-foreground text-xs">No default selected.</p>
+                  <p className="mt-3 text-muted-foreground text-xs">{t("No default selected.")}</p>
                 ) : null}
               </>
             )}
           </section>
 
           <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="font-medium text-sm">Appearance and notifications</h2>
+            <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5 text-xs">
-                <span>Theme</span>
+                <span>{t("Theme")}</span>
                 <select
-                  aria-label="Theme mode"
+                  aria-label={t("Theme mode")}
                   value={mode === "system" ? "dark" : mode}
                   onChange={(event) => setMode(event.target.value as ThemeMode)}
                   className="rounded-md border border-border bg-background px-2 py-2"
                 >
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
+                  <option value="light">{t("Light")}</option>
+                  <option value="dark">{t("Dark")}</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1.5 text-xs">
-                <span>How do you want PI Lab to let you know it’s ready?</span>
+                <span>{t("How do you want PI Lab to let you know it’s ready?")}</span>
                 <select
-                  aria-label="Completion sound"
+                  aria-label={t("Completion sound")}
                   value={completionSound}
                   onChange={(event) => setCompletionSound(event.target.value as NotificationSound)}
                   className="rounded-md border border-border bg-background px-2 py-2"
                 >
                   {NOTIFICATION_SOUND_OPTIONS.map((sound) => (
                     <option key={sound.id} value={sound.id}>
-                      {sound.label}
+                      {t(sound.label)}
                     </option>
                   ))}
                 </select>
                 <Button type="button" variant="outline" size="sm" onClick={previewSound}>
-                  Preview sound
+                  {t("Preview sound")}
                 </Button>
                 <span aria-live="polite" className="min-h-4 text-muted-foreground">
                   {soundPreview}
@@ -226,7 +256,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
           </section>
 
           <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="font-medium text-sm">Local integrations</h2>
+            <h2 className="font-medium text-sm">{t("Local integrations")}</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <IntegrationCard
                 title="GitHub"
@@ -240,10 +270,10 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 title="Zotero"
                 detail={
                   environment.data?.zotero === "running"
-                    ? "Detected"
+                    ? t("Detected")
                     : environment.data?.zotero === "installed"
-                      ? "Installed"
-                      : "Not found"
+                      ? t("Installed")
+                      : t("Not found")
                 }
                 description="Use your local library as a research source."
                 state={
@@ -268,14 +298,14 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
 
           <footer className="flex items-center justify-end gap-2 pb-2">
             <Button type="button" variant="ghost" onClick={skipSetup} disabled={skip.isPending}>
-              Skip setup
+              {t("Skip setup")}
             </Button>
             <Button
               type="button"
               onClick={finish}
               disabled={complete.isPending || saveApiKey.isPending}
             >
-              Finish setup
+              {t("Finish setup")}
             </Button>
           </footer>
         </div>
@@ -310,6 +340,7 @@ function HarnessCard({
   onRetry: () => void
 }) {
   const detected = harness.state === "authenticated"
+  const t = useTranslate()
   return (
     <div
       className={cn(
@@ -319,7 +350,7 @@ function HarnessCard({
     >
       <button
         type="button"
-        className="w-full text-left"
+        className="w-full text-start"
         onClick={detected ? onSelect : undefined}
         disabled={!detected}
       >
@@ -334,39 +365,42 @@ function HarnessCard({
           )}
         >
           {detected
-            ? "Detected"
+            ? t("Detected")
             : harness.state === "missing"
-              ? "Not detected"
-              : (harness.message ?? "Not detected")}
+              ? t("Not detected")
+              : (harness.message ?? t("Not detected"))}
         </span>
         {detected ? (
           <span className="mt-3 block text-muted-foreground text-[11px]">
-            {selected ? "Default agent" : "Click to set as default"}
+            {selected ? t("Default agent") : t("Click to set as default")}
           </span>
         ) : null}
       </button>
       {harness.state === "error" ? (
         <div className="mt-3 rounded-md bg-muted/60 p-2.5 text-xs">
           <p className="text-muted-foreground">
-            Run <code className="font-mono text-foreground">{harness.executable} login status</code>{" "}
-            in a terminal to inspect the CLI result, then try again.
+            {t("Run")}{" "}
+            <code className="font-mono text-foreground" dir="ltr">
+              {harness.executable} login status
+            </code>{" "}
+            {t("in a terminal to inspect the CLI result, then try again.")}
           </p>
           <Button type="button" variant="outline" size="sm" className="mt-2" onClick={onRetry}>
             <RefreshCw className="size-3.5" aria-hidden />
-            Retry detection
+            {t("Retry detection")}
           </Button>
         </div>
       ) : null}
       {apiOpen ? (
         <div className="mt-3 flex gap-2">
           <input
-            aria-label={`${harness.label} API key`}
+            aria-label={`${harness.label} ${t("API key")}`}
             type="password"
             autoComplete="off"
             value={apiKey}
             onChange={(event) => onApiKeyChange(event.target.value)}
             className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1.5 text-xs"
-            placeholder="API key"
+            placeholder={t("API key")}
           />
           <Button
             type="button"
@@ -374,7 +408,7 @@ function HarnessCard({
             onClick={onSaveApi}
             disabled={saving || apiKey.trim().length === 0}
           >
-            Save
+            {t("Save")}
           </Button>
         </div>
       ) : (
@@ -383,7 +417,7 @@ function HarnessCard({
           className="mt-3 text-muted-foreground text-[11px] underline underline-offset-4"
           onClick={onOpenApi}
         >
-          {apiConfigured ? "API key saved · replace" : "Use API instead"}
+          {apiConfigured ? t("API key saved · replace") : t("Use API instead")}
         </button>
       )}
     </div>
@@ -401,13 +435,14 @@ function IntegrationCard({
   description: string
   state: HarnessStatus["state"]
 }) {
+  const t = useTranslate()
   return (
     <div className="rounded-lg border border-border p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="font-medium text-sm">{title}</span>
         <StateIcon state={state} />
       </div>
-      <p className="mt-1 text-muted-foreground text-xs">{description}</p>
+      <p className="mt-1 text-muted-foreground text-xs">{t(description)}</p>
       <p className="mt-3 text-xs">
         <span className={state === "authenticated" ? "text-emerald-600" : "text-muted-foreground"}>
           {detail}
@@ -424,9 +459,10 @@ function compactState(state: HarnessStatus["state"] | undefined): string {
 }
 
 function StateIcon({ state }: { state: HarnessStatus["state"] }) {
+  const t = useTranslate()
   if (state === "authenticated")
-    return <CheckCircle2 className="size-4 text-emerald-600" aria-label="Detected" />
+    return <CheckCircle2 className="size-4 text-emerald-600" aria-label={t("Detected")} />
   if (state === "error")
-    return <CircleAlert className="size-4 text-destructive" aria-label="Check failed" />
+    return <CircleAlert className="size-4 text-destructive" aria-label={t("Check failed")} />
   return <CircleHelp className="size-4 text-muted-foreground" aria-hidden />
 }

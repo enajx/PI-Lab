@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
+import { useTranslate } from "../../../../i18n/language"
 import { useTRPC } from "../../../../trpc/react"
 
 /**
@@ -13,15 +14,16 @@ import { useTRPC } from "../../../../trpc/react"
  * `toBeVisible()` passes while the real surface owns the screen.
  */
 export function HealthBanner({ children }: { children?: ReactNode }) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const ping = useQuery(trpc.health.ping.queryOptions({ message: "hello" }))
   const dbVersion = useQuery(trpc.health.dbVersion.queryOptions())
 
   if (ping.isError || dbVersion.isError) {
-    const message = (ping.error ?? dbVersion.error)?.message ?? "Unknown error"
+    const message = (ping.error ?? dbVersion.error)?.message ?? t("Unknown error")
     return (
       <section data-testid="app-error" className="flex flex-col gap-2 p-8">
-        <h1 className="font-semibold text-xl">PI Lab failed to start</h1>
+        <h1 className="font-semibold text-xl">{t("PI Lab failed to start")}</h1>
         {/* Error text must stay selectable (AGENTS.md Pitfalls #7). */}
         <pre className="cursor-text select-text whitespace-pre-wrap text-destructive text-sm">
           {message}
@@ -33,7 +35,7 @@ export function HealthBanner({ children }: { children?: ReactNode }) {
   if (ping.isPending || dbVersion.isPending) {
     return (
       <section data-testid="app-loading" className="p-8 text-muted-foreground text-sm">
-        Starting PI Lab…
+        {t("Starting PI Lab…")}
       </section>
     )
   }
@@ -55,7 +57,7 @@ export function HealthBanner({ children }: { children?: ReactNode }) {
         data-health-echo={ping.data.echo}
         className="sr-only"
       >
-        PI Lab ready
+        {t("PI Lab ready")}
       </span>
       {children}
     </div>

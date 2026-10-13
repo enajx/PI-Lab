@@ -1,6 +1,7 @@
 import { Button, Input, Label } from "@pi-lab/ui"
 import { Library } from "lucide-react"
 import { useState } from "react"
+import { useTranslate } from "../../../../../../../i18n/language"
 
 /**
  * Connect values for either Zotero backend; `mode` discriminates which fields apply. The
@@ -42,6 +43,7 @@ interface ZoteroConnectFormProps {
  * `libraryType` uses a native `<select>` (the UI package ships no Select).
  */
 export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroConnectFormProps) {
+  const t = useTranslate()
   const [apiKey, setApiKey] = useState("")
   const [libraryId, setLibraryId] = useState(mode === "local" ? "0" : "")
   const [libraryType, setLibraryType] = useState<"user" | "group">("user")
@@ -90,16 +92,16 @@ export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroCo
           <Library className="size-6 text-accent-foreground" aria-hidden />
         </span>
         <h2 className="font-semibold text-foreground text-sm">
-          {mode === "web" ? "Connect Zotero (Web API)" : "Local Zotero"}
+          {mode === "web" ? t("Connect Zotero (Web API)") : t("Local Zotero")}
         </h2>
         <p className="max-w-xs text-muted-foreground text-xs leading-relaxed">
           {mode === "web" ? (
             <>
-              Create a key at <code className="font-mono">zotero.org/settings/keys</code>. It is
-              stored locally only and never leaves your machine.
+              {t("Create a key at")} <code className="font-mono">zotero.org/settings/keys</code>.{" "}
+              {t("It is stored locally only and never leaves your machine.")}
             </>
           ) : (
-            <>Reads from the running Zotero desktop app — no API key needed.</>
+            t("Reads from the running Zotero desktop app — no API key needed.")
           )}
         </p>
       </div>
@@ -107,7 +109,8 @@ export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroCo
       {mode === "web" ? (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="zotero-api-key" className="text-muted-foreground text-xs">
-            API key<span className="text-destructive"> *</span>
+            {t("API key")}
+            <span className="text-destructive"> *</span>
           </Label>
           <Input
             id="zotero-api-key"
@@ -115,7 +118,7 @@ export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroCo
             type="password"
             autoComplete="off"
             value={apiKey}
-            placeholder="Zotero Web API key"
+            placeholder={t("Zotero Web API key")}
             onChange={(event) => setApiKey(event.target.value)}
           />
         </div>
@@ -123,20 +126,21 @@ export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroCo
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="zotero-library-id" className="text-muted-foreground text-xs">
-          Library ID<span className="text-destructive"> *</span>
+          {t("Library ID")}
+          <span className="text-destructive"> *</span>
         </Label>
         <Input
           id="zotero-library-id"
           data-testid="zotero-library-id-input"
           value={libraryId}
-          placeholder={mode === "local" ? "0 (personal library)" : "e.g. 123456"}
+          placeholder={mode === "local" ? `0 (${t("personal library")})` : `${t("e.g.")} 123456`}
           onChange={(event) => setLibraryId(event.target.value)}
         />
       </div>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="zotero-library-type" className="text-muted-foreground text-xs">
-          Library type
+          {t("Library type")}
         </Label>
         <select
           id="zotero-library-type"
@@ -145,16 +149,18 @@ export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroCo
           onChange={(event) => setLibraryType(event.target.value as "user" | "group")}
           className="h-9 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
-          <option value="user">User</option>
-          <option value="group">Group</option>
+          <option value="user">{t("User")}</option>
+          <option value="group">{t("Group")}</option>
         </select>
       </div>
 
       {mode === "local" ? (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="zotero-bridge-token" className="text-muted-foreground text-xs">
-            Bridge token{" "}
-            <span className="text-muted-foreground/70">(optional — enables attaching files)</span>
+            {t("Bridge token")}{" "}
+            <span className="text-muted-foreground/70">
+              {t("(optional — enables attaching files)")}
+            </span>
           </Label>
           <Input
             id="zotero-bridge-token"
@@ -166,9 +172,11 @@ export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroCo
             onChange={(event) => setBridgeToken(event.target.value)}
           />
           <p className="text-muted-foreground/70 text-xs leading-relaxed">
-            In Zotero, open Settings → Advanced → Config Editor, create the string preference{" "}
-            <code className="font-mono">extensions.zotero.debug-bridge.token</code>, set a value,
-            and paste the same value here. Leave blank to browse without attaching files.
+            {t("In Zotero, open Settings → Advanced → Config Editor, create the string preference")}{" "}
+            <code className="font-mono">extensions.zotero.debug-bridge.token</code>,{" "}
+            {t(
+              "set a value, and paste the same value here. Leave blank to browse without attaching files.",
+            )}
           </p>
         </div>
       ) : null}
@@ -183,7 +191,7 @@ export function ZoteroConnectForm({ mode, onSubmit, isPending, error }: ZoteroCo
       ) : null}
 
       <Button type="submit" data-testid="zotero-connect-submit" disabled={!canSubmit}>
-        {isPending ? "Connecting…" : mode === "web" ? "Connect" : "Use local Zotero"}
+        {isPending ? t("Connecting…") : mode === "web" ? t("Connect") : t("Use local Zotero")}
       </Button>
     </form>
   )

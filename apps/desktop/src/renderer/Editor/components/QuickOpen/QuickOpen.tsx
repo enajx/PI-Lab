@@ -2,6 +2,7 @@ import { fuzzyMatch } from "@pi-lab/shared/search/fuzzy"
 import { useQuery } from "@tanstack/react-query"
 import { FolderGit2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslate } from "../../../i18n/language"
 import { useTRPC } from "../../../trpc/react"
 
 interface QuickOpenProps {
@@ -34,6 +35,7 @@ export function QuickOpen({
   onClose,
   filter,
 }: QuickOpenProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const [query, setQuery] = useState("")
   const [debounced, setDebounced] = useState("")
@@ -131,8 +133,8 @@ export function QuickOpen({
           it's keyboard-reachable; the dialog sits above it). */}
       <button
         type="button"
-        aria-label="Close quick open"
-        data-feature-help="Close file search without opening a file"
+        aria-label={t("Close quick open")}
+        data-feature-help={t("Close file search without opening a file")}
         tabIndex={-1}
         onClick={onClose}
         className="-z-10 absolute inset-0 cursor-default bg-black/40"
@@ -142,26 +144,26 @@ export function QuickOpen({
         className="flex max-h-[60vh] w-full max-w-xl flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl"
         role="dialog"
         aria-modal="true"
-        aria-label="Quick open file"
+        aria-label={t("Quick open file")}
       >
         <input
           ref={inputRef}
           data-testid="quick-open-input"
-          aria-label="Search project files"
-          data-feature-help="Search this project's files by name"
+          aria-label={t("Search project files")}
+          data-feature-help={t("Search this project's files by name")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Search files by name…"
+          placeholder={t("Search files by name…")}
           className="shrink-0 border-border border-b bg-transparent px-4 py-3 text-foreground text-sm outline-none placeholder:text-muted-foreground"
         />
         <div
           data-testid="quick-open-scope"
           className="border-border border-b px-4 py-1.5 text-muted-foreground text-xs"
         >
-          Searching: {global ? "All projects" : (projectName ?? "Current project")}
-          <span className="ml-2 opacity-70">
-            {global ? "Tab to search in current project" : "Tab to search in all projects"}
+          {t("Searching:")} {global ? t("All projects") : (projectName ?? t("Current project"))}
+          <span className="ms-2 opacity-70">
+            {global ? t("Tab to search in current project") : t("Tab to search in all projects")}
           </span>
         </div>
         {!global && searchQuery.data?.partial && (
@@ -170,7 +172,7 @@ export function QuickOpen({
             role="status"
             className="border-border border-b px-4 py-2 text-amber-500 text-xs"
           >
-            Some folders could not be searched: {searchQuery.data.skipped.join(", ")}
+            {t("Some folders could not be searched:")} {searchQuery.data.skipped.join(", ")}
           </div>
         )}
         {!global && searchQuery.isError && (
@@ -179,7 +181,7 @@ export function QuickOpen({
             role="alert"
             className="border-border border-b px-4 py-2 text-destructive text-xs"
           >
-            File search failed: {searchQuery.error.message}
+            {t("File search failed:")} {searchQuery.error.message}
           </div>
         )}
         <ul className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -189,7 +191,7 @@ export function QuickOpen({
                 data-testid="quick-open-empty"
                 className="px-4 py-2 text-muted-foreground/70 text-xs"
               >
-                No projects yet
+                {t("No projects yet")}
               </li>
             ) : (
               globalProjects.map((project, index) => (
@@ -203,8 +205,8 @@ export function QuickOpen({
                     onMouseEnter={() => setHighlight(index)}
                     className={
                       index === highlight
-                        ? "flex w-full items-center gap-2 bg-accent px-4 py-1.5 text-left text-foreground text-xs"
-                        : "flex w-full items-center gap-2 px-4 py-1.5 text-left text-muted-foreground text-xs hover:bg-accent/60"
+                        ? "flex w-full items-center gap-2 bg-accent px-4 py-1.5 text-start text-foreground text-xs"
+                        : "flex w-full items-center gap-2 px-4 py-1.5 text-start text-muted-foreground text-xs hover:bg-accent/60"
                     }
                   >
                     <FolderGit2 className="size-3.5 shrink-0 opacity-70" />
@@ -221,7 +223,7 @@ export function QuickOpen({
               data-testid="quick-open-empty"
               className="px-4 py-2 text-muted-foreground/70 text-xs"
             >
-              {debounced.trim().length === 0 ? "Type to search files" : "No matching files"}
+              {debounced.trim().length === 0 ? t("Type to search files") : t("No matching files")}
             </li>
           ) : (
             hits.map((hit, index) => (
@@ -231,14 +233,14 @@ export function QuickOpen({
                   data-testid="quick-open-result"
                   data-rel-path={hit.relPath}
                   data-feature-label={hit.relPath}
-                  data-feature-help="Open this project file in the built-in editor"
+                  data-feature-help={t("Open this project file in the built-in editor")}
                   data-highlighted={index === highlight}
                   onClick={() => choose(index)}
                   onMouseEnter={() => setHighlight(index)}
                   className={
                     index === highlight
-                      ? "flex w-full items-center gap-2 bg-accent px-4 py-1.5 text-left text-foreground text-xs"
-                      : "flex w-full items-center gap-2 px-4 py-1.5 text-left text-muted-foreground text-xs hover:bg-accent/60"
+                      ? "flex w-full items-center gap-2 bg-accent px-4 py-1.5 text-start text-foreground text-xs"
+                      : "flex w-full items-center gap-2 px-4 py-1.5 text-start text-muted-foreground text-xs hover:bg-accent/60"
                   }
                 >
                   <span className="truncate font-medium text-foreground">

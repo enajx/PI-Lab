@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
+import { useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { ChangeList } from "../ChangeList"
 
@@ -11,6 +12,7 @@ const CHANGES_REFETCH_MS = 8_000
  * the same `workspaces.changes` data the session view previously showed inline).
  */
 export function ChangesPanel({ workspaceId }: { workspaceId: string }) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const changesQuery = useQuery(
     trpc.workspaces.changes.queryOptions(
@@ -24,7 +26,7 @@ export function ChangesPanel({ workspaceId }: { workspaceId: string }) {
     <section data-testid="panel-changes" className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
         <span className="font-medium text-[10px] text-muted-foreground/60 uppercase tracking-wide">
-          Code changes
+          {t("Code changes")}
         </span>
         <span data-testid="changes-count" className="text-muted-foreground text-xs tabular-nums">
           {changes.length}

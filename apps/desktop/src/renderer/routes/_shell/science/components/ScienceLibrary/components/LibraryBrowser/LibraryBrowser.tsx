@@ -6,6 +6,7 @@ import type {
   LibraryCollection,
   LibraryPaper,
 } from "../../../../../../../../main/trpc/science/library"
+import { useTranslate } from "../../../../../../../i18n/language"
 import { QuickFind, type QuickFindItem } from "../../../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../../../trpc/react"
@@ -51,6 +52,7 @@ type Row =
  * resolved attachment via `openZoteroItem` (surfacing a clear message when none is on disk).
  */
 export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProps) {
+  const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [trail, setTrail] = useState<Crumb[]>([])
@@ -160,9 +162,9 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
         kind === "folder"
           ? await openItem.mutateAsync({ path: selectedRow.id })
           : await openZoteroItem.mutateAsync({ itemKey: selectedRow.id })
-      if (!result.ok) setOpenError(result.message ?? "Couldn't open the file.")
+      if (!result.ok) setOpenError(result.message ?? t("Couldn't open the file."))
     } catch (err) {
-      setOpenError(err instanceof Error ? err.message : "Open failed.")
+      setOpenError(err instanceof Error ? err.message : t("Open failed."))
     }
   }
   // Activate the cursor row for ⌘→/⌘↓: enter a collection (or "All items"), or open a folder file.
@@ -349,7 +351,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
             type="button"
             data-testid="library-crumb-root"
             data-feature-label={rootLabel}
-            data-feature-help="Return to the top level of the connected research library."
+            data-feature-help={t("Return to the top level of the connected research library.")}
             onClick={goToRoot}
             className="max-w-[12rem] truncate font-medium text-[10px] uppercase tracking-wider hover:text-foreground"
           >
@@ -361,7 +363,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
               <button
                 type="button"
                 data-feature-label={c.name}
-                data-feature-help="Return to this collection in the library path."
+                data-feature-help={t("Return to this collection in the library path.")}
                 onClick={() => goToCrumb(index)}
                 className="max-w-[12rem] truncate hover:text-foreground"
               >
@@ -372,7 +374,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
           {viewAll ? (
             <span className="flex items-center gap-1">
               <ChevronRight className="size-3" aria-hidden />
-              <span className="text-foreground">All items</span>
+              <span className="text-foreground">{t("All items")}</span>
             </span>
           ) : null}
         </nav>
@@ -381,14 +383,14 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
           variant="ghost"
           size="sm"
           data-testid="library-refresh"
-          data-feature-label="Refresh library"
-          data-feature-help="Reload collections and papers from the connected library source."
+          data-feature-label={t("Refresh library")}
+          data-feature-help={t("Reload collections and papers from the connected library source.")}
           className="h-7 shrink-0 gap-1.5 text-muted-foreground text-xs"
           disabled={isFetching}
           onClick={refresh}
         >
           <RefreshCw className="size-3.5" />
-          {isFetching ? "Refreshing…" : "Refresh"}
+          {isFetching ? t("Refreshing…") : t("Refresh")}
         </Button>
       </div>
 
@@ -410,19 +412,19 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
       {!viewAll && !current ? (
         <div className="flex flex-col gap-2">
           <CollectionRow
-            name="All items"
+            name={t("All items")}
             testId="library-all-items"
             selected={selectedRow?.type === "all-items"}
             onClick={openAll}
           />
           {collectionsQuery.isLoading ? (
-            <p className="text-muted-foreground text-xs">Loading collections…</p>
+            <p className="text-muted-foreground text-xs">{t("Loading collections…")}</p>
           ) : (
             collections.map(collectionRow)
           )}
           {!collectionsQuery.isLoading && collections.length === 0 && !error ? (
             <p data-testid="library-collections-empty" className="text-muted-foreground text-xs">
-              No collections — open “All items” to browse everything.
+              {t("No collections — open “All items” to browse everything.")}
             </p>
           ) : null}
         </div>
@@ -430,7 +432,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
         <div className="flex flex-col gap-2">
           {!viewAll ? collections.map(collectionRow) : null}
           {itemsQuery.isLoading ? (
-            <p className="text-muted-foreground text-xs">Loading items…</p>
+            <p className="text-muted-foreground text-xs">{t("Loading items…")}</p>
           ) : (
             items.map((paper) => (
               <LibraryItem
@@ -450,7 +452,8 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
           )}
           {truncated ? (
             <p data-testid="library-truncated" className="text-muted-foreground text-xs">
-              Showing the first {items.length} items — open a subfolder to narrow the list.
+              {t("Showing the first")} {items.length}{" "}
+              {t("items — open a subfolder to narrow the list.")}
             </p>
           ) : null}
           {!itemsQuery.isLoading &&
@@ -458,7 +461,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
           (viewAll || collections.length === 0) &&
           !error ? (
             <p data-testid="science-library-empty" className="text-muted-foreground text-xs">
-              Nothing here yet.
+              {t("Nothing here yet.")}
             </p>
           ) : null}
         </div>
@@ -466,12 +469,12 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
 
       {findOpen ? (
         <QuickFind
-          ariaLabel="Find in library"
+          ariaLabel={t("Find in library")}
           // This level's collections and their sub-collections (a level deeper), plus papers once
           // they show at this level — id prefixes (coll:/deep:/paper:) drive the pick.
-          placeholder={showItems ? "Find a collection or paper…" : "Find a collection…"}
+          placeholder={showItems ? t("Find a collection or paper…") : t("Find a collection…")}
           items={finderEntries.map((e) => e.item)}
-          emptyText={showItems ? "Nothing matches at this level" : "No matching collections"}
+          emptyText={showItems ? t("Nothing matches at this level") : t("No matching collections")}
           onSelect={(item) => finderEntries.find((e) => e.item.id === item.id)?.run()}
           onClose={() => setFindOpen(false)}
         />

@@ -7,7 +7,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ProjectActivityProvider } from "../../../-ProjectActivity"
@@ -82,6 +82,8 @@ function project(
 }
 
 describe("Dashboard", () => {
+  beforeEach(() => window.localStorage.clear())
+
   test("uses the Projects Dashboard name", async () => {
     renderDashboard({ "projects.list": () => [] })
 
@@ -89,6 +91,14 @@ describe("Dashboard", () => {
       expect(screen.getByRole("heading", { name: "Projects Dashboard" })).toBeTruthy()
     })
     expect(screen.getByTestId("caffeine-control")).toBeTruthy()
+  })
+
+  test("translates dashboard copy after choosing Norwegian", async () => {
+    window.localStorage.setItem("pi-lab.interface.language", "nb")
+    renderDashboard({ "projects.list": () => [] })
+
+    expect(await screen.findByRole("heading", { name: "Prosjektoversikt" })).toBeTruthy()
+    expect(screen.getByTestId("dashboard-empty").textContent).toBe("Ingen prosjekter ennå.")
   })
 
   test("renders a card per project with its name and a status badge", async () => {

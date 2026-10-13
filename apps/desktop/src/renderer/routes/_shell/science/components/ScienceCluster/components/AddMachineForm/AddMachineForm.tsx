@@ -1,5 +1,6 @@
 import { Button, Input, Label } from "@pi-lab/ui"
 import { useState } from "react"
+import { useTranslate } from "../../../../../../../i18n/language"
 
 export interface AddMachineValues {
   host: string
@@ -25,6 +26,7 @@ interface AddMachineFormProps {
  * optional connection metadata. ssh key material is never collected here.
  */
 export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMachineFormProps) {
+  const t = useTranslate()
   const [host, setHost] = useState("")
   const [hostname, setHostname] = useState("")
   const [user, setUser] = useState("")
@@ -54,7 +56,7 @@ export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMach
       }}
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field id="add-host" label="Host alias" required>
+        <Field id="add-host" label={t("Host alias")} required>
           <Input
             id="add-host"
             data-testid="add-host-input"
@@ -64,7 +66,7 @@ export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMach
             onChange={(e) => setHost(e.target.value)}
           />
         </Field>
-        <Field id="add-hostname" label="HostName (optional)">
+        <Field id="add-hostname" label={t("HostName (optional)")}>
           <Input
             id="add-hostname"
             value={hostname}
@@ -72,7 +74,7 @@ export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMach
             onChange={(e) => setHostname(e.target.value)}
           />
         </Field>
-        <Field id="add-user" label="User (optional)">
+        <Field id="add-user" label={t("User (optional)")}>
           <Input
             id="add-user"
             value={user}
@@ -80,7 +82,7 @@ export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMach
             onChange={(e) => setUser(e.target.value)}
           />
         </Field>
-        <Field id="add-port" label="Port (optional)">
+        <Field id="add-port" label={t("Port (optional)")}>
           <Input
             id="add-port"
             type="number"
@@ -89,7 +91,7 @@ export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMach
             onChange={(e) => setPort(e.target.value)}
           />
         </Field>
-        <Field id="add-label" label="Label (optional)">
+        <Field id="add-label" label={t("Label (optional)")}>
           <Input
             id="add-label"
             value={label}
@@ -103,7 +105,7 @@ export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMach
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button
           type="submit"
@@ -111,7 +113,7 @@ export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMach
           data-testid="add-machine-submit"
           disabled={isPending || host.trim().length === 0}
         >
-          Add machine
+          {t("Add machine")}
         </Button>
       </div>
     </form>

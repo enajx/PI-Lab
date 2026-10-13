@@ -1,5 +1,6 @@
 import { type AutomationRunState, automationRuns, type PiLabDatabase } from "@pi-lab/local-db"
 import { and, eq, inArray } from "drizzle-orm"
+import { nativeNotificationBody, nativeText } from "../i18n/nativeLanguage"
 import type { NotificationRequest } from "../notifications"
 
 /**
@@ -41,7 +42,7 @@ export interface WorkflowLifecycleDependencies {
   now?: () => number
 }
 
-function sourceLabel(source: ExternalWorkflowSource): string {
+function sourceLabel(source: ExternalWorkflowSource): "chat" | "non-interactive" {
   return source === "chat" ? "chat" : "non-interactive"
 }
 
@@ -96,8 +97,12 @@ export function createWorkflowLifecycleReporter(
         { launchedAt: startedAt, error: null },
         {
           eventType: "workflowStart",
-          title: "Workflow started",
-          body: `${target.workflowName} started in ${sourceLabel(target.source)} mode`,
+          title: nativeText("Workflow started"),
+          body: nativeNotificationBody(
+            "workflowStarted",
+            target.workflowName,
+            sourceLabel(target.source),
+          ),
         },
       )
     },
@@ -108,8 +113,8 @@ export function createWorkflowLifecycleReporter(
         { completedAt: now(), error: null },
         {
           eventType: "workflowCompletion",
-          title: "Workflow completed",
-          body: `${target.workflowName} completed`,
+          title: nativeText("Workflow completed"),
+          body: nativeNotificationBody("workflowCompleted", target.workflowName),
         },
       ),
     failed: (reason: string) =>
@@ -119,7 +124,7 @@ export function createWorkflowLifecycleReporter(
         { completedAt: now(), error: reason },
         {
           eventType: "workflowFailure",
-          title: "Workflow failed",
+          title: nativeText("Workflow failed"),
           body: reason,
         },
       ),
