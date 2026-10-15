@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  FileCode2,
   Info,
   LayoutDashboard,
   PanelLeft,
@@ -31,6 +32,7 @@ import {
   useSidebarFeatureHelp,
   useSidebarWidth,
 } from "../../../../preferences/preferences"
+import { readActiveQuickTarget } from "../../../../QuickEditor/quickEditorState"
 import { useTRPC } from "../../../../trpc/react"
 import type { ProjectSummary } from "../../../../trpc/useProjectThumbnail"
 import { useProjectThumbnail } from "../../../../trpc/useProjectThumbnail"
@@ -391,6 +393,8 @@ export function Sidebar() {
       {/* Nav body — padded; the header above is full-bleed for the traffic lights. */}
       <div data-testid="sidebar-nav-body" className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
         <ProjectDashboardNav collapsed={collapsed} />
+
+        <EditorNav collapsed={collapsed} />
 
         <WorkspaceNav collapsed={collapsed} />
 
@@ -794,6 +798,29 @@ function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
         {collapsed ? null : <span className="flex-1 truncate">{t("Projects Dashboard")}</span>}
       </Link>
     </div>
+  )
+}
+
+/** Return to the outside-project file that is open in the full app. */
+function EditorNav({ collapsed }: { collapsed: boolean }) {
+  const target = readActiveQuickTarget()
+  const { location } = useRouterState()
+  if (!target) return null
+  const isActive = location.pathname === "/quick-edit"
+  return (
+    <Link
+      to="/quick-edit"
+      search={{ target: target.id }}
+      data-testid="nav-editor"
+      data-active={isActive}
+      title={collapsed ? "Editor" : target.path}
+      data-feature-label="Editor"
+      data-feature-help={`Return to ${target.path}`}
+      className={cn(navRowClass, collapsed && "justify-center", navStateClass(isActive))}
+    >
+      <FileCode2 className="size-4" aria-hidden />
+      {collapsed ? null : <span className="flex-1 truncate">Editor</span>}
+    </Link>
   )
 }
 

@@ -190,7 +190,11 @@ export default defineConfig({
       minify: "esbuild",
       sourcemap: "hidden",
       rollupOptions: {
-        input: resolve(__dirname, "src/renderer/index.html"),
+        input: [
+          resolve(__dirname, "src/renderer/index.html"),
+          resolve(__dirname, "src/renderer/quick.html"),
+          resolve(__dirname, "src/renderer/tray.html"),
+        ],
       },
     },
   },

@@ -137,6 +137,21 @@ describe("FirstRunSetup", () => {
     expect(screen.queryByTestId("app-theme-gallery")).toBeNull()
   })
 
+  test("offers Start at login off by default and applies a change before setup ends", async () => {
+    const loginPatches: unknown[] = []
+    renderSetup({
+      "system.startAtLogin": () => ({ enabled: false }),
+      "system.setStartAtLogin": (input) => {
+        loginPatches.push(input)
+        return input
+      },
+    })
+    const toggle = await screen.findByTestId("setup-start-at-login")
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(toggle)
+    await waitFor(() => expect(loginPatches).toContainEqual({ enabled: true }))
+  })
+
   test("finishes with the selected sound only after persistence succeeds", async () => {
     const completed: unknown[] = []
     const setup = renderSetup({

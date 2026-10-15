@@ -63,6 +63,36 @@ const APP_FILES = [
 const config = {
   appId: "com.pi-lab.desktop",
   productName: "PI Lab",
+  fileAssociations: [
+    {
+      ext: [
+        "txt",
+        "md",
+        "py",
+        "pyi",
+        "cpp",
+        "cc",
+        "cxx",
+        "c",
+        "h",
+        "hpp",
+        "hxx",
+        "js",
+        "ts",
+        "tsx",
+        "jsx",
+        "json",
+        "yaml",
+        "yml",
+        "toml",
+        "sh",
+        "rs",
+      ],
+      name: "Text source file",
+      role: "Editor",
+      rank: "Alternate",
+    },
+  ],
   // Both native modules use N-API. Validate the installed binaries under Node
   // and Electron before packaging instead of rebuilding or swapping ABIs.
   npmRebuild: false,
@@ -79,6 +109,7 @@ const config = {
   // at `<process.resourcesPath>/template`.
   extraResources: [
     { from: "resources/template", to: "template" },
+    { from: "resources/bin/pilab", to: "bin/pilab" },
     // Runtime window/Dock/notification identity. `build:icons` copies the
     // canonical `icons/icon.png` here before every package command.
     { from: "build/icon.png", to: "pi-lab-icon.png" },
@@ -87,6 +118,16 @@ const config = {
   // (asar packing can drop it; node-pty exec()s this file for every PTY).
   afterPack: "./scripts/electron-builder-after-pack.cjs",
   mac: {
+    extendInfo: {
+      CFBundleDocumentTypes: [
+        {
+          CFBundleTypeName: "Plain text",
+          CFBundleTypeRole: "Editor",
+          LSHandlerRank: "Alternate",
+          LSItemContentTypes: ["public.plain-text"],
+        },
+      ],
+    },
     files: [
       ...APP_FILES,
       "!**/node_modules/better-sqlite3/prebuilds/!(darwin-${arch}).node",

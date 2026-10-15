@@ -13,6 +13,7 @@ import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ShellIndexRouteImport } from './routes/_shell/index'
 import { Route as ShellSetupRouteImport } from './routes/_shell/setup'
 import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
+import { Route as ShellQuickEditRouteImport } from './routes/_shell/quick-edit'
 import { Route as ShellAutomationsRouteImport } from './routes/_shell/automations'
 import { Route as ShellScienceTasksRouteImport } from './routes/_shell/science/tasks'
 import { Route as ShellScienceSkillsRouteImport } from './routes/_shell/science/skills'
@@ -38,6 +39,11 @@ const ShellSetupRoute = ShellSetupRouteImport.update({
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellQuickEditRoute = ShellQuickEditRouteImport.update({
+  id: '/quick-edit',
+  path: '/quick-edit',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellAutomationsRoute = ShellAutomationsRouteImport.update({
@@ -79,6 +85,7 @@ const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/automations': typeof ShellAutomationsRoute
+  '/quick-edit': typeof ShellQuickEditRoute
   '/settings': typeof ShellSettingsRoute
   '/setup': typeof ShellSetupRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
@@ -90,6 +97,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/automations': typeof ShellAutomationsRoute
+  '/quick-edit': typeof ShellQuickEditRoute
   '/settings': typeof ShellSettingsRoute
   '/setup': typeof ShellSetupRoute
   '/': typeof ShellIndexRoute
@@ -104,6 +112,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_shell': typeof ShellRouteWithChildren
   '/_shell/automations': typeof ShellAutomationsRoute
+  '/_shell/quick-edit': typeof ShellQuickEditRoute
   '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/setup': typeof ShellSetupRoute
   '/_shell/': typeof ShellIndexRoute
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/automations'
+    | '/quick-edit'
     | '/settings'
     | '/setup'
     | '/projects/$projectId'
@@ -130,6 +140,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/automations'
+    | '/quick-edit'
     | '/settings'
     | '/setup'
     | '/'
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_shell'
     | '/_shell/automations'
+    | '/_shell/quick-edit'
     | '/_shell/settings'
     | '/_shell/setup'
     | '/_shell/'
@@ -186,6 +198,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof ShellSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/quick-edit': {
+      id: '/_shell/quick-edit'
+      path: '/quick-edit'
+      fullPath: '/quick-edit'
+      preLoaderRoute: typeof ShellQuickEditRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/automations': {
@@ -242,6 +261,7 @@ declare module '@tanstack/react-router' {
 
 interface ShellRouteChildren {
   ShellAutomationsRoute: typeof ShellAutomationsRoute
+  ShellQuickEditRoute: typeof ShellQuickEditRoute
   ShellSettingsRoute: typeof ShellSettingsRoute
   ShellSetupRoute: typeof ShellSetupRoute
   ShellIndexRoute: typeof ShellIndexRoute
@@ -255,6 +275,7 @@ interface ShellRouteChildren {
 
 const ShellRouteChildren: ShellRouteChildren = {
   ShellAutomationsRoute: ShellAutomationsRoute,
+  ShellQuickEditRoute: ShellQuickEditRoute,
   ShellSettingsRoute: ShellSettingsRoute,
   ShellSetupRoute: ShellSetupRoute,
   ShellIndexRoute: ShellIndexRoute,

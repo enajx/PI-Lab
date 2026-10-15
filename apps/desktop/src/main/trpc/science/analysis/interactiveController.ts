@@ -4,7 +4,7 @@ import { realpath, stat } from "node:fs/promises"
 import { basename, dirname } from "node:path"
 import { pathToFileURL } from "node:url"
 import { firstFreePortInRange } from "@pi-lab/port-scanner"
-import { net, protocol, session } from "electron"
+import { net, session } from "electron"
 import { isTestMode } from "../../../runtime/env"
 import {
   type AnalysisInteractivePort,
@@ -17,8 +17,8 @@ import {
   resolveReportAsset,
   type StartMarimoInput,
 } from "./interactive"
+import { REPORT_SCHEME } from "./reportScheme"
 
-const REPORT_SCHEME = "pi-lab-report"
 const MARIMO_HOST = "127.0.0.1"
 const START_TIMEOUT_MS = 15_000
 const START_POLL_MS = 100
@@ -37,22 +37,6 @@ interface ManagedMarimo {
   exited: Promise<void>
   stderr: string
   ended: boolean
-}
-
-/** Must run before `app.whenReady()` so Chromium treats report URLs as web origins. */
-export function registerAnalysisReportScheme(): void {
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: REPORT_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-        stream: true,
-      },
-    },
-  ])
 }
 
 /**

@@ -1,12 +1,12 @@
+import { cpp } from "@codemirror/lang-cpp"
 import { python } from "@codemirror/lang-python"
 import type { Extension } from "@codemirror/state"
 
 /**
- * Pick a CodeMirror language extension from a file's path. v1 ships Python
- * highlighting only (AGENTS.md "Scope" / TODO "Built-in editor" — Python first); any
- * other extension returns `null`, leaving the buffer as plain text. Kept a pure
+ * Pick a CodeMirror language extension from a file's path. Unsupported
+ * extensions return `null`, leaving the buffer as plain text. Kept a pure
  * function (no view, no I/O) so the by-extension mapping is unit-testable in
- * isolation and the integrate stage can extend it with more `lang-*` packages.
+ * isolation.
  */
 export function languageForPath(relPath: string): Extension | null {
   const ext = extensionOf(relPath)
@@ -15,6 +15,15 @@ export function languageForPath(relPath: string): Extension | null {
     case "pyi":
     case "pyw":
       return python()
+    case "c":
+    case "h":
+    case "cc":
+    case "hh":
+    case "cpp":
+    case "hpp":
+    case "cxx":
+    case "hxx":
+      return cpp()
     default:
       return null
   }

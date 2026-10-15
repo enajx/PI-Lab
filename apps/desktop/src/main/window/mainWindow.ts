@@ -61,7 +61,11 @@ function testSeamQuery(): string {
  * at `out/renderer/index.html`, i.e. `../renderer/index.html` next to this
  * compiled `out/main/index.js`.
  */
-export function createMainWindow(iconPath: string | null): BrowserWindow {
+export function createMainWindow(
+  iconPath: string | null,
+  page: "full" | "quick",
+  hash: string | undefined,
+): BrowserWindow {
   const window = new BrowserWindow(
     buildMainWindowOptions(iconPath, join(__dirname, "../preload/index.js"), process.platform),
   )
@@ -76,13 +80,29 @@ export function createMainWindow(iconPath: string | null): BrowserWindow {
     }
   })
 
-  const query = testSeamQuery()
-  if (rendererDevServerUrl) {
-    const url = query ? `${rendererDevServerUrl}?${query}` : rendererDevServerUrl
-    void window.loadURL(url)
-  } else {
-    void window.loadFile(join(__dirname, "../renderer/index.html"), query ? { search: query } : {})
-  }
+  loadWindowPage(window, page, hash)
 
   return window
+}
+
+/** Load either the small quick editor or the full app into an existing window. */
+export function loadWindowPage(
+  window: BrowserWindow,
+  page: "full" | "quick",
+  hash?: string,
+): Promise<void> {
+  const query = testSeamQuery()
+  if (rendererDevServerUrl) {
+    const url = new URL(page === "quick" ? "quick.html" : "index.html", rendererDevServerUrl)
+    if (query) url.search = query
+    if (hash) url.hash = hash
+    return window.loadURL(url.toString())
+  }
+  return window.loadFile(
+    join(__dirname, `../renderer/${page === "quick" ? "quick" : "index"}.html`),
+    {
+      ...(query ? { search: query } : {}),
+      ...(hash ? { hash } : {}),
+    },
+  )
 }

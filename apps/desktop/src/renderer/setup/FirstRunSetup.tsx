@@ -32,6 +32,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const queryClient = useQueryClient()
   const environment = useQuery(trpc.setup.environment.queryOptions(undefined, { staleTime: 0 }))
   const settings = useQuery(trpc.settings.get.queryOptions())
+  const startAtLogin = useQuery(trpc.system.startAtLogin.queryOptions())
   const [, setDefaultAgent] = useDefaultAgentId()
   const [selectedAgent, setSelectedAgent] = useState<"claude-code" | "codex" | null>(null)
   const [selectionTouched, setSelectionTouched] = useState(false)
@@ -72,6 +73,12 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   )
   const complete = useMutation(trpc.setup.complete.mutationOptions())
   const skip = useMutation(trpc.setup.skip.mutationOptions())
+  const setStartAtLogin = useMutation(
+    trpc.system.setStartAtLogin.mutationOptions({
+      onSuccess: () =>
+        void queryClient.invalidateQueries({ queryKey: trpc.system.startAtLogin.queryKey() }),
+    }),
+  )
 
   const chooseAgent = (agentId: "claude-code" | "codex") => {
     setSelectionTouched(true)
@@ -113,7 +120,13 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   }
 
   const error =
-    environment.error ?? settings.error ?? saveApiKey.error ?? complete.error ?? skip.error
+    environment.error ??
+    settings.error ??
+    startAtLogin.error ??
+    setStartAtLogin.error ??
+    saveApiKey.error ??
+    complete.error ??
+    skip.error
 
   return (
     <div
@@ -136,7 +149,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
           size="sm"
           className="app-no-drag ms-auto"
           onClick={skipSetup}
-          disabled={skip.isPending}
+          disabled={skip.isPending || setStartAtLogin.isPending}
         >
           {t("Skip setup")}
         </Button>
@@ -160,6 +173,43 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 ))}
               </select>
             </label>
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="font-medium text-sm">{t("Start at login")}</h2>
+                <p className="mt-1 text-muted-foreground text-xs">
+                  {t("Launch PI Lab in the background when you sign in.")}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label={t("Start at login")}
+                aria-checked={startAtLogin.data?.enabled ?? false}
+                data-testid="setup-start-at-login"
+                disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
+                onClick={() =>
+                  setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
+                }
+                className={cn(
+                  "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
+                  startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
+                    startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
+                  )}
+                />
+              </button>
+            </div>
+            {startAtLogin.data?.available === false ? (
+              <p className="mt-2 text-muted-foreground text-xs">
+                {t("Start at login is available in packaged desktop builds.")}
+              </p>
+            ) : null}
           </section>
           <section className="rounded-xl border border-border bg-card p-5">
             <div className="mb-4 flex items-start justify-between gap-4">
@@ -297,13 +347,18 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
           ) : null}
 
           <footer className="flex items-center justify-end gap-2 pb-2">
-            <Button type="button" variant="ghost" onClick={skipSetup} disabled={skip.isPending}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={skipSetup}
+              disabled={skip.isPending || setStartAtLogin.isPending}
+            >
               {t("Skip setup")}
             </Button>
             <Button
               type="button"
               onClick={finish}
-              disabled={complete.isPending || saveApiKey.isPending}
+              disabled={complete.isPending || saveApiKey.isPending || setStartAtLogin.isPending}
             >
               {t("Finish setup")}
             </Button>

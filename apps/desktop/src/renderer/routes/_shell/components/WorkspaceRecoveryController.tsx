@@ -2,6 +2,7 @@ import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { Button } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import type { QuickEditBridge } from "../../../../shared/quickEdit"
 import type { ShutdownBridge, ShutdownRequest } from "../../../../shared/shutdown"
 import { drainFileOperations } from "../../../Editor/hooks/useEditorBuffers/fileOperations"
 import { useTranslate } from "../../../i18n/language"
@@ -19,6 +20,7 @@ declare global {
       shutdown: ShutdownBridge
       getPathForFile?: (file: File) => string
       setInterfaceLanguage?: (language: string) => void
+      quickEdit?: QuickEditBridge
     }
   }
 }
@@ -49,6 +51,7 @@ export function WorkspaceRecoveryController() {
     const bridge = window.piLab?.shutdown
     if (!bridge) return
     return bridge.subscribe((next) => {
+      if (window.location.hash.startsWith("#/quick-edit")) return
       if (pending.current?.requestId === next.requestId) {
         pending.current = next
         setRequest((current) => (current ? next : null))

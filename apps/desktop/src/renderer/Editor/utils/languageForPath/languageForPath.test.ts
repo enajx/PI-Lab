@@ -30,7 +30,22 @@ describe("languageForPath", () => {
     expect(languageForPath("win.pyw")).not.toBeNull()
   })
 
-  test("returns null for non-Python files (plain text in v1)", () => {
+  test("returns a C++ extension for common C++ source and header extensions", () => {
+    for (const path of [
+      "main.c",
+      "main.h",
+      "main.cc",
+      "main.hh",
+      "main.cpp",
+      "main.hpp",
+      "main.cxx",
+      "main.hxx",
+    ]) {
+      expect(languageForPath(path), path).not.toBeNull()
+    }
+  })
+
+  test("returns null for unsupported files (plain text)", () => {
     expect(languageForPath("notes.md")).toBeNull()
     expect(languageForPath("app.ts")).toBeNull()
     expect(languageForPath("data.json")).toBeNull()

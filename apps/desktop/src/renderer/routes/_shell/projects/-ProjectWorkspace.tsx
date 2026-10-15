@@ -21,6 +21,7 @@ import {
   useRightSidebarWidth,
   useSidebarCollapsed,
 } from "../../../preferences/preferences"
+import { stripOuterQuery } from "../../../QuickEditor/routeTarget"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { useOptionalNewFileController } from "../components/NewFileController"
 import { AgentStatusControl, titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
@@ -265,6 +266,17 @@ export function ProjectWorkspace({
     if (pendingOpenFile.kind === "new") controller.openNewMarkdown()
     else if (pendingOpenFile.relPath) controller.openFile(pendingOpenFile.relPath)
   }, [controller.openFile, controller.openNewMarkdown, pendingOpenFile, projectId, workspaceId])
+
+  // The quick editor saves before switching to this route, then opens that same
+  // file as a normal project tab after the main workspace is ready.
+  const handledQuickFile = useRef<string | null>(null)
+  useEffect(() => {
+    if (!workspaceId || !activation.quickFile) return
+    const relPath = stripOuterQuery(activation.quickFile)
+    if (handledQuickFile.current === relPath) return
+    handledQuickFile.current = relPath
+    controller.openFile(relPath)
+  }, [activation.quickFile, controller.openFile, workspaceId])
 
   // Card-triggered and in-view auto-research launch failures surface here (no
   // silent failure — AGENTS.md), so a failed launch never leaves the view stuck.

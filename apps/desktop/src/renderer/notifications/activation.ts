@@ -25,7 +25,7 @@ export const notificationActivationSchema = z.discriminatedUnion("type", [
 
 export type NotificationActivation = z.infer<typeof notificationActivationSchema>
 
-export const projectNotificationSearchSchema = z.union([
+const projectNotificationOnlySearchSchema = z.union([
   z.object({
     notificationId: z.string().min(1),
     notificationKind: z.literal("agent"),
@@ -51,6 +51,10 @@ export const projectNotificationSearchSchema = z.union([
     notificationLabel: z.undefined().optional(),
   }),
 ])
+
+export const projectNotificationSearchSchema = projectNotificationOnlySearchSchema.and(
+  z.object({ quickFile: z.string().min(1).optional() }),
+)
 
 export type ProjectNotificationSearch = z.infer<typeof projectNotificationSearchSchema>
 

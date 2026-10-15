@@ -45,6 +45,51 @@ export interface EditorTheme {
  */
 export const DEFAULT_EDITOR_THEME_ID = "solarized-light"
 
+/** The quick editor follows the current PI Lab appearance without reading settings on launch. */
+function piLabEditorTheme(mode: "light" | "dark"): Extension {
+  return createTheme({
+    theme: mode,
+    settings: {
+      background: "var(--background)",
+      foreground: "var(--foreground)",
+      caret: "var(--foreground)",
+      selection: "var(--accent)",
+      selectionMatch: "var(--secondary)",
+      lineHighlight: "var(--muted)",
+      gutterBackground: "var(--background)",
+      gutterForeground: "var(--muted-foreground)",
+    },
+    styles: [
+      {
+        tag: [t.keyword, t.moduleKeyword, t.controlKeyword],
+        color: mode === "dark" ? "#d2a8df" : "#7b4b91",
+      },
+      { tag: [t.string, t.special(t.string)], color: mode === "dark" ? "#a9c49a" : "#4b7547" },
+      {
+        tag: [t.comment, t.lineComment, t.blockComment],
+        color: "var(--muted-foreground)",
+        fontStyle: "italic",
+      },
+      { tag: [t.number, t.bool, t.null], color: mode === "dark" ? "#d6ae87" : "#9a5b30" },
+      {
+        tag: [t.function(t.variableName), t.function(t.propertyName)],
+        color: mode === "dark" ? "#9abfe0" : "#366d9d",
+      },
+      {
+        tag: [t.typeName, t.className, t.namespace],
+        color: mode === "dark" ? "#d6ae87" : "#9a5b30",
+      },
+      { tag: [t.propertyName, t.attributeName], color: mode === "dark" ? "#9abfe0" : "#366d9d" },
+      { tag: [t.operator, t.punctuation], color: "var(--foreground)" },
+      { tag: [t.variableName, t.definition(t.variableName)], color: "var(--foreground)" },
+      { tag: t.invalid, color: "var(--destructive)" },
+    ],
+  })
+}
+
+const piLabLight = piLabEditorTheme("light")
+const piLabDark = piLabEditorTheme("dark")
+
 /** One Dark — the Atom palette. */
 const oneDark = createTheme({
   theme: "dark",
@@ -500,6 +545,8 @@ export function editorThemeExtension(
   id: string | undefined,
   customThemes?: ImportedEditorTheme[],
 ): Extension {
+  if (id === "pi-lab-light") return piLabLight
+  if (id === "pi-lab-dark") return piLabDark
   return (
     (
       allEditorThemes(customThemes ?? []).find((theme) => theme.id === id) ??

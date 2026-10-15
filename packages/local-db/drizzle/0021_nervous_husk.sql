@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `keep_running_after_close` integer DEFAULT true NOT NULL;

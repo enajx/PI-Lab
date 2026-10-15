@@ -5,7 +5,7 @@ const menu = vi.hoisted(() => ({
   buildFromTemplate: vi.fn((template) => template),
   setApplicationMenu: vi.fn(),
 }))
-vi.mock("electron", () => ({ Menu: menu }))
+vi.mock("electron", () => ({ Menu: menu, app: { isPackaged: false } }))
 
 import { installAppMenu } from "./appMenu"
 

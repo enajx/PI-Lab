@@ -62,6 +62,13 @@ function applyTheme(themeId: string, mode: ResolvedThemeMode) {
   }
 }
 
+/** Set the saved appearance before the quick editor's first React render. */
+export function applySavedAppearance(): void {
+  const selected = readInitialMode()
+  const resolved = selected === "system" ? (systemPrefersDark() ? "dark" : "light") : selected
+  applyTheme(readInitialThemeId(), resolved)
+}
+
 /**
  * Owns the two independent app-appearance choices: a light/dark/system mode and
  * a named UI palette. The resolved mode remains reflected as `.dark` for

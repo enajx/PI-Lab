@@ -588,6 +588,10 @@ export const settings = sqliteTable("settings", {
     .default([]),
   /** Whether to prompt before quitting with live sessions. */
   confirmOnQuit: integer("confirm_on_quit", { mode: "boolean" }).notNull().default(true),
+  /** Whether the app remains available through the tray after its window closes. */
+  keepRunningAfterClose: integer("keep_running_after_close", { mode: "boolean" })
+    .notNull()
+    .default(true),
   /**
    * Worktree policy for the "start agent session" flow (md/engineering/architecture.md (agent runtime)). When ON,
    * every agent session gets its own fresh git worktree. When OFF (default), an

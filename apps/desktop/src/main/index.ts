@@ -1,77 +1,46 @@
 import { randomUUID } from "node:crypto"
-import { existsSync } from "node:fs"
-import { homedir } from "node:os"
-import { getSettingsOrDefaults, MigrationFailure } from "@pi-lab/local-db"
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron"
-import { createIPCHandler } from "trpc-electron/main"
-import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
+import { existsSync, statSync } from "node:fs"
+import { resolve } from "node:path"
+import { app, type BrowserWindow, dialog, ipcMain } from "electron"
 import {
-  type ActivityMonitorPort,
-  ActivityRegistry,
-  createActivityMonitor,
-  systemActivityClock,
-  systemActivityScheduler,
-} from "./activity"
-import { dispatchAutomation } from "./automations/dispatch"
-import { AutomationScheduler } from "./automations/scheduler"
-import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
-import { getDb, initDatabase } from "./db/db"
+  BACKGROUND_TRAY_OPEN_APP_CHANNEL,
+  BACKGROUND_TRAY_OPEN_FILE_CHANNEL,
+  BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL,
+  BACKGROUND_TRAY_QUIT_CHANNEL,
+  BACKGROUND_TRAY_SNAPSHOT_CHANNEL,
+} from "../shared/backgroundTray"
 import {
-  getNativeLanguage,
-  loadNativeLanguage,
-  nativeText,
-  saveNativeLanguage,
-} from "./i18n/nativeLanguage"
+  QUICK_EDIT_CLOSE_CHANNEL,
+  QUICK_EDIT_CURRENT_CHANNEL,
+  QUICK_EDIT_OPEN_CHANNEL,
+  QUICK_EDIT_READ_CHANNEL,
+  QUICK_EDIT_READY_CHANNEL,
+  QUICK_EDIT_RESOLVE_ROUTE_CHANNEL,
+  QUICK_EDIT_ROUTE_CHANNEL,
+  QUICK_EDIT_ROUTES_READY_CHANNEL,
+  QUICK_EDIT_SAVE_CHANNEL,
+  QUICK_EDIT_SHOW_FULL_CHANNEL,
+  QUICK_EDIT_STAT_CHANNEL,
+} from "../shared/quickEdit"
+import type { BackgroundTray } from "./background/tray"
+import type { FullRuntime } from "./fullRuntime"
+import { loadNativeLanguage } from "./i18n/nativeLanguage"
 import { applyMacDockIcon, resolveAppIconPath } from "./identity/appIcon"
-import {
-  createElectronAppFocusAdapter,
-  createElectronNativeNotificationAdapter,
-  createNotificationBrokers,
-  NotificationService,
-} from "./notifications"
-import { dataDirOverride, isTestMode, skillsHomeDirOverride } from "./runtime/env"
-import { testSetupProbe } from "./setup/testProbe"
-import { TerminalSupervisor } from "./terminal/supervisor"
-import { appRouter } from "./trpc/appRouter"
-import {
-  type AppContext,
-  buildAgentCatalog,
-  DEFAULT_AGENT_EXECUTABLE_RESOLVER,
-  DEFAULT_AGENT_LAUNCH_ENVIRONMENT,
-  DEFAULT_HTTP_FETCH,
-  DEFAULT_PY_TOOLS_EXEC,
-  DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
-  DEFAULT_PYTHON_RUNTIME_RESOLVER,
-  DEFAULT_SETUP_PROBE,
-  DEFAULT_SSH_EXEC,
-  DEFAULT_WORKFLOW_PROCESS_RUNNER,
-} from "./trpc/context"
-import { electronThumbnailImageProcessor } from "./trpc/projects/electronThumbnailImage"
-import {
-  AnalysisInteractiveController,
-  registerAnalysisReportScheme,
-} from "./trpc/science/analysis/interactiveController"
-import { seedWritableTemplate } from "./trpc/template"
+import { FullBootScheduler } from "./quickEdit/fullBootScheduler"
+import { firstFileArgument } from "./quickEdit/launchArgs"
+import { QuickEditFiles } from "./quickEdit/service"
+import { dataDirOverride, isTestMode } from "./runtime/env"
+import { registerAnalysisReportScheme } from "./trpc/science/analysis/reportScheme"
 import { installAppMenu } from "./window/appMenu"
-import { createMainWindow } from "./window/mainWindow"
+import { createMainWindow, loadWindowPage } from "./window/mainWindow"
 import { installShutdownGuard } from "./window/shutdownGuard"
 
 export type { AppRouter } from "./trpc/appRouter"
 
 /**
- * Main-process boot (a foundation slice of the sequence in md/engineering/architecture.md (process model)):
- *
- *   1. point `userData` at the resolved data dir   (must precede any disk/DB IO)
- *   2. acquire the single-instance lock            (skipped in test mode)
- *   3. open + migrate the local SQLite DB
- *   4. serve the tRPC appRouter (with the PTY-daemon-backed context) over
- *      `trpc-electron`
- *   5. create the window
- *
- * The PTY daemon itself is started lazily on first terminal use (adopt-or-spawn,
- * md/engineering/architecture.md (process model)) so an app that never opens a terminal pays nothing. Later phases
- * insert science-state, eager pty-daemon session reconciliation, the automations
- * scheduler, and tray/menu between steps 3 and 5.
+ * The small entry starts a file in quick edit before importing fullRuntime.
+ * Full services start after the caret is ready or immediately for a full-app
+ * request. See md/engineering/architecture.md for the complete boot sequence.
  */
 
 // The product name — also the basename of Electron's default userData dir
@@ -87,7 +56,7 @@ if (dataDirOverride) {
   app.setPath("userData", dataDirOverride)
 }
 
-const appIconPath = resolveAppIconPath(
+const resolvedAppIconPath = resolveAppIconPath(
   {
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -95,135 +64,287 @@ const appIconPath = resolveAppIconPath(
   },
   { exists: existsSync },
 )
+const devIconPath = resolve(__dirname, "../../../..", "icons", "icon.png")
+const appIconPath =
+  resolvedAppIconPath ?? (!app.isPackaged && existsSync(devIconPath) ? devIconPath : null)
 
 // Step 2 — one instance per data dir in normal use; the smoke harness launches
 // many parallel instances against throwaway data dirs, so test mode opts out.
-if (!isTestMode && !app.requestSingleInstanceLock()) {
+const ownsInstance = isTestMode || app.requestSingleInstanceLock()
+if (!ownsInstance) {
   app.quit()
+}
+
+const quickFiles = new QuickEditFiles()
+let pendingFilePath: string | null = null
+let appReady = false
+let quickWindow = false
+let fullBootComplete = false
+let userWindow: BrowserWindow | null = null
+let fullRendererReady = false
+let pendingFullRoute: string | null = null
+let tray: BackgroundTray | null = null
+let unsubscribeTray: (() => void) | null = null
+let quitting = false
+let hiddenStartup = false
+
+/** Close the background surface before a user window appears. */
+function closeTray(): void {
+  unsubscribeTray?.()
+  unsubscribeTray = null
+  tray?.dispose()
+  tray = null
+}
+
+/** Register a user window separately from the tray popover. */
+function attachUserWindow(window: BrowserWindow): BrowserWindow {
+  userWindow = window
+  fullRendererReady = false
+  pendingFullRoute = null
+  window.webContents.on("did-start-loading", () => {
+    fullRendererReady = false
+  })
+  closeTray()
+  shutdownGuard.attachWindow(window)
+  window.on("closed", () => {
+    if (userWindow !== window) return
+    userWindow = null
+    if (!quitting)
+      void enterBackground().catch((error: unknown) => {
+        console.error("[pi-lab] could not enter background:", error)
+        app.quit()
+      })
+  })
+  if (fullBootComplete) fullRuntime?.boot(window)
+  return window
+}
+
+/** Stay resident only when the persisted setting permits it. */
+async function enterBackground(): Promise<void> {
+  if (!fullBootComplete) await fullBootScheduler.startNow()
+  if (userWindow || quitting) return
+  const runtime = fullRuntime
+  if (!runtime) throw new Error("Full app did not start")
+  if (!hiddenStartup && !runtime.keepRunningAfterClose()) {
+    app.quit()
+    return
+  }
+  if (tray) return
+  if (!appIconPath) throw new Error("PI Lab tray icon is missing")
+  const { BackgroundTray } = await import("./background/tray")
+  if (userWindow || quitting) return
+  const created = new BackgroundTray(appIconPath)
+  tray = created
+  hiddenStartup = false
+  unsubscribeTray = runtime.subscribeTray((snapshot) => created.publish(snapshot))
+  if (isTestMode && process.env.PI_LAB_TEST_SHOW_TRAY === "1") created.showForTest()
+}
+
+function acceptFile(path: string): void {
+  if (!existsSync(path) || !statSync(path).isFile()) return
+  const target = quickFiles.register(path)
+  if (!appReady) {
+    pendingFilePath = target.path
+    return
+  }
+  const window = userWindow
+  if (!window) {
+    quickWindow = true
+    createQuickWindow(target.id)
+    return
+  }
+  const route = !quickWindow && fullRuntime ? fullRuntime.routeForFile(target) : null
+  if (route?.startsWith("/projects/")) {
+    if (fullRendererReady) window.webContents.send(QUICK_EDIT_ROUTE_CHANNEL, route)
+    else pendingFullRoute = route
+    window.show()
+    window.focus()
+    return
+  }
+  if (window.webContents.isLoadingMainFrame()) {
+    window.webContents.once("did-finish-load", () => {
+      if (!window.isDestroyed()) window.webContents.send(QUICK_EDIT_OPEN_CHANNEL, target)
+    })
+  } else {
+    window.webContents.send(QUICK_EDIT_OPEN_CHANNEL, target)
+  }
+  window.show()
+  window.focus()
+}
+
+if (ownsInstance) {
+  app.on("open-file", (event, path) => {
+    event.preventDefault()
+    acceptFile(path)
+  })
+  app.on("second-instance", (_event, argv, cwd) => {
+    const path = firstFileArgument(argv, cwd, __filename)
+    if (path) acceptFile(path)
+    else if (userWindow) {
+      userWindow.show()
+      userWindow.focus()
+    } else {
+      void app
+        .whenReady()
+        .then(() => openFull(null))
+        .catch((error: unknown) => {
+          console.error("[pi-lab] could not open full app:", error)
+        })
+    }
+  })
 }
 
 // In test mode there is no auto-update or telemetry to disable yet; the seam is
 // reserved here so future wiring stays gated behind one flag (md/engineering/testing-and-build.md).
 
-let ipcHandler: ReturnType<typeof createIPCHandler> | null = null
 const shutdownGuard = installShutdownGuard({ app, ipcMain, createRequestId: randomUUID })
-
-// The PTY daemon supervisor is created once and shared across the app's life.
-// It adopts a daemon a prior run left detached, or spawns one (md/engineering/architecture.md (process model)); it
-// is NOT torn down with windows so terminals survive a reload.
-//
-// Test mode is the exception: each E2E run gets a throwaway daemon on a unique
-// socket, so we reap it on quit — otherwise the orphaned daemon + its node-pty
-// children wedge Playwright's `app.close()` on Linux (it waits on the Electron
-// child's stdio-pipe EOF). Production keeps the daemon detached so sessions
-// survive a restart.
-const terminalSupervisor = new TerminalSupervisor(isTestMode ? { reapDaemonOnDispose: true } : {})
-const analysisInteractive = new AnalysisInteractiveController()
-
-// The launchable agent catalog. In test mode it includes the deterministic
-// test-echo agent so the E2E can launch an assertable agent (md/engineering/testing-and-build.md).
-const agentCatalog = buildAgentCatalog(isTestMode)
-const notificationBrokers = createNotificationBrokers()
-const notificationService = new NotificationService({
-  native: createElectronNativeNotificationAdapter(appIconPath),
-  focus: createElectronAppFocusAdapter(ensureMainWindow),
-  getPreferences: () => getSettingsOrDefaults(getDb()).notifications,
-  activations: notificationBrokers.activations,
-  sounds: notificationBrokers.sounds,
-  errors: notificationBrokers.errors,
-  logger: { warn: (message) => console.warn(message) },
-})
-const activityRegistry = new ActivityRegistry({
-  clock: systemActivityClock,
-  scheduler: systemActivityScheduler,
-})
-let activityMonitor: ActivityMonitorPort | null = null
-let caffeineController: CaffeineController | null = null
-
-// Context built per request (after boot has migrated the DB). The terminal +
-// agent-launch paths resolve their daemon client lazily through the supervisor
-// (adopt-or-spawn + reconnect); the DB handle, agent catalog, and live-session
-// registry are app-lifetime singletons.
-function createAppContext(): AppContext {
-  if (!activityMonitor) throw new Error("activity monitor is not initialized")
-  if (!caffeineController) throw new Error("caffeine controller is not initialized")
-  return {
-    db: getDb(),
-    skillsHomeDir: skillsHomeDirOverride ?? homedir(),
-    getDaemonClient: () => terminalSupervisor.ensureClient(),
-    agentCatalog,
-    resolveAgentExecutable: DEFAULT_AGENT_EXECUTABLE_RESOLVER,
-    getAgentLaunchEnvironment: DEFAULT_AGENT_LAUNCH_ENVIRONMENT,
-    runNonInteractiveProcess: DEFAULT_WORKFLOW_PROCESS_RUNNER,
-    setupProbe: isTestMode ? testSetupProbe : DEFAULT_SETUP_PROBE,
-    credentialCipher: {
-      encrypt: (value) => {
-        if (!safeStorage.isEncryptionAvailable()) {
-          throw new Error("Your operating system keychain is unavailable for API-key storage")
-        }
-        return safeStorage.encryptString(value).toString("base64")
-      },
-    },
-    sshExec: DEFAULT_SSH_EXEC,
-    httpFetch: DEFAULT_HTTP_FETCH,
-    // Library folder source opens PDFs with the OS default app (md/engineering/architecture.md).
-    openPath: (path) => shell.openPath(path),
-    revealPath: (path) => shell.showItemInFolder(path),
-    thumbnailImageProcessor: electronThumbnailImageProcessor,
-    pyToolsExec: DEFAULT_PY_TOOLS_EXEC,
-    discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
-    resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
-    analysisInteractive,
-    notifications: notificationBrokers,
-    activityMonitor,
-    notificationService,
-    caffeine: caffeineController,
-  }
-}
-
-// The automations scheduler (AGENTS.md "Scope" / md/engineering/architecture.md (process model)). Its "fire" builds the same
-// AppContext the routers use and dispatches the due automation through the
-// shared session-start flow, so a scheduled run is identical to a manual one.
-// Created on first boot (after the DB is migrated) and stopped on quit.
-let automationScheduler: AutomationScheduler | null = null
-
-function startAutomationScheduler(): void {
-  if (automationScheduler) return
-  automationScheduler = new AutomationScheduler({
-    db: getDb(),
-    fire: (args) => dispatchAutomation(createAppContext(), args),
-  })
-  automationScheduler.start()
-}
-
-function boot(window: BrowserWindow): void {
-  shutdownGuard.attachWindow(window)
-  // One IPC handler for the app's lifetime; re-attach windows rather than
-  // re-create it (avoids duplicate handlers when a window is reopened).
-  if (ipcHandler) {
-    ipcHandler.attachWindow(window)
-    return
-  }
-  ipcHandler = createIPCHandler({
-    router: appRouter,
-    windows: [window],
-    createContext: async () => createAppContext(),
-  })
-}
+let fullRuntime: FullRuntime | null = null
 
 function ensureMainWindow(): BrowserWindow {
-  const existing = BrowserWindow.getAllWindows()[0]
+  const existing = userWindow
   if (existing) return existing
-  const window = createMainWindow(appIconPath)
-  boot(window)
-  return window
+  return attachUserWindow(createMainWindow(appIconPath, "full", undefined))
 }
+
+function createQuickWindow(id: string): BrowserWindow {
+  const window = createMainWindow(
+    appIconPath,
+    "quick",
+    `/quick-edit?target=${encodeURIComponent(id)}`,
+  )
+  return attachUserWindow(window)
+}
+
+/** Import full-app code only after the quick editor reports a focused caret. */
+function startFullBoot(): Promise<void> {
+  return import("./fullRuntime")
+    .then(async ({ FullRuntime, reportFullBootFailure }) => {
+      const runtime = new FullRuntime({
+        appIconPath,
+        ensureMainWindow,
+        initialWindow: () => {
+          const existing = userWindow
+          if (existing) return existing
+          return quickWindow || hiddenStartup ? null : ensureMainWindow()
+        },
+      })
+      fullRuntime = runtime
+      await runtime.start().catch((error: unknown) => {
+        reportFullBootFailure(error)
+        throw error
+      })
+      fullBootComplete = true
+      if (!userWindow) await enterBackground()
+    })
+    .catch((error: unknown) => {
+      console.error("[pi-lab] fatal during boot:", error)
+      throw error
+    })
+}
+
+const fullBootScheduler = new FullBootScheduler(startFullBoot, 200)
+
+/** Open the full app in the existing user window or a new one. */
+async function openFull(route: string | null): Promise<void> {
+  await fullBootScheduler.startNow()
+  if (!fullRuntime) throw new Error("Full app did not start")
+  const current = quickFiles.current()
+  const destination = route ?? (quickWindow && current ? fullRuntime.routeForFile(current) : null)
+  const window = ensureMainWindow()
+  if (quickWindow || destination) await loadWindowPage(window, "full", destination ?? undefined)
+  quickWindow = false
+  window.show()
+  window.focus()
+}
+
+ipcMain.handle(
+  BACKGROUND_TRAY_SNAPSHOT_CHANNEL,
+  () => fullRuntime?.traySnapshot() ?? { projects: [] },
+)
+ipcMain.handle(BACKGROUND_TRAY_OPEN_APP_CHANNEL, async () => openFull(null))
+ipcMain.handle(BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL, async (_event, id: unknown) => {
+  if (typeof id !== "string" || !fullRuntime?.hasProject(id)) throw new Error("Unknown project")
+  await openFull(`/projects/${encodeURIComponent(id)}`)
+})
+ipcMain.handle(BACKGROUND_TRAY_OPEN_FILE_CHANNEL, async () => {
+  const testFile = isTestMode ? process.env.PI_LAB_TEST_PICK_FILE : undefined
+  if (testFile) {
+    acceptFile(testFile)
+    return
+  }
+  const result = await dialog.showOpenDialog({ properties: ["openFile"] })
+  if (!result.canceled && result.filePaths[0]) acceptFile(result.filePaths[0])
+})
+ipcMain.on(BACKGROUND_TRAY_QUIT_CHANNEL, () => app.quit())
+
+ipcMain.handle(QUICK_EDIT_CURRENT_CHANNEL, () => quickFiles.current())
+ipcMain.handle(QUICK_EDIT_CLOSE_CHANNEL, (_event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("Invalid quick-edit file ID")
+  quickFiles.close(id)
+})
+ipcMain.handle(QUICK_EDIT_ROUTES_READY_CHANNEL, () => {
+  fullRendererReady = true
+  const route = pendingFullRoute
+  pendingFullRoute = null
+  return route
+})
+ipcMain.handle(QUICK_EDIT_RESOLVE_ROUTE_CHANNEL, (_event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("Invalid quick-edit file ID")
+  if (!fullRuntime) throw new Error("Full app has not started")
+  return fullRuntime.routeForFile(quickFiles.require(id))
+})
+ipcMain.handle(QUICK_EDIT_READ_CHANNEL, (_event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("Invalid quick-edit file ID")
+  return quickFiles.read(id)
+})
+ipcMain.handle(QUICK_EDIT_STAT_CHANNEL, (_event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("Invalid quick-edit file ID")
+  return quickFiles.stat(id)
+})
+ipcMain.handle(
+  QUICK_EDIT_SAVE_CHANNEL,
+  (_event, id: unknown, content: unknown, baseline: unknown, overwrite: unknown) => {
+    if (typeof id !== "string" || typeof content !== "string" || typeof overwrite !== "boolean") {
+      throw new Error("Invalid quick-edit save request")
+    }
+    if (
+      !baseline ||
+      typeof baseline !== "object" ||
+      !("exists" in baseline) ||
+      typeof baseline.exists !== "boolean" ||
+      !("mtimeMs" in baseline) ||
+      typeof baseline.mtimeMs !== "number" ||
+      !("size" in baseline) ||
+      typeof baseline.size !== "number"
+    ) {
+      throw new Error("Invalid quick-edit baseline")
+    }
+    return quickFiles.save(
+      id,
+      content,
+      baseline as { exists: boolean; mtimeMs: number; size: number },
+      overwrite,
+    )
+  },
+)
+ipcMain.on(QUICK_EDIT_READY_CHANNEL, () => {
+  if (quickWindow) fullBootScheduler.schedule()
+})
+ipcMain.handle(QUICK_EDIT_SHOW_FULL_CHANNEL, async (_event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("Invalid quick-edit file ID")
+  const target = quickFiles.require(id)
+  await fullBootScheduler.startNow()
+  const window = ensureMainWindow()
+  if (!fullRuntime) throw new Error("Full app did not start")
+  await loadWindowPage(window, "full", fullRuntime.routeForFile(target))
+  quickWindow = false
+})
 
 app
   .whenReady()
   .then(async () => {
-    // Test runs stay in the background on macOS: no Dock icon, no ⌘Tab entry, and
-    // macOS does not hand focus to the app when another app quits.
+    if (!ownsInstance) return
+    appReady = true
     if (isTestMode && process.platform === "darwin") app.setActivationPolicy("accessory")
     const dock = app.dock
     applyMacDockIcon(
@@ -232,88 +353,48 @@ app
       dock ? { setIcon: (path) => dock.setIcon(path) } : null,
       { warn: (message) => console.warn(message) },
     )
-
     loadNativeLanguage(app.getPath("userData"))
-    // Step 3 — migrate the DB; the renderer's `app-ready` marker proves this ran.
-    const dbStatus = initDatabase()
-    ipcMain.on(INTERFACE_LANGUAGE_CHANNEL, (_event, language: unknown) => {
-      if (language === getNativeLanguage()) return
-      if (saveNativeLanguage(app.getPath("userData"), language)) installAppMenu()
-    })
-    analysisInteractive.installProtocolHandler()
-    console.log(
-      `[pi-lab] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
-    )
-    activityMonitor = createActivityMonitor({
-      db: getDb(),
-      registry: activityRegistry,
-      getMonitorClient: () => terminalSupervisor.ensureMonitorClient(),
-      notifications: notificationService,
-      scheduler: systemActivityScheduler,
-      logger: { warn: (message) => console.warn(message) },
-    })
-    await activityMonitor.reconcile().catch((error) => {
-      console.warn(`[pi-lab] activity reconciliation skipped: ${String(error)}`)
-    })
-    caffeineController = new CaffeineController({
-      power: electronPowerSaveBlockerAdapter,
-      clock: systemActivityClock,
-      scheduler: systemActivityScheduler,
-      activity: activityRegistry,
-      initialSettings: getSettingsOrDefaults(getDb()).caffeine,
-    })
-
-    // First-run seed of the writable project template (data dir is already set in
-    // step 1). Fire-and-forget + graceful: a failure logs but never aborts boot,
-    // and the template router re-seeds lazily as a safety net.
-    void seedWritableTemplate().catch((error) => {
-      console.warn("[pi-lab] template seed skipped:", error)
-    })
-
-    // Start the automations scheduler timer (reconciles schedules on boot, then
-    // ticks). Done before the window so a due automation fires even if the
-    // renderer is slow to mount (md/engineering/architecture.md (process model)).
-    startAutomationScheduler()
-
-    // Own the application menu so ⌘W is NOT bound to "Close Window" — the project
-    // view handles ⌘W to close the active tab instead (see appMenu.ts / CentralPanel).
     installAppMenu()
-
-    // Steps 4 + 5 — wire tRPC, then open the window.
-    ensureMainWindow()
-
-    // macOS: recreate the window when the dock icon is clicked with none open.
+    hiddenStartup =
+      process.argv.includes("--pi-lab-background") ||
+      (process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin)
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        ensureMainWindow()
-      }
+      if (userWindow) return
+      void openFull(null).catch((error: unknown) =>
+        console.error("[pi-lab] activate failed:", error),
+      )
     })
+
+    if (!pendingFilePath) {
+      const arg = firstFileArgument(process.argv, process.cwd(), __filename)
+      if (arg) quickFiles.register(arg)
+    }
+    const current = quickFiles.current()
+    if (current) {
+      hiddenStartup = false
+      quickWindow = true
+      createQuickWindow(current.id)
+      return
+    }
+    await fullBootScheduler.startNow()
   })
   .catch((error) => {
-    console.error("[pi-lab] fatal during boot:", error)
-    if (error instanceof MigrationFailure) {
-      dialog.showErrorBox(nativeText("PI Lab database could not be opened"), error.message)
-    }
+    console.error("[pi-lab] fatal during startup:", error)
     app.quit()
   })
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit()
-  }
+  // The approved user-window close starts background mode in its `closed` event.
 })
 
-// Stop the scheduler and dispose the supervisor on quit. In production the
-// supervisor closes its client but deliberately leaves the *detached* daemon
-// running so live terminals/agents survive the app restarting — the whole reason
-// it is a separate process (md/engineering/architecture.md (process model)). In test mode
-// dispose also reaps that daemon (see TerminalSupervisor construction above).
+app.on("before-quit", (event) => {
+  if (!event.defaultPrevented) quitting = true
+})
+
 app.on("will-quit", () => {
+  quitting = true
+  closeTray()
+  fullBootScheduler.cancel()
   shutdownGuard.dispose()
-  automationScheduler?.stop()
-  caffeineController?.dispose()
-  activityMonitor?.dispose()
-  activityRegistry.dispose()
-  terminalSupervisor.dispose()
-  analysisInteractive.dispose()
+  fullRuntime?.dispose()
 })

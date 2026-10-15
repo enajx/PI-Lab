@@ -78,6 +78,7 @@ const editorPatch = z.object({
 const generalPatch = z.object({
   worktreePerAgent: z.boolean().optional(),
   confirmOnQuit: z.boolean().optional(),
+  keepRunningAfterClose: z.boolean().optional(),
 })
 
 const agentsPatch = z.object({
@@ -152,7 +153,10 @@ export function writeEditorSettings(
 }
 
 /** The general-settings columns this router patches (top-level, not a JSON blob). */
-export type GeneralSettings = Pick<Settings, "worktreePerAgent" | "confirmOnQuit">
+export type GeneralSettings = Pick<
+  Settings,
+  "worktreePerAgent" | "confirmOnQuit" | "keepRunningAfterClose"
+>
 
 /**
  * Merge a general-settings patch onto the current row and persist it, upserting
@@ -166,6 +170,7 @@ export function writeGeneralSettings(db: PiLabDatabase, patch: Partial<GeneralSe
   const next: GeneralSettings = {
     worktreePerAgent: patch.worktreePerAgent ?? current.worktreePerAgent,
     confirmOnQuit: patch.confirmOnQuit ?? current.confirmOnQuit,
+    keepRunningAfterClose: patch.keepRunningAfterClose ?? current.keepRunningAfterClose,
   }
   db.insert(settings)
     .values({ id: SETTINGS_ROW_ID, ...next, updatedAt: Date.now() })

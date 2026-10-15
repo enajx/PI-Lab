@@ -80,13 +80,21 @@ export function GeneralSection() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
+  const startAtLoginQuery = useQuery(trpc.system.startAtLogin.queryOptions())
   const updateGeneral = useMutation(
     trpc.settings.updateGeneral.mutationOptions({
       onSuccess: () =>
         void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() }),
     }),
   )
+  const setStartAtLogin = useMutation(
+    trpc.system.setStartAtLogin.mutationOptions({
+      onSuccess: () =>
+        void queryClient.invalidateQueries({ queryKey: trpc.system.startAtLogin.queryKey() }),
+    }),
+  )
   const confirmOnQuit = settingsQuery.data?.confirmOnQuit ?? true
+  const keepRunningAfterClose = settingsQuery.data?.keepRunningAfterClose ?? true
   const [restoreProjectTabs, setRestoreProjectTabs] = useRestoreProjectTabs()
 
   return (
@@ -103,6 +111,31 @@ export function GeneralSection() {
         options={LANGUAGES.map((item) => ({ value: item.code, label: item.label }))}
         onChange={(next) => setLanguage(next as InterfaceLanguage)}
       />
+      <ToggleField
+        testId="settings-keep-running-after-close"
+        label="Keep running after window closes"
+        description="Keep PI Lab available in the menu bar or system tray for quick file opens."
+        checked={keepRunningAfterClose}
+        onChange={(value) => updateGeneral.mutate({ keepRunningAfterClose: value })}
+      />
+      <ToggleField
+        testId="settings-start-at-login"
+        label="Start at login"
+        description="Launch PI Lab in the background when you sign in."
+        checked={startAtLoginQuery.data?.enabled ?? false}
+        disabled={startAtLoginQuery.data?.available === false || setStartAtLogin.isPending}
+        onChange={(value) => setStartAtLogin.mutate({ enabled: value })}
+      />
+      {startAtLoginQuery.data?.available === false ? (
+        <p className="px-4 py-3 text-muted-foreground text-xs">
+          {t("Start at login is available in packaged desktop builds.")}
+        </p>
+      ) : null}
+      {updateGeneral.error || setStartAtLogin.error || startAtLoginQuery.error ? (
+        <p role="alert" className="px-4 py-3 text-destructive text-xs">
+          {String(updateGeneral.error ?? setStartAtLogin.error ?? startAtLoginQuery.error)}
+        </p>
+      ) : null}
       <ToggleField
         testId="settings-confirm-quit"
         label="Confirm on quit"

@@ -6,6 +6,7 @@ import {
   type SystemFontDetector,
 } from "../../fonts/systemFonts"
 import { pickDirectoryOverride, testFontFamilies } from "../../runtime/env"
+import { liveStartAtLoginService, type StartAtLoginService } from "../../window/startAtLogin"
 import { applyTrafficLightInset } from "../../window/trafficLights"
 import { publicProcedure, router } from "../trpc"
 import { type EditorThemeImportResult, readEditorThemeFiles } from "./themeImport"
@@ -21,11 +22,19 @@ import { type EditorThemeImportResult, readEditorThemeFiles } from "./themeImpor
  * automated; test mode can return `PI_LAB_TEST_PICK_DIRECTORY` instead so the
  * renderer's real chooser flow remains covered deterministically.
  */
-export function createSystemRouter(detectSystemFonts: SystemFontDetector) {
+export function createSystemRouter(
+  detectSystemFonts: SystemFontDetector,
+  startAtLogin: StartAtLoginService,
+) {
   const detectSystemFontsOnce = cacheSystemFontDetector(detectSystemFonts)
   return router({
     /** System-installed font families for the global editor typography picker. */
     fonts: publicProcedure.query(() => detectSystemFontsOnce()),
+    /** The OS login item is separate from the window-close setting in SQLite. */
+    startAtLogin: publicProcedure.query(() => startAtLogin.get()),
+    setStartAtLogin: publicProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ input }) => startAtLogin.set(input.enabled)),
     /**
      * Open the native single-directory picker, parented to the focused window so it
      * presents as a sheet on macOS. Returns the chosen absolute path, or `null`
@@ -99,4 +108,7 @@ function selectedSystemFontDetector(): SystemFontDetector {
   return override ? async () => ({ families: override, error: null }) : liveSystemFontDetector
 }
 
-export const systemRouter = createSystemRouter(selectedSystemFontDetector())
+export const systemRouter = createSystemRouter(selectedSystemFontDetector(), {
+  get: () => liveStartAtLoginService().get(),
+  set: (enabled) => liveStartAtLoginService().set(enabled),
+})

@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderGit2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { CommandPalette } from "../CommandPalette"
 import { useTranslate } from "../i18n/language"
 import { NotificationBridge } from "../notifications/NotificationBridge"
 import { useSidebarCollapsed } from "../preferences/preferences"
+import { quickEditorRevision, subscribeQuickEditor } from "../QuickEditor/quickEditorState"
 import { QuickFind, type QuickFindItem } from "../QuickFind"
 import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute"
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
@@ -54,6 +55,7 @@ function ShellLayout() {
   const awaitingSetupDecision =
     setupGateMode === "honor" && !isSetup && settings.data === undefined && settings.isPending
   const isSettings = location.pathname.startsWith("/settings")
+  useSyncExternalStore(subscribeQuickEditor, quickEditorRevision, quickEditorRevision)
   const isFullScreen = isSettings || isSetup || redirectToSetup || awaitingSetupDecision
 
   useEffect(() => {

@@ -45,6 +45,7 @@ function defaultSettings(): Settings {
     terminalFontSize: null,
     agentPresets: [],
     confirmOnQuit: true,
+    keepRunningAfterClose: true,
     knownTeams: [],
     worktreePerAgent: false,
     editor: DEFAULT_EDITOR_SETTINGS,

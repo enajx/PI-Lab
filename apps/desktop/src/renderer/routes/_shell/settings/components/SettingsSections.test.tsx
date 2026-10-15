@@ -207,6 +207,37 @@ describe("Settings sections", () => {
     await waitFor(() => expect(patches).toContainEqual({ confirmOnQuit: false }))
   })
 
+  test("General toggles background operation and OS login separately", async () => {
+    const generalPatches: unknown[] = []
+    const loginPatches: unknown[] = []
+    renderSection(<GeneralSection />, {
+      "settings.get": () => ({
+        confirmOnQuit: true,
+        worktreePerAgent: false,
+        keepRunningAfterClose: true,
+      }),
+      "settings.updateGeneral": (input) => {
+        generalPatches.push(input)
+        return input
+      },
+      "system.startAtLogin": () => ({ enabled: false }),
+      "system.setStartAtLogin": (input) => {
+        loginPatches.push(input)
+        return input
+      },
+    })
+    const background = await screen.findByTestId("settings-keep-running-after-close")
+    const login = await screen.findByTestId("settings-start-at-login")
+    expect(background.getAttribute("aria-checked")).toBe("true")
+    expect(login.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(background)
+    fireEvent.click(login)
+    await waitFor(() => {
+      expect(generalPatches).toContainEqual({ keepRunningAfterClose: false })
+      expect(loginPatches).toContainEqual({ enabled: true })
+    })
+  })
+
   test("General restores project tabs by default and lets the user turn restoration off", async () => {
     renderSection(<GeneralSection />, {
       "settings.get": () => ({ confirmOnQuit: true, worktreePerAgent: false }),

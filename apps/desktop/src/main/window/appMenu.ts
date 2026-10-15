@@ -1,5 +1,8 @@
-import { Menu, type MenuItemConstructorOptions } from "electron"
+import { homedir } from "node:os"
+import { delimiter, join } from "node:path"
+import { app, dialog, Menu, type MenuItemConstructorOptions } from "electron"
 import { nativeText } from "../i18n/nativeLanguage"
+import { installCommand } from "../quickEdit/installCommand"
 
 /**
  * Install the application menu, deliberately binding **no** accelerator to ⌘W / Ctrl+W.
@@ -29,6 +32,32 @@ export function installAppMenu(): void {
             label: "PI Lab",
             submenu: [
               item("about", "About PI Lab"),
+              ...(app.isPackaged
+                ? [
+                    {
+                      label: "Install 'pilab' command",
+                      click: () => {
+                        const home = homedir()
+                        const bin = join(home, ".local", "bin")
+                        const script = join(process.resourcesPath, "bin", "pilab")
+                        void installCommand(home, script)
+                          .then((path) => {
+                            const onPath = (process.env.PATH ?? "").split(delimiter).includes(bin)
+                            const message = onPath
+                              ? `Installed ${path}. Run: pilab /path/to/file.py`
+                              : `Installed ${path}. Add this line to your shell setup, then open a new terminal:\n\nexport PATH="$HOME/.local/bin:$PATH"`
+                            return dialog.showMessageBox({ type: "info", message })
+                          })
+                          .catch((error: unknown) => {
+                            return dialog.showMessageBox({
+                              type: "error",
+                              message: `Could not install the pilab command: ${String(error)}`,
+                            })
+                          })
+                      },
+                    } satisfies MenuItemConstructorOptions,
+                  ]
+                : []),
               { type: "separator" },
               item("hide", "Hide PI Lab"),
               item("hideOthers", "Hide Others"),

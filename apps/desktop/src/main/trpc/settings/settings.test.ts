@@ -242,6 +242,15 @@ describe("settings.updateEditor", () => {
 })
 
 describe("settings.updateGeneral", () => {
+  it("keeps the app running after window close by default and persists an opt-out", async () => {
+    expect((await harness.caller.settings.get()).keepRunningAfterClose).toBe(true)
+    const updated = await harness.caller.settings.updateGeneral({ keepRunningAfterClose: false })
+    expect(updated.keepRunningAfterClose).toBe(false)
+    expect((await harness.caller.settings.get()).keepRunningAfterClose).toBe(false)
+    await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    expect((await harness.caller.settings.get()).keepRunningAfterClose).toBe(false)
+  })
+
   it("round-trips worktreePerAgent and confirmOnQuit", async () => {
     const updated = await harness.caller.settings.updateGeneral({
       worktreePerAgent: true,

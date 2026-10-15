@@ -1,0 +1,20 @@
+#!/bin/bash
+# Ask macOS to open the file in this app bundle. A running PI Lab receives the
+# document-open event directly, without starting a second Electron process.
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+  source_path="$(readlink "$source_path")"
+  [[ "$source_path" = /* ]] || source_path="$source_dir/$source_path"
+done
+resource_dir="$(cd -P "$(dirname "$source_path")/.." && pwd)"
+files=()
+for path in "$@"; do
+  if [[ "$path" = /* ]]; then
+    files+=("$path")
+  else
+    # An absolute path also stops `open` treating a file named `-foo.py` as a flag.
+    files+=("$PWD/$path")
+  fi
+done
+exec /usr/bin/open -a "$resource_dir/../.." "${files[@]}"

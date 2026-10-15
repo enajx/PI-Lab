@@ -51,6 +51,8 @@ interface CodeMirrorBufferProps {
    * the keybinding always swallows the event so the browser's Save never fires.
    */
   onSave: () => void
+  /** Called after the CodeMirror view is mounted and focused. */
+  onReady?: () => void
   /** Fires on Mod+Enter while this focused buffer is eligible to run. */
   onRun?: () => void
   /**
@@ -134,6 +136,7 @@ export function CodeMirrorBuffer({
   initialDoc,
   onChange,
   onSave,
+  onReady,
   onRun,
   vim: vimEnabled = false,
   theme,
@@ -242,9 +245,11 @@ export function CodeMirrorBuffer({
   // through to the current handlers without re-creating the view on each render.
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
+  const onReadyRef = useRef(onReady)
   const onRunRef = useRef(onRun)
   onChangeRef.current = onChange
   onSaveRef.current = onSave
+  onReadyRef.current = onReady
   onRunRef.current = onRun
 
   // Reconfigurable slices of the config. Created once per mount.
@@ -425,6 +430,7 @@ export function CodeMirrorBuffer({
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
     view.focus()
+    onReadyRef.current?.()
     if (markdown) updateMarkdownOverlay(view)
 
     return () => {

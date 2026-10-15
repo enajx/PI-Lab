@@ -38,6 +38,7 @@ describe("getSettingsOrDefaults", () => {
       expect(result.worktreePerAgent).toBe(false)
       expect(result.theme).toBe("system")
       expect(result.confirmOnQuit).toBe(true)
+      expect(result.keepRunningAfterClose).toBe(true)
       expect(result.agentPresets).toEqual([])
       expect(result.knownTeams).toEqual([])
       expect(result.notifications).toEqual(DEFAULT_NOTIFICATION_SETTINGS)

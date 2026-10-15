@@ -5,4 +5,4 @@ export {
   DEFAULT_APP_THEME_ID,
   type ResolvedThemeMode,
 } from "./appThemes"
-export { type ThemeMode, ThemeProvider, useTheme } from "./ThemeProvider"
+export { applySavedAppearance, type ThemeMode, ThemeProvider, useTheme } from "./ThemeProvider"
