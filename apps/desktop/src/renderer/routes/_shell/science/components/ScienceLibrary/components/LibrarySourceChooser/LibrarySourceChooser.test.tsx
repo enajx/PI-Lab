@@ -6,7 +6,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../../../te
 import { LibrarySourceChooser, type LibrarySourceValues } from "./LibrarySourceChooser"
 
 /**
- * Component test for the three-source chooser (md/engineering/testing-and-build.md). jsdom + a fake
+ * Component test for the three-source chooser. jsdom + a fake
  * tRPC client: the live "detected" badge reads `detectLocal`, the folder card drives the
  * native `system.pickDirectory` then connects with the chosen path, and the Zotero cards
  * connect zero-config / reveal the advanced form.

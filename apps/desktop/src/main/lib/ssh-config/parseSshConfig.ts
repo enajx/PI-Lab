@@ -1,6 +1,5 @@
 /**
- * Minimal, dependency-free OpenSSH client-config parser (md/engineering/architecture.md (agent runtime) "Science
- * tabs" — Cluster monitoring).
+ * Minimal, dependency-free OpenSSH client-config parser for Cluster monitoring.
  *
  * Scope is deliberately narrow: it extracts only the connection metadata the
  * Cluster tab needs to list and probe a machine — the `Host` alias and its

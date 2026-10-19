@@ -15,7 +15,7 @@ import {
 import { DaemonClient } from "../packages/pty-daemon/src/index"
 
 /**
- * Whole-app E2E (md/engineering/testing-and-build.md, P7b): launch the real Electron build, boot to
+ * Whole-app E2E: launch the real Electron build, boot to
  * `app-ready`, and prove the project-cards Dashboard is wired end-to-end:
  *
  *   1. the `?openProject` seam opens a temp repo on load (via the sidebar),
@@ -27,7 +27,7 @@ import { DaemonClient } from "../packages/pty-daemon/src/index"
  * `PI_LAB_TEST_OPEN_PROJECT`. No native dialog, no agent launch needed here.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (md/engineering/testing-and-build.md (build & ship)).
+ * Bun.
  */
 
 const execFileAsync = promisify(execFile)

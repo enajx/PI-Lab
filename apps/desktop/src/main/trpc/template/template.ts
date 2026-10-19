@@ -11,9 +11,8 @@ import { resolveWritableTemplateDir, seedWritableTemplate } from "./templateDir"
  * (`~/.pi-lab/template`) that backs the Settings "Project template" editor and
  * `projects.createFromTemplate`. The shape mirrors the files router: thin
  * procedures that jail every path to the template dir and delegate I/O to
- * `@pi-lab/workspace-fs`. Every procedure lazily seeds the writable copy first
- * (idempotent — a no-op once it exists) so the surface works on a cold start even
- * if the boot-time seed was skipped.
+ * `@pi-lab/workspace-fs`. Every procedure ensures the writable directory exists
+ * so the surface works on a cold start even if boot-time setup was skipped.
  */
 
 const relPathInput = z.object({

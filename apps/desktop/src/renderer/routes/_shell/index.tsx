@@ -6,7 +6,7 @@ import { Dashboard } from "./index/components/Dashboard"
 import { readTerminalSpawnOverride } from "./utils/terminalSpawnOverride"
 
 /**
- * Shell home (md/engineering/architecture.md (renderer); git history (build phases), P7). Behind the boot/health gate (`HealthBanner`,
+ * Shell home. Behind the boot/health gate (`HealthBanner`,
  * which mounts the `app-ready` marker once the renderer→main→SQLite path is
  * proven) it renders the project-cards **Dashboard** — the default surface.
  *

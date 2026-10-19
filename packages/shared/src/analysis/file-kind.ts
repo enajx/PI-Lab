@@ -1,6 +1,5 @@
 /**
- * Data/analysis file classifier for the Science → Analysis tab (AGENTS.md "Scope"
- * "Science tabs", P8c). A **pure, total, deterministic** function from a file
+ * Data/analysis file classifier for the Science → Analysis tab. A **pure, total, deterministic** function from a file
  * path to one of a fixed set of {@link DataFileKind} sub-formats — the single
  * source of truth shared by the main-side walker and the renderer. Discovery
  * uses the nullable {@link classifyAnalysisArtifact} boundary so unknown/source

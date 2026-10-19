@@ -286,7 +286,7 @@ interface ProjectMenuState {
 }
 
 /**
- * Left sidebar (md/engineering/architecture.md (renderer), md/02 — projects are the ground unit).
+ * Left sidebar.
  * Top to bottom: a "Dashboard" entry (carrying the divider below it), one unified
  * workspace nav (Library, Analysis, Cluster, Tasks, Skills, Workflows) rendered as a
  * single `gap-0.5` list, a divider-topped "Projects" label + the opened projects (the
@@ -310,11 +310,10 @@ interface ProjectMenuState {
  * existing folder (`system.pickDirectory` → `projects.open`), clone a git repo
  * (`projects.clone`), or start from a template (`projects.createFromTemplate`); each
  * invalidates the project list. The E2E can't drive a native dialog, so a
- * `?openProject=<abs path>` seam (md/engineering/testing-and-build.md) opens a known path once
+ * `?openProject=<abs path>` seam opens a known path once
  * on mount instead.
  *
- * The list is a bounded flex child with its own scroll (`min-h-0 overflow-y-auto`,
- * AGENTS.md Pitfalls #3 — never a nested Radix ScrollArea).
+ * The list is a bounded flex child with its own scroll (`min-h-0 overflow-y-auto`), without a nested Radix ScrollArea.
  */
 export function Sidebar() {
   const t = useTranslate()
@@ -808,7 +807,7 @@ function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
 }
 
 /**
- * Unified workspace nav (AGENTS.md "Scope" / md/engineering/architecture.md (renderer)): the
+ * Unified workspace nav: the
  * `scienceNavItems` registry plus Workflows and Editor, rendered as ONE `gap-0.5` list so every
  * row — Workflows included — sits flush with its peers (Task 2/6: the old gap-3
  * between two separate `<nav>`s was what made Workflows read as a detached block).
@@ -1157,7 +1156,7 @@ function ProjectBadge({ project, isActive }: { project: ProjectSummary; isActive
 
 /**
  * Fire the open-project test seam exactly once on mount when `?openProject` is
- * present (md/engineering/testing-and-build.md). A ref guard survives React 19 StrictMode's double
+ * present. A ref guard survives React 19 StrictMode's double
  * effect so the project is never opened twice.
  */
 function useOpenProjectSeam(open: (path: string) => void): void {

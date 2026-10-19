@@ -4,7 +4,7 @@ import { isTestMode, rendererDevServerUrl, testFirstRun } from "../runtime/env"
 import { buildMainWindowOptions } from "./windowOptions"
 
 /**
- * Test seams (md/engineering/testing-and-build.md): in test mode the E2E harness drives the app through
+ * Test seams: in test mode the E2E harness drives the app through
  * renderer URL query params (read from `window.location.search`, which hash
  * routing leaves untouched). We translate a small set of env vars into those
  * params so the harness can act deterministically without native dialogs or
@@ -54,7 +54,7 @@ function testSeamQuery(): string {
 /**
  * Create the single application window and load the renderer.
  *
- * Security posture (md/engineering/architecture.md (process model)): context isolation ON, node integration OFF,
+ * Security posture: context isolation ON, node integration OFF,
  * sandboxed renderer; preload exposes tRPC and the narrow shutdown request/response
  * bridge. In dev the renderer comes from the Vite dev server
  * (`ELECTRON_RENDERER_URL`); in a packaged build it's the built HTML that sits

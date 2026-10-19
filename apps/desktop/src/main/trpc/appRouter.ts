@@ -19,10 +19,10 @@ import { workflowsRouter } from "./workflows"
 import { workspacesRouter } from "./workspaces"
 
 /**
- * The single root router exposed to the renderer (md/engineering/architecture.md (process model)). Feature routers
+ * The single root router exposed to the renderer. Feature routers
  * (git, github, filesystem, automations, science-*) mount here as later phases
  * land — each as a one-line sub-router so its logic stays in plain,
- * `createCaller`-testable functions (md/engineering/testing-and-build.md).
+ * `createCaller`-testable functions.
  */
 export const appRouter = router({
   health: healthRouter,

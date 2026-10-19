@@ -1,6 +1,6 @@
 // Integration tests for the science.analysis router via createCallerFactory over
 // a temp SQLite DB with the real migrations and a real temp git repo (AGENTS.md
-// md/engineering/testing-and-build.md). Data files are written into the repo and classified/previewed off real
+// Data files are written into the repo and classified/previewed off real
 // bytes — no filesystem mocking.
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"

@@ -1,6 +1,5 @@
 /**
- * Pure parser for `pyrefly check <file> --output-format json` (AGENTS.md "Scope", TODO
- * "Built-in editor" — `ty`↔`pyrefly` toggle). pyrefly prints a JSON **object**
+ * Pure parser for `pyrefly check <file> --output-format json`. pyrefly prints a JSON **object**
  * `{ "errors": [ … ] }` on stdout (its `INFO`/summary lines go to stderr, so the
  * captured stdout is clean JSON). Each error carries 1-based `line`/`column`,
  * optional `stop_line`/`stop_column` (the range end), a rule `name`, a
@@ -10,7 +9,7 @@
  *
  * As with the ruff/ty parsers, this **never throws**: invalid JSON, a missing or
  * non-array `errors`, or entries lacking a position all degrade to `[]` / a
- * skipped entry, which the property tests assert (md/engineering/testing-and-build.md).
+ * skipped entry, which the property tests assert.
  */
 
 import type { Diagnostic, DiagnosticSeverity } from "./types"

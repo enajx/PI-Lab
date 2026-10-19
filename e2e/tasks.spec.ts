@@ -33,7 +33,7 @@ async function initRepo(dir: string): Promise<void> {
       "",
       "## Experiments",
       "",
-      "- [~] Run benchmark #priority/high #label/ml #owner/enaj",
+      "- [~] Run benchmark #priority/high #label/ml #owner/alex",
       "",
     ].join("\n"),
   )

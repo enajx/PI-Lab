@@ -19,7 +19,7 @@ import type {
 import { createWorkflowLifecycleReporter } from "./workflowLifecycle"
 
 /**
- * Fire one automation once (AGENTS.md "Scope" — Automations). Interactive runs
+ * Fire one automation once. Interactive runs
  * are targeted to a PTY agent session whose activity monitor owns the later
  * terminal transition. Non-interactive runs spawn a supported one-shot CLI and
  * follow its actual process lifecycle. This is the single "what happens on

@@ -36,8 +36,7 @@ import { deriveLinkName } from "./utils/deriveLinkName"
 import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
 
 /**
- * A single dashboard project card (md/02 — "Dashboard & project cards", Notion-
- * database style). Two stacked regions:
+ * A single dashboard project card. Two stacked regions:
  *
  *   - a **header image area** — the project's thumbnail if it has one, else a
  *     baked noisy-gradient seeded from the project's persisted `{ seed, palette }`
@@ -134,7 +133,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   // the project view picks the intent up on mount, runs the launch itself, and
   // attaches the returned session to its central panel (a failed launch surfaces
   // there). Navigating first means opening the project never waits on — nor gets
-  // wedged by — the launch RPC (md/02 — Dashboard & project cards; `-pendingLaunch`).
+  // wedged by — the launch RPC.
   const onAutoResearch = () => {
     if (!gitAvailable) return
     setPendingLaunch(project.id, { kind: "auto-research" })
@@ -460,7 +459,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           session in an isolated worktree (interactive), plus the two stateful
           background workflow controls — "Fetch remote experiments" and "Project
           summary" — which run headlessly, cache their result per git-state, and
-          open a result popup when done. See md/02 — Dashboard & project cards. */}
+          open a result popup when done.  */}
       <div
         data-testid="project-card-actions"
         className="mt-auto flex items-center gap-1.5 border-border border-t p-2 transition-[filter] group-hover:brightness-105"

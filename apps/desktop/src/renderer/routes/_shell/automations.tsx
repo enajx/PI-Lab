@@ -3,7 +3,7 @@ import { workflowNotificationSearchSchema } from "../../notifications/activation
 import { AutomationsView } from "./automations/components/AutomationsView"
 
 /**
- * Workflows route (AGENTS.md "Scope" / md/engineering/architecture.md (renderer)) — scheduled & looping agent runs. A
+ * Workflows route — scheduled & looping agent runs. A
  * top-level v1 surface reached from the sidebar; the firing happens in the
  * main-process scheduler, this route is the management UI.
  */

@@ -1,4 +1,4 @@
-// Integration tests for the automations router (AGENTS.md "Scope" / md/engineering/testing-and-build.md): createCaller
+// Integration tests for the automations router: createCaller
 // over a temp SQLite DB with real migrations, a real temp git repo, and the
 // in-process pty-daemon + fake agent. Covers CRUD, prompt-version snapshotting,
 // the computed nextRunAt, runNow firing through the real session-start flow, and

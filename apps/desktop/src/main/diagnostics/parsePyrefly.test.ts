@@ -1,4 +1,4 @@
-// Unit + property tests for the pyrefly JSON parser (md/engineering/testing-and-build.md). Pure
+// Unit + property tests for the pyrefly JSON parser. Pure
 // transform over loose JSON, so example tests against the real `pyrefly check
 // --output-format json` shape plus fast-check totality properties.
 import fc from "fast-check"

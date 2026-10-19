@@ -10,13 +10,13 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (md/engineering/testing-and-build.md, P8c): launch the real Electron build, open a
+ * Whole-app E2E: launch the real Electron build, open a
  * temp git repo as a project via the `?openProject` seam (no native dialog),
  * navigate to the Analysis science tab, select the CSV the repo contains, and
  * prove the preview table renders end to end.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (md/engineering/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun; the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))

@@ -196,8 +196,7 @@ export function useRightSidebarPanels(
 /**
  * Stacked, bounded-flex sidebar: a tab strip on top (plus a collapse button and a
  * gear opening a view-options menu), the active panel below in a `min-h-0 flex-1`
- * region so each panel's own `overflow-y-auto` body scrolls (AGENTS.md Pitfalls #3
- * — no Radix ScrollArea). The collapse button calls `onCollapse`; the project route
+ * region so each panel's own `overflow-y-auto` body scrolls without a nested Radix ScrollArea. The collapse button calls `onCollapse`; the project route
  * owns the collapse state (session state, defaulting to EXPANDED on each project open —
  * not persisted), dropping the right column and showing an expand affordance when collapsed.
  */

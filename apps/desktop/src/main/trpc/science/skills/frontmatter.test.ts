@@ -1,4 +1,4 @@
-// Unit tests for the SKILL.md frontmatter parser (md/engineering/testing-and-build.md). The parser is
+// Unit tests for the SKILL.md frontmatter parser. The parser is
 // pure and total — it never throws and always returns a well-formed result — so
 // these cover the real authored shape plus the degenerate inputs (missing
 // fields, no block, unterminated block, CRLF, blank values).

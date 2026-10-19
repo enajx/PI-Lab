@@ -17,7 +17,7 @@ interface ScienceTabShellProps {
 }
 
 /**
- * Shared chrome for every science tab (AGENTS.md "Scope" "Science tabs", AGENTS.md Pitfalls #3): a
+ * Shared chrome for every science tab: a
  * fixed header (title + optional subtitle + actions) over a bounded, scroll-
  * managed body. The body is the one place each tab owns its own vertical scroll
  * via a native `min-h-0 flex-1 overflow-y-auto` child — never a nested Radix

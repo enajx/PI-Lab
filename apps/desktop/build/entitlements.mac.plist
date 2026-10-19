@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  macOS hardened-runtime entitlements for PI Lab (md/engineering/testing-and-build.md (build & ship)).
+  macOS hardened-runtime entitlements for PI Lab.
 
   Electron needs the JIT / unsigned-executable-memory entitlements to run the V8
   engine under hardened runtime. PI Lab also spawns child processes (the

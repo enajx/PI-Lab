@@ -1,6 +1,5 @@
 /**
- * Recurrence engine for scheduled / looping agent runs (AGENTS.md "Scope" —
- * Automations). Given an RFC 5545 RRULE body, an anchor (`startAt`), and an IANA
+ * Recurrence engine for scheduled / looping agent runs. Given an RFC 5545 RRULE body, an anchor (`startAt`), and an IANA
  * timezone, it answers "what is the next instant this should fire, strictly
  * after some reference time?". That single question drives the whole scheduler:
  * computing the initial `nextRunAt`, advancing it after a fire, and re-anchoring
@@ -10,7 +9,7 @@
  *   - **Pure & deterministic.** {@link nextOccurrence} is a pure function of its
  *     arguments — no `Date.now()`, no `new Date()` of "now", no hidden state. The
  *     same inputs always yield the same output, so it is property-testable
- *     (md/engineering/testing-and-build.md) and the scheduler can drive it off an injected clock.
+ * and the scheduler can drive it off an injected clock.
  *   - **Wall-clock recurrence in a real timezone.** rrule.js is run on *floating*
  *     wall-clock dates (no `TZID`), because its `TZID` output drifts with the host
  *     process timezone. We feed it wall-clock-as-UTC dates, let it walk the

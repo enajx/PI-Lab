@@ -1,5 +1,5 @@
 /**
- * Test seam (md/engineering/testing-and-build.md): let the E2E open a project without driving the
+ * Test seam: let the E2E open a project without driving the
  * native folder picker. When the renderer loads with `?openProject=<abs path>`
  * (mirrors the existing `?termcmd` seam), the sidebar reads it once on mount and
  * calls `projects.open` for that path, so the harness can add a known repo

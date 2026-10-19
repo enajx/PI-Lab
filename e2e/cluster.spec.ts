@@ -6,14 +6,14 @@ import { fileURLToPath } from "node:url"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (md/engineering/testing-and-build.md, P8a): launch the real Electron build, boot to
+ * Whole-app E2E: launch the real Electron build, boot to
  * `app-ready`, navigate to the Cluster science tab, and prove it is wired end to
  * end — machines imported from a **fixture ssh-config** (seeded via the
  * `?sshConfigPath` test seam, NOT the real `~/.ssh/config`) appear as cards with
  * the hide affordance.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (md/engineering/testing-and-build.md (build & ship)).
+ * Bun.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))

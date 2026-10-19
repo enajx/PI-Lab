@@ -207,8 +207,8 @@ export const planningProcedures = {
     const originalResearch = await readProjectFile(join(project.repoPath, "RESEARCH.md"))
     const originalAgents = await readProjectFile(join(project.repoPath, "AGENTS.md"))
     await seedWritableTemplate()
-    const baseAgents =
-      originalAgents ?? (await readFile(join(resolveWritableTemplateDir(), "AGENTS.md"), "utf8"))
+    const templateAgents = await readProjectFile(join(resolveWritableTemplateDir(), "AGENTS.md"))
+    const baseAgents = originalAgents ?? templateAgents ?? ""
     const proposedAgents = withProjectInstructions(
       baseAgents,
       input.name,

@@ -1,5 +1,5 @@
 /**
- * Runtime environment + testability hooks (md/engineering/testing-and-build.md). These are the only
+ * Runtime environment + testability hooks. These are the only
  * knobs an automated harness needs to drive the app headless against a throwaway
  * data dir, so they're read once and shared.
  */

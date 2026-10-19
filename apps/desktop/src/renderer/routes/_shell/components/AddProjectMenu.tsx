@@ -209,12 +209,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     }
     const configured = settings.data.projectTemplate.initializationMarkdownFiles
     const available = new Set(defaultTemplateFiles.map((file) => file.relPath))
-    setTemplateFiles(
-      (configured.length > 0
-        ? configured
-        : defaultTemplateFiles.map((file) => file.relPath)
-      ).filter((file) => available.has(file)),
-    )
+    setTemplateFiles(configured.filter((file) => available.has(file)))
     setTemplateParentPath(
       settings.data.projectTemplate.defaultTemplateParentPath ??
         commonProjectParent(projectList.data) ??

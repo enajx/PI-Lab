@@ -1,3 +1,0 @@
-# Bun configuration. Kept minimal; workspace + lockfile behaviour is driven by package.json.
-[install]
-# Use the default hoisting linker; native modules are rebuilt for Electron's ABI at build time.

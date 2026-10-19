@@ -29,7 +29,7 @@ function formatNextRun(nextRunAt: number | null, language: string): string {
 }
 
 /**
- * One automation in the Workflows list (AGENTS.md "Scope"): name + cadence summary +
+ * One automation in the Workflows list: name + cadence summary +
  * next run + enabled and execution-mode controls, with run-now / delete actions
  * and an expandable run history. Mutations call back to refresh the list.
  */

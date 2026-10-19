@@ -3,7 +3,7 @@ import { isAbsolute, join } from "node:path"
 
 /**
  * Pure helpers for resolving a Zotero item's child **attachments** to an on-disk file
- * for the Library tab's "open local copy" gesture (AGENTS.md "Scope" "Science tabs").
+ * for the Library tab's "open local copy" gesture.
  * Kept free of tRPC, I/O, and credentials — mirroring `parse.ts` — so the parse →
  * pick → resolve chain is example-testable in isolation over the loose, partially-typed
  * payloads the Zotero API returns. The router (`library.ts`) fetches the `/children`

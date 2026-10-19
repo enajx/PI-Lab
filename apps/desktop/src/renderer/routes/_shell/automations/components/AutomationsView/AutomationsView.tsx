@@ -14,16 +14,16 @@ import { AutomationsEmptyState } from "./components/AutomationsEmptyState"
 import { CreateAutomationForm } from "./components/CreateAutomationForm"
 
 /**
- * Automations / Workflows view (AGENTS.md "Scope" — scheduled & looping agent runs).
+ * Automations / Workflows view.
  * Lists every automation (name, cadence summary, next run, enabled toggle),
  * offers a create form, and per-row run-now / enable-disable / delete plus an
  * expandable run history. A workflow can either open an interactive agent
  * terminal or invoke the supported harness in one-shot run-to-completion mode;
  * external communications remain intentionally absent.
  *
- * The body owns its own scroll via a bounded `min-h-0 overflow-y-auto` child
- * (AGENTS.md Pitfalls #3 — never a nested Radix ScrollArea). All assertion-worthy
- * elements carry stable `data-testid`s (md/engineering/testing-and-build.md).
+ * The body owns its own scroll via a bounded `min-h-0 overflow-y-auto` child.
+ * All assertion-worthy
+ * elements carry stable `data-testid`s.
  */
 export function AutomationsView({
   activation,

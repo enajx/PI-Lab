@@ -11,8 +11,7 @@ import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from ".
 import { ProjectCard } from "../ProjectCard"
 
 /**
- * The project-cards dashboard — the shell home (md/02 — "Dashboard & project
- * cards", md/engineering/architecture.md (renderer); git history (build phases), P7). A responsive grid of large project cards, one per
+ * The project-cards dashboard is the shell home. A responsive grid of large project cards, one per
  * opened project (most-recently-opened first, mirroring the sidebar), with a
  * bottom-corner handle that persists each card's independent grid span.
  *

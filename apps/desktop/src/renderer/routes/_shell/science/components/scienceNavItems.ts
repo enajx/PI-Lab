@@ -3,7 +3,7 @@ import { ChartArea, FlaskConical, Library, ListTodo, Server } from "lucide-react
 import type { ComponentType } from "react"
 
 /**
- * Declarative registry of the v1 science tabs (AGENTS.md "Scope" / md/engineering/architecture.md (renderer)). This is the
+ * Declarative registry of the v1 science tabs. This is the
  * single seam for adding a science tab: append an entry here and add its route
  * under `routes/_shell/science/<id>.tsx` — the sidebar maps over this list, so
  * there is no per-tab nav fork.

@@ -12,8 +12,7 @@ import { formatRelativeTime } from "./relativeTime"
  * The result window for a background project workflow ("Project summary" /
  * "Fetch remote experiments"). Opened by the control while a run is in flight
  * (to watch it live) or when it is done/errored (to review the outcome). It has
- * two stacked regions so a run is never opaque and never disappears silently
- * (AGENTS.md — no silent failures):
+ * two stacked regions so a run is never opaque and never disappears silently:
  *
  *   1. A live **agent activity log** at the top — a monospace, auto-scrolling
  *      region subscribed to `workflows.onOutput`, replaying this run's buffered

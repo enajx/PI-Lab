@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { parseSshConfig } from "./parseSshConfig"
 
-// Unit tests for the OpenSSH client-config parser (md/engineering/architecture.md (agent runtime) / md/engineering/testing-and-build.md): a pure
+// Unit tests for the OpenSSH client-config parser: a pure
 // string→data function, so a fixture string fully exercises it — no filesystem.
 
 const FIXTURE = `

@@ -4,8 +4,7 @@ import type { LibraryCollection, LibraryPaper } from "./parse"
 
 /**
  * Filesystem readers for the Library tab's **local-folder** source — for researchers
- * who keep papers in a directory tree rather than Zotero (AGENTS.md "Scope" "Science
- * tabs"). Subfolders are browsed as collections, `.pdf` files as items. Kept free of
+ * who keep papers in a directory tree rather than Zotero. Subfolders are browsed as collections, `.pdf` files as items. Kept free of
  * tRPC/Electron so they're unit-testable against a real temp dir, mirroring `parse.ts`.
  *
  * Two safety choices, both deliberate:

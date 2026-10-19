@@ -13,7 +13,7 @@ import { MetricChart } from "../MetricChart"
  * a sampled CSV/TSV table, a line chart (metric logs / 1-D NumPy arrays), a
  * NumPy 2-D array grid, an inline image, pretty-printed JSON, a text head, or a
  * metadata card for kinds with no inline renderer. The pane owns its own
- * vertical scroll (AGENTS.md Pitfalls #3); the fetch is keyed on the project + path so switching
+ * vertical scroll; the fetch is keyed on the project + path so switching
  * files re-fetches cleanly.
  */
 export function AnalysisPreview({

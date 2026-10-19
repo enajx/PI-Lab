@@ -14,7 +14,7 @@ import { ProjectActivityProvider } from "../../../-ProjectActivity"
 import { Dashboard } from "./Dashboard"
 
 /**
- * Component test for the project-cards Dashboard (md/engineering/testing-and-build.md). Mounts it under
+ * Component test for the project-cards Dashboard. Mounts it under
  * the real providers + a router (so the card's `useNavigate` resolves) with a
  * faked tRPC client. jsdom suffices — the cards render plain DOM (no Radix), and
  * we assert public structure and interactions: cards-by-name, status, direct

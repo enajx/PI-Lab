@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { chmod, readFile, symlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { projects } from "@pi-lab/local-db"
 import type { TerminalAgent } from "@pi-lab/shared"
@@ -95,7 +95,7 @@ describe("project planning", () => {
     })
   })
 
-  test("an adopted folder without AGENTS.md receives the shared template after Apply", async () => {
+  test("an adopted folder without AGENTS.md receives only its chosen project instructions", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     const started = await h.caller.projects.startPlan({
       id: project.id,
@@ -108,10 +108,29 @@ describe("project planning", () => {
     })
     const review = await h.caller.projects.reviewPlan({ draftId: started.draftId })
     expect(review.agentsOriginal).toBe("")
-    expect(review.agentsProposed).toContain("## Repo structure")
+    expect(review.agentsProposed).not.toContain("## Repo structure")
     expect(review.agentsProposed).toContain("## PI Lab project instructions: Adopted project")
     await h.caller.projects.applyPlan({ draftId: started.draftId })
     expect(await readFile(join(h.repoDir, "AGENTS.md"), "utf8")).toContain("Use SI units.")
+  })
+
+  test("an imported AGENTS.md template supplies instructions when the project has none", async () => {
+    const templateDir = join(h.dataDir, "template")
+    await mkdir(templateDir, { recursive: true })
+    await writeFile(join(templateDir, "AGENTS.md"), "# My template instructions\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const started = await h.caller.projects.startPlan({
+      id: project.id,
+      name: "Adopted project",
+      description: "A short description.",
+      typeId: "research",
+      customInstructions: "Use SI units.",
+      agentId: "codex",
+      mode: "one-shot",
+    })
+    const review = await h.caller.projects.reviewPlan({ draftId: started.draftId })
+    expect(review.agentsProposed).toContain("# My template instructions")
+    expect(review.agentsProposed).toContain("Use SI units.")
   })
 
   test("a later reviewed plan replaces only the named project instruction section", async () => {

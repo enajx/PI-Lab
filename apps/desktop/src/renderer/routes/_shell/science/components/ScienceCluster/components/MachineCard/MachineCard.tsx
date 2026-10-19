@@ -60,7 +60,7 @@ function pct(value: number): number {
 }
 
 /**
- * One machine in the Cluster tab (AGENTS.md "Scope"): its display name / host, the
+ * One machine in the Cluster tab: its display name / host, the
  * connection string, a reachability status with a "Check" probe, an inline
  * annotate affordance, and a hide / unhide toggle. When a probe has returned
  * telemetry it also renders the host's per-GPU usage and CPU load. No dispatch /

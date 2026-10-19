@@ -102,13 +102,7 @@ export interface ProjectType {
 }
 
 export const DEFAULT_PROJECT_TEMPLATE_SETTINGS: ProjectTemplateSettings = {
-  initializationMarkdownFiles: [
-    "AGENTS.md",
-    "CLAUDE.md",
-    "EXPERIMENT_TRACKING_SQLITE.md",
-    "RESEARCH.md",
-    "TODO.md",
-  ],
+  initializationMarkdownFiles: [],
   defaultTemplateParentPath: null,
   projectTypes: [
     {
@@ -132,6 +126,13 @@ export const DEFAULT_PROJECT_TEMPLATE_SETTINGS: ProjectTemplateSettings = {
 /** Keep the existing SQL column default stable; readers upgrade its type list. */
 const STORED_PROJECT_TEMPLATE_SQL_DEFAULT: ProjectTemplateSettings = {
   ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
+  initializationMarkdownFiles: [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "EXPERIMENT_TRACKING_SQLITE.md",
+    "RESEARCH.md",
+    "TODO.md",
+  ],
   projectTypes: [
     {
       id: "general",
@@ -273,7 +274,7 @@ export interface ProjectMetadata {
   referenceLinks?: ProjectReferenceLink[]
 }
 
-/** A locally-known v2 Team (names only — no remote ids, see md/engineering/architecture.md (local DB)). */
+/** A locally-known v2 Team. */
 export interface KnownTeam {
   name: string
   color?: string
@@ -331,7 +332,7 @@ export interface FolderSource {
 export type ZoteroSource = ZoteroLocalSource | ZoteroWebSource
 
 /**
- * Stored Library source for the Library science tab (AGENTS.md "Scope" "Science tabs").
+ * Stored Library source for the Library science tab.
  * Persisted in the singleton `settings` row as a JSON blob (still in the historically
  * named `zotero` column), local-only like everything else — any credentials live on the
  * user's machine and are never logged or synced. `null` (the column default) means "not
@@ -412,8 +413,7 @@ export const projects = sqliteTable(
     /**
      * Dashboard card header image, stored as a self-contained `data:` URL (the
      * user drag-and-drops an image onto the card). Null ⇒ the card falls back to
-     * a deterministic gradient seeded from the project id (md/02 — "Dashboard &
-     * project cards"). Kept inline rather than as a file path so the thumbnail
+     * a deterministic gradient seeded from the project id. Kept inline rather than as a file path so the thumbnail
      * travels with the row and never dangles.
      */
     thumbnail: text("thumbnail"),
@@ -599,7 +599,7 @@ export const settings = sqliteTable("settings", {
     .notNull()
     .default("stable"),
   /**
-   * Worktree policy for the "start agent session" flow (md/engineering/architecture.md (agent runtime)). When ON,
+   * Worktree policy for the "start agent session" flow. When ON,
    * every agent session gets its own fresh git worktree. When OFF (default), an
    * agent opens in the project's main checkout (its single branch workspace) and
    * only spills into a fresh worktree once a second concurrent agent would
@@ -608,8 +608,7 @@ export const settings = sqliteTable("settings", {
   worktreePerAgent: integer("worktree_per_agent", { mode: "boolean" }).notNull().default(false),
   /**
    * Built-in editor preferences (autosave / vim / type checker / format-on-save),
-   * stored as a JSON blob so the group grows without a migration (AGENTS.md "Scope",
-   * TODO "Built-in editor"). Defaults to the spec's all-off / `ty` shape.
+   * stored as a JSON blob so the group grows without a migration. Defaults to the all-off / `ty` shape.
    */
   editor: text("editor", { mode: "json" })
     .notNull()
@@ -642,7 +641,7 @@ export const settings = sqliteTable("settings", {
   /**
    * Stored Library source for the Library science tab — a Zotero connection (local
    * desktop API or cloud Web API) or a local folder of PDFs (see {@link LibrarySource})
-   * — or `null` when not connected (AGENTS.md "Scope"). Local-only; credentials never
+   * — or `null` when not connected. Local-only; credentials never
    * leave the machine or get logged. The column keeps its historical name `zotero`, but
    * holds any source. Freeform JSON, so the union widened (modes, then a folder kind)
    * without a migration — rows are normalized at read time by `coerceLibrarySource`.
@@ -708,7 +707,7 @@ export const browserHistory = sqliteTable(
 
 // ---------------------------------------------------------------------------
 // machines — a remote compute box the user monitors from the Cluster science
-// tab (AGENTS.md "Scope" "Science tabs"). v1 is *monitoring only*: rows are imported
+// tab. v1 is *monitoring only*: rows are imported
 // from `~/.ssh/config` or added by hand, annotated, hidden, and reachability-
 // probed over the `ssh` CLI. Job dispatch / experiment runs are v2 and have no
 // table here. Connection metadata only — never key material or secrets.

@@ -4,7 +4,7 @@ import { join } from "node:path"
 /**
  * Root directory for all of PI Lab's on-disk state.
  *
- * Overridable via `PI_LAB_DATA_DIR` (md/engineering/testing-and-build.md) so tests and parallel
+ * Overridable via `PI_LAB_DATA_DIR` so tests and parallel
  * instances can point at a throwaway directory; defaults to `~/.pi-lab`.
  */
 export function resolveDataDir(): string {

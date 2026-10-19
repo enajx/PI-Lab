@@ -24,7 +24,7 @@ interface EditorStatusBarProps {
   /**
    * Tools that were requested but absent (e.g. `["ruff"]`). When non-empty the
    * bar shows a subtle "install uv" hint instead of a clean/error count, per the
-   * spec's graceful "uv not found" path (TODO "Built-in editor").
+   * spec's graceful "uv not found" path.
    */
   missing: string[]
   /** True while a diagnostics check is in flight (shows a muted "checking…"). */
@@ -45,7 +45,7 @@ interface EditorStatusBarProps {
 }
 
 /**
- * The editor's bottom status bar (AGENTS.md "Scope", TODO "Built-in editor" — "a small
+ * The editor's bottom status bar ("a small
  * error/warning count in the status bar"). For a Python file it surfaces the last
  * diagnostics run as a compact error/warning/info count (or a clean check), and
  * when the Astral tools are absent it shows a subtle, non-alarming hint to install

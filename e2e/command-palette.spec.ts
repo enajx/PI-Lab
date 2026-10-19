@@ -8,7 +8,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E for the ⌘P command palette (TODO "Command palette on ⌘P"). Launches the
+ * Whole-app E2E for the ⌘P command palette. Launches the
  * real build with one opened project, then: ⌘P opens the palette, an empty query lists
  * entries, Esc dismisses; and typing a project name + Enter jumps to that project view
  * (proves the projects source + fuzzy filter + navigation end-to-end). Keys use the

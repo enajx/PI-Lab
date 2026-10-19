@@ -4,7 +4,7 @@ import type { AppContext } from "./context"
 
 /**
  * tRPC primitives for the main process. There is exactly one renderer↔main
- * contract (md/engineering/architecture.md (process model)) — no inter-process HTTP hop — so a single root
+ * contract — no inter-process HTTP hop — so a single root
  * builder is all we need. `superjson` is the wire transformer and MUST match
  * the renderer's `ipcLink` transformer or payloads silently corrupt.
  *
@@ -17,7 +17,7 @@ export const router = t.router
 export const publicProcedure = t.procedure
 
 /**
- * Direct, window-free procedure invocation for tests (md/engineering/testing-and-build.md): call
+ * Direct, window-free procedure invocation for tests: call
  * routers via `createCaller` instead of spinning up a BrowserWindow.
  */
 export const createCallerFactory = t.createCallerFactory

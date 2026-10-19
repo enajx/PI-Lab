@@ -59,7 +59,7 @@ function orderMachines(machines: ClusterMachine[], order: string[]): ClusterMach
 }
 
 /**
- * Cluster science tab (AGENTS.md "Scope" "Science tabs") — v1 monitoring: list
+ * Cluster science tab — v1 monitoring: list
  * compute machines (imported from `~/.ssh/config` or added by hand), probe each
  * one's reachability, annotate and hide them. No job dispatch / experiment runs —
  * that is v2 and intentionally absent.
@@ -67,7 +67,7 @@ function orderMachines(machines: ClusterMachine[], order: string[]): ClusterMach
  * Reads `science.cluster.list` (hidden excluded by default, with a hidden tally
  * for the "Show hidden (N)" toggle) and drives import / add / hide / annotate /
  * refresh through the matching mutations, invalidating the list on success. The
- * body owns its own scroll per AGENTS.md Pitfalls #3.
+ * body owns its own scroll.
  */
 export function ScienceCluster() {
   const t = useTranslate()
@@ -134,7 +134,7 @@ export function ScienceCluster() {
     }),
   )
 
-  // Test seam (md/engineering/testing-and-build.md): on mount, when loaded with `?sshConfigPath`,
+  // Test seam: on mount, when loaded with `?sshConfigPath`,
   // import once from that fixture path so the E2E seeds deterministic machines
   // without touching the real `~/.ssh/config`. A ref guard survives React 19
   // StrictMode's double effect so the import never fires twice.

@@ -21,7 +21,7 @@ import { workspaceWorkingDir } from "../workspaces/workspaces"
  * Files router — read/write a single text file *inside a workspace's working
  * directory*, addressed by a path relative to that dir. This is the file I/O
  * primitive the right-sidebar doc panels read through (`RESEARCH.md`,
- * `TODO.md`) and that the built-in editor reuses for save (md/engineering/architecture.md (process model)).
+ * `TODO.md`) and that the built-in editor reuses for save.
  *
  * Beyond read/write it exposes three editor primitives:
  *   - `stat` — a cheap fingerprint (mtime+size) the editor polls to notice
@@ -31,7 +31,7 @@ import { workspaceWorkingDir } from "../workspaces/workspaces"
  *
  * The router stays thin: it resolves the workspace's working dir, jails every
  * requested path to that dir, and delegates the real work to
- * `@pi-lab/workspace-fs`. Everything is `createCaller`-testable (md/engineering/testing-and-build.md).
+ * `@pi-lab/workspace-fs`. Everything is `createCaller`-testable.
  */
 
 const readInput = z.object({
@@ -104,7 +104,7 @@ function requireWorkspace(db: PiLabDatabase, workspaceId: string): Workspace {
 
 /**
  * Resolve `relPath` against a workspace's working `dir`, guaranteeing the result
- * stays *inside* `dir` (md/engineering/architecture.md (process model) — guard against path traversal). Absolute
+ * stays *inside* `dir`. Absolute
  * inputs and any `..` escape (or a symlink-free `../outside`) are rejected with
  * a FORBIDDEN error rather than silently reading arbitrary disk.
  *
@@ -192,7 +192,7 @@ export const filesRouter = router({
   /**
    * Fingerprint a file (mtime + size) without reading its bytes. The editor
    * polls this to detect agent/git edits on disk: a clean buffer auto-reloads,
-   * a dirty buffer warns (AGENTS.md "What PI Lab is" — never silently clobber). A missing file
+   * a dirty buffer warns. A missing file
    * is a normal answer (`exists: false`), matching `read`.
    */
   stat: publicProcedure.input(readInput).query(async ({ ctx, input }): Promise<FileStat> => {

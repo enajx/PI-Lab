@@ -1,6 +1,6 @@
 // Localhost port-availability checks. These touch the network stack, so they
 // live apart from the pure allocation math and are covered by example/integration
-// tests rather than property tests (md/engineering/testing-and-build.md). Every socket and server
+// tests rather than property tests. Every socket and server
 // opened here is closed before the promise settles — no leaked handles.
 
 import net from "node:net"

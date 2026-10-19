@@ -20,9 +20,9 @@ interface AddMachineFormProps {
 }
 
 /**
- * Inline form to register a machine by hand (AGENTS.md "Scope" — Cluster monitoring).
+ * Inline form to register a machine by hand.
  * Deliberately a plain inline panel rather than a Radix dialog so it renders and
- * is assertable under jsdom (md/engineering/testing-and-build.md). Only `host` is required; the rest is
+ * is assertable under jsdom. Only `host` is required; the rest is
  * optional connection metadata. ssh key material is never collected here.
  */
 export function AddMachineForm({ onSubmit, onCancel, isPending, error }: AddMachineFormProps) {

@@ -12,7 +12,7 @@ import {
 import { publicProcedure, router } from "../../trpc"
 
 /**
- * Cluster science tab — v1 is **monitoring only** (AGENTS.md "Scope" "Science tabs"):
+ * Cluster science tab — v1 is **monitoring only**:
  * import compute boxes from `~/.ssh/config`, add a few by hand, annotate / hide
  * them, and probe reachability over the `ssh` CLI. Job dispatch and experiment
  * runs are explicitly v2 and have no procedures here.

@@ -4,13 +4,13 @@ import { z } from "zod"
 import { publicProcedure, router } from "../trpc"
 
 /**
- * Terminal router — the renderer's contract to the PTY daemon (md/engineering/architecture.md (process model), md/engineering/architecture.md (agent runtime)).
+ * Terminal router — the renderer's contract to the PTY daemon.
  *
  * Every procedure is a thin bridge to the supervisor's {@link DaemonClient}
  * obtained from context; all real PTY ownership (spawn, scrollback, reattach)
  * lives in `@pi-lab/pty-daemon` and is reused, not reimplemented. Keeping these
  * one-liners over a fetched client makes the router `createCaller`-testable
- * without an Electron window (md/engineering/testing-and-build.md).
+ * without an Electron window.
  */
 
 const spawnInput = z.object({
@@ -89,7 +89,7 @@ export const terminalRouter = router({
   /**
    * Stream one session's output. MUST be an `observable`, never an async
    * generator — the `trpc-electron` IPC link throws on generators (AGENTS.md
-   * AGENTS.md Pitfalls #1).
+   * the IPC link throws on generators).
    *
    * Bridging the daemon's contract: on subscribe we `attach` (which snapshots
    * scrollback and begins live delivery atomically on the daemon side), then

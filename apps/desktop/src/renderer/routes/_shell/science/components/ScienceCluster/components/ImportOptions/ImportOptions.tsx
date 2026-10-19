@@ -10,8 +10,7 @@ interface ImportOptionsProps {
 }
 
 /**
- * Minimal Cluster settings, folded into the tab (AGENTS.md "Scope" — "keep it small,
- * or fold a couple of options into the tab"): import hosts from a non-default
+ * Minimal Cluster settings, folded into the tab: import hosts from a non-default
  * ssh-config path. The full settings route group doesn't exist in this shell
  * yet, so a co-located inline panel is the clean v1 home for the one option that
  * matters — the source config path. A blank path imports from `~/.ssh/config`.

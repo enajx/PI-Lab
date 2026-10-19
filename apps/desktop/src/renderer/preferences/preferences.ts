@@ -437,7 +437,7 @@ export function useDefaultAgentId(): [string, (next: string) => void] {
 
 /**
  * The agent id to launch a session with: the deterministic `?agentId` E2E seam
- * (md/engineering/testing-and-build.md) wins, otherwise the user's stored default. Keeps the
+ * wins, otherwise the user's stored default. Keeps the
  * test seam working while honouring the Settings → Agents default.
  */
 export function resolveLaunchAgentId(): string {

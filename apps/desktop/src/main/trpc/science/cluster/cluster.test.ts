@@ -1,5 +1,5 @@
 // Integration tests for the science.cluster router via createCallerFactory over
-// a temp SQLite DB with the real migrations (md/engineering/testing-and-build.md). The ssh probe is the
+// a temp SQLite DB with the real migrations. The ssh probe is the
 // injected fake (FAKE_SSH_EXEC) so `refreshStatus` never touches the network.
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"

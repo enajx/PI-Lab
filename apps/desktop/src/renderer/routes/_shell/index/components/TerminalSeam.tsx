@@ -1,7 +1,7 @@
 import { Terminal } from "../../../../Terminal"
 import { useTRPCClient } from "../../../../trpc/react"
 
-/** The standalone-terminal test seam (md/engineering/testing-and-build.md), gated to `?termcmd` runs. */
+/** The standalone-terminal test seam, gated to `?termcmd` runs. */
 export function TerminalSeam({
   termSpawn,
 }: {

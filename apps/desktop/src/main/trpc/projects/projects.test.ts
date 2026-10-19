@@ -1,10 +1,11 @@
 // Integration tests for the projects router via createCallerFactory over a temp
-// SQLite DB with real migrations and a real temp git repo (md/engineering/testing-and-build.md).
+// SQLite DB with real migrations and a real temp git repo.
 import { execFile } from "node:child_process"
 import {
   lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   readlink,
   realpath,
@@ -27,7 +28,7 @@ const execFileAsync = promisify(execFile)
 /**
  * A self-contained git identity for `createFromTemplate`'s seed commit so the
  * suite is hermetic — it never reads (or needs) a global `git config user.*`,
- * which CI does not set (md/engineering/testing-and-build.md).
+ * which CI does not set.
  */
 const GIT_IDENTITY = {
   GIT_AUTHOR_NAME: "PI Lab Test",
@@ -199,6 +200,13 @@ describe("projects.open", () => {
 })
 
 describe("project Markdown selections", () => {
+  test("creates an empty TODO.md when no custom template exists", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const result = await h.caller.projects.createTaskFile({ id: project.id })
+    expect(result.taskRelPath).toBe("TODO.md")
+    expect(await readFile(join(h.repoDir, "TODO.md"), "utf8")).toBe("")
+  })
+
   test("creates TODO.md from the editable template without replacing an existing file", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     await mkdir(join(h.dataDir, "template"), { recursive: true })
@@ -317,6 +325,22 @@ describe("projects.clone", () => {
 })
 
 describe("projects.createFromTemplate", () => {
+  test("creates a Git project with no starter files from a fresh template", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "pi-lab-empty-tpl-"))
+    const targetDir = join(parent, "study")
+    const project = await h.caller.projects.createFromTemplate({ targetDir })
+    expect(project.defaultBranch).toBe("main")
+    expect((await readdir(project.repoPath)).sort()).toEqual([".git"])
+    const { stdout } = await execFileAsync("git", [
+      "-C",
+      project.repoPath,
+      "log",
+      "-1",
+      "--format=%s",
+    ])
+    expect(stdout.trim()).toBe("Initial commit")
+  })
+
   test("copies the template in, skips cruft, inits a repo, and stores the project", async () => {
     const templateDir = await makeTemplate()
     await writeFile(join(templateDir, "RESEARCH.md"), "# Template research\n")

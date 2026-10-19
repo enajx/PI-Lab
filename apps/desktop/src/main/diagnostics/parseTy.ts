@@ -1,6 +1,6 @@
 /**
  * Pure parser for `ty check <file> --output-format concise --color never`
- * (AGENTS.md "Scope", TODO "Built-in editor"). ty's "concise" format prints one
+ * ty's "concise" format prints one
  * diagnostic per line:
  *
  *   path/to/file.py:LINE:COL: SEVERITY[rule-code] message text
@@ -13,7 +13,7 @@
  *
  * Like the ruff parser this **never throws**: any line that doesn't match the
  * shape (the summary, blank lines, ANSI residue, arbitrary garbage) is skipped,
- * which the property tests assert (md/engineering/testing-and-build.md).
+ * which the property tests assert.
  */
 
 import type { Diagnostic, DiagnosticSeverity } from "./types"

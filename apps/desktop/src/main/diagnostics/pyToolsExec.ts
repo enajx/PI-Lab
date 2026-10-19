@@ -5,13 +5,12 @@ import { promisify } from "node:util"
 import type { PythonRuntime } from "../python"
 
 /**
- * Injectable exec seam for the Python diagnostics runners (md/engineering/testing-and-build.md). The
+ * Injectable exec seam for the Python diagnostics runners. The
  * runners shell out to the Astral CLIs (`ty` / `pyrefly` / `ruff`) **one-shot**
- * per save (TODO "Built-in editor" — one-shot CLI, not LSP). They never call
+ * per save. They never call
  * `node:child_process` directly: they go through this function so the diagnostics
  * router's tests inject a deterministic fake (canned ruff-JSON / ty output, plus
- * a "binary missing" branch) and need no `uv` installed (md/engineering/testing-and-build.md —
- * determinism without credentials/tooling).
+ * a "binary missing" branch) and need no `uv` installed.
  *
  * The live implementation runs the tool via `uvx` ({@link livePyToolsExec}); the
  * abstraction is "given a command + args + cwd, give me stdout/stderr/exit or a
@@ -73,7 +72,7 @@ export interface PyToolsExecDependencies {
 }
 
 /**
- * Live exec (AGENTS.md "Scope", TODO "Built-in editor"): run the tool through `uvx`
+ * Live exec: run the tool through `uvx`
  * (`uvx ty …` / `uvx pyrefly …` / `uvx ruff …`), which provisions the binary on
  * demand and ships with `uv`. The tool's own non-zero exit (diagnostics found) is
  * captured, not thrown; only a genuinely unspawnable command (`uv`/`uvx` not on

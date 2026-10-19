@@ -5,7 +5,7 @@ import { useTranslate } from "../../../../../../../i18n/language"
  * Grid renderer for an {@link ArrayPreview} — a decoded 2-D `.npy` array. Shows
  * the dtype + shape as a header chip and the (already bounded, main-side) cells
  * in a monospaced table with a row-index gutter. Empty bodies and the
- * truncation note use selectable text per AGENTS.md (the body is
+ * truncation note use selectable text because the body is
  * `user-select: none`).
  */
 export function ArrayGrid({ preview }: { preview: ArrayPreview }) {

@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * electron-builder `afterPack` hook (AGENTS.md Pitfalls #4).
+ * electron-builder `afterPack` hook.
  *
  * On macOS node-pty exec()s `spawn-helper` for every PTY it opens. The
  * executable bit can be lost when the file is copied into the packaged app

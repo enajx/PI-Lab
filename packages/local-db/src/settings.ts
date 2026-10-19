@@ -23,7 +23,7 @@ import {
  * {@link getSettingsOrDefaults} is that source: it reads row 1 and, when absent,
  * returns the same default shape Drizzle would insert. It performs no write — a
  * pure read so it is safe to call from anywhere (including read-only flows like
- * the start-agent-session policy in md/engineering/architecture.md (agent runtime)). The returned object is a
+ * the start-agent-session policy. The returned object is a
  * fully-typed {@link Settings} row regardless of whether one exists on disk.
  */
 
@@ -119,6 +119,11 @@ function projectTemplateWithDefaults(
   return {
     ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
     ...stored,
+    initializationMarkdownFiles:
+      stored?.initializationMarkdownFiles?.join("|") ===
+      "AGENTS.md|CLAUDE.md|EXPERIMENT_TRACKING_SQLITE.md|RESEARCH.md|TODO.md"
+        ? []
+        : (stored?.initializationMarkdownFiles ?? []),
     projectTypes: builtInTypes,
   }
 }

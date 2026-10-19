@@ -1,5 +1,5 @@
 /**
- * Test seam (md/engineering/testing-and-build.md): let the Cluster E2E import from a fixture ssh-config
+ * Test seam: let the Cluster E2E import from a fixture ssh-config
  * instead of the real `~/.ssh/config`. When the renderer loads with
  * `?sshConfigPath=<abs path>` (mirrors the existing `?openProject` / `?termcmd`
  * seams), the Cluster tab imports from that path on mount so the harness can seed

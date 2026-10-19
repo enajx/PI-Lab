@@ -8,7 +8,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { ScienceAnalysis } from "./ScienceAnalysis"
 
 /**
- * Component test for the Analysis science tab (md/engineering/testing-and-build.md). Renders plain DOM
+ * Component test for the Analysis science tab. Renders plain DOM
  * + hand-authored primitives, so jsdom suffices: we assert structure only — the
  * grouped file list, a CSV table preview, the metadata fallback, and the empty /
  * no-projects states — never copy text or shadcn classes.

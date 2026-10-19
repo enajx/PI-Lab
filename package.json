@@ -11,17 +11,13 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "docs:dev": "vitepress dev md --host=127.0.0.1",
-    "docs:build": "vitepress build md && bun scripts/docs-export.ts",
-    "docs:preview": "bun run docs:build && bun scripts/docs-preview.ts",
-    "docs:test": "bun run docs:build && node node_modules/@playwright/test/cli.js test e2e/docs-offline.spec.ts",
     "typecheck": "turbo run typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "bun run build && bun run docs:build && node node_modules/@playwright/test/cli.js test",
+    "e2e": "bun run build && node node_modules/@playwright/test/cli.js test",
     "verify": "bun run scripts/verify.ts",
     "package": "bun run --cwd apps/desktop package",
     "package:stable": "bun run --cwd apps/desktop package:stable",
@@ -48,7 +44,6 @@
     "jsdom": "^25.0.0",
     "turbo": "^2.5.0",
     "typescript": "^5.9.0",
-    "vitepress": "1.6.4",
     "vitest": "^4.0.0"
   }
 }

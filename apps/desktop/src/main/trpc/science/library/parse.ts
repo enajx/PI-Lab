@@ -1,6 +1,5 @@
 /**
- * Pure parsers + result types for the Library science tab (AGENTS.md "Scope" "Science
- * tabs"). Kept free of tRPC, I/O, and credentials so they are example- and
+ * Pure parsers + result types for the Library science tab. Kept free of tRPC, I/O, and credentials so they are example- and
  * property-testable in isolation: each takes already-decoded JSON (`unknown`)
  * and returns a typed, UI-ready shape, defensively coping with the loose,
  * partially-typed payloads the Zotero Web API actually returns.

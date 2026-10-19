@@ -73,8 +73,7 @@ interface CentralPanelProps {
 }
 
 /**
- * The project view's central panel (md/02; spec: plan "Settings panel, project-view
- * rework"). A single bounded slot that holds whatever the user opens — a running
+ * The project view's central panel. A single bounded slot that holds whatever the user opens — a running
  * agent, a plain terminal, or a file in the built-in editor — with a tab strip
  * (agents, terminals, and open files as peer tabs) and a "+" launcher. Exactly
  * one pane fills the panel; the file tree lives in the right sidebar (or, when
@@ -394,8 +393,7 @@ export function CentralPanel({
 
       <div className="flex min-h-0 flex-1">
         {/* Optional left Files column: the workspace tree beside the editor area
-            instead of in the right sidebar. Its own bounded-flex scroll region
-            (AGENTS.md Pitfalls #3 — no Radix ScrollArea). */}
+            instead of in the right sidebar. It has its own bounded scroll region. */}
         {showFilesPanel ? (
           <div className="relative flex min-h-0 shrink-0" style={{ width: filesWidth }}>
             <div

@@ -7,7 +7,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { AutomationsView } from "./AutomationsView"
 
 /**
- * Component tests for the Workflows view (md/engineering/testing-and-build.md): jsdom + a fake tRPC
+ * Component tests for the Workflows view: jsdom + a fake tRPC
  * client. The view renders plain DOM and the hand-authored UI primitives, so we
  * assert structure and the wiring of the enable toggle / create flow — never
  * copy text or shadcn classes.

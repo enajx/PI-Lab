@@ -18,8 +18,7 @@ interface EditorSettingsMenuProps {
 }
 
 /**
- * Self-contained editor-settings popover (md/engineering/architecture.md (renderer); spec: TODO "Built-in
- * editor" — "Editor settings group"). A gear button in the editor toolbar that
+ * Self-contained editor-settings popover. A gear button in the editor toolbar that
  * opens a small menu toggling autosave, vim mode, Python diagnostics, and ruff
  * format-on-save. The Python type checker (`ty` ↔ `pyrefly`) lives in
  * Settings → Editor instead, so it is intentionally absent here.

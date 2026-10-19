@@ -18,7 +18,7 @@ import {
 import type { AnalysisInteractiveResult } from "./interactive"
 
 /**
- * Analysis science tab (AGENTS.md "Scope" "Science tabs", P8c) — v1 is a **read-only
+ * Analysis science tab — v1 is a **read-only
  * data browser**: discover and classify the data/analysis files in a project's
  * repo, list them grouped by kind, and render a bounded preview of a selected
  * file (a sampled CSV/TSV table, a pretty-printed JSON, an inline image, or a
@@ -28,7 +28,7 @@ import type { AnalysisInteractiveResult } from "./interactive"
  * Both procedures resolve the project's repo path from the injected Drizzle
  * handle, then delegate to the plain, filesystem-only functions in `./discover`.
  * `preview` jails its `relPath` to the repo via the shared {@link resolveInsideDir}
- * guard (md/engineering/architecture.md (process model) — path-traversal). Mounted as `science.analysis.*`.
+ * guard. Mounted as `science.analysis.*`.
  */
 
 const listInput = z.object({
@@ -141,7 +141,7 @@ export const analysisRouter = router({
    * tree (skipping noise dirs), tags each file with its data-file kind, and
    * returns them grouped by kind with per-file metadata (size, mtime). The walk
    * is capped, and `truncated` flags when the cap was hit so the UI can say so
-   * rather than silently dropping files (AGENTS.md — no silent caps).
+   * rather than silently dropping files.
    */
   listFiles: publicProcedure
     .input(listInput)

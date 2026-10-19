@@ -32,14 +32,14 @@ import {
 } from "./zoteroAttachments"
 
 /**
- * Library science tab (AGENTS.md "Scope" "Science tabs") — v1 is **connect + browse**:
+ * Library science tab — v1 is **connect + browse**:
  * store a library source locally and browse its collections and items. A source is
  * either **Zotero** (local desktop API or cloud Web API) or a plain **local folder** of
  * PDFs for researchers who don't use Zotero. Deep two-way sync, citation export, and
  * paper recommendations are explicitly v2 and absent here.
  *
  * Zotero HTTP goes through the injected {@link AppContext.httpFetch} so the suite mocks
- * Zotero with zero network (md/engineering/testing-and-build.md); the folder source reads the disk
+ * Zotero with zero network; the folder source reads the disk
  * directly (see `folder.ts`) and opens files through {@link AppContext.openPath}. Not-
  * configured and request failures are returned as **typed results**, never thrown — the
  * UI renders them as states. The stored Zotero API key is never logged.

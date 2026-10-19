@@ -3,8 +3,7 @@ import type { PiLabTrpcClient } from "../../../trpc/client"
 import type { RouterOutputs } from "../../../trpc/types"
 
 /**
- * Renderer-side Python diagnostics integration for the built-in editor (AGENTS.md
- * AGENTS.md "Scope", TODO "Built-in editor"). The diagnostics *engine* runs in main as one-shot
+ * Renderer-side Python diagnostics integration for the built-in editor. The diagnostics *engine* runs in main as one-shot
  * CLIs over `diagnostics.check`; this module is the thin glue that
  *   1. decides whether a file is even a Python file (no diagnostics otherwise),
  *   2. calls the router for the **saved** file, and
@@ -118,7 +117,7 @@ export async function runPythonCheck(
     workspaceId: params.workspaceId,
     relPath: params.relPath,
     typeChecker: params.typeChecker,
-    // v1 always runs ruff alongside the type checker (TODO "Built-in editor").
+    // v1 always runs ruff alongside the type checker.
     lint: true,
   })
 }

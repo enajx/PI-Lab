@@ -4,7 +4,7 @@ import { GitError, runGit } from "./runGit"
 
 /**
  * PI Lab's git operations, expressed as promisified calls to the user's own
- * `git` CLI (no new dependency — md/engineering/architecture.md). Each function is total and
+ * `git` CLI. Each function is total and
  * typed; git failures surface as {@link GitError} with git's own stderr. These
  * back the projects/workspaces routers (repo validation, worktree management,
  * the changes pane) and nothing here touches the DB or tRPC.

@@ -8,8 +8,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (md/engineering/testing-and-build.md) for the built-in editor (spec: TODO "Built-in
- * editor"). Launch the real Electron build, open a temp git repo as a project via
+ * Whole-app E2E for the built-in editor. Launch the real Electron build, open a temp git repo as a project via
  * the `?openProject` seam (landing directly on the rich project view), then
  * exercise the editor end-to-end:
  *   1. open a seeded text file from the right-sidebar **Files** tab (the tree now
@@ -28,7 +27,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * + `PI_LAB_TEST_AGENT_ID` (env → renderer query params). No native dialogs.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (md/engineering/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun; the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const SEED_FILE = "edit-me.txt"

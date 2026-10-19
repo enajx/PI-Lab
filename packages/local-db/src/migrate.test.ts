@@ -18,7 +18,7 @@ import { DEFAULT_CAFFEINE_SETTINGS, DEFAULT_NOTIFICATION_SETTINGS, settings } fr
 
 // Apply the *real* generated migrations to a throwaway file-backed SQLite DB
 // (file, not :memory:, because the runner opens its own connection — AGENTS.md
-// md/engineering/testing-and-build.md). Each test gets a fresh temp data dir.
+// Each test gets a fresh temp data dir.
 
 let dataDir: string
 let dbPath: string

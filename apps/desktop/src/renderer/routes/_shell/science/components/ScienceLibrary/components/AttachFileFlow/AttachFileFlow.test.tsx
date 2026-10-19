@@ -6,7 +6,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../../../te
 import { AttachFileFlow } from "./AttachFileFlow"
 
 /**
- * Component test for the per-item attach flow (md/engineering/testing-and-build.md). jsdom + a fake tRPC
+ * Component test for the per-item attach flow. jsdom + a fake tRPC
  * client: clicking "Attach" picks a file (`system.pickFile`) then calls
  * `science.library.attachFile`, and the typed result drives an inline success/error.
  */

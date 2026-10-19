@@ -23,10 +23,9 @@ interface DocPanelProps {
  * Shared panel that reads a single markdown doc from the workspace's working dir
  * via `files.read` and renders it. A missing file is the *expected* empty state, not an error: the
  * router returns `{ exists: false }`, so we show a friendly prompt rather than a
- * failure (AGENTS.md "What PI Lab is" — these are plain files the user may not have authored
- * yet).
+ * failure because these are plain files the user may not have authored yet.
  *
- * Scrolling follows AGENTS.md Pitfalls #3: a bounded `min-h-0 flex-1` column with a
+ * Scrolling uses a bounded `min-h-0 flex-1` column with a
  * native `overflow-y-auto` body — no Radix ScrollArea.
  */
 export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }: DocPanelProps) {

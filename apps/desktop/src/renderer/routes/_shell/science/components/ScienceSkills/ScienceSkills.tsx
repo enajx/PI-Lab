@@ -21,7 +21,7 @@ import { ScienceTabShell } from "../ScienceTabShell"
 const EMPTY_SKILLS: SkillCatalogItem[] = []
 
 /**
- * Skills science tab (AGENTS.md "Scope" "Science tabs") — a **read-only catalog**:
+ * Skills science tab — a **read-only catalog**:
  * pick a project, then browse its project-local and global agent skills. Each
  * skill is a `<dir>/SKILL.md` discovered under `.claude/skills`,
  * `.codex/skills`, or `.agents/skills` in the repository or home directory (see
@@ -31,7 +31,7 @@ const EMPTY_SKILLS: SkillCatalogItem[] = []
  *
  * The project defaults to the most-recently-opened (`projects.list` is ordered
  * that way), with a selector to switch. A client-side search narrows the list;
- * the body owns its own scroll per AGENTS.md Pitfalls #3.
+ * the body owns its own scroll.
  *
  * Context-aware ⌘F (the quick-open shortcut): opens a {@link QuickFind} over the
  * skills currently shown in this tab (not projects — the shell skips `/science/*`,

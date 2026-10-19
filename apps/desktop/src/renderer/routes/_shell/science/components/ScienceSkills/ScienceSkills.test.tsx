@@ -8,7 +8,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { ScienceSkills } from "./ScienceSkills"
 
 /**
- * Component test for the Skills science tab (md/engineering/testing-and-build.md). The tab renders
+ * Component test for the Skills science tab. The tab renders
  * plain DOM + hand-authored UI primitives, so jsdom suffices and we assert
  * structure only: skill cards, the source badge, the project selector, the
  * search filter, and the empty / no-projects states — never copy text or

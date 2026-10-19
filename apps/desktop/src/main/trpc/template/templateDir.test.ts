@@ -1,7 +1,6 @@
-// Unit tests for the template directory resolver + first-run seed. Each test points
-// PI_LAB_DATA_DIR at a throwaway temp dir so the writable copy is hermetic; the
-// bundled source is read from `apps/desktop/resources/template` (md/engineering/testing-and-build.md).
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+// Unit tests for the writable template directory. Each test points PI_LAB_DATA_DIR
+// at a throwaway temp dir so the empty first-run directory is hermetic.
+import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { resolveDataDir } from "@pi-lab/local-db"
@@ -31,11 +30,9 @@ describe("resolveWritableTemplateDir", () => {
 })
 
 describe("seedWritableTemplate", () => {
-  test("seeds the bundled files on first run", async () => {
+  test("starts with an empty writable template on first run", async () => {
     await seedWritableTemplate()
-    expect((await readFile(join(dataDir, "template", "AGENTS.md"), "utf8")).length).toBeGreaterThan(
-      0,
-    )
+    expect(await readdir(join(dataDir, "template"))).toEqual([])
   })
 
   test("is idempotent — a second call never overwrites the user's edits", async () => {

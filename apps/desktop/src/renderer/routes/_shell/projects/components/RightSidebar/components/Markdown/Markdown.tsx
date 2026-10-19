@@ -81,7 +81,7 @@ const markdownComponents: Components = {
  * enabled via `remark-gfm` so a research doc's checklists and tables render.
  *
  * Text is selectable (`select-text`) — the surrounding app sets `user-select:
- * none` on the body (AGENTS.md Pitfalls #7), and a doc the user wants to read should
+ * none` on the body, and a doc the user wants to read should
  * be copyable.
  */
 export const Markdown = memo(function Markdown({ content }: { content: string }) {

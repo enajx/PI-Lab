@@ -13,26 +13,19 @@ import { ProjectTypesEditor } from "./ProjectTypesEditor"
 // Keep this renderer fallback local. Importing the local-db package at runtime
 // would pull its SQLite implementation into the browser bundle.
 const DEFAULT_PROJECT_TEMPLATE_SETTINGS = {
-  initializationMarkdownFiles: [
-    "AGENTS.md",
-    "CLAUDE.md",
-    "EXPERIMENT_TRACKING_SQLITE.md",
-    "RESEARCH.md",
-    "TODO.md",
-  ],
+  initializationMarkdownFiles: [],
   defaultTemplateParentPath: null,
   projectTypes: [],
 }
 
 /**
  * Project template editor (Settings → "Project template"). Edits the writable
- * copy of the bundled template (`~/.pi-lab/template`) that `createFromTemplate`
- * stamps into every new project. A left file list selects a file; the right pane
+ * template (`~/.pi-lab/template`) that `createFromTemplate` can copy into new
+ * projects. A left file list selects a file; the right pane
  * is a workspace-agnostic {@link CodeMirrorBuffer} that loads via `template.read`
  * and saves via `template.write`.
  *
- * The template is seeded once on first run, so the user's edits persist across app
- * updates — and newly bundled files won't appear automatically.
+ * The template starts empty on first run. User files persist across app updates.
  *
  * We deliberately do NOT use `useEditorBuffers` (it requires a workspace + the
  * `files.*` router); only the editor theme + vim toggle are reused from

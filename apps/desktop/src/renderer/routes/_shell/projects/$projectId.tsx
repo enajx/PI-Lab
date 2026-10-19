@@ -3,7 +3,7 @@ import { projectNotificationSearchSchema } from "../../../notifications/activati
 import { ProjectWorkspace } from "./-ProjectWorkspace"
 
 /**
- * Project route (md/02; plan "Settings panel, project-view rework") — the rich
+ * Project route — the rich
  * workspace surface a project card opens directly into. The central panel holds
  * whatever the user opens (an agent, a plain terminal, or a file in the built-in
  * editor) as tabs; the right sidebar (Research / TODOs / Files, + an optional

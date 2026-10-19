@@ -20,12 +20,12 @@ interface QuickOpenProps {
 const DEBOUNCE_MS = 120
 
 /**
- * `⌘F` fuzzy quick-open palette (md/engineering/architecture.md (renderer)). Typing debounces a `files.search`
+ * `⌘F` fuzzy quick-open palette. Typing debounces a `files.search`
  * fuzzy query against the workspace; ↑/↓ move the highlight, Enter opens the
  * highlighted hit, Esc dismisses. Rendered as a centered overlay by the parent
  * `Editor`, which mounts it only while open.
  *
- * Results scroll in a native bounded list (AGENTS.md Pitfalls #3). The palette owns no
+ * Results scroll in a native bounded list. The palette owns no
  * file I/O — it only turns a chosen path into an `onOpenFile` call.
  */
 export function QuickOpen({

@@ -1,6 +1,6 @@
 import type { Stats } from "node:fs"
 import { constants } from "node:fs"
-import { copyFile, cp, mkdir, readdir, readFile, realpath, stat } from "node:fs/promises"
+import { copyFile, cp, mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
   getSettingsOrDefaults,
@@ -188,7 +188,7 @@ const createFromTemplateInput = z.object({
   /** Absolute directory to create as the new project; the template copies into it. */
   targetDir: z.string().min(1),
   /**
-   * Template folder to copy from. Defaults to the writable bundled template under
+   * Template folder to copy from. Defaults to the user's writable template under
    * the data dir ({@link resolveWritableTemplateDir}); explicit callers/tests may
    * name any source directory.
    */
@@ -480,8 +480,8 @@ export const projectsRouter = router({
 
   /**
    * Create a fresh project by copying a template folder into `targetDir`. The
-   * template defaults to the writable bundled template ({@link
-   * resolveWritableTemplateDir}, first-run-seeded here as a safety net) but the
+   * template defaults to the user's writable template ({@link
+   * resolveWritableTemplateDir}, created empty on first use) but the
    * caller may name any source directory. We refuse to clobber a non-empty target,
    * copy the template's contents in (symlinks preserved, `.DS_Store` and any nested
    * `.git` skipped), `git init` + initial-commit the result unless it already lives
@@ -554,7 +554,7 @@ export const projectsRouter = router({
         try {
           await runGit(target, ["init", "-b", "main"])
           await runGit(target, ["add", "-A"])
-          await runGit(target, ["commit", "-m", "Initial commit"])
+          await runGit(target, ["commit", "--allow-empty", "-m", "Initial commit"])
         } catch (error) {
           if (error instanceof GitError) {
             throw new TRPCError({ code: "BAD_REQUEST", message: error.message, cause: error })
@@ -780,7 +780,7 @@ export const projectsRouter = router({
       return row
     }),
 
-  /** Copy the user's TODO template into a project with no TODO.md, then select it. */
+  /** Create TODO.md from the user's template, or empty when no template exists. */
   createTaskFile: publicProcedure
     .input(idInput)
     .mutation(async ({ ctx, input }): Promise<Project> => {
@@ -788,15 +788,14 @@ export const projectsRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
       await seedWritableTemplate()
       const source = resolveInsideTemplate(resolveWritableTemplateDir(), "TODO.md")
-      if (!(await statOrNull(source))?.isFile()) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "TODO.md is missing from the project template",
-        })
-      }
       const target = join(project.repoPath, "TODO.md")
       try {
-        await copyFile(source, target, constants.COPYFILE_EXCL)
+        if ((await statOrNull(source))?.isFile()) {
+          await copyFile(source, target, constants.COPYFILE_EXCL)
+        } else {
+          const file = await open(target, "wx")
+          await file.close()
+        }
       } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "EEXIST") {
           throw new TRPCError({

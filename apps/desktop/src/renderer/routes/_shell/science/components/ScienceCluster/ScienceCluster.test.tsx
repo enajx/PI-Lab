@@ -8,7 +8,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { ScienceCluster } from "./ScienceCluster"
 
 /**
- * Component test for the Cluster science tab (md/engineering/testing-and-build.md). The tab renders
+ * Component test for the Cluster science tab. The tab renders
  * plain DOM + the hand-authored (non-Radix) UI primitives, so jsdom suffices and
  * we assert structure only: machine cards, the hide toggle, the import action,
  * and the empty state — never copy text or shadcn classes.

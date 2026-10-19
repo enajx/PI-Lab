@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * PI Lab smoke harness — the autonomous build → launch → assert gate (md/engineering/testing-and-build.md).
+ * PI Lab smoke harness — the autonomous build → launch → assert gate.
  *
  * It grows phase by phase. At P0 it only proves the toolchain is wired and exits 0.
  * From P3 it will: build the app, launch it headless via Playwright `_electron`, then

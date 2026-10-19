@@ -11,7 +11,7 @@ import { onPublicUpdateChannelChanged } from "../../updates/selection"
 import { createHarness, type Harness } from "../testHarness"
 
 // Integration tests for the settings router over a real migrated SQLite DB
-// (md/engineering/testing-and-build.md): a `get` against a fresh DB yields the editor defaults, and
+// A `get` against a fresh DB yields the editor defaults, and
 // `updateEditor` upserts + merges the singleton row.
 
 let harness: Harness

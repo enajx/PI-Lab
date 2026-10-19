@@ -6,7 +6,7 @@ import { skillsRouter } from "./skills/skills"
 import { tasksRouter } from "./tasks"
 
 /**
- * Science namespace (AGENTS.md "Scope" "Science tabs") — the umbrella for the
+ * Science namespace — the umbrella for the
  * research-specific surfaces. v1 wires the **cluster** monitoring tab, the
  * **skills** read-only catalog, the **analysis** data browser, and the
  * **library** tab (Zotero). Mounted on the appRouter as

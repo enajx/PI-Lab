@@ -9,7 +9,7 @@ interface AutomationsEmptyStateProps {
 }
 
 /**
- * Empty state for the Workflows view (AGENTS.md "Scope"). Explains what automations
+ * Empty state for the Workflows view. Explains what automations
  * do and offers the create action — or, when there is no project/agent yet,
  * nudges the user to open a project first (a workflow always targets one).
  */

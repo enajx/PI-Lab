@@ -1,5 +1,5 @@
 // Integration tests for the science.library router via createCallerFactory over
-// a temp SQLite DB with the real migrations (md/engineering/testing-and-build.md). Outbound HTTP is
+// a temp SQLite DB with the real migrations. Outbound HTTP is
 // the injected fake (`httpFetch`) so the real Zotero API is never hit; the folder source
 // reads real temp dirs and opens files through the injected `openPath`. We assert
 // kind/mode-aware reads (Zotero local vs web, and folder), credential/coercion

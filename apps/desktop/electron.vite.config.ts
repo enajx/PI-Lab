@@ -182,7 +182,7 @@ export default defineConfig({
       }),
       react(),
       // Tailwind v4 via its first-party Vite plugin — scans the renderer and the
-      // shared `@pi-lab/ui` package for utility classes (md/engineering/architecture.md (renderer)).
+      // shared `@pi-lab/ui` package for utility classes.
       tailwindcss(),
     ],
     build: {

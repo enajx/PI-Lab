@@ -6,7 +6,7 @@ import { createFakeTrpcClient } from "../../../../../../../test/fakeTrpcClient"
 import { ResearchPanel } from "./ResearchPanel"
 
 /**
- * Component test for the Research panel (md/engineering/testing-and-build.md): mount it under the real
+ * Component test for the Research panel: mount it under the real
  * providers with a *faked* tRPC client (a real client over an in-memory link, so
  * no IPC/main process is needed). We assert the two behaviours that matter —
  * rendering a present RESEARCH.md as markdown, and the empty state when the file

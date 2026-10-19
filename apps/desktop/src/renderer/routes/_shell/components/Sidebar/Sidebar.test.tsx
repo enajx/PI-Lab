@@ -15,7 +15,7 @@ import { writeProjectWorkspaceState } from "../../projects/-workspaceState"
 import { Sidebar } from "./Sidebar"
 
 /**
- * Component test for the left sidebar (md/engineering/testing-and-build.md). Mounts the
+ * Component test for the left sidebar. Mounts the
  * real `Sidebar` under the app providers + a memory router (so its `<Link>`s
  * resolve) with a faked tRPC client. jsdom suffices — the sidebar is plain DOM
  * (no Radix). We cover the unified workspace nav (Workflows still reachable), the
@@ -150,6 +150,41 @@ describe("Sidebar", () => {
       expect(templateInput).toEqual({
         targetDir: "/tmp/projects/Study",
         templateFiles: ["AGENTS.md"],
+        externalFiles: [],
+      }),
+    )
+  })
+
+  test("an empty default selection does not copy imported template files", async () => {
+    let templateInput: unknown
+    renderSidebar({
+      "template.list": () => [{ name: "AGENTS.md", relPath: "AGENTS.md", kind: "file" }],
+      "settings.get": () => ({
+        projectTemplate: {
+          initializationMarkdownFiles: [],
+          defaultTemplateParentPath: null,
+        },
+      }),
+      "projects.createFromTemplate": (input) => {
+        templateInput = input
+        return { id: "empty", name: "empty", repoPath: "/tmp/projects/Empty" }
+      },
+    })
+    await screen.findByTestId("add-project")
+    fireEvent.click(screen.getByTestId("add-project"))
+    fireEvent.click(screen.getByTestId("add-project-template"))
+    await screen.findByTestId("add-project-template-form")
+    fireEvent.change(screen.getByTestId("add-project-template-name"), {
+      target: { value: "Empty" },
+    })
+    fireEvent.change(screen.getByTestId("add-project-template-location"), {
+      target: { value: "/tmp/projects" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+    await waitFor(() =>
+      expect(templateInput).toEqual({
+        targetDir: "/tmp/projects/Empty",
+        templateFiles: [],
         externalFiles: [],
       }),
     )

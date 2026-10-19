@@ -1,5 +1,5 @@
 // Shared test plumbing for the projects/workspaces router suites (AGENTS.md
-// md/engineering/testing-and-build.md): a `createCaller` over a temp-file SQLite handle with the *real* generated
+// a `createCaller` over a temp-file SQLite handle with the *real* generated
 // migrations, a throwaway git repo, an in-process pty-daemon, and an injectable
 // fake agent catalog. Everything is created with real tools (git init, real
 // DaemonServer) — only the transport (caller vs IPC) and the daemon's home
@@ -55,7 +55,7 @@ const createCaller = createCallerFactory(appRouter)
 export type Caller = ReturnType<typeof createCaller>
 
 /**
- * A deterministic, credential-free fake agent (md/engineering/testing-and-build.md): it runs the test
+ * A deterministic, credential-free fake agent: it runs the test
  * runner's own Node and prints a known marker, so launchAgent exercises the real
  * PTY/launch/stream path with zero network and zero paid credentials.
  */
@@ -71,7 +71,7 @@ export const FAKE_AGENT: TerminalAgent = {
  * A *long-lived* fake agent: it prints its marker then stays alive on an
  * interval until killed, so a test can keep a session "live" while it starts a
  * second concurrent agent (exercising the concurrency-spills-to-worktree
- * branch of the policy; md/engineering/architecture.md, agent runtime). Killing the PTY (or closing the daemon) ends it.
+ * branch of the policy. Killing the PTY (or closing the daemon) ends it.
  */
 export const LONG_FAKE_AGENT: TerminalAgent = {
   id: "long-fake-agent",
@@ -180,7 +180,7 @@ export function createTestCaffeineController(): TestCaffeineController {
 
 /**
  * A deterministic, network-free ssh probe for the cluster router's status tests
- * (md/engineering/testing-and-build.md): every host is reachable unless its alias starts with `down-`,
+ * Every host is reachable unless its alias starts with `down-`,
  * so a suite can assert both branches without any real `ssh` / network.
  */
 export const FAKE_SSH_EXEC: SshExec = async (host) =>
@@ -192,7 +192,7 @@ export const FAKE_SSH_EXEC: SshExec = async (host) =>
  * Default outbound-HTTP fake for the harness: any unexpected URL is a hard error
  * so a test that hits the network by accident fails loudly rather than reaching
  * the real Zotero API. Library router suites pass their own `httpFetch` to stub
- * specific responses (md/engineering/testing-and-build.md).
+ * specific responses.
  */
 export const FAKE_HTTP_FETCH: HttpFetch = async (input) => {
   throw new Error(`Unexpected network call in tests: ${String(input)}`)
@@ -209,7 +209,7 @@ export const FAKE_OPEN_PATH: OpenPath = async () => ""
  * Default Python-tools exec for the harness: reports every tool as **absent**
  * (`notFound: true`) so an unrelated router suite never spawns a real `uvx`
  * process. The diagnostics suite passes its own exec returning canned tool output
- * to exercise the parse + merge path (md/engineering/testing-and-build.md).
+ * to exercise the parse + merge path.
  */
 export const FAKE_PY_TOOLS_EXEC: PyToolsExec = async () => ({
   stdout: "",

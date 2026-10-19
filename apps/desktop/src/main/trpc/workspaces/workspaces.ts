@@ -89,7 +89,7 @@ export interface CreateWorkspaceArgs {
 
 /**
  * Create a workspace and its backing git checkout — the choreography shared by
- * the `create` procedure and the start-agent-session flow (md/engineering/architecture.md (agent runtime)).
+ * the `create` procedure and the start-agent-session flow.
  *
  * For `kind: "worktree"` we compute a managed worktree path under the data dir,
  * `git worktree add` a fresh branch there, and insert matching `worktrees` +
@@ -301,10 +301,10 @@ export const workspacesRouter = router({
    * Launch an external CLI agent in the workspace's working directory. Resolves
    * the agent from the injected catalog (default `BUILTIN_AGENTS`), builds its
    * argv with the pure `buildLaunchArgv`, and spawns it in a PTY via the shared
-   * daemon client (the same path terminals use — md/engineering/architecture.md (agent runtime)). Returns the new
+   * daemon client. Returns the new
    * session id; the renderer subscribes to `terminal.onData` to render it.
    *
-   * Authentication is the agent's own (md/engineering/architecture.md (agent runtime)): we set the agent's `env`
+   * Authentication is the agent's own: we set the agent's `env`
    * if it declares any, but inject no credentials and read none.
    */
   launchAgent: publicProcedure

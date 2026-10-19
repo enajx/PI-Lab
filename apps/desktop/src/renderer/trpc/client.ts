@@ -10,7 +10,7 @@ import type { AppRouter } from "../../main/trpc/appRouter"
  * the main process's `initTRPC` transformer.
  *
  * Constructed via a factory (not a module singleton) so component tests can
- * inject a fake client (md/engineering/testing-and-build.md).
+ * inject a fake client.
  */
 export function createPiLabTrpcClient() {
   return createTRPCClient<AppRouter>({

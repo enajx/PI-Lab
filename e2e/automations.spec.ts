@@ -8,7 +8,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (md/engineering/testing-and-build.md, P9) for the Automations / Workflows feature:
+ * Whole-app E2E for the Automations / Workflows feature:
  * launch the real Electron build, open a temp git repo as a project via the
  * `?openProject` seam (no native dialog), navigate to the Workflows view from
  * the sidebar, create an automation through the UI, and assert it appears in the
@@ -20,7 +20,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * wired end to end to the real main-process router.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (md/engineering/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun; the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))

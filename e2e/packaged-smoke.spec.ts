@@ -9,7 +9,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Packaged-app smoke (git history (build phases) P11 / AGENTS.md Pitfalls #4): launch the REAL packaged
+ * Packaged-app smoke: launch the REAL packaged
  * `PI Lab.app`, assert the database round-trip, then receive real PTY output.
  *
  * This is the only test that proves native modules load from the *packaged* app:
@@ -23,7 +23,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * `bun run build`. Build it with `bun run package` (or `--cwd apps/desktop package`).
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * the Bun runtime (md/engineering/testing-and-build.md (build & ship)).
+ * the Bun runtime.
  */
 
 const execFileAsync = promisify(execFile)

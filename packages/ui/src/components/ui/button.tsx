@@ -5,7 +5,7 @@ import { cn } from "../../lib/cn"
 
 /**
  * Base button (shadcn/ui style). Kept here as a hand-authored shadcn component
- * (kebab-case under `components/ui/`, AGENTS.md project structure) so the shared
+ * so the shared
  * UI lib has at least one real, variant-driven primitive other packages can use.
  * Tokens come from the theme CSS variables (`bg-primary`, `border`, …).
  */

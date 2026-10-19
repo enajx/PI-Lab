@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (md/engineering/testing-and-build.md, P8d): launch the real Electron build, boot to
+ * Whole-app E2E: launch the real Electron build, boot to
  * `app-ready`, navigate to the Library science tab, and prove it is wired — with
  * a fresh (unconfigured) data dir the **library source chooser** renders its three
  * sources (Zotero local, Zotero cloud, folder). We do NOT exercise the live Zotero API
@@ -14,7 +14,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * router's fetch + folder-read paths are covered by the integration suite.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (md/engineering/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun; the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))

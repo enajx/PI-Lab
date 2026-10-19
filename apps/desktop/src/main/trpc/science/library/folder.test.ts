@@ -1,4 +1,4 @@
-// Unit tests for the folder-source filesystem readers (md/engineering/testing-and-build.md). These
+// Unit tests for the folder-source filesystem readers. These
 // are pure of tRPC/Electron, so they run against real temp directories — no mocking.
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"

@@ -17,14 +17,14 @@ import { dispatchAutomation } from "../../automations/dispatch"
 import { publicProcedure, router } from "../trpc"
 
 /**
- * Automations router (AGENTS.md "Scope" — Automations / Workflows): CRUD over the
+ * Automations router: CRUD over the
  * `automations` table plus the prompt-version history, the run log, and the
  * manual `runNow` fire. The recurrence math (initial / advanced `nextRunAt`,
  * the human cadence summary, the create-form preview) is delegated wholesale to
  * the pure `@pi-lab/shared` recurrence engine; the scheduler timer owns the
  * actual firing (started in main boot).
  *
- * Convention (md/engineering/testing-and-build.md): procedures stay thin — input validation + a call into the
+ * Convention: procedures stay thin — input validation + a call into the
  * plain functions below — so the logic is `createCaller`-testable and reusable.
  */
 

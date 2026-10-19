@@ -1,7 +1,7 @@
 // Pure port-range allocation. Each workspace ("slot") is handed a contiguous,
 // non-overlapping block of dev-server ports so concurrent workspaces never
 // collide. No I/O lives here — this is deterministic arithmetic, exercised by
-// property-based tests (md/engineering/testing-and-build.md).
+// property-based tests.
 
 /** Tunable bounds for slot-to-range allocation. Defaults target the high
  *  ephemeral-but-uncommon range so they rarely clash with real dev servers. */

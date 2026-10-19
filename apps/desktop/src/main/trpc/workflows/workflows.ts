@@ -534,7 +534,7 @@ export const workflowsRouter = router({
   /**
    * Live output of a (project, task)'s current/last run. MUST be an `observable`,
    * never an async generator — the `trpc-electron` IPC link throws on generators
-   * (AGENTS.md Pitfalls #1) — mirroring `terminal.onData`.
+   * — mirroring `terminal.onData`.
    *
    * On subscribe it replays the run's buffered output (the `start` command line
    * + accumulated `chunk`s) so a late subscriber sees prior output, then streams

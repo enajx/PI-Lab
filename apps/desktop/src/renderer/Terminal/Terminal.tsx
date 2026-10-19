@@ -6,8 +6,8 @@ import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
 
 /**
- * Live terminal pane (md/engineering/architecture.md (renderer)) wired end-to-end to the `terminal` tRPC
- * router (md/engineering/architecture.md (process model), md/engineering/architecture.md (agent runtime)). It streams a PTY session's bytes into xterm.js,
+ * Live terminal pane wired end-to-end to the `terminal` tRPC
+ * router. It streams a PTY session's bytes into xterm.js,
  * forwards keystrokes back, and keeps the PTY sized to the viewport.
  *
  * Two modes, picked by props:
@@ -23,16 +23,16 @@ import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMappin
  * Lifecycle ownership is deliberate: on unmount we unsubscribe and **detach**
  * (the subscription's teardown calls the daemon's `detach`) — we never `kill`.
  * The session lives in the separate pty-daemon process so it survives an Electron
- * reload (md/engineering/architecture.md (process model)); killing here would defeat that survival contract.
+ * reload; killing here would defeat that survival contract.
  *
- * Scrolling is xterm's own viewport, not Radix `ScrollArea` (AGENTS.md Pitfalls #3).
+ * Scrolling is xterm's own viewport, not Radix `ScrollArea`.
  */
 
 interface TerminalProps {
   /** Whether this PTY hosts an interactive agent/TUI or an ordinary shell. */
   inputKind: TerminalInputKind
   /**
-   * Injectable tRPC client for tests (md/engineering/testing-and-build.md); defaults to the real IPC
+   * Injectable tRPC client for tests; defaults to the real IPC
    * client. A fresh client per pane keeps subscriptions independent.
    */
   client?: PiLabTrpcClient
@@ -255,7 +255,7 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       resizeObserver?.disconnect()
       inputDisposable?.dispose()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
-      // session (it is NOT killed), so the PTY persists across reload (md/engineering/architecture.md (process model)).
+      // session (it is NOT killed), so the PTY persists across reload.
       unsubscribe?.()
       xterm.dispose()
       xtermRef.current = null
@@ -338,7 +338,7 @@ function currentTerminalTheme(): ITheme {
 }
 
 // xterm manages its own scrollback viewport; the pane just needs to be a bounded
-// box that fills its parent (AGENTS.md Pitfalls #3 — no Radix ScrollArea).
+// box that fills its parent.
 const paneStyle: CSSProperties = {
   width: "100%",
   height: "100%",

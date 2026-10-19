@@ -10,7 +10,7 @@
 @source "../components";
 
 /*
- * PI Lab shared design tokens (md/engineering/architecture.md (renderer), md/02-ux-and-design.md).
+ * PI Lab shared design tokens.
  *
  * Calm "analog/scandi" default palette, with light and dark token sets expressed
  * on :root / .dark. The renderer ThemeProvider can override the same tokens with
@@ -63,7 +63,7 @@
 }
 
 .dark {
-  /* Dark theme — warm near-black, NOT pure black (md/engineering/architecture.md (renderer)). */
+  /* Dark theme — warm near-black, NOT pure black. */
   --background: oklch(0.18 0.005 75);
   --foreground: oklch(0.92 0.004 85);
 
@@ -144,8 +144,7 @@
     color: var(--color-foreground);
     font-family:
       ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    /* App chrome shouldn't be selectable; error/code surfaces opt back in
-       (AGENTS.md Pitfalls #7). */
+    /* App chrome is not selectable; error and code surfaces opt back in. */
     user-select: none;
   }
 }

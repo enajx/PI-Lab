@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { ScienceLibrary } from "./components/ScienceLibrary"
 
 /**
- * Library science tab route (AGENTS.md "Scope" / md/engineering/architecture.md (renderer), P8d) — the fourth and final v1
+ * Library science tab route — the fourth and final v1
  * science tab: connect a Zotero library and browse its collections and items.
  * The nav registry (`scienceNavItems`) marks it ready so the sidebar links here.
  */

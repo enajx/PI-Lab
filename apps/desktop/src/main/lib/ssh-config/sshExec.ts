@@ -44,7 +44,7 @@ export interface SshProbeResult {
  * Probe one host: reachability **plus** transient GPU / CPU telemetry, in a
  * single ssh invocation. Injected into the cluster router's context as
  * {@link SshExec} so tests can substitute a deterministic fake and never touch
- * the network (md/engineering/testing-and-build.md); this is the live path the app wires in.
+ * the network; this is the live path the app wires in.
  *
  * Uses batch-mode ssh so it fails fast instead of blocking on a password / host-
  * key prompt, with a short connect timeout. Any clean exit is treated as
@@ -159,7 +159,7 @@ function reachabilityDetail(stdout: string): string {
 }
 
 /**
- * The live ssh probe (md/engineering/architecture.md (agent runtime)): a single
+ * The live ssh probe: a single
  * `ssh -o BatchMode=yes … <host> '<reachability + sentinel-fenced telemetry>'`.
  * Resolves to a typed result either way; an unreachable host loses the telemetry
  * fields, a reachable one without `nvidia-smi` reports `gpus: []`.

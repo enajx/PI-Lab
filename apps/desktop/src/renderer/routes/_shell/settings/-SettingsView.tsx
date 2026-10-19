@@ -29,7 +29,7 @@ import {
 /**
  * Settings (plan "Settings panel, project-view rework"). A local-only preferences
  * surface reachable from the sidebar gear and ⌘, — a left section nav plus a
- * scrollable content column (bounded flex + native scroll, AGENTS.md Pitfalls #3).
+ * scrollable content column.
  * Back-end-affecting settings (editor, worktree/quit policy) round-trip through
  * the `settings` router; pure-UI prefs (theme, code-changes panel, experimental,
  * shortcuts) live in localStorage (see `preferences`/`shortcuts`).

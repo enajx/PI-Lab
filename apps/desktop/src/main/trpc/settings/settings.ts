@@ -24,12 +24,10 @@ import { publishPublicUpdateChannelChanged } from "../../updates/selection"
 import { publicProcedure, router } from "../trpc"
 
 /**
- * Settings router — read/write the singleton app-config row (md/engineering/architecture.md (renderer)
- * "Settings"). v1 exposes the editor-preferences slice the built-in editor needs
- * (autosave / vim / type checker / format-on-save; AGENTS.md "Scope", TODO "Built-in
- * editor"); other settings groups mount here as later phases wire their UIs.
+ * Settings router — read/write the singleton app-config row. v1 exposes the editor-preferences slice the built-in editor needs
+ * (autosave / vim / type checker / format-on-save); other settings groups mount here as later phases wire their UIs.
  *
- * The router stays thin (md/engineering/testing-and-build.md): `get` reads through
+ * The router stays thin: `get` reads through
  * {@link getSettingsOrDefaults} (defaults when no row exists yet, never writes),
  * and `updateEditor` upserts the single row with the new `editor` blob. The logic
  * lives in the plain {@link writeEditorSettings} function so it is
@@ -300,7 +298,7 @@ export const settingsRouter = router({
   })),
 
   /**
-   * Patch the built-in editor preferences (TODO "Built-in editor"). Returns the
+   * Patch the built-in editor preferences. Returns the
    * full editor settings after the merge so the renderer can update its cache.
    */
   updateEditor: publicProcedure

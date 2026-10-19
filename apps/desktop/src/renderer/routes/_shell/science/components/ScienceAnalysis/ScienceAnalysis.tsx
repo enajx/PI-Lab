@@ -21,7 +21,7 @@ import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
 
 /**
- * Analysis science tab (AGENTS.md "Scope" "Science tabs", P8c) — a **read-only data
+ * Analysis science tab — a **read-only data
  * browser**: pick a project, browse the data/analysis files discovered in its
  * repo (grouped by category, filtered by a search box), and preview a selected
  * file in a side pane. CSV/TSV render as a sampled table (or a line chart when
@@ -35,7 +35,7 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  *
  * The project defaults to the most-recently-opened (`projects.list` is ordered
  * that way), with a selector at the top of the left column. The two columns each
- * own their own scroll per AGENTS.md Pitfalls #3.
+ * own their own scroll.
  */
 export function ScienceAnalysis() {
   const t = useTranslate()

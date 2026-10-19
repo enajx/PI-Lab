@@ -21,7 +21,7 @@ import { publicProcedure, router } from "../trpc"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
 
 /**
- * Sessions router — the "start agent session" flow (md/engineering/architecture.md (agent runtime), P5b).
+ * Sessions router — the "start agent session" flow.
  *
  * Opening an agent session must, by default, behave like opening a normal
  * terminal in the project's *main checkout* (cwd = repo root, no new worktree).
@@ -63,7 +63,7 @@ export interface StartSessionResult {
 }
 
 /**
- * Decide the workspace kind for a new agent session, per md/engineering/architecture.md (agent runtime):
+ * Decide the workspace kind for a new agent session:
  *   1. `worktreePerAgent` ON   → always a fresh worktree;
  *   2. a live agent already runs for this project (2nd+ concurrent) → fresh
  *      worktree, so it can't clobber the shared main checkout;
@@ -140,7 +140,7 @@ export interface StartAgentSessionInput {
 /**
  * The "start agent session" flow as a plain function over {@link AppContext}, so
  * both the `sessions.start` mutation *and* the automations dispatcher fire agents
- * through the exact same policy path (md/engineering/architecture.md, agent runtime; no duplicated launch logic). It decides
+ * through the exact same policy path. It decides
  * the workspace kind, gets-or-creates that workspace, launches the agent in the
  * correct cwd, registers the live session, and marks the workspace active.
  *
@@ -346,7 +346,7 @@ export const sessionsRouter = router({
       .all(),
   ),
   /**
-   * Start an external CLI agent for a project under the worktree policy (md/engineering/architecture.md, agent runtime).
+   * Start an external CLI agent for a project under the worktree policy.
    * Thin wrapper over {@link startAgentSession} — the shared start flow also used
    * by the automations dispatcher so the policy lives in one place.
    */

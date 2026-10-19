@@ -48,13 +48,13 @@ interface CreateDraft {
 }
 
 /**
- * Lazy workspace file tree (md/engineering/architecture.md (renderer)). The root level is listed via
+ * Lazy workspace file tree. The root level is listed via
  * `files.tree` with an empty path; each directory expands on click, fetching its
  * own children on demand so a large repo never walks the whole tree up front.
  * Files open into the editor on click.
  *
  * Scrolling is a native bounded `min-h-0 flex-1 overflow-y-auto` column
- * (AGENTS.md Pitfalls #3) — no Radix ScrollArea.
+ * — no Radix ScrollArea.
  */
 export function FileTree({
   workspaceId,

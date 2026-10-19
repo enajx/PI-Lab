@@ -67,7 +67,7 @@ export type { AppRouter } from "./trpc/appRouter"
 /**
  * The small entry starts a file in quick edit before importing fullRuntime.
  * Full services start after the caret is ready or immediately for a full-app
- * request. See md/engineering/architecture.md for the complete boot sequence.
+ * request.
  */
 
 // Set the channel before reading userData or opening the database. The packaged
@@ -280,7 +280,7 @@ if (ownsInstance) {
 }
 
 // In test mode there is no auto-update or telemetry to disable yet; the seam is
-// reserved here so future wiring stays gated behind one flag (md/engineering/testing-and-build.md).
+// reserved here so future wiring stays gated behind one flag.
 
 const shutdownGuard = installShutdownGuard({ app, ipcMain, createRequestId: randomUUID })
 let fullRuntime: FullRuntime | null = null

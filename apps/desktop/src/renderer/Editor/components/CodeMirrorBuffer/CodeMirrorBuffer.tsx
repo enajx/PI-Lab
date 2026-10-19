@@ -27,7 +27,7 @@ import {
  * returns the diagnostics to render as squiggles + gutter markers. The integrate
  * stage supplies the real Python (`ty`/`ruff`) source; the editor core only
  * knows how to *display* whatever it returns, so this prop keeps diagnostics
- * fully decoupled from the one-shot CLI wiring (TODO "Built-in editor").
+ * fully decoupled from the one-shot CLI wiring.
  */
 export type DiagnosticsSource = (doc: string) => Diagnostic[] | Promise<Diagnostic[]>
 
@@ -59,7 +59,7 @@ interface CodeMirrorBufferProps {
   /** Fires on Mod+Enter while this focused buffer is eligible to run. */
   onRun?: () => void
   /**
-   * Optional Vim keymap toggle (TODO "Built-in editor" — off by default). Wired
+   * Optional Vim keymap toggle. Wired
    * here behind the prop so the integrate stage can surface it as a setting
    * without touching this component.
    */
@@ -128,8 +128,7 @@ interface MarkdownOverlayState {
 const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: null, mention: null }
 
 /**
- * Thin React wrapper around a CodeMirror 6 `EditorView` (md/engineering/architecture.md (renderer); spec:
- * TODO "Built-in editor"). It owns exactly one view for its lifetime: the doc,
+ * Thin React wrapper around a CodeMirror 6 `EditorView`. It owns exactly one view for its lifetime: the doc,
  * language, ⌘S keybinding, and change listener are wired once on mount, and
  * mutable concerns (the language for the current path, vim, the diagnostics
  * source) live in CodeMirror `Compartment`s so they can be reconfigured without
@@ -443,7 +442,7 @@ export function CodeMirrorBuffer({
         EditorView.lineWrapping,
         // Constrain the view to its bounded host so it scrolls internally instead of
         // growing past the (overflow-hidden) container and being clipped — the
-        // canonical CodeMirror fixed-height setup (AGENTS.md Pitfalls #3, native scroll).
+        // canonical CodeMirror fixed-height setup.
         EditorView.theme({
           "&": { height: "100%" },
           ".cm-scroller": { overflow: "auto" },

@@ -4,8 +4,7 @@ import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { createTheme } from "@uiw/codemirror-themes"
 
 /**
- * Curated color themes for the built-in CodeMirror editor (TODO "Built-in editor"
- * — "Editor settings group"). The editor core ({@link CodeMirrorBuffer}) ships
+ * Curated color themes for the built-in CodeMirror editor. The editor core ({@link CodeMirrorBuffer}) ships
  * only `basicSetup` plus a structural height/scroll theme; this registry layers a
  * *color* theme on top, chosen in Settings → Editor and applied live via a
  * compartment.

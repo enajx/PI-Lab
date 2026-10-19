@@ -23,7 +23,7 @@ import { TRPCError } from "@trpc/server"
  * Hard cap on the number of files a single `listFiles` walk returns. Guards a
  * giant repo from producing an unbounded IPC payload; when hit, the listing's
  * `truncated` flag is set so the UI can surface "showing N of more" rather than
- * silently dropping files (AGENTS.md — no silent caps).
+ * silently dropping files.
  */
 export const MAX_LISTED_FILES = 2000
 /** Max Python prefix read while deciding whether a `.py` file is a marimo notebook. */

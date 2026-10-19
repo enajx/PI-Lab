@@ -16,7 +16,7 @@ export interface AgentOption {
 
 /**
  * Agents router — exposes the launchable external-CLI agent catalog (AGENTS.md
- * md/engineering/architecture.md (agent runtime)) to the renderer so pickers (the automation create form, future workspace
+ * agent runtime to the renderer so pickers (the automation create form, future workspace
  * launchers) can offer a choice without hard-coding ids. The catalog is data on
  * the context (the built-ins, plus the deterministic test agent in test mode),
  * so this is a thin read. The resolved executable is shown for diagnosis, while

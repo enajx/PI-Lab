@@ -8,7 +8,7 @@ import { resolveDaemonSocketPath } from "./socketPath"
 /**
  * Keeps exactly one PTY daemon reachable for the lifetime of the app.
  *
- * The daemon is a *separate, detached* process on purpose (md/engineering/architecture.md (process model)): live
+ * The daemon is a *separate, detached* process on purpose: live
  * terminals and agent sessions must outlive an Electron reload or a full app
  * quit, so in normal use the supervisor never owns the daemon's lifecycle — it
  * only ensures one is listening and holds a client to it. (The one exception is

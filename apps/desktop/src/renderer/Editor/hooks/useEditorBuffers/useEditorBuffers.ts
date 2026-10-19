@@ -125,7 +125,7 @@ export interface EditorBuffersApi {
  * project view's central panel hosts file tabs at the top level (with the file
  * tree in the right-sidebar Files panel) — both drive one buffer set through this
  * hook. Reads/writes go through the injected tRPC client so it stays testable with
- * the fake client (md/engineering/testing-and-build.md).
+ * the fake client.
  */
 export function useEditorBuffers({
   client,

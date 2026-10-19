@@ -7,7 +7,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../../../te
 import { CreateAutomationForm } from "./CreateAutomationForm"
 
 /**
- * Component test for the create-workflow form (md/engineering/testing-and-build.md): jsdom + a fake
+ * Component test for the create-workflow form: jsdom + a fake
  * tRPC client (the ScheduleBuilder fetches a live preview via
  * `automations.previewSchedule`). Asserts the schedule preview renders and that
  * submitting passes the collected values up.

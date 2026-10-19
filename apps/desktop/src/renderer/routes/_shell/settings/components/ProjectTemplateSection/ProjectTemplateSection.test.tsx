@@ -10,8 +10,8 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
  * Component test for the Settings "Project template" editor. The real CodeMirror
  * view needs layout APIs jsdom lacks, so it is stubbed (re-exposing
  * `onChange`/`onSave` + the seeded `initialDoc`); the file list, selection, and
- * save round-trip are asserted through the DOM + a faked tRPC client
- * (md/engineering/testing-and-build.md), mirroring the CentralPanel editor test.
+ * save round-trip are asserted through the DOM + a faked tRPC client,
+ * mirroring the CentralPanel editor test.
  */
 
 vi.mock("../../../../../Editor/components/CodeMirrorBuffer", () => ({

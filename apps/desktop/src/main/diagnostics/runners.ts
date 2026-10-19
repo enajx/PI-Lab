@@ -1,10 +1,10 @@
 /**
- * One-shot diagnostics runners for the built-in editor's Python code intelligence
- * (AGENTS.md "Scope", TODO "Built-in editor"). Each runner invokes a single Astral CLI
+ * One-shot diagnostics runners for the built-in editor's Python code intelligence.
+ * Each runner invokes a single Astral CLI
  * through the injected {@link PyToolsExec} and maps its output via the matching
  * pure parser. They are deliberately small and side-effect-light — all I/O is the
  * one exec call, so the diagnostics router's tests drive them with a canned exec
- * and need no `uv` (md/engineering/testing-and-build.md).
+ * and need no `uv`.
  *
  * **Graceful when tools are absent (hard requirement):** a missing binary
  * (`uv`/`ty`/`ruff`/`pyrefly` not installed → `notFound`) is never thrown; it
@@ -79,8 +79,7 @@ export interface FormatRunResult {
 }
 
 /**
- * Format one file in place with `ruff format <file>` (AGENTS.md "Scope", TODO
- * "Built-in editor" — format-on-save, off by default). ruff rewrites the file on
+ * Format one file in place with `ruff format <file>` when format-on-save is enabled. ruff rewrites the file on
  * disk; we report whether it changed anything so the editor can reload its buffer
  * only when needed. Graceful when ruff/`uv` is absent (`available: false`).
  */

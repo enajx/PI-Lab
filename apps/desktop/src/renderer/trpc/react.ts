@@ -9,7 +9,7 @@ import type { AppRouter } from "../../main/trpc/appRouter"
  * server reads flow through one `QueryClient`.
  *
  * Subscriptions are deliberately NOT routed through this React layer: over
- * `trpc-electron` they must consume observables (AGENTS.md Pitfalls #1), and the
+ * `trpc-electron` they must consume observables, and the
  * observable-driven path (the live terminal) keeps using the vanilla client in
  * `./client.ts`. This split is intentional and documented.
  */

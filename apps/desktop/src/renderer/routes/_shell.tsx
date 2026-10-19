@@ -26,11 +26,11 @@ import { WorkspaceRecoveryController } from "./_shell/components/WorkspaceRecove
 import { useTitleBarTrafficLights } from "./_shell/titleBar"
 
 /**
- * Pathless layout route — the default app surface (md/engineering/architecture.md (renderer)): a ROW of
+ * Pathless layout route — the default app surface: a ROW of
  * [sidebar | main]. The gray sidebar owns the window's top-left — its own header clears the
  * macOS traffic lights and holds the collapse toggle — and each page renders its header as the
  * top row of the main column (single header level, not a full-width bar). The content column is
- * a bounded flex child owning its own vertical scroll (AGENTS.md Pitfalls #3). `<Outlet />`.
+ * a bounded flex child owning its own vertical scroll. `<Outlet />`.
  *
  * Two global palettes are mounted here:
  *  - **⌘P command palette** (commands + projects) — opens from any surface.

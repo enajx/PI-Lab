@@ -41,8 +41,7 @@ if (typeof Element.prototype.scrollIntoView !== "function") {
 }
 
 // Renderer (jsdom) component tests: reset persisted state + unmount/reset the DOM between
-// tests so React Testing Library mounts and stored UI state don't leak across cases
-// (md/engineering/testing-and-build.md).
+// tests so React Testing Library mounts and stored UI state don't leak across cases.
 beforeEach(() => {
   globalThis.localStorage.clear()
   globalThis.sessionStorage.clear()

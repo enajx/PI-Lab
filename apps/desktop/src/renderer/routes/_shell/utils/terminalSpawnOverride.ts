@@ -1,5 +1,5 @@
 /**
- * Test seam (md/engineering/testing-and-build.md): let the E2E spawn the terminal with a deterministic
+ * Test seam: let the E2E spawn the terminal with a deterministic
  * program via URL query params (`?termcmd=…&termargs=<json-array>`), so the
  * harness can assert a known marker without typing into the grid. `termkind`
  * optionally exercises agent/TUI input encoding. In normal use no params are

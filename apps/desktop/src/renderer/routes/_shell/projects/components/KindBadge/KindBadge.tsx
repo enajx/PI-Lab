@@ -3,8 +3,7 @@ import { GitBranch, GitFork } from "lucide-react"
 import { useTranslate } from "../../../../../i18n/language"
 
 /**
- * Small badge surfacing the worktree policy outcome (md/engineering/architecture.md, agent
- * runtime) — branch (the project's main checkout) vs. an isolated worktree.
+ * Small badge surfacing the worktree policy outcome: branch (the project's main checkout) vs. an isolated worktree.
  * Extracted from the old project route so the project view and the central
  * panel's agent tabs can both show it.
  */

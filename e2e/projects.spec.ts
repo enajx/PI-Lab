@@ -8,7 +8,7 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E (md/engineering/testing-and-build.md) for the projects/workspaces feature: launch the
+ * Whole-app E2E for the projects/workspaces feature: launch the
  * real Electron build, open a temp git repo as a project via the `?openProject`
  * seam (so no native dialog is needed), then exercise the full flow —
  *   1. the project shows in the sidebar and opens DIRECTLY into the rich project
@@ -26,7 +26,7 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
  * dialogs, no synthetic keystrokes, no credentials.
  *
  * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun (md/engineering/testing-and-build.md (build & ship)); the repo `e2e` script runs Playwright's CLI through node.
+ * Bun; the repo `e2e` script runs Playwright's CLI through node.
  */
 
 const AGENT_MARKER = "AGENT-UI-OK"

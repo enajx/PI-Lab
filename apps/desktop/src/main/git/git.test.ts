@@ -1,5 +1,5 @@
 // Integration tests for the git wrapper against throwaway repos created with
-// real `git init` (md/engineering/testing-and-build.md). No mocks — these exercise the actual CLI.
+// real `git init`. No mocks — these exercise the actual CLI.
 import { execFile } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"

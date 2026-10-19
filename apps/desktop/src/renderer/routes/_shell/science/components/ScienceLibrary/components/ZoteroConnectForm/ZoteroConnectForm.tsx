@@ -35,8 +35,8 @@ interface ZoteroConnectFormProps {
 }
 
 /**
- * Connect form for the Library tab (AGENTS.md "Scope" — Zotero). A plain inline panel
- * (not a Radix dialog) so it renders and is assertable under jsdom (md/engineering/testing-and-build.md).
+ * Connect form for the Library tab. A plain inline panel
+ * (not a Radix dialog) so it renders and is assertable under jsdom.
  * In `web` mode it collects an API key (`type="password"`, never logged) + library; in
  * `local` mode the key is gone (the desktop API needs none) and an optional bridge token
  * unlocks file attachment. Both are sent only to the local main process and stored locally.

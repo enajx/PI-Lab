@@ -45,6 +45,7 @@ describe("getSettingsOrDefaults", () => {
       expect(result.caffeine).toEqual(DEFAULT_CAFFEINE_SETTINGS)
       expect(result.caffeine.mode).toBe("off")
       expect(result.caffeine.scope).toBe("system-only")
+      expect(result.projectTemplate.initializationMarkdownFiles).toEqual([])
       expect(result.projectTemplate.projectTypes.map((type) => [type.id, type.name])).toEqual([
         ["research", "Research project"],
         ["software", "Software project"],
@@ -65,6 +66,7 @@ describe("getSettingsOrDefaults", () => {
       db.insert(settings).values({ id: SETTINGS_ROW_ID, worktreePerAgent: true }).run()
       const result = getSettingsOrDefaults(db)
       expect(result.worktreePerAgent).toBe(true)
+      expect(result.projectTemplate.initializationMarkdownFiles).toEqual([])
     } finally {
       sqlite.close()
     }

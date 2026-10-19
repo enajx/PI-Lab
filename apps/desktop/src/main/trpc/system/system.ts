@@ -13,7 +13,7 @@ import { type EditorThemeImportResult, readEditorThemeFiles } from "./themeImpor
 
 /**
  * System router — small bridges to native OS surfaces that only the main process
- * can reach (md/engineering/architecture.md (process model)). Kept thin: each procedure validates nothing it
+ * can reach. Kept thin: each procedure validates nothing it
  * doesn't own and returns a plain, serializable result the renderer can act on.
  *
  * `pickDirectory` is the OS folder picker that backs the sidebar's "Add project"

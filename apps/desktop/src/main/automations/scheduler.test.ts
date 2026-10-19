@@ -1,4 +1,4 @@
-// Unit tests for the automations scheduler (AGENTS.md "Scope" / md/engineering/testing-and-build.md): a temp-file
+// Unit tests for the automations scheduler: a temp-file
 // SQLite DB with the real generated migrations, an INJECTED clock, and an
 // INJECTED fire function — no real time, no agents, no PTYs. We seed automations
 // directly, advance the clock, tick, and assert what fired and how nextRunAt

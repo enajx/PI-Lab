@@ -14,7 +14,7 @@ function folderName(folderPath: string): string {
 }
 
 /**
- * Library science tab (AGENTS.md "Scope" "Science tabs", P8d) — v1 is **connect +
+ * Library science tab — v1 is **connect +
  * browse**: connect a library source (a Zotero library via the local desktop API or
  * cloud Web API, or a local folder of PDFs — all stored locally) and browse it as a
  * **collections browser** (collections by default, drill into a collection's items).

@@ -1,14 +1,14 @@
 // @ts-check
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: electron-builder expands ${arch} for each target.
 /**
- * electron-builder configuration for the PI Lab desktop app (md/engineering/testing-and-build.md (build & ship), P11).
+ * electron-builder configuration for the PI Lab desktop app.
  *
  * Local builds use an ad-hoc signature when no signing identity is requested.
  * Production public builds require a Developer ID identity and notarization.
  * Notarization accepts a Keychain profile or Apple ID credentials.
  *
- * Native modules (`better-sqlite3`, `node-pty`) are the load-bearing concern
- * (AGENTS.md Pitfalls #4): the compiled main bundle does a bare `require("better-sqlite3")`
+ * Native modules (`better-sqlite3`, `node-pty`) need special packaging:
+ * the compiled main bundle does a bare `require("better-sqlite3")`
  * / `require("node-pty")`, and the pty-daemon child (run via ELECTRON_RUN_AS_NODE)
  * loads node-pty's `pty.node` + its sibling `spawn-helper` from disk. Native `.node`
  * files cannot be read from inside an asar archive, so both modules are listed in
@@ -138,11 +138,7 @@ const config = {
   // Native `.node` addons + node-pty's `spawn-helper` executable MUST live outside
   // the asar so they can be dlopen'd / exec'd at runtime.
   asarUnpack: ["**/node_modules/better-sqlite3/**", "**/node_modules/node-pty/**"],
-  // Ship the bundled project template alongside the app (exempt from the `files`
-  // md/ts exclusion globs) so packaged builds can first-run-seed the writable copy
-  // at `<process.resourcesPath>/template`.
   extraResources: [
-    { from: "resources/template", to: "template" },
     { from: "resources/bin/pilab", to: "bin/pilab" },
     // Runtime window/Dock/notification identity. `build:icons` stages the
     // selected channel icon here before every package command.

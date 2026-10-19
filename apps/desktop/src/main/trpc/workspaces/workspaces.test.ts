@@ -1,4 +1,4 @@
-// Integration tests for the workspaces router (md/engineering/testing-and-build.md): createCaller over
+// Integration tests for the workspaces router: createCaller over
 // a temp SQLite DB with real migrations, real temp git repos, an in-process
 // pty-daemon for launchAgent, and an injected fake agent. Full cleanup per test.
 import { existsSync } from "node:fs"

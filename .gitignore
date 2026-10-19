@@ -43,6 +43,13 @@ coverage
 .env.local
 !.bun-version
 
+# Local project notes linked from PI-Lab-private
+/AGENTS.md
+/CLAUDE.md
+/PROJECT.md
+/TODO.md
+/md/
+
 # Tooling caches
 .turbo
 .cache

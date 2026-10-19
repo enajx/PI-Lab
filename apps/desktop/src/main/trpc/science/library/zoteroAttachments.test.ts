@@ -1,4 +1,4 @@
-// Unit tests for the pure Zotero attachment resolver (md/engineering/testing-and-build.md). These
+// Unit tests for the pure Zotero attachment resolver. These
 // transform the loose `/items/{key}/children` payload and do on-disk path math, so they
 // get example tests for the real API shapes per link mode with an injected fake dataDir
 // (no homedir, no I/O).

@@ -1,5 +1,5 @@
 // Integration test for the terminal router via `createCallerFactory` — no
-// Electron window (md/engineering/testing-and-build.md). The test owns an in-process `DaemonServer` on
+// Electron window. The test owns an in-process `DaemonServer` on
 // a temp socket and a `DaemonClient` connected to it, injected as the router's
 // context. This exercises the real router → real daemon client → real PTY path;
 // only the *transport* (caller vs IPC) and the daemon's *home* (in-process vs
