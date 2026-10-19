@@ -163,6 +163,22 @@
   border-top: 1px solid #e8e8e3;
 }
 
+.tray-update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #526c56;
+  font-size: 11px;
+}
+
+.tray-update button {
+  padding: 4px 8px;
+  border: 1px solid #cbdccc;
+  background: #e4efe4;
+  color: #3e5e44;
+}
+
 .tray-primary-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

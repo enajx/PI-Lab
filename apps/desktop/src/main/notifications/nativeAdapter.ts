@@ -27,10 +27,10 @@ export interface PlatformNotificationDependencies {
  * Construct the Electron-facing adapter behind injectable platform seams. The
  * native banner stays silent. macOS owns sender identity through the application
  * bundle; passing Electron's `icon` option there would add a second content
- * image. Other platforms receive the explicit Pi tile.
+ * image. Other platforms receive the icon chosen when each banner is sent.
  */
 export function createNativeNotificationAdapter(
-  iconPath: string | null,
+  getIconPath: () => string | null,
   dependencies: PlatformNotificationDependencies,
 ): NativeNotificationAdapter {
   const retainedNotifications =
@@ -38,6 +38,7 @@ export function createNativeNotificationAdapter(
   return {
     isSupported: dependencies.isSupported,
     deliver: (input: NativeNotificationInput, handlers: NativeNotificationHandlers): void => {
+      const iconPath = getIconPath()
       const notification = dependencies.create({
         ...input,
         ...(iconPath && dependencies.platform !== "darwin" ? { icon: iconPath } : {}),

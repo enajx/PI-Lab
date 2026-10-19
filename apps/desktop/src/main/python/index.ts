@@ -12,10 +12,12 @@ export {
 } from "./globalEnvironments"
 export {
   environmentDirForInterpreter,
+  inspectPythonRuntime,
   interpreterCandidates,
   isUvProject,
   livePythonProbe,
   livePythonRuntimeResolver,
+  liveQuickPythonRuntimeResolver,
   type PythonEnvironmentSource,
   type PythonProbe,
   type PythonProbeResult,

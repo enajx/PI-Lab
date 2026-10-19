@@ -101,6 +101,14 @@ export function TrayPopover() {
       ) : null}
 
       <footer className="tray-footer">
+        {snapshot?.updateVersion ? (
+          <div className="tray-update">
+            <span>Ready to update to {snapshot.updateVersion}</span>
+            <button onClick={() => bridge?.restartToUpdate()} type="button">
+              Restart to Update
+            </button>
+          </div>
+        ) : null}
         <div className="tray-primary-actions">
           <button
             className="tray-open-app"

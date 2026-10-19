@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest"
-import { applyMacDockIcon, resolveAppIconPath } from "./appIcon"
+import { applyMacDockIcon, applyOptionalIcon, resolveAppIconPath } from "./appIcon"
 
 describe("resolveAppIconPath", () => {
   test("uses the repository master during development", () => {
@@ -20,6 +20,20 @@ describe("resolveAppIconPath", () => {
 
     expect(path).toBe("/repo/icons/icon.png")
     expect(existing).toEqual(["/repo/icons/icon.png"])
+  })
+
+  test("uses the Alpha icon during source development", () => {
+    expect(
+      resolveAppIconPath(
+        {
+          isPackaged: false,
+          resourcesPath: "/Electron/Resources",
+          appPath: "/repo/apps/desktop",
+          channel: "alpha",
+        },
+        { exists: () => true },
+      ),
+    ).toBe("/repo/icons/icon-alpha.png")
   })
 
   test("uses the packaged extra resource without consulting the source tree", () => {
@@ -72,4 +86,13 @@ describe("applyMacDockIcon", () => {
     expect(applyMacDockIcon("/repo/icons/icon.png", "darwin", { setIcon }, { warn })).toBe("failed")
     expect(warn).toHaveBeenCalledWith("[pi-lab] Dock icon unavailable: invalid image")
   })
+})
+
+test("a native window icon failure is reported without rejecting a saved choice", () => {
+  const warn = vi.fn()
+  const setIcon = vi.fn(() => {
+    throw new Error("window closed")
+  })
+  expect(applyOptionalIcon("window", "/icons/new.png", { setIcon }, { warn })).toBe("failed")
+  expect(warn).toHaveBeenCalledWith("[pi-lab] window icon unavailable: window closed")
 })

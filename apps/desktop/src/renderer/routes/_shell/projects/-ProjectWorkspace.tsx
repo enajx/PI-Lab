@@ -3,7 +3,7 @@ import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { X } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
 import { ProjectTypeChoice } from "../../../components/ProjectTypeChoice"
@@ -160,6 +160,14 @@ export function ProjectWorkspace({
   const ensureMainRef = useRef(ensureMain.mutateAsync)
   ensureMainRef.current = ensureMain.mutateAsync
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const [fileFinderRequested, setFileFinderRequested] = useState(false)
+  // The project heading appears before its workspace is ready. Keep an early ⌘F
+  // request until the central panel can open the file finder.
+  useLayoutEffect(() => {
+    const requestFileFinder = () => setFileFinderRequested(true)
+    window.addEventListener("pi-lab:open-project-file-finder", requestFileFinder)
+    return () => window.removeEventListener("pi-lab:open-project-file-finder", requestFileFinder)
+  }, [])
   useEffect(() => {
     // Fire on every effect run; only the still-active run applies the result.
     // Under React StrictMode's dev double-invoke the first run is cleaned up
@@ -451,6 +459,8 @@ export function ProjectWorkspace({
               controller={controller}
               client={client}
               workspaceId={workspaceId}
+              openFileFinder={fileFinderRequested}
+              onFileFinderOpened={() => setFileFinderRequested(false)}
               projectName={project?.name}
               settings={editorSettings}
               gitAvailable={gitAvailable}

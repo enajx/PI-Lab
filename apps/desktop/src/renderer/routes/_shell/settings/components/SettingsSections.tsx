@@ -95,6 +95,7 @@ export function GeneralSection() {
   )
   const confirmOnQuit = settingsQuery.data?.confirmOnQuit ?? true
   const keepRunningAfterClose = settingsQuery.data?.keepRunningAfterClose ?? true
+  const publicUpdateChannel = settingsQuery.data?.publicUpdateChannel ?? "stable"
   const [restoreProjectTabs, setRestoreProjectTabs] = useRestoreProjectTabs()
 
   return (
@@ -110,6 +111,19 @@ export function GeneralSection() {
         value={language}
         options={LANGUAGES.map((item) => ({ value: item.code, label: item.label }))}
         onChange={(next) => setLanguage(next as InterfaceLanguage)}
+      />
+      <SelectField
+        testId="settings-update-channel"
+        label="Update channel"
+        description="Choose Stable or Beta for the public PI Lab app. Restart PI Lab after changing channels. Local development builds do not auto-update."
+        value={publicUpdateChannel}
+        options={[
+          { value: "stable", label: "Stable" },
+          { value: "beta", label: "Beta" },
+        ]}
+        onChange={(next) =>
+          updateGeneral.mutate({ publicUpdateChannel: next as "stable" | "beta" })
+        }
       />
       <ToggleField
         testId="settings-keep-running-after-close"

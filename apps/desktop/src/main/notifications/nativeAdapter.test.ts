@@ -14,7 +14,7 @@ describe("createNativeNotificationAdapter", () => {
     "win32",
   ] as const)("passes the resolved Pi tile to native notification construction on %s", (platform) => {
     const harness = notificationHarness()
-    const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+    const adapter = createNativeNotificationAdapter(() => "/repo/icons/icon.png", {
       platform,
       isSupported: () => true,
       create: harness.create,
@@ -36,7 +36,7 @@ describe("createNativeNotificationAdapter", () => {
 
   test("omits a content icon on macOS so the app bundle provides sender identity once", () => {
     const harness = notificationHarness()
-    const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+    const adapter = createNativeNotificationAdapter(() => "/repo/icons/icon.png", {
       platform: "darwin",
       isSupported: () => true,
       create: harness.create,
@@ -56,7 +56,7 @@ describe("createNativeNotificationAdapter", () => {
 
   test("omits the icon when the asset could not be resolved", () => {
     const harness = notificationHarness()
-    const adapter = createNativeNotificationAdapter(null, {
+    const adapter = createNativeNotificationAdapter(() => null, {
       platform: "win32",
       isSupported: () => true,
       create: harness.create,
@@ -74,11 +74,30 @@ describe("createNativeNotificationAdapter", () => {
     })
   })
 
+  test("uses the current icon for each notification after Appearance changes", () => {
+    const harness = notificationHarness()
+    let iconPath = "/repo/icons/first.png"
+    const adapter = createNativeNotificationAdapter(() => iconPath, {
+      platform: "linux",
+      isSupported: () => true,
+      create: harness.create,
+    })
+    const input = { title: "Agent waiting", body: "Codex needs input", silent: true as const }
+    const handlers = { onClick: vi.fn(), onFailure: vi.fn() }
+
+    adapter.deliver(input, handlers)
+    iconPath = "/repo/icons/second.png"
+    adapter.deliver(input, handlers)
+
+    expect(harness.create.mock.calls[0]?.[0].icon).toBe("/repo/icons/first.png")
+    expect(harness.create.mock.calls[1]?.[0].icon).toBe("/repo/icons/second.png")
+  })
+
   test("wires click and failure handlers through the native instance", () => {
     const harness = notificationHarness()
     const onClick = vi.fn()
     const onFailure = vi.fn()
-    const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+    const adapter = createNativeNotificationAdapter(() => "/repo/icons/icon.png", {
       platform: "linux",
       isSupported: () => true,
       create: harness.create,
@@ -98,7 +117,7 @@ describe("createNativeNotificationAdapter", () => {
     const harness = notificationHarness()
     const retained = new Set<ReturnType<typeof harness.create>>()
     const onClick = vi.fn()
-    const adapter = createNativeNotificationAdapter("/repo/icons/icon.png", {
+    const adapter = createNativeNotificationAdapter(() => "/repo/icons/icon.png", {
       platform: "win32",
       isSupported: () => true,
       create: harness.create,

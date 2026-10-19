@@ -108,3 +108,34 @@ test("can save text that grows beyond the bounded opening size", async () => {
     status: "saved",
   })
 })
+
+test("Save As creates a new file and verifies its contents", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-quick-edit-"))
+  dirs.push(dir)
+  const path = join(dir, "new.py")
+  const files = new QuickEditFiles()
+  expect(await files.saveUntitled(path, "print('new')\n")).toBe(path)
+  expect(await readFile(path, "utf8")).toBe("print('new')\n")
+})
+
+test("Save As can replace an existing regular file after the native dialog accepts it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-quick-edit-"))
+  dirs.push(dir)
+  const path = join(dir, "notes.txt")
+  await writeFile(path, "before")
+  const files = new QuickEditFiles()
+  expect(await files.saveUntitled(path, "after")).toBe(path)
+  expect(await readFile(path, "utf8")).toBe("after")
+})
+
+test("Save As refuses symlinks instead of following them", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-quick-edit-"))
+  dirs.push(dir)
+  const path = join(dir, "notes.txt")
+  const outside = join(dir, "outside.txt")
+  await writeFile(outside, "safe")
+  await symlink(outside, path)
+  const files = new QuickEditFiles()
+  await expect(files.saveUntitled(path, "changed")).rejects.toThrow("regular file")
+  expect(await readFile(outside, "utf8")).toBe("safe")
+})

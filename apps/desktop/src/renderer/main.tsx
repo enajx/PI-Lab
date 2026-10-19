@@ -39,7 +39,13 @@ function QuickEditOpenController() {
         return
       }
       void bridge.current().then((target) => {
-        if (target && !window.location.hash.startsWith("#/projects/")) open(target)
+        if (
+          target &&
+          !window.location.hash.startsWith("#/projects/") &&
+          !window.location.hash.startsWith("#/settings")
+        ) {
+          open(target)
+        }
       })
     })
     return () => {

@@ -21,6 +21,10 @@ test.beforeEach(async () => {
     args: [mainEntry],
     env: {
       ...process.env,
+      GIT_AUTHOR_NAME: "PI Lab Test",
+      GIT_AUTHOR_EMAIL: "test@pi-lab.local",
+      GIT_COMMITTER_NAME: "PI Lab Test",
+      GIT_COMMITTER_EMAIL: "test@pi-lab.local",
       PI_LAB_TEST_MODE: "1",
       PI_LAB_DATA_DIR: dataDir,
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),

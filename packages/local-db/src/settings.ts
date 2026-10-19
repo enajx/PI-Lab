@@ -46,6 +46,7 @@ function defaultSettings(): Settings {
     agentPresets: [],
     confirmOnQuit: true,
     keepRunningAfterClose: true,
+    publicUpdateChannel: "stable",
     knownTeams: [],
     worktreePerAgent: false,
     editor: DEFAULT_EDITOR_SETTINGS,
@@ -131,6 +132,8 @@ export function getSettingsOrDefaults(db: PiLabDatabase): Settings {
   if (!row) return defaultSettings()
   return {
     ...row,
+    publicUpdateChannel:
+      String(row.publicUpdateChannel) === "nightly" ? "stable" : row.publicUpdateChannel,
     editor: editorSettingsWithDefaults(row.editor),
     notifications: notificationSettingsWithDefaults(row.notifications),
     projectTemplate: projectTemplateWithDefaults(row.projectTemplate),

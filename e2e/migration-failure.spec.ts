@@ -35,16 +35,20 @@ for (const fixture of ["partial schema", "unreadable file"]) {
       dialog.showErrorBox = (title, content) => require('node:fs').writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({title, content}));
       require(${JSON.stringify(resolve("apps/desktop/out/main/index.js"))});`,
       )
-      await execFileAsync(electronPath, [launcher], {
-        env: {
-          ...process.env,
-          ELECTRON_RUN_AS_NODE: "",
-          PI_LAB_TEST_MODE: "1",
-          PI_LAB_DATA_DIR: dir,
-          PI_LAB_SOCKET_PATH: join(dir, "daemon.sock"),
+      await execFileAsync(
+        electronPath,
+        process.platform === "linux" ? ["--no-sandbox", launcher] : [launcher],
+        {
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: "",
+            PI_LAB_TEST_MODE: "1",
+            PI_LAB_DATA_DIR: dir,
+            PI_LAB_SOCKET_PATH: join(dir, "daemon.sock"),
+          },
+          timeout: 20_000,
         },
-        timeout: 20_000,
-      })
+      )
       const dialog = JSON.parse(await readFile(resultPath, "utf8"))
       expect(dialog.title).toContain("database")
       expect(dialog.content).toContain("backup")

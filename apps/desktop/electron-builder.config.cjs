@@ -3,11 +3,9 @@
 /**
  * electron-builder configuration for the PI Lab desktop app (md/engineering/testing-and-build.md (build & ship), P11).
  *
- * This is a `.cjs` (not JSON) so we can *gate code-signing/notarization behind
- * env*: a local developer with no Apple cert must still get a launchable build.
- * When the signing env vars are unset we emit an ad-hoc-signed local build
- * (`identity: "-"`, notarization skipped); when they're set, electron-builder
- * uses the configured Developer ID identity and notarizes.
+ * Local builds use an ad-hoc signature when no signing identity is requested.
+ * Production public builds require a Developer ID identity and notarization.
+ * Notarization accepts a Keychain profile or Apple ID credentials.
  *
  * Native modules (`better-sqlite3`, `node-pty`) are the load-bearing concern
  * (AGENTS.md Pitfalls #4): the compiled main bundle does a bare `require("better-sqlite3")`
@@ -22,14 +20,29 @@
  * `./drizzle`), so the whole `out/**` tree is packaged preserving that layout.
  */
 
+const { channelDefinition } = require("./scripts/package-channel.cjs")
+const { publicReleaseDefinition, publicUpdateUrl } = require("./scripts/public-release.cjs")
+const publicReleaseChannel = process.env.PI_LAB_PUBLIC_RELEASE_CHANNEL
+const publicRelease = publicReleaseChannel
+  ? publicReleaseDefinition(publicReleaseChannel, process.env.PI_LAB_RELEASE_VERSION)
+  : null
+const testPublicRelease = process.env.PI_LAB_UPDATE_TEST_BUILD === "1"
 const SIGN =
+  Boolean(publicRelease && !testPublicRelease) ||
   Boolean(process.env.CSC_LINK) ||
   Boolean(process.env.CSC_KEY_PASSWORD) ||
   Boolean(process.env.PI_LAB_FORCE_SIGN)
-
 const NOTARIZE = Boolean(
-  process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID,
+  (process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID) ||
+    (process.env.APPLE_KEYCHAIN && process.env.APPLE_KEYCHAIN_PROFILE),
 )
+const { channel, productName, appId } = publicRelease
+  ? channelDefinition("stable")
+  : channelDefinition(process.env.PI_LAB_CHANNEL)
+const iconChannel = publicRelease?.iconChannel ?? channel
+const updateUrl = publicRelease
+  ? publicUpdateUrl(process.env.PI_LAB_UPDATE_URL, testPublicRelease)
+  : null
 
 // Keep only compiled app outputs and audited runtime dependencies.
 // Put this list inside each platform files array. A global files FileSet plus
@@ -43,7 +56,7 @@ const APP_FILES = [
   // These are the emitted main/daemon externals and their runtime dependency
   // tree. validate:package rejects a new external or transitive dependency
   // missing from this list before electron-builder runs.
-  "!**/node_modules/!(@jsquash|@trpc|@xterm|better-sqlite3|copy-anything|drizzle-orm|is-what|node-pty|omggif|superjson|trpc-electron|wasm-feature-detect|zod)/**",
+  "!**/node_modules/!(@jsquash|@trpc|@xterm|argparse|better-sqlite3|builder-util-runtime|copy-anything|debug|drizzle-orm|electron-updater|fs-extra|graceful-fs|is-what|js-yaml|jsonfile|lazy-val|lodash.escaperegexp|lodash.isequal|ms|node-pty|omggif|sax|semver|superjson|tiny-typed-emitter|trpc-electron|universalify|wasm-feature-detect|zod)/**",
   "!**/node_modules/@jsquash/!(webp)/**",
   "!**/node_modules/@trpc/!(server)/**",
   "!**/node_modules/@xterm/!(headless)/**",
@@ -61,44 +74,65 @@ const APP_FILES = [
 
 /** @type {import("electron-builder").Configuration} */
 const config = {
-  appId: "com.pi-lab.desktop",
-  productName: "PI Lab",
-  fileAssociations: [
-    {
-      ext: [
-        "txt",
-        "md",
-        "py",
-        "pyi",
-        "cpp",
-        "cc",
-        "cxx",
-        "c",
-        "h",
-        "hpp",
-        "hxx",
-        "js",
-        "ts",
-        "tsx",
-        "jsx",
-        "json",
-        "yaml",
-        "yml",
-        "toml",
-        "sh",
-        "rs",
-      ],
-      name: "Text source file",
-      role: "Editor",
-      rank: "Alternate",
-    },
-  ],
+  appId,
+  productName,
+  extraMetadata: {
+    piLabChannel: channel,
+    ...(publicRelease
+      ? {
+          piLabPublicRelease: true,
+          piLabReleaseChannel: publicRelease.channel,
+          version: publicRelease.version,
+        }
+      : {}),
+  },
+  ...(publicRelease
+    ? { generateUpdatesFilesForAllChannels: false, forceCodeSigning: !testPublicRelease }
+    : {}),
+  fileAssociations:
+    channel === "stable"
+      ? [
+          {
+            ext: [
+              "txt",
+              "md",
+              "py",
+              "pyi",
+              "cpp",
+              "cc",
+              "cxx",
+              "c",
+              "h",
+              "hpp",
+              "hxx",
+              "js",
+              "ts",
+              "tsx",
+              "jsx",
+              "json",
+              "yaml",
+              "yml",
+              "toml",
+              "sh",
+              "rs",
+            ],
+            name: "Text source file",
+            role: "Editor",
+            rank: "Alternate",
+          },
+        ]
+      : [],
   // Both native modules use N-API. Validate the installed binaries under Node
   // and Electron before packaging instead of rebuilding or swapping ABIs.
   npmRebuild: false,
   buildDependenciesFromSource: false,
   directories: {
-    output: "release",
+    // Direct electron-builder invocations stay away from each channel alias.
+    output:
+      process.env.PI_LAB_PACKAGE_STAGE ||
+      (publicRelease
+        ? `release/.direct-public-${publicRelease.channel}`
+        : `release/.direct-${channel}`),
     buildResources: "build",
   },
   // Native `.node` addons + node-pty's `spawn-helper` executable MUST live outside
@@ -110,24 +144,48 @@ const config = {
   extraResources: [
     { from: "resources/template", to: "template" },
     { from: "resources/bin/pilab", to: "bin/pilab" },
-    // Runtime window/Dock/notification identity. `build:icons` copies the
-    // canonical `icons/icon.png` here before every package command.
+    // Runtime window/Dock/notification identity. `build:icons` stages the
+    // selected channel icon here before every package command.
     { from: "build/icon.png", to: "pi-lab-icon.png" },
+    ...(publicRelease?.channel === "beta"
+      ? [
+          {
+            from: "../../icons-temp/matplotlib-colormaps-3.11.2.json",
+            to: "app-icon-palettes.json",
+          },
+        ]
+      : []),
+    iconChannel === "stable"
+      ? {
+          from: "src/renderer/routes/_shell/settings/components/AppIconGallery/icons",
+          to: "app-icon-variants",
+          filter: ["joyplot-*.png", "pi-*.png"],
+        }
+      : {
+          from: "src/renderer/routes/_shell/settings/components/AppIconGallery/channel-icons",
+          to: "app-icon-channel-variants",
+          filter: [`joyplot-*-${iconChannel}*.png`, `pi-*-${iconChannel}*.png`],
+        },
   ],
   // Keep node-pty's spawn-helper executable bit after it's copied into the package
   // (asar packing can drop it; node-pty exec()s this file for every PTY).
+  beforePack: "./scripts/electron-builder-before-pack.cjs",
   afterPack: "./scripts/electron-builder-after-pack.cjs",
   mac: {
-    extendInfo: {
-      CFBundleDocumentTypes: [
-        {
-          CFBundleTypeName: "Plain text",
-          CFBundleTypeRole: "Editor",
-          LSHandlerRank: "Alternate",
-          LSItemContentTypes: ["public.plain-text"],
-        },
-      ],
-    },
+    ...(channel === "stable"
+      ? {
+          extendInfo: {
+            CFBundleDocumentTypes: [
+              {
+                CFBundleTypeName: "Plain text",
+                CFBundleTypeRole: "Editor",
+                LSHandlerRank: "Alternate",
+                LSItemContentTypes: ["public.plain-text"],
+              },
+            ],
+          },
+        }
+      : {}),
     files: [
       ...APP_FILES,
       "!**/node_modules/better-sqlite3/prebuilds/!(darwin-${arch}).node",
@@ -140,21 +198,30 @@ const config = {
         ...["FEMININE", "MASCULINE", "NEUTER"].map((variant) => `${locale}_${variant}`),
       ],
     ),
-    target: [
-      { target: "dmg", arch: ["arm64"] },
-      { target: "dir", arch: ["arm64"] },
-    ],
+    target: publicRelease
+      ? [
+          { target: "dmg", arch: ["arm64"] },
+          { target: "zip", arch: ["arm64"] },
+        ]
+      : [
+          { target: "dmg", arch: ["arm64"] },
+          { target: "dir", arch: ["arm64"] },
+        ],
     category: "public.app-category.developer-tools",
     icon: "build/icon.icns",
+    type: publicRelease && !testPublicRelease ? "distribution" : undefined,
     hardenedRuntime: true,
     gatekeeperAssess: false,
     // Electron's macOS Notification API requires a code-signed application.
     // Ad-hoc signing keeps local packages notification-capable without requiring
     // a Developer ID certificate; distribution builds use the real identity.
     identity: SIGN ? undefined : "-",
+    // The app seals these PNG resources in its top-level signature. Signing
+    // each preview as a separate binary would launch codesign ~19,000 times.
+    signIgnore: ["/Resources/app-icon-(?:channel-)?variants/.*\\.png$"],
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
-    notarize: NOTARIZE ? { teamId: /** @type {string} */ (process.env.APPLE_TEAM_ID) } : false,
+    notarize: NOTARIZE,
   },
   linux: {
     files: [
@@ -179,8 +246,10 @@ const config = {
     // time (we don't generate .ico locally — no Windows tooling on the dev host).
     icon: "build/icon.png",
   },
-  // No auto-update / publishing surface (local-only, AGENTS.md "Dropped surfaces" / Pitfalls #6).
-  publish: null,
+  // Public release metadata is generated locally. The packaging command never uploads.
+  publish: publicRelease
+    ? { provider: "generic", url: updateUrl, channel: publicRelease.updaterChannel }
+    : null,
 }
 
 module.exports = config

@@ -4,9 +4,9 @@ import { createNativeNotificationAdapter } from "./nativeAdapter"
 import type { AppFocusAdapter, NativeNotificationAdapter } from "./service"
 
 export function createElectronNativeNotificationAdapter(
-  iconPath: string | null,
+  getIconPath: () => string | null,
 ): NativeNotificationAdapter {
-  return createNativeNotificationAdapter(iconPath, {
+  return createNativeNotificationAdapter(getIconPath, {
     platform: process.platform,
     isSupported: () => Notification.isSupported(),
     create: (input) => new Notification(input),

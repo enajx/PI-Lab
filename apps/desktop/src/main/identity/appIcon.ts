@@ -1,9 +1,12 @@
 import { join, resolve } from "node:path"
+import type { NativeImage } from "electron"
+import type { PiLabChannel } from "./channel"
 
 export interface AppIconPathContext {
   isPackaged: boolean
   resourcesPath: string
   appPath: string
+  channel?: PiLabChannel
 }
 
 export interface AppIconFileSystem {
@@ -14,11 +17,34 @@ export interface DockIconAdapter {
   setIcon: (path: string) => void
 }
 
+export interface MacDockIconAdapter {
+  setIcon: (image: string | NativeImage) => void
+}
+
 export interface AppIdentityLogger {
   warn: (message: string) => void
 }
 
 export type DockIconOutcome = "applied" | "failed" | "skipped"
+
+/** Apply a runtime icon on an optional native surface without losing the saved choice. */
+export function applyOptionalIcon(
+  surface: string,
+  iconPath: string,
+  target: DockIconAdapter | null,
+  logger: AppIdentityLogger,
+): DockIconOutcome {
+  if (!target) return "skipped"
+  try {
+    target.setIcon(iconPath)
+    return "applied"
+  } catch (error) {
+    logger.warn(
+      `[pi-lab] ${surface} icon unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    )
+    return "failed"
+  }
+}
 
 /**
  * Resolve the one canonical Pi tile for main-process surfaces.
@@ -33,7 +59,15 @@ export function resolveAppIconPath(
 ): string | null {
   const candidate = context.isPackaged
     ? join(context.resourcesPath, "pi-lab-icon.png")
-    : resolve(context.appPath, "..", "..", "icons", "icon.png")
+    : resolve(
+        context.appPath,
+        "..",
+        "..",
+        "icons",
+        context.channel === "alpha" || context.channel === "beta"
+          ? `icon-${context.channel}.png`
+          : "icon.png",
+      )
   return fileSystem.exists(candidate) ? candidate : null
 }
 
@@ -42,9 +76,9 @@ export function resolveAppIconPath(
  * still owned by electron-builder's generated application bundle icon.
  */
 export function applyMacDockIcon(
-  iconPath: string | null,
+  iconPath: string | NativeImage | null,
   platform: NodeJS.Platform,
-  dock: DockIconAdapter | null,
+  dock: MacDockIconAdapter | null,
   logger: AppIdentityLogger,
 ): DockIconOutcome {
   if (platform !== "darwin" || !iconPath || !dock) return "skipped"

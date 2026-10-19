@@ -6,7 +6,8 @@ import {
   type EditorSettings,
   settings,
 } from "@pi-lab/local-db"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { onPublicUpdateChannelChanged } from "../../updates/selection"
 import { createHarness, type Harness } from "../testHarness"
 
 // Integration tests for the settings router over a real migrated SQLite DB
@@ -242,6 +243,42 @@ describe("settings.updateEditor", () => {
 })
 
 describe("settings.updateGeneral", () => {
+  it("moves a saved Nightly choice to Stable before starting updates", async () => {
+    harness.db
+      .insert(settings)
+      .values({ id: 1, publicUpdateChannel: "nightly" as "beta", updatedAt: 1 })
+      .run()
+    expect((await harness.caller.settings.get()).publicUpdateChannel).toBe("stable")
+    await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    expect(harness.db.select().from(settings).get()?.publicUpdateChannel).toBe("stable")
+  })
+
+  it("notifies the running updater only when the selected channel changes", async () => {
+    const changed = vi.fn()
+    const unsubscribe = onPublicUpdateChannelChanged(changed)
+    await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    await harness.caller.settings.updateGeneral({ publicUpdateChannel: "stable" })
+    expect(changed).not.toHaveBeenCalled()
+    await harness.caller.settings.updateGeneral({ publicUpdateChannel: "beta" })
+    expect(changed).toHaveBeenCalledExactlyOnceWith("beta")
+    unsubscribe()
+  })
+
+  it("defaults to Stable and persists a public update channel without changing other settings", async () => {
+    expect((await harness.caller.settings.get()).publicUpdateChannel).toBe("stable")
+    await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    const updated = await harness.caller.settings.updateGeneral({ publicUpdateChannel: "beta" })
+    expect(updated.publicUpdateChannel).toBe("beta")
+    expect(updated.confirmOnQuit).toBe(false)
+    expect((await harness.caller.settings.get()).publicUpdateChannel).toBe("beta")
+    await expect(
+      harness.caller.settings.updateGeneral({ publicUpdateChannel: "nightly" as "stable" }),
+    ).rejects.toThrow()
+    await expect(
+      harness.caller.settings.updateGeneral({ publicUpdateChannel: "preview" as "stable" }),
+    ).rejects.toThrow()
+  })
+
   it("keeps the app running after window close by default and persists an opt-out", async () => {
     expect((await harness.caller.settings.get()).keepRunningAfterClose).toBe(true)
     const updated = await harness.caller.settings.updateGeneral({ keepRunningAfterClose: false })

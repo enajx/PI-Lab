@@ -5,8 +5,8 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router"
-import { render, screen } from "@testing-library/react"
-import { describe, expect, test } from "vitest"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../test/fakeTrpcClient"
 import { SettingsView } from "./settings/-SettingsView"
@@ -63,5 +63,38 @@ describe("SettingsView", () => {
     expect(await screen.findByTestId("settings-section-appearance")).toBeTruthy()
     expect(screen.getByTestId("appearance-advanced-editor-typography")).toBeTruthy()
     expect(screen.getByTestId("settings-nav-appearance").getAttribute("data-active")).toBe("true")
+  })
+
+  test("shows a return error when the editor file was removed while Settings was open", async () => {
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "settings.get": () => ({ confirmOnQuit: true }),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: SettingsView })
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({
+        initialEntries: ["/?section=quick-editor&returnTarget=missing"],
+      }),
+    })
+    vi.stubGlobal("piLab", {
+      quickEdit: { resolveRoute: vi.fn().mockRejectedValue(new Error("File missing")) },
+    })
+    try {
+      render(
+        <AppProviders client={client} queryClient={queryClient}>
+          {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+          <RouterProvider router={router as any} />
+        </AppProviders>,
+      )
+
+      fireEvent.click(await screen.findByTestId("settings-back"))
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Could not return to the editor",
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

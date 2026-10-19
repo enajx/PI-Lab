@@ -20,6 +20,20 @@ const desktop = join(dirname(mainEntry), "..", "..")
 const electronPath = createRequire(join(desktop, "package.json"))("electron") as string
 const execFileAsync = promisify(execFile)
 
+/** Clicking Quit closes its own Playwright page before the click promise can settle. */
+async function quitFromTray(
+  app: ElectronApplication,
+  tray: Awaited<ReturnType<ElectronApplication["firstWindow"]>>,
+): Promise<void> {
+  const quit = tray.getByRole("button", { name: "Quit" })
+  await expect(quit).toBeVisible()
+  const closed = app.waitForEvent("close")
+  const click = quit.click().catch((error: unknown) => {
+    if (!String(error).includes("Target page, context or browser has been closed")) throw error
+  })
+  await Promise.all([closed, click])
+}
+
 /** A hidden login launch keeps the full services running and opens from its real popover. */
 test("hidden startup opens PI Lab from the background tray", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-lab-background-tray-"))
@@ -91,9 +105,7 @@ test("hidden startup opens PI Lab from the background tray", async () => {
     })
     await fullAgain.evaluate(() => window.close())
     const quitTray = await finalPopover
-    const closed = app.waitForEvent("close")
-    await quitTray.getByRole("button", { name: "Quit" }).click()
-    await closed
+    await quitFromTray(app, quitTray)
     app = null
   } finally {
     await app?.close()
@@ -203,9 +215,7 @@ test("working project appears in the tray and opens its full project view", asyn
     })
     await full.evaluate(() => window.close())
     const quitTray = await lastTray
-    const closed = app.waitForEvent("close")
-    await quitTray.getByRole("button", { name: "Quit" }).click()
-    await closed
+    await quitFromTray(app, quitTray)
     app = null
   } finally {
     await app?.close()

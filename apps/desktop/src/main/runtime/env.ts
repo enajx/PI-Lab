@@ -10,8 +10,7 @@ export const isDev = process.env.NODE_ENV === "development"
 /**
  * Test mode (`PI_LAB_TEST_MODE=1`) relaxes interactive behavior so the smoke
  * harness can run many instances in parallel and assert deterministically:
- * single-instance lock is skipped and auto-update/telemetry stay off (neither
- * exists yet — this just reserves the seam).
+ * single-instance lock is skipped and public auto-update stays off.
  */
 export const isTestMode = process.env.PI_LAB_TEST_MODE === "1"
 

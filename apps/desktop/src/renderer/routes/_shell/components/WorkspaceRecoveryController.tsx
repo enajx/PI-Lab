@@ -2,11 +2,20 @@ import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { Button } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import type { AppIconBridge } from "../../../../shared/appIcon"
+import type { BackgroundTrayBridge } from "../../../../shared/backgroundTray"
 import type { QuickEditBridge } from "../../../../shared/quickEdit"
 import type { ShutdownBridge, ShutdownRequest } from "../../../../shared/shutdown"
 import { drainFileOperations } from "../../../Editor/hooks/useEditorBuffers/fileOperations"
 import { useTranslate } from "../../../i18n/language"
 import { readRestoreProjectTabs, useRestoreProjectTabs } from "../../../preferences/preferences"
+import {
+  discardQuickDrafts,
+  markQuickBufferSaved,
+  readDirtyQuickBuffers,
+  readUntitledDraft,
+  writeUntitledDraft,
+} from "../../../QuickEditor/quickEditorState"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { closeDiscardedBuffers, saveProjectBuffer } from "../projects/-workspaceEditorOperations"
 import { type AffectedBuffer, isDirtyBuffer } from "../projects/-workspaceRecovery"
@@ -21,6 +30,8 @@ declare global {
       getPathForFile?: (file: File) => string
       setInterfaceLanguage?: (language: string) => void
       quickEdit?: QuickEditBridge
+      backgroundTray?: BackgroundTrayBridge
+      appIcon?: AppIconBridge
     }
   }
 }
@@ -44,6 +55,7 @@ export function WorkspaceRecoveryController() {
   const pending = useRef<ShutdownRequest | null>(null)
   const [affected, setAffected] = useState<AffectedBuffer[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [untitledLocationRequested, setUntitledLocationRequested] = useState(false)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
 
@@ -65,7 +77,11 @@ export function WorkspaceRecoveryController() {
         if (pending.current?.requestId !== next.requestId) return
         store.flush()
         const unprotected = store.affected(readRestoreProjectTabs())
-        if (unprotected.length === 0) {
+        if (
+          unprotected.length === 0 &&
+          readDirtyQuickBuffers().length === 0 &&
+          !readUntitledDraft()
+        ) {
           bridge.respond({ requestId: next.requestId, allow: true })
           pending.current = null
           setRequest(null)
@@ -86,6 +102,7 @@ export function WorkspaceRecoveryController() {
     setRequest(null)
     setAffected([])
     setError(null)
+    setUntitledLocationRequested(false)
   }
 
   const currentAffected = (): AffectedBuffer[] => {
@@ -130,10 +147,36 @@ export function WorkspaceRecoveryController() {
           return
         }
       }
+      const quickEdit = window.piLab?.quickEdit
+      for (const buffer of readDirtyQuickBuffers()) {
+        if (!quickEdit) {
+          setError("The quick editor is unavailable. PI Lab is still open.")
+          return
+        }
+        const result = await quickEdit
+          .save(buffer.target.id, buffer.content, buffer.baseline, false)
+          .then(
+            (saved) => saved,
+            (cause: unknown) => {
+              setError(`Could not save ${buffer.target.path}: ${String(cause)}`)
+              return null
+            },
+          )
+        if (!result) return
+        if (result.status === "conflict") {
+          setError(`${buffer.target.path} changed on disk. PI Lab is still open.`)
+          return
+        }
+        markQuickBufferSaved(buffer.target.id, buffer.content, result.baseline)
+      }
+      if (readUntitledDraft()) {
+        setUntitledLocationRequested(true)
+        return
+      }
       await drainFileOperations()
       store.flush()
       const remaining = store.affected(readRestoreProjectTabs())
-      if (remaining.length > 0) {
+      if (remaining.length > 0 || readDirtyQuickBuffers().length > 0 || readUntitledDraft()) {
         setAffected(remaining)
         setError(t("There are newer unsaved edits. PI Lab is still open."))
         return
@@ -168,11 +211,82 @@ export function WorkspaceRecoveryController() {
         setError(t("There are newer unsaved edits. PI Lab is still open."))
         return
       }
+      discardQuickDrafts()
       respond(true)
     } finally {
       busyRef.current = false
       setBusy(false)
     }
+  }
+
+  /** Save a hidden Untitled draft to the location selected in the recovery dialog. */
+  const saveUntitled = async (choice: "project" | "anywhere"): Promise<void> => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setError(null)
+    const content = readUntitledDraft()
+    let saved = false
+    if (choice === "project") {
+      const destination = await chooseNewFile("").then(
+        (value) => value,
+        (cause: unknown) => {
+          setError(`Could not choose a project file: ${String(cause)}`)
+          return null
+        },
+      )
+      if (destination) {
+        const result = await client.workspaces.ensureMain
+          .mutate({ projectId: destination.projectId })
+          .then(
+            (workspace) =>
+              client.files.write.mutate({
+                workspaceId: workspace.id,
+                relPath: destination.relPath,
+                content,
+              }),
+            (cause: unknown) => {
+              setError(`Could not save Untitled: ${String(cause)}`)
+              return null
+            },
+          )
+          .then(
+            (written) => written,
+            (cause: unknown) => {
+              setError(`Could not save Untitled: ${String(cause)}`)
+              return null
+            },
+          )
+        saved = result?.matchesWrittenContent === true
+        if (result && !result.matchesWrittenContent)
+          setError("Saved file differs from Untitled content. PI Lab is still open.")
+      }
+    } else {
+      const quickEdit = window.piLab?.quickEdit
+      if (!quickEdit) setError("The quick editor is unavailable. PI Lab is still open.")
+      const result = await quickEdit?.saveUntitled(content).then(
+        (value) => value,
+        (cause: unknown) => {
+          setError(`Could not save Untitled: ${String(cause)}`)
+          return null
+        },
+      )
+      saved = Boolean(result)
+    }
+    busyRef.current = false
+    setBusy(false)
+    setUntitledLocationRequested(false)
+    if (!saved) return
+    if (readUntitledDraft() !== content) {
+      setError("There are newer unsaved edits. PI Lab is still open.")
+      return
+    }
+    writeUntitledDraft("")
+    if (store.affected(readRestoreProjectTabs()).length > 0 || readDirtyQuickBuffers().length > 0) {
+      setError("There are newer unsaved edits. PI Lab is still open.")
+      return
+    }
+    respond(true)
   }
 
   const warnings = store.warnings()
@@ -212,6 +326,10 @@ export function WorkspaceRecoveryController() {
               {affected.map((item) => (
                 <li key={`${item.projectId}:${item.buffer.relPath}`}>{item.buffer.relPath}</li>
               ))}
+              {readDirtyQuickBuffers().map((buffer) => (
+                <li key={buffer.target.id}>{buffer.target.path}</li>
+              ))}
+              {readUntitledDraft() ? <li>Untitled</li> : null}
             </ul>
             {error ? (
               <p role="alert" className="my-3 text-destructive text-sm">
@@ -227,6 +345,33 @@ export function WorkspaceRecoveryController() {
               </Button>
               <Button disabled={busy} onClick={() => void save()}>
                 {busy ? t("Saving…") : t("Save affected")}
+              </Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {untitledLocationRequested ? (
+        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-background/60 pt-[20vh]">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Save Untitled"
+            className="w-[min(30rem,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-5 shadow-xl"
+          >
+            <p className="mb-4 text-sm">Where would you like to save Untitled?</p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setUntitledLocationRequested(false)}
+              >
+                Cancel
+              </Button>
+              <Button variant="ghost" disabled={busy} onClick={() => void saveUntitled("project")}>
+                Save in project
+              </Button>
+              <Button disabled={busy} onClick={() => void saveUntitled("anywhere")}>
+                Save to any path
               </Button>
             </div>
           </section>

@@ -4,6 +4,7 @@ export const BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL = "background-tray:open-projec
 export const BACKGROUND_TRAY_OPEN_APP_CHANNEL = "background-tray:open-app"
 export const BACKGROUND_TRAY_OPEN_FILE_CHANNEL = "background-tray:open-file"
 export const BACKGROUND_TRAY_QUIT_CHANNEL = "background-tray:quit"
+export const BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL = "background-tray:restart-to-update"
 
 export interface BackgroundTrayProject {
   id: string
@@ -13,6 +14,7 @@ export interface BackgroundTrayProject {
 
 export interface BackgroundTraySnapshot {
   projects: BackgroundTrayProject[]
+  updateVersion?: string | null
 }
 
 /** The small native tray window uses this bridge without booting the full app. */
@@ -22,5 +24,6 @@ export interface BackgroundTrayBridge {
   openProject(id: string): Promise<void>
   openApp(): Promise<void>
   openFile(): Promise<void>
+  restartToUpdate(): void
   quit(): void
 }

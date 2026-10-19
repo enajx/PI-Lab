@@ -238,6 +238,22 @@ describe("Settings sections", () => {
     })
   })
 
+  test("General lets the user select the public update channel", async () => {
+    const patches: unknown[] = []
+    renderSection(<GeneralSection />, {
+      "settings.get": () => ({ publicUpdateChannel: "stable" }),
+      "settings.updateGeneral": (input) => {
+        patches.push(input)
+        return { publicUpdateChannel: "beta" }
+      },
+    })
+    const channel = await screen.findByTestId<HTMLSelectElement>("settings-update-channel")
+    expect(channel.value).toBe("stable")
+    expect(Array.from(channel.options, (option) => option.textContent)).toEqual(["Stable", "Beta"])
+    fireEvent.change(channel, { target: { value: "beta" } })
+    await waitFor(() => expect(patches).toContainEqual({ publicUpdateChannel: "beta" }))
+  })
+
   test("General restores project tabs by default and lets the user turn restoration off", async () => {
     renderSection(<GeneralSection />, {
       "settings.get": () => ({ confirmOnQuit: true, worktreePerAgent: false }),

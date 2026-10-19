@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import {
   ChartArea,
+  FileCode2,
   FileDiff,
   FilePlus2,
   Files,
@@ -33,6 +34,7 @@ import {
   useSidebarCollapsed,
 } from "../preferences/preferences"
 import { useTheme } from "../providers/ThemeProvider"
+import { readActiveQuickTarget } from "../QuickEditor/quickEditorState"
 import {
   type AddProjectRequest,
   useAddProjectController,
@@ -67,6 +69,7 @@ const NAV_TARGETS = [
   { id: "cluster", label: "Go to Cluster", icon: Server, to: "/science/cluster" },
   { id: "skills", label: "Go to Skills", icon: FlaskConical, to: "/science/skills" },
   { id: "workflows", label: "Go to Workflows", icon: Waypoints, to: "/automations" },
+  { id: "editor", label: "Go to Editor", icon: FileCode2, to: "/quick-edit" },
   { id: "settings", label: "Open Settings", icon: Settings, to: "/settings" },
 ] as const
 
@@ -152,7 +155,10 @@ export function usePaletteCommands(): PaletteCommand[] {
     label: target.label,
     group: "Navigate",
     icon: target.icon,
-    run: () => void navigate({ to: target.to }),
+    run: () =>
+      void (target.id === "editor"
+        ? navigate({ to: "/quick-edit", search: { target: readActiveQuickTarget()?.id } })
+        : navigate({ to: target.to })),
   }))
 
   const viewCommands: PaletteCommand[] = [

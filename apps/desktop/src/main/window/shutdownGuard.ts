@@ -14,6 +14,9 @@ interface ShutdownGuardOptions {
 
 export interface ShutdownGuard {
   attachWindow: (window: BrowserWindow) => void
+  requestUpdateInstall: (install: () => void) => void
+  setInstallOnApprovedQuit: (install: (() => void) | null) => void
+  cancelUpdateInstall: () => void
   dispose: () => void
 }
 
@@ -21,8 +24,23 @@ export interface ShutdownGuard {
 export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGuard {
   let mainWindow: BrowserWindow | null = null
   let pending: ShutdownRequest | null = null
-  let approvedQuit: { event: Event | null } | null = null
+  let approvedQuit: { event: Event | null; update: boolean } | null = null
   let approvedClose: BrowserWindow | null = null
+  let pendingUpdateInstall: (() => void) | null = null
+  let installOnApprovedQuit: (() => void) | null = null
+
+  /** Keep approval across asynchronous updater work until quit or explicit failure. */
+  function beginApprovedUpdateInstall(install: () => void): void {
+    const approval = { event: null, update: true }
+    approvedQuit = approval
+    let started = false
+    try {
+      install()
+      started = true
+    } finally {
+      if (!started && approvedQuit === approval) approvedQuit = null
+    }
+  }
 
   function request(intent: ShutdownRequest["intent"]): void {
     if (!mainWindow || mainWindow.webContents.isDestroyed()) return
@@ -35,17 +53,28 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   }
 
   function beforeQuit(event: Event): void {
+    if (approvedQuit?.update) {
+      approvedQuit.event = event
+      return
+    }
     if (approvedQuit && !approvedQuit.event) {
       approvedQuit.event = event
       return
     }
     approvedQuit = null
-    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      if (installOnApprovedQuit) {
+        event.preventDefault()
+        beginApprovedUpdateInstall(installOnApprovedQuit)
+      }
+      return
+    }
     event.preventDefault()
     request("quit")
   }
 
   function beforeClose(event: Event): void {
+    if (approvedQuit?.update) return
     if (approvedQuit?.event && !approvedQuit.event.defaultPrevented) {
       approvedQuit = null
       return
@@ -63,8 +92,14 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     mainWindow?.removeListener("closed", detachWindow)
     mainWindow = null
     pending = null
-    approvedQuit = null
+    if (!approvedQuit?.update) approvedQuit = null
     approvedClose = null
+    pendingUpdateInstall = null
+  }
+
+  function willQuit(): void {
+    approvedQuit = null
+    pendingUpdateInstall = null
   }
 
   function receiveResponse(event: IpcMainEvent, value: unknown): void {
@@ -84,14 +119,27 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
 
     const intent = pending.intent
     pending = null
-    if (!value.allow) return
+    if (!value.allow) {
+      pendingUpdateInstall = null
+      return
+    }
     if (intent === "quit") {
-      const approval: { event: Event | null } = { event: null }
+      const install = pendingUpdateInstall ?? installOnApprovedQuit
+      pendingUpdateInstall = null
+      if (install) {
+        beginApprovedUpdateInstall(install)
+        return
+      }
+      const approval: { event: Event | null; update: boolean } = { event: null, update: false }
       approvedQuit = approval
-      options.app.quit()
-      // Another before-quit listener may cancel this attempt without a close.
-      if (approvedQuit === approval && (!approval.event || approval.event.defaultPrevented)) {
-        approvedQuit = null
+      try {
+        options.app.quit()
+      } finally {
+        // The approved action must start quitting synchronously. An exception,
+        // cancelled quit, or callback that does not quit cannot approve a later attempt.
+        if (approvedQuit === approval && (!approval.event || approval.event.defaultPrevented)) {
+          approvedQuit = null
+        }
       }
     } else {
       approvedClose = window
@@ -100,9 +148,28 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   }
 
   options.app.on("before-quit", beforeQuit)
+  options.app.on("will-quit", willQuit)
   options.ipcMain.on(SHUTDOWN_RESPONSE_CHANNEL, receiveResponse)
 
   return {
+    requestUpdateInstall(install): void {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        beginApprovedUpdateInstall(install)
+        return
+      }
+      if (mainWindow.webContents.isDestroyed()) return
+      pendingUpdateInstall = install
+      request("quit")
+    },
+    setInstallOnApprovedQuit(install): void {
+      installOnApprovedQuit = install
+    },
+    cancelUpdateInstall(): void {
+      const explicitUpdatePending = pendingUpdateInstall !== null
+      pendingUpdateInstall = null
+      if (approvedQuit?.update) approvedQuit = null
+      if (explicitUpdatePending && pending?.intent === "quit") pending = null
+    },
     attachWindow(window): void {
       if (window === mainWindow) return
       detachWindow()
@@ -113,6 +180,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     dispose(): void {
       detachWindow()
       options.app.removeListener("before-quit", beforeQuit)
+      options.app.removeListener("will-quit", willQuit)
       options.ipcMain.removeListener(SHUTDOWN_RESPONSE_CHANNEL, receiveResponse)
     },
   }

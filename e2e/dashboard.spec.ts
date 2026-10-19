@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -596,44 +596,111 @@ test("leaving Settings restores the view that opened it", async () => {
   await expect(window.getByTestId("project-view")).toBeVisible()
 })
 
-test("the Appearance Pi icon gallery renders every preview and remembers the pick", async () => {
+test("Alpha Appearance changes the running icon choice and restores both families after restart", async () => {
   let window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+
+  if (process.platform === "darwin") {
+    await app.evaluate(({ app: electronApp }) => {
+      const dock = electronApp.dock
+      const original = dock.setIcon.bind(dock)
+      const probe = globalThis as typeof globalThis & { __piLabDockIconCalls?: string[] }
+      probe.__piLabDockIconCalls = []
+      dock.setIcon = (icon) => {
+        if (typeof icon === "string") probe.__piLabDockIconCalls?.push(icon)
+        original(icon)
+      }
+    })
+  }
 
   await window.getByTestId("nav-settings").click()
   await window.getByTestId("settings-nav-appearance").click()
   await expect(window.getByTestId("settings-section-appearance")).toBeVisible()
 
-  const gallery = window.getByTestId("settings-app-icon-fonts")
-  await expect(gallery).toBeVisible()
-  await expect(gallery.locator("button")).toHaveCount(12)
+  const picker = window.getByTestId("settings-app-icon-picker")
+  await expect(picker).toBeVisible()
+  await expect(window.getByTestId("settings-app-icon-style")).toHaveValue("25")
+  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
+  await expect(window.getByTestId("settings-app-icon-palette")).toBeDisabled()
+  await expect(window.getByTestId("settings-app-icon-expanded")).toBeChecked()
 
-  // The whole point of shipping pre-rendered PNGs: assert they actually decoded
-  // in the real renderer. A broken asset URL still renders a <img> in jsdom, so
-  // only an end-to-end check can catch a bundling regression here.
+  // Check that the preview bridge returns the exact PNG for the selected icon.
+  const preview = window.getByTestId("settings-app-icon-preview")
+  const previewMatches = async (name: string): Promise<void> => {
+    const path =
+      name === "icon-alpha.png"
+        ? join(HERE, "..", "icons", name)
+        : join(
+            DESKTOP_DIR,
+            "src/renderer/routes/_shell/settings/components/AppIconGallery/channel-icons",
+            name,
+          )
+    const expected = await readFile(path)
+    await expect
+      .poll(async () => {
+        const source = await window.getByTestId("settings-app-icon-preview").getAttribute("src")
+        if (!source?.startsWith("data:image/png;base64,")) return false
+        return Buffer.from(source.slice("data:image/png;base64,".length), "base64").equals(expected)
+      })
+      .toBe(true)
+  }
   await expect
-    .poll(
-      async () =>
-        await gallery
-          .locator("img")
-          .evaluateAll((nodes) =>
-            nodes.every((node) => (node as HTMLImageElement).naturalWidth > 0),
-          ),
-      { timeout: 15_000 },
-    )
-    .toBe(true)
+    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0)
+  await previewMatches("icon-alpha.png")
+  await window.getByTestId("settings-app-icon-expanded").uncheck()
+  await previewMatches("joyplot-25-alpha.png")
+  await expect
+    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0)
+  await window.getByTestId("settings-app-icon-next").click()
+  await expect(window.getByTestId("settings-app-icon-style")).toHaveValue("26")
+  await window.getByTestId("settings-app-icon-style").selectOption("37")
+  await previewMatches("joyplot-37-alpha.png")
+  await expect
+    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0)
+  await window.getByTestId("settings-app-icon-style").selectOption("33")
+  await window.getByTestId("settings-app-icon-expanded").check()
+  await previewMatches("joyplot-33-alpha-expanded.png")
+  if (process.platform === "darwin") {
+    await expect
+      .poll(() =>
+        app.evaluate(() =>
+          (
+            globalThis as typeof globalThis & { __piLabDockIconCalls?: string[] }
+          ).__piLabDockIconCalls?.at(-1),
+        ),
+      )
+      .toMatch(/joyplot-33-alpha-expanded\.png$/)
+  }
+  await expect
+    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0)
 
-  // Avenir Next — Medium is what the app actually ships, so it starts selected.
-  await expect(window.getByTestId("settings-app-icon-font-avenir-next-medium")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-
-  await window.getByTestId("settings-app-icon-font-didot-bold").click()
-  await expect(window.getByTestId("settings-app-icon-font-didot-bold")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await window.getByTestId("settings-app-icon-family").selectOption("pi")
+  await expect(window.getByTestId("settings-app-icon-font")).toHaveValue("helvetica-neue-medium")
+  await expect(preview).toHaveAttribute("alt", "Pi Lab helvetica-neue-medium, Viridis")
+  await previewMatches("pi-helvetica-neue-medium-alpha.png")
+  await expect
+    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0)
+  await window.getByTestId("settings-app-icon-font").selectOption("didot-bold")
+  await expect(preview).toHaveAttribute("alt", "Pi Lab didot-bold, Viridis")
+  await previewMatches("pi-didot-bold-alpha.png")
+  await expect
+    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0)
+  await expect
+    .poll(async () => JSON.parse(await readFile(join(dataDir, "app-icon-selection.json"), "utf8")))
+    .toMatchObject({
+      family: "pi",
+      joyplotStyle: "33",
+      joyplotPalette: "viridis",
+      joyplotExpanded: true,
+      piFont: "didot-bold",
+      piPalette: "viridis",
+    })
 
   await app.close()
   await launchApp()
@@ -641,15 +708,12 @@ test("the Appearance Pi icon gallery renders every preview and remembers the pic
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("nav-settings").click()
   await window.getByTestId("settings-nav-appearance").click()
-  await expect(window.getByTestId("settings-app-icon-font-didot-bold")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-
-  // Keep the shared Electron profile neutral for later E2E cases.
-  await window.getByTestId("settings-app-icon-font-avenir-next-medium").click()
-  await expect(window.getByTestId("settings-app-icon-font-avenir-next-medium")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await expect(window.getByTestId("settings-app-icon-family")).toHaveValue("pi")
+  await expect(window.getByTestId("settings-app-icon-font")).toHaveValue("didot-bold")
+  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
+  await window.getByTestId("settings-app-icon-family").selectOption("joyplot")
+  await expect(window.getByTestId("settings-app-icon-style")).toHaveValue("33")
+  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
+  await expect(window.getByTestId("settings-app-icon-expanded")).toBeChecked()
+  await previewMatches("joyplot-33-alpha-expanded.png")
 })

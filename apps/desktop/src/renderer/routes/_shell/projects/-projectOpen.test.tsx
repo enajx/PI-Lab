@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../providers/AppProviders"
-import { createFakeTrpcClient } from "../../../test/fakeTrpcClient"
+import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx) — reproduces the dev build's
 // effect double-invoke, which is what surfaced the "Opening project…" hang.
 import { act, render, screen, waitFor } from "../../../test/render"
@@ -18,7 +18,9 @@ const { openFile } = vi.hoisted(() => ({ openFile: vi.fn() }))
 // "Opening project…"; this test fails in that case and passes once the effect
 // applies the result from its still-active run.
 vi.mock("./components/CentralPanel", () => ({
-  CentralPanel: () => <div data-testid="central-panel-stub" />,
+  CentralPanel: ({ openFileFinder }: { openFileFinder: boolean }) => (
+    <div data-testid="central-panel-stub" data-open-file-finder={String(openFileFinder)} />
+  ),
   useCentralPanel: () => ({
     attachSession: () => {},
     openFile,
@@ -30,13 +32,14 @@ vi.mock("./components/RightSidebar", () => ({
 }))
 vi.mock("./components/ProjectPalette", () => ({ ProjectPalette: () => null }))
 
-function renderWorkspaceUnderStrictMode() {
+function renderWorkspaceUnderStrictMode(handlers: FakeHandlers) {
   const client = createFakeTrpcClient({
     "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
     "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
     "settings.get": () => ({}),
     // The real ensureMain is idempotent; here it resolves to the main workspace.
     "workspaces.ensureMain": () => ({ id: "w1" }),
+    ...handlers,
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -53,7 +56,7 @@ afterEach(() => {
 
 describe("Project open", () => {
   test("resolves the main workspace and shows the project view under StrictMode", async () => {
-    renderWorkspaceUnderStrictMode()
+    renderWorkspaceUnderStrictMode({})
 
     // The open flow must complete: the central panel mounts and the
     // "Opening project…" gate is gone.
@@ -62,7 +65,7 @@ describe("Project open", () => {
   })
 
   test("opens every globally created file while the chosen project is already mounted", async () => {
-    renderWorkspaceUnderStrictMode()
+    renderWorkspaceUnderStrictMode({})
     await screen.findByTestId("central-panel-stub")
 
     act(() => setPendingOpenFile("p1", "notes/first.md"))
@@ -73,5 +76,22 @@ describe("Project open", () => {
       expect(openFile).toHaveBeenCalledTimes(2)
       expect(openFile).toHaveBeenLastCalledWith("notes/second.md")
     })
+  })
+
+  test("keeps file search requested before the workspace is ready", async () => {
+    let resolveWorkspace!: (value: { id: string }) => void
+    const pendingWorkspace = new Promise<{ id: string }>((resolve) => {
+      resolveWorkspace = resolve
+    })
+    renderWorkspaceUnderStrictMode({
+      "workspaces.ensureMain": () => pendingWorkspace,
+    })
+
+    await screen.findByTestId("project-view")
+    expect(screen.queryByTestId("central-panel-stub")).toBeNull()
+    act(() => window.dispatchEvent(new Event("pi-lab:open-project-file-finder")))
+
+    await act(async () => resolveWorkspace({ id: "w1" }))
+    expect((await screen.findByTestId("central-panel-stub")).dataset.openFileFinder).toBe("true")
   })
 })

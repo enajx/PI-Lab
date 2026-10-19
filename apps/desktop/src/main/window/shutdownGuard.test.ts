@@ -66,6 +66,149 @@ function harness() {
 }
 
 describe("shutdown guard through mocked Electron events", () => {
+  test("Restart to Update installs only after the current renderer approves quitting", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    const install = vi.fn()
+    h.guard.requestUpdateInstall(install)
+    expect(h.webContents.send).toHaveBeenCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-1",
+      intent: "quit",
+    })
+    expect(install).not.toHaveBeenCalled()
+    h.respond({ requestId: "request-1", allow: true }, {}, h.mainFrame)
+    h.respond({ requestId: "old", allow: true }, h.webContents, h.mainFrame)
+    expect(install).not.toHaveBeenCalled()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(install).toHaveBeenCalledOnce()
+    expect(h.quit).not.toHaveBeenCalled()
+  })
+
+  test("cancelled Restart to Update cannot install on a later ordinary quit", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    const install = vi.fn()
+    h.guard.requestUpdateInstall(install)
+    h.respond({ requestId: "request-1", allow: false }, h.webContents, h.mainFrame)
+    h.quit()
+    h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
+    expect(install).not.toHaveBeenCalled()
+  })
+
+  test("Restart to Update with no window invokes install without a renderer response", () => {
+    const h = harness()
+    const install = vi.fn()
+    h.guard.requestUpdateInstall(install)
+    expect(install).toHaveBeenCalledOnce()
+    expect(h.webContents.send).not.toHaveBeenCalled()
+  })
+
+  test("Restart to Update supersedes pending close and permits its own quit once", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.close()
+    const install = vi.fn(() => h.quit())
+    h.guard.requestUpdateInstall(install)
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-1",
+      intent: "quit",
+    })
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(install).toHaveBeenCalledOnce()
+    expect(h.webContents.send).toHaveBeenCalledTimes(2)
+    expect(h.window.listenerCount("close")).toBe(0)
+  })
+
+  test("Restart to Update waits when a live window has lost its renderer", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.webContents.isDestroyed.mockReturnValue(true)
+    const install = vi.fn()
+    h.guard.requestUpdateInstall(install)
+    expect(install).not.toHaveBeenCalled()
+    expect(h.webContents.send).not.toHaveBeenCalled()
+  })
+
+  test("an approved update may quit asynchronously without a second renderer prompt", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    const install = vi.fn()
+    h.guard.requestUpdateInstall(install)
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(install).toHaveBeenCalledOnce()
+    h.close()
+    expect(h.window.listenerCount("close")).toBe(0)
+    h.quit()
+    expect(h.webContents.send).toHaveBeenCalledTimes(1)
+  })
+
+  test("a failed update clears asynchronous quit approval", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.guard.requestUpdateInstall(vi.fn())
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    h.guard.cancelUpdateInstall()
+    h.quit()
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-2",
+      intent: "quit",
+    })
+  })
+
+  test("a synchronously failed installer does not leave Quit approved", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.guard.requestUpdateInstall(() => {
+      throw new Error("install failed")
+    })
+    expect(() =>
+      h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame),
+    ).toThrow("install failed")
+    h.quit()
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-2",
+      intent: "quit",
+    })
+  })
+
+  test("ordinary approved full Quit installs a ready update and a canceled Quit does not", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    const install = vi.fn()
+    h.guard.setInstallOnApprovedQuit(install)
+    h.quit()
+    h.respond({ requestId: "request-1", allow: false }, h.webContents, h.mainFrame)
+    expect(install).not.toHaveBeenCalled()
+    h.quit()
+    h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
+    expect(install).toHaveBeenCalledOnce()
+  })
+
+  test("tray Quit installs a ready update without a window and can be disarmed", () => {
+    const h = harness()
+    const install = vi.fn()
+    h.guard.setInstallOnApprovedQuit(install)
+    h.quit()
+    expect(install).toHaveBeenCalledOnce()
+    h.guard.cancelUpdateInstall()
+    h.guard.setInstallOnApprovedQuit(null)
+    h.quit()
+    expect(install).toHaveBeenCalledOnce()
+  })
+
+  test("disarming an update does not cancel an ordinary pending Quit", () => {
+    const h = harness()
+    h.guard.attachWindow(h.electronWindow)
+    h.guard.setInstallOnApprovedQuit(vi.fn())
+    h.quit()
+    h.guard.setInstallOnApprovedQuit(null)
+    h.guard.cancelUpdateInstall()
+    const willQuit = vi.fn()
+    h.app.on("will-quit", willQuit)
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    expect(willQuit).toHaveBeenCalledOnce()
+  })
+
   test("close and quit stay open until the current main-frame response allows them", () => {
     const h = harness()
     h.guard.attachWindow(h.electronWindow)

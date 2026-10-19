@@ -26,6 +26,9 @@ import {
   createNotificationBrokers,
   NotificationService,
 } from "./notifications"
+import { livePythonProbe, liveQuickPythonRuntimeResolver } from "./python"
+import { liveStandalonePythonDiscoverer } from "./python/standaloneInterpreters"
+import { QuickPythonRunner } from "./quickEdit/pythonRun"
 import { isTestMode, skillsHomeDirOverride } from "./runtime/env"
 import { testSetupProbe } from "./setup/testProbe"
 import { TerminalSupervisor } from "./terminal/supervisor"
@@ -49,7 +52,7 @@ import { seedWritableTemplate } from "./trpc/template"
 import { installAppMenu } from "./window/appMenu"
 
 interface FullRuntimeHost {
-  appIconPath: string | null
+  getAppIconPath: () => string | null
   ensureMainWindow: () => BrowserWindow
   initialWindow: () => BrowserWindow | null
 }
@@ -60,6 +63,13 @@ export class FullRuntime {
   private readonly terminalSupervisor = new TerminalSupervisor(
     isTestMode ? { reapDaemonOnDispose: true } : {},
   )
+  private readonly quickPythonRunner = new QuickPythonRunner({
+    resolveRuntime: liveQuickPythonRuntimeResolver,
+    discoverStandalonePython: liveStandalonePythonDiscoverer,
+    projectRootForFile: async (filePath) => this.projectRootForFile(filePath),
+    probeRuntime: livePythonProbe,
+    getDaemonClient: () => this.terminalSupervisor.ensureClient(),
+  })
   private readonly analysisInteractive = new AnalysisInteractiveController()
   private readonly agentCatalog = buildAgentCatalog(isTestMode)
   private readonly notificationBrokers = createNotificationBrokers()
@@ -74,7 +84,7 @@ export class FullRuntime {
 
   constructor(private readonly host: FullRuntimeHost) {
     this.notificationService = new NotificationService({
-      native: createElectronNativeNotificationAdapter(host.appIconPath),
+      native: createElectronNativeNotificationAdapter(host.getAppIconPath),
       focus: createElectronAppFocusAdapter(host.ensureMainWindow),
       getPreferences: () => getSettingsOrDefaults(getDb()).notifications,
       activations: this.notificationBrokers.activations,
@@ -157,6 +167,18 @@ export class FullRuntime {
     return `/projects/${encodeURIComponent(best.id)}?quickFile=${encodeURIComponent(best.relPath)}`
   }
 
+  /** Find the registered project containing a quick-opened file, if any. */
+  private projectRootForFile(filePath: string): string | null {
+    const canonicalPath = realpathSync(filePath)
+    let best: string | null = null
+    for (const project of getDb().select({ repoPath: projects.repoPath }).from(projects).all()) {
+      const relPath = relative(project.repoPath, canonicalPath)
+      if (relPath === ".." || relPath.startsWith(`..${sep}`) || isAbsolute(relPath)) continue
+      if (!best || project.repoPath.length > best.length) best = project.repoPath
+    }
+    return best
+  }
+
   /** Current working and waiting projects for the background popover. */
   traySnapshot(): BackgroundTraySnapshot {
     return trayProjectSnapshot(
@@ -173,6 +195,31 @@ export class FullRuntime {
   /** Read the persisted background preference after the local database opens. */
   keepRunningAfterClose(): boolean {
     return getSettingsOrDefaults(getDb()).keepRunningAfterClose
+  }
+
+  /** Seed Quick Editor's Vim cache after the full database starts in the background. */
+  editorVim(): boolean {
+    return getSettingsOrDefaults(getDb()).editor.vim
+  }
+
+  /** Resolve picker choices only when the Quick Editor asks for them. */
+  quickPythonOptions(filePath: string) {
+    return this.quickPythonRunner.options(filePath)
+  }
+
+  /** Keep a Quick Editor interpreter choice in memory for this app session. */
+  quickPythonSelect(filePath: string, path: string | null) {
+    return this.quickPythonRunner.select(filePath, path)
+  }
+
+  /** Start a Python file through the full runtime's shared PTY daemon. */
+  quickPythonRun(filePath: string, cols: number, rows: number) {
+    return this.quickPythonRunner.run(filePath, cols, rows)
+  }
+
+  /** Stop a process started by the Quick Editor. */
+  quickPythonKill(sessionId: string) {
+    return this.quickPythonRunner.kill(sessionId)
   }
 
   /** Check a tray project selection against the current local project list. */

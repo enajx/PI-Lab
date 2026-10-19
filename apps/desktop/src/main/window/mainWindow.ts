@@ -67,10 +67,23 @@ export function createMainWindow(
   hash: string | undefined,
 ): BrowserWindow {
   const window = new BrowserWindow(
-    buildMainWindowOptions(iconPath, join(__dirname, "../preload/index.js"), process.platform),
+    buildMainWindowOptions(
+      iconPath,
+      join(__dirname, "../preload/index.js"),
+      process.platform,
+      isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1",
+    ),
   )
 
-  window.once("ready-to-show", () => (isTestMode ? window.showInactive() : window.show()))
+  if (isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1") {
+    window.setIgnoreMouseEvents(true)
+  }
+
+  window.once("ready-to-show", () => {
+    if (isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1") return
+    if (isTestMode) window.showInactive()
+    else window.show()
+  })
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", (event, navigationUrl) => {
     const currentUrl = window.webContents.getURL()

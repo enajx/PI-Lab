@@ -2,10 +2,9 @@
 /**
  * Validate and stage the canonical PI Lab icon for electron-builder.
  *
- * `icons/icon.svg` is the outlined-vector master. `icons/icon.png` is its
- * committed 1024×1024 derivative, so packaging never needs the source font,
- * outline extraction tools, or an SVG renderer. `icons/icon.manifest.json`
- * pins both files together.
+ * `icons/icon.svg` is the vector master for joyplot style 25 in magma, expanded.
+ * `icons/icon.png` is its committed 1024×1024 derivative, so packaging never
+ * needs an SVG renderer. `icons/icon.manifest.json` pins both files together.
  *
  * Outputs:
  *   - `build/icon.png` — Linux source and Windows `.ico` source.
@@ -27,6 +26,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { inflateSync } from "node:zlib"
+import type { PiLabChannel } from "../src/main/identity/channel"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = resolve(HERE, "..")
@@ -49,6 +49,7 @@ interface IconManifest {
     width: number
     height: number
   }
+  channelVariants: Record<"alpha" | "beta", { master: string; derivative: string }>
 }
 
 export interface RgbaPng {
@@ -168,7 +169,7 @@ function assertPixel(
   }
 }
 
-/** Validate provenance, geometry, transparent corners, white tile, and black glyph. */
+/** Validate provenance, geometry, transparent corners, light tile, and joyplot fill. */
 export function validateIconSources(): IconManifest {
   for (const path of [MASTER, SOURCE, MANIFEST]) {
     if (!existsSync(path)) throw new Error(`canonical icon source not found at ${path}`)
@@ -192,16 +193,15 @@ export function validateIconSources(): IconManifest {
   const svg = readFileSync(MASTER, "utf8")
   if (
     !svg.includes('viewBox="0 0 1024 1024"') ||
-    !svg.includes('<rect x="64" y="64" width="896" height="896" rx="210" fill="#fff" />') ||
-    !svg.includes("Avenir Next Medium face index 5") ||
-    !svg.includes("436.638×580") ||
+    !svg.includes('x="64" y="64" width="896" height="896" rx="210" fill="#fff"') ||
+    !svg.includes("joyplot icon: style 25, ascending peaks, magma, expanded") ||
+    !svg.includes('stop-color="#000004"') ||
+    !svg.includes('id="expanded-tile"') ||
+    !svg.includes('stroke="#fff"') ||
     !svg.includes("<path") ||
-    !svg.includes('fill="#000"') ||
     /<(?:text|image)\b/.test(svg)
   ) {
-    throw new Error(
-      "icon.svg must contain the outlined Avenir Next Medium Pi at canonical bounds on the white tile",
-    )
+    throw new Error("icon.svg must contain expanded joyplot style 25 in magma on the white tile")
   }
 
   const png = decodeRgbaPng(SOURCE)
@@ -220,7 +220,33 @@ export function validateIconSources(): IconManifest {
     assertPixel(png, x, y, [0, 0, 0, 0], "outer corner")
   }
   assertPixel(png, 512, 100, [255, 255, 255, 255], "white tile")
-  assertPixel(png, 512, 240, [0, 0, 0, 255], "black Pi")
+  assertPixel(png, 512, 512, [182, 58, 116, 255], "magma plot")
+  for (const channel of ["alpha", "beta"] as const) {
+    const variant = manifest.channelVariants?.[channel]
+    const vector = join(ICONS_DIR, `icon-${channel}.svg`)
+    const raster = join(ICONS_DIR, `icon-${channel}.png`)
+    if (!variant || !existsSync(vector) || !existsSync(raster)) {
+      throw new Error(`${channel} icon source is missing`)
+    }
+    if (sha256(vector) !== variant.master || sha256(raster) !== variant.derivative) {
+      throw new Error(`${channel} icon does not match its provenance manifest`)
+    }
+    const svg = readFileSync(vector, "utf8")
+    const palette = channel === "alpha" ? "viridis" : "magma"
+    if (
+      !svg.includes(`ascending peaks, ${palette} inverted, expanded`) ||
+      !svg.includes('fill="url(#fill)" />') ||
+      (svg.match(/fill="#fff"/g) ?? []).length !== 3
+    ) {
+      throw new Error(`${channel} icon must have a ${palette} tile and white Joyplot`)
+    }
+    const icon = decodeRgbaPng(raster)
+    if (icon.width !== 1024 || icon.height !== 1024) {
+      throw new Error(`${channel} icon must be 1024×1024`)
+    }
+    assertPixel(icon, 0, 0, [0, 0, 0, 0], `${channel} outer corner`)
+    assertPixel(icon, 512, 512, [255, 255, 255, 255], `${channel} Joyplot`)
+  }
   return manifest
 }
 
@@ -268,12 +294,13 @@ function buildIcns(masterPng: string): void {
   rmSync(container, { recursive: true, force: true })
 }
 
-export function generateAppIcons(): void {
+export function generateAppIcons(channel: PiLabChannel): void {
   validateIconSources()
   mkdirSync(BUILD_DIR, { recursive: true })
 
   const masterPng = join(BUILD_DIR, "icon.png")
-  cpSync(SOURCE, masterPng)
+  const source = channel === "stable" ? SOURCE : join(ICONS_DIR, `icon-${channel}.png`)
+  cpSync(source, masterPng)
   console.log(`icon.png  → ${masterPng}`)
 
   if (process.platform === "darwin") {
@@ -284,4 +311,18 @@ export function generateAppIcons(): void {
   }
 }
 
-if (import.meta.main) generateAppIcons()
+if (import.meta.main) {
+  const publicReleaseChannel = process.env.PI_LAB_PUBLIC_RELEASE_CHANNEL
+  if (
+    publicReleaseChannel &&
+    publicReleaseChannel !== "stable" &&
+    publicReleaseChannel !== "beta"
+  ) {
+    throw new Error(`Unknown public release icon channel: ${publicReleaseChannel}`)
+  }
+  const value = publicReleaseChannel ?? process.env.PI_LAB_CHANNEL ?? "stable"
+  if (value !== "alpha" && value !== "beta" && value !== "stable") {
+    throw new Error(`Unknown PI Lab icon channel: ${value}`)
+  }
+  generateAppIcons(value)
+}

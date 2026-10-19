@@ -316,7 +316,7 @@ describe("runMigrations", () => {
         .get(),
     ).toBeUndefined()
     first.sqlite.close()
-    expect(columnNames(dbPath, "projects").has("type_id")).toBe(version === "current")
+    expect(columnNames(dbPath, "settings").has("public_update_channel")).toBe(version === "current")
   })
 
   it("rejects an unrecognized journal watermark without trusting it", () => {

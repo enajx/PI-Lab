@@ -24,7 +24,12 @@
     "e2e": "bun run build && bun run docs:build && node node_modules/@playwright/test/cli.js test",
     "verify": "bun run scripts/verify.ts",
     "package": "bun run --cwd apps/desktop package",
+    "package:stable": "bun run --cwd apps/desktop package:stable",
+    "package:stable:keep": "bun run --cwd apps/desktop package:stable:keep",
+    "package:public": "bun run --cwd apps/desktop package:public",
+    "link:apps": "bun run --cwd apps/desktop link:apps",
     "package:prod": "bun run --cwd apps/desktop package:prod",
+    "package:prod:stable": "bun run --cwd apps/desktop package:prod:stable",
     "clean": "rm -rf node_modules"
   },
   "trustedDependencies": [

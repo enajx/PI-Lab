@@ -53,7 +53,8 @@ test("quick-open prunes dependency and output trees and reports an unreadable ch
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await chmod(join(repoDir, "unreadable"), 0o000)
 
-  await window.keyboard.press("ControlOrMeta+f")
+  await window.getByTestId("launcher-file").click()
+  await expect(window.getByTestId("quick-open")).toBeVisible()
   await window.getByTestId("quick-open-input").fill("sample-target")
   await expect(window.getByTestId("quick-open-result")).toHaveCount(1)
   await expect(window.getByTestId("quick-open-result")).toHaveAttribute(

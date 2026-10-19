@@ -2,7 +2,21 @@ import { homedir } from "node:os"
 import { delimiter, join } from "node:path"
 import { app, dialog, Menu, type MenuItemConstructorOptions } from "electron"
 import { nativeText } from "../i18n/nativeLanguage"
+import { channelFromAppName } from "../identity/channel"
 import { installCommand } from "../quickEdit/installCommand"
+
+interface ReadyUpdateMenuItem {
+  version: string
+  restart: () => void
+}
+
+let readyUpdate: ReadyUpdateMenuItem | null = null
+
+/** Refresh the native menu when a public update becomes ready or is cleared. */
+export function setReadyUpdateMenuItem(item: ReadyUpdateMenuItem | null): void {
+  readyUpdate = item
+  installAppMenu()
+}
 
 /**
  * Install the application menu, deliberately binding **no** accelerator to ⌘W / Ctrl+W.
@@ -19,6 +33,8 @@ import { installCommand } from "../quickEdit/installCommand"
  */
 export function installAppMenu(): void {
   const isMac = process.platform === "darwin"
+  const appName = app.getName()
+  const stable = channelFromAppName(appName) === "stable"
 
   const item = (
     role: NonNullable<MenuItemConstructorOptions["role"]>,
@@ -29,10 +45,10 @@ export function installAppMenu(): void {
     ...(isMac
       ? [
           {
-            label: "PI Lab",
+            label: appName,
             submenu: [
-              item("about", "About PI Lab"),
-              ...(app.isPackaged
+              stable ? item("about", "About PI Lab") : { role: "about", label: `About ${appName}` },
+              ...(app.isPackaged && stable
                 ? [
                     {
                       label: "Install 'pilab' command",
@@ -58,19 +74,27 @@ export function installAppMenu(): void {
                     } satisfies MenuItemConstructorOptions,
                   ]
                 : []),
+              ...(readyUpdate
+                ? ([
+                    { label: `Ready to update to ${readyUpdate.version}`, enabled: false },
+                    { label: "Restart to Update", click: readyUpdate.restart },
+                  ] satisfies MenuItemConstructorOptions[])
+                : []),
               { type: "separator" },
-              item("hide", "Hide PI Lab"),
+              stable ? item("hide", "Hide PI Lab") : { role: "hide", label: `Hide ${appName}` },
               item("hideOthers", "Hide Others"),
               item("unhide", "Show All"),
               { type: "separator" },
-              item("quit", "Quit PI Lab"),
+              stable ? item("quit", "Quit PI Lab") : { role: "quit", label: `Quit ${appName}` },
             ],
           } satisfies MenuItemConstructorOptions,
         ]
       : [
           {
             label: nativeText("File"),
-            submenu: [item("quit", "Quit PI Lab")],
+            submenu: [
+              stable ? item("quit", "Quit PI Lab") : { role: "quit", label: `Quit ${appName}` },
+            ],
           } satisfies MenuItemConstructorOptions,
         ]),
     {

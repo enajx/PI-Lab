@@ -301,6 +301,14 @@ const rows: Record<string, SixTranslations> = {
     "سير العمل",
     "Arbeidsflyter",
   ],
+  "Open the editor to edit a file.": [
+    "打开编辑器以编辑文件。",
+    "편집기를 열어 파일을 편집합니다.",
+    "エディターを開いてファイルを編集します。",
+    "Abre el editor para editar un archivo.",
+    "افتح المحرر لتعديل ملف.",
+    "Åpne redigering for å redigere en fil.",
+  ],
   "Create and monitor scheduled automations across your projects.": [
     "创建和监控跨项目的定时自动化。",
     "프로젝트 전반의 예약 자동화를 만들고 모니터링합니다.",

@@ -66,8 +66,8 @@ const navStateClass = (isActive: boolean): string =>
     : "text-sidebar-foreground hover:bg-accent/60"
 
 /**
- * Unified workspace nav entries (Task 2/6): the science tabs followed by Workflows,
- * rendered as ONE `gap-0.5` list so Workflows sits flush with its peers (the old
+ * Unified workspace nav entries: the science tabs followed by Workflows and Editor,
+ * rendered as ONE `gap-0.5` list so these rows sit flush with their peers (the old
  * gap-3 between two separate `<nav>`s made it read as a detached block). Workflows
  * reuses the {@link ScienceNavItem} shape so the whole list shares one row renderer.
  */
@@ -80,6 +80,14 @@ const navItems: ScienceNavItem[] = [
     icon: Waypoints,
     ready: true,
     to: "/automations",
+  },
+  {
+    id: "editor",
+    label: "Editor",
+    description: "Open the editor to edit a file.",
+    icon: FileCode2,
+    ready: true,
+    to: "/quick-edit",
   },
 ]
 
@@ -393,8 +401,6 @@ export function Sidebar() {
       {/* Nav body — padded; the header above is full-bleed for the traffic lights. */}
       <div data-testid="sidebar-nav-body" className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
         <ProjectDashboardNav collapsed={collapsed} />
-
-        <EditorNav collapsed={collapsed} />
 
         <WorkspaceNav collapsed={collapsed} />
 
@@ -801,32 +807,9 @@ function ProjectDashboardNav({ collapsed }: { collapsed: boolean }) {
   )
 }
 
-/** Return to the outside-project file that is open in the full app. */
-function EditorNav({ collapsed }: { collapsed: boolean }) {
-  const target = readActiveQuickTarget()
-  const { location } = useRouterState()
-  if (!target) return null
-  const isActive = location.pathname === "/quick-edit"
-  return (
-    <Link
-      to="/quick-edit"
-      search={{ target: target.id }}
-      data-testid="nav-editor"
-      data-active={isActive}
-      title={collapsed ? "Editor" : target.path}
-      data-feature-label="Editor"
-      data-feature-help={`Return to ${target.path}`}
-      className={cn(navRowClass, collapsed && "justify-center", navStateClass(isActive))}
-    >
-      <FileCode2 className="size-4" aria-hidden />
-      {collapsed ? null : <span className="flex-1 truncate">Editor</span>}
-    </Link>
-  )
-}
-
 /**
  * Unified workspace nav (AGENTS.md "Scope" / md/engineering/architecture.md (renderer)): the
- * `scienceNavItems` registry plus Workflows, rendered as ONE `gap-0.5` list so every
+ * `scienceNavItems` registry plus Workflows and Editor, rendered as ONE `gap-0.5` list so every
  * row — Workflows included — sits flush with its peers (Task 2/6: the old gap-3
  * between two separate `<nav>`s was what made Workflows read as a detached block).
  * Built ("ready") tabs are links that highlight when active; not-yet-built tabs render
@@ -851,7 +834,14 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
     if (item.id === "analysis") return showAnalysis
     return true
   })
-  const ordered = orderById(visibleItems, navOrder)
+  // Existing saved orders predate Editor. Place the new row after Workflows
+  // once, then let drag-and-drop persist any position the user chooses.
+  const workflowsIndex = navOrder.indexOf("workflows")
+  const effectiveOrder =
+    navOrder.includes("editor") || workflowsIndex < 0
+      ? navOrder
+      : [...navOrder.slice(0, workflowsIndex + 1), "editor", ...navOrder.slice(workflowsIndex + 1)]
+  const ordered = orderById(visibleItems, effectiveOrder)
   const navRowProps = useDragReorder(
     ordered.map((item) => item.id),
     setNavOrder,
@@ -865,7 +855,12 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
     >
       {ordered.map((item) => {
         const Icon = item.icon
-        const testId = item.id === "workflows" ? "nav-automations" : "science-nav-item"
+        const testId =
+          item.id === "workflows"
+            ? "nav-automations"
+            : item.id === "editor"
+              ? "nav-editor"
+              : "science-nav-item"
         const reorder = collapsed ? null : navRowProps(item.id)
         if (!item.ready || !item.to) {
           return (
@@ -901,6 +896,7 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
           <Link
             key={item.id}
             to={item.to}
+            search={item.id === "editor" ? { target: readActiveQuickTarget()?.id } : undefined}
             data-testid={testId}
             data-science-tab={item.id}
             data-ready={true}

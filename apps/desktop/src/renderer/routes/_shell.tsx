@@ -1,16 +1,22 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderGit2 } from "lucide-react"
-import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { CommandPalette } from "../CommandPalette"
 import { useTranslate } from "../i18n/language"
 import { NotificationBridge } from "../notifications/NotificationBridge"
-import { useSidebarCollapsed } from "../preferences/preferences"
+import {
+  editorVimChoicePending,
+  readEditorVimChoice,
+  settleEditorVimChoice,
+  useEditorVimCache,
+  useSidebarCollapsed,
+} from "../preferences/preferences"
 import { quickEditorRevision, subscribeQuickEditor } from "../QuickEditor/quickEditorState"
 import { QuickFind, type QuickFindItem } from "../QuickFind"
 import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute"
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
-import { useTRPC } from "../trpc/react"
+import { useTRPC, useTRPCClient } from "../trpc/react"
 import { ProjectActivityProvider } from "./_shell/-ProjectActivity"
 import { rememberSettingsReturnRoute } from "./_shell/-settingsReturnRoute"
 import { AddProjectControllerProvider } from "./_shell/components/AddProjectController"
@@ -46,7 +52,45 @@ function ShellLayout() {
   useGlobalShortcuts(location.pathname, location.search, () => setPaletteOpen(true))
   useDashboardTabToggle(location.pathname, location.search)
   const trpc = useTRPC()
+  const client = useTRPCClient()
   const settings = useQuery(trpc.settings.get.queryOptions())
+  const [cachedVim] = useEditorVimCache()
+  const [vimSyncError, setVimSyncError] = useState<string | null>(null)
+  const [vimSyncRetry, setVimSyncRetry] = useState(0)
+  const vimSyncInFlight = useRef(false)
+  // Retry is an explicit trigger after a failed settings write.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry button re-runs this sync effect
+  useEffect(() => {
+    const saved = settings.data?.editor.vim
+    if (saved === undefined || vimSyncInFlight.current) return
+    if (!editorVimChoicePending()) {
+      if (saved !== cachedVim) settleEditorVimChoice(saved)
+      return
+    }
+    if (saved === cachedVim) {
+      settleEditorVimChoice(saved)
+      setVimSyncError(null)
+      return
+    }
+    vimSyncInFlight.current = true
+    let writeSucceeded = false
+    void client.settings.updateEditor
+      .mutate({ vim: cachedVim })
+      .then(async () => {
+        const result = await settings.refetch()
+        if (result.isError) throw result.error
+        if (readEditorVimChoice() === cachedVim) {
+          settleEditorVimChoice(cachedVim)
+        }
+        writeSucceeded = true
+        setVimSyncError(null)
+      })
+      .catch((cause: unknown) => setVimSyncError(`Could not save Vim mode: ${String(cause)}`))
+      .finally(() => {
+        vimSyncInFlight.current = false
+        if (writeSucceeded && editorVimChoicePending()) setVimSyncRetry((value) => value + 1)
+      })
+  }, [cachedVim, client, settings.data?.editor.vim, settings.refetch, vimSyncRetry])
   const setupGateMode = readSetupGateMode(window.location.search)
   const isSetup = location.pathname === "/setup"
   const redirectToSetup =
@@ -88,6 +132,14 @@ function ShellLayout() {
 
   const content = (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      {vimSyncError ? (
+        <div role="alert" className="flex items-center gap-3 border-b px-4 py-2 text-sm">
+          <span>{vimSyncError}</span>
+          <button type="button" onClick={() => setVimSyncRetry((value) => value + 1)}>
+            Retry
+          </button>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Outlet />
       </div>
@@ -160,7 +212,7 @@ function useGlobalShortcuts(pathname: string, search: unknown, onCommandPalette:
   paletteRef.current = onCommandPalette
   const routeRef = useRef({ pathname, search })
   routeRef.current = { pathname, search }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (routeRef.current.pathname.startsWith("/settings")) return
       if (eventMatchesShortcut(event, "open-settings")) {

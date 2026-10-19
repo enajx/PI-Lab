@@ -20,6 +20,7 @@ import {
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import { publishPublicUpdateChannelChanged } from "../../updates/selection"
 import { publicProcedure, router } from "../trpc"
 
 /**
@@ -79,6 +80,7 @@ const generalPatch = z.object({
   worktreePerAgent: z.boolean().optional(),
   confirmOnQuit: z.boolean().optional(),
   keepRunningAfterClose: z.boolean().optional(),
+  publicUpdateChannel: z.enum(["stable", "beta"]).optional(),
 })
 
 const agentsPatch = z.object({
@@ -155,7 +157,7 @@ export function writeEditorSettings(
 /** The general-settings columns this router patches (top-level, not a JSON blob). */
 export type GeneralSettings = Pick<
   Settings,
-  "worktreePerAgent" | "confirmOnQuit" | "keepRunningAfterClose"
+  "worktreePerAgent" | "confirmOnQuit" | "keepRunningAfterClose" | "publicUpdateChannel"
 >
 
 /**
@@ -171,6 +173,7 @@ export function writeGeneralSettings(db: PiLabDatabase, patch: Partial<GeneralSe
     worktreePerAgent: patch.worktreePerAgent ?? current.worktreePerAgent,
     confirmOnQuit: patch.confirmOnQuit ?? current.confirmOnQuit,
     keepRunningAfterClose: patch.keepRunningAfterClose ?? current.keepRunningAfterClose,
+    publicUpdateChannel: patch.publicUpdateChannel ?? current.publicUpdateChannel,
   }
   db.insert(settings)
     .values({ id: SETTINGS_ROW_ID, ...next, updatedAt: Date.now() })
@@ -179,6 +182,9 @@ export function writeGeneralSettings(db: PiLabDatabase, patch: Partial<GeneralSe
       set: { ...next, updatedAt: Date.now() },
     })
     .run()
+  if (next.publicUpdateChannel !== current.publicUpdateChannel) {
+    publishPublicUpdateChannelChanged(next.publicUpdateChannel)
+  }
   return getSettingsOrDefaults(db)
 }
 

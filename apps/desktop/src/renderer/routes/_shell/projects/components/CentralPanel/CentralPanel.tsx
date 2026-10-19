@@ -51,6 +51,8 @@ interface CentralPanelProps {
   client: PiLabTrpcClient
   /** Main-checkout workspace — drives quick-open search + file reads. */
   workspaceId: string
+  openFileFinder: boolean
+  onFileFinderOpened: () => void
   /** Project name used by the contextual fuzzy-search scope label. */
   projectName?: string
   settings: EditorSettings
@@ -83,6 +85,8 @@ export function CentralPanel({
   controller,
   client,
   workspaceId,
+  openFileFinder,
+  onFileFinderOpened,
   projectName,
   settings,
   gitAvailable,
@@ -102,14 +106,12 @@ export function CentralPanel({
   const [filesWidth, setFilesWidth] = useFilesPanelWidth()
   const runDestination = settings.pythonRunDestination ?? "central"
 
-  // The shell owns the actual keyboard chord so its capture listener always runs before any
-  // transient panel. This project view receives the resulting intent.
+  // The project view keeps an early ⌘F request while the workspace loads.
   useLayoutEffect(() => {
-    const onOpenProjectFileFinder = () => setQuickOpen(true)
-    window.addEventListener("pi-lab:open-project-file-finder", onOpenProjectFileFinder)
-    return () =>
-      window.removeEventListener("pi-lab:open-project-file-finder", onOpenProjectFileFinder)
-  }, [])
+    if (!openFileFinder) return
+    setQuickOpen(true)
+    onFileFinderOpened()
+  }, [openFileFinder, onFileFinderOpened])
 
   useEffect(() => {
     if (!addMenuOpen) return

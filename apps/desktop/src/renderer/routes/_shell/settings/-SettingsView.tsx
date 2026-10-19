@@ -10,6 +10,7 @@ import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
 import { FeatureHelpPanel, FeatureHelpRestoreButton, useFeatureHelp } from "../components/Sidebar"
 import { AgentStatusControl } from "../titleBar"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
+import { QuickEditorSection } from "./components/QuickEditorSection"
 import {
   AgentsSection,
   AppearanceSection,
@@ -58,6 +59,12 @@ const SECTIONS = [
     label: "Editor",
     description: "Configure saving, keybindings, diagnostics, formatting, and editor themes.",
     render: () => <EditorSection />,
+  },
+  {
+    id: "quick-editor",
+    label: "Quick Editor",
+    description: "Choose how files open in Quick Editor.",
+    render: () => <QuickEditorSection />,
   },
   {
     id: "agents",
@@ -126,6 +133,7 @@ export function SettingsView() {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as SettingsSearch
   const [activeId, setActiveId] = useState<SettingsSectionId>(search.section ?? SECTIONS[0].id)
+  const [returnError, setReturnError] = useState<string | null>(null)
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
   const featureHelp = useFeatureHelp(showFeatureHelp)
   const active = SECTIONS.find((section) => section.id === activeId) ?? SECTIONS[0]
@@ -141,6 +149,21 @@ export function SettingsView() {
   }, [activeId, search.advanced])
 
   const onBack = () => {
+    if (search.returnTarget) {
+      const bridge = window.piLab?.quickEdit
+      if (!bridge) {
+        setReturnError("Could not return to the editor: the file bridge is unavailable.")
+        return
+      }
+      setReturnError(null)
+      void bridge
+        .resolveRoute(search.returnTarget)
+        .then((route) => navigate({ href: route }))
+        .catch((error: unknown) =>
+          setReturnError(`Could not return to the editor: ${String(error)}`),
+        )
+      return
+    }
     const previous = readSettingsReturnRoute()
     void navigate({ to: previous.pathname as never, search: previous.search as never })
   }
@@ -168,6 +191,15 @@ export function SettingsView() {
         </div>
       </header>
 
+      {returnError ? (
+        <div
+          role="alert"
+          className="border-destructive border-b px-6 py-2 text-destructive text-sm"
+        >
+          {returnError}
+        </div>
+      ) : null}
+
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label={t("Settings sections")}
@@ -183,7 +215,10 @@ export function SettingsView() {
               data-feature-help={t(section.description)}
               onClick={() => {
                 setActiveId(section.id)
-                void navigate({ to: "/settings", search: { section: section.id } })
+                void navigate({
+                  to: "/settings",
+                  search: { section: section.id, returnTarget: search.returnTarget },
+                })
               }}
               className={cn(
                 "rounded-md px-2 py-1.5 text-start text-sm transition-colors",

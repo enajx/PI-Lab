@@ -20,6 +20,7 @@ describe("Start at login", () => {
       platform: "darwin",
       isPackaged: true,
       executable: "/Applications/PI Lab.app/Contents/MacOS/PI Lab",
+      channel: "stable",
       configHome: "/unused",
       native: {
         getLoginItemSettings: () => ({ openAtLogin: enabled }),
@@ -38,6 +39,7 @@ describe("Start at login", () => {
       platform: "win32",
       isPackaged: true,
       executable: "C:\\Program Files\\PI Lab\\PI Lab.exe",
+      channel: "stable",
       configHome: "C:\\unused",
       native: { getLoginItemSettings, setLoginItemSettings },
     })
@@ -61,6 +63,7 @@ describe("Start at login", () => {
       platform: "linux",
       isPackaged: true,
       executable: "/home/user/PI Lab.AppImage",
+      channel: "stable",
       configHome,
       native: null,
     })
@@ -78,6 +81,7 @@ describe("Start at login", () => {
       platform: "darwin",
       isPackaged: false,
       executable: "/path/to/Electron",
+      channel: "stable",
       configHome: "/unused",
       native: {
         getLoginItemSettings: () => ({ openAtLogin: false }),
@@ -86,5 +90,28 @@ describe("Start at login", () => {
     })
     expect(await service.get()).toEqual({ enabled: false, available: false })
     await expect(service.set(true)).rejects.toThrow("packaged")
+  })
+
+  test.each([
+    "alpha",
+    "beta",
+  ] as const)("Linux %s login item does not overwrite Stable", async (channel) => {
+    const configHome = await mkdtemp(join(tmpdir(), "pi-lab-autostart-"))
+    dirs.push(configHome)
+    const service = createStartAtLoginService({
+      platform: "linux",
+      isPackaged: true,
+      executable: `/home/user/PI Lab ${channel}.AppImage`,
+      channel,
+      configHome,
+      native: null,
+    })
+    await service.set(true)
+    const entry = await readFile(
+      join(configHome, "autostart", `com.pi-lab.desktop.${channel}`),
+      "utf8",
+    )
+    expect(entry).toContain(`Name=PI Lab ${channel === "alpha" ? "Alpha" : "Beta"}`)
+    expect(entry).toContain("--pi-lab-background")
   })
 })

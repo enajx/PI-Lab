@@ -83,6 +83,52 @@ function useBooleanPref(key: string, fallback: boolean): [boolean, (next: boolea
   return [value, set]
 }
 
+const EDITOR_VIM_CACHE_KEY = "pi-lab.editor.vim"
+const EDITOR_VIM_PENDING_KEY = "pi-lab.editor.vim.pending"
+
+/** The quick renderer reads this without starting the full settings service. */
+export const useEditorVimCache = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(EDITOR_VIM_CACHE_KEY, false)
+
+export function readEditorVimChoice(): boolean {
+  return readBoolean(EDITOR_VIM_CACHE_KEY, false)
+}
+
+/** Mark a quick change for the full app to save in its editor settings. */
+export function writeEditorVimChoice(value: boolean): void {
+  writePref(EDITOR_VIM_CACHE_KEY, String(value))
+  writePref(EDITOR_VIM_PENDING_KEY, "true")
+}
+
+export function editorVimChoicePending(): boolean {
+  return readBoolean(EDITOR_VIM_PENDING_KEY, false)
+}
+
+/** Mirror the saved full-app choice after settings load or a successful save. */
+export function settleEditorVimChoice(value: boolean): void {
+  writePref(EDITOR_VIM_CACHE_KEY, String(value))
+  writePref(EDITOR_VIM_PENDING_KEY, "false")
+}
+
+/** Quick Editor word suggestions use text in the current file and need no service. */
+export const useQuickEditorAutocomplete = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.quickEditor.autocomplete", false)
+
+/** Python execution is optional so the quick renderer can start without its services. */
+export const useQuickEditorRunPython = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.quickEditor.runPython", false)
+
+export type QuickEditorMarkdownMode = "source" | "render"
+
+/** Default presentation for Markdown opened in Quick Editor. */
+export const useQuickEditorMarkdownMode = (): [
+  QuickEditorMarkdownMode,
+  (next: QuickEditorMarkdownMode) => void,
+] => {
+  const [stored, setStored] = useStringPref("pi-lab.quickEditor.markdownMode", "source")
+  return [stored === "render" ? "render" : "source", setStored]
+}
+
 /** Per-project dismissal state for the concise non-Git capability notice. */
 export const useNonGitNoticeDismissed = (projectId: string): [boolean, (next: boolean) => void] =>
   useBooleanPref(`pi-lab.project.${projectId}.nonGitNoticeDismissed`, false)
@@ -234,20 +280,6 @@ export const FILES_PANEL_MAX_WIDTH = 480
 export const FILES_PANEL_DEFAULT_WIDTH = 224
 export const useFilesPanelWidth = (): [number, (next: number) => void] =>
   useNumberPref(FILES_PANEL_WIDTH_KEY, FILES_PANEL_DEFAULT_WIDTH)
-
-// --- App icon: which Pi treatment the user currently favours ----------------
-// Comparison-only. This records a *pick*, never app identity: the shipped icon
-// stays the outlined face pinned in `icons/icon.manifest.json` until a pick is
-// explicitly promoted. Stored as a free string (like the editor font family) so
-// this layer stays unaware of the gallery's catalogue; the gallery validates the
-// value against the treatments it actually ships.
-export const APP_ICON_PI_FONT_DEFAULT = "avenir-next-medium"
-const APP_ICON_PI_FONT_KEY = "pi-lab.appearance.iconPiFont"
-export const useAppIconPiFont = (): [string, (next: string) => void] => {
-  const [stored, setStored] = useStringPref(APP_ICON_PI_FONT_KEY, APP_ICON_PI_FONT_DEFAULT)
-  const font = stored.trim().length > 0 ? stored : APP_ICON_PI_FONT_DEFAULT
-  return [font, setStored]
-}
 
 // --- File tree: one global sort shared by every project/tree placement -------
 export type FileTreeSort = "name-asc" | "name-desc" | "type" | "modified"

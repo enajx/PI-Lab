@@ -114,6 +114,8 @@ test("Add project opens the shared chooser and enters the folder returned by the
   await expect(window.getByTestId("add-project-template")).toBeVisible()
 
   await window.getByTestId("add-project-folder").click()
+  await expect(window.getByRole("dialog", { name: "Plan this project" })).toBeVisible()
+  await window.getByRole("button", { name: "Maybe later" }).click()
 
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByRole("heading", { name: "added-repo" })).toBeVisible()

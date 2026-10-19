@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { realpathSync } from "node:fs"
+import { constants, realpathSync } from "node:fs"
 import { lstat, open } from "node:fs/promises"
 import { resolve } from "node:path"
 import {
@@ -52,6 +52,11 @@ export class QuickEditFiles {
     return path
   }
 
+  /** Canonical path for a registered file, for process execution. */
+  canonicalPath(id: string): string {
+    return this.resolvedPath(id)
+  }
+
   async read(id: string): Promise<TextSnapshot> {
     const snapshot = await readTextSnapshot(this.resolvedPath(id))
     if (snapshot.status === "text") this.baselineContent.set(id, snapshot.content)
@@ -60,6 +65,38 @@ export class QuickEditFiles {
 
   async stat(id: string): Promise<FileStat> {
     return statFile(this.resolvedPath(id))
+  }
+
+  /** Write a path accepted by the native Save dialog, then verify the disk copy. */
+  async saveUntitled(path: string, content: string): Promise<string> {
+    const target = resolve(path)
+    const before = await lstat(target).then(
+      (info) => info,
+      (cause: NodeJS.ErrnoException) => {
+        if (cause.code === "ENOENT") return null
+        throw cause
+      },
+    )
+    if (before && !before.isFile()) throw new Error("The save path is not a regular file")
+    const handle = before
+      ? await open(target, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0))
+      : await open(target, "wx")
+    try {
+      const opened = await handle.stat()
+      if (
+        !opened.isFile() ||
+        (before && (opened.dev !== before.dev || opened.ino !== before.ino))
+      ) {
+        throw new Error("The save path is no longer the selected regular file")
+      }
+      if (before) await handle.truncate(0)
+      await handle.writeFile(content, "utf8")
+    } finally {
+      await handle.close()
+    }
+    const verified = await verifyWrittenText(target, content)
+    if (!verified.matchesWrittenContent) throw new Error("Saved file differs from editor content")
+    return target
   }
 
   async save(

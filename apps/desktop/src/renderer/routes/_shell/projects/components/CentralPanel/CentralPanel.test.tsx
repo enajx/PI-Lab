@@ -278,6 +278,8 @@ function Harness({
         controller={controller}
         client={client}
         workspaceId="ws-1"
+        openFileFinder={false}
+        onFileFinderOpened={() => {}}
         settings={settings}
         onUpdateEditorSettings={onUpdate}
         rightSidebarCollapsed={false}

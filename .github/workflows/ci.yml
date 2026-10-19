@@ -84,18 +84,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.0"
-      - name: Cache bun store
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
       # Linux: node-gyp toolchain headers for any from-source native compile.
       - name: Linux native build deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbfile-dev
       # Install native prebuilds or compile node-pty when no prebuild matches.
-      - run: bun install --frozen-lockfile
+      # Native postinstall scripts may both bootstrap node-gyp in /tmp. Run them
+      # in sequence so one script cannot read the other's incomplete install.
+      - run: bun install --frozen-lockfile --concurrent-scripts 1
       # Prepare the macOS PTY helper, then validate both native modules in Node.
       - name: Setup native modules (node-pty)
         run: bun run --cwd apps/desktop setup:native
@@ -115,12 +111,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.0"
-      - name: Cache bun store
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -130,7 +120,7 @@ jobs:
       - name: Linux native build deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbfile-dev xvfb
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --concurrent-scripts 1
       # Prepare the macOS PTY helper and check native loading under Node.
       - name: Setup native modules (node-pty)
         run: bun run --cwd apps/desktop setup:native

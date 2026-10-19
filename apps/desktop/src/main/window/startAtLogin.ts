@@ -3,9 +3,9 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { isAbsolute, join } from "node:path"
 import { app } from "electron"
+import { channelFromAppName, channelIdentity, type PiLabChannel } from "../identity/channel"
 
 const BACKGROUND_ARG = "--pi-lab-background"
-const AUTOSTART_NAME = "com.pi-lab.desktop"
 
 export interface StartAtLoginState {
   enabled: boolean
@@ -21,6 +21,7 @@ interface StartAtLoginOptions {
   platform: NodeJS.Platform
   isPackaged: boolean
   executable: string
+  channel: PiLabChannel
   configHome: string
   native: NativeLoginPort | null
 }
@@ -48,7 +49,8 @@ export function createStartAtLoginService(options: StartAtLoginOptions): StartAt
     options.isPackaged &&
     (options.platform === "linux" ||
       ((options.platform === "darwin" || options.platform === "win32") && options.native !== null))
-  const entryPath = join(options.configHome, "autostart", AUTOSTART_NAME)
+  const identity = channelIdentity(options.channel)
+  const entryPath = join(options.configHome, "autostart", identity.autostartName)
   const loginOptions =
     options.platform === "win32" ? { path: options.executable, args: [BACKGROUND_ARG] } : undefined
 
@@ -73,7 +75,7 @@ export function createStartAtLoginService(options: StartAtLoginOptions): StartAt
         await mkdir(join(options.configHome, "autostart"), { recursive: true })
         await writeFile(
           entryPath,
-          `[Desktop Entry]\nType=Application\nName=PI Lab\nExec=${desktopExecutable(options.executable)} ${BACKGROUND_ARG}\nTerminal=false\n`,
+          `[Desktop Entry]\nType=Application\nName=${identity.name}\nExec=${desktopExecutable(options.executable)} ${BACKGROUND_ARG}\nTerminal=false\n`,
           "utf8",
         )
       } else {
@@ -98,6 +100,7 @@ export function liveStartAtLoginService(): StartAtLoginService {
     platform: process.platform,
     isPackaged: app.isPackaged,
     executable,
+    channel: channelFromAppName(app.getName()),
     configHome,
     native: process.platform === "linux" ? null : app,
   })

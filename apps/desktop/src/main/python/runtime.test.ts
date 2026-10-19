@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import {
   environmentDirForInterpreter,
@@ -118,7 +118,10 @@ describe("resolvePythonRuntime environment precedence", () => {
 
     const runtime = await resolvePythonRuntime(
       workspaceDir,
-      options(probe, { UV_PROJECT_ENVIRONMENT: "runtime/uv" }),
+      {
+        ...options(probe, { UV_PROJECT_ENVIRONMENT: "runtime/uv" }),
+        ignoreInheritedEnvironments: true,
+      },
       null,
     )
 
@@ -173,6 +176,7 @@ describe("resolvePythonRuntime layouts and managers", () => {
       source: "dot-venv",
       displayName: `${basename(workspaceDir)}/.venv (3.13)`,
       interpreterPath: interpreter,
+      version: "3.13",
     })
   })
 
@@ -362,6 +366,110 @@ describe("resolvePythonRuntime layouts and managers", () => {
 })
 
 describe("resolvePythonRuntime no-environment strategies", () => {
+  test("uses terminal python before the GUI PATH fallback", async () => {
+    const terminalPath = "/opt/homebrew/bin/python3.15"
+    const { probe, calls } = recordingProbe((call) =>
+      call.command === "python3"
+        ? {
+            stdout: `${JSON.stringify({ executable: "/usr/bin/python3", version: "3.9" })}\n`,
+            stderr: "",
+            code: 0,
+            notFound: false,
+            timedOut: false,
+          }
+        : MISSING,
+    )
+    const runtime = await resolvePythonRuntime(
+      workspaceDir,
+      {
+        ...options(probe),
+        terminalPython: async () => ({ executable: terminalPath, version: "3.15" }),
+      },
+      null,
+    )
+    expect(runtime).toMatchObject({
+      interpreterPath: terminalPath,
+      version: "3.15",
+      runStrategy: { command: terminalPath, argsPrefix: [] },
+    })
+    expect(calls).toEqual([])
+  })
+
+  test("keeps a local environment ahead of terminal python", async () => {
+    const interpreter = await addInterpreter(join(workspaceDir, ".venv"), "bin/python3")
+    const { probe } = recordingProbe()
+    let terminalCalls = 0
+    const runtime = await resolvePythonRuntime(
+      workspaceDir,
+      {
+        ...options(probe),
+        terminalPython: async () => {
+          terminalCalls += 1
+          return { executable: "/opt/homebrew/bin/python3.15", version: "3.15" }
+        },
+      },
+      null,
+    )
+    expect(runtime.interpreterPath).toBe(interpreter)
+    expect(terminalCalls).toBe(0)
+  })
+
+  test("ignores an unrelated inherited environment in Quick Editor", async () => {
+    const currentDir = join(workspaceDir, "current-project")
+    await mkdir(currentDir)
+    const unrelated = await addInterpreter(
+      join(workspaceDir, "other-project", ".venv"),
+      "bin/python3",
+    )
+    const { probe } = recordingProbe()
+    const terminalPath = "/opt/homebrew/bin/python3.15"
+    const runtime = await resolvePythonRuntime(
+      currentDir,
+      {
+        ...options(probe, {
+          VIRTUAL_ENV: dirname(dirname(unrelated)),
+          UV_PROJECT_ENVIRONMENT: dirname(dirname(unrelated)),
+        }),
+        ignoreInheritedEnvironments: true,
+        terminalPython: async () => ({ executable: terminalPath, version: "3.15" }),
+      },
+      null,
+    )
+    expect(runtime.source).toBeNull()
+    expect(runtime.interpreterPath).toBe(terminalPath)
+  })
+
+  test("uses the base interpreter when terminal python is an unrelated virtual environment", async () => {
+    const baseExecutable = "/usr/local/bin/python3.15"
+    const { probe } = recordingProbe((call) =>
+      call.command === baseExecutable
+        ? {
+            stdout: `${JSON.stringify({ executable: baseExecutable, version: "3.15", isVenv: false, isConda: false })}\n`,
+            stderr: "",
+            code: 0,
+            notFound: false,
+            timedOut: false,
+          }
+        : MISSING,
+    )
+    const runtime = await resolvePythonRuntime(
+      workspaceDir,
+      {
+        ...options(probe),
+        ignoreInheritedEnvironments: true,
+        terminalPython: async () => ({
+          executable: "/other-project/.venv/bin/python",
+          version: "3.15",
+          isVenv: true,
+          baseExecutable,
+        }),
+      },
+      null,
+    )
+    expect(runtime.source).toBeNull()
+    expect(runtime.interpreterPath).toBe(baseExecutable)
+  })
+
   test("prefers uv run python for a recognized uv project", async () => {
     await writeFile(join(workspaceDir, "uv.lock"), "")
     const { probe, calls } = recordingProbe((call) =>
@@ -415,6 +523,29 @@ describe("resolvePythonRuntime no-environment strategies", () => {
       runStrategy: { kind: "python3", command: python3, argsPrefix: [] },
     })
     expect(calls.map((call) => call.command)).toEqual(["uv", "python3"])
+  })
+
+  test("keeps the exact version and executable of a system Python fallback", async () => {
+    const python3 = "/usr/local/bin/python3"
+    const { probe } = recordingProbe((call) =>
+      call.command === "python3"
+        ? {
+            stdout: `${JSON.stringify({ executable: python3, version: "3.12" })}\n`,
+            stderr: "",
+            code: 0,
+            notFound: false,
+            timedOut: false,
+          }
+        : MISSING,
+    )
+
+    const runtime = await resolvePythonRuntime(workspaceDir, options(probe), null)
+
+    expect(runtime).toMatchObject({
+      displayName: "No virtual env",
+      interpreterPath: python3,
+      version: "3.12",
+    })
   })
 
   test("falls back from a missing python3 to python", async () => {

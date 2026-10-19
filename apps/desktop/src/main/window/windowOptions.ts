@@ -4,6 +4,7 @@ export function buildMainWindowOptions(
   iconPath: string | null,
   preloadPath: string,
   platform: NodeJS.Platform,
+  hideTestWindow: boolean,
 ): BrowserWindowConstructorOptions {
   return {
     width: 1280,
@@ -13,6 +14,7 @@ export function buildMainWindowOptions(
     minWidth: 900,
     minHeight: 600,
     show: false,
+    ...(hideTestWindow ? { opacity: 0 } : {}),
     // Light by default; this is only the pre-paint flash color before the
     // renderer mounts its theme.
     backgroundColor: "#ffffff",

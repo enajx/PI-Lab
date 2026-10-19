@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { BrowserWindow, nativeImage, type Rectangle, screen, Tray } from "electron"
 import { BACKGROUND_TRAY_CHANGED_CHANNEL } from "../../shared/backgroundTray"
-import { rendererDevServerUrl } from "../runtime/env"
+import { isTestMode, rendererDevServerUrl } from "../runtime/env"
 
 const POPOVER_WIDTH = 344
 const POPOVER_HEIGHT = 420
@@ -11,13 +11,22 @@ export class BackgroundTray {
   private readonly tray: Tray
   private popover: BrowserWindow | null = null
 
-  constructor(iconPath: string) {
+  constructor(iconPath: string, appName: string) {
+    this.tray = new Tray(this.imageFor(iconPath))
+    this.tray.setToolTip(appName)
+    this.tray.on("click", (_event, bounds) => this.toggle(bounds))
+  }
+
+  /** Update the background icon when Settings changes the application icon. */
+  setIcon(iconPath: string): void {
+    this.tray.setImage(this.imageFor(iconPath))
+  }
+
+  private imageFor(iconPath: string) {
     const icon = nativeImage.createFromPath(iconPath).resize({ width: 20, height: 20 })
     if (icon.isEmpty()) throw new Error(`PI Lab tray icon could not be loaded: ${iconPath}`)
     if (process.platform === "darwin") icon.setTemplateImage(true)
-    this.tray = new Tray(icon)
-    this.tray.setToolTip("PI Lab")
-    this.tray.on("click", (_event, bounds) => this.toggle(bounds))
+    return icon
   }
 
   /** Hide the popover after one of its actions opens a window. */
@@ -61,8 +70,11 @@ export class BackgroundTray {
     const below = anchor.y + anchor.height + POPOVER_HEIGHT <= area.y + area.height
     const y = below ? anchor.y + anchor.height : anchor.y - POPOVER_HEIGHT
     window.setPosition(Math.round(x), Math.round(Math.max(area.y, y)))
-    window.show()
-    window.focus()
+    if (isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1") window.showInactive()
+    else {
+      window.show()
+      window.focus()
+    }
   }
 
   private ensurePopover(): BrowserWindow {
@@ -71,6 +83,7 @@ export class BackgroundTray {
       width: POPOVER_WIDTH,
       height: POPOVER_HEIGHT,
       show: false,
+      ...(isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1" ? { opacity: 0 } : {}),
       frame: false,
       resizable: false,
       skipTaskbar: true,
@@ -83,6 +96,9 @@ export class BackgroundTray {
         nodeIntegration: false,
       },
     })
+    if (isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1") {
+      window.setIgnoreMouseEvents(true)
+    }
     window.on("blur", () => window.hide())
     window.on("closed", () => {
       if (this.popover === window) this.popover = null

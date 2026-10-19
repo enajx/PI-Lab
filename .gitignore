@@ -47,6 +47,8 @@ coverage
 .turbo
 .cache
 .tmp/
+__pycache__/
+*.pyc
 md/.vitepress/cache/
 mise.toml
 

@@ -16,6 +16,7 @@ function bridge(initial: BackgroundTraySnapshot) {
     openProject: vi.fn(async () => undefined),
     openApp: vi.fn(async () => undefined),
     openFile: vi.fn(async () => undefined),
+    restartToUpdate: vi.fn(),
     quit: vi.fn(),
   }
   Object.defineProperty(window, "piLab", { configurable: true, value: { backgroundTray: api } })
@@ -63,4 +64,13 @@ test("shows native action failures", async () => {
   render(<TrayPopover />)
   fireEvent.click(screen.getByRole("button", { name: "Open File" }))
   expect((await screen.findByRole("alert")).textContent).toContain("Dialog unavailable")
+})
+
+test("shows a downloaded update in the tray and offers an approved restart", async () => {
+  const { api } = bridge({ projects: [], updateVersion: "0.1.2" })
+  render(<TrayPopover />)
+
+  expect(await screen.findByText("Ready to update to 0.1.2")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Restart to Update" }))
+  expect(api.restartToUpdate).toHaveBeenCalledOnce()
 })

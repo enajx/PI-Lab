@@ -35,6 +35,7 @@ function renderSidebar(handlers: FakeHandlers = {}) {
     routeTree: rootRoute.addChildren([
       stub("/projects/$projectId"),
       stub("/automations"),
+      stub("/quick-edit"),
       stub("/settings"),
       stub("/science/library"),
       stub("/science/analysis"),
@@ -243,6 +244,38 @@ describe("Sidebar", () => {
     // Workflows shares the one nav with the science rows (not a separate block).
     expect(screen.getByTestId("science-nav").contains(workflows)).toBe(true)
     expect(screen.getAllByTestId("science-nav-item").length).toBeGreaterThan(0)
+  })
+
+  test("Editor stays after Workflows in the workspace nav even without an open file", async () => {
+    const { router } = renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const workflows = screen.getByTestId("nav-automations")
+    const editor = screen.getByTestId("nav-editor")
+    expect(nav.contains(editor)).toBe(true)
+    expect(workflows.nextElementSibling).toBe(editor)
+    fireEvent.click(editor)
+    await waitFor(() => expect(router.state.location.pathname).toBe("/quick-edit"))
+  })
+
+  test("Editor respects a saved workspace nav order", async () => {
+    window.localStorage.setItem("pi-lab.sidebar.navOrder", JSON.stringify(["editor", "workflows"]))
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    expect(nav.firstElementChild).toBe(screen.getByTestId("nav-editor"))
+    expect(nav.children[1]).toBe(screen.getByTestId("nav-automations"))
+  })
+
+  test("adds Editor after Workflows in an older saved nav order", async () => {
+    window.localStorage.setItem(
+      "pi-lab.sidebar.navOrder",
+      JSON.stringify(["workflows", "library", "analysis"]),
+    )
+    renderSidebar()
+    const workflows = await screen.findByTestId("nav-automations")
+    expect(workflows.nextElementSibling).toBe(screen.getByTestId("nav-editor"))
+    expect(
+      screen.getByTestId("nav-editor").nextElementSibling?.getAttribute("data-science-tab"),
+    ).toBe("library")
   })
 
   test("hides Cluster/Analysis nav rows when their section preference is off, restores when on", async () => {

@@ -1,9 +1,9 @@
+import { autocompletion, completeAnyWord } from "@codemirror/autocomplete"
 import { type Diagnostic, linter, lintGutter } from "@codemirror/lint"
-import { Compartment, EditorState, Prec } from "@codemirror/state"
+import { Compartment, EditorState, type Extension, Prec } from "@codemirror/state"
 import { EditorView, keymap } from "@codemirror/view"
 import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { vim } from "@replit/codemirror-vim"
-import { basicSetup } from "codemirror"
 import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { useTranslate } from "../../../i18n/language"
 import {
@@ -13,6 +13,7 @@ import {
 } from "../../../preferences/preferences"
 import { languageForPath } from "../../utils/languageForPath"
 import { editorThemeExtension } from "../editorThemes"
+import { editorSetup } from "./editorSetup"
 import {
   MARKDOWN_BLOCK_COMMANDS,
   type MarkdownMode,
@@ -53,6 +54,8 @@ interface CodeMirrorBufferProps {
   onSave: () => void
   /** Called after the CodeMirror view is mounted and focused. */
   onReady?: () => void
+  /** Reports the main cursor's one-based line and column. */
+  onCursorChange?: (line: number, column: number) => void
   /** Fires on Mod+Enter while this focused buffer is eligible to run. */
   onRun?: () => void
   /**
@@ -61,6 +64,8 @@ interface CodeMirrorBufferProps {
    * without touching this component.
    */
   vim?: boolean
+  /** Quick Editor can request file-local words or turn completion off. */
+  autocomplete?: "words" | false
   /**
    * Optional color-theme id (the stored `EditorSettings.editorTheme`). Resolved to
    * a CodeMirror extension via {@link editorThemeExtension} and layered on top of
@@ -82,6 +87,13 @@ interface CodeMirrorBufferProps {
   projectEntries?: MarkdownProjectEntry[]
   /** Search the current workspace for files matching a Markdown `@` query. */
   searchProjectFiles?: (query: string) => Promise<MarkdownProjectEntry[]>
+}
+
+/** Keep the full editor's language sources and Quick Editor's word source separate. */
+function completionExtension(mode: CodeMirrorBufferProps["autocomplete"]): Extension {
+  if (mode === false) return []
+  if (mode === "words") return autocompletion({ override: [completeAnyWord] })
+  return autocompletion()
 }
 
 interface MarkdownToolbarState {
@@ -127,9 +139,8 @@ const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: nul
  * one by `relPath`; remounting on a real document identity change is handled
  * there via React `key`, so this component never has to diff `initialDoc`.
  *
- * Uses `codemirror`'s `basicSetup` per the spec
- * (https://codemirror.net/docs/ref/#basic-setup): line numbers, history,
- * bracket matching, multi-cursor, and the standard keymap come for free.
+ * Uses CodeMirror's basic extensions with completion in its own compartment,
+ * so Quick Editor can switch it without losing the document or undo history.
  */
 export function CodeMirrorBuffer({
   relPath,
@@ -137,8 +148,10 @@ export function CodeMirrorBuffer({
   onChange,
   onSave,
   onReady,
+  onCursorChange,
   onRun,
   vim: vimEnabled = false,
+  autocomplete,
   theme,
   customThemes,
   diagnostics,
@@ -247,14 +260,17 @@ export function CodeMirrorBuffer({
   const onSaveRef = useRef(onSave)
   const onReadyRef = useRef(onReady)
   const onRunRef = useRef(onRun)
+  const onCursorChangeRef = useRef(onCursorChange)
   onChangeRef.current = onChange
   onSaveRef.current = onSave
   onReadyRef.current = onReady
   onRunRef.current = onRun
+  onCursorChangeRef.current = onCursorChange
 
   // Reconfigurable slices of the config. Created once per mount.
   const languageCompartment = useRef(new Compartment()).current
   const vimCompartment = useRef(new Compartment()).current
+  const autocompleteCompartment = useRef(new Compartment()).current
   const themeCompartment = useRef(new Compartment()).current
   const lintCompartment = useRef(new Compartment()).current
   const markdownCompartment = useRef(new Compartment()).current
@@ -303,8 +319,15 @@ export function CodeMirrorBuffer({
       setMarkdownOverlay(next)
     }
 
+    const reportCursor = (view: EditorView): void => {
+      const position = view.state.selection.main.head
+      const line = view.state.doc.lineAt(position)
+      onCursorChangeRef.current?.(line.number, position - line.from + 1)
+    }
+
     const changeListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+      if (update.docChanged || update.selectionSet) reportCursor(update.view)
       if (
         markdown &&
         (update.docChanged ||
@@ -400,13 +423,14 @@ export function CodeMirrorBuffer({
       extensions: [
         // Vim must precede other keymaps to win precedence when enabled.
         vimCompartment.of(vimEnabled ? vim() : []),
-        // Run/save must precede basicSetup's Enter keymap so Mod+Enter does not
+        // Run/save must precede the standard Enter keymap so Mod+Enter does not
         // fall through and insert a newline.
         saveKeymap,
-        basicSetup,
+        editorSetup,
+        autocompleteCompartment.of(completionExtension(autocomplete)),
         languageCompartment.of(languageForPath(relPath) ?? []),
         // Color theme (chrome + syntax highlighting) chosen in Settings → Editor.
-        // Layered over basicSetup's default highlight; the structural height theme
+        // Layered over the default highlight; the structural height theme
         // below only sets layout, so the two never conflict on color.
         themeCompartment.of(editorThemeExtension(theme, customThemes)),
         editorTypographyExtension,
@@ -430,6 +454,7 @@ export function CodeMirrorBuffer({
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
     view.focus()
+    reportCursor(view)
     onReadyRef.current?.()
     if (markdown) updateMarkdownOverlay(view)
 
@@ -454,6 +479,13 @@ export function CodeMirrorBuffer({
       effects: vimCompartment.reconfigure(vimEnabled ? vim() : []),
     })
   }, [vimEnabled, vimCompartment])
+
+  // Change only completion so the document, selection, and undo history stay intact.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: autocompleteCompartment.reconfigure(completionExtension(autocomplete)),
+    })
+  }, [autocomplete, autocompleteCompartment])
 
   // Swap the color theme live.
   useEffect(() => {

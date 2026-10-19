@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type PiLabDatabase, runMigrations } from "@pi-lab/local-db"
+import { readMigrationFiles } from "drizzle-orm/migrator"
+import dataFormat from "../../../release-data-format.json"
 import { resolveBundledMigrationsDir } from "./migrationsDir"
 
 /**
@@ -14,6 +16,11 @@ export interface DbStatus {
   recovered: boolean
   /** Newest migration tag (e.g. "0001_branch_workspace_unique"), or null. */
   latestTag: string | null
+  /** Ordered migrations applied to shared data, for safe public channel switches. */
+  compatibility: {
+    formatVersion: number
+    migrations: Array<{ hash: string; createdAt: number }>
+  }
 }
 
 let status: DbStatus | null = null
@@ -50,6 +57,12 @@ export function initDatabase(): DbStatus {
     appliedCount: result.appliedCount,
     recovered: result.recovered,
     latestTag: readLatestTag(migrationsFolder),
+    compatibility: {
+      formatVersion: dataFormat.version,
+      migrations: readMigrationFiles({ migrationsFolder })
+        .slice(0, result.appliedCount)
+        .map(({ hash, folderMillis }) => ({ hash, createdAt: folderMillis })),
+    },
   }
   return status
 }

@@ -592,6 +592,12 @@ export const settings = sqliteTable("settings", {
   keepRunningAfterClose: integer("keep_running_after_close", { mode: "boolean" })
     .notNull()
     .default(true),
+  /** Public update stream for the single installed PI Lab app. */
+  publicUpdateChannel: text("public_update_channel", {
+    enum: ["stable", "beta"],
+  })
+    .notNull()
+    .default("stable"),
   /**
    * Worktree policy for the "start agent session" flow (md/engineering/architecture.md (agent runtime)). When ON,
    * every agent session gets its own fresh git worktree. When OFF (default), an

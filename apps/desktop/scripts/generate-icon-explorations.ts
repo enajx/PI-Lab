@@ -2,10 +2,9 @@
 /**
  * Generate unshipped uppercase-Pi font explorations.
  *
- * Every output keeps the canonical application's 1024px canvas and white
- * macOS-style tile (x/y 64, 896px square, 210px corner radius). Only the
- * centered black `Π` glyph changes. These explorations intentionally do not
- * touch `icons/icon.svg`, `icons/icon.png`, or packaged build resources.
+ * Every output keeps the application's 1024px canvas and white macOS-style
+ * tile (x/y 64, 896px square, 210px corner radius). Only the centered black
+ * `Π` glyph changes. These font masters do not touch the shipped joyplot icon.
  *
  * Requires ImageMagick, librsvg (`rsvg-convert`), fontconfig (`fc-query`), and
  * the listed macOS fonts.
@@ -39,9 +38,8 @@ const OUTPUT_DIR = join(REPO_ROOT, "icons-temp")
 const SUPPLEMENTAL_FONTS = "/System/Library/Fonts/Supplemental"
 
 /**
- * Downscaled copies of the same explorations, committed as renderer assets so the
- * Settings → Appearance comparison gallery can show them without shipping four
- * 1024px masters' worth of pixels — and without any runtime font tooling.
+ * Downscaled copies of the same explorations, committed as renderer assets so
+ * Settings can build palette-specific Pi previews without runtime font tooling.
  */
 export const PREVIEW_SIZE = 256
 export const PREVIEW_DIR = join(
@@ -170,9 +168,9 @@ bun apps/desktop/scripts/generate-icon-explorations.ts
 
 The same run also writes ${PREVIEW_SIZE}px copies to
 \`apps/desktop/src/renderer/routes/_shell/settings/components/AppIconGallery/icons/\`,
-which the Settings → Appearance comparison gallery ships. That gallery is
-preview-only: it records which treatment the user favours and never touches
-\`icons/icon.svg\`, its manifest digests, or the packaged bundle icon.
+then regenerates the color variants used by the Settings → Appearance picker.
+The font choice can change the running app icon. The installed app bundle uses
+expanded joyplot style 25 in magma as its icon.
 
 | Preview | File | Font style | Local font source |
 | --- | --- | --- | --- |
@@ -220,10 +218,9 @@ export function generateIconExplorations(): void {
   }
 
   mkdirSync(PREVIEW_DIR, { recursive: true })
-  for (const entry of readdirSync(PREVIEW_DIR)) {
-    if (entry.toLowerCase().endsWith(".png")) {
-      rmSync(join(PREVIEW_DIR, entry))
-    }
+  for (const { fileName } of ICON_EXPLORATIONS) {
+    const preview = join(PREVIEW_DIR, `${explorationId(fileName)}.png`)
+    if (existsSync(preview)) rmSync(preview)
   }
 
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "pi-lab-icon-explorations-"))
@@ -312,6 +309,7 @@ export function generateIconExplorations(): void {
   rmSync(temporaryDirectory, { recursive: true, force: true })
 
   writeFileSync(join(OUTPUT_DIR, "README.md"), readme())
+  execFileSync("python3", [join(HERE, "generate-app-icon-choices.py")], { stdio: "inherit" })
 }
 
 generateIconExplorations()

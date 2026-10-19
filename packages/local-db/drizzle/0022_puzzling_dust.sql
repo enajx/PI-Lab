@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `public_update_channel` text DEFAULT 'stable' NOT NULL;

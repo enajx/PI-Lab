@@ -57,6 +57,15 @@ const rows: Row[] = [
     "Gå til Arbeidsflyter",
   ],
   [
+    "Go to Editor",
+    "转到编辑器",
+    "편집기로 이동",
+    "エディターへ移動",
+    "Ir al editor",
+    "الانتقال إلى المحرر",
+    "Gå til redigering",
+  ],
+  [
     "New/Add Project",
     "新建/添加项目",
     "프로젝트 만들기/추가",
