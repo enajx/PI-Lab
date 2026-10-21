@@ -6,7 +6,7 @@
 // (in-process vs detached child) are substituted.
 
 import { execFile } from "node:child_process"
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -89,8 +89,9 @@ export interface Harness {
   dataDir: string
   /** Deterministic stand-in for the user's home during global Skills discovery. */
   skillsHomeDir: string
-  /** A throwaway git repo with one commit on `main`. */
+  /** A throwaway folder, initialized as Git unless setup explicitly disables it. */
   repoDir: string
+  /** In lazy mode, request a terminal router procedure before direct client access. */
   client: DaemonClient
   activityMonitor: ActivityMonitorPort
   activityRegistry: ActivityRegistry
@@ -228,6 +229,10 @@ export const FAKE_PYTHON_RUNTIME_RESOLVER: PythonRuntimeResolver = async () => (
 })
 
 export interface HarnessOptions {
+  /** Skip Git subprocesses for suites that use only the database and filesystem. */
+  git?: boolean
+  /** Defer the real socket and its clients until a terminal operation needs them. */
+  daemon?: "eager" | "lazy"
   /** Launchable agents for this harness (defaults to the single fake agent). */
   agentCatalog?: readonly TerminalAgent[]
   /** Reachability probe for the cluster router (defaults to {@link FAKE_SSH_EXEC}). */
@@ -286,6 +291,8 @@ export async function createHarness(
     | "runNonInteractiveProcess"
     | "setupProbe"
     | "getAgentLaunchEnvironment"
+    | "git"
+    | "daemon"
   > = {},
 ): Promise<Harness> {
   // Canonicalize: on macOS `mkdtemp` hands back `/var/...` but git reports the
@@ -295,18 +302,27 @@ export async function createHarness(
   process.env.PI_LAB_DATA_DIR = dataDir
 
   const repoDir = join(dataDir, "repo")
-  await initRepo(repoDir)
+  if (options.git === false) await mkdir(repoDir)
+  else await initRepo(repoDir)
 
   const dbPath = join(dataDir, "local.db")
   const { db, sqlite } = runMigrations(dbPath)
 
   const socketPath = join(dataDir, "daemon.sock")
   const server = new DaemonServer({ socketPath })
-  await server.listen()
   const client = new DaemonClient(socketPath)
-  await client.connect()
   const monitorClient = new DaemonClient(socketPath)
-  await monitorClient.connect()
+  let daemonStarting: Promise<void> | null = null
+  const ensureDaemon = (): Promise<void> => {
+    if (!daemonStarting) {
+      daemonStarting = (async () => {
+        await server.listen()
+        await Promise.all([client.connect(), monitorClient.connect()])
+      })()
+    }
+    return daemonStarting
+  }
+  if (options.daemon !== "lazy") await ensureDaemon()
 
   const notifications = createNotificationBrokers()
   const notificationDeliveries: TestNotificationDelivery[] = []
@@ -334,7 +350,10 @@ export async function createHarness(
   const activityMonitor = createActivityMonitor({
     db,
     registry: activityRegistry,
-    getMonitorClient: async () => monitorClient,
+    getMonitorClient: async () => {
+      await ensureDaemon()
+      return monitorClient
+    },
     notifications: notificationService,
     scheduler: systemActivityScheduler,
     logger: { warn: () => {} },
@@ -345,7 +364,10 @@ export async function createHarness(
   const context: AppContext = {
     db,
     skillsHomeDir,
-    getDaemonClient: async () => client,
+    getDaemonClient: async () => {
+      await ensureDaemon()
+      return client
+    },
     agentCatalog,
     resolveAgentExecutable: async (candidate) =>
       candidate === "/missing/pi-lab-agent" ? null : candidate,
@@ -383,9 +405,12 @@ export async function createHarness(
   const dispose = async () => {
     activityMonitor.dispose()
     activityRegistry.dispose()
-    monitorClient.close()
-    client.close()
-    await server.close()
+    if (daemonStarting) {
+      await daemonStarting
+      monitorClient.close()
+      client.close()
+      await server.close()
+    }
     closeSqlite(sqlite)
     if (previousDataDir === undefined) delete process.env.PI_LAB_DATA_DIR
     else process.env.PI_LAB_DATA_DIR = previousDataDir

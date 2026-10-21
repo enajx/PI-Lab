@@ -11,7 +11,11 @@ import { join } from "node:path"
 import { type LibrarySource, SETTINGS_ROW_ID, settings } from "@pi-lab/local-db"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { HttpFetch } from "../../context"
-import { createHarness, FAKE_AGENT, type Harness } from "../../testHarness"
+import { createHarness as createFullHarness, FAKE_AGENT, type Harness } from "../../testHarness"
+
+// Keep a fresh database and temp tree per test without unused Git or PTY startup.
+const createHarness: typeof createFullHarness = (agentCatalog, options) =>
+  createFullHarness(agentCatalog, { ...options, git: false, daemon: "lazy" })
 
 /** A recorded outbound request — url plus the init (so tests can assert headers/body). */
 interface Recorded {
