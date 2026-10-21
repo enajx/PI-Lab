@@ -1,5 +1,5 @@
 import { DEFAULT_AGENT_ID } from "@pi-lab/shared/agents/catalog"
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useSyncExternalStore } from "react"
 
 /**
  * Renderer-only user preferences (the local, layout/appearance kind) persisted to
@@ -427,12 +427,8 @@ export function readDefaultAgentId(): string {
 }
 
 export function useDefaultAgentId(): [string, (next: string) => void] {
-  const [value, setValue] = useState<string>(() => readDefaultAgentId())
-  useEffect(() => {
-    persist(DEFAULT_AGENT_KEY, value)
-  }, [value])
-  const set = useCallback((next: string) => setValue(next), [])
-  return [value, set]
+  const [value, set] = useStringPref(DEFAULT_AGENT_KEY, DEFAULT_AGENT_ID)
+  return [value.trim() || DEFAULT_AGENT_ID, set]
 }
 
 /**

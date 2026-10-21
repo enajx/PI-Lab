@@ -88,7 +88,6 @@ function appConfig(project: Project): ProjectAgentConfig {
 }
 
 export async function readProjectAgentConfig(
-  db: PiLabDatabase,
   project: Project,
   storage: ProjectConfigStorage,
 ): Promise<ProjectAgentConfig> {
@@ -98,12 +97,7 @@ export async function readProjectAgentConfig(
     return { agentId: typeof repo?.agentId === "string" ? repo.agentId : undefined }
   // In "both", the repository copy is authoritative whenever it exists.
   if (repo) {
-    const config = { agentId: typeof repo.agentId === "string" ? repo.agentId : undefined }
-    db.update(projects)
-      .set({ agentConfig: config, updatedAt: Date.now() })
-      .where(eq(projects.id, project.id))
-      .run()
-    return config
+    return { agentId: typeof repo.agentId === "string" ? repo.agentId : undefined }
   }
   return appConfig(project)
 }

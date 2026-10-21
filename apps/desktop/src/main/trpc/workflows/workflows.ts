@@ -315,7 +315,7 @@ async function executeWorkflow(
 
   // The project's remembered agent choice, falling back to the catalog default.
   const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
-  const config = await readProjectAgentConfig(ctx.db, project, storage)
+  const config = await readProjectAgentConfig(project, storage)
   const agentId = config.agentId ?? DEFAULT_AGENT_ID
   const agent = getAgent(agentId, ctx.agentCatalog)
   if (!agent) throw new Error(`No agent ${agentId}`)

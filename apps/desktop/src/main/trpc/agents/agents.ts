@@ -48,7 +48,7 @@ export const agentsRouter = router({
       if (!project)
         throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
       const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
-      const config = await readProjectAgentConfig(ctx.db, project, storage)
+      const config = await readProjectAgentConfig(project, storage)
       return { agentId: config.agentId ?? null, storage }
     }),
 

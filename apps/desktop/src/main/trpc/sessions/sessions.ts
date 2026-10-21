@@ -304,7 +304,7 @@ export async function startAutoResearch(
 
   // The project's remembered agent choice, falling back to the catalog default.
   const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
-  const config = await readProjectAgentConfig(ctx.db, project, storage)
+  const config = await readProjectAgentConfig(project, storage)
   const agentId = config.agentId ?? DEFAULT_AGENT_ID
 
   // Seed the placeholder BEFORE the agent launches, via the pre-spawn hook, so the
