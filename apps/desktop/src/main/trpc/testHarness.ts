@@ -183,7 +183,7 @@ export function createTestCaffeineController(): TestCaffeineController {
  * Every host is reachable unless its alias starts with `down-`,
  * so a suite can assert both branches without any real `ssh` / network.
  */
-export const FAKE_SSH_EXEC: SshExec = async (host) =>
+export const FAKE_SSH_EXEC: SshExec = async ({ host }) =>
   host.startsWith("down-")
     ? { ok: false, detail: "Connection refused" }
     : { ok: true, detail: "10:00 up 3 days" }

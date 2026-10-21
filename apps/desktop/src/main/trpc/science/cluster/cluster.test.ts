@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import type { SshExec } from "../../../lib/ssh-config"
+import type { SshConnection, SshExec } from "../../../lib/ssh-config"
 import { createHarness, FAKE_AGENT, type Harness } from "../../testHarness"
 
 const SSH_CONFIG_FIXTURE = `
@@ -90,6 +90,9 @@ describe("science.cluster manual machines + annotate + hide", () => {
       label: "Cluster head node",
     })
     expect(machine).toMatchObject({ host: "slurm-head", user: "hpc", source: "manual" })
+    await expect(h.caller.science.cluster.addMachine({ host: " -V " })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
 
     await expect(h.caller.science.cluster.addMachine({ host: "slurm-head" })).rejects.toMatchObject(
       {
@@ -210,14 +213,20 @@ describe("science.cluster.refreshStatus (injected fake ssh-exec)", () => {
 
 describe("science.cluster with a custom injected ssh-exec", () => {
   test("uses the harness-provided sshExec, proving full injectability", async () => {
-    const calls: string[] = []
-    const fakeExec: SshExec = async (host) => {
-      calls.push(host)
+    const calls: SshConnection[] = []
+    const fakeExec: SshExec = async (connection) => {
+      const { host } = connection
+      calls.push(connection)
       return { ok: host === "yes", detail: host }
     }
     const custom = await createHarness([FAKE_AGENT], { sshExec: fakeExec })
     try {
-      const yes = await custom.caller.science.cluster.addMachine({ host: "yes" })
+      const yes = await custom.caller.science.cluster.addMachine({
+        host: "yes",
+        hostname: "10.0.0.5",
+        user: "alice",
+        port: 2222,
+      })
       const no = await custom.caller.science.cluster.addMachine({ host: "no" })
       expect(
         (await custom.caller.science.cluster.refreshStatus({ id: yes.id })).machine.reachable,
@@ -225,7 +234,10 @@ describe("science.cluster with a custom injected ssh-exec", () => {
       expect(
         (await custom.caller.science.cluster.refreshStatus({ id: no.id })).machine.reachable,
       ).toBe(false)
-      expect(calls).toEqual(["yes", "no"])
+      expect(calls).toMatchObject([
+        { host: "yes", hostname: "10.0.0.5", user: "alice", port: 2222 },
+        { host: "no", hostname: null, user: null, port: null },
+      ])
       expect(custom.caffeine.meaningfulStartedTags).toEqual([
         `cluster:refresh:${yes.id}`,
         `cluster:refresh:${no.id}`,

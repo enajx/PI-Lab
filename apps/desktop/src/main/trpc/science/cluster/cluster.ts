@@ -53,7 +53,11 @@ const importInput = z.object({
 })
 
 const addInput = z.object({
-  host: z.string().min(1),
+  host: z
+    .string()
+    .trim()
+    .min(1)
+    .refine((host) => !host.startsWith("-"), "SSH host must not start with '-'"),
   hostname: z.string().optional(),
   user: z.string().optional(),
   port: z.number().int().positive().optional(),
@@ -255,7 +259,7 @@ async function probeAndRecord(
   sshExec: SshExec,
   machine: Machine,
 ): Promise<MachineProbeResult> {
-  const result = await sshExec(machine.host)
+  const result = await sshExec(machine)
   const row = db
     .update(machines)
     .set({

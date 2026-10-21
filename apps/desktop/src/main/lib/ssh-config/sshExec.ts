@@ -50,7 +50,14 @@ export interface SshProbeResult {
  * key prompt, with a short connect timeout. Any clean exit is treated as
  * reachable; the telemetry is best-effort on top.
  */
-export type SshExec = (host: string) => Promise<SshProbeResult>
+export interface SshConnection {
+  host: string
+  hostname: string | null
+  user: string | null
+  port: number | null
+}
+
+export type SshExec = (connection: SshConnection) => Promise<SshProbeResult>
 
 /** ssh options that make a probe fail fast rather than hang on a prompt. */
 const SSH_PROBE_ARGS = [
@@ -164,9 +171,24 @@ function reachabilityDetail(stdout: string): string {
  * Resolves to a typed result either way; an unreachable host loses the telemetry
  * fields, a reachable one without `nvidia-smi` reports `gpus: []`.
  */
-export const liveSshExec: SshExec = async (host) => {
+/** Build SSH argv while retaining the alias's configuration and applying stored overrides. */
+export function buildSshProbeArgs(connection: SshConnection): string[] {
+  const host = connection.host.trim()
+  if (!host || host.startsWith("-")) throw new Error("SSH host must not be empty or start with '-'")
+  return [
+    ...SSH_PROBE_ARGS,
+    ...(connection.hostname ? ["-o", `Hostname=${connection.hostname}`] : []),
+    ...(connection.user ? ["-l", connection.user] : []),
+    ...(connection.port !== null ? ["-p", String(connection.port)] : []),
+    "--",
+    host,
+    PROBE_COMMAND,
+  ]
+}
+
+export const liveSshExec: SshExec = async (connection) => {
   try {
-    const { stdout } = await execFileAsync("ssh", [...SSH_PROBE_ARGS, host, PROBE_COMMAND], {
+    const { stdout } = await execFileAsync("ssh", buildSshProbeArgs(connection), {
       timeout: PROBE_TIMEOUT_MS,
       maxBuffer: 4 * 1024 * 1024,
     })
