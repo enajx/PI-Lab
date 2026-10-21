@@ -130,7 +130,7 @@ function featureHelpFromElement(element: HTMLElement): FeatureHelp | null {
   return { label, description }
 }
 
-export function useFeatureHelp(active: boolean): FeatureHelp | null {
+function useFeatureHelp(active: boolean): FeatureHelp | null {
   const [help, setHelp] = useState<FeatureHelp | null>(null)
 
   useEffect(() => {
@@ -331,7 +331,6 @@ export function Sidebar() {
   const [width, setWidth] = useSidebarWidth()
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
   const [restoreProjectTabs] = useRestoreProjectTabs()
-  const featureHelp = useFeatureHelp(showFeatureHelp && !collapsed)
   const [actionError, setActionError] = useState<string | null>(null)
   const reportMutationError = (error: { message: string }) => setActionError(error.message)
 
@@ -479,7 +478,7 @@ export function Sidebar() {
         </nav>
 
         {!collapsed && showFeatureHelp ? (
-          <FeatureHelpPanel help={featureHelp} onHide={() => setShowFeatureHelp(false)} />
+          <FeatureHelpPanel onHide={() => setShowFeatureHelp(false)} />
         ) : null}
 
         {/* Bottom cluster: "Add project" then Settings, under a top divider and with a
@@ -524,13 +523,8 @@ export function Sidebar() {
   )
 }
 
-export function FeatureHelpPanel({
-  help,
-  onHide,
-}: {
-  help: FeatureHelp | null
-  onHide: () => void
-}) {
+export function FeatureHelpPanel({ onHide }: { onHide: () => void }) {
+  const help = useFeatureHelp(true)
   const t = useTranslate()
   const label = help?.label ?? t("What’s this?")
   const description = help?.description ?? t("Hover over or focus a control to learn what it does.")

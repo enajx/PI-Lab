@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { RadioTower } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../../trpc/react"
+import { useAgentStatus } from "../../-ProjectActivity"
 
 const AUTH_LABELS = {
   authenticated: "Signed in",
@@ -25,9 +26,7 @@ export function AgentStatusControl() {
   const environment = useQuery(
     trpc.setup.environment.queryOptions(undefined, { staleTime: 30_000, refetchInterval: 60_000 }),
   )
-  const sessions = useQuery(
-    trpc.sessions.status.queryOptions(undefined, { staleTime: 0, refetchInterval: 3_000 }),
-  )
+  const sessions = useAgentStatus()
   const attention = Boolean(
     environment.isError ||
       environment.data?.harnesses.some((agent) => agent.state !== "authenticated") ||
@@ -103,17 +102,17 @@ export function AgentStatusControl() {
           <h2 className="mt-4 border-border border-t pt-3 font-semibold text-sm">
             Current sessions
           </h2>
-          {sessions.isPending ? (
+          {!sessions.data && !sessions.error ? (
             <p className="mt-2 text-muted-foreground text-xs">Checking sessions…</p>
-          ) : sessions.isError ? (
+          ) : sessions.error ? (
             <p role="alert" className="mt-2 text-destructive text-xs">
-              Could not check sessions: {sessions.error.message}
+              Could not check sessions: {sessions.error?.message}
             </p>
-          ) : sessions.data.length === 0 ? (
+          ) : sessions.data?.length === 0 ? (
             <p className="mt-2 text-muted-foreground text-xs">No current sessions.</p>
           ) : (
             <ul className="mt-2 max-h-48 space-y-2 overflow-y-auto">
-              {sessions.data.map((session) => (
+              {sessions.data?.map((session) => (
                 <li
                   key={session.sessionId}
                   className="flex items-start justify-between gap-2 text-xs"

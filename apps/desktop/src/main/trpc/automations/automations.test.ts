@@ -109,6 +109,7 @@ function harnessContext(): AppContext {
     }),
     analysisInteractive: h.analysisInteractive,
     notifications: createNotificationBrokers(),
+    activityStatus: { subscribe: () => () => {}, projectsChanged: () => {} },
     activityMonitor: h.activityMonitor,
     notificationService: h.notificationService,
     caffeine: h.caffeine,

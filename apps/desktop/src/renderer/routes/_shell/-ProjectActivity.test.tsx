@@ -1,28 +1,38 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { type Observer, observable } from "@trpc/server/observable"
 import { useState } from "react"
-import { expect, test } from "vitest"
+import { expect, test, vi } from "vitest"
+import type { LiveAgentStatus } from "../../../shared/agentStatus"
 import { AppProviders } from "../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../test/fakeTrpcClient"
-import { ProjectActivityProvider, useProjectActivityState } from "./-ProjectActivity"
+import {
+  ProjectActivityProvider,
+  useAgentStatus,
+  useProjectActivityState,
+} from "./-ProjectActivity"
 
 function Status({ projectId }: { projectId: string }) {
   const state = useProjectActivityState(projectId)
   return <span data-testid={`status-${projectId}`}>{state}</span>
 }
 
-test("one shell owner keeps card and sidebar status current across dashboard unmount", async () => {
+test("one shell subscription keeps cards and sidebar current across dashboard unmount", async () => {
   let calls = 0
-  let activity: Array<{ projectId: string; state: "waiting" | "working" | "exited" }> = [
-    { projectId: "a", state: "working" },
-    { projectId: "a", state: "waiting" },
-    { projectId: "b", state: "exited" },
-  ]
+  const stop = vi.fn()
+  let emit: Observer<LiveAgentStatus[], unknown> | undefined
+  const row = { sessionId: "s1", projectId: "a", projectName: "Alpha", agentId: "codex" }
   const client = createFakeTrpcClient({
-    "sessions.activity": () => {
-      calls += 1
-      return activity
-    },
+    "sessions.onStatus": () =>
+      observable<LiveAgentStatus[]>((observer) => {
+        calls += 1
+        emit = observer
+        observer.next([{ ...row, state: "waiting" }])
+        return () => {
+          stop()
+          emit = undefined
+        }
+      }),
   })
 
   function Shell() {
@@ -39,7 +49,7 @@ test("one shell owner keeps card and sidebar status current across dashboard unm
     )
   }
 
-  render(
+  const view = render(
     <AppProviders
       client={client}
       queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
@@ -52,9 +62,52 @@ test("one shell owner keeps card and sidebar status current across dashboard unm
   expect(calls).toBe(1)
 
   fireEvent.click(screen.getByRole("button", { name: "Leave dashboard" }))
-  activity = [{ projectId: "a", state: "working" }]
-  await waitFor(() => expect(screen.getByTestId("status-a").textContent).toBe("active"), {
-    timeout: 2_500,
+  act(() => emit?.next([{ ...row, state: "working" }]))
+  await waitFor(() => expect(screen.getByTestId("status-a").textContent).toBe("active"))
+  expect(calls).toBe(1)
+  view.unmount()
+  expect(stop).toHaveBeenCalledOnce()
+  expect(emit).toBeUndefined()
+})
+
+test("a subscription error keeps the last activity snapshot and exposes the error", async () => {
+  let emit: Observer<LiveAgentStatus[], unknown> | undefined
+  const client = createFakeTrpcClient({
+    "sessions.onStatus": () =>
+      observable<LiveAgentStatus[]>((observer) => {
+        emit = observer
+        observer.next([
+          {
+            sessionId: "s1",
+            projectId: "a",
+            projectName: "Alpha",
+            agentId: "codex",
+            state: "working",
+          },
+        ])
+        return () => {}
+      }),
   })
-  expect(calls).toBeGreaterThan(1)
+  function ReadStatus() {
+    const snapshot = useAgentStatus()
+    return (
+      <>
+        <Status projectId="a" />
+        <span role="alert">{snapshot.error?.message}</span>
+      </>
+    )
+  }
+  render(
+    <AppProviders client={client}>
+      <ProjectActivityProvider>
+        <ReadStatus />
+      </ProjectActivityProvider>
+    </AppProviders>,
+  )
+  await waitFor(() => expect(screen.getByTestId("status-a").textContent).toBe("active"))
+  act(() => emit?.error(new Error("activity connection lost")))
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toBe("activity connection lost"),
+  )
+  expect(screen.getByTestId("status-a").textContent).toBe("active")
 })

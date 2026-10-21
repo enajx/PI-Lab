@@ -1,6 +1,5 @@
 import { join } from "node:path"
 import {
-  agentSessions,
   getAgentSettingsOrDefaults,
   getSettingsOrDefaults,
   type PiLabDatabase,
@@ -11,8 +10,10 @@ import {
 import { buildLaunchArgv, DEFAULT_AGENT_ID, getAgent } from "@pi-lab/shared"
 import { writeTextFile } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
-import { and, eq, ne } from "drizzle-orm"
+import { observable } from "@trpc/server/observable"
+import { and, eq } from "drizzle-orm"
 import { z } from "zod"
+import type { LiveAgentStatus } from "../../../shared/agentStatus"
 import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { isGitRepo } from "../../git"
 import { withAgentLaunchGuard } from "../agentLaunchGuard"
@@ -322,28 +323,11 @@ export async function startAutoResearch(
 }
 
 export const sessionsRouter = router({
-  /** Live sessions with enough context for the title bar status panel. */
-  status: publicProcedure.query(({ ctx }) =>
-    ctx.db
-      .select({
-        sessionId: agentSessions.sessionId,
-        projectId: agentSessions.projectId,
-        projectName: projects.name,
-        agentId: agentSessions.agentId,
-        state: agentSessions.state,
-      })
-      .from(agentSessions)
-      .innerJoin(projects, eq(agentSessions.projectId, projects.id))
-      .where(ne(agentSessions.state, "exited"))
-      .all(),
-  ),
-  /** Live agent state, grouped by project in the renderer for project-level indicators. */
-  activity: publicProcedure.query(({ ctx }) =>
-    ctx.db
-      .select({ projectId: agentSessions.projectId, state: agentSessions.state })
-      .from(agentSessions)
-      .where(ne(agentSessions.state, "exited"))
-      .all(),
+  /** One compact stream shared by shell indicators and the title bar. */
+  onStatus: publicProcedure.subscription(({ ctx }) =>
+    observable<LiveAgentStatus[]>((emit) =>
+      ctx.activityStatus.subscribe((sessions) => emit.next(sessions)),
+    ),
   ),
   /**
    * Start an external CLI agent for a project under the worktree policy.

@@ -8,7 +8,9 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
+import { type Observer, observable } from "@trpc/server/observable"
 import { describe, expect, test, vi } from "vitest"
+import type { LiveAgentStatus } from "../../../../../../shared/agentStatus"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
@@ -59,7 +61,7 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
   const summary = { ...fields, hasThumbnail: thumbnail !== null }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
-    "sessions.activity": () => [],
+    "sessions.onStatus": () => [],
     "projects.capabilities": () => ({ git: true }),
     "workflows.status": () => IDLE_STATUS,
     "projects.thumbnail": () => ({ dataUrl: thumbnail, tooLarge: false }),
@@ -217,9 +219,13 @@ describe("ProjectCard metadata", () => {
   })
   test("Digital Rain refreshes from paused to working without remounting", async () => {
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
-    let activity: Array<{ projectId: string; state: "working" | "waiting" }> = [
-      { projectId: "rain-working", state: "waiting" },
-    ]
+    let emit: Observer<LiveAgentStatus[], unknown> | undefined
+    const session = {
+      sessionId: "rain-agent",
+      projectId: "rain-working",
+      projectName: "Working rain",
+      agentId: "codex",
+    }
 
     const idle = renderCard(project({ id: "rain-idle", name: "Idle rain", digitalRain: true }), {
       "projects.digitalRainCharacters": () => ({ characters: "constrain=0" }),
@@ -230,18 +236,24 @@ describe("ProjectCard metadata", () => {
     idle.unmount()
 
     renderCard(project({ id: "rain-working", name: "Working rain", digitalRain: true }), {
-      "sessions.activity": () => activity,
+      "sessions.onStatus": () =>
+        observable<LiveAgentStatus[]>((observer) => {
+          emit = observer
+          observer.next([{ ...session, state: "waiting" }])
+          return () => {
+            emit = undefined
+          }
+        }),
       "projects.digitalRainCharacters": () => ({ characters: "constrain=1" }),
     })
     await waitFor(() =>
       expect(screen.getByTestId("project-card-status").textContent).toContain("Paused"),
     )
-    expect(screen.getByTestId("project-card-digital-rain").getAttribute("data-animating")).toBe(
-      "false",
-    )
+    expect(
+      (await screen.findByTestId("project-card-digital-rain")).getAttribute("data-animating"),
+    ).toBe("false")
 
-    activity = [{ projectId: "rain-working", state: "working" }]
-    await new Promise((resolve) => window.setTimeout(resolve, 1_100))
+    act(() => emit?.next([{ ...session, state: "working" }]))
     await waitFor(() =>
       expect(screen.getByTestId("project-card-digital-rain").getAttribute("data-animating")).toBe(
         "true",

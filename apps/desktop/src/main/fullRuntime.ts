@@ -14,6 +14,7 @@ import {
   systemActivityClock,
   systemActivityScheduler,
 } from "./activity"
+import { ActivityStatusFeed } from "./activity/statusFeed"
 import { dispatchAutomation } from "./automations/dispatch"
 import { AutomationScheduler } from "./automations/scheduler"
 import { trayProjectSnapshot } from "./background/projectSnapshot"
@@ -78,6 +79,9 @@ export class FullRuntime {
     clock: systemActivityClock,
     scheduler: systemActivityScheduler,
   })
+  private activityStatus: ActivityStatusFeed | null = null
+  private startupReady: Promise<void> = Promise.resolve()
+  private agentLaunchReady: Promise<void> = Promise.resolve()
   private activityMonitor: ActivityMonitorPort | null = null
   private caffeineController: CaffeineController | null = null
   private automationScheduler: AutomationScheduler | null = null
@@ -103,11 +107,14 @@ export class FullRuntime {
     this.ipcHandler = createIPCHandler({
       router: appRouter,
       windows: [window],
-      createContext: async () => this.createAppContext(),
+      createContext: async () => {
+        await this.startupReady
+        return this.createAppContext()
+      },
     })
   }
 
-  /** Migrate local state, start background services, then attach the full window. */
+  /** Show the window after database setup; hold IPC contexts until reconciliation finishes. */
   async start(): Promise<void> {
     const dbStatus = initDatabase()
     ipcMain.on(INTERFACE_LANGUAGE_CHANNEL, (_event, language: unknown) => {
@@ -126,9 +133,6 @@ export class FullRuntime {
       scheduler: systemActivityScheduler,
       logger: { warn: (message) => console.warn(message) },
     })
-    await this.activityMonitor.reconcile().catch((error) => {
-      console.warn(`[pi-lab] activity reconciliation skipped: ${String(error)}`)
-    })
     this.caffeineController = new CaffeineController({
       power: electronPowerSaveBlockerAdapter,
       clock: systemActivityClock,
@@ -136,20 +140,29 @@ export class FullRuntime {
       activity: this.activityRegistry,
       initialSettings: getSettingsOrDefaults(getDb()).caffeine,
     })
+    this.activityStatus = new ActivityStatusFeed(getDb(), this.activityRegistry)
+    this.agentLaunchReady = this.activityMonitor.reconcile()
+    this.startupReady = this.agentLaunchReady.catch((error) => {
+      console.warn(`[pi-lab] activity reconciliation skipped: ${String(error)}`)
+    })
+    const window = this.host.initialWindow()
+    if (window) this.boot(window)
+    await this.startupReady
     void seedWritableTemplate().catch((error) => {
       console.warn("[pi-lab] template seed skipped:", error)
     })
     this.startAutomationScheduler()
     installAppMenu()
-    const window = this.host.initialWindow()
-    if (window) this.boot(window)
   }
 
   /** Route a quick file to its longest matching registered project. */
   routeForFile(target: QuickEditTarget): string {
     const canonicalPath = realpathSync(target.path)
     let best: { id: string; rootLength: number; relPath: string } | null = null
-    for (const project of getDb().select().from(projects).all()) {
+    for (const project of getDb()
+      .select({ id: projects.id, repoPath: projects.repoPath })
+      .from(projects)
+      .all()) {
       const relPath = relative(project.repoPath, canonicalPath)
       if (
         relPath === "" ||
@@ -251,6 +264,7 @@ export class FullRuntime {
   }
 
   private createAppContext(): AppContext {
+    if (!this.activityStatus) throw new Error("activity status is not initialized")
     if (!this.activityMonitor) throw new Error("activity monitor is not initialized")
     if (!this.caffeineController) throw new Error("caffeine controller is not initialized")
     return {
@@ -259,7 +273,10 @@ export class FullRuntime {
       getDaemonClient: () => this.terminalSupervisor.ensureClient(),
       agentCatalog: this.agentCatalog,
       resolveAgentExecutable: DEFAULT_AGENT_EXECUTABLE_RESOLVER,
-      getAgentLaunchEnvironment: DEFAULT_AGENT_LAUNCH_ENVIRONMENT,
+      getAgentLaunchEnvironment: async () => {
+        await this.agentLaunchReady
+        return DEFAULT_AGENT_LAUNCH_ENVIRONMENT()
+      },
       runNonInteractiveProcess: DEFAULT_WORKFLOW_PROCESS_RUNNER,
       setupProbe: isTestMode ? testSetupProbe : DEFAULT_SETUP_PROBE,
       credentialCipher: {
@@ -280,6 +297,7 @@ export class FullRuntime {
       resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
       analysisInteractive: this.analysisInteractive,
       notifications: this.notificationBrokers,
+      activityStatus: this.activityStatus,
       activityMonitor: this.activityMonitor,
       notificationService: this.notificationService,
       caffeine: this.caffeineController,

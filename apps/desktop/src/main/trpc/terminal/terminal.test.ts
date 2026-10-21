@@ -77,6 +77,7 @@ beforeEach(async () => {
       dispose: () => {},
     },
     notifications,
+    activityStatus: { subscribe: () => () => {}, projectsChanged: () => {} },
     activityMonitor: {
       track: async () => {},
       trackTerminal: async () => {},

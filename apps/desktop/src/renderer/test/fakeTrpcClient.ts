@@ -1,5 +1,5 @@
 import { createTRPCClient, type TRPCLink } from "@trpc/client"
-import { observable } from "@trpc/server/observable"
+import { isObservable, observable } from "@trpc/server/observable"
 import type { AppRouter } from "../../main/trpc/appRouter"
 import type { PiLabTrpcClient } from "../trpc/client"
 
@@ -30,7 +30,16 @@ export function createFakeTrpcClient(handlers: FakeHandlers): PiLabTrpcClient {
           observer.error(new Error(`Fake tRPC client: no handler for "${op.path}"`) as never)
           return
         }
-        Promise.resolve(handler(op.input))
+        const result = handler(op.input)
+        if (op.type === "subscription" && isObservable(result)) {
+          const subscription = result.subscribe({
+            next: (data) => observer.next({ result: { type: "data", data } }),
+            error: (error) => observer.error(error as never),
+            complete: () => observer.complete(),
+          })
+          return () => subscription.unsubscribe()
+        }
+        Promise.resolve(result)
           .then((data) => {
             observer.next({ result: { type: "data", data } })
             observer.complete()

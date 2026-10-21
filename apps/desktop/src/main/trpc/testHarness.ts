@@ -21,6 +21,7 @@ import {
   systemActivityClock,
   systemActivityScheduler,
 } from "../activity"
+import { ActivityStatusFeed } from "../activity/statusFeed"
 import type { AgentLaunchEnvironmentResolver } from "../agents/executable"
 import {
   type NonInteractiveProcessRunner,
@@ -92,6 +93,7 @@ export interface Harness {
   repoDir: string
   client: DaemonClient
   activityMonitor: ActivityMonitorPort
+  activityRegistry: ActivityRegistry
   caffeine: TestCaffeineController
   notificationService: NotificationService
   notifications: NotificationBrokers
@@ -364,6 +366,7 @@ export async function createHarness(
     analysisInteractive,
     notifications,
     activityMonitor,
+    activityStatus: new ActivityStatusFeed(db, activityRegistry),
     notificationService,
     caffeine,
     thumbnailImageProcessor: {
@@ -397,6 +400,7 @@ export async function createHarness(
     repoDir,
     client,
     activityMonitor,
+    activityRegistry,
     caffeine,
     notificationService,
     notifications,

@@ -110,16 +110,22 @@ function enableWorktreePerAgent(): void {
 
 describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
   test("title bar status lists live sessions with their agent, project, and state", async () => {
-    h.db
-      .insert(agentSessions)
-      .values({
-        sessionId: "live-status-session",
-        projectId,
-        agentId: LONG_FAKE_AGENT.id,
-        state: "working",
-      })
-      .run()
-    const status = await h.caller.sessions.status()
+    h.activityRegistry.register({
+      sessionId: "live-status-session",
+      projectId,
+      workspaceId: null,
+      agentId: LONG_FAKE_AGENT.id,
+      workflowRunId: null,
+      turnArmed: true,
+    })
+    let status: unknown
+    const stream = await h.caller.sessions.onStatus()
+    const subscription = stream.subscribe({
+      next: (sessions) => {
+        status = sessions
+      },
+    })
+    subscription.unsubscribe()
     expect(status).toContainEqual({
       sessionId: "live-status-session",
       projectId,

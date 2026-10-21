@@ -14,7 +14,13 @@ import type { AppContext } from "./context"
 const t = initTRPC.context<AppContext>().create({ transformer: superjson })
 
 export const router = t.router
-export const publicProcedure = t.procedure
+export const publicProcedure = t.procedure.use(async ({ ctx, path, type, next }) => {
+  const result = await next()
+  if (result.ok && type === "mutation" && path.startsWith("projects.")) {
+    ctx.activityStatus.projectsChanged()
+  }
+  return result
+})
 
 /**
  * Direct, window-free procedure invocation for tests: call

@@ -191,7 +191,7 @@ function attachUserWindow(window: BrowserWindow): BrowserWindow {
         app.quit()
       })
   })
-  if (fullBootComplete) fullRuntime?.boot(window)
+  fullRuntime?.boot(window)
   return window
 }
 

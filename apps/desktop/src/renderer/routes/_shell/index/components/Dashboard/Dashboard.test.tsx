@@ -186,7 +186,7 @@ describe("Dashboard", () => {
     renderDashboard({
       "projects.list": () => [project("p1", "Active Project")],
       "workspaces.list": () => [],
-      "sessions.activity": () => [{ projectId: "p1", state: "working" }],
+      "sessions.onStatus": () => [{ projectId: "p1", state: "working" }],
     })
 
     await waitFor(() => {

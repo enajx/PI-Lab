@@ -7,7 +7,7 @@ import { useTranslate } from "../../../i18n/language"
 import { useSidebarFeatureHelp } from "../../../preferences/preferences"
 import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
-import { FeatureHelpPanel, FeatureHelpRestoreButton, useFeatureHelp } from "../components/Sidebar"
+import { FeatureHelpPanel, FeatureHelpRestoreButton } from "../components/Sidebar"
 import { AgentStatusControl } from "../titleBar"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
 import { QuickEditorSection } from "./components/QuickEditorSection"
@@ -135,7 +135,6 @@ export function SettingsView() {
   const [activeId, setActiveId] = useState<SettingsSectionId>(search.section ?? SECTIONS[0].id)
   const [returnError, setReturnError] = useState<string | null>(null)
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
-  const featureHelp = useFeatureHelp(showFeatureHelp)
   const active = SECTIONS.find((section) => section.id === activeId) ?? SECTIONS[0]
 
   useEffect(() => {
@@ -232,7 +231,7 @@ export function SettingsView() {
           ))}
           <div className="mt-auto border-sidebar-border border-t pt-3">
             {showFeatureHelp ? (
-              <FeatureHelpPanel help={featureHelp} onHide={() => setShowFeatureHelp(false)} />
+              <FeatureHelpPanel onHide={() => setShowFeatureHelp(false)} />
             ) : (
               <FeatureHelpRestoreButton
                 collapsed={false}

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../../../test/fakeTrpcClient"
 import { fireEvent, render, screen, waitFor } from "../../../../test/render"
+import { ProjectActivityProvider } from "../../-ProjectActivity"
 import { AgentStatusControl } from "./AgentStatusControl"
 
 describe("AgentStatusControl", () => {
@@ -28,7 +29,7 @@ describe("AgentStatusControl", () => {
         zotero: "not-running",
         apiConfigured: { "claude-code": false, codex: false },
       }),
-      "sessions.status": () => [
+      "sessions.onStatus": () => [
         {
           sessionId: "s1",
           projectId: "p1",
@@ -41,7 +42,9 @@ describe("AgentStatusControl", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <AppProviders client={client} queryClient={queryClient}>
-        <AgentStatusControl />
+        <ProjectActivityProvider>
+          <AgentStatusControl />
+        </ProjectActivityProvider>
       </AppProviders>,
     )
 

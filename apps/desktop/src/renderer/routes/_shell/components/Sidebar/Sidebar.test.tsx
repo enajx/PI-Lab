@@ -374,7 +374,7 @@ describe("Sidebar", () => {
   test("a project’s sidebar ring reflects its active agent state", async () => {
     renderSidebar({
       "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],
-      "sessions.activity": () => [{ projectId: "a", state: "working" }],
+      "sessions.onStatus": () => [{ projectId: "a", state: "working" }],
     })
     await waitFor(() => expect(screen.getByTestId("project-agent-status")).toBeTruthy())
 
