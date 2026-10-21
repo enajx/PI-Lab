@@ -1,6 +1,8 @@
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { BrowserWindow } from "electron"
 import { isTestMode, rendererDevServerUrl, testFirstRun } from "../runtime/env"
+import { isTrustedNavigation } from "./mainWindowNavigation"
 import { buildMainWindowOptions } from "./windowOptions"
 
 /**
@@ -85,10 +87,13 @@ export function createMainWindow(
     else window.show()
   })
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  const trustedEntries = rendererDevServerUrl
+    ? [rendererDevServerUrl]
+    : ["index", "quick"].map(
+        (name) => pathToFileURL(join(__dirname, `../renderer/${name}.html`)).href,
+      )
   window.webContents.on("will-navigate", (event, navigationUrl) => {
-    const currentUrl = window.webContents.getURL()
-    if (!currentUrl) return
-    if (new URL(navigationUrl).origin !== new URL(currentUrl).origin) {
+    if (!isTrustedNavigation(navigationUrl, trustedEntries)) {
       event.preventDefault()
     }
   })
