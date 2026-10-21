@@ -256,10 +256,29 @@ describe("CodeMirrorBuffer Markdown editing", () => {
         "true",
       ),
     )
+    fireEvent.keyDown(editor.contentDOM, { key: "Escape" })
+    expect(screen.getByRole("option", { name: "Header" })).toBeTruthy()
+    fireEvent.keyDown(editor.contentDOM, { key: "Enter" })
+    fireEvent.keyDown(editor.contentDOM, { key: "ArrowUp" })
     fireEvent.keyDown(editor.contentDOM, { key: "Enter" })
 
     expect(onChange).toHaveBeenLastCalledWith("### ")
     expect(screen.queryByRole("listbox", { name: "Markdown blocks" })).toBeNull()
+  })
+
+  test("preserves a long malformed link while editing rendered Markdown", () => {
+    const rendered = render(
+      <CodeMirrorBuffer
+        relPath="malformed.md"
+        initialDoc={`${"[".repeat(60_000)}\n[valid](target.md)`}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        markdownMode="render"
+      />,
+    )
+    const editor = findEditor(rendered.container)
+    act(() => editor.dispatch({ changes: { from: 0, insert: "x" } }))
+    expect(editor.state.doc.toString()).toContain("[valid](target.md)")
   })
 
   test("continues Markdown list and task-list items on Enter", () => {

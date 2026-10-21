@@ -75,6 +75,14 @@ const EMPTY_PYTHON_RUNTIME: PythonRuntimeState = {
   error: null,
 }
 
+export interface RetainedBuffers {
+  read: () => OpenBuffer[]
+  update: (update: (buffers: OpenBuffer[]) => OpenBuffer[]) => void
+}
+
+// A pending operation follows its workspace's current editor after navigation.
+const mountedBufferOwners = new Map<string, BufferAccess>()
+
 export interface UseEditorBuffersArgs {
   client: PiLabTrpcClient
   workspaceId: string
@@ -84,6 +92,7 @@ export interface UseEditorBuffersArgs {
   initialBuffers?: OpenBuffer[]
   initialActiveRelPath?: string | null
   onBuffersChange?: (buffers: OpenBuffer[]) => void
+  retainedBuffers?: RetainedBuffers
 }
 
 export interface EditorBuffersApi {
@@ -135,9 +144,12 @@ export function useEditorBuffers({
   initialBuffers,
   initialActiveRelPath,
   onBuffersChange,
+  retainedBuffers,
 }: UseEditorBuffersArgs): EditorBuffersApi {
   const [buffers, setBufferState] = useState<LiveBuffer[]>(() =>
-    (initialBuffers ?? []).map(liveBuffer),
+    (initialBuffers ?? []).map((buffer) =>
+      BUFFER_ID in buffer && EDIT_REVISION in buffer ? (buffer as LiveBuffer) : liveBuffer(buffer),
+    ),
   )
   const [activeRelPath, setActiveRelPath] = useState<string | null>(
     () => initialActiveRelPath ?? null,
@@ -213,9 +225,10 @@ export function useEditorBuffers({
         if (!diagnosticsEnabledRef.current || diagnosticsEpochRef.current !== epoch) return
         if (result) patchDiagnostics(relPath, { result, checking: false, hasRun: true })
         else patchDiagnostics(relPath, { checking: false })
-      } catch {
+      } catch (cause) {
         if (!diagnosticsEnabledRef.current || diagnosticsEpochRef.current !== epoch) return
         patchDiagnostics(relPath, { checking: false })
+        setError(`Could not check ${relPath}: ${String(cause)}`)
       }
     },
     [client, workspaceId, patchDiagnostics],
@@ -338,20 +351,52 @@ export function useEditorBuffers({
     [setBuffers],
   )
 
-  const bufferAccess = useMemo<BufferAccess>(
-    () => ({
-      read: () => buffersRef.current,
-      update: setBuffers,
-      current: currentInstance,
-      reportError: setError,
+  const bufferAccess = useMemo<BufferAccess>(() => {
+    const owner = (): BufferAccess | undefined => {
+      const current = mountedBufferOwners.get(workspaceId)
+      return !mountedRef.current && current !== access ? current : undefined
+    }
+    const read = (): LiveBuffer[] =>
+      mountedRef.current
+        ? buffersRef.current
+        : (owner()?.read() ?? (retainedBuffers?.read() as LiveBuffer[] | undefined) ?? [])
+    const access: BufferAccess = {
+      read,
+      update: (update) => {
+        if (mountedRef.current) setBuffers(update)
+        else if (owner()) owner()?.update(update)
+        else retainedBuffers?.update((buffers) => update(buffers as LiveBuffer[]))
+      },
+      current: (snapshot) =>
+        read().find(
+          (entry) => entry[BUFFER_ID] === snapshot[BUFFER_ID] && entry.relPath === snapshot.relPath,
+        ),
+      reportError: (message) => {
+        if (mountedRef.current) setError(message)
+        else if (owner()) owner()?.reportError(message)
+        else if (message) console.warn(message)
+      },
       formatOnSave: () => formatOnSaveRef.current,
       onSaved: (relPath) => {
+        if (!mountedRef.current) {
+          owner()?.onSaved(relPath)
+          return
+        }
         onSaved?.(relPath)
         void runDiagnostics(relPath)
       },
-    }),
-    [setBuffers, currentInstance, onSaved, runDiagnostics],
-  )
+    }
+    return access
+  }, [setBuffers, onSaved, runDiagnostics, retainedBuffers, workspaceId])
+
+  useEffect(() => {
+    if (!retainedBuffers) return
+    mountedBufferOwners.set(workspaceId, bufferAccess)
+    return () => {
+      if (mountedBufferOwners.get(workspaceId) === bufferAccess)
+        mountedBufferOwners.delete(workspaceId)
+    }
+  }, [workspaceId, bufferAccess, retainedBuffers])
 
   const saveFile = useCallback(
     (relPath: string) => saveBuffer(bufferAccess, client, workspaceId, relPath, false),

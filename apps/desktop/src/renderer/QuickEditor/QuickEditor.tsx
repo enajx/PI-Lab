@@ -17,9 +17,12 @@ import { useTheme } from "../providers/ThemeProvider"
 import { QuickEditorStatusBar } from "./QuickEditorStatusBar"
 import {
   closeQuickBuffer,
+  markQuickBufferConflicted,
+  markQuickBufferSaved,
   type QuickBuffer,
   readQuickBuffer,
   readUntitledDraft,
+  subscribeQuickEditor,
   writeQuickBuffer,
   writeUntitledDraft,
 } from "./quickEditorState"
@@ -67,6 +70,8 @@ export function QuickEditor({
   const saveUntitledResolver = useRef<((route: string | null) => void) | null>(null)
   const [saveLocationRequested, setSaveLocationRequested] = useState(false)
   const bufferRef = useRef<QuickBuffer | null>(null)
+  const loadGeneration = useRef(0)
+  const mounted = useRef(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
@@ -87,6 +92,14 @@ export function QuickEditor({
   const [pythonRunning, setPythonRunning] = useState(false)
 
   useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      loadGeneration.current += 1
+    }
+  }, [])
+
+  useEffect(() => {
     if (fullApp) return
     return bridge?.subscribeEditorVim((enabled) => {
       if (!editorVimChoicePending()) settleEditorVimChoice(enabled)
@@ -99,6 +112,18 @@ export function QuickEditor({
     setBuffer(next)
   }, [])
 
+  useEffect(
+    () =>
+      subscribeQuickEditor(() => {
+        const current = bufferRef.current
+        const latest = current ? readQuickBuffer(current.target.id) : null
+        if (!latest || latest === current) return
+        bufferRef.current = latest
+        setBuffer(latest)
+      }),
+    [],
+  )
+
   const reportReady = useCallback((): void => {
     if (readySent.current) return
     readySent.current = true
@@ -106,8 +131,8 @@ export function QuickEditor({
   }, [bridge])
 
   const load = useCallback(
-    async (target: QuickEditTarget): Promise<void> => {
-      if (!bridge) return
+    async (target: QuickEditTarget, generation: number): Promise<void> => {
+      if (!bridge || !mounted.current || generation !== loadGeneration.current) return
       setMarkdownMode(defaultMarkdownMode)
       setUntitled(false)
       setError(null)
@@ -116,7 +141,15 @@ export function QuickEditor({
         update(cached)
         return
       }
-      const result = await bridge.read(target.id)
+      const result = await bridge.read(target.id).catch((cause: unknown) => {
+        if (mounted.current && generation === loadGeneration.current) {
+          setError(`Could not open ${target.path}: ${String(cause)}`)
+          reportReady()
+        }
+        return null
+      })
+      if (!mounted.current || generation !== loadGeneration.current) return
+      if (!result) return
       if (result.status !== "text") {
         setError(
           result.status === "oversized"
@@ -146,10 +179,11 @@ export function QuickEditor({
       return
     }
     let active = true
+    const generation = ++loadGeneration.current
     void bridge
       .current()
       .then((target) => {
-        if (!active) return
+        if (!active || generation !== loadGeneration.current) return
         if (fullApp && !targetId) {
           setUntitled(true)
           reportReady()
@@ -160,15 +194,16 @@ export function QuickEditor({
           reportReady()
           return
         }
-        return load(target)
+        return load(target, generation)
       })
       .catch((cause: unknown) => {
-        if (!active) return
+        if (!active || generation !== loadGeneration.current) return
         setError(`Could not open file: ${String(cause)}`)
         reportReady()
       })
     return () => {
       active = false
+      loadGeneration.current += 1
     }
   }, [bridge, fullApp, load, reportReady, targetId])
 
@@ -187,29 +222,25 @@ export function QuickEditor({
       const result = await bridge
         .save(current.target.id, current.content, current.baseline, overwrite)
         .catch((cause: unknown) => {
-          setError(`Could not save ${current.target.path}: ${String(cause)}`)
+          if (mounted.current && bufferRef.current?.target.id === current.target.id)
+            setError(`Could not save ${current.target.path}: ${String(cause)}`)
           return null
         })
       busyRef.current = false
       setBusy(false)
       if (!result) return false
-      const latest = bufferRef.current
-      if (!latest || latest.target.id !== current.target.id) return false
+      const latest = readQuickBuffer(current.target.id)
+      if (!latest) return false
       if (result.status === "conflict") {
-        update({ ...latest, conflict: true })
-        setError("The file changed on disk. Reload it or choose Overwrite disk.")
+        markQuickBufferConflicted(current.target.id)
+        if (mounted.current && bufferRef.current?.target.id === current.target.id)
+          setError("The file changed on disk. Reload it or choose Overwrite disk.")
         return false
       }
-      const next = {
-        ...latest,
-        savedContent: current.content,
-        baseline: result.baseline,
-        conflict: false,
-      }
-      update(next)
-      return next.content === next.savedContent
+      markQuickBufferSaved(current.target.id, current.content, result.baseline)
+      return latest.content === current.content
     },
-    [bridge, update],
+    [bridge],
   )
 
   /** Stop the attached run when its pane closes or the file changes. */
@@ -366,9 +397,18 @@ export function QuickEditor({
     const current = bufferRef.current
     if (!bridge || !current) return
     const result = await bridge.read(current.target.id).catch((cause: unknown) => {
-      setError(`Could not reload ${current.target.path}: ${String(cause)}`)
+      if (mounted.current && bufferRef.current?.target.id === current.target.id)
+        setError(`Could not reload ${current.target.path}: ${String(cause)}`)
       return null
     })
+    if (!mounted.current) return
+    const latest = bufferRef.current
+    if (!latest || latest.target.id !== current.target.id) return
+    if (latest !== current) {
+      update({ ...latest, conflict: true })
+      setError("The file changed on disk. Reload it or choose Overwrite disk.")
+      return
+    }
     if (result?.status !== "text") {
       if (result) setError("The file cannot be reloaded as text.")
       return
@@ -410,6 +450,10 @@ export function QuickEditor({
   useEffect(() => {
     if (!bridge) return
     return bridge.subscribeOpen((target) => {
+      const generation = ++loadGeneration.current
+      setPendingOpen(null)
+      setPendingRoute(null)
+      setUntitledReplaceRequested(false)
       const current = bufferRef.current
       if (current?.target.id === target.id) return
       if (!current && untitledRef.current !== "") {
@@ -419,13 +463,16 @@ export function QuickEditor({
       }
       const move = async (): Promise<void> => {
         if (current?.content !== current?.savedContent && !(await save(false))) {
+          if (!mounted.current || generation !== loadGeneration.current) return
           setPendingOpen(target)
           setError("Save or resolve this file before opening the next one.")
           return
         }
+        if (!mounted.current || generation !== loadGeneration.current) return
         setPendingOpen(null)
-        await load(target)
-        if (fullApp) window.location.hash = `#/quick-edit?target=${encodeURIComponent(target.id)}`
+        await load(target, generation)
+        if (fullApp && mounted.current && generation === loadGeneration.current)
+          window.location.hash = `#/quick-edit?target=${encodeURIComponent(target.id)}`
       }
       void move()
     })
@@ -434,16 +481,21 @@ export function QuickEditor({
   /** Resolve an Open File request without hiding a dirty Untitled document. */
   const replaceUntitled = async (choice: "save" | "discard" | "cancel"): Promise<void> => {
     const target = pendingOpen
+    const generation = loadGeneration.current
     if (!target) return
     if (choice === "cancel") {
       setPendingOpen(null)
       setUntitledReplaceRequested(false)
       return
     }
-    if (choice === "save" && !(await saveUntitled())) {
-      setPendingOpen(null)
-      setUntitledReplaceRequested(false)
-      return
+    if (choice === "save") {
+      const route = await saveUntitled()
+      if (!mounted.current || generation !== loadGeneration.current) return
+      if (!route) {
+        setPendingOpen(null)
+        setUntitledReplaceRequested(false)
+        return
+      }
     }
     if (choice === "discard") {
       untitledRef.current = ""
@@ -452,27 +504,37 @@ export function QuickEditor({
     }
     setPendingOpen(null)
     setUntitledReplaceRequested(false)
-    await load(target)
-    if (fullApp) window.location.hash = `#/quick-edit?target=${encodeURIComponent(target.id)}`
+    await load(target, generation)
+    if (fullApp && mounted.current && generation === loadGeneration.current)
+      window.location.hash = `#/quick-edit?target=${encodeURIComponent(target.id)}`
   }
 
   useEffect(() => {
     if (!pendingOpen || !buffer || busy || buffer.content !== buffer.savedContent) return
+    const generation = loadGeneration.current
     setPendingOpen(null)
-    void load(pendingOpen)
-    if (fullApp) window.location.hash = `#/quick-edit?target=${encodeURIComponent(pendingOpen.id)}`
+    void load(pendingOpen, generation).then(() => {
+      if (fullApp && mounted.current && generation === loadGeneration.current)
+        window.location.hash = `#/quick-edit?target=${encodeURIComponent(pendingOpen.id)}`
+    })
   }, [buffer, busy, fullApp, load, pendingOpen])
 
   useEffect(() => {
     if (!fullApp || !bridge) return
     return bridge.subscribeRoute((route) => {
+      const generation = ++loadGeneration.current
+      setPendingOpen(null)
+      setPendingRoute(null)
+      setUntitledReplaceRequested(false)
       const move = async (): Promise<void> => {
         const current = bufferRef.current
         if (current?.content !== current?.savedContent && !(await save(false))) {
+          if (!mounted.current || generation !== loadGeneration.current) return
           setPendingRoute(route)
           setError("Save or resolve this file before opening the project file.")
           return
         }
+        if (!mounted.current || generation !== loadGeneration.current) return
         window.location.hash = `#${route}`
       }
       void move()

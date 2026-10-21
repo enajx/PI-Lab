@@ -6,6 +6,7 @@ import {
   type OpenBuffer,
   useEditorBuffers,
 } from "../../../../../Editor/hooks/useEditorBuffers"
+import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { resolveLaunchAgentId } from "../../../../../preferences/preferences"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { useTRPC } from "../../../../../trpc/react"
@@ -102,6 +103,7 @@ interface UseCentralPanelArgs {
   initialState?: CentralPanelRestoreState
   onStateChange?: (state: CentralPanelRestoreState) => void
   onBuffersChange?: (buffers: OpenBuffer[]) => void
+  retainedBuffers?: RetainedBuffers
 }
 
 /**
@@ -123,6 +125,7 @@ export function useCentralPanel({
   initialState,
   onStateChange,
   onBuffersChange,
+  retainedBuffers,
 }: UseCentralPanelArgs): CentralPanelController {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -134,6 +137,7 @@ export function useCentralPanel({
     initialBuffers: initialState?.buffers,
     initialActiveRelPath: initialState?.activeRelPath,
     onBuffersChange,
+    retainedBuffers,
   })
   const initialPane = useRef<SessionPane | null>(
     !initialState && initialSession ? { ...initialSession, id: "pane-1" } : null,
@@ -155,6 +159,11 @@ export function useCentralPanel({
   )
   const sessionsRef = useRef(sessions)
   sessionsRef.current = sessions
+  const updateSessions = useCallback((update: (previous: SessionPane[]) => SessionPane[]) => {
+    const next = update(sessionsRef.current)
+    sessionsRef.current = next
+    setSessions(next)
+  }, [])
   const idCounter = useRef(highestPaneNumber(sessions))
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Buffer changes trigger publication; the synchronous accessor supplies the latest revision.
@@ -214,16 +223,18 @@ export function useCentralPanel({
 
     const generation = restorationGeneration.current + 1
     restorationGeneration.current = generation
-    const createdSessionIds: string[] = []
-    let applied = false
+    const createdSessionIds = new Set<string>()
     const isCurrent = (): boolean => restorationGeneration.current === generation
     const reportError = (message: string): void => {
       if (isCurrent()) setRestorationError(message)
     }
     const killUnclaimedSessions = (): void => {
       for (const sessionId of createdSessionIds) {
-        void client.terminal.kill.mutate({ sessionId }).catch(() => {})
+        void client.terminal.kill.mutate({ sessionId }).catch((error: unknown) => {
+          console.warn("Could not stop an unclaimed restored terminal", sessionId, error)
+        })
       }
+      createdSessionIds.clear()
     }
 
     void client.terminal.list
@@ -247,7 +258,7 @@ export function useCentralPanel({
               cols: 80,
               rows: 24,
             })
-            createdSessionIds.push(result.sessionId)
+            createdSessionIds.add(result.sessionId)
             return { ...pane, sessionId: result.sessionId }
           }
           if (pane.launch.type === "python") {
@@ -257,12 +268,12 @@ export function useCentralPanel({
               cols: 80,
               rows: 24,
             })
-            createdSessionIds.push(result.sessionId)
+            createdSessionIds.add(result.sessionId)
             return { ...pane, sessionId: result.sessionId }
           }
           if (pane.launch.type === "auto-research") {
             const result = await client.sessions.startAutoResearch.mutate({ projectId })
-            createdSessionIds.push(result.sessionId)
+            createdSessionIds.add(result.sessionId)
             return { ...pane, sessionId: result.sessionId, wsKind: result.kind }
           }
           const result = await client.sessions.start.mutate({
@@ -270,7 +281,7 @@ export function useCentralPanel({
             agentId: pane.launch.agentId,
             workspaceMode: pane.launch.workspaceMode,
           })
-          createdSessionIds.push(result.sessionId)
+          createdSessionIds.add(result.sessionId)
           return { ...pane, sessionId: result.sessionId, wsKind: result.kind }
         }
         const restored = await Promise.all(
@@ -297,7 +308,7 @@ export function useCentralPanel({
                 rows: 24,
               })
               .then((result) => {
-                createdSessionIds.push(result.sessionId)
+                createdSessionIds.add(result.sessionId)
                 nextBelowEditorRun = { ...savedBelowEditorRun, sessionId: result.sessionId }
               })
               .catch((error: unknown) => {
@@ -319,14 +330,26 @@ export function useCentralPanel({
           killUnclaimedSessions()
           return
         }
-        applied = true
-        sessionsRef.current = available
-        setSessions(available)
-        belowEditorRunRef.current = nextBelowEditorRun
-        setBelowEditorRun(nextBelowEditorRun)
+        const originalById = new Map(panes.map((pane) => [pane.id, pane]))
+        const restoredById = new Map(available.map((pane) => [pane.id, pane]))
+        const next = sessionsRef.current.flatMap((pane) => {
+          const original = originalById.get(pane.id)
+          if (!original || original.sessionId !== pane.sessionId) return [pane]
+          const restored = restoredById.get(pane.id)
+          return restored ? [restored] : []
+        })
+        sessionsRef.current = next
+        setSessions(next)
+        if (belowEditorRunRef.current === savedBelowEditorRun) {
+          belowEditorRunRef.current = nextBelowEditorRun
+          setBelowEditorRun(nextBelowEditorRun)
+        }
+        for (const pane of next) createdSessionIds.delete(pane.sessionId)
+        if (belowEditorRunRef.current) createdSessionIds.delete(belowEditorRunRef.current.sessionId)
+        killUnclaimedSessions()
         setActive((current) => {
           if (current?.type !== "session") return current
-          return available.some((pane) => pane.id === current.id) ? current : null
+          return next.some((pane) => pane.id === current.id) ? current : null
         })
       })
       .catch((error: unknown) => {
@@ -335,11 +358,11 @@ export function useCentralPanel({
             error instanceof Error ? error.message : String(error)
           }`,
         )
-        if (!isCurrent()) killUnclaimedSessions()
+        killUnclaimedSessions()
       })
     return () => {
       if (isCurrent()) restorationGeneration.current += 1
-      if (!applied) killUnclaimedSessions()
+      killUnclaimedSessions()
     }
   }, [client, initialState?.belowEditorRun, initialState?.sessions, projectId, workspaceId])
 
@@ -426,7 +449,7 @@ export function useCentralPanel({
         {
           onSuccess: (result) => {
             const id = nextPaneId()
-            setSessions((prev) => [
+            updateSessions((prev) => [
               ...prev,
               {
                 id,
@@ -442,7 +465,7 @@ export function useCentralPanel({
         },
       )
     },
-    [agentsQuery.data, projectId, startSession, nextPaneId],
+    [agentsQuery.data, projectId, startSession, nextPaneId, updateSessions],
   )
 
   const openAgent = useCallback(() => {
@@ -481,7 +504,7 @@ export function useCentralPanel({
       {
         onSuccess: (result) => {
           const id = nextPaneId()
-          setSessions((prev) => [
+          updateSessions((prev) => [
             ...prev,
             {
               id,
@@ -495,7 +518,7 @@ export function useCentralPanel({
         },
       },
     )
-  }, [workspaceId, spawnTerminal, nextPaneId])
+  }, [workspaceId, spawnTerminal, nextPaneId, updateSessions])
 
   const openNewMarkdown = useCallback(() => {
     let name = "untitled.md"
@@ -533,7 +556,7 @@ export function useCentralPanel({
                 return
               }
               const id = nextPaneId()
-              setSessions((prev) => [
+              updateSessions((prev) => [
                 ...prev,
                 {
                   id,
@@ -549,7 +572,15 @@ export function useCentralPanel({
         )
       })
     },
-    [editor, killTerminal, nextPaneId, runPythonFile, settings.pythonRunDestination, workspaceId],
+    [
+      editor,
+      killTerminal,
+      nextPaneId,
+      runPythonFile,
+      settings.pythonRunDestination,
+      workspaceId,
+      updateSessions,
+    ],
   )
 
   const closeBelowEditorRun = useCallback(() => {

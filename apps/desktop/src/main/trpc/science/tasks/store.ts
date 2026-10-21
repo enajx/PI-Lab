@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Dirent } from "node:fs"
 import { readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { Project } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import {
@@ -397,13 +397,42 @@ function errorMessage(error: unknown): string {
 /** Replace a source atomically so interruption cannot leave a partial Markdown file. */
 type BeforeAtomicRevisionCheck = (path: string) => Promise<void>
 let beforeAtomicRevisionCheck: BeforeAtomicRevisionCheck | null = null
+const taskWrites = new Map<string, Promise<void>>()
 
-/** Test-only seam for a deterministic out-of-band edit before the final CAS check. */
+/** Test-only seam for an out-of-band edit before the final revision check. */
 export function setBeforeTaskRevisionCheckForTest(hook: BeforeAtomicRevisionCheck | null): void {
   beforeAtomicRevisionCheck = hook
 }
 
 async function atomicWrite(
+  path: string,
+  content: string,
+  expectedRevision: string | null,
+): Promise<void> {
+  const canonical = await canonicalTaskPath(path)
+  const previous = taskWrites.get(canonical) ?? Promise.resolve()
+  const pending = previous.then(() => replaceTaskFile(canonical, content, expectedRevision))
+  const settled = pending.then(
+    () => {},
+    () => {},
+  )
+  taskWrites.set(canonical, settled)
+  try {
+    await pending
+  } finally {
+    if (taskWrites.get(canonical) === settled) taskWrites.delete(canonical)
+  }
+}
+
+/** Resolve aliases to one write queue, including files that have not been created yet. */
+async function canonicalTaskPath(path: string): Promise<string> {
+  return realpath(path).catch(async (error: unknown) => {
+    if (!isNotFound(error)) throw error
+    return join(await realpath(dirname(path)), basename(path))
+  })
+}
+
+async function replaceTaskFile(
   path: string,
   content: string,
   expectedRevision: string | null,

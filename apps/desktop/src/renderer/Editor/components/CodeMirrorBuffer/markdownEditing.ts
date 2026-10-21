@@ -239,6 +239,11 @@ function decorateLine(from: number, text: string, ranges: DecorationRange[]) {
   decorateInline(from, text, ranges)
 }
 
+/** Match simple links without rescanning unmatched opening brackets. */
+export function markdownLinkMatches(text: string): IterableIterator<RegExpMatchArray> {
+  return text.matchAll(/(!?\[)([^[\]\n]+)(\]\()([^)[\n]+)(\))/g)
+}
+
 function decorateInline(from: number, text: string, ranges: DecorationRange[]) {
   addDelimited(text, from, /(\*\*|__)(.+?)\1/g, "cm-md-strong", ranges)
   addDelimited(text, from, /(~~)(.+?)\1/g, "cm-md-strike", ranges)
@@ -246,7 +251,7 @@ function decorateInline(from: number, text: string, ranges: DecorationRange[]) {
   addDelimited(text, from, /(?<!\*)(\*)(?!\*)([^*\n]+?)\1(?!\*)/g, "cm-md-emphasis", ranges)
   addDelimited(text, from, /(?<!_)(_)(?!_)([^_\n]+?)\1(?!_)/g, "cm-md-emphasis", ranges)
 
-  for (const match of text.matchAll(/(!?\[)([^\]]+)(\]\()([^)]+)(\))/g)) {
+  for (const match of markdownLinkMatches(text)) {
     const start = from + (match.index ?? 0)
     const bangAndOpen = (match[1] ?? "").length
     const labelStart = start + bangAndOpen

@@ -1,4 +1,14 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Project } from "@pi-lab/local-db"
@@ -117,6 +127,25 @@ describe("TODO Markdown discovery and aggregation", () => {
 })
 
 describe("surgical task mutations", () => {
+  test("updates a default TODO symlink's external target and preserves the link", async () => {
+    const { root, project } = await fixture("Linked")
+    const outside = await fixture("Outside")
+    const content = "- [ ] Original\n"
+    const target = join(outside.root, "Shared.md")
+    await writeFile(target, content)
+    const link = join(root, "TODO.md")
+    await symlink(target, link)
+    await updateTask({
+      project,
+      relPath: "TODO.md",
+      expectedRevision: taskRevision(content),
+      selector: { sourceStart: 0 },
+      patch: { title: "Updated" },
+    })
+    expect((await lstat(link)).isSymbolicLink()).toBe(true)
+    expect(await readFile(target, "utf8")).toContain("Updated")
+  })
+
   test("updates one ordinary task, lazily assigning an id while preserving surrounding bytes", async () => {
     const { root, project } = await fixture("Alpha")
     const original = "Preamble\r\n\r\n- [ ] Human task\r\n  detail\r\n\r\nFooter stays exact\r\n"
@@ -336,7 +365,7 @@ describe("surgical task mutations", () => {
     const path = join(root, "TODO.md")
     const external = "- [ ] Created concurrently by an agent\n"
     setBeforeTaskRevisionCheckForTest(async (target) => {
-      expect(target).toBe(path)
+      expect(target).toBe(join(await realpath(root), "TODO.md"))
       await writeFile(target, external)
     })
 
@@ -359,5 +388,44 @@ describe("surgical task mutations", () => {
     await expect(readFile(path, "utf8")).resolves.toBe(external)
     const names = await readdir(root)
     expect(names.some((name) => name.includes(".pi-lab-") && name.endsWith(".tmp"))).toBe(false)
+  })
+
+  test("rejects a concurrent stale mutation without losing the first task", async () => {
+    const { root, project } = await fixture("Concurrent")
+    const initial = "- [ ] Original\n"
+    const path = join(root, "TODO.md")
+    await writeFile(path, initial)
+    await symlink(path, join(root, "TODO-alias.md"))
+    let release: () => void = () => {}
+    let checked: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const checking = new Promise<void>((resolve) => {
+      checked = resolve
+    })
+    setBeforeTaskRevisionCheckForTest(async () => {
+      checked()
+      await gate
+    })
+    const create = (title: string, relPath: string) =>
+      createTask({
+        project,
+        relPath,
+        expectedRevision: taskRevision(initial),
+        fields: { title, details: "", status: "planned", priority: null, labels: [], owner: null },
+      })
+    const first = create("First", "TODO.md")
+    await checking
+    const second = create("Second", "TODO-alias.md")
+    const completion = Promise.allSettled([first, second])
+    // Both old writers can reach their final check before either replaces the file.
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    release()
+    const results = await completion
+    expect(results[0].status).toBe("fulfilled")
+    expect(results[1]).toMatchObject({ status: "rejected", reason: { code: "CONFLICT" } })
+    expect(await readFile(path, "utf8")).toContain("First")
+    expect(await readFile(path, "utf8")).not.toContain("Second")
   })
 })

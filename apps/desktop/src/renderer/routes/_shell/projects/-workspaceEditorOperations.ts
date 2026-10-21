@@ -59,21 +59,30 @@ export async function saveProjectBuffer(
       )
       state = store.read(projectId, true)
     }
+    const mountedAccess = (): BufferAccess | undefined =>
+      activeEditors.get(projectId)?.().editor.bufferAccess
     const inactiveAccess: BufferAccess = {
-      read: () => (store.read(projectId, true)?.buffers ?? []) as LiveBuffer[],
-      update: (update) =>
-        store.updateBuffers(projectId, (buffers) => update(buffers as LiveBuffer[])),
-      current: (snapshot) =>
-        activeEditors.has(projectId)
-          ? undefined
+      read: () =>
+        mountedAccess()?.read() ?? ((store.read(projectId, true)?.buffers ?? []) as LiveBuffer[]),
+      update: (update) => {
+        const mounted = mountedAccess()
+        if (mounted) mounted.update(update)
+        else store.updateBuffers(projectId, (buffers) => update(buffers as LiveBuffer[]))
+      },
+      current: (snapshot) => {
+        const mounted = mountedAccess()
+        return mounted
+          ? mounted.current(snapshot)
           : (store.read(projectId, true)?.buffers as LiveBuffer[] | undefined)?.find(
               (buffer) =>
                 buffer[BUFFER_ID] === snapshot[BUFFER_ID] && buffer.relPath === snapshot.relPath,
-            ),
+            )
+      },
       formatOnSave: () => settings.formatOnSave,
       onSaved: () => {},
       reportError: (message) => {
         error = message
+        mountedAccess()?.reportError(message)
       },
     }
     const originalAccess = activeEditor?.bufferAccess ?? inactiveAccess

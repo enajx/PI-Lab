@@ -36,6 +36,83 @@ function setup() {
 }
 
 describe("inactive project saves through shared editor operations (mocked IPC)", () => {
+  test("an inactive save completing after remount preserves newer drafts and updates their baseline", async () => {
+    const store = setup()
+    store.updateBuffers("source", (buffers) =>
+      buffers.map((buffer) => ({
+        ...buffer,
+        relPath: "notes.txt",
+        untitled: false,
+        content: "first draft",
+        savedContent: "old",
+        baseline: { mtimeMs: 1, size: 3 },
+      })),
+    )
+    let finishWrite!: (result: {
+      baseline: { mtimeMs: number; size: number }
+      matchesWrittenContent: boolean
+    }) => void
+    const write = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishWrite = resolve
+        }),
+    )
+    const client = createFakeTrpcClient({
+      "workspaces.ensureMain": () => ({ id: "source-ws" }),
+      "files.stat": () => ({ exists: true, mtimeMs: 1, size: 3 }),
+      "files.write": write,
+      "agents.list": () => [],
+      "agents.projectChoice": () => ({ agentId: null }),
+    })
+    const saving = saveProjectBuffer(
+      store,
+      client,
+      "source",
+      "notes.txt",
+      DEFAULT_EDITOR_SETTINGS,
+      async () => null,
+    )
+    await waitFor(() => expect(write).toHaveBeenCalledOnce())
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const initialState = store.read("source", true)
+    const view = renderHook(
+      () =>
+        useCentralPanel({
+          client,
+          workspaceId: "source-ws",
+          projectId: "source",
+          settings: DEFAULT_EDITOR_SETTINGS,
+          initialState,
+          onStateChange: (state) => store.write("source", state, "source-ws"),
+          onBuffersChange: (buffers) => store.updateBuffers("source", () => buffers),
+        }),
+      { wrapper: ({ children }) => createElement(AppProviders, { client, queryClient, children }) },
+    )
+    const unregister = registerProjectEditor("source", () => view.result.current)
+    act(() => {
+      view.result.current.editor.onEdit("notes.txt", "newer draft")
+      view.result.current.editor.openUntitled("another.txt")
+    })
+    await act(async () => {
+      finishWrite({ baseline: { mtimeMs: 2, size: 11 }, matchesWrittenContent: true })
+      await saving
+    })
+    expect(view.result.current.editor.buffers[0]).toMatchObject({
+      content: "newer draft",
+      savedContent: "first draft",
+      baseline: { mtimeMs: 2, size: 11 },
+      externalChange: false,
+    })
+    expect(store.read("source", true)?.buffers.map((buffer) => buffer.relPath)).toEqual([
+      "notes.txt",
+      "another.txt",
+    ])
+    unregister()
+    view.unmount()
+    queryClient.clear()
+    store.dispose()
+  })
   test("canceled Save As preserves the inactive draft", async () => {
     const store = setup()
     const write = vi.fn()

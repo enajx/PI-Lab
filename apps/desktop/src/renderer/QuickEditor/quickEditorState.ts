@@ -40,6 +40,14 @@ export function markQuickBufferSaved(id: string, savedContent: string, baseline:
   emit()
 }
 
+/** Mark a pending save's conflict without selecting its possibly hidden file. */
+export function markQuickBufferConflicted(id: string): void {
+  const current = buffers.get(id)
+  if (!current) return
+  buffers.set(id, { ...current, conflict: true })
+  emit()
+}
+
 /** Discard unsaved quick drafts only after the user explicitly chooses Discard. */
 export function discardQuickDrafts(): void {
   for (const [id, buffer] of buffers) {

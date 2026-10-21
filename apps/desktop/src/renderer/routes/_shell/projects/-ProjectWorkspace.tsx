@@ -3,12 +3,13 @@ import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { X } from "lucide-react"
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
 import { ProjectTypeChoice } from "../../../components/ProjectTypeChoice"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
+import type { RetainedBuffers } from "../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { translateKnownError } from "../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import type { ProjectNotificationSearch } from "../../../notifications/activation"
@@ -203,6 +204,13 @@ export function ProjectWorkspace({
     [projectId],
   )
   useEffect(() => () => workspaceRecovery().flush(projectId), [projectId])
+  const retainedBuffers = useMemo<RetainedBuffers>(
+    () => ({
+      read: () => workspaceRecovery().read(projectId, true)?.buffers ?? [],
+      update: (update) => workspaceRecovery().updateBuffers(projectId, update),
+    }),
+    [projectId],
+  )
 
   // Hooks are unconditional; the central panel does no file I/O until a workspace
   // id is set and the panel is rendered, so an empty id pre-resolve is inert.
@@ -215,6 +223,7 @@ export function ProjectWorkspace({
     initialState: restoredWorkspaceState,
     onStateChange,
     onBuffersChange,
+    retainedBuffers,
   })
   const editorRef = useRef(controller)
   editorRef.current = controller

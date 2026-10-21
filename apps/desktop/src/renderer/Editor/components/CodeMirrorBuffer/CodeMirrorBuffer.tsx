@@ -169,6 +169,8 @@ export function CodeMirrorBuffer({
     useState<MarkdownOverlayState>(EMPTY_MARKDOWN_OVERLAY)
   const [activeSlashIndex, setActiveSlashIndex] = useState(0)
   const [slashGroup, setSlashGroup] = useState<MarkdownSlashCommand | null>(null)
+  const slashGroupRef = useRef(slashGroup)
+  slashGroupRef.current = slashGroup
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const [mentionEntries, setMentionEntries] = useState<MarkdownProjectEntry[]>([])
   const [mentionLoading, setMentionLoading] = useState(false)
@@ -404,7 +406,7 @@ export function CodeMirrorBuffer({
           run: () => {
             if (!markdownOverlayRef.current.slash && !markdownOverlayRef.current.mention)
               return false
-            if (slashGroup) {
+            if (slashGroupRef.current) {
               setSlashGroup(null)
               setActiveSlashIndex(0)
               return true

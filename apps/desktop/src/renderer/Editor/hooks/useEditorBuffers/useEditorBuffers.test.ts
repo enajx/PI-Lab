@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
 import { DEFAULT_EDITOR_SETTINGS, type OpenBuffer, useEditorBuffers } from "./useEditorBuffers"
@@ -64,7 +64,106 @@ function setup(handlers: FakeHandlers, buffer: OpenBuffer, formatOnSave: boolean
 
 afterEach(() => vi.useRealTimers())
 
+test("diagnostics exceptions surface through the editor error state (mocked IPC)", async () => {
+  const client = createFakeTrpcClient({
+    "python.resolve": () => null,
+    "diagnostics.check": () => {
+      throw new Error("checker crashed")
+    },
+  })
+  const view = renderHook(() =>
+    useEditorBuffers({
+      client,
+      workspaceId: "diagnostics-error",
+      initialBuffers: [{ ...initial, relPath: "file.py" }],
+      initialActiveRelPath: "file.py",
+      settings: { ...DEFAULT_EDITOR_SETTINGS, diagnosticsEnabled: true },
+    }),
+  )
+  await waitFor(() => expect(view.result.current.error).toContain("checker crashed"))
+  expect(view.result.current.activeDiagnostics.checking).toBe(false)
+})
+
 describe("editor races (deferred mocked IPC)", () => {
+  test.each([
+    false,
+    true,
+  ])("save completion updates retained baselines across remount=%s", async (remount) => {
+    const written = deferred<{ baseline: OpenBuffer["baseline"]; matchesWrittenContent: boolean }>()
+    const write = vi.fn(() => written.promise)
+    let diskBaseline = initial.baseline
+    let retained: OpenBuffer[] = [initial]
+    const retainedBuffers = {
+      read: () => retained,
+      update: (update: (buffers: OpenBuffer[]) => OpenBuffer[]) => {
+        retained = update(retained)
+      },
+    }
+    const client = createFakeTrpcClient({
+      "files.stat": () => ({ exists: true, ...diskBaseline }),
+      "files.write": write,
+    })
+    const mount = () =>
+      renderHook(() =>
+        useEditorBuffers({
+          client,
+          workspaceId: "retained-save",
+          settings: DEFAULT_EDITOR_SETTINGS,
+          initialBuffers: retained,
+          initialActiveRelPath: "notes.txt",
+          retainedBuffers,
+          onBuffersChange: (buffers) => {
+            retained = buffers
+          },
+        }),
+      )
+    const first = mount()
+    act(() => first.result.current.onEdit("notes.txt", "written draft"))
+    let saving!: Promise<boolean>
+    act(() => {
+      saving = first.result.current.saveFile("notes.txt")
+    })
+    await waitFor(() => expect(write).toHaveBeenCalledOnce())
+    first.unmount()
+    const second = remount ? mount() : null
+    if (second)
+      act(() => {
+        second.result.current.onEdit("notes.txt", "newer draft")
+        second.result.current.openUntitled("another.txt")
+      })
+    await act(async () => {
+      diskBaseline = { mtimeMs: 2, size: 13 }
+      written.resolve({ baseline: diskBaseline, matchesWrittenContent: true })
+      await saving
+    })
+    const completed = retained[0]
+    if (second) {
+      expect(second.result.current.buffers[0]).toEqual(retained[0])
+      expect(retained.map((buffer) => buffer.relPath)).toEqual(["notes.txt", "another.txt"])
+      let saved = false
+      await act(async () => {
+        saved = await second.result.current.saveFile("notes.txt")
+      })
+      expect(saved).toBe(true)
+      expect(second.result.current.buffers[0]).toMatchObject({
+        content: "newer draft",
+        savedContent: "newer draft",
+        externalChange: false,
+      })
+      expect(write).toHaveBeenLastCalledWith({
+        workspaceId: "retained-save",
+        relPath: "notes.txt",
+        content: "newer draft",
+      })
+      second.unmount()
+    }
+    expect(completed).toMatchObject({
+      content: remount ? "newer draft" : "written draft",
+      savedContent: "written draft",
+      baseline: { mtimeMs: 2, size: 13 },
+      externalChange: false,
+    })
+  })
   test("late save records the exact written text and reports newer edits unsaved", async () => {
     const write = deferred<{ bytes: number }>()
     const view = setup({ "files.write": () => write.promise }, initial, false)
