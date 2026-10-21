@@ -64,33 +64,44 @@ export async function walkWorkspace(
 
   while (frontier.length > 0 && depth <= maxDepth) {
     const next: string[] = []
-    for (const dir of frontier) {
-      const dirents = await readdir(dir, { withFileTypes: true }).catch((error: unknown) => {
-        if (dir !== root && isExpectedChildError(error)) {
-          skipped.push(toRelativePath(root, dir))
-          return null
+    // Read small batches ahead, but run visitors in the original BFS order.
+    // Errors are consumed in that order too; a stopped walk ignores unused reads.
+    for (let offset = 0; offset < frontier.length; offset += 4) {
+      const directories = await Promise.all(
+        frontier.slice(offset, offset + 4).map((dir) =>
+          readdir(dir, { withFileTypes: true }).then(
+            (dirents) => ({ dir, dirents, error: null }),
+            (error: unknown) => ({ dir, dirents: null, error }),
+          ),
+        ),
+      )
+      for (const { dir, dirents, error } of directories) {
+        if (dirents === null) {
+          if (dir !== root && isExpectedChildError(error)) {
+            skipped.push(toRelativePath(root, dir))
+            continue
+          }
+          throw error
         }
-        throw error
-      })
-      if (!dirents) continue
-      dirents.sort((a, b) => a.name.localeCompare(b.name))
+        dirents.sort((a, b) => a.name.localeCompare(b.name))
 
-      for (const dirent of dirents) {
-        if (policy.includeHidden === false && dirent.name.startsWith(".")) continue
-        const kind = dirent.isFile() ? "file" : dirent.isDirectory() ? "dir" : null
-        if (!kind || (kind === "dir" && ignored.has(dirent.name))) continue
-        const path = join(dir, dirent.name)
-        const decision = await Promise.resolve()
-          .then(() => visitor({ path, name: dirent.name, kind, depth }))
-          .catch((error: unknown) => {
-            if (isExpectedChildError(error)) {
-              skipped.push(toRelativePath(root, path))
-              return "prune" as const
-            }
-            throw error
-          })
-        if (decision === "stop") return { stopped: true, partial: skipped.length > 0, skipped }
-        if (kind === "dir" && decision !== "prune" && depth < maxDepth) next.push(path)
+        for (const dirent of dirents) {
+          if (policy.includeHidden === false && dirent.name.startsWith(".")) continue
+          const kind = dirent.isFile() ? "file" : dirent.isDirectory() ? "dir" : null
+          if (!kind || (kind === "dir" && ignored.has(dirent.name))) continue
+          const path = join(dir, dirent.name)
+          const decision = await Promise.resolve()
+            .then(() => visitor({ path, name: dirent.name, kind, depth }))
+            .catch((error: unknown) => {
+              if (isExpectedChildError(error)) {
+                skipped.push(toRelativePath(root, path))
+                return "prune" as const
+              }
+              throw error
+            })
+          if (decision === "stop") return { stopped: true, partial: skipped.length > 0, skipped }
+          if (kind === "dir" && decision !== "prune" && depth < maxDepth) next.push(path)
+        }
       }
     }
     frontier = next

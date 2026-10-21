@@ -5,23 +5,8 @@ import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "./editorSettings"
 export { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "./editorSettings"
 
 /**
- * PI Lab's local store. Every row lives on the user's own machine in
- * `$PI_LAB_DATA_DIR/local.db` — there is no cloud mirror, no synced identity,
- * and no remote ownership. The shape below models exactly four things:
- *
- *   1. the user's research units      -> `projects`
- *   2. the git checkouts under them   -> `worktrees`
- *   3. the agent/editing contexts     -> `workspaces` (+ `workspaceSections`)
- *   4. unattended agent schedules     -> `automations` (+ runs / prompt history)
- *
- * plus two singletons of convenience: app-wide `settings` and in-app browser
- * `browserHistory`.
- *
- * Conventions used throughout:
- *   - Text UUID v4 primary keys, minted in JS so inserts never round-trip.
- *   - Epoch-millisecond integers for every instant (`*At` suffix).
- *   - camelCase property names; explicit snake_case SQL column names.
- *   - JSON columns are typed via `$type<>()` and parsed by drizzle.
+ * Local SQLite schema. IDs are generated in JavaScript; `*At` values are epoch
+ * milliseconds. Property names use camelCase and SQL columns use snake_case.
  */
 
 /** Fresh UUID v4 primary key, generated app-side (no DB extension needed). */

@@ -223,7 +223,7 @@ function PythonRuntimeSummary({
         <div
           role="menu"
           aria-label={t("Python environment")}
-          className="absolute end-0 bottom-full z-30 mb-1 w-80 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          className="absolute end-0 bottom-full z-30 mb-1 max-h-[min(24rem,70vh)] w-80 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
         >
           <div className="px-2 py-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
             {t("Python environment")}

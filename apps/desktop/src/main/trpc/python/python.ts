@@ -77,33 +77,40 @@ export const pythonRouter = router({
       }
 
       const options: PythonEnvironmentOption[] = []
-      const seenInterpreters = new Set<string>()
-      for (const path of candidatePaths) {
-        const runtime = await ctx.resolvePythonRuntime(cwd, path)
-        if (runtime.source !== "selected" || !runtime.interpreterPath) continue
-        const canonicalInterpreter = await canonicalInterpreterPath(runtime.interpreterPath)
-        if (!canonicalInterpreter || seenInterpreters.has(canonicalInterpreter)) continue
-        seenInterpreters.add(canonicalInterpreter)
-        options.push({
-          path,
-          displayName: runtime.displayName,
-          interpreterPath: runtime.interpreterPath,
-        })
+      const seenChoices = new Set<string>()
+      // Small batches bound interpreter children; consume completed batches in
+      // discovery order so alias deduplication keeps the preferred local entry.
+      const appendCandidates = async (
+        candidates: Array<{ path: string; manager: PythonEnvironmentManager | null }>,
+      ): Promise<void> => {
+        for (let offset = 0; offset < candidates.length; offset += 4) {
+          const inspected = await Promise.all(
+            candidates.slice(offset, offset + 4).map(async (candidate) => {
+              const runtime = await ctx.resolvePythonRuntime(cwd, candidate.path)
+              const canonical =
+                runtime.source === "selected" && runtime.interpreterPath
+                  ? await canonicalRuntimeKey(runtime.interpreterPath, runtime.environmentPath)
+                  : null
+              return { candidate, runtime, canonical }
+            }),
+          )
+          for (const { candidate, runtime, canonical } of inspected) {
+            if (!canonical || !runtime.interpreterPath || seenChoices.has(canonical)) continue
+            seenChoices.add(canonical)
+            options.push({
+              path: candidate.path,
+              displayName: candidate.manager
+                ? `${managerDisplayName(candidate.manager)} · ${runtime.displayName}`
+                : runtime.displayName,
+              interpreterPath: runtime.interpreterPath,
+            })
+          }
+        }
       }
+      await appendCandidates(candidatePaths.map((path) => ({ path, manager: null })))
 
       const globalCandidates = await ctx.discoverPythonEnvironments()
-      for (const candidate of globalCandidates) {
-        const runtime = await ctx.resolvePythonRuntime(cwd, candidate.path)
-        if (runtime.source !== "selected" || !runtime.interpreterPath) continue
-        const canonicalInterpreter = await canonicalInterpreterPath(runtime.interpreterPath)
-        if (!canonicalInterpreter || seenInterpreters.has(canonicalInterpreter)) continue
-        seenInterpreters.add(canonicalInterpreter)
-        options.push({
-          path: candidate.path,
-          displayName: `${managerDisplayName(candidate.manager)} · ${runtime.displayName}`,
-          interpreterPath: runtime.interpreterPath,
-        })
-      }
+      await appendCandidates(globalCandidates)
       return options
     }),
 
@@ -213,9 +220,16 @@ export const pythonRouter = router({
     }),
 })
 
-async function canonicalInterpreterPath(interpreterPath: string): Promise<string | null> {
+/** Environment aliases share a key; distinct environments may share a base executable. */
+async function canonicalRuntimeKey(
+  interpreterPath: string,
+  environmentPath: string | undefined,
+): Promise<string | null> {
   try {
-    return await realpath(interpreterPath)
+    const interpreter = await realpath(interpreterPath)
+    return environmentPath
+      ? `environment:${await realpath(environmentPath)}`
+      : `interpreter:${interpreter}`
   } catch (cause) {
     if (!(cause instanceof Error) || !("code" in cause)) throw cause
     const code = (cause as NodeJS.ErrnoException).code

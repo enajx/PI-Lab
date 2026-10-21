@@ -1,24 +1,7 @@
 /**
- * Pure, renderer-safe fuzzy matcher for file/path and list search.
- *
- * Shared by both the Electron main process (workspace file search) and the
- * renderer (command palette, highlighting), so it has **no** Node or DOM
- * dependencies and never throws for any pair of strings.
- *
- * The single load-bearing invariant — relied on by callers and the property
- * tests — is:
- *
- *   `fuzzyMatch(query, target) !== null`  **iff**  `query` is a
- *   case-insensitive subsequence of `target`, **or** `query` is empty.
- *
- * "Subsequence" means every character of `query`, in order (but not
- * necessarily contiguous), can be found in `target`. The score is otherwise
- * arbitrary in magnitude — only the match/no-match boundary carries cross-call
- * meaning, while larger scores rank a target higher among matches.
- *
- * The **empty query** is a match with score `0` and no positions; a file picker
- * decides separately whether "match everything" or "match nothing" is the right
- * call-site behaviour for an empty query.
+ * Match when the query is a case-insensitive subsequence of the target.
+ * An empty query matches with score 0 and no positions. Larger scores rank
+ * matches higher; callers decide how to handle an empty search.
  */
 
 /** Bonus for a query char that immediately follows the previous match. */

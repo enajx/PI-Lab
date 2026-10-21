@@ -1,7 +1,4 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import { type PiLabDatabase, runMigrations } from "@pi-lab/local-db"
-import { readMigrationFiles } from "drizzle-orm/migrator"
 import dataFormat from "../../../release-data-format.json"
 import { resolveBundledMigrationsDir } from "./migrationsDir"
 
@@ -27,22 +24,6 @@ let status: DbStatus | null = null
 let dbHandle: PiLabDatabase | null = null
 
 /**
- * Newest migration tag from `meta/_journal.json`. The applied *count* is the
- * machine check; the tag is the human-readable version label for the renderer.
- */
-function readLatestTag(migrationsFolder: string): string | null {
-  try {
-    const raw = readFileSync(join(migrationsFolder, "meta", "_journal.json"), "utf8")
-    const parsed = JSON.parse(raw) as { entries?: Array<{ tag: string; when: number }> }
-    const entries = parsed.entries ?? []
-    if (entries.length === 0) return null
-    return entries.reduce((latest, e) => (e.when > latest.when ? e : latest)).tag
-  } catch {
-    return null
-  }
-}
-
-/**
  * Open the local SQLite DB and apply migrations from a recognized journal.
  * Unknown states stop with a backup and visible error. Must run before any router that
  * touches the DB. Idempotent; the resolved path honors `PI_LAB_DATA_DIR`.
@@ -56,12 +37,10 @@ export function initDatabase(): DbStatus {
   status = {
     appliedCount: result.appliedCount,
     recovered: result.recovered,
-    latestTag: readLatestTag(migrationsFolder),
+    latestTag: result.latestTag,
     compatibility: {
       formatVersion: dataFormat.version,
-      migrations: readMigrationFiles({ migrationsFolder })
-        .slice(0, result.appliedCount)
-        .map(({ hash, folderMillis }) => ({ hash, createdAt: folderMillis })),
+      migrations: result.history,
     },
   }
   return status

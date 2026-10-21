@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   chmodSync,
   cpSync,
@@ -57,6 +58,25 @@ function columnNames(dbFile: string, table: string): Set<string> {
 }
 
 describe("runMigrations", () => {
+  it("returns the applied compatibility history and latest tag on unchanged reopen", () => {
+    const folder = resolveMigrationsDir()
+    const journal = JSON.parse(readFileSync(join(folder, "meta", "_journal.json"), "utf8")) as {
+      entries: Array<{ tag: string; when: number }>
+    }
+    runMigrations(dbPath).sqlite.close()
+    const result = runMigrations(dbPath)
+    result.sqlite.close()
+    expect(result.history).toEqual(
+      journal.entries.map(({ tag, when }) => ({
+        hash: createHash("sha256")
+          .update(readFileSync(join(folder, `${tag}.sql`)))
+          .digest("hex"),
+        createdAt: when,
+      })),
+    )
+    expect(result.latestTag).toBe(journal.entries.at(-1)?.tag)
+  })
+
   it("creates every kept table", () => {
     const { sqlite } = runMigrations(dbPath)
     sqlite.close()
@@ -207,12 +227,14 @@ describe("runMigrations", () => {
   it("is idempotent — running twice is a no-op, not an error", () => {
     const first = runMigrations(dbPath)
     const firstCount = first.appliedCount
+    expect(first.sqlite.pragma("synchronous", { simple: true })).toBe(1)
     first.sqlite.close()
     expect(firstCount).toBeGreaterThan(0)
     expect(first.recovered).toBe(false)
 
     const second = runMigrations(dbPath)
     try {
+      expect(second.sqlite.pragma("synchronous", { simple: true })).toBe(1)
       expect(second.appliedCount).toBe(firstCount)
       expect(second.recovered).toBe(false)
     } finally {

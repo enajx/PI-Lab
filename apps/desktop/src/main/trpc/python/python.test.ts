@@ -1,5 +1,7 @@
-import { access, mkdir, symlink, writeFile } from "node:fs/promises"
+import { execFile, spawnSync } from "node:child_process"
+import { access, mkdir, realpath, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { promisify } from "node:util"
 import type { Unsubscribable } from "@trpc/server/observable"
 import { afterEach, describe, expect, test } from "vitest"
 import type {
@@ -7,6 +9,7 @@ import type {
   PythonRuntime,
   PythonRuntimeResolver,
 } from "../../python"
+import { livePythonRuntimeResolver } from "../../python"
 import type { TerminalEvent } from "../terminal/terminal"
 import { createHarness, type Harness } from "../testHarness"
 
@@ -19,6 +22,7 @@ const NODE_RUNTIME: PythonRuntime = {
 
 let h: Harness | undefined
 const subscriptions: Unsubscribable[] = []
+const execFileAsync = promisify(execFile)
 
 afterEach(async () => {
   for (const subscription of subscriptions) subscription.unsubscribe()
@@ -65,6 +69,75 @@ async function collect(sessionId: string): Promise<{ chunks: string[]; exits: Te
 }
 
 describe("python.resolve", () => {
+  test.skipIf(process.platform === "win32" || spawnSync("uv", ["--version"]).status !== 0)(
+    "keeps real venvs sharing a base interpreter and deduplicates a directory alias",
+    async () => {
+      let alias = ""
+      let second = ""
+      const { workspaceId, workspaceDir } = await setup(livePythonRuntimeResolver, async () => [
+        { manager: "uv", path: alias, environmentName: "alias" },
+        { manager: "uv", path: second, environmentName: "second" },
+      ])
+      const first = join(workspaceDir, ".venv")
+      second = join(workspaceDir, "global", "second")
+      alias = join(workspaceDir, "global", "alias")
+      const env = { ...process.env, UV_CACHE_DIR: join(workspaceDir, "uv-cache") }
+      for (const path of [first, second]) {
+        await execFileAsync(
+          "uv",
+          ["venv", "--offline", "--no-managed-python", "--python", "python3", path],
+          { env },
+        )
+      }
+      await symlink(first, alias, "dir")
+      // Both environments really point at one base executable, rather than copies.
+      expect(await realpath(join(first, "bin", "python3"))).toBe(
+        await realpath(join(second, "bin", "python3")),
+      )
+      const options = await h?.caller.python.options({ workspaceId })
+      expect(options?.map(({ path }) => path)).toEqual([first, second])
+    },
+  )
+
+  test("probes chooser candidates concurrently with a small bound and preserves discovery order", async () => {
+    let candidates: Array<{ manager: "conda"; path: string; environmentName: string }> = []
+    let active = 0
+    let maximum = 0
+    const { workspaceId, workspaceDir } = await setup(
+      async (_cwd, selectedPath) => {
+        if (!selectedPath || !candidates.some((candidate) => candidate.path === selectedPath))
+          return NODE_RUNTIME
+        active++
+        maximum = Math.max(maximum, active)
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        active--
+        const interpreterPath = join(selectedPath, "python")
+        return {
+          source: "selected",
+          displayName: selectedPath,
+          interpreterPath,
+          runStrategy: { kind: "environment", command: interpreterPath, argsPrefix: [] },
+        }
+      },
+      async () => candidates,
+    )
+    candidates = Array.from({ length: 8 }, (_, index) => ({
+      manager: "conda",
+      path: join(workspaceDir, `env-${index}`),
+      environmentName: `env-${index}`,
+    }))
+    await Promise.all(
+      candidates.map(async ({ path }) => {
+        await mkdir(path)
+        await writeFile(join(path, "python"), "fixture")
+      }),
+    )
+    const result = await h?.caller.python.options({ workspaceId })
+    expect(maximum).toBeGreaterThan(1)
+    expect(maximum).toBeLessThanOrEqual(4)
+    expect(result?.map(({ path }) => path)).toEqual(candidates.map(({ path }) => path))
+  })
+
   test("resolves the selected workspace through the typed public router", async () => {
     const calls: string[] = []
     const expected: PythonRuntime = {

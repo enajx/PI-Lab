@@ -224,12 +224,17 @@ export async function writeTextFile(absPath: string, content: string): Promise<v
 export async function listDir(absPath: string): Promise<DirEntry[]> {
   const dirents = await readdir(absPath, { withFileTypes: true })
   const entries: DirEntry[] = []
-  for (const dirent of dirents) {
-    const kind = dirent.isDirectory() ? "dir" : dirent.isFile() ? "file" : null
-    if (kind === null) continue
-    const path = join(absPath, dirent.name)
-    const info = await stat(path)
-    entries.push({ name: dirent.name, path, kind, mtimeMs: info.mtimeMs })
+  for (let offset = 0; offset < dirents.length; offset += 4) {
+    const batch = await Promise.all(
+      dirents.slice(offset, offset + 4).map(async (dirent): Promise<DirEntry | null> => {
+        const kind = dirent.isDirectory() ? "dir" : dirent.isFile() ? "file" : null
+        if (kind === null) return null
+        const path = join(absPath, dirent.name)
+        const info = await stat(path)
+        return { name: dirent.name, path, kind, mtimeMs: info.mtimeMs }
+      }),
+    )
+    for (const entry of batch) if (entry) entries.push(entry)
   }
   entries.sort(compareEntries)
   return entries

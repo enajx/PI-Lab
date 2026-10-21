@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import { mkdirSync, readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import Database from "better-sqlite3"
 import { drizzle } from "drizzle-orm/better-sqlite3"
 import { migrate } from "drizzle-orm/better-sqlite3/migrator"
@@ -30,6 +30,7 @@ export function openDatabase(dbPath: string = resolveDbPath()): OpenDatabaseResu
   const sqlite = new Database(dbPath)
   try {
     sqlite.pragma("journal_mode = WAL")
+    sqlite.pragma("synchronous = NORMAL")
     sqlite.pragma("foreign_keys = ON")
     const db = drizzle(sqlite, { schema })
     return { db, sqlite }
@@ -155,6 +156,9 @@ export interface RunMigrationsResult {
   recovered: boolean
   /** Number of migration tags Drizzle considers applied afterward. */
   appliedCount: number
+  /** Applied hashes and timestamps reused by channel compatibility checks. */
+  history: Array<{ hash: string; createdAt: number }>
+  latestTag: string | null
 }
 
 /**
@@ -181,10 +185,27 @@ export function runMigrations(
     const migrations = readMigrationFiles({ migrationsFolder })
     const previousCount = verifyJournal(sqlite, migrations)
     verifySchema(sqlite, migrations.slice(0, previousCount))
-    migrate(db, { migrationsFolder })
-    const appliedCount = verifyJournal(sqlite, migrations)
-    verifySchema(sqlite, migrations)
-    return { db, sqlite, recovered: false, appliedCount }
+    let appliedCount = previousCount
+    if (previousCount < migrations.length) {
+      migrate(db, { migrationsFolder })
+      appliedCount = verifyJournal(sqlite, migrations)
+      verifySchema(sqlite, migrations)
+    }
+    const journal = JSON.parse(
+      readFileSync(join(migrationsFolder, "meta", "_journal.json"), "utf8"),
+    ) as {
+      entries: Array<{ tag: string }>
+    }
+    return {
+      db,
+      sqlite,
+      recovered: false,
+      appliedCount,
+      history: migrations
+        .slice(0, appliedCount)
+        .map(({ hash, folderMillis }) => ({ hash, createdAt: folderMillis })),
+      latestTag: journal.entries[appliedCount - 1]?.tag ?? null,
+    }
   } catch (error) {
     throw preserveFailure(sqlite, dbPath, error)
   }

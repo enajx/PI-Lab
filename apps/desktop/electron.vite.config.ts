@@ -1,10 +1,11 @@
-import { cpSync, existsSync, writeFileSync } from "node:fs"
+import { writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig, externalizeDepsPlugin } from "electron-vite"
 import { type Plugin, build as viteBuild } from "vite"
+import { copyRuntimeMigrations } from "./scripts/copy-migrations"
 
 /**
  * Copy the generated Drizzle migrations next to the compiled main bundle so the
@@ -19,9 +20,7 @@ function copyMigrationsPlugin(): Plugin {
     name: "pi-lab:copy-migrations",
     apply: "build",
     closeBundle() {
-      if (existsSync(from)) {
-        cpSync(from, to, { recursive: true })
-      }
+      copyRuntimeMigrations(from, to)
     },
   }
 }
