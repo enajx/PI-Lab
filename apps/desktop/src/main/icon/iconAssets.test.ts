@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import {
   decodeRgbaPng,
   generateAppIcons,
@@ -16,6 +17,31 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = resolve(HERE, "..", "..", "..")
 const REPO_ROOT = resolve(DESKTOP_DIR, "..", "..")
 const ICONS_DIR = join(REPO_ROOT, "icons")
+const outputs: string[] = []
+const guard = vi.hoisted(() => ({ sharedBuild: "" }))
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>()
+  return {
+    ...actual,
+    cpSync: (...args: Parameters<typeof actual.cpSync>) => {
+      if (String(args[1]).startsWith(guard.sharedBuild)) {
+        throw new Error("Icon tests must not write shared packaging inputs")
+      }
+      return actual.cpSync(...args)
+    },
+  }
+})
+guard.sharedBuild = join(DESKTOP_DIR, "build")
+
+function temporaryOutput(): string {
+  const directory = mkdtempSync(join(tmpdir(), "pi-lab-icon-test-"))
+  outputs.push(directory)
+  return directory
+}
+
+afterEach(() => {
+  for (const directory of outputs.splice(0)) rmSync(directory, { recursive: true, force: true })
+})
 const LEGACY_ICON_PATHS = [
   "icon_bw.png",
   "icon_bw_negative.png",
@@ -203,16 +229,13 @@ describe("canonical PI Lab application icon", () => {
   })
 
   test("stages the same master for macOS, Linux, and Windows packaging", () => {
-    generateAppIcons("stable")
-    expect(readFileSync(join(DESKTOP_DIR, "build", "icon.png"))).toEqual(
+    const output = temporaryOutput()
+    generateAppIcons("stable", output)
+    expect(readFileSync(join(output, "icon.png"))).toEqual(
       readFileSync(join(ICONS_DIR, "icon.png")),
     )
     if (process.platform === "darwin") {
-      expect(
-        readFileSync(join(DESKTOP_DIR, "build", "icon.icns"))
-          .subarray(0, 4)
-          .toString(),
-      ).toBe("icns")
+      expect(readFileSync(join(output, "icon.icns")).subarray(0, 4).toString()).toBe("icns")
     }
 
     const builderConfig = readFileSync(join(DESKTOP_DIR, "electron-builder.config.cjs"), "utf8")
@@ -222,13 +245,14 @@ describe("canonical PI Lab application icon", () => {
   })
 
   test("stages a white Joyplot on viridis for Alpha and magma for Beta", () => {
+    const output = temporaryOutput()
     for (const channel of ["alpha", "beta"] as const) {
       const source = join(ICONS_DIR, `icon-${channel}.png`)
       const vector = join(ICONS_DIR, `icon-${channel}.svg`)
       expect(existsSync(vector)).toBe(true)
       expect(existsSync(source)).toBe(true)
-      generateAppIcons(channel)
-      expect(readFileSync(join(DESKTOP_DIR, "build", "icon.png"))).toEqual(readFileSync(source))
+      generateAppIcons(channel, output)
+      expect(readFileSync(join(output, "icon.png"))).toEqual(readFileSync(source))
       const icon = decodeRgbaPng(source)
       expect([icon.width, icon.height]).toEqual([1024, 1024])
       expect(pixelAt(icon.pixels, icon.width, 0, 0)).toEqual([0, 0, 0, 0])

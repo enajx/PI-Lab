@@ -90,7 +90,7 @@ test("creates a project, reviews an interactive CLI proposal, and applies both f
   await wizard.getByLabel("Project type").selectOption("paper")
   const taskChoice = wizard.getByTestId("project-markdown-choice-tasks")
   await taskChoice.getByRole("textbox", { name: "Task Markdown path" }).fill("TODO.md")
-  await taskChoice.getByRole("button", { name: "Select" }).click()
+  await taskChoice.getByRole("button", { name: "Create TODO.md" }).click()
   await expect(taskChoice).toContainText("Task source: TODO.md")
   await wizard.getByLabel("Instructions for this project's agents").fill("Use SI units.")
   await wizard.getByLabel("CLI agent").selectOption("test-plan")
@@ -115,7 +115,7 @@ test("creates a project, reviews an interactive CLI proposal, and applies both f
   const repoDir = join(dataDir, "Setup study")
   expect(await readFile(join(repoDir, "RESEARCH.md"), "utf8")).toContain("# Planned project")
   expect(await readFile(join(repoDir, "AGENTS.md"), "utf8")).toContain("Use SI units.")
-  expect(await readFile(join(repoDir, "TODO.md"), "utf8")).toContain("# TODO")
+  expect(await readFile(join(repoDir, "TODO.md"), "utf8")).toBe("")
 })
 
 test("runs a one-shot CLI draft and applies its reviewed proposal", async () => {
@@ -133,7 +133,7 @@ test("runs a one-shot CLI draft and applies its reviewed proposal", async () => 
   await wizard.getByLabel("Short description").fill("Track a measurement.")
   const taskChoice = wizard.getByTestId("project-markdown-choice-tasks")
   await taskChoice.getByRole("textbox", { name: "Task Markdown path" }).fill("TODO.md")
-  await taskChoice.getByRole("button", { name: "Select" }).click()
+  await taskChoice.getByRole("button", { name: "Create TODO.md" }).click()
   await expect(taskChoice).toContainText("Task source: TODO.md")
   await expect(wizard.getByRole("button", { name: "Draft RESEARCH.md" })).toBeDisabled()
   await wizard.getByLabel("Project type").selectOption("research")

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
@@ -92,7 +93,7 @@ test("selects nested task and main Markdown files through the real app", async (
   await expect(window.getByTestId("panel-todos")).toContainText("Nested task")
 })
 
-test("creates a missing TODO.md from the project template", async () => {
+test("creates an empty TODO.md when the project template has no task file", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
@@ -103,5 +104,24 @@ test("creates a missing TODO.md from the project template", async () => {
     .click()
 
   await expect(window.getByTestId("panel-todos")).toContainText("TODO", { timeout: 30_000 })
-  expect(await readFile(join(repoDir, "TODO.md"), "utf8")).toContain("# TODO")
+  expect(await readFile(join(repoDir, "TODO.md"), "utf8")).toBe("")
+})
+
+test("copies the configured task template bytes when creating TODO.md", async () => {
+  const template = Buffer.from("# Custom tasks\r\n\r\n- [ ] Measure café signal\r\n", "utf8")
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await mkdir(join(dataDir, "template"), { recursive: true })
+  await writeFile(join(dataDir, "template", "TODO.md"), template)
+  await window.getByTestId("project-item").click()
+  await window.getByTestId("panel-tab-todos").click()
+  await window
+    .getByTestId("project-markdown-choice-tasks")
+    .getByRole("button", { name: "Create TODO.md" })
+    .click()
+
+  const taskPath = join(repoDir, "TODO.md")
+  await expect.poll(() => existsSync(taskPath)).toBe(true)
+  expect(await readFile(taskPath)).toEqual(template)
+  await expect(window.getByTestId("panel-todos")).toContainText("Measure café signal")
 })

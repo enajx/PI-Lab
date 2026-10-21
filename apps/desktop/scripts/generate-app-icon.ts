@@ -255,7 +255,7 @@ function sips(args: string[]): void {
 }
 
 /** Build `build/icon.icns` from the 1024px master via sips + the ICNS container format. */
-function buildIcns(masterPng: string): void {
+function buildIcns(masterPng: string, outputDirectory: string): void {
   const container = mkdtempSync(join(tmpdir(), "pi-lab-iconset-"))
   const iconset = join(container, "icon.iconset")
   mkdirSync(iconset)
@@ -289,23 +289,23 @@ function buildIcns(masterPng: string): void {
   const header = Buffer.alloc(8)
   header.write("icns", 0, 4, "ascii")
   header.writeUInt32BE(8 + chunks.reduce((total, chunk) => total + chunk.length, 0), 4)
-  const output = join(BUILD_DIR, "icon.icns")
+  const output = join(outputDirectory, "icon.icns")
   writeFileSync(output, Buffer.concat([header, ...chunks]))
   rmSync(container, { recursive: true, force: true })
 }
 
-export function generateAppIcons(channel: PiLabChannel): void {
+export function generateAppIcons(channel: PiLabChannel, outputDirectory: string): void {
   validateIconSources()
-  mkdirSync(BUILD_DIR, { recursive: true })
+  mkdirSync(outputDirectory, { recursive: true })
 
-  const masterPng = join(BUILD_DIR, "icon.png")
+  const masterPng = join(outputDirectory, "icon.png")
   const source = channel === "stable" ? SOURCE : join(ICONS_DIR, `icon-${channel}.png`)
   cpSync(source, masterPng)
   console.log(`icon.png  → ${masterPng}`)
 
   if (process.platform === "darwin") {
-    buildIcns(masterPng)
-    console.log(`icon.icns → ${join(BUILD_DIR, "icon.icns")}`)
+    buildIcns(masterPng, outputDirectory)
+    console.log(`icon.icns → ${join(outputDirectory, "icon.icns")}`)
   } else {
     console.log("non-macOS host: skipping icon.icns (electron-builder derives from icon.png)")
   }
@@ -324,5 +324,5 @@ if (import.meta.main) {
   if (value !== "alpha" && value !== "beta" && value !== "stable") {
     throw new Error(`Unknown PI Lab icon channel: ${value}`)
   }
-  generateAppIcons(value)
+  generateAppIcons(value, BUILD_DIR)
 }

@@ -8,26 +8,9 @@ import { promisify } from "node:util"
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 
 /**
- * Whole-app E2E for the built-in editor. Launch the real Electron build, open a temp git repo as a project via
- * the `?openProject` seam (landing directly on the rich project view), then
- * exercise the editor end-to-end:
- *   1. open a seeded text file from the right-sidebar **Files** tab (the tree now
- *      lives there; files open as tabs in the central panel),
- *   2. edit it and ⌘S,
- *   3. assert the save reached disk (the file on disk holds the new content) and
- *      the editor reflects it (clean buffer, no dirty dot),
- *   4. the editor-settings menu opens and toggles a preference.
- *
- * The Python-diagnostics path depends on `uv`/`ty`/`ruff` being installed, which
- * the CI host may not have — so we only assert the *graceful* shape (the editor
- * opens a `.py` file and the status bar renders without crashing), never that a
- * specific tool ran.
- *
- * Driven through the same seams as `projects.spec.ts`: `PI_LAB_TEST_OPEN_PROJECT`
- * + `PI_LAB_TEST_AGENT_ID` (env → renderer query params). No native dialogs.
- *
- * MUST run under Node (not Bun) — Playwright's `_electron` launcher hangs under
- * Bun; the repo `e2e` script runs Playwright's CLI through node.
+ * Uses a temporary project and the test-mode project-opening seam.
+ * Python diagnostics may be unavailable on CI, so those checks cover graceful
+ * behavior. Playwright's Electron launcher must run under Node, not Bun.
  */
 
 const SEED_FILE = "edit-me.txt"
