@@ -717,11 +717,10 @@ export function NotificationsSection() {
     }),
   )
 
-  const save = (next: NotificationSettings) => update.mutate(next)
   const patchEvent = (
     key: Exclude<keyof NotificationSettings, "muted">,
     patch: Partial<NotificationEventSettings>,
-  ) => save({ ...notifications, [key]: { ...notifications[key], ...patch } })
+  ) => update.mutate({ [key]: patch })
 
   const preview = async (label: string, sound: NotificationSoundId) => {
     setPreviewMessage(`${t("Playing")} ${t(label)} ${t("preview…")}`)
@@ -749,7 +748,7 @@ export function NotificationsSection() {
         label="Mute all notifications"
         description="Suppress native banners and sounds without changing the event choices below."
         checked={notifications.muted}
-        onChange={(muted) => save({ ...notifications, muted })}
+        onChange={(muted) => update.mutate({ muted })}
       />
       {NOTIFICATION_EVENTS.map((event) => {
         const value = notifications[event.key]

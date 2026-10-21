@@ -374,7 +374,7 @@ describe("Settings sections", () => {
     expect(screen.getByRole("button", { name: "Preview Workflow failed sound" })).toBeTruthy()
   })
 
-  test("Notifications section persists a complete next event configuration", async () => {
+  test("Notifications section sends only changed event fields and mute state", async () => {
     const updates: unknown[] = []
     const notifications = {
       muted: false,
@@ -396,16 +396,14 @@ describe("Settings sections", () => {
     fireEvent.click(await screen.findByRole("switch", { name: "Workflow started notifications" }))
     await waitFor(() =>
       expect(updates).toContainEqual({
-        ...notifications,
-        workflowStart: { enabled: true, sound: "pulse" },
+        workflowStart: { enabled: true },
       }),
     )
 
     fireEvent.click(screen.getByRole("switch", { name: "Agent finished its turn notifications" }))
     await waitFor(() =>
       expect(updates).toContainEqual({
-        ...notifications,
-        agentTurnCompletion: { enabled: false, sound: "success" },
+        agentTurnCompletion: { enabled: false },
       }),
     )
 
@@ -414,10 +412,11 @@ describe("Settings sections", () => {
     })
     await waitFor(() =>
       expect(updates).toContainEqual({
-        ...notifications,
-        agentInput: { enabled: true, sound: "silent" },
+        agentInput: { sound: "silent" },
       }),
     )
+    fireEvent.click(screen.getByRole("switch", { name: "Mute all notifications" }))
+    await waitFor(() => expect(updates).toContainEqual({ muted: true }))
   })
 
   test("Silent sound preview reports its explicit no-audio outcome", async () => {
