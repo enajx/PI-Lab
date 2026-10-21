@@ -35,6 +35,7 @@ export class DaemonError extends Error {
 interface PendingRequest {
   resolve: (reply: Exclude<DaemonReply, ErrorReply>) => void
   reject: (error: Error) => void
+  receive?: (reply: Exclude<DaemonReply, ErrorReply>) => void
 }
 
 export interface SpawnParams {
@@ -76,6 +77,8 @@ export class DaemonClient extends EventEmitter {
       const onConnect = () => {
         socket.removeListener("error", onError)
         this.socket = socket
+        // Transport failures settle through close, including pending RPCs and session observers.
+        socket.on("error", () => socket.destroy())
         socket.on("data", (raw: string) => this.ingest(raw))
         socket.on("close", () => this.handleClose())
         resolve()
@@ -114,6 +117,7 @@ export class DaemonClient extends EventEmitter {
     if (frame.kind === "error") {
       pending.reject(new DaemonError(frame.code, frame.message))
     } else {
+      pending.receive?.(frame)
       pending.resolve(frame)
     }
   }
@@ -128,6 +132,7 @@ export class DaemonClient extends EventEmitter {
 
   private request<R extends Exclude<DaemonReply, ErrorReply>>(
     build: (cid: string) => ClientRequest,
+    receive?: (reply: R) => void,
   ): Promise<R> {
     const socket = this.socket
     if (!socket) return Promise.reject(new Error("client is not connected"))
@@ -136,6 +141,7 @@ export class DaemonClient extends EventEmitter {
       this.pending.set(cid, {
         resolve: resolve as PendingRequest["resolve"],
         reject,
+        receive: receive as PendingRequest["receive"],
       })
       socket.write(encodeFrame(build(cid)))
     })
@@ -155,12 +161,19 @@ export class DaemonClient extends EventEmitter {
     return reply.session
   }
 
-  async attach(sessionId: string): Promise<AttachResult> {
-    const reply = await this.request<Extract<DaemonReply, { kind: "attach-ok" }>>((cid) => ({
-      kind: "attach",
-      cid,
-      sessionId,
-    }))
+  /** Deliver replay synchronously at the reply boundary, before later frames in the same read. */
+  async attach(
+    sessionId: string,
+    onReplay?: (result: AttachResult) => void,
+  ): Promise<AttachResult> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "attach-ok" }>>(
+      (cid) => ({
+        kind: "attach",
+        cid,
+        sessionId,
+      }),
+      (frame) => onReplay?.({ session: frame.session, scrollback: frame.scrollback }),
+    )
     return { session: reply.session, scrollback: reply.scrollback }
   }
 

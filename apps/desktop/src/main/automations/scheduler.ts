@@ -135,9 +135,8 @@ export class AutomationScheduler {
         try {
           await this.fire({ automation, scheduledFor })
           fired++
-        } catch {
-          // A failed fire must not kill the loop; dispatch already records the
-          // failure on the run row.
+        } catch (error) {
+          console.warn("[pi-lab] automation fire failed", automation.id, error)
         }
       }
       return fired
@@ -151,8 +150,8 @@ export class AutomationScheduler {
     if (this.timer) return
     this.reconcile()
     this.timer = setInterval(() => {
-      void this.tick().catch(() => {
-        // A failed tick must not kill the timer.
+      void this.tick().catch((error) => {
+        console.warn("[pi-lab] automation tick failed", error)
       })
     }, this.intervalMs)
     // Don't keep the Node/Electron event loop alive purely for the scheduler.

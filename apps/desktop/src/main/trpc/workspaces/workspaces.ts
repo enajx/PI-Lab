@@ -87,6 +87,21 @@ export interface CreateWorkspaceArgs {
   baseBranch?: string
 }
 
+/** Choose an unused localhost range across all projects inside the insert transaction. */
+function availablePortBase(db: Pick<PiLabDatabase, "select">): number {
+  const used = new Set(
+    db
+      .select({ portBase: workspaces.portBase })
+      .from(workspaces)
+      .all()
+      .map(({ portBase }) => portBase),
+  )
+  for (let slot = 0; ; slot += 1) {
+    const base = portBaseForSlot(slot)
+    if (!used.has(base)) return base
+  }
+}
+
 /**
  * Create a workspace and its backing git checkout — the choreography shared by
  * the `create` procedure and the start-agent-session flow.
@@ -96,8 +111,8 @@ export interface CreateWorkspaceArgs {
  * `workspaces` rows. For `kind: "branch"` we insert a single workspace on the
  * project's primary checkout; the schema's partial unique index enforces one
  * branch-workspace per project, surfaced here as a clean CONFLICT. Either way a
- * `portBase` is allocated from the project's current workspace count so
- * concurrent workspaces never share dev-server ports.
+ * `portBase` is reserved from the unused localhost ranges in the insert
+ * transaction, so deletion and concurrent creation cannot reuse a live range.
  */
 export async function createWorkspace(
   db: PiLabDatabase,
@@ -114,23 +129,24 @@ export async function createWorkspace(
     })
   }
 
-  // Slot index = existing workspace count, so each new workspace gets the next
-  // contiguous port block (portBaseForSlot is deterministic arithmetic).
-  const slotIndex = db
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.projectId, project.id))
-    .all().length
-  const portBase = portBaseForSlot(slotIndex)
-
   if (args.kind === "branch") {
     const branch = args.branch ?? project.defaultBranch ?? "main"
     try {
-      const workspace = db
-        .insert(workspaces)
-        .values({ projectId: project.id, kind: "branch", name: args.name, branch, portBase })
-        .returning()
-        .get()
+      const workspace = db.transaction(
+        (tx) =>
+          tx
+            .insert(workspaces)
+            .values({
+              projectId: project.id,
+              kind: "branch",
+              name: args.name,
+              branch,
+              portBase: availablePortBase(tx),
+            })
+            .returning()
+            .get(),
+        { behavior: "immediate" },
+      )
       return { workspace, worktree: null }
     } catch (error) {
       if (isBranchUniquenessViolation(error)) {
@@ -162,26 +178,31 @@ export async function createWorkspace(
     throw error
   }
 
-  const worktree = db
-    .insert(worktrees)
-    .values({ projectId: project.id, path: worktreeDir, branch, baseBranch })
-    .returning()
-    .get()
+  return db.transaction(
+    (tx) => {
+      const worktree = tx
+        .insert(worktrees)
+        .values({ projectId: project.id, path: worktreeDir, branch, baseBranch })
+        .returning()
+        .get()
 
-  const workspace = db
-    .insert(workspaces)
-    .values({
-      projectId: project.id,
-      worktreeId: worktree.id,
-      kind: "worktree",
-      name: args.name,
-      branch,
-      portBase,
-    })
-    .returning()
-    .get()
+      const workspace = tx
+        .insert(workspaces)
+        .values({
+          projectId: project.id,
+          worktreeId: worktree.id,
+          kind: "worktree",
+          name: args.name,
+          branch,
+          portBase: availablePortBase(tx),
+        })
+        .returning()
+        .get()
 
-  return { workspace, worktree }
+      return { workspace, worktree }
+    },
+    { behavior: "immediate" },
+  )
 }
 
 /** The working directory an agent/terminal should run in for a workspace. */

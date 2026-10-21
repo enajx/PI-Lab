@@ -4,9 +4,10 @@
 // polling with a deadline, never fixed sleeps, so the suite stays deterministic.
 
 import { mkdtemp, rm } from "node:fs/promises"
+import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { DaemonClient } from "./client"
 import { DaemonServer } from "./server"
 
@@ -58,6 +59,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   for (const client of clients) client.close()
   clients.length = 0
   await server.close()
@@ -104,6 +106,62 @@ async function drain(
 }
 
 describe("spawn + stream + exit", () => {
+  test("strips inherited daemon environment and preserves explicit child overrides", async () => {
+    vi.stubEnv("ELECTRON_RUN_AS_NODE", "1")
+    vi.stubEnv("PI_LAB_SOCKET_PATH", socketPath)
+    vi.stubEnv("PI_LAB_USER_SETTING", "kept")
+    const client = await newClient()
+    const args = [
+      "-e",
+      "process.stdout.write(JSON.stringify({nodeMode:process.env.ELECTRON_RUN_AS_NODE??null,socket:process.env.PI_LAB_SOCKET_PATH??null,user:process.env.PI_LAB_USER_SETTING}))",
+    ]
+    const inherited = await client.spawn({ command: NODE, args })
+    expect(JSON.parse((await drain(client, inherited.id)).output)).toEqual({
+      nodeMode: null,
+      socket: null,
+      user: "kept",
+    })
+    const explicit = await client.spawn({
+      command: NODE,
+      args,
+      env: { ELECTRON_RUN_AS_NODE: "1", PI_LAB_SOCKET_PATH: "requested" },
+    })
+    expect(JSON.parse((await drain(client, explicit.id)).output)).toEqual({
+      nodeMode: "1",
+      socket: "requested",
+      user: "kept",
+    })
+  })
+
+  test("disconnects a stalled reader while keeping its session available", async () => {
+    const client = await newClient()
+    const session = await client.spawn({
+      command: NODE,
+      args: [
+        "-e",
+        "process.stdin.once('data',()=>process.stdout.write('x'.repeat(16*1024*1024)));setInterval(()=>{},1000)",
+      ],
+    })
+    await client.detach(session.id)
+    const slow = connect(socketPath)
+    slow.pause()
+    try {
+      await new Promise<void>((resolve, reject) => {
+        slow.once("connect", resolve)
+        slow.once("error", reject)
+      })
+      slow.write(`${JSON.stringify({ kind: "attach", cid: "slow", sessionId: session.id })}\n`)
+      await waitFor(() => connectionSubscriptions().length === 2)
+      await client.write(session.id, "start\n")
+      await waitFor(() => connectionSubscriptions().length === 1)
+      expect((await client.list()).find(({ id }) => id === session.id)?.alive).toBe(true)
+      expect((await client.attach(session.id)).scrollback.length).toBeGreaterThan(0)
+    } finally {
+      slow.destroy()
+      await client.kill(session.id)
+    }
+  })
+
   test("a trivial command streams its output and exits cleanly", async () => {
     const client = await newClient()
     const session = await client.spawn({

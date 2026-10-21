@@ -6,6 +6,7 @@
 // detached child) are substituted, both of which the app/verify harness covers.
 
 import { mkdtemp, rm } from "node:fs/promises"
+import type { Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { PiLabDatabase } from "@pi-lab/local-db"
@@ -151,6 +152,68 @@ async function collect(sessionId: string): Promise<{
 }
 
 describe("terminal router", () => {
+  test("a reset on the real socket rejects pending RPCs and errors the active stream", async () => {
+    const session = await client.spawn({ command: "cat", args: [] })
+    const errors: Error[] = []
+    const stream = await caller.terminal.onData({ sessionId: session.id })
+    subscriptions.push(stream.subscribe({ error: (error) => errors.push(error) }))
+    await client.list()
+    const pending = expect(client.list()).rejects.toThrow("daemon connection closed")
+    const socket = (client as unknown as { socket: Socket }).socket
+    // Fault injection on the connected transport, exercising net.Socket's actual error/close path.
+    socket.destroy(Object.assign(new Error("connection reset"), { code: "ECONNRESET" }))
+    await pending
+    await waitFor(() => errors.length === 1)
+    expect(errors[0]?.message).toBe("daemon connection closed")
+  })
+
+  test("reports connection closure instead of leaving the terminal stream pending", async () => {
+    const session = await client.spawn({ command: "cat", args: [] })
+    const errors: Error[] = []
+    const stream = await caller.terminal.onData({ sessionId: session.id })
+    subscriptions.push(stream.subscribe({ error: (error) => errors.push(error) }))
+    // A round trip proves the subscription's preceding attach has been processed.
+    await client.list()
+    client.close()
+    await waitFor(() => errors.length === 1)
+    expect(errors[0]?.message).toBe("daemon connection closed")
+  })
+
+  test("a subscriber after process exit receives scrollback before exit", async () => {
+    const { sessionId } = await caller.terminal.spawn({
+      command: NODE,
+      args: ["-e", "process.stdout.write('FINAL-REPLAY')"],
+      cols: 80,
+      rows: 24,
+    })
+    const deadline = Date.now() + 4000
+    while ((await client.list()).find((session) => session.id === sessionId)?.alive) {
+      if (Date.now() > deadline) throw new Error("process did not exit")
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const events: TerminalEvent[] = []
+    const stream = await caller.terminal.onData({ sessionId })
+    subscriptions.push(stream.subscribe({ next: (event) => events.push(event) }))
+    await waitFor(() => events.some((event) => event.type === "exit"))
+    expect(events).toEqual([
+      { type: "data", chunk: "FINAL-REPLAY" },
+      expect.objectContaining({ type: "exit", exitCode: 0 }),
+    ])
+  })
+
+  test("closing one subscriber keeps another subscriber to the same session live", async () => {
+    const session = await client.spawn({ command: "cat", args: [] })
+    const first = await collect(session.id)
+    const firstSubscription = subscriptions[subscriptions.length - 1]
+    const second = await collect(session.id)
+    await client.write(session.id, "BEFORE-CLOSE\n")
+    await waitFor(() => first.chunks.join("").includes("BEFORE-CLOSE"))
+    await waitFor(() => second.chunks.join("").includes("BEFORE-CLOSE"))
+    firstSubscription?.unsubscribe()
+    await client.write(session.id, "AFTER-CLOSE\n")
+    await waitFor(() => second.chunks.join("").includes("AFTER-CLOSE"))
+  })
+
   test("onData reports daemon acquisition failure to its observer", async () => {
     caller = createCaller({
       ...callerContext,

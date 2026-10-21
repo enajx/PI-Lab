@@ -17,6 +17,9 @@ import {
 } from "./protocol"
 import { type SessionHandle, SessionStore, type SessionStoreOptions } from "./session"
 
+// Larger than the most-escaped scrollback replay, while bounding stalled readers.
+const MAX_PENDING_OUTPUT_BYTES = 4 * 1024 * 1024
+
 export interface DaemonServerOptions {
   /** Absolute path of the Unix socket to listen on. */
   socketPath: string
@@ -54,11 +57,19 @@ class Connection {
   }
 
   send(frame: DaemonFrame): void {
-    if (!this.socket.destroyed) this.socket.write(encodeFrame(frame))
+    if (this.socket.destroyed) return
+    const encoded = encodeFrame(frame)
+    if (this.socket.writableLength + Buffer.byteLength(encoded) > MAX_PENDING_OUTPUT_BYTES) {
+      // The session keeps running and its bounded replay remains available on reattach.
+      this.socket.destroy()
+      return
+    }
+    this.socket.write(encoded)
   }
 
   attach(session: SessionHandle): void {
-    if (this.subscriptions.has(session.id)) return
+    // Renew an existing attachment so a repeated attach also sees a cached exit.
+    this.detach(session.id)
     const unsubscribe = session.subscribe({
       onData: (chunk) => this.send({ kind: "data", sessionId: session.id, chunk }),
       onExit: (exitCode, signal) =>
@@ -197,8 +208,8 @@ export class DaemonServer {
     // do not overlap or drop a chunk that arrives between the two steps.
     const scrollback = session.getScrollback()
     const info = session.info()
-    connection.attach(session)
     this.reply(connection, { kind: "attach-ok", cid: request.cid, session: info, scrollback })
+    connection.attach(session)
   }
 
   private handleDetach(

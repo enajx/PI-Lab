@@ -175,19 +175,31 @@ export class TerminalSupervisor {
 
   private async startMonitorClient(): Promise<DaemonClient> {
     await this.ensureClient()
+    if (this.disposed) throw new Error("supervisor disposed")
     const client = new DaemonClient(this.socketPath)
     await client.connect()
+    if (this.disposed) {
+      client.close()
+      throw new Error("supervisor disposed")
+    }
     this.monitorClient = client
     client.on("close", () => this.handleMonitorClose())
     return client
   }
 
   private async start(): Promise<DaemonClient> {
-    if (!(await isDaemonListening(this.socketPath))) {
+    const listening = await isDaemonListening(this.socketPath)
+    if (this.disposed) throw new Error("supervisor disposed")
+    if (!listening) {
       await this.spawnDaemon()
     }
+    if (this.disposed) throw new Error("supervisor disposed")
     const client = new DaemonClient(this.socketPath)
     await client.connect()
+    if (this.disposed) {
+      client.close()
+      throw new Error("supervisor disposed")
+    }
     this.client = client
     client.on("close", () => this.handleClose())
     return client
@@ -220,6 +232,7 @@ export class TerminalSupervisor {
       exited = true
     })
     while (Date.now() < deadline) {
+      if (this.disposed) throw new Error("supervisor disposed")
       if (exited) throw new Error("pty-daemon child exited before it began listening")
       if (await isDaemonListening(this.socketPath)) return
       await delay(50)

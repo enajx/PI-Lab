@@ -63,6 +63,26 @@ describe("isDaemonListening", () => {
 })
 
 describe("adopt branch", () => {
+  test.each([
+    "primary",
+    "monitor",
+  ] as const)("dispose rejects an in-flight %s start without a late connection", async (kind) => {
+    server = new DaemonServer({ socketPath })
+    await server.listen()
+    supervisor = new TerminalSupervisor({ socketPath })
+    if (kind === "monitor") await supervisor.ensureClient()
+    const starting =
+      kind === "primary" ? supervisor.ensureClient() : supervisor.ensureMonitorClient()
+    supervisor.dispose()
+    await expect(starting).rejects.toThrow("supervisor disposed")
+    const deadline = Date.now() + 1_000
+    while ((server as unknown as { connections: Set<unknown> }).connections.size > 0) {
+      if (Date.now() >= deadline)
+        throw new Error("disposed supervisor retained a daemon connection")
+      await new Promise((done) => setTimeout(done, 10))
+    }
+  })
+
   test("ensureClient adopts an already-listening daemon and shares one client", async () => {
     server = new DaemonServer({ socketPath })
     await server.listen()

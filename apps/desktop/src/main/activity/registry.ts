@@ -49,6 +49,8 @@ export class ActivityRegistry {
   private readonly sessions = new Map<string, AgentActivityRecord>()
   private readonly runtime = new Map<string, SessionRuntime>()
   private readonly listeners = new Set<ActivityRegistryListener>()
+  private readonly pendingRetirements = new Set<string>()
+  private publicationDepth = 0
   private readonly clock: ActivityClock
   private readonly scheduler: ActivityScheduler
 
@@ -84,6 +86,12 @@ export class ActivityRegistry {
     return record ? cloneRecord(record) : null
   }
 
+  /** Retire in-memory history after every listener has received the final events. */
+  retireExited(sessionId: string): void {
+    this.pendingRetirements.add(sessionId)
+    if (this.publicationDepth === 0) this.flushRetirements()
+  }
+
   register(input: RegisterAgentActivity): AgentActivityRecord {
     const existing = this.sessions.get(input.sessionId)
     if (existing) return cloneRecord(existing)
@@ -115,8 +123,8 @@ export class ActivityRegistry {
   }
 
   /**
-   * Rehydrate a durable record during daemon reconciliation. Exited records are
-   * retained as history; a recovered working record reacquires app activity.
+   * Rehydrate a durable record during daemon reconciliation. The monitor retires
+   * persisted exits; a recovered working record reacquires app activity.
    */
   restore(record: AgentActivityRecord): AgentActivityRecord {
     const existing = this.sessions.get(record.sessionId)
@@ -418,6 +426,26 @@ export class ActivityRegistry {
       snapshot: this.snapshot(),
       activityEvents,
     }
-    for (const listener of this.listeners) listener(change)
+    this.publicationDepth += 1
+    try {
+      for (const listener of this.listeners) listener(change)
+    } finally {
+      this.publicationDepth -= 1
+      if (this.publicationDepth === 0) this.flushRetirements()
+    }
+  }
+
+  private flushRetirements(): void {
+    for (const sessionId of this.pendingRetirements) {
+      if (this.sessions.get(sessionId)?.state !== "exited") continue
+      const runtime = this.runtime.get(sessionId)
+      if (runtime) {
+        this.cancelWaitingCandidate(runtime)
+        this.cancelIdleTimer(runtime)
+      }
+      this.sessions.delete(sessionId)
+      this.runtime.delete(sessionId)
+    }
+    this.pendingRetirements.clear()
   }
 }

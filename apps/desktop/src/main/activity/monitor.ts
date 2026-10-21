@@ -26,7 +26,7 @@ import type {
 } from "./types"
 
 export interface ActivityDaemonClient {
-  attach: (sessionId: string) => Promise<AttachResult>
+  attach: (sessionId: string, onReplay?: (result: AttachResult) => void) => Promise<AttachResult>
   list: () => Promise<SessionInfo[]>
   on: {
     (event: "data", listener: (event: DataEvent) => void): unknown
@@ -75,6 +75,7 @@ interface MonitoredTerminal {
   cols: number
   rows: number
   kind: "agent" | "terminal"
+  replayPending: boolean
 }
 
 interface TerminalCommandRuntime {
@@ -285,9 +286,11 @@ export class ActivityMonitor implements ActivityMonitorPort {
     const client = providedClient ?? (await this.options.getMonitorClient())
     this.wireClient(client)
     const terminal = this.options.terminalFactory(cols, rows)
-    this.terminals.set(sessionId, { terminal, cols, rows, kind })
-    try {
-      const result = await client.attach(sessionId)
+    const monitored = { terminal, cols, rows, kind, replayPending: true }
+    this.terminals.set(sessionId, monitored)
+    const replay = (result: AttachResult) => {
+      if (!monitored.replayPending || this.terminals.get(sessionId) !== monitored) return
+      monitored.replayPending = false
       if (!result.session.alive) {
         this.handleExit({
           kind: "exit",
@@ -298,6 +301,11 @@ export class ActivityMonitor implements ActivityMonitorPort {
         return
       }
       if (result.scrollback.length > 0) this.render(sessionId, result.scrollback)
+    }
+    try {
+      const result = await client.attach(sessionId, replay)
+      // Keep injected clients that only return a snapshot compatible with the port.
+      replay(result)
     } catch (error) {
       terminal.dispose()
       this.terminals.delete(sessionId)
@@ -319,7 +327,10 @@ export class ActivityMonitor implements ActivityMonitorPort {
     const identity = client as object
     if (this.clients.has(identity)) return
     this.clients.add(identity)
-    client.on("data", (event) => this.render(event.sessionId, event.chunk))
+    client.on("data", (event) => {
+      if (!this.terminals.get(event.sessionId)?.replayPending)
+        this.render(event.sessionId, event.chunk)
+    })
     client.on("exit", (event) => this.handleExit(event))
     client.on("close", () => this.handleClientClose())
   }
@@ -504,6 +515,18 @@ export class ActivityMonitor implements ActivityMonitorPort {
       if (record.workflowState === "running") this.notifyWorkflow(record, "workflowStart")
       if (record.workflowState === "completed") this.notifyWorkflow(record, "workflowCompletion")
       if (record.workflowState === "failed") this.notifyWorkflow(record, "workflowFailure")
+    }
+    for (const record of change.snapshot.sessions) {
+      if (record.state !== "exited") continue
+      this.pendingAgentTimestamps.get(record.sessionId)?.timer.cancel()
+      this.pendingAgentTimestamps.delete(record.sessionId)
+      this.previous.delete(record.sessionId)
+      this.persistedAgents.delete(record.sessionId)
+      this.notificationOnlyTimestamps.delete(record.sessionId)
+      if (record.workflowRunId) this.persistedWorkflows.delete(record.workflowRunId)
+      this.terminals.get(record.sessionId)?.terminal.dispose()
+      this.terminals.delete(record.sessionId)
+      this.options.registry.retireExited(record.sessionId)
     }
   }
 

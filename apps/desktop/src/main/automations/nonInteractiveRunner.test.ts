@@ -1,4 +1,4 @@
-import { access, mkdtemp, realpath, rm } from "node:fs/promises"
+import { access, mkdtemp, readFile, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, test } from "vitest"
@@ -11,6 +11,43 @@ afterEach(async () => {
 })
 
 describe("runNonInteractiveProcess", () => {
+  test("timeout kills descendants holding stdout open and completes within a bound", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-lab-process-tree-"))
+    tempDirs.push(cwd)
+    const pidFile = join(cwd, "descendant.pid")
+    const started = await runNonInteractiveProcess({
+      command: process.execPath,
+      args: [
+        "-e",
+        `const {spawn}=require('node:child_process'); const {writeFileSync}=require('node:fs'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:['ignore',1,2]}); writeFileSync(process.argv[1],String(child.pid));`,
+        pidFile,
+      ],
+      cwd,
+      timeoutMs: 500,
+    })
+    let result: Awaited<typeof started.completion>
+    let alive = true
+    try {
+      result = await Promise.race([
+        started.completion,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("completion stayed pending")), 2500).unref(),
+        ),
+      ])
+    } finally {
+      const descendant = Number(await readFile(pidFile, "utf8"))
+      // A failed assertion must not leave the fixture child alive.
+      try {
+        process.kill(descendant, 0)
+      } catch {
+        alive = false
+      }
+      if (alive) process.kill(descendant, "SIGKILL")
+    }
+    expect(result.error).toBe("Timed out after 500ms")
+    expect(alive).toBe(false)
+  })
+
   test("inherits the app environment, applies agent env, and uses the exact project cwd", async () => {
     const cwd = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-one-shot-")))
     tempDirs.push(cwd)

@@ -1,4 +1,4 @@
-import type { DataEvent, ExitEvent } from "@pi-lab/pty-daemon"
+import type { DaemonClient, DaemonEvent } from "@pi-lab/pty-daemon"
 import { observable } from "@trpc/server/observable"
 import { z } from "zod"
 import { publicProcedure, router } from "../trpc"
@@ -33,6 +33,9 @@ const resizeInput = z.object({
 
 /** A login shell is the sensible default when the UI doesn't name a command. */
 const DEFAULT_SHELL = process.env.SHELL ?? "/bin/bash"
+
+// Multiple observers of one session share a physical daemon attachment.
+const sessionObservers = new WeakMap<DaemonClient, Map<string, Set<() => void>>>()
 
 /** What `onData` streams to the renderer: incremental chunks, then a terminal exit. */
 export type TerminalEvent =
@@ -101,17 +104,19 @@ export const terminalRouter = router({
   onData: publicProcedure.input(sessionIdInput).subscription(({ ctx, input }) =>
     observable<TerminalEvent>((emit) => {
       const { sessionId } = input
-      // Listeners are registered before `attach` resolves so no live chunk that
-      // arrives between scrollback snapshot and our subscription is dropped.
-      const onData = (event: DataEvent) => {
-        if (event.sessionId !== sessionId) return
-        ctx.caffeine.markTerminalActivity()
-        emit.next({ type: "data", chunk: event.chunk })
+      let attaching = true
+      const deliver = (event: DaemonEvent) => {
+        if (event.kind === "data") {
+          ctx.caffeine.markTerminalActivity()
+          emit.next({ type: "data", chunk: event.chunk })
+        } else {
+          emit.next({ type: "exit", exitCode: event.exitCode, signal: event.signal })
+          emit.complete()
+        }
       }
-      const onExit = (event: ExitEvent) => {
-        if (event.sessionId !== sessionId) return
-        emit.next({ type: "exit", exitCode: event.exitCode, signal: event.signal })
-        emit.complete()
+      const onEvent = (event: DaemonEvent) => {
+        // Anything before the attach reply is already included in its snapshot.
+        if (!attaching) deliver(event)
       }
 
       let cleanup = () => {}
@@ -121,17 +126,39 @@ export const terminalRouter = router({
         try {
           const client = await ctx.getDaemonClient()
           if (cancelled) return
-          client.on("data", onData)
-          client.on("exit", onExit)
+          const eventName = `session:${sessionId}`
+          client.on(eventName, onEvent)
+          let observers = sessionObservers.get(client)
+          if (!observers) {
+            observers = new Map<string, Set<() => void>>()
+            sessionObservers.set(client, observers)
+            const watched = observers
+            client.once("close", () => {
+              sessionObservers.delete(client)
+              for (const listeners of watched.values()) {
+                for (const notify of listeners) notify()
+              }
+              watched.clear()
+            })
+          }
+          const listeners = observers.get(sessionId) ?? new Set<() => void>()
+          const onClose = () => emit.error(new Error("daemon connection closed"))
+          listeners.add(onClose)
+          observers.set(sessionId, listeners)
           cleanup = () => {
-            client.off("data", onData)
-            client.off("exit", onExit)
-            void client.detach(sessionId).catch(() => {})
+            client.off(eventName, onEvent)
+            listeners.delete(onClose)
+            if (listeners.size === 0) {
+              observers.delete(sessionId)
+              void client.detach(sessionId).catch(() => {})
+            }
             cleanup = () => {}
           }
-          const { scrollback } = await client.attach(sessionId)
-          if (cancelled) return
-          if (scrollback.length > 0) emit.next({ type: "data", chunk: scrollback })
+          await client.attach(sessionId, ({ scrollback }) => {
+            if (cancelled) return
+            if (scrollback.length > 0) emit.next({ type: "data", chunk: scrollback })
+            attaching = false
+          })
         } catch (error) {
           cleanup()
           if (!cancelled) emit.error(error instanceof Error ? error : new Error(String(error)))

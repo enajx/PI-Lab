@@ -54,6 +54,25 @@ async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void
 }
 
 describe("workspaces.create (worktree)", () => {
+  test("reserves distinct port ranges after deletion and concurrent creation", async () => {
+    const first = await h.caller.workspaces.create({ projectId, kind: "worktree", name: "slot-a" })
+    const second = await h.caller.workspaces.create({ projectId, kind: "worktree", name: "slot-b" })
+    await h.caller.workspaces.remove({ id: first.workspace.id })
+    const concurrent = await Promise.all([
+      h.caller.workspaces.create({ projectId, kind: "worktree", name: "slot-c" }),
+      h.caller.workspaces.create({ projectId, kind: "worktree", name: "slot-d" }),
+    ])
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-port-project-"))
+    const project = await h.caller.projects.open({ path: plain })
+    const main = await h.caller.workspaces.ensureMain({ projectId: project.id })
+    const ports = [
+      second.workspace.portBase,
+      ...concurrent.map(({ workspace }) => workspace.portBase),
+      main.portBase,
+    ]
+    expect(new Set(ports).size).toBe(ports.length)
+  })
+
   test("creates the on-disk checkout, branch, rows, and a portBase", async () => {
     const { workspace, worktree } = await h.caller.workspaces.create({
       projectId,

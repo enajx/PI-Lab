@@ -112,11 +112,21 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     let unsubscribe: (() => void) | null = null
     let inputDisposable: { dispose: () => void } | null = null
     let resizeObserver: ResizeObserver | null = null
+    const failedTransports = new Set<"write" | "resize">()
+    const reportTransportFailure = (operation: "write" | "resize", error: unknown): void => {
+      if (cancelled || failedTransports.has(operation)) return
+      failedTransports.add(operation)
+      const message = error instanceof Error ? error.message : String(error)
+      xterm.write(`\r\n[pi-lab] terminal ${operation} failed: ${message}\r\n`)
+    }
 
     /** Forward one input chunk exactly once, whether xterm generated or custom-mapped. */
     const forwardInput = (data: string): void => {
       if (cancelled || !sessionId) return
-      void trpc.terminal.write.mutate({ sessionId, data }).catch(() => {})
+      void trpc.terminal.write.mutate({ sessionId, data }).then(
+        () => failedTransports.delete("write"),
+        (error: unknown) => reportTransportFailure("write", error),
+      )
     }
 
     /** Insert native paths as one shell argument each, leaving submission to the user. */
@@ -174,9 +184,10 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
         // let the next ResizeObserver tick re-fit.
         return
       }
-      void trpc.terminal.resize
-        .mutate({ sessionId, cols: xterm.cols, rows: xterm.rows })
-        .catch(() => {})
+      void trpc.terminal.resize.mutate({ sessionId, cols: xterm.cols, rows: xterm.rows }).then(
+        () => failedTransports.delete("resize"),
+        (error: unknown) => reportTransportFailure("resize", error),
+      )
     }
 
     /** Wire the streaming subscription + stdin forwarding for a session id. */

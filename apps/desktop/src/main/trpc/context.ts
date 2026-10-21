@@ -146,6 +146,7 @@ export const TEST_AGENT: TerminalAgent = {
   label: "Test Echo",
   command: process.execPath,
   detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
   defaultArgs: ["-e", "process.stdout.write('AGENT-UI-OK\\n')"],
 }
 
@@ -157,6 +158,7 @@ export const TEST_ACTIVITY_AGENT: TerminalAgent = {
   label: "Test Activity",
   command: process.execPath,
   detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
   defaultArgs: ["-e", "setInterval(()=>process.stdout.write('AGENT-ACTIVE\\n'),100)"],
 }
 

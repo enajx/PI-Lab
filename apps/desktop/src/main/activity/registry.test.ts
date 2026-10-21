@@ -84,6 +84,34 @@ function activityPhases(changes: readonly ActivityRegistryChange[]): string[] {
 }
 
 describe("ActivityRegistry agent lifecycle", () => {
+  test("retires history after all final listeners, including reentrant publications", () => {
+    const { registry } = setup()
+    registry.register(AGENT_SESSION)
+    registry.register({ ...AGENT_SESSION, sessionId: "second" })
+    const released: string[] = []
+    let nested = false
+    registry.subscribe((change) => {
+      for (const record of change.snapshot.sessions) {
+        if (record.state !== "exited") continue
+        registry.retireExited(record.sessionId)
+        if (!nested) {
+          nested = true
+          registry.processExited("second", null)
+        }
+      }
+    })
+    registry.subscribe((change) => {
+      for (const event of change.activityEvents) {
+        if (event.phase !== "release" || !event.sessionId) continue
+        expect(registry.get(event.sessionId)?.state).toBe("exited")
+        released.push(event.sessionId)
+      }
+    })
+    registry.processExited(AGENT_SESSION.sessionId, null)
+    expect(released.sort()).toEqual(["second", AGENT_SESSION.sessionId].sort())
+    expect(registry.snapshot().sessions).toHaveLength(0)
+  })
+
   test("does not claim the initial blank prompt as a completed turn", () => {
     const { registry, time } = setup()
     registry.register(AGENT_SESSION)

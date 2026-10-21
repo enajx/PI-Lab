@@ -5,6 +5,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 // bounded so a runaway harness can't grow the buffer without limit.
 const MAX_STDOUT_BYTES = 1024 * 1024
 const MAX_STDERR_BYTES = 32 * 1024
+const TERMINATION_DRAIN_MS = 1_000
 
 export interface NonInteractiveProcessInput {
   command: string
@@ -74,6 +75,7 @@ export function createNonInteractiveProcessRunner(
       let startSettled = false
       let timedOut = false
       let timeout: ReturnType<typeof setTimeout> | null = null
+      let drainTimeout: ReturnType<typeof setTimeout> | null = null
       let complete: ((result: NonInteractiveProcessResult) => void) | null = null
       const completion = new Promise<NonInteractiveProcessResult>((resolveCompletion) => {
         complete = resolveCompletion
@@ -84,6 +86,10 @@ export function createNonInteractiveProcessRunner(
           clearTimeout(timeout)
           timeout = null
         }
+        if (drainTimeout !== null) {
+          clearTimeout(drainTimeout)
+          drainTimeout = null
+        }
       }
 
       const child: ChildProcess = spawnProcess(input.command, input.args, {
@@ -91,6 +97,7 @@ export function createNonInteractiveProcessRunner(
         env: { ...process.env, ...input.env },
         shell: false,
         windowsHide: true,
+        detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
       })
 
@@ -112,7 +119,29 @@ export function createNonInteractiveProcessRunner(
         if (input.timeoutMs !== undefined) {
           timeout = setTimeout(() => {
             timedOut = true
-            child.kill("SIGKILL")
+            if (process.platform !== "win32" && child.pid !== undefined) {
+              try {
+                // The group survives its leader while descendants still hold our pipes.
+                process.kill(-child.pid, "SIGKILL")
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+                  child.kill("SIGKILL")
+                }
+              }
+            } else child.kill("SIGKILL")
+            // A descendant can escape the group. Never wait forever for its pipes.
+            drainTimeout = setTimeout(() => {
+              child.stdout?.destroy()
+              child.stderr?.destroy()
+              complete?.({
+                code: child.exitCode,
+                signal: child.signalCode,
+                stdout: stdout.toString("utf8"),
+                stderr: stderr.toString("utf8"),
+                error: `Timed out after ${input.timeoutMs}ms`,
+              })
+              clearTimeoutTimer()
+            }, TERMINATION_DRAIN_MS)
           }, input.timeoutMs)
         }
         resolve({ completion })

@@ -16,7 +16,7 @@ import {
 } from "@pi-lab/local-db"
 import type Database from "better-sqlite3"
 import { eq } from "drizzle-orm"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { AutomationScheduler } from "./scheduler"
 
 let db: PiLabDatabase
@@ -43,6 +43,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
   sqlite.close()
   await rm(dataDir, { recursive: true, force: true })
 })
@@ -144,14 +146,17 @@ describe("AutomationScheduler.tick", () => {
 
   test("advances nextRunAt before awaiting fire, so a throwing fire can't wedge the occurrence", async () => {
     const automation = seedAutomation()
+    const error = new Error("boom")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const throwingFire = async () => {
-      throw new Error("boom")
+      throw error
     }
     const scheduler = new AutomationScheduler({ db, fire: throwingFire, now: () => T0 + 2 * HOUR })
 
     // tick swallows the fire error (dispatch records failures on the run row).
     const fired = await scheduler.tick()
     expect(fired).toBe(0) // a thrown fire is not counted as fired
+    expect(warn).toHaveBeenCalledWith("[pi-lab] automation fire failed", automation.id, error)
 
     // …but nextRunAt was advanced regardless — the timer won't re-fire forever.
     expect(reload(automation.id).nextRunAt).toBe(new Date("2026-06-23T09:00:00.000Z").getTime())
@@ -170,6 +175,19 @@ describe("AutomationScheduler.tick", () => {
 })
 
 describe("AutomationScheduler.reconcile", () => {
+  test("logs a tick database failure instead of silently dropping it", async () => {
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const scheduler = new AutomationScheduler({ db, fire: makeFire().fire, now: () => T0 })
+    scheduler.start()
+    try {
+      sqlite.exec("DROP TABLE automations")
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(warn).toHaveBeenCalledWith("[pi-lab] automation tick failed", expect.any(Error))
+    } finally {
+      scheduler.stop()
+    }
+  })
   test("recomputes nextRunAt from the clock and skips missed runs", async () => {
     // Stale nextRunAt far in the past (laptop closed overnight). Reconcile must
     // bump it to the next future occurrence, NOT replay missed ones.

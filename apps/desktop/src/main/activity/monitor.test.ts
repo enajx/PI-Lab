@@ -80,12 +80,20 @@ class FakeDaemon implements ActivityDaemonClient {
   private readonly exitListeners: Array<(event: ExitEvent) => void> = []
   private readonly closeListeners: Array<() => void> = []
   private liveSessionIds = ["terminal-1"]
+  scrollback = "➜ repo"
+  afterReplay: ((sessionId: string) => void) | null = null
 
-  async attach(sessionId: string): Promise<AttachResult> {
-    return {
+  async attach(
+    sessionId: string,
+    onReplay?: (result: AttachResult) => void,
+  ): Promise<AttachResult> {
+    const result = {
       session: this.session(sessionId),
-      scrollback: "➜ repo",
+      scrollback: this.scrollback,
     }
+    onReplay?.(result)
+    this.afterReplay?.(sessionId)
+    return result
   }
 
   async list(): Promise<SessionInfo[]> {
@@ -299,7 +307,27 @@ function setupAgentMonitor(): AgentMonitorFixture {
 }
 
 describe("ActivityMonitor agent completion notifications", () => {
-  test("bounds SQLite writes while many exited sessions remain in the registry", async () => {
+  test("applies replay before live frames delivered in the same client read (injected daemon)", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    fixture.daemon.scrollback = "OpenAI Codex\n\n› "
+    fixture.daemon.afterReplay = (sessionId) =>
+      fixture.daemon.emitSessionScreen(sessionId, "Processing live output")
+    await fixture.monitor.track({
+      sessionId: "terminal-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      agentId: "codex",
+      workflowRunId: null,
+      turnArmed: false,
+      cols: 80,
+      rows: 24,
+    })
+    fixture.time.advance(WAITING_CONFIRMATION_MS)
+    expect(fixture.registry.get("terminal-1")?.state).toBe("working")
+  })
+
+  test("retires exited metadata while preserving durable history and bounded SQLite writes", async () => {
     const fixture = setupAgentMonitor()
     onTestFinished(fixture.dispose)
     for (let index = 0; index < 80; index += 1) {
@@ -316,6 +344,25 @@ describe("ActivityMonitor agent completion notifications", () => {
       })
       fixture.registry.processExited(sessionId, null)
     }
+    expect(fixture.registry.snapshot().sessions).toEqual([])
+    expect(fixture.db.select().from(agentSessions).all()).toHaveLength(80)
+    const retained = fixture.monitor as unknown as {
+      previous: Map<string, unknown>
+      persistedAgents: Map<string, unknown>
+      persistedWorkflows: Map<string, unknown>
+      notificationOnlyTimestamps: Map<string, unknown>
+      pendingAgentTimestamps: Map<string, unknown>
+      terminals: Map<string, unknown>
+    }
+    for (const entries of [
+      retained.previous,
+      retained.persistedAgents,
+      retained.persistedWorkflows,
+      retained.notificationOnlyTimestamps,
+      retained.pendingAgentTimestamps,
+      retained.terminals,
+    ])
+      expect(entries.size).toBe(0)
     for (const sessionId of ["active-1", "active-2", "active-3"]) {
       await fixture.monitor.track({
         sessionId,
@@ -468,7 +515,8 @@ describe("ActivityMonitor agent completion notifications", () => {
     expect(fixture.writeCount() - beforeOutput).toBe(1)
     fixture.monitor.dispose()
     fixture.registry.dispose()
-    const restored = fixture.createMonitor(fixture.createRegistry())
+    const recoveredRegistry = fixture.createRegistry()
+    const restored = fixture.createMonitor(recoveredRegistry)
     await restored.reconcile()
     fixture.daemon.emitScreen("Still processing workflow")
     fixture.time.advance(1_000)
@@ -476,6 +524,12 @@ describe("ActivityMonitor agent completion notifications", () => {
       fixture.db.select().from(automationRuns).where(eq(automationRuns.id, "run-1")).get()
         ?.launchedAt,
     ).toBe(launchedAt)
+    recoveredRegistry.processExited("terminal-1", "exit 1")
+    expect(
+      fixture.db.select().from(automationRuns).where(eq(automationRuns.id, "run-1")).get()?.state,
+    ).toBe("failed")
+    expect(fixture.deliveries).toEqual(["Workflow failed"])
+    expect(recoveredRegistry.get("terminal-1")).toBeNull()
   })
 
   test("separates initial workflow completion from later ad-hoc turn completion", async () => {

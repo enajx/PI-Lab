@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto"
 import { type IPty, spawn } from "node-pty"
 import type { SessionInfo } from "./protocol"
+import { Scrollback } from "./scrollback"
 
 /** How much PTY output to retain per session for replay on (re)attach. */
 const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
@@ -32,10 +33,7 @@ interface ExitState {
 /**
  * A single PTY plus its replay buffer and subscribers.
  *
- * Scrollback is a byte-capped string window: appends accumulate and, once over
- * the cap, the oldest characters are dropped. This keeps replay bounded without
- * a per-chunk ring of objects. The cap is approximate at the UTF-16 char level,
- * which is fine for terminal scrollback.
+ * Scrollback retains a capped UTF-16 suffix in chunks and joins on attach.
  */
 class Session {
   readonly id = randomUUID()
@@ -45,8 +43,7 @@ class Session {
   readonly createdAt = Date.now()
 
   private readonly pty: IPty
-  private readonly scrollbackCap: number
-  private scrollback = ""
+  private readonly scrollback: Scrollback
   private cols: number
   private rows: number
   private exitState: ExitState | null = null
@@ -58,18 +55,21 @@ class Session {
     this.cwd = options.cwd ?? process.cwd()
     this.cols = options.cols ?? 80
     this.rows = options.rows ?? 24
-    this.scrollbackCap = scrollbackCap
+    this.scrollback = new Scrollback(scrollbackCap)
 
+    const inheritedEnv = { ...process.env }
+    delete inheritedEnv.ELECTRON_RUN_AS_NODE
+    delete inheritedEnv.PI_LAB_SOCKET_PATH
     this.pty = spawn(this.command, this.args, {
       name: "xterm-color",
       cols: this.cols,
       rows: this.rows,
       cwd: this.cwd,
-      env: { ...(process.env as Record<string, string>), ...(options.env ?? {}) },
+      env: { ...(inheritedEnv as Record<string, string>), ...options.env },
     })
 
     this.pty.onData((chunk) => {
-      this.appendScrollback(chunk)
+      this.scrollback.append(chunk)
       for (const listener of this.listeners) listener.onData(chunk)
     })
 
@@ -77,13 +77,6 @@ class Session {
       this.exitState = { exitCode, signal: signal ?? null }
       for (const listener of this.listeners) listener.onExit(exitCode, signal ?? null)
     })
-  }
-
-  private appendScrollback(chunk: string): void {
-    this.scrollback += chunk
-    if (this.scrollback.length > this.scrollbackCap) {
-      this.scrollback = this.scrollback.slice(this.scrollback.length - this.scrollbackCap)
-    }
   }
 
   get alive(): boolean {
@@ -109,7 +102,7 @@ class Session {
   }
 
   getScrollback(): string {
-    return this.scrollback
+    return this.scrollback.text()
   }
 
   /**

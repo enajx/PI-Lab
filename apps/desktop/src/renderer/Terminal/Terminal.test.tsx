@@ -100,6 +100,31 @@ describe("Terminal macOS custom key integration", () => {
     expect(write).toHaveBeenLastCalledWith({ sessionId: "agent-session", data: "\r" })
   })
 
+  test("shows failed input once until a write succeeds", async () => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock)
+    const write = vi.fn().mockRejectedValue(new Error("daemon offline"))
+    const client = {
+      terminal: {
+        onData: { subscribe: () => ({ unsubscribe: () => {} }) },
+        write: { mutate: write },
+        resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
+      },
+    } as unknown as PiLabTrpcClient
+    render(<Terminal client={client} inputKind="terminal" sessionId="input-failure" />)
+    await waitFor(() => expect(xtermHarness.dataHandler).not.toBeNull())
+    xtermHarness.dataHandler?.("a")
+    xtermHarness.dataHandler?.("b")
+    await waitFor(() => expect(xtermHarness.writes.join("")).toContain("daemon offline"))
+    expect(xtermHarness.writes.join("").match(/daemon offline/g)).toHaveLength(1)
+    write.mockResolvedValueOnce({ ok: true })
+    xtermHarness.dataHandler?.("c")
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(3))
+    xtermHarness.dataHandler?.("d")
+    await waitFor(() =>
+      expect(xtermHarness.writes.join("").match(/daemon offline/g)).toHaveLength(2),
+    )
+  })
+
   test("shows a subscription failure in the terminal", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock)
     const errorHandler = { current: null as ((error: Error) => void) | null }
