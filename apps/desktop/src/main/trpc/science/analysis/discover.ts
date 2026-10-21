@@ -10,12 +10,7 @@ import {
 import { walkWorkspace } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 
-/**
- * Filesystem layer for the Analysis science tab (P8c). Plain, side-effecting
- * functions kept out of the tRPC router so the router stays a thin one-liner and
- * the discovery/preview logic is independently reasoned about. No DB access, no
- * tRPC context — just paths and bytes.
- */
+/** Filesystem discovery and preview for Analysis, independent of the tRPC router. */
 
 // ── Discovery ────────────────────────────────────────────────────────────────
 
@@ -35,31 +30,22 @@ export const MAX_MARIMO_SOURCE_BYTES = 64 * 1024
  */
 const EXTRA_IGNORED_DIRS = [".next", ".idea", ".vscode"] as const
 
-/** One discovered artifact, tagged with its kind and lightweight metadata. */
 export interface DataFileEntry {
   /** Repo-relative path (POSIX separators), the stable id / preview key. */
   relPath: string
-  /** Final path segment, for the list label. */
   name: string
-  /** Classified kind (drives grouping + which preview to request). */
   kind: DataFileKind
-  /** Size in bytes. */
   size: number
-  /** Last-modified time, epoch ms. */
   mtime: number
 }
 
-/** Files of one kind, for grouped rendering in the UI. */
 export interface DataFileGroup {
   kind: DataFileKind
   files: DataFileEntry[]
 }
 
-/** The `listFiles` result: grouped files plus the truncation signal. */
 export interface DataFileListing {
-  /** Non-empty groups, in canonical kind order. */
   groups: DataFileGroup[]
-  /** Total files returned across all groups (≤ {@link MAX_LISTED_FILES}). */
   total: number
   /** True iff the walk hit {@link MAX_LISTED_FILES} and stopped early. */
   truncated: boolean
@@ -453,15 +439,22 @@ const NUMERIC_COLUMN_THRESHOLD = 0.8
  */
 const MONOTONIC_THRESHOLD = 0.95
 
+/** Missing cells remain missing; a literal zero remains a measurement. */
+function numericCell(cell: string | undefined): number | null {
+  if (cell === undefined || cell.trim() === "") return null
+  const value = Number(cell)
+  return Number.isFinite(value) ? value : null
+}
+
 /** Whether at least {@link NUMERIC_COLUMN_THRESHOLD} of column `col` is numeric. */
 function isNumericColumn(rows: string[][], col: number): boolean {
   let numeric = 0
   let nonEmpty = 0
   for (const row of rows) {
     const cell = row[col]
-    if (cell === undefined || cell === "") continue
+    if (cell === undefined || cell.trim() === "") continue
     nonEmpty++
-    if (!Number.isNaN(Number(cell))) numeric++
+    if (numericCell(cell) !== null) numeric++
   }
   return nonEmpty > 0 && numeric / nonEmpty >= NUMERIC_COLUMN_THRESHOLD
 }
@@ -472,8 +465,8 @@ function isMonotonicColumn(rows: string[][], col: number): boolean {
   let seen = 0
   let ordered = 0
   for (const row of rows) {
-    const value = Number(row[col])
-    if (!Number.isFinite(value)) continue
+    const value = numericCell(row[col])
+    if (value === null) continue
     seen++
     if (value >= prev) ordered++
     prev = value
@@ -526,12 +519,11 @@ function buildChart(args: {
   const xAll: number[] = []
   const seriesAll: Array<Array<number | null>> = seriesCols.map(() => [])
   for (const row of rows) {
-    const x = Number(row[xCol])
-    if (!Number.isFinite(x)) continue
+    const x = numericCell(row[xCol])
+    if (x === null) continue
     xAll.push(x)
     seriesCols.forEach((col, s) => {
-      const value = Number(row[col])
-      seriesAll[s]?.push(Number.isFinite(value) ? value : null)
+      seriesAll[s]?.push(numericCell(row[col]))
     })
   }
 
