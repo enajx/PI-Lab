@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react"
-import { translate } from "./messages"
+import { hasMessages, loadMessages, translate } from "./messages"
 
 export const LANGUAGES = [
   { code: "en", label: "English" },
@@ -14,6 +14,7 @@ export const LANGUAGES = [
 export type InterfaceLanguage = (typeof LANGUAGES)[number]["code"]
 const KEY = "pi-lab.interface.language"
 const listeners = new Set<() => void>()
+let request = 0
 
 /** Read the selected interface language, falling back to English for old or invalid values. */
 export function readInterfaceLanguage(): InterfaceLanguage {
@@ -22,13 +23,31 @@ export function readInterfaceLanguage(): InterfaceLanguage {
   return LANGUAGES.find((item) => item.code === stored)?.code ?? "en"
 }
 
-/** Persist the choice and update every mounted language consumer. */
-export function setInterfaceLanguage(language: InterfaceLanguage): void {
+function applyLanguage(language: InterfaceLanguage): void {
   window.localStorage.setItem(KEY, language)
   window.piLab?.setInterfaceLanguage?.(language)
   document.documentElement.lang = language
   document.documentElement.dir = language === "ar" ? "rtl" : "ltr"
   for (const notify of listeners) notify()
+}
+
+/** Publish only a ready locale, and ignore responses for superseded choices. */
+export function setInterfaceLanguage(language: InterfaceLanguage): Promise<void> | undefined {
+  const generation = ++request
+  if (hasMessages(language)) {
+    applyLanguage(language)
+    return
+  }
+  return loadMessages(language).then(
+    () => {
+      if (generation === request) applyLanguage(language)
+    },
+    (error: unknown) => {
+      if (generation !== request) return
+      console.error("Could not load interface language", language, error)
+      applyLanguage("en")
+    },
+  )
 }
 
 function subscribe(notify: () => void): () => void {
@@ -54,9 +73,6 @@ export function useTranslate(): (english: string) => string {
 }
 
 /** Set the document language and direction before React paints the first view. */
-export function initializeInterfaceLanguage(): void {
-  const language = readInterfaceLanguage()
-  window.piLab?.setInterfaceLanguage?.(language)
-  document.documentElement.lang = language
-  document.documentElement.dir = language === "ar" ? "rtl" : "ltr"
+export function initializeInterfaceLanguage(): Promise<void> {
+  return Promise.resolve(setInterfaceLanguage(readInterfaceLanguage()))
 }

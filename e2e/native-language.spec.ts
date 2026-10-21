@@ -43,7 +43,17 @@ test("the selected language updates the native menu and survives restart", async
   const window = await application.firstWindow()
   await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
 
+  const localeRequests: string[] = []
+  const network = await window.context().newCDPSession(window)
+  await network.send("Network.enable")
+  network.on("Network.requestWillBeSent", ({ request }) => {
+    if (/\/(?:zh-CN|ko|ja|es|ar|nb)-[^/]+\.js(?:$|\?)/.test(request.url))
+      localeRequests.push(request.url)
+  })
   await window.getByLabel("Language").selectOption("es")
+  await expect(window.getByRole("heading", { name: "Configurar PI Lab" })).toBeVisible()
+  expect(localeRequests).toHaveLength(1)
+  expect(localeRequests[0]).toMatch(/\/es-/)
   await expect
     .poll(async () =>
       application?.evaluate(({ Menu }) =>
@@ -63,6 +73,8 @@ test("the selected language updates the native menu and survives restart", async
   ).toContain("Editar")
 
   const reopened = await application.firstWindow()
+  await expect(reopened.getByRole("heading", { name: "Configurar PI Lab" })).toBeVisible()
+  await expect(reopened.locator("html")).toHaveAttribute("lang", "es")
   await reopened.getByLabel("Idioma").selectOption("ar")
   await expect
     .poll(async () =>

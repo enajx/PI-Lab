@@ -7,12 +7,13 @@ import { QuickEditor } from "./QuickEditor/QuickEditor"
 
 const root = document.getElementById("root")
 if (!root) throw new Error("Quick editor root element is missing")
-initializeInterfaceLanguage()
 applySavedAppearance()
-createRoot(root).render(
-  <StrictMode>
-    <ThemeProvider>
-      <QuickEditor fullApp={false} />
-    </ThemeProvider>
-  </StrictMode>,
-)
+void initializeInterfaceLanguage().then(() => {
+  createRoot(root).render(
+    <StrictMode>
+      <ThemeProvider>
+        <QuickEditor fullApp={false} />
+      </ThemeProvider>
+    </StrictMode>,
+  )
+})

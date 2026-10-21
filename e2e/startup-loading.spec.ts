@@ -66,13 +66,25 @@ test("Dashboard startup excludes deferred modules and keeps usable hidden debug 
     "Settings views must be deferred",
   ).toBe(false)
 
+  const localeChunks = new Set<string>()
+  for (const locale of ["es", "ar", "ja", "ko", "nb", "zh-CN"]) {
+    const chunk = filenames.find((name) => name.startsWith(`${locale}-`))
+    expect(chunk, `${locale} must remain available`).toBeTruthy()
+    if (!chunk) throw new Error(`Missing locale ${locale}`)
+    localeChunks.add(chunk)
+    expect(startup.has(chunk), `${locale} must be deferred`).toBe(false)
+  }
+
   const startupModules: string[] = []
   const allModules: string[] = []
   for (const [name, source] of scripts) {
     const map = JSON.parse(await readFile(join(assetsDir, `${name}.map`), "utf8")) as SourceMap
     expect(map.version).toBe(3)
-    expect(map.mappings.length).toBeGreaterThan(0)
-    expect(map.sourcesContent.some((content) => content.length > 0)).toBe(true)
+    // Rollup's generated JSON-only locale modules have no source mappings.
+    if (!localeChunks.has(name)) {
+      expect(map.mappings.length).toBeGreaterThan(0)
+      expect(map.sourcesContent.some((content) => content.length > 0)).toBe(true)
+    }
     expect(source).not.toContain("sourceMappingURL=")
     // Minified chunks can retain line breaks inside string literals and licenses.
     const lines = source.trimEnd().split("\n").length

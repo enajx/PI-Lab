@@ -6,6 +6,7 @@ import react from "@vitejs/plugin-react"
 import { defineConfig, externalizeDepsPlugin } from "electron-vite"
 import { type Plugin, build as viteBuild } from "vite"
 import { copyRuntimeMigrations } from "./scripts/copy-migrations"
+import { validateLocaleFiles } from "./scripts/validate-locales"
 
 /**
  * Copy the generated Drizzle migrations next to the compiled main bundle so the
@@ -164,6 +165,12 @@ export default defineConfig({
       dedupe: ["@codemirror/state", "@codemirror/view", "@codemirror/lint"],
     },
     plugins: [
+      {
+        name: "pi-lab:validate-locales",
+        buildStart() {
+          validateLocaleFiles(resolve(__dirname, "src/renderer/i18n/locales"))
+        },
+      },
       // TanStack Router's file-based codegen MUST run before the React plugin so
       // the generated `routeTree.gen.ts` exists when React transforms the tree.
       // It watches `routes/` in dev and regenerates on each build.

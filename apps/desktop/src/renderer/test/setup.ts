@@ -1,5 +1,15 @@
 import { cleanup } from "@testing-library/react"
-import { afterEach, beforeEach } from "vitest"
+import { afterEach, beforeAll, beforeEach } from "vitest"
+import { loadMessages } from "../i18n/messages"
+
+// Component fixtures choose languages synchronously; cold-loading races have their own tests.
+beforeAll(async () => {
+  await Promise.all(
+    ["zh-CN", "ko", "ja", "es", "ar", "nb"].map((language) =>
+      loadMessages(language as Parameters<typeof loadMessages>[0]),
+    ),
+  )
+})
 
 // Node 25 exposes native `localStorage`/`sessionStorage` globals that are inert without
 // `--localstorage-file` (their `getItem`/`setItem` are undefined) and shadow jsdom's own
