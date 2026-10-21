@@ -332,19 +332,32 @@ export function Sidebar() {
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
   const [restoreProjectTabs] = useRestoreProjectTabs()
   const featureHelp = useFeatureHelp(showFeatureHelp && !collapsed)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const reportMutationError = (error: { message: string }) => setActionError(error.message)
 
-  const invalidateProjects = () =>
-    queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+  const invalidateProjects = () => {
+    setActionError(null)
+    return queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+  }
 
   const openProject = useMutation(
-    trpc.projects.open.mutationOptions({ onSuccess: () => void invalidateProjects() }),
+    trpc.projects.open.mutationOptions({
+      onSuccess: () => void invalidateProjects(),
+      onError: reportMutationError,
+    }),
   )
   // Remove only the project row (the working tree on disk is never touched).
   const removeProject = useMutation(
-    trpc.projects.remove.mutationOptions({ onSuccess: () => void invalidateProjects() }),
+    trpc.projects.remove.mutationOptions({
+      onSuccess: () => void invalidateProjects(),
+      onError: reportMutationError,
+    }),
   )
   const setArchived = useMutation(
-    trpc.projects.setArchived.mutationOptions({ onSuccess: () => void invalidateProjects() }),
+    trpc.projects.setArchived.mutationOptions({
+      onSuccess: () => void invalidateProjects(),
+      onError: reportMutationError,
+    }),
   )
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
@@ -399,6 +412,11 @@ export function Sidebar() {
 
       {/* Nav body — padded; the header above is full-bleed for the traffic lights. */}
       <div data-testid="sidebar-nav-body" className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
+        {actionError ? (
+          <p role="alert" className="cursor-text select-text text-xs text-destructive">
+            {actionError}
+          </p>
+        ) : null}
         <ProjectDashboardNav collapsed={collapsed} />
 
         <WorkspaceNav collapsed={collapsed} />

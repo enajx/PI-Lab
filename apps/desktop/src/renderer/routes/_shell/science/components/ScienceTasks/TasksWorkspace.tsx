@@ -215,7 +215,8 @@ export function TasksWorkspace({
     target: { kind: "status"; status: TaskStatus } | { kind: "heading"; headingKey: string },
   ) => {
     event.preventDefault()
-    if (dragged && !alreadyInStatusLane(dragged.status, target)) void onMove(dragged, target)
+    if (dragged && !alreadyInStatusLane(dragged.status, target))
+      void onMove(dragged, target).catch(reportTaskActionFailure)
     setDraggedKey(null)
   }
 
@@ -407,7 +408,7 @@ export function TasksWorkspace({
               void onUpdate(task, {
                 ...taskToDraft(task),
                 status: task.status === "done" ? "planned" : "done",
-              })
+              }).catch(reportTaskActionFailure)
             }
           />
         ) : view === "list" ? (
@@ -421,7 +422,7 @@ export function TasksWorkspace({
               void onUpdate(task, {
                 ...taskToDraft(task),
                 status: task.status === "done" ? "planned" : "done",
-              })
+              }).catch(reportTaskActionFailure)
             }
           />
         ) : boardMode === "status" ? (
@@ -1057,6 +1058,11 @@ function ErrorBanner({ message }: { message: string }) {
   )
 }
 
+/** Handle rejected UI actions; the owning mutation supplies the visible error banner. */
+function reportTaskActionFailure(error: unknown): void {
+  console.warn("Task action failed:", error)
+}
+
 function TaskEditorDialog({
   task,
   sources,
@@ -1110,7 +1116,10 @@ function TaskEditorDialog({
 
   return (
     <Modal title={t(task ? "Edit task" : "New task")} onClose={onClose}>
-      <form onSubmit={submit} className="flex flex-col gap-4">
+      <form
+        onSubmit={(event) => void submit(event).catch(reportTaskActionFailure)}
+        className="flex flex-col gap-4"
+      >
         {!task ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("Project")}>
@@ -1220,7 +1229,7 @@ function TaskEditorDialog({
                 size="sm"
                 className="gap-1.5 text-destructive"
                 disabled={busy}
-                onClick={() => void onDelete()}
+                onClick={() => void onDelete().catch(reportTaskActionFailure)}
               >
                 <Trash2 className="size-4" />
                 {t("Delete")}
@@ -1297,7 +1306,7 @@ function RunTaskDialog({
           <Button
             size="sm"
             disabled={busy || !agentId || !prompt.trim()}
-            onClick={() => void onRun(agentId, prompt.trim())}
+            onClick={() => void onRun(agentId, prompt.trim()).catch(reportTaskActionFailure)}
           >
             {t("Run agent")}
           </Button>

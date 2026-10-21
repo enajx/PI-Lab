@@ -458,4 +458,16 @@ describe("TasksWorkspace", () => {
       ),
     )
   })
+
+  test("keeps a failed task draft open and reports the rejected action", async () => {
+    const failure = new Error("TODO Markdown changed since it was loaded")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    renderWorkspace({ onCreate: vi.fn().mockRejectedValue(failure) })
+    fireEvent.click(screen.getByRole("button", { name: "New task" }))
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Keep this draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(warn).toHaveBeenCalledWith("Task action failed:", failure))
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Keep this draft")
+    warn.mockRestore()
+  })
 })

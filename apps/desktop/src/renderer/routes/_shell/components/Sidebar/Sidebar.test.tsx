@@ -565,6 +565,17 @@ describe("Sidebar", () => {
     expect((await screen.findByTitle("Hidden")).getAttribute("data-hidden")).toBe("true")
   })
 
+  test("shows a rejected project menu action and leaves the project visible", async () => {
+    renderSidebar({
+      "projects.list": () => [{ id: "keep", name: "Keep", repoPath: "/keep", archivedAt: null }],
+      "projects.setArchived": () => Promise.reject(new Error("Visibility change failed")),
+    })
+    fireEvent.contextMenu(await screen.findByTestId("project-item"))
+    fireEvent.click(screen.getByTestId("project-hide"))
+    expect((await screen.findByRole("alert")).textContent).toContain("Visibility change failed")
+    expect(screen.getByTestId("project-item")).toBeTruthy()
+  })
+
   test("a project context menu hides a project without removing it", async () => {
     let projects: Array<{
       id: string

@@ -92,7 +92,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const [digitalRainDensity] = useDigitalRainDensity()
   const [digitalRainSpeed] = useDigitalRainSpeed()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [thumbnailError, setThumbnailError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const artworkGenerationRef = useRef(0)
   const thumbnail = useProjectThumbnail(project, "card")
 
@@ -105,24 +105,41 @@ export function ProjectCard({ project }: ProjectCardProps) {
     : t("Initialize Git to use this Git-backed action.")
 
   const invalidateProjects = () => {
+    setActionError(null)
     void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
     void queryClient.invalidateQueries({ queryKey: trpc.projects.thumbnail.pathKey() })
   }
+  const reportMutationError = (error: { message: string }) => setActionError(error.message)
 
   const setThumbnail = useMutation(
-    trpc.projects.setThumbnail.mutationOptions({ onSuccess: invalidateProjects }),
+    trpc.projects.setThumbnail.mutationOptions({
+      onSuccess: invalidateProjects,
+      onError: reportMutationError,
+    }),
   )
   const setGradient = useMutation(
-    trpc.projects.setGradient.mutationOptions({ onSuccess: invalidateProjects }),
+    trpc.projects.setGradient.mutationOptions({
+      onSuccess: invalidateProjects,
+      onError: reportMutationError,
+    }),
   )
   const setDigitalRain = useMutation(
-    trpc.projects.setDigitalRain.mutationOptions({ onSuccess: invalidateProjects }),
+    trpc.projects.setDigitalRain.mutationOptions({
+      onSuccess: invalidateProjects,
+      onError: reportMutationError,
+    }),
   )
   const setMetadata = useMutation(
-    trpc.projects.setMetadata.mutationOptions({ onSuccess: invalidateProjects }),
+    trpc.projects.setMetadata.mutationOptions({
+      onSuccess: invalidateProjects,
+      onError: reportMutationError,
+    }),
   )
   const setArchived = useMutation(
-    trpc.projects.setArchived.mutationOptions({ onSuccess: invalidateProjects }),
+    trpc.projects.setArchived.mutationOptions({
+      onSuccess: invalidateProjects,
+      onError: reportMutationError,
+    }),
   )
 
   const openProject = () => {
@@ -143,16 +160,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const applyThumbnailFile = async (file: File | undefined) => {
     if (!file?.type.startsWith("image/")) return
     const generation = ++artworkGenerationRef.current
-    setThumbnailError(null)
+    setActionError(null)
     try {
       const dataUrl = await readImageFileAsDataUrl(file)
       if (generation !== artworkGenerationRef.current) return
       await setThumbnail.mutateAsync({ id: project.id, dataUrl })
     } catch (error) {
       if (generation === artworkGenerationRef.current) {
-        setThumbnailError(
-          error instanceof Error ? error.message : t("Could not set this thumbnail."),
-        )
+        setActionError(error instanceof Error ? error.message : t("Could not set this thumbnail."))
       }
     }
   }
@@ -194,7 +209,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
   const generateGradient = () => {
     artworkGenerationRef.current += 1
-    setThumbnailError(null)
+    setActionError(null)
     setGradient.mutate({
       id: project.id,
       gradient: { seed: Math.floor(Math.random() * 0x1_0000_0000), palette: sampleThemePalette() },
@@ -223,7 +238,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const chooseDigitalRain = () => {
     setChoosingArtwork(false)
     artworkGenerationRef.current += 1
-    setThumbnailError(null)
+    setActionError(null)
     setDigitalRain.mutate({ id: project.id, enabled: true })
   }
 
@@ -399,9 +414,9 @@ export function ProjectCard({ project }: ProjectCardProps) {
           </button>
         </div>
       ) : null}
-      {thumbnailError ? (
+      {actionError ? (
         <div role="alert" className="px-3 py-1 text-xs text-destructive">
-          {thumbnailError}
+          {actionError}
         </div>
       ) : null}
 

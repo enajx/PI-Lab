@@ -125,6 +125,9 @@ describe("ProjectCard thumbnail", () => {
     })
 
     const select = (await screen.findByTestId("project-card-type-p1")) as HTMLSelectElement
+    await waitFor(() =>
+      expect(within(select).getByRole("option", { name: "Software project" })).toBeTruthy(),
+    )
     expect(select.value).toBe("")
     fireEvent.click(select)
     fireEvent.change(select, { target: { value: "software" } })
@@ -188,6 +191,16 @@ describe("ProjectCard thumbnail", () => {
 })
 
 describe("ProjectCard metadata", () => {
+  test("shows a rejected project action without losing the card", async () => {
+    renderCard(project({ id: "failed-hide", name: "Keep this project" }), {
+      "settings.get": () => ({}),
+      "projects.setArchived": () => Promise.reject(new Error("Could not save project visibility")),
+    })
+    fireEvent.contextMenu(await screen.findByTestId("project-card-body"))
+    fireEvent.click(screen.getByTestId("project-card-menu-hide"))
+    expect(await screen.findByText("Could not save project visibility")).toBeTruthy()
+    expect(screen.getByTestId("project-card")).toBeTruthy()
+  })
   test("translates the card status and artwork chooser when language changes", async () => {
     renderCard(project({ id: "translated", name: "Study" }))
     act(() => setInterfaceLanguage("es"))
