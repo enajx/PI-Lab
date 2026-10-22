@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Generate unshipped uppercase-Pi font explorations.
+ * Generate the uppercase-Pi font masters for Alpha's icon choices.
  *
  * Every output keeps the application's 1024px canvas and white macOS-style
  * tile (x/y 64, 896px square, 210px corner radius). Only the centered black
- * `Π` glyph changes. These font masters do not touch the shipped joyplot icon.
+ * `Π` glyph changes. Gill Sans uses a 15% larger glyph for the built-in icons.
  *
  * Requires ImageMagick, librsvg (`rsvg-convert`), fontconfig (`fc-query`), and
  * the listed macOS fonts.
@@ -34,26 +34,21 @@ interface IconExploration {
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, "..", "..", "..")
-const OUTPUT_DIR = join(REPO_ROOT, "icons-temp")
+const OUTPUT_DIR = join(REPO_ROOT, "apps", "desktop", ".tmp", "icon-explorations", "font-tiles")
 const SUPPLEMENTAL_FONTS = "/System/Library/Fonts/Supplemental"
 
 /**
- * Downscaled copies of the same explorations, committed as renderer assets so
- * Settings can build palette-specific Pi previews without runtime font tooling.
+ * Downscaled exploration previews. The packaged picker uses its 256px shape
+ * masters and generates selected colors at runtime.
  */
 export const PREVIEW_SIZE = 256
 export const PREVIEW_DIR = join(
   REPO_ROOT,
   "apps",
   "desktop",
-  "src",
-  "renderer",
-  "routes",
-  "_shell",
-  "settings",
-  "components",
-  "AppIconGallery",
-  "icons",
+  ".tmp",
+  "icon-explorations",
+  "font-previews",
 )
 
 /** `07-avenir-next-medium.png` → `avenir-next-medium`: the stable id shared with the renderer. */
@@ -155,7 +150,7 @@ function readme(): string {
   ).join("\n")
   return `# Pi tile font explorations
 
-These 12 unshipped explorations use the current 1024×1024 white rounded tile with
+These 12 explorations use the current 1024×1024 white rounded tile with
 transparent outer corners. Only the centered black uppercase Greek Pi changes.
 
 Regenerate on macOS with ImageMagick, \`rsvg-convert\`, and fontconfig
@@ -166,11 +161,13 @@ only the declared font file, so system fallback cannot change the glyph.
 bun apps/desktop/scripts/generate-icon-explorations.ts
 \`\`\`
 
-The same run also writes ${PREVIEW_SIZE}px copies to
-\`apps/desktop/src/renderer/routes/_shell/settings/components/AppIconGallery/icons/\`,
-then regenerates the color variants used by the Settings → Appearance picker.
+The same run updates the white-background shape masters used by the
+Settings → Appearance picker. Alpha applies the selected palette, direction,
+and range when an icon is chosen. To render every combination for visual
+exploration, run \`python3 apps/desktop/scripts/generate-app-icon-choices.py --explore-all\`;
+those temporary outputs are ignored by Git and excluded from app packages.
 The font choice can change the running app icon. The installed app bundle uses
-expanded joyplot style 25 in magma as its icon.
+Gill Sans Regular Pi as its icon.
 
 | Preview | File | Font style | Local font source |
 | --- | --- | --- | --- |
@@ -278,7 +275,7 @@ export function generateIconExplorations(): void {
         "-trim",
         "+repage",
         "-resize",
-        "520x520",
+        family === "Gill Sans" ? "598x598" : "520x520",
         ")",
         "-gravity",
         "center",

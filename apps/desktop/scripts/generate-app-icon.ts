@@ -2,9 +2,9 @@
 /**
  * Validate and stage the canonical PI Lab icon for electron-builder.
  *
- * `icons/icon.svg` is the vector master for joyplot style 25 in magma, expanded.
- * `icons/icon.png` is its committed 1024×1024 derivative, so packaging never
- * needs an SVG renderer. `icons/icon.manifest.json` pins both files together.
+ * `assets/icons/icon.svg` is the vector master for Gill Sans Regular Pi in #303030.
+ * Its committed PNG derivative lets packaging avoid an SVG renderer.
+ * `assets/icons/icon.manifest.json` pins both files together.
  *
  * Outputs:
  *   - `build/icon.png` — Linux source and Windows `.ico` source.
@@ -30,8 +30,7 @@ import type { PiLabChannel } from "../src/main/identity/channel"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = resolve(HERE, "..")
-const REPO_ROOT = resolve(DESKTOP_DIR, "..", "..")
-const ICONS_DIR = join(REPO_ROOT, "icons")
+const ICONS_DIR = join(DESKTOP_DIR, "assets", "icons")
 const MASTER = join(ICONS_DIR, "icon.svg")
 const SOURCE = join(ICONS_DIR, "icon.png")
 const MANIFEST = join(ICONS_DIR, "icon.manifest.json")
@@ -169,7 +168,7 @@ function assertPixel(
   }
 }
 
-/** Validate provenance, geometry, transparent corners, light tile, and joyplot fill. */
+/** Validate provenance, geometry, transparent corners, tile, and glyph. */
 export function validateIconSources(): IconManifest {
   for (const path of [MASTER, SOURCE, MANIFEST]) {
     if (!existsSync(path)) throw new Error(`canonical icon source not found at ${path}`)
@@ -178,8 +177,8 @@ export function validateIconSources(): IconManifest {
   const manifest = JSON.parse(readFileSync(MANIFEST, "utf8")) as IconManifest
   if (
     manifest.schemaVersion !== 1 ||
-    manifest.master.path !== "icons/icon.svg" ||
-    manifest.derivative.path !== "icons/icon.png"
+    manifest.master.path !== "apps/desktop/assets/icons/icon.svg" ||
+    manifest.derivative.path !== "apps/desktop/assets/icons/icon.png"
   ) {
     throw new Error("icon.manifest.json does not describe the canonical icon.svg/icon.png pair")
   }
@@ -194,14 +193,12 @@ export function validateIconSources(): IconManifest {
   if (
     !svg.includes('viewBox="0 0 1024 1024"') ||
     !svg.includes('x="64" y="64" width="896" height="896" rx="210" fill="#fff"') ||
-    !svg.includes("joyplot icon: style 25, ascending peaks, magma, expanded") ||
-    !svg.includes('stop-color="#000004"') ||
-    !svg.includes('id="expanded-tile"') ||
-    !svg.includes('stroke="#fff"') ||
+    !svg.includes("Gill Sans Regular Pi, solid #303030, white background") ||
+    !svg.includes('fill="#303030"') ||
     !svg.includes("<path") ||
     /<(?:text|image)\b/.test(svg)
   ) {
-    throw new Error("icon.svg must contain expanded joyplot style 25 in magma on the white tile")
+    throw new Error("icon.svg must contain Gill Sans Regular Pi in #303030 on the white tile")
   }
 
   const png = decodeRgbaPng(SOURCE)
@@ -220,7 +217,7 @@ export function validateIconSources(): IconManifest {
     assertPixel(png, x, y, [0, 0, 0, 0], "outer corner")
   }
   assertPixel(png, 512, 100, [255, 255, 255, 255], "white tile")
-  assertPixel(png, 512, 512, [182, 58, 116, 255], "magma plot")
+  assertPixel(png, 512, 270, [48, 48, 48, 255], "gray Pi")
   for (const channel of ["alpha", "beta"] as const) {
     const variant = manifest.channelVariants?.[channel]
     const vector = join(ICONS_DIR, `icon-${channel}.svg`)
@@ -232,20 +229,32 @@ export function validateIconSources(): IconManifest {
       throw new Error(`${channel} icon does not match its provenance manifest`)
     }
     const svg = readFileSync(vector, "utf8")
-    const palette = channel === "alpha" ? "viridis" : "magma"
-    if (
-      !svg.includes(`ascending peaks, ${palette} inverted, expanded`) ||
-      !svg.includes('fill="url(#fill)" />') ||
-      (svg.match(/fill="#fff"/g) ?? []).length !== 3
+    if (channel === "alpha") {
+      if (
+        !svg.includes("Alpha Gill Sans Regular Pi, viridis on white") ||
+        !svg.includes('fill="url(#fill)"') ||
+        !svg.includes('fill="#fff"')
+      )
+        throw new Error("alpha icon must have a viridis Gill Sans Pi on white")
+    } else if (
+      !svg.includes("Beta Gill Sans Regular Pi, white on #303030") ||
+      !svg.includes('fill="#303030"') ||
+      !svg.includes('fill="#fff"')
     ) {
-      throw new Error(`${channel} icon must have a ${palette} tile and white Joyplot`)
+      throw new Error("beta icon must have a #303030 tile and white Gill Sans Pi")
     }
     const icon = decodeRgbaPng(raster)
     if (icon.width !== 1024 || icon.height !== 1024) {
       throw new Error(`${channel} icon must be 1024×1024`)
     }
     assertPixel(icon, 0, 0, [0, 0, 0, 0], `${channel} outer corner`)
-    assertPixel(icon, 512, 512, [255, 255, 255, 255], `${channel} Joyplot`)
+    if (channel === "alpha") {
+      assertPixel(icon, 512, 100, [255, 255, 255, 255], "alpha white tile")
+      assertPixel(icon, 512, 270, [33, 145, 140, 255], "alpha viridis Pi")
+    } else {
+      assertPixel(icon, 512, 270, [255, 255, 255, 255], "beta Pi")
+      assertPixel(icon, 512, 100, [48, 48, 48, 255], "beta gray tile")
+    }
   }
   return manifest
 }

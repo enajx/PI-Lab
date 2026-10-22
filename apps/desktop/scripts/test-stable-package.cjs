@@ -85,7 +85,7 @@ async function testStablePackage() {
           [
             join(REPO_ROOT, "node_modules", "@playwright", "test", "cli.js"),
             "test",
-            "e2e/packaged-smoke.spec.ts",
+            "tests/e2e/packaged-smoke.spec.ts",
           ],
           REPO_ROOT,
           {

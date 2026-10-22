@@ -1,4 +1,7 @@
 /** The icon choices shared by Settings, preload, and the main process. */
+import iconSolidColors from "./iconSolidColors.json"
+
+export const APP_ICON_SOLID_COLORS = iconSolidColors
 export const APP_ICON_GET_CHANNEL = "app-icon:get"
 export const APP_ICON_SET_CHANNEL = "app-icon:set"
 export const APP_ICON_PREVIEW_CHANNEL = "app-icon:preview"
@@ -43,6 +46,12 @@ export const APP_ICON_PALETTES = [
   "plasma",
   "inferno",
   "cividis",
+  "black",
+  "gray-10",
+  "gray-20",
+  "gray-30",
+  "gray-40",
+  "gray-50",
   "Greys",
   "Purples",
   "Blues",
@@ -131,6 +140,7 @@ export type PiIconFontId = (typeof APP_ICON_PI_FONTS)[number]
 
 export interface JoyplotAppIconFavorite {
   family: "joyplot"
+  alphaWhiteBackground?: boolean
   style: JoyplotStyleId
   palette: AppIconPalette
   expanded: boolean
@@ -140,6 +150,7 @@ export interface JoyplotAppIconFavorite {
 
 export interface PiAppIconFavorite {
   family: "pi"
+  alphaWhiteBackground?: boolean
   font: PiIconFontId
   palette: AppIconPalette
   reverse: boolean
@@ -150,6 +161,7 @@ export type AppIconFavorite = JoyplotAppIconFavorite | PiAppIconFavorite
 
 export interface AppIconSelection {
   family: AppIconFamily
+  alphaWhiteBackground: boolean
   joyplotStyle: JoyplotStyleId
   joyplotPalette: AppIconPalette
   joyplotExpanded: boolean
@@ -170,14 +182,15 @@ export interface AppIconBridge {
 }
 
 export const APP_ICON_DEFAULT_SELECTION: AppIconSelection = {
-  family: "joyplot",
+  family: "pi",
+  alphaWhiteBackground: false,
   joyplotStyle: "25",
   joyplotPalette: "magma",
   joyplotExpanded: true,
   joyplotReverse: false,
   joyplotLimitVisibleRange: false,
-  piFont: "helvetica-neue-medium",
-  piPalette: "viridis",
+  piFont: "gill-sans-regular",
+  piPalette: "gray-30",
   piReverse: false,
   piLimitVisibleRange: false,
   favoriteIcons: [],
@@ -188,6 +201,7 @@ export function snapshotAppIconFavorite(selection: AppIconSelection): AppIconFav
   return selection.family === "joyplot"
     ? {
         family: "joyplot",
+        ...(selection.alphaWhiteBackground ? { alphaWhiteBackground: true } : {}),
         style: selection.joyplotStyle,
         palette: selection.joyplotPalette,
         expanded: selection.joyplotExpanded,
@@ -196,6 +210,7 @@ export function snapshotAppIconFavorite(selection: AppIconSelection): AppIconFav
       }
     : {
         family: "pi",
+        ...(selection.alphaWhiteBackground ? { alphaWhiteBackground: true } : {}),
         font: selection.piFont,
         palette: selection.piPalette,
         reverse: selection.piReverse,
@@ -221,6 +236,7 @@ export function applyAppIconFavorite(
     ? {
         ...selection,
         family: "joyplot",
+        alphaWhiteBackground: favorite.alphaWhiteBackground === true,
         joyplotStyle: favorite.style,
         joyplotPalette: favorite.palette,
         joyplotExpanded: favorite.expanded,
@@ -230,6 +246,7 @@ export function applyAppIconFavorite(
     : {
         ...selection,
         family: "pi",
+        alphaWhiteBackground: favorite.alphaWhiteBackground === true,
         piFont: favorite.font,
         piPalette: favorite.palette,
         piReverse: favorite.reverse,
@@ -243,7 +260,7 @@ export function isAppIconFavorite(value: unknown): value is AppIconFavorite {
   const candidate = value as Record<string, unknown>
   if (candidate.family === "joyplot") {
     return (
-      hasExactKeys(candidate, [
+      hasFavoriteKeys(candidate, [
         "family",
         "style",
         "palette",
@@ -260,7 +277,7 @@ export function isAppIconFavorite(value: unknown): value is AppIconFavorite {
   }
   if (candidate.family === "pi") {
     return (
-      hasExactKeys(candidate, ["family", "font", "palette", "reverse", "limitVisibleRange"]) &&
+      hasFavoriteKeys(candidate, ["family", "font", "palette", "reverse", "limitVisibleRange"]) &&
       APP_ICON_PI_FONTS.some((id) => id === candidate.font) &&
       APP_ICON_PALETTES.some((id) => id === candidate.palette) &&
       typeof candidate.reverse === "boolean" &&
@@ -274,6 +291,14 @@ function hasExactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   return Object.keys(value).length === keys.length && keys.every((key) => key in value)
 }
 
+function hasFavoriteKeys(value: Record<string, unknown>, keys: string[]): boolean {
+  return (
+    hasExactKeys(value, keys) ||
+    (hasExactKeys(value, [...keys, "alphaWhiteBackground"]) &&
+      typeof value.alphaWhiteBackground === "boolean")
+  )
+}
+
 function favoriteIdentity(favorite: AppIconFavorite): string {
   return favorite.family === "joyplot"
     ? JSON.stringify([
@@ -283,6 +308,7 @@ function favoriteIdentity(favorite: AppIconFavorite): string {
         favorite.expanded,
         favorite.reverse,
         favorite.limitVisibleRange,
+        favorite.alphaWhiteBackground === true,
       ])
     : JSON.stringify([
         favorite.family,
@@ -290,6 +316,7 @@ function favoriteIdentity(favorite: AppIconFavorite): string {
         favorite.palette,
         favorite.reverse,
         favorite.limitVisibleRange,
+        favorite.alphaWhiteBackground === true,
       ])
 }
 
@@ -299,6 +326,7 @@ export function isAppIconSelection(value: unknown): value is AppIconSelection {
   const candidate = value as Record<string, unknown>
   return (
     (candidate.family === "joyplot" || candidate.family === "pi") &&
+    typeof candidate.alphaWhiteBackground === "boolean" &&
     APP_ICON_JOYPLOT_STYLES.some((id) => id === candidate.joyplotStyle) &&
     APP_ICON_PALETTES.some((id) => id === candidate.joyplotPalette) &&
     typeof candidate.joyplotExpanded === "boolean" &&

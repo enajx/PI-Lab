@@ -50,7 +50,7 @@ export const PI_ICON_FONTS: readonly PiIconFont[] = [
     label: "Futura — Medium",
   },
   {
-    id: DEFAULT_PI_ICON_FONT_ID,
+    id: "helvetica-neue-medium",
     label: "Helvetica Neue — Medium",
   },
   {

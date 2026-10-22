@@ -38,7 +38,12 @@ async function expectPreview(name: string): Promise<void> {
 
 beforeEach(() => {
   activeChannel = "stable"
-  savedSelection = { ...APP_ICON_DEFAULT_SELECTION }
+  savedSelection = {
+    ...APP_ICON_DEFAULT_SELECTION,
+    family: "joyplot",
+    piFont: "helvetica-neue-medium",
+    piPalette: "viridis",
+  }
   setIcon.mockClear()
   window.piLab = {
     platform: "darwin",
@@ -55,18 +60,44 @@ beforeEach(() => {
         const limited =
           family === "joyplot" ? selection.joyplotLimitVisibleRange : selection.piLimitVisibleRange
         const expanded = family === "joyplot" && selection.joyplotExpanded
-        return `icons/${family}-${variant}-${activeChannel === "alpha" ? activeChannel : palette}${reversed ? "-reversed" : ""}${limited ? "-limited" : ""}${expanded ? "-expanded" : ""}.png`
+        return `icons/${family}-${variant}-${activeChannel === "alpha" && !selection.alphaWhiteBackground ? activeChannel : palette}${reversed ? "-reversed" : ""}${limited ? "-limited" : ""}${expanded ? "-expanded" : ""}.png`
       }),
     },
   } as NonNullable<typeof window.piLab> & { appIcon: AppIconBridge }
 })
 
 describe("AppIconGallery", () => {
-  test("fixes Alpha's palette while keeping both icon families selectable", async () => {
+  test("offers solid black and dark grays for the Gill Sans Pi", async () => {
+    savedSelection = { ...APP_ICON_DEFAULT_SELECTION }
+    renderGallery()
+    const palette = (await screen.findByTestId("settings-app-icon-palette")) as HTMLSelectElement
+    expect([...palette.options].map((option) => option.value)).toEqual(
+      expect.arrayContaining(["black", "gray-10", "gray-20", "gray-30", "gray-40", "gray-50"]),
+    )
+    fireEvent.change(palette, { target: { value: "gray-40" } })
+    await waitFor(() =>
+      expect(savedSelection).toMatchObject({
+        family: "pi",
+        piFont: "gill-sans-regular",
+        piPalette: "gray-40",
+        piReverse: false,
+        piLimitVisibleRange: false,
+      }),
+    )
+    expect(screen.getByTestId("settings-app-icon-reverse")).toHaveProperty("disabled", true)
+    expect(screen.getByTestId("settings-app-icon-limit-visible-range")).toHaveProperty(
+      "disabled",
+      true,
+    )
+    await expectPreview("pi-gill-sans-regular-gray-40.png")
+  })
+  test("offers Stable's palettes in Alpha for both icon families", async () => {
     activeChannel = "alpha"
     savedSelection = {
       ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot",
       joyplotPalette: "viridis",
+      piFont: "helvetica-neue-medium",
       piPalette: "viridis",
     }
     renderGallery()
@@ -74,14 +105,35 @@ describe("AppIconGallery", () => {
       expect(screen.getByTestId("settings-app-icon-palette")).toHaveProperty("value", "viridis"),
     )
     const palette = screen.getByTestId("settings-app-icon-palette") as HTMLSelectElement
-    expect(palette.disabled).toBe(true)
-    expect(palette.options).toHaveLength(1)
+    expect(palette.disabled).toBe(false)
+    expect(palette.options).toHaveLength(APP_ICON_PALETTES.length)
+    fireEvent.change(palette, { target: { value: "plasma" } })
+    await waitFor(() => expect(savedSelection.joyplotPalette).toBe("plasma"))
     fireEvent.change(screen.getByTestId("settings-app-icon-family"), { target: { value: "pi" } })
     await expectPreview("pi-helvetica-neue-medium-alpha.png")
   })
+  test("lets Alpha switch the selected icon between colored and white backgrounds", async () => {
+    activeChannel = "alpha"
+    savedSelection = {
+      ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot",
+      joyplotPalette: "viridis",
+      piFont: "helvetica-neue-medium",
+      piPalette: "viridis",
+    }
+    renderGallery()
+    const toggle = await screen.findByTestId("settings-app-icon-alpha-white-background")
+    await expectPreview("joyplot-25-alpha-expanded.png")
+    fireEvent.click(toggle)
+    await waitFor(() => expect(savedSelection.alphaWhiteBackground).toBe(true))
+    await expectPreview("joyplot-25-viridis-expanded.png")
+    fireEvent.click(toggle)
+    await waitFor(() => expect(savedSelection.alphaWhiteBackground).toBe(false))
+    await expectPreview("joyplot-25-alpha-expanded.png")
+  })
   test("lets public Beta use the color selected for the shared Stable icon", async () => {
     activeChannel = "beta"
-    savedSelection = { ...APP_ICON_DEFAULT_SELECTION, joyplotPalette: "plasma" }
+    savedSelection = { ...APP_ICON_DEFAULT_SELECTION, family: "joyplot", joyplotPalette: "plasma" }
     renderGallery()
     const palette = (await screen.findByTestId("settings-app-icon-palette")) as HTMLSelectElement
     await waitFor(() => expect(palette).toHaveProperty("value", "plasma"))
@@ -114,6 +166,7 @@ describe("AppIconGallery", () => {
   test("loads the saved icon and shows one large preview", async () => {
     savedSelection = {
       ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot",
       joyplotStyle: "33",
       joyplotPalette: "magma-iris",
     }
@@ -400,7 +453,7 @@ describe("AppIconGallery", () => {
     expect([...themes.options].map((option) => option.value)).not.toContain("Pastel1")
     expect([...themes.options].map((option) => option.value)).not.toContain("flag")
     expect([...themes.options].map((option) => option.value)).not.toContain("prism")
-    expect(themes.options).toHaveLength(70)
+    expect(themes.options).toHaveLength(APP_ICON_PALETTES.length)
   })
 
   test("every Pi font remains available one at a time", async () => {

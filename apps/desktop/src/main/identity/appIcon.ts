@@ -61,8 +61,7 @@ export function resolveAppIconPath(
     ? join(context.resourcesPath, "pi-lab-icon.png")
     : resolve(
         context.appPath,
-        "..",
-        "..",
+        "assets",
         "icons",
         context.channel === "alpha" || context.channel === "beta"
           ? `icon-${context.channel}.png`

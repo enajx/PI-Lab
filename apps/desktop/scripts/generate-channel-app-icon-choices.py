@@ -7,6 +7,7 @@ Requires ImageMagick and librsvg, like generate-app-icon-choices.py.
 from __future__ import annotations
 
 import importlib.util
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -15,8 +16,8 @@ from types import ModuleType
 
 
 ROOT = Path(__file__).resolve().parents[3]
-CANDIDATES = ROOT / "icons-temp" / "joyplot-candidates"
-PI_MASTERS = ROOT / "icons-temp"
+CANDIDATES = ROOT / "apps" / "desktop" / "assets" / "icons" / "sources" / "joyplot-candidates"
+PI_MASTERS = ROOT / "apps" / "desktop" / "assets" / "icons" / "sources" / "pi-masters"
 OUTPUT = (
     ROOT
     / "apps"
@@ -30,6 +31,7 @@ OUTPUT = (
     / "AppIconGallery"
     / "channel-icons"
 )
+EXPLORATION_OUTPUT = ROOT / "apps" / "desktop" / ".tmp" / "icon-explorations" / "colored"
 SVG = "{http://www.w3.org/2000/svg}"
 CHANNEL_PALETTES = {"alpha": "viridis", "beta": "magma"}
 CHANNEL_OUTLINES = {"alpha": "#153f3c", "beta": "#4c1b58"}
@@ -219,9 +221,16 @@ def render_pi(mask: Path, tile: Path, destination: Path, temporary: Path) -> Non
 
 
 def main() -> None:
-    """Generate 272 selected icon combinations for each colored channel."""
+    """Keep Alpha's base shapes in the app; write full choices to an ignored cache."""
+    explore_all = sys.argv[1:] == ["--explore-all"]
+    if sys.argv[1:] and not explore_all:
+        raise ValueError("usage: generate-channel-app-icon-choices.py [--explore-all]")
     _, palettes, qualitative = BASE.load_palette_data()
-    OUTPUT.mkdir(parents=True, exist_ok=True)
+    output = EXPLORATION_OUTPUT if explore_all else OUTPUT
+    channels = tuple(CHANNEL_PALETTES) if explore_all else ("alpha",)
+    directions = (False, True) if explore_all else (False,)
+    ranges = (False, True) if explore_all else (False,)
+    output.mkdir(parents=True, exist_ok=True)
     vectors = {
         source.name[:2]: source
         for source in CANDIDATES.glob("*-magma.svg")
@@ -239,16 +248,16 @@ def main() -> None:
         masks = make_pi_masks(masters, temporary)
         with ThreadPoolExecutor(max_workers=8) as pool:
             jobs = []
-            for channel in CHANNEL_PALETTES:
+            for channel in channels:
                 for number, source in sorted(vectors.items()):
                     fit_source = vectors["25"] if number == "37" else source
-                    for reversed_colors in (False, True):
+                    for reversed_colors in directions:
                         direction = "-reversed" if reversed_colors else ""
-                        for limited in (False, True):
+                        for limited in ranges:
                             range_suffix = "-limited" if limited else ""
                             for expanded in (False, True):
                                 size = "-expanded" if expanded else ""
-                                destination = OUTPUT / (
+                                destination = output / (
                                     f"joyplot-{number}-{channel}"
                                     f"{direction}{range_suffix}{size}.png"
                                 )
@@ -261,9 +270,9 @@ def main() -> None:
                                         destination, temporary,
                                     )
                                 )
-                for reversed_colors in (False, True):
+                for reversed_colors in directions:
                     direction = "-reversed" if reversed_colors else ""
-                    for limited in (False, True):
+                    for limited in ranges:
                         range_suffix = "-limited" if limited else ""
                         tile_vector = temporary / (
                             f"tile-{channel}{direction}{range_suffix}.svg"
@@ -277,7 +286,7 @@ def main() -> None:
                         )
                         BASE.run("rsvg-convert", "--output", str(tile_png), str(tile_vector))
                         for font, mask in masks.items():
-                            destination = OUTPUT / (
+                            destination = output / (
                                 f"pi-{font}-{channel}{direction}{range_suffix}.png"
                             )
                             expected.add(destination)
@@ -287,12 +296,15 @@ def main() -> None:
             for job in jobs:
                 job.result()
 
-    expected_count = len(CHANNEL_PALETTES) * (len(vectors) * 8 + len(masks) * 4)
+    expected_count = len(channels) * (
+        len(vectors) * len(directions) * len(ranges) * 2
+        + len(masks) * len(directions) * len(ranges)
+    )
     if len(expected) != expected_count or any(
         not path.is_file() or path.stat().st_size == 0 for path in expected
     ):
         raise ValueError(f"expected {expected_count} complete channel icons")
-    for existing in OUTPUT.glob("*.png"):
+    for existing in output.glob("*.png"):
         if existing.name.startswith(("joyplot-", "pi-")) and existing not in expected:
             existing.unlink()
 

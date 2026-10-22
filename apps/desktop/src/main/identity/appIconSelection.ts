@@ -3,7 +3,6 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import {
   APP_ICON_DEFAULT_SELECTION,
-  type AppIconFavorite,
   type AppIconSelection,
   isAppIconSelection,
 } from "../../shared/appIcon"
@@ -20,20 +19,44 @@ const RENDERER_ICONS = "src/renderer/routes/_shell/settings/components/AppIconGa
 const CHANNEL_ICONS = "src/renderer/routes/_shell/settings/components/AppIconGallery/channel-icons"
 const RETIRED_JOYPLOT_STYLES = new Set(["06", "07", "13", "14", "16", "19", "20", "21", "22", "23"])
 
+/** Alpha generates palettes and range changes from the selected shape master. */
+export function alphaIconNeedsRecolor(selection: AppIconSelection): boolean {
+  const palette = selection.family === "joyplot" ? selection.joyplotPalette : selection.piPalette
+  const reversed = selection.family === "joyplot" ? selection.joyplotReverse : selection.piReverse
+  const limited =
+    selection.family === "joyplot"
+      ? selection.joyplotLimitVisibleRange
+      : selection.piLimitVisibleRange
+  return palette !== "viridis" || reversed || limited
+}
+
+function defaultSelection(channel: PiLabChannel): AppIconSelection {
+  return channel === "alpha"
+    ? {
+        ...APP_ICON_DEFAULT_SELECTION,
+        alphaWhiteBackground: true,
+        joyplotPalette: "viridis",
+        piPalette: "viridis",
+      }
+    : { ...APP_ICON_DEFAULT_SELECTION }
+}
+
 /** Read the saved selection so main can apply it before the first window opens. */
 export function loadAppIconSelection(
   userDataPath: string,
   logger: AppIdentityLogger,
+  channel: PiLabChannel,
 ): AppIconSelection {
+  if (channel !== "alpha") return defaultSelection(channel)
   const path = join(userDataPath, SELECTION_FILE)
-  if (!existsSync(path)) return { ...APP_ICON_DEFAULT_SELECTION }
+  if (!existsSync(path)) return defaultSelection(channel)
   const contents = readFileSync(path, "utf8")
   let value: unknown
   try {
     value = JSON.parse(contents)
   } catch {
     logger.warn(`[pi-lab] Invalid app icon selection in ${path}; using default`)
-    return { ...APP_ICON_DEFAULT_SELECTION }
+    return defaultSelection(channel)
   }
   if (typeof value === "object" && value !== null) {
     const saved = value as Record<string, unknown>
@@ -41,6 +64,8 @@ export function loadAppIconSelection(
     delete current.favoritePalettes
     value = {
       ...current,
+      alphaWhiteBackground:
+        saved.alphaWhiteBackground === undefined ? false : saved.alphaWhiteBackground,
       joyplotExpanded: saved.joyplotExpanded === undefined ? false : saved.joyplotExpanded,
       joyplotReverse: saved.joyplotReverse === undefined ? false : saved.joyplotReverse,
       joyplotLimitVisibleRange:
@@ -69,7 +94,7 @@ export function loadAppIconSelection(
   }
   if (!isAppIconSelection(value)) {
     logger.warn(`[pi-lab] Invalid app icon selection in ${path}; using default`)
-    return { ...APP_ICON_DEFAULT_SELECTION }
+    return defaultSelection(channel)
   }
   return value
 }
@@ -82,25 +107,6 @@ export function saveAppIconSelection(userDataPath: string, selection: AppIconSel
   renameSync(temporary, path)
 }
 
-/** Keep Alpha's test icon color fixed; public Beta shares the Stable choice. */
-export function normalizeAppIconSelectionForChannel(
-  selection: AppIconSelection,
-  channel: PiLabChannel,
-): AppIconSelection {
-  if (channel !== "alpha") return selection
-  const palette = "viridis"
-  const seen = new Set<string>()
-  const favoriteIcons: AppIconFavorite[] = []
-  for (const favorite of selection.favoriteIcons) {
-    const normalized = { ...favorite, palette } as AppIconFavorite
-    const identity = JSON.stringify(normalized)
-    if (seen.has(identity)) continue
-    seen.add(identity)
-    favoriteIcons.push(normalized)
-  }
-  return { ...selection, joyplotPalette: palette, piPalette: palette, favoriteIcons }
-}
-
 /** Resolve a packaged or development PNG for the active family and color theme. */
 export function resolveSelectedAppIconPath(
   selection: AppIconSelection,
@@ -108,27 +114,43 @@ export function resolveSelectedAppIconPath(
   fileSystem: AppIconFileSystem,
 ): string {
   const channel = context.channel ?? "stable"
+  const assetChannel = channel === "alpha" && selection.alphaWhiteBackground ? "stable" : channel
+  const selectedPalette =
+    selection.family === "joyplot" ? selection.joyplotPalette : selection.piPalette
+  const assetPalette = channel === "alpha" ? "viridis" : selectedPalette
   const isCanonical =
-    selection.family === "joyplot" &&
-    selection.joyplotStyle === "25" &&
-    channel !== "beta" &&
-    (channel === "alpha" || selection.joyplotPalette === "magma") &&
-    selection.joyplotExpanded &&
-    !selection.joyplotReverse &&
-    !selection.joyplotLimitVisibleRange
+    (channel === "stable" &&
+      selection.family === "pi" &&
+      selection.piFont === "gill-sans-regular" &&
+      selection.piPalette === "gray-30" &&
+      !selection.piReverse &&
+      !selection.piLimitVisibleRange) ||
+    (channel === "alpha" &&
+      selection.alphaWhiteBackground &&
+      selection.family === "pi" &&
+      selection.piFont === "gill-sans-regular" &&
+      selection.piPalette === "viridis" &&
+      !selection.piReverse &&
+      !selection.piLimitVisibleRange) ||
+    (channel === "beta" &&
+      selection.family === "pi" &&
+      selection.piFont === "gill-sans-regular" &&
+      selection.piPalette === "gray-30" &&
+      !selection.piReverse &&
+      !selection.piLimitVisibleRange)
   const name =
     selection.family === "joyplot"
-      ? `joyplot-${selection.joyplotStyle}-${channel === "stable" ? selection.joyplotPalette : channel}${selection.joyplotReverse ? "-reversed" : ""}${selection.joyplotLimitVisibleRange ? "-limited" : ""}${selection.joyplotExpanded ? "-expanded" : ""}.png`
-      : `pi-${selection.piFont}-${channel === "stable" ? selection.piPalette : channel}${selection.piReverse ? "-reversed" : ""}${selection.piLimitVisibleRange ? "-limited" : ""}.png`
+      ? `joyplot-${selection.joyplotStyle}-${assetChannel === "stable" ? assetPalette : assetChannel}${channel !== "alpha" && selection.joyplotReverse ? "-reversed" : ""}${channel !== "alpha" && selection.joyplotLimitVisibleRange ? "-limited" : ""}${selection.joyplotExpanded ? "-expanded" : ""}.png`
+      : `pi-${selection.piFont}-${assetChannel === "stable" ? assetPalette : assetChannel}${channel !== "alpha" && selection.piReverse ? "-reversed" : ""}${channel !== "alpha" && selection.piLimitVisibleRange ? "-limited" : ""}.png`
   const path = isCanonical
     ? resolveAppIconPath(context, fileSystem)
     : context.isPackaged
       ? join(
           context.resourcesPath,
-          channel === "stable" ? "app-icon-variants" : "app-icon-channel-variants",
+          assetChannel === "stable" ? "app-icon-variants" : "app-icon-channel-variants",
           name,
         )
-      : resolve(context.appPath, channel === "stable" ? RENDERER_ICONS : CHANNEL_ICONS, name)
+      : resolve(context.appPath, assetChannel === "stable" ? RENDERER_ICONS : CHANNEL_ICONS, name)
   if (!path || !fileSystem.exists(path)) {
     throw new Error(`selected app icon is missing: ${name}`)
   }
@@ -148,10 +170,7 @@ export function resolveStartupAppIcon(
     logger.warn(
       `[pi-lab] Saved app icon unavailable; using default: ${error instanceof Error ? error.message : String(error)}`,
     )
-    const fallback = normalizeAppIconSelectionForChannel(
-      { ...APP_ICON_DEFAULT_SELECTION },
-      context.channel ?? "stable",
-    )
+    const fallback = defaultSelection(context.channel ?? "stable")
     return {
       selection: fallback,
       path: resolveSelectedAppIconPath(fallback, context, fileSystem),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -13,8 +14,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-CANDIDATES = ROOT / "icons-temp" / "joyplot-candidates"
-PI_MASTERS = ROOT / "icons-temp"
+CANDIDATES = ROOT / "apps" / "desktop" / "assets" / "icons" / "sources" / "joyplot-candidates"
+PI_MASTERS = ROOT / "apps" / "desktop" / "assets" / "icons" / "sources" / "pi-masters"
 OUTPUT = (
     ROOT
     / "apps"
@@ -28,7 +29,9 @@ OUTPUT = (
     / "AppIconGallery"
     / "icons"
 )
-PALETTE_DATA = ROOT / "icons-temp" / "matplotlib-colormaps-3.11.2.json"
+EXPLORATION_OUTPUT = ROOT / "apps" / "desktop" / ".tmp" / "icon-explorations" / "white"
+PALETTE_DATA = ROOT / "apps" / "desktop" / "assets" / "icons" / "matplotlib-colormaps-3.11.2.json"
+SOLID_COLORS = json.loads((ROOT / "apps" / "desktop" / "src" / "shared" / "iconSolidColors.json").read_text())
 LEGACY_PALETTES = frozenset({"magma", "magma-iris"})
 DISCRETE_PALETTES = frozenset({"flag", "prism"})
 SELECTABLE_JOYPLOT_STYLES = {
@@ -80,17 +83,17 @@ def load_palette_data() -> tuple[tuple[str, ...], dict[str, list[str]], frozense
     all_names = (*standard, *data["custom"])
     if len(standard) != 84 or len(all_names) != 85 or len(set(all_names)) != 85:
         raise ValueError("expected 84 Matplotlib maps and Magma + Iris")
-    palettes = data["palettes"]
-    if set(palettes) != set(all_names) or any(
+    palettes = {**data["palettes"], **{name: [color] * 256 for name, color in SOLID_COLORS.items()}}
+    if set(palettes) != set(all_names) | set(SOLID_COLORS) or any(
         len(palettes[name]) != 256 for name in all_names
     ):
         raise ValueError("each icon palette needs 256 color samples")
     qualitative = frozenset(data["categories"]["Qualitative"])
     names = tuple(
         name for name in all_names if name not in qualitative | DISCRETE_PALETTES
-    )
-    if len(names) != 70:
-        raise ValueError("expected 70 selectable icon color themes")
+    ) + tuple(SOLID_COLORS)
+    if len(names) != 76:
+        raise ValueError("expected 70 colormaps and six solid icon colors")
     return names, palettes, qualitative
 
 
@@ -114,6 +117,9 @@ def color_stops(
     limited: bool,
 ) -> list[tuple[float, str]]:
     """Build smooth samples or hard boundaries for qualitative colormaps."""
+    if palette in SOLID_COLORS:
+        color = SOLID_COLORS[palette]
+        return [(0.0, color), (1.0, color)]
     if palette in LEGACY_PALETTES:
         stops = legacy_stops(palette)
         stops = (
@@ -465,9 +471,21 @@ def mask_horizontal_bounds(mask: Path) -> tuple[int, int]:
 
 
 def main() -> None:
-    """Generate every selectable palette and both directions for both families."""
+    """Keep shape masters in the app; write full explorations to an ignored cache."""
     palette_names, palettes, qualitative = load_palette_data()
-    OUTPUT.mkdir(parents=True, exist_ok=True)
+    arguments = sys.argv[1:]
+    only_solid = arguments == ["--only-solid"]
+    explore_all = arguments == ["--explore-all"] or only_solid
+    if arguments and not explore_all:
+        raise ValueError("usage: generate-app-icon-choices.py [--explore-all|--only-solid]")
+    if only_solid:
+        palette_names = tuple(SOLID_COLORS)
+    elif not explore_all:
+        palette_names = ("viridis",)
+    output = EXPLORATION_OUTPUT if explore_all else OUTPUT
+    directions = (False, True) if explore_all else (False,)
+    ranges = (False, True) if explore_all else (False,)
+    output.mkdir(parents=True, exist_ok=True)
     expected: set[Path] = set()
 
     vectors = {
@@ -492,9 +510,9 @@ def main() -> None:
                         else magma_source
                     )
                     fit_source = vectors["25"] if number == "37" else source
-                    for reversed_colors in (False, True):
+                    for reversed_colors in directions:
                         direction = "-reversed" if reversed_colors else ""
-                        for limited in (False, True):
+                        for limited in ranges:
                             range_suffix = "-limited" if limited else ""
                             for expanded in (False, True):
                                 size = "-expanded" if expanded else ""
@@ -502,7 +520,7 @@ def main() -> None:
                                     f"joyplot-{number}-{palette}"
                                     f"{direction}{range_suffix}{size}.png"
                                 )
-                                destination = OUTPUT / filename
+                                destination = output / filename
                                 expected.add(destination)
                                 jobs.append(
                                     pool.submit(
@@ -580,14 +598,14 @@ def main() -> None:
             jobs = []
             for font, mask in masks.items():
                 for palette in palette_names:
-                    for reversed_colors in (False, True):
+                    for reversed_colors in directions:
                         direction = "-reversed" if reversed_colors else ""
-                        for limited in (False, True):
+                        for limited in ranges:
                             range_suffix = "-limited" if limited else ""
                             filename = (
                                 f"pi-{font}-{palette}{direction}{range_suffix}.png"
                             )
-                            destination = OUTPUT / filename
+                            destination = output / filename
                             expected.add(destination)
                             jobs.append(
                                 pool.submit(
@@ -610,13 +628,16 @@ def main() -> None:
             for job in jobs:
                 job.result()
 
-    expected_count = len(palette_names) * (len(vectors) * 8 + len(masks) * 4)
+    expected_count = len(palette_names) * (
+        len(vectors) * len(directions) * len(ranges) * 2
+        + len(masks) * len(directions) * len(ranges)
+    )
     if len(expected) != expected_count or any(
         not path.is_file() or path.stat().st_size == 0 for path in expected
     ):
         raise ValueError(f"expected {expected_count:,} complete color choices")
-    for existing in OUTPUT.glob("*.png"):
-        if existing.name.startswith(("joyplot-", "pi-")) and existing not in expected:
+    for existing in output.glob("*.png"):
+        if existing not in expected:
             existing.unlink()
 
 

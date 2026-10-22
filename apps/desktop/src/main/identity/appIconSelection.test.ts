@@ -7,7 +7,6 @@ import { decodeRgbaPng } from "../../../scripts/generate-app-icon"
 import {
   APP_ICON_DEFAULT_SELECTION,
   APP_ICON_JOYPLOT_STYLES,
-  APP_ICON_PALETTES,
   APP_ICON_PI_FONTS,
   type AppIconSelection,
   applyAppIconFavorite,
@@ -16,8 +15,8 @@ import {
   snapshotAppIconFavorite,
 } from "../../shared/appIcon"
 import {
+  alphaIconNeedsRecolor,
   loadAppIconSelection,
-  normalizeAppIconSelectionForChannel,
   resolveSelectedAppIconPath,
   resolveStartupAppIcon,
   saveAppIconSelection,
@@ -29,10 +28,38 @@ const context = {
   appPath: "/repo/apps/desktop",
 }
 
+const ALPHA_DEFAULT_SELECTION: AppIconSelection = {
+  ...APP_ICON_DEFAULT_SELECTION,
+  alphaWhiteBackground: true,
+  joyplotPalette: "viridis",
+  piPalette: "viridis",
+}
+
 describe("app icon selection", () => {
+  test("Alpha resolves one shape master while palette and range controls change", () => {
+    const base: AppIconSelection = {
+      ...ALPHA_DEFAULT_SELECTION,
+      family: "joyplot",
+      joyplotStyle: "37",
+      joyplotExpanded: true,
+    }
+    const packaged = { ...context, channel: "alpha" as const, isPackaged: true }
+    const source = resolveSelectedAppIconPath(base, packaged, { exists: () => true })
+    expect(source).toBe("/app/Resources/app-icon-variants/joyplot-37-viridis-expanded.png")
+    for (const changed of [
+      { ...base, joyplotPalette: "plasma" as const },
+      { ...base, joyplotReverse: true },
+      { ...base, joyplotLimitVisibleRange: true },
+    ]) {
+      expect(resolveSelectedAppIconPath(changed, packaged, { exists: () => true })).toBe(source)
+      expect(alphaIconNeedsRecolor(changed)).toBe(true)
+    }
+  })
+
   test("snapshots only the factors affecting the active family's final icon", () => {
     const selection: AppIconSelection = {
       ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot",
       joyplotStyle: "38",
       joyplotPalette: "plasma",
       joyplotExpanded: false,
@@ -58,6 +85,18 @@ describe("app icon selection", () => {
       reverse: true,
       limitVisibleRange: false,
     })
+  })
+
+  test("Alpha favorites distinguish colored and white backgrounds", () => {
+    const colored = { ...APP_ICON_DEFAULT_SELECTION, joyplotPalette: "plasma" as const }
+    const white = { ...colored, alphaWhiteBackground: true }
+    const coloredFavorite = snapshotAppIconFavorite(colored)
+    const whiteFavorite = snapshotAppIconFavorite(white)
+    expect(whiteFavorite).toMatchObject({ alphaWhiteBackground: true })
+    expect(matchesAppIconFavorite(white, coloredFavorite)).toBe(false)
+    expect(matchesAppIconFavorite(white, whiteFavorite)).toBe(true)
+    expect(applyAppIconFavorite(white, coloredFavorite).alphaWhiteBackground).toBe(false)
+    expect(applyAppIconFavorite(colored, whiteFavorite).alphaWhiteBackground).toBe(true)
   })
 
   test("matches the exact visible icon and restores a favorite without changing inactive choices", () => {
@@ -104,7 +143,7 @@ describe("app icon selection", () => {
           favoriteIcons: undefined,
         }),
       )
-      expect(loadAppIconSelection(directory, { warn: vi.fn() })).toEqual({
+      expect(loadAppIconSelection(directory, { warn: vi.fn() }, "alpha")).toEqual({
         ...APP_ICON_DEFAULT_SELECTION,
         joyplotStyle: "38",
         favoriteIcons: [],
@@ -115,8 +154,8 @@ describe("app icon selection", () => {
   })
 
   test("rejects incomplete, wrong-family, and duplicate complete favorites", () => {
-    const favorite = snapshotAppIconFavorite(APP_ICON_DEFAULT_SELECTION)
-    const valid = { ...APP_ICON_DEFAULT_SELECTION, favoriteIcons: [favorite] }
+    const favorite = snapshotAppIconFavorite({ ...APP_ICON_DEFAULT_SELECTION, family: "joyplot" })
+    const valid = { ...APP_ICON_DEFAULT_SELECTION, family: "joyplot", favoriteIcons: [favorite] }
     expect(isAppIconSelection(valid)).toBe(true)
     expect(isAppIconSelection({ ...valid, favoriteIcons: [favorite, { ...favorite }] })).toBe(false)
     expect(
@@ -158,29 +197,68 @@ describe("app icon selection", () => {
           ],
         }),
       )
-      expect(loadAppIconSelection(directory, { warn })).toEqual(APP_ICON_DEFAULT_SELECTION)
+      expect(loadAppIconSelection(directory, { warn }, "alpha")).toEqual(ALPHA_DEFAULT_SELECTION)
       expect(warn).toHaveBeenCalledOnce()
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
   })
 
-  test("uses expanded joyplot style 25 in Magma as the default", () => {
+  test("uses Gill Sans Pi in solid #303030 as the Stable default", () => {
     const directory = mkdtempSync(join(tmpdir(), "pi-lab-icon-choice-"))
     try {
       expect(APP_ICON_DEFAULT_SELECTION).toMatchObject({
-        family: "joyplot",
+        family: "pi",
         joyplotStyle: "25",
         joyplotPalette: "magma",
         joyplotExpanded: true,
         joyplotReverse: false,
-        piFont: "helvetica-neue-medium",
+        piFont: "gill-sans-regular",
+        piPalette: "gray-30",
         piReverse: false,
       })
-      expect(loadAppIconSelection(directory, { warn: vi.fn() })).toEqual(APP_ICON_DEFAULT_SELECTION)
+      expect(loadAppIconSelection(directory, { warn: vi.fn() }, "stable")).toEqual(
+        APP_ICON_DEFAULT_SELECTION,
+      )
       expect(
         resolveSelectedAppIconPath(APP_ICON_DEFAULT_SELECTION, context, { exists: () => true }),
-      ).toBe("/repo/icons/icon.png")
+      ).toBe("/repo/apps/desktop/assets/icons/icon.png")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("ignores saved icon choices in Stable and Beta", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-lab-public-icon-choice-"))
+    try {
+      saveAppIconSelection(directory, {
+        ...APP_ICON_DEFAULT_SELECTION,
+        family: "joyplot",
+        joyplotPalette: "plasma",
+      })
+      for (const channel of ["stable", "beta"] as const) {
+        expect(loadAppIconSelection(directory, { warn: vi.fn() }, channel)).toEqual(
+          APP_ICON_DEFAULT_SELECTION,
+        )
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("starts Alpha with Gill Sans in viridis on white but keeps later palette choices", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-lab-alpha-icon-choice-"))
+    try {
+      expect(loadAppIconSelection(directory, { warn: vi.fn() }, "alpha")).toMatchObject({
+        family: "pi",
+        alphaWhiteBackground: true,
+        piFont: "gill-sans-regular",
+        joyplotPalette: "viridis",
+        piPalette: "viridis",
+      })
+      const selected = { ...APP_ICON_DEFAULT_SELECTION, joyplotPalette: "plasma" as const }
+      saveAppIconSelection(directory, selected)
+      expect(loadAppIconSelection(directory, { warn: vi.fn() }, "alpha")).toEqual(selected)
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
@@ -190,6 +268,7 @@ describe("app icon selection", () => {
     const directory = mkdtempSync(join(tmpdir(), "pi-lab-icon-choice-"))
     const selection: AppIconSelection = {
       family: "pi",
+      alphaWhiteBackground: true,
       joyplotStyle: "31",
       joyplotPalette: "magma-iris",
       joyplotExpanded: true,
@@ -211,7 +290,7 @@ describe("app icon selection", () => {
     }
     try {
       saveAppIconSelection(directory, selection)
-      expect(loadAppIconSelection(directory, { warn: vi.fn() })).toEqual(selection)
+      expect(loadAppIconSelection(directory, { warn: vi.fn() }, "alpha")).toEqual(selection)
       expect(readFileSync(join(directory, "app-icon-selection.json"), "utf8")).toContain(
         '"piFont": "didot-bold"',
       )
@@ -225,10 +304,10 @@ describe("app icon selection", () => {
     const warn = vi.fn()
     try {
       writeFileSync(join(directory, "app-icon-selection.json"), "{broken")
-      expect(loadAppIconSelection(directory, { warn })).toEqual(APP_ICON_DEFAULT_SELECTION)
+      expect(loadAppIconSelection(directory, { warn }, "alpha")).toEqual(ALPHA_DEFAULT_SELECTION)
       expect(warn).toHaveBeenCalledOnce()
       writeFileSync(join(directory, "app-icon-selection.json"), '{"family":"old"}')
-      expect(loadAppIconSelection(directory, { warn })).toEqual(APP_ICON_DEFAULT_SELECTION)
+      expect(loadAppIconSelection(directory, { warn }, "alpha")).toEqual(ALPHA_DEFAULT_SELECTION)
       expect(warn).toHaveBeenCalledTimes(2)
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -248,8 +327,9 @@ describe("app icon selection", () => {
           piPalette: "viridis",
         }),
       )
-      expect(loadAppIconSelection(directory, { warn: vi.fn() })).toEqual({
+      expect(loadAppIconSelection(directory, { warn: vi.fn() }, "alpha")).toEqual({
         family: "joyplot",
+        alphaWhiteBackground: false,
         joyplotStyle: "31",
         joyplotPalette: "magma",
         joyplotExpanded: false,
@@ -280,8 +360,9 @@ describe("app icon selection", () => {
           piPalette: "magma",
         }),
       )
-      expect(loadAppIconSelection(directory, { warn })).toEqual({
+      expect(loadAppIconSelection(directory, { warn }, "alpha")).toEqual({
         family: "pi",
+        alphaWhiteBackground: false,
         joyplotStyle: "25",
         joyplotPalette: "magma",
         joyplotExpanded: true,
@@ -320,8 +401,9 @@ describe("app icon selection", () => {
           piPalette: "magma-iris",
         }),
       )
-      expect(loadAppIconSelection(directory, { warn })).toEqual({
+      expect(loadAppIconSelection(directory, { warn }, "alpha")).toEqual({
         family: "pi",
+        alphaWhiteBackground: false,
         joyplotStyle: "25",
         joyplotPalette: "magma",
         joyplotExpanded: true,
@@ -360,7 +442,7 @@ describe("app icon selection", () => {
     ).toBe("/app/Resources/app-icon-variants/pi-didot-bold-magma.png")
   })
 
-  test("keeps Alpha palette fixed and shares Beta's selected color with Stable", () => {
+  test("keeps Alpha's selected palette and uses Beta's fixed built-in icon", () => {
     const selection: AppIconSelection = {
       ...APP_ICON_DEFAULT_SELECTION,
       family: "pi",
@@ -376,20 +458,18 @@ describe("app icon selection", () => {
         },
       ],
     }
-    const alpha = normalizeAppIconSelectionForChannel(selection, "alpha")
-    expect(alpha.piPalette).toBe("viridis")
-    expect(alpha.joyplotPalette).toBe("viridis")
-    expect(alpha.favoriteIcons[0]).toMatchObject({ palette: "viridis", font: "didot-bold" })
+    const alpha = selection
+    expect(alpha.piPalette).toBe("plasma")
+    expect(alpha.joyplotPalette).toBe(selection.joyplotPalette)
+    expect(alpha.favoriteIcons[0]).toMatchObject({ palette: "plasma", font: "didot-bold" })
     expect(selection.piPalette).toBe("plasma")
-    expect(normalizeAppIconSelectionForChannel(selection, "beta")).toEqual(selection)
-    expect(normalizeAppIconSelectionForChannel(selection, "stable")).toEqual(selection)
     expect(
       resolveSelectedAppIconPath(
         APP_ICON_DEFAULT_SELECTION,
         { ...context, channel: "beta", isPackaged: true },
         { exists: () => true },
       ),
-    ).toBe("/app/Resources/app-icon-channel-variants/joyplot-25-beta-expanded.png")
+    ).toBe("/app/Resources/pi-lab-icon.png")
     expect(
       resolveSelectedAppIconPath(alpha, { ...context, channel: "alpha" }, { exists: () => true }),
     ).toBe(
@@ -408,13 +488,56 @@ describe("app icon selection", () => {
         { ...context, channel: "alpha", isPackaged: true },
         { exists: () => true },
       ),
-    ).toBe("/app/Resources/app-icon-channel-variants/joyplot-32-alpha-reversed-expanded.png")
+    ).toBe("/app/Resources/app-icon-channel-variants/joyplot-32-alpha-expanded.png")
+  })
+
+  test("uses one white-background shape master for Alpha's palettes", () => {
+    const selection = {
+      ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot" as const,
+      alphaWhiteBackground: true,
+    }
+    expect(
+      resolveSelectedAppIconPath(
+        selection,
+        { ...context, channel: "alpha", isPackaged: true },
+        { exists: () => true },
+      ),
+    ).toBe("/app/Resources/app-icon-variants/joyplot-25-viridis-expanded.png")
+    expect(
+      resolveSelectedAppIconPath(
+        { ...selection, family: "pi", piPalette: "magma" },
+        { ...context, channel: "alpha", isPackaged: true },
+        { exists: () => true },
+      ),
+    ).toBe("/app/Resources/app-icon-variants/pi-gill-sans-regular-viridis.png")
+    expect(
+      resolveSelectedAppIconPath(
+        { ...selection, joyplotPalette: "magma-iris" },
+        { ...context, channel: "alpha", isPackaged: true },
+        { exists: () => true },
+      ),
+    ).toBe("/app/Resources/app-icon-variants/joyplot-25-viridis-expanded.png")
+    expect(
+      resolveSelectedAppIconPath(
+        { ...selection, joyplotPalette: "plasma" },
+        { ...context, channel: "alpha", isPackaged: true },
+        { exists: () => true },
+      ),
+    ).toBe("/app/Resources/app-icon-variants/joyplot-25-viridis-expanded.png")
+    expect(
+      resolveSelectedAppIconPath(
+        { ...selection, alphaWhiteBackground: false },
+        { ...context, channel: "alpha", isPackaged: true },
+        { exists: () => true },
+      ),
+    ).toBe("/app/Resources/app-icon-channel-variants/joyplot-25-alpha-expanded.png")
   })
 
   test("resolves reversed icons for each family without using the canonical icon", () => {
     expect(
       resolveSelectedAppIconPath(
-        { ...APP_ICON_DEFAULT_SELECTION, joyplotReverse: true },
+        { ...APP_ICON_DEFAULT_SELECTION, family: "joyplot", joyplotReverse: true },
         { ...context, isPackaged: true },
         { exists: () => true },
       ),
@@ -425,13 +548,13 @@ describe("app icon selection", () => {
         { ...context, isPackaged: true },
         { exists: () => true },
       ),
-    ).toBe("/app/Resources/app-icon-variants/pi-helvetica-neue-medium-viridis-reversed.png")
+    ).toBe("/app/Resources/app-icon-variants/pi-gill-sans-regular-gray-30-reversed.png")
   })
 
   test("resolves limited-range icons for each family without changing the default icon", () => {
     expect(
       resolveSelectedAppIconPath(
-        { ...APP_ICON_DEFAULT_SELECTION, joyplotLimitVisibleRange: true },
+        { ...APP_ICON_DEFAULT_SELECTION, family: "joyplot", joyplotLimitVisibleRange: true },
         { ...context, isPackaged: true },
         { exists: () => true },
       ),
@@ -447,20 +570,20 @@ describe("app icon selection", () => {
         { ...context, isPackaged: true },
         { exists: () => true },
       ),
-    ).toBe("/app/Resources/app-icon-variants/pi-helvetica-neue-medium-viridis-reversed-limited.png")
+    ).toBe("/app/Resources/app-icon-variants/pi-gill-sans-regular-gray-30-reversed-limited.png")
     expect(
       resolveSelectedAppIconPath(APP_ICON_DEFAULT_SELECTION, context, { exists: () => true }),
-    ).toBe("/repo/icons/icon.png")
+    ).toBe("/repo/apps/desktop/assets/icons/icon.png")
   })
 
   test("resolves the installed choice and other expanded Joyplot PNGs", () => {
     const selection: AppIconSelection = { ...APP_ICON_DEFAULT_SELECTION }
     expect(resolveSelectedAppIconPath(selection, context, { exists: () => true })).toBe(
-      "/repo/icons/icon.png",
+      "/repo/apps/desktop/assets/icons/icon.png",
     )
     expect(
       resolveSelectedAppIconPath(
-        { ...selection, joyplotStyle: "35", joyplotPalette: "magma" },
+        { ...selection, family: "joyplot", joyplotStyle: "35", joyplotPalette: "magma" },
         { ...context, isPackaged: true },
         { exists: () => true },
       ),
@@ -468,124 +591,88 @@ describe("app icon selection", () => {
   })
 
   test("rejects a missing selected icon instead of silently applying a different one", () => {
-    const selection: AppIconSelection = { ...APP_ICON_DEFAULT_SELECTION, joyplotStyle: "32" }
+    const selection: AppIconSelection = {
+      ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot",
+      joyplotStyle: "32",
+    }
     expect(() => resolveSelectedAppIconPath(selection, context, { exists: () => false })).toThrow(
       "selected app icon is missing",
     )
   })
 
   test("opens with the default if a saved variant is missing", () => {
-    const selected: AppIconSelection = { ...APP_ICON_DEFAULT_SELECTION, joyplotStyle: "32" }
+    const selected: AppIconSelection = {
+      ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot",
+      joyplotStyle: "32",
+    }
     const warn = vi.fn()
     const resolved = resolveStartupAppIcon(
       selected,
       context,
       {
-        exists: (path) => path === "/repo/icons/icon.png",
+        exists: (path) => path === "/repo/apps/desktop/assets/icons/icon.png",
       },
       { warn },
     )
     expect(resolved).toEqual({
       selection: APP_ICON_DEFAULT_SELECTION,
-      path: "/repo/icons/icon.png",
+      path: "/repo/apps/desktop/assets/icons/icon.png",
     })
     expect(warn).toHaveBeenCalledOnce()
   })
 
   test("falls back to the channel palette when an Alpha icon choice is missing", () => {
-    const selected: AppIconSelection = { ...APP_ICON_DEFAULT_SELECTION, joyplotStyle: "32" }
+    const selected: AppIconSelection = {
+      ...APP_ICON_DEFAULT_SELECTION,
+      family: "joyplot",
+      joyplotStyle: "32",
+    }
     const resolved = resolveStartupAppIcon(
       selected,
       { ...context, channel: "alpha" },
-      { exists: (path) => path === "/repo/icons/icon-alpha.png" },
+      { exists: (path) => path === "/repo/apps/desktop/assets/icons/icon-alpha.png" },
       { warn: vi.fn() },
     )
     expect(resolved.selection).toMatchObject({ joyplotPalette: "viridis", piPalette: "viridis" })
-    expect(resolved.path).toBe("/repo/icons/icon-alpha.png")
+    expect(resolved.path).toBe("/repo/apps/desktop/assets/icons/icon-alpha.png")
   })
 
-  test("every listed choice has a 256px runtime PNG and removed styles stay absent", () => {
-    const icons = join(
+  test("each supported shape has one 256px master per background style", () => {
+    const gallery = join(
       resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
-      "src/renderer/routes/_shell/settings/components/AppIconGallery/icons",
+      "src/renderer/routes/_shell/settings/components/AppIconGallery",
     )
-    expect(
-      readdirSync(icons)
-        .filter((name) => name.startsWith("joyplot-"))
-        .sort(),
-    ).toEqual(
-      [
-        ...APP_ICON_JOYPLOT_STYLES.flatMap((style) =>
-          APP_ICON_PALETTES.flatMap((palette) =>
-            [false, true].flatMap((reverse) =>
-              [false, true].flatMap((limited) => [
-                `joyplot-${style}-${palette}${reverse ? "-reversed" : ""}${limited ? "-limited" : ""}.png`,
-                `joyplot-${style}-${palette}${reverse ? "-reversed" : ""}${limited ? "-limited" : ""}-expanded.png`,
-              ]),
-            ),
-          ),
-        ),
-      ].sort(),
-    )
-    for (const palette of APP_ICON_PALETTES) {
-      const png = decodeRgbaPng(join(icons, `joyplot-25-${palette}-reversed-expanded.png`))
-      expect([png.width, png.height]).toEqual([256, 256])
-    }
-    expect(
-      readdirSync(icons)
-        .filter((name) => name.startsWith("pi-"))
-        .sort(),
-    ).toEqual(
-      APP_ICON_PI_FONTS.flatMap((font) =>
-        APP_ICON_PALETTES.flatMap((palette) =>
-          [false, true].flatMap((reverse) => [
-            `pi-${font}-${palette}${reverse ? "-reversed" : ""}.png`,
-            `pi-${font}-${palette}${reverse ? "-reversed" : ""}-limited.png`,
-          ]),
-        ),
-      ).sort(),
-    )
-    for (const palette of APP_ICON_PALETTES) {
-      for (const reverse of [false, true]) {
-        for (const limited of [false, true]) {
-          const png = readFileSync(
-            join(
-              icons,
-              `pi-helvetica-neue-medium-${palette}${reverse ? "-reversed" : ""}${limited ? "-limited" : ""}.png`,
-            ),
-          )
-          expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a")
-          expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([256, 256])
-        }
+    const white = join(gallery, "icons")
+    const colored = join(gallery, "channel-icons")
+    const whiteNames = [
+      ...APP_ICON_JOYPLOT_STYLES.flatMap((style) => [
+        `joyplot-${style}-viridis.png`,
+        `joyplot-${style}-viridis-expanded.png`,
+      ]),
+      ...APP_ICON_PI_FONTS.map((font) => `pi-${font}-viridis.png`),
+    ].sort()
+    const coloredNames = [
+      ...APP_ICON_JOYPLOT_STYLES.flatMap((style) => [
+        `joyplot-${style}-alpha.png`,
+        `joyplot-${style}-alpha-expanded.png`,
+      ]),
+      ...APP_ICON_PI_FONTS.map((font) => `pi-${font}-alpha.png`),
+    ].sort()
+    expect(readdirSync(white).sort()).toEqual(whiteNames)
+    expect(readdirSync(colored).sort()).toEqual(coloredNames)
+    for (const [directory, names] of [
+      [white, whiteNames],
+      [colored, coloredNames],
+    ] as const) {
+      for (const name of names) {
+        const png = decodeRgbaPng(join(directory, name))
+        expect([png.width, png.height]).toEqual([256, 256])
       }
     }
-    for (const removed of [
-      "01",
-      "02",
-      "03",
-      "04",
-      "05",
-      "06",
-      "07",
-      "08",
-      "09",
-      "10",
-      "11",
-      "12",
-      "13",
-      "14",
-      "15",
-      "16",
-      "17",
-      "18",
-      "19",
-      "20",
-      "21",
-      "22",
-      "23",
-      "24",
-    ]) {
-      expect(existsSync(join(icons, `joyplot-${removed}-viridis.png`))).toBe(false)
+    for (const removed of ["06", "07", "13", "14", "16", "19", "20", "21", "22", "23"]) {
+      expect(existsSync(join(white, `joyplot-${removed}-viridis.png`))).toBe(false)
     }
   })
 

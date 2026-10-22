@@ -5,6 +5,7 @@ import {
   APP_ICON_DEFAULT_SELECTION,
   APP_ICON_JOYPLOT_STYLES,
   APP_ICON_PALETTES,
+  APP_ICON_SOLID_COLORS,
   type AppIconBridge,
   type AppIconFamily,
   type AppIconFavorite,
@@ -55,6 +56,12 @@ const PALETTE_LABELS: Partial<Record<AppIconPalette, string>> = {
   magma: "Magma",
   "magma-iris": "Magma + Iris",
   viridis: "Viridis",
+  black: "Black · #000000",
+  "gray-10": "Gray · #101010",
+  "gray-20": "Gray · #202020",
+  "gray-30": "Gray · #303030",
+  "gray-40": "Gray · #404040",
+  "gray-50": "Gray · #505050",
 }
 
 function paletteLabel(palette: AppIconPalette): string {
@@ -165,8 +172,17 @@ export function AppIconGallery() {
 
   const family = selection.family
   const palette = family === "joyplot" ? selection.joyplotPalette : selection.piPalette
-  const availablePalettes: readonly AppIconPalette[] =
-    channel === "alpha" ? ["viridis"] : APP_ICON_PALETTES
+  const solidColor = palette in APP_ICON_SOLID_COLORS
+  const availablePalettes: readonly AppIconPalette[] = APP_ICON_PALETTES
+  function paletteChoice(next: AppIconPalette): Partial<AppIconSelection> {
+    const solid = next in APP_ICON_SOLID_COLORS
+    return family === "joyplot"
+      ? {
+          joyplotPalette: next,
+          ...(solid ? { joyplotReverse: false, joyplotLimitVisibleRange: false } : {}),
+        }
+      : { piPalette: next, ...(solid ? { piReverse: false, piLimitVisibleRange: false } : {}) }
+  }
   const favoriteIndex = selection.favoriteIcons.findIndex((favorite) =>
     matchesAppIconFavorite(selection, favorite),
   )
@@ -176,15 +192,17 @@ export function AppIconGallery() {
   const piFontIds = PI_ICON_FONTS.map((font) => font.id as PiIconFontId)
 
   function favoriteLabel(favorite: AppIconFavorite): string {
+    const background =
+      channel === "alpha" && favorite.alphaWhiteBackground ? ` · ${t("White background")}` : ""
     const size =
       favorite.family === "joyplot" ? (favorite.expanded ? t("Expanded") : t("Regular size")) : ""
     const direction = favorite.reverse ? t("Reversed") : t("Forward")
     const range = favorite.limitVisibleRange ? t("Limited range") : t("Full range")
     if (favorite.family === "joyplot") {
-      return `${t("Joyplot")} ${favorite.style} ${JOYPLOT_STYLE_LABELS[favorite.style]} · ${paletteLabel(favorite.palette)} · ${size} · ${direction} · ${range}`
+      return `${t("Joyplot")} ${favorite.style} ${JOYPLOT_STYLE_LABELS[favorite.style]} · ${paletteLabel(favorite.palette)} · ${size} · ${direction} · ${range}${background}`
     }
     const font = PI_ICON_FONTS.find((item) => item.id === favorite.font)
-    return `${t("Pi Lab")} ${font?.label ?? favorite.font} · ${paletteLabel(favorite.palette)} · ${direction} · ${range}`
+    return `${t("Pi Lab")} ${font?.label ?? favorite.font} · ${paletteLabel(favorite.palette)} · ${direction} · ${range}${background}`
   }
 
   function selectFavorite(index: number): void {
@@ -261,6 +279,19 @@ export function AppIconGallery() {
               <ChevronRight className="size-5" aria-hidden="true" />
             </button>
           </div>
+
+          {channel === "alpha" ? (
+            <button
+              type="button"
+              data-testid="settings-app-icon-alpha-white-background"
+              aria-pressed={selection.alphaWhiteBackground}
+              disabled={!iconBridge()}
+              onClick={() => choose({ alphaWhiteBackground: !selection.alphaWhiteBackground })}
+              className={`self-center rounded-md border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${selection.alphaWhiteBackground ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
+            >
+              {t("White background")}
+            </button>
+          ) : null}
 
           <div className="flex min-w-0 items-end gap-2">
             <div className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-foreground">
@@ -382,19 +413,9 @@ export function AppIconGallery() {
               <select
                 data-testid="settings-app-icon-palette"
                 value={palette}
-                disabled={!iconBridge() || channel === "alpha"}
-                onChange={(event) =>
-                  choose(
-                    family === "joyplot"
-                      ? { joyplotPalette: event.target.value as AppIconPalette }
-                      : { piPalette: event.target.value as AppIconPalette },
-                  )
-                }
-                onKeyDown={(event) =>
-                  chooseArrow(event, APP_ICON_PALETTES, palette, (next) =>
-                    family === "joyplot" ? { joyplotPalette: next } : { piPalette: next },
-                  )
-                }
+                disabled={!iconBridge()}
+                onChange={(event) => choose(paletteChoice(event.target.value as AppIconPalette))}
+                onKeyDown={(event) => chooseArrow(event, APP_ICON_PALETTES, palette, paletteChoice)}
                 className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
               >
                 {availablePalettes.map((id) => (
@@ -424,7 +445,7 @@ export function AppIconGallery() {
                 type="checkbox"
                 data-testid="settings-app-icon-reverse"
                 checked={family === "joyplot" ? selection.joyplotReverse : selection.piReverse}
-                disabled={!iconBridge()}
+                disabled={!iconBridge() || solidColor}
                 onChange={(event) =>
                   choose(
                     family === "joyplot"
@@ -445,7 +466,7 @@ export function AppIconGallery() {
                     ? selection.joyplotLimitVisibleRange
                     : selection.piLimitVisibleRange
                 }
-                disabled={!iconBridge()}
+                disabled={!iconBridge() || solidColor}
                 onChange={(event) =>
                   choose(
                     family === "joyplot"

@@ -18,8 +18,8 @@ describe("resolveAppIconPath", () => {
       },
     )
 
-    expect(path).toBe("/repo/icons/icon.png")
-    expect(existing).toEqual(["/repo/icons/icon.png"])
+    expect(path).toBe("/repo/apps/desktop/assets/icons/icon.png")
+    expect(existing).toEqual(["/repo/apps/desktop/assets/icons/icon.png"])
   })
 
   test("uses the Alpha icon during source development", () => {
@@ -33,7 +33,7 @@ describe("resolveAppIconPath", () => {
         },
         { exists: () => true },
       ),
-    ).toBe("/repo/icons/icon-alpha.png")
+    ).toBe("/repo/apps/desktop/assets/icons/icon-alpha.png")
   })
 
   test("uses the packaged extra resource without consulting the source tree", () => {
@@ -62,17 +62,27 @@ describe("resolveAppIconPath", () => {
 describe("applyMacDockIcon", () => {
   test("sets the explicit Dock icon on macOS", () => {
     const setIcon = vi.fn()
-    expect(applyMacDockIcon("/repo/icons/icon.png", "darwin", { setIcon }, { warn: vi.fn() })).toBe(
-      "applied",
-    )
-    expect(setIcon).toHaveBeenCalledWith("/repo/icons/icon.png")
+    expect(
+      applyMacDockIcon(
+        "/repo/apps/desktop/assets/icons/icon.png",
+        "darwin",
+        { setIcon },
+        { warn: vi.fn() },
+      ),
+    ).toBe("applied")
+    expect(setIcon).toHaveBeenCalledWith("/repo/apps/desktop/assets/icons/icon.png")
   })
 
   test("skips unsupported platforms and missing icons", () => {
     const setIcon = vi.fn()
-    expect(applyMacDockIcon("/repo/icons/icon.png", "linux", { setIcon }, { warn: vi.fn() })).toBe(
-      "skipped",
-    )
+    expect(
+      applyMacDockIcon(
+        "/repo/apps/desktop/assets/icons/icon.png",
+        "linux",
+        { setIcon },
+        { warn: vi.fn() },
+      ),
+    ).toBe("skipped")
     expect(applyMacDockIcon(null, "darwin", { setIcon }, { warn: vi.fn() })).toBe("skipped")
     expect(setIcon).not.toHaveBeenCalled()
   })
@@ -83,7 +93,9 @@ describe("applyMacDockIcon", () => {
       throw new Error("invalid image")
     })
 
-    expect(applyMacDockIcon("/repo/icons/icon.png", "darwin", { setIcon }, { warn })).toBe("failed")
+    expect(
+      applyMacDockIcon("/repo/apps/desktop/assets/icons/icon.png", "darwin", { setIcon }, { warn }),
+    ).toBe("failed")
     expect(warn).toHaveBeenCalledWith("[pi-lab] Dock icon unavailable: invalid image")
   })
 })

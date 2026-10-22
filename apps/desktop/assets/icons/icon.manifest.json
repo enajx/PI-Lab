@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "master": {
+    "path": "apps/desktop/assets/icons/icon.svg",
+    "sha256": "6170f5f40300d5e155e1ed099bfa8549f0079808069a511f9795e5e8c4473d35"
+  },
+  "derivative": {
+    "path": "apps/desktop/assets/icons/icon.png",
+    "sha256": "5169d9fc4d20dc1c0b9c3f18db2fb8973499f4a7026d9eed382bb302199fcb96",
+    "width": 1024,
+    "height": 1024
+  },
+  "channelVariants": {
+    "alpha": {
+      "master": "87d179095f1fa66bb451ba30755873ce25d1bd39ffbdff232543b8a87599ccca",
+      "derivative": "58baca1709f9fdfb91db7533eb140206ce0375d63af83e5e383237ebd6d3dc29"
+    },
+    "beta": {
+      "master": "397128d5aadd7d7245771efd7efc2a832fce46acb34ce7ba513845c33a276eae",
+      "derivative": "df821916316910397b1707044ff287c2c5b5b175ae47e87b2805628ec87b6ac9"
+    }
+  }
+}
