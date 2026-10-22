@@ -12,7 +12,7 @@
       "packages/**/*",
       "tooling/**/*",
       "scripts/**/*",
-      "e2e/**/*",
+      "tests/e2e/**/*",
       "*.ts",
       "*.json",
       "*.jsonc",

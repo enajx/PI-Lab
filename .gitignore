@@ -30,7 +30,6 @@ pnpm-lock.yaml
 yarn.lock
 
 # Test / e2e output
-/test-results/
 /playwright-report/
 /playwright/.cache/
 coverage
