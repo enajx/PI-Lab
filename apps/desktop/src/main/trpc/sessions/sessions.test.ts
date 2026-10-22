@@ -307,6 +307,15 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     await h.caller.terminal.kill({ sessionId: result.sessionId })
   })
 
+  test("overlapping starts reserve main once through activity registration", async () => {
+    const results = await Promise.all([
+      h.caller.sessions.start({ projectId, agentId: LONG_FAKE_AGENT.id }),
+      h.caller.sessions.start({ projectId, agentId: LONG_FAKE_AGENT.id }),
+    ])
+    expect(results.map((result) => result.kind).sort()).toEqual(["branch", "worktree"])
+    expect(h.activityMonitor.liveAgentCount(projectId)).toBe(2)
+  })
+
   test("a long-lived agent makes the 2nd start (same project) a 'worktree'; another project stays 'branch'", async () => {
     // First start: branch (main checkout), held live by the long agent.
     const first = await h.caller.sessions.start({ projectId, agentId: "long-fake-agent" })
@@ -507,6 +516,54 @@ describe("sessions.start — registry drains on exit", () => {
     const all = await h.caller.workspaces.list({ projectId })
     const branchCount = all.filter((w) => w.kind === "branch").length
     expect(branchCount).toBe(1)
+  })
+
+  test("a real socket closing during attach preserves the agent and reconnects automatically", async () => {
+    const live = await h.caller.sessions.start({ projectId, agentId: LONG_FAKE_AGENT.id })
+    h.activityMonitor.dispose()
+    const brokenClient = new DaemonClient(join(h.dataDir, "daemon.sock"))
+    const recoveredClient = new DaemonClient(join(h.dataDir, "daemon.sock"))
+    await brokenClient.connect()
+    await recoveredClient.connect()
+    const attach = brokenClient.attach.bind(brokenClient)
+    brokenClient.attach = (sessionId, replay) => {
+      const pending = attach(sessionId, replay)
+      brokenClient.close()
+      return pending
+    }
+    const recoveredRegistry = new ActivityRegistry({
+      clock: systemActivityClock,
+      scheduler: systemActivityScheduler,
+    })
+    let connectionCount = 0
+    const monitor = createActivityMonitor({
+      db: h.db,
+      registry: recoveredRegistry,
+      getMonitorClient: async () => (++connectionCount === 1 ? brokenClient : recoveredClient),
+      notifications: h.notificationService,
+      scheduler: systemActivityScheduler,
+      logger: { warn: () => {} },
+    })
+    try {
+      await monitor.reconcile()
+      expect(monitor.liveAgentCount(projectId)).toBe(1)
+      expect(
+        h.db.select().from(agentSessions).where(eq(agentSessions.sessionId, live.sessionId)).get()
+          ?.state,
+      ).not.toBe("exited")
+      await waitFor(() => connectionCount >= 2)
+      await recoveredClient.write(live.sessionId, "still alive")
+      expect(
+        (await recoveredClient.list()).find((session) => session.id === live.sessionId)?.alive,
+      ).toBe(true)
+      await h.caller.terminal.kill({ sessionId: live.sessionId })
+      await waitFor(() => monitor.liveAgentCount(projectId) === 0)
+    } finally {
+      monitor.dispose()
+      recoveredRegistry.dispose()
+      brokenClient.close()
+      recoveredClient.close()
+    }
   })
 
   test("a fresh app-lifetime monitor reconciles a durable still-live daemon session", async () => {

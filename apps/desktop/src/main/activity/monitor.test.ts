@@ -307,6 +307,65 @@ function setupAgentMonitor(): AgentMonitorFixture {
 }
 
 describe("ActivityMonitor agent completion notifications", () => {
+  test("retains a live agent after attach failure and reconciles before confirming exit (injected daemon)", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    const attach = fixture.daemon.attach.bind(fixture.daemon)
+    fixture.daemon.attach = async () => {
+      throw new Error("daemon connection closed")
+    }
+    await fixture.monitor.track({
+      sessionId: "terminal-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      agentId: "codex",
+      workflowRunId: null,
+      turnArmed: false,
+      cols: 80,
+      rows: 24,
+    })
+    expect(fixture.monitor.liveAgentCount("project-1")).toBe(1)
+    expect(fixture.db.select().from(agentSessions).get()?.state).toBe("working")
+    fixture.daemon.attach = attach
+    await fixture.monitor.reconcile()
+    fixture.daemon.emitScreen("Processing after reconnection")
+    expect(fixture.registry.get("terminal-1")?.state).toBe("working")
+    fixture.daemon.setLiveSessionIds([])
+    await fixture.monitor.reconcile()
+    expect(fixture.monitor.liveAgentCount("project-1")).toBe(0)
+    expect(fixture.db.select().from(agentSessions).get()?.state).toBe("exited")
+  })
+
+  test("restores live counts when reconnect listing fails after app restart (injected daemon)", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    await fixture.monitor.track({
+      sessionId: "terminal-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      agentId: "codex",
+      workflowRunId: null,
+      turnArmed: false,
+      cols: 80,
+      rows: 24,
+    })
+    fixture.monitor.dispose()
+    fixture.registry.dispose()
+    const registry = fixture.createRegistry()
+    const monitor = fixture.createMonitor(registry)
+    const list = fixture.daemon.list.bind(fixture.daemon)
+    fixture.daemon.list = async () => {
+      throw new Error("connection unavailable")
+    }
+    await expect(monitor.reconcile()).rejects.toThrow("connection unavailable")
+    expect(monitor.liveAgentCount("project-1")).toBe(1)
+    fixture.daemon.list = list
+    fixture.time.advance(1000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(monitor.liveAgentCount("project-1")).toBe(1)
+  })
+
   test("applies replay before live frames delivered in the same client read (injected daemon)", async () => {
     const fixture = setupAgentMonitor()
     onTestFinished(fixture.dispose)

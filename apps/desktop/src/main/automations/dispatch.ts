@@ -7,6 +7,7 @@ import {
 } from "@pi-lab/local-db"
 import { buildNonInteractiveLaunchArgv, getAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
+import { z } from "zod"
 import { isGitRepo } from "../git"
 import { nativeText } from "../i18n/nativeLanguage"
 import { acquireAgentLaunchSlot } from "../trpc/agentLaunchGuard"
@@ -116,7 +117,11 @@ async function dispatchNonInteractiveAutomation(
     const agent = getAgent(automation.agentId, ctx.agentCatalog)
     if (!agent) throw new Error(`No agent ${automation.agentId}`)
 
-    const [catalogCommand, ...args] = buildNonInteractiveLaunchArgv(agent, automation.prompt)
+    const [catalogCommand, ...args] = buildNonInteractiveLaunchArgv(
+      agent,
+      automation.prompt,
+      getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
+    )
     const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[
       agent.id
     ]?.trim()
@@ -128,9 +133,10 @@ async function dispatchNonInteractiveAutomation(
       )
     }
 
+    const gitAvailable = await isGitRepo(project.repoPath)
     const releaseAgentSlot = acquireAgentLaunchSlot({
       projectId: project.id,
-      gitAvailable: await isGitRepo(project.repoPath),
+      gitAvailable,
       liveAgentCount: () => ctx.activityMonitor.liveAgentCount(project.id),
     })
     let started: StartedNonInteractiveProcess
@@ -138,6 +144,15 @@ async function dispatchNonInteractiveAutomation(
     try {
       const launchEnvironment = await ctx.getAgentLaunchEnvironment()
       started = await ctx.runNonInteractiveProcess({
+        metadata: {
+          kind: "automation",
+          runId: run.id,
+          workflowId: automation.id,
+          workflowName: automation.name,
+          agentLabel: agent.label,
+          projectId: project.id,
+          gitAvailable: String(gitAvailable),
+        },
         command,
         args,
         cwd: project.repoPath,
@@ -151,14 +166,16 @@ async function dispatchNonInteractiveAutomation(
     }
     void started.completion
       .then(
-        (result) => {
+        async (result) => {
           releaseAgentSlot()
           endActivity()
           if (result.code === 0 && result.signal === null && result.error === null) {
             lifecycle.completed()
+            await started.acknowledge?.()
             return
           }
           lifecycle.failed(nonInteractiveFailure(agent.label, result))
+          await started.acknowledge?.()
         },
         (error) => {
           releaseAgentSlot()
@@ -180,6 +197,47 @@ async function dispatchNonInteractiveAutomation(
   }
 
   return ctx.db.select().from(automationRuns).where(eq(automationRuns.id, run.id)).get() ?? run
+}
+
+/** Resume durable workflow reporting without launching the agent a second time. */
+export function restoreAutomationProcess(
+  ctx: AppContext,
+  rawMetadata: Record<string, string>,
+  started: StartedNonInteractiveProcess,
+): Promise<void> {
+  const metadata = z
+    .object({
+      workflowId: z.string(),
+      runId: z.string(),
+      workflowName: z.string(),
+      projectId: z.string(),
+      gitAvailable: z.enum(["true", "false"]),
+      agentLabel: z.string(),
+    })
+    .parse(rawMetadata)
+  const lifecycle = createWorkflowLifecycleReporter(
+    { db: ctx.db, notifications: ctx.notificationService },
+    {
+      source: "noninteractive",
+      workflowId: metadata.workflowId,
+      runId: metadata.runId,
+      workflowName: metadata.workflowName,
+    },
+  )
+  lifecycle.started()
+  const release = acquireAgentLaunchSlot({
+    projectId: metadata.projectId,
+    gitAvailable: metadata.gitAvailable === "true",
+    liveAgentCount: () => ctx.activityMonitor.liveAgentCount(metadata.projectId),
+  })
+  const endActivity = ctx.caffeine.beginMeaningfulActivity(`workflow:${metadata.runId}`)
+  return started.completion.then(async (result) => {
+    release()
+    endActivity()
+    if (result.code === 0 && result.signal === null && result.error === null) lifecycle.completed()
+    else lifecycle.failed(nonInteractiveFailure(metadata.agentLabel, result))
+    await started.acknowledge?.()
+  })
 }
 
 export function nonInteractiveFailure(

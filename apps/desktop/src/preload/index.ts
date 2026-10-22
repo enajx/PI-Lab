@@ -9,10 +9,8 @@ import {
 } from "../shared/appIcon"
 import {
   BACKGROUND_TRAY_CHANGED_CHANNEL,
-  BACKGROUND_TRAY_OPEN_APP_CHANNEL,
   BACKGROUND_TRAY_OPEN_FILE_CHANNEL,
   BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL,
-  BACKGROUND_TRAY_QUIT_CHANNEL,
   BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL,
   BACKGROUND_TRAY_SNAPSHOT_CHANNEL,
   type BackgroundTrayBridge,
@@ -125,10 +123,8 @@ if (process.isMainFrame) {
       return () => ipcRenderer.removeListener(BACKGROUND_TRAY_CHANGED_CHANNEL, receive)
     },
     openProject: (id) => ipcRenderer.invoke(BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL, id),
-    openApp: () => ipcRenderer.invoke(BACKGROUND_TRAY_OPEN_APP_CHANNEL),
     openFile: () => ipcRenderer.invoke(BACKGROUND_TRAY_OPEN_FILE_CHANNEL),
     restartToUpdate: () => ipcRenderer.send(BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL),
-    quit: () => ipcRenderer.send(BACKGROUND_TRAY_QUIT_CHANNEL),
   }
 
   const appIcon: AppIconBridge = {

@@ -49,7 +49,7 @@ describe("getSettingsOrDefaults", () => {
       expect(result.projectTemplate.projectTypes.map((type) => [type.id, type.name])).toEqual([
         ["research", "Research project"],
         ["software", "Software project"],
-        ["paper", "Paper"],
+        ["manuscript", "Manuscript"],
       ])
 
       // The read must NOT have persisted a row.
@@ -90,8 +90,8 @@ describe("getSettingsOrDefaults", () => {
         .run()
 
       const types = getSettingsOrDefaults(db).projectTemplate.projectTypes
-      expect(types.map((type) => type.id)).toEqual(["research", "software", "paper"])
-      expect(types.find((type) => type.id === "paper")?.guidance).toBe("My paper guidance.")
+      expect(types.map((type) => type.id)).toEqual(["research", "software", "manuscript"])
+      expect(types.find((type) => type.id === "manuscript")?.guidance).toBe("My paper guidance.")
       expect(db.select().from(settings).get()?.projectTemplate.projectTypes.at(-1)?.guidance).toBe(
         "My custom guidance.",
       )

@@ -10,10 +10,17 @@ describe("system.fonts", () => {
       error: null,
     })
     const caller = createCallerFactory(
-      createSystemRouter(detect, {
-        get: async () => ({ enabled: false, available: true }),
-        set: async (enabled) => ({ enabled, available: true }),
-      }),
+      createSystemRouter(
+        detect,
+        {
+          get: async () => ({ enabled: false, available: true }),
+          set: async (enabled) => ({ enabled, available: true }),
+        },
+        {
+          get: () => ({ visible: true, available: true }),
+          set: (visible) => ({ visible, available: true }),
+        },
+      ),
     )({} as AppContext)
 
     await expect(caller.fonts()).resolves.toEqual({
@@ -29,13 +36,20 @@ describe("system.startAtLogin", () => {
   test("reads the OS state and updates it through a separate native setting", async () => {
     let enabled = false
     const caller = createCallerFactory(
-      createSystemRouter(async () => ({ families: [], error: null }), {
-        get: async () => ({ enabled, available: true }),
-        set: async (next) => {
-          enabled = next
-          return { enabled, available: true }
+      createSystemRouter(
+        async () => ({ families: [], error: null }),
+        {
+          get: async () => ({ enabled, available: true }),
+          set: async (next) => {
+            enabled = next
+            return { enabled, available: true }
+          },
         },
-      }),
+        {
+          get: () => ({ visible: true, available: true }),
+          set: (visible) => ({ visible, available: true }),
+        },
+      ),
     )({} as AppContext)
     await expect(caller.startAtLogin()).resolves.toEqual({ enabled: false, available: true })
     await expect(caller.setStartAtLogin({ enabled: true })).resolves.toEqual({

@@ -359,7 +359,10 @@ export const workspacesRouter = router({
             "A non-Git project can run only one agent at a time. Close the live agent or Initialize Git.",
         })
       }
-      const [catalogCommand, ...args] = buildLaunchArgv(agent)
+      const [catalogCommand, ...args] = buildLaunchArgv(
+        agent,
+        getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
+      )
       const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[
         agent.id
       ]?.trim()
@@ -377,6 +380,15 @@ export const workspacesRouter = router({
         gitAvailable,
         liveAgentCount: () => ctx.activityMonitor.liveAgentCount(workspace.projectId),
         launch: async () => {
+          if (
+            !ctx.db
+              .select({ id: projects.id })
+              .from(projects)
+              .where(eq(projects.id, workspace.projectId))
+              .get()
+          ) {
+            throw new TRPCError({ code: "NOT_FOUND", message: `No project ${workspace.projectId}` })
+          }
           const client = await ctx.getDaemonClient()
           const launchEnvironment = await ctx.getAgentLaunchEnvironment()
           const spawned = await client.spawn({

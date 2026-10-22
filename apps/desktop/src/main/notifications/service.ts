@@ -33,6 +33,8 @@ export interface NotificationLogger {
 }
 
 export interface NotificationServiceOptions {
+  /** Automated runtimes suppress desktop output without changing user preferences. */
+  suppressDelivery?: boolean
   native: NativeNotificationAdapter
   focus: AppFocusAdapter
   getPreferences: () => NotificationPreferences
@@ -53,7 +55,7 @@ export class NotificationService {
 
   notify(request: NotificationRequest): NotificationOutcome {
     const preferences = this.options.getPreferences()
-    if (preferences.muted) return "muted"
+    if (this.options.suppressDelivery || preferences.muted) return "muted"
     const eventSetting = preferences[request.eventType]
     if (!eventSetting.enabled) return "disabled"
     if (this.options.focus.isFocused()) return "focused"

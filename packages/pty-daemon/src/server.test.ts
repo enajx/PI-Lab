@@ -383,3 +383,40 @@ describe("error handling", () => {
     })
   })
 })
+
+test("killing an agent PTY also stops its subprocess group", async () => {
+  const client = await newClient()
+  const session = await client.spawn({
+    command: NODE,
+    args: [
+      "-e",
+      "const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e',\"process.on('SIGHUP',()=>{});console.log('READY');setInterval(()=>{},100)\"],{stdio:'inherit'});child.once('spawn',()=>console.log('CHILD:'+child.pid));setInterval(()=>{},100)",
+    ],
+    cwd: socketDir,
+  })
+  let descendant = 0
+  await waitFor(async () => {
+    const snapshot = await client.attach(session.id)
+    descendant = Number(snapshot.scrollback.match(/CHILD:(\d+)/)?.[1] ?? 0)
+    return descendant > 0 && snapshot.scrollback.includes("READY")
+  })
+  try {
+    process.kill(descendant, 0)
+    await client.kill(session.id, "SIGKILL")
+    await waitFor(() => {
+      try {
+        process.kill(descendant, 0)
+        return false
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+        return true
+      }
+    }, 1000)
+  } finally {
+    try {
+      process.kill(descendant, "SIGKILL")
+    } catch (error) {
+      expect((error as NodeJS.ErrnoException).code).toBe("ESRCH")
+    }
+  }
+})

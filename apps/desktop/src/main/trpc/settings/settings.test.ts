@@ -17,7 +17,7 @@ import { createHarness, type Harness } from "../testHarness"
 let harness: Harness
 
 beforeEach(async () => {
-  harness = await createHarness()
+  harness = await createHarness([], { git: false, daemon: "lazy" })
 })
 
 afterEach(async () => {
@@ -87,12 +87,12 @@ describe("settings.updateProjectTemplate", () => {
 })
 
 describe("project types", () => {
-  it("starts with Research, Software, and Paper and stores editable guidance", async () => {
+  it("starts with Research, Software, and Manuscript and stores editable guidance", async () => {
     const initial = (await harness.caller.settings.get()).projectTemplate.projectTypes
-    expect(initial.map((type) => type.id)).toEqual(["research", "software", "paper"])
+    expect(initial.map((type) => type.id)).toEqual(["research", "software", "manuscript"])
 
     await harness.caller.settings.updateProjectTypeGuidance({
-      id: "paper",
+      id: "manuscript",
       guidance: "Focus on the manuscript and its evidence.",
     })
 
@@ -319,6 +319,9 @@ describe("settings.updateAgents", () => {
     })
     expect(result).toEqual({
       projectConfigStorage: "both",
+      quitBehavior: "stop",
+      launchDefaults: {},
+      defaultAgentId: null,
       executableOverrides: { codex: "/opt/homebrew/bin/codex" },
       setupCompleted: false,
     })
@@ -333,6 +336,9 @@ describe("settings.updateAgents", () => {
     const result = await harness.caller.settings.updateAgents({ setupCompleted: true })
     expect(result).toEqual({
       projectConfigStorage: "project",
+      quitBehavior: "stop",
+      launchDefaults: {},
+      defaultAgentId: null,
       executableOverrides: { codex: "/usr/local/bin/codex" },
       setupCompleted: true,
     })

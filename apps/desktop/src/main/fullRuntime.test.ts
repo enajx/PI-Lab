@@ -1,13 +1,19 @@
 import type { BrowserWindow } from "electron"
 import { expect, test, vi } from "vitest"
 
-const { reconcile, handler, database } = vi.hoisted(() => ({
+const { reconcile, recover, handler, database } = vi.hoisted(() => ({
   reconcile: vi.fn(),
+  recover: vi.fn(async () => {}),
   handler: vi.fn((_options: unknown) => ({ attachWindow: vi.fn() })),
   database: {},
 }))
 vi.mock("electron", () => ({
-  app: { getPath: () => "/unused" },
+  app: {
+    isPackaged: false,
+    getAppPath: () => "/unused",
+    getPath: () => "/unused",
+    getName: () => "PI Lab",
+  },
   ipcMain: { on: vi.fn() },
   dialog: {},
   safeStorage: {},
@@ -17,6 +23,7 @@ vi.mock("trpc-electron/main", () => ({ createIPCHandler: handler }))
 vi.mock("@pi-lab/local-db", () => ({
   getSettingsOrDefaults: () => ({ caffeine: {} }),
   projects: {},
+  resolveDataDir: () => "/unused",
 }))
 vi.mock("./db/db", () => ({
   getDb: () => database,
@@ -27,6 +34,11 @@ vi.mock("./activity", () => ({
   createActivityMonitor: () => ({ reconcile }),
   systemActivityClock: {},
   systemActivityScheduler: {},
+}))
+vi.mock("./automations/managedProcesses", () => ({
+  ManagedProcesses: class {
+    recover = recover
+  },
 }))
 vi.mock("./automations/dispatch", () => ({ dispatchAutomation: vi.fn() }))
 vi.mock("./automations/scheduler", () => ({
@@ -54,6 +66,7 @@ vi.mock("./python", () => ({
 vi.mock("./python/standaloneInterpreters", () => ({ liveStandalonePythonDiscoverer: vi.fn() }))
 vi.mock("./quickEdit/pythonRun", () => ({ QuickPythonRunner: class {} }))
 vi.mock("./terminal/supervisor", () => ({ TerminalSupervisor: class {} }))
+vi.mock("./trpc/projects/planning", () => ({ listPlanningAgentSessions: async () => [] }))
 vi.mock("./trpc/appRouter", () => ({ appRouter: {} }))
 vi.mock("./trpc/science/analysis/interactiveController", () => ({
   AnalysisInteractiveController: class {
@@ -62,6 +75,11 @@ vi.mock("./trpc/science/analysis/interactiveController", () => ({
 }))
 vi.mock("./trpc/template", () => ({ seedWritableTemplate: async () => {} }))
 vi.mock("./window/appMenu", () => ({ installAppMenu: vi.fn() }))
+
+vi.mock("./trpc/context", async (original) => ({
+  ...(await original<typeof import("./trpc/context")>()),
+  DEFAULT_AGENT_LAUNCH_ENVIRONMENT: async () => ({ TEST: "ready" }),
+}))
 
 import { FullRuntime } from "./fullRuntime"
 
@@ -76,6 +94,7 @@ test("the window opens while reconciliation is pending and IPC launch context wa
   const initialWindow = vi.fn(() => window)
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
+    openAgentSettings: () => {},
     ensureMainWindow: () => window,
     initialWindow,
   })
@@ -106,6 +125,7 @@ test("a reconciliation failure leaves read-only IPC usable and rejects agent lau
   const window = {} as BrowserWindow
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
+    openAgentSettings: () => {},
     ensureMainWindow: () => window,
     initialWindow: () => window,
   })
@@ -119,4 +139,45 @@ test("a reconciliation failure leaves read-only IPC usable and rejects agent lau
     (error: Error) => error.message,
   )
   expect(outcome).toBe("Daemon adoption failed")
+})
+
+test("a later launch retries failed recovery and concurrent launches share that retry", async () => {
+  handler.mockClear()
+  recover.mockClear()
+  let finish!: () => void
+  reconcile
+    .mockReset()
+    .mockRejectedValueOnce(new Error("Daemon temporarily unavailable"))
+    .mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        }),
+    )
+  const window = {} as BrowserWindow
+  const runtime = new FullRuntime({
+    getAppIconPath: () => null,
+    openAgentSettings: () => {},
+    ensureMainWindow: () => window,
+    initialWindow: () => window,
+  })
+  await runtime.start()
+  const options = handler.mock.calls[0]?.[0] as {
+    createContext: () => Promise<{ getAgentLaunchEnvironment: () => Promise<unknown> }>
+  }
+  const context = await options.createContext()
+  const first = context.getAgentLaunchEnvironment()
+  const second = context.getAgentLaunchEnvironment()
+  // Attach rejection handlers immediately while asserting that retry starts.
+  const outcomes = Promise.allSettled([first, second])
+  await Promise.resolve()
+  expect(reconcile).toHaveBeenCalledTimes(2)
+  finish()
+  expect(await outcomes).toEqual([
+    { status: "fulfilled", value: { TEST: "ready" } },
+    { status: "fulfilled", value: { TEST: "ready" } },
+  ])
+  expect(recover).toHaveBeenCalledTimes(1)
+  await context.getAgentLaunchEnvironment()
+  expect(reconcile).toHaveBeenCalledTimes(2)
 })

@@ -1,0 +1,1 @@
+ALTER TABLE `agent_settings` ADD `quit_behavior` text DEFAULT 'stop' NOT NULL;

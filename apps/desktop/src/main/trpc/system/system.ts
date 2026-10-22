@@ -1,5 +1,6 @@
-import { BrowserWindow, dialog, type OpenDialogOptions } from "electron"
+import { app, BrowserWindow, dialog, type OpenDialogOptions } from "electron"
 import { z } from "zod"
+import { createMenuBarIconService, type MenuBarIconService } from "../../background/trayVisibility"
 import {
   cacheSystemFontDetector,
   liveSystemFontDetector,
@@ -25,6 +26,7 @@ import { type EditorThemeImportResult, readEditorThemeFiles } from "./themeImpor
 export function createSystemRouter(
   detectSystemFonts: SystemFontDetector,
   startAtLogin: StartAtLoginService,
+  menuBarIcon: MenuBarIconService,
 ) {
   const detectSystemFontsOnce = cacheSystemFontDetector(detectSystemFonts)
   return router({
@@ -35,6 +37,10 @@ export function createSystemRouter(
     setStartAtLogin: publicProcedure
       .input(z.object({ enabled: z.boolean() }))
       .mutation(({ input }) => startAtLogin.set(input.enabled)),
+    menuBarIcon: publicProcedure.query(() => menuBarIcon.get()),
+    setMenuBarIcon: publicProcedure
+      .input(z.object({ visible: z.boolean() }))
+      .mutation(({ input }) => menuBarIcon.set(input.visible)),
     /**
      * Open the native single-directory picker, parented to the focused window so it
      * presents as a sheet on macOS. Returns the chosen absolute path, or `null`
@@ -108,7 +114,11 @@ function selectedSystemFontDetector(): SystemFontDetector {
   return override ? async () => ({ families: override, error: null }) : liveSystemFontDetector
 }
 
-export const systemRouter = createSystemRouter(selectedSystemFontDetector(), {
-  get: () => liveStartAtLoginService().get(),
-  set: (enabled) => liveStartAtLoginService().set(enabled),
-})
+export const systemRouter = createSystemRouter(
+  selectedSystemFontDetector(),
+  {
+    get: () => liveStartAtLoginService().get(),
+    set: (enabled) => liveStartAtLoginService().set(enabled),
+  },
+  createMenuBarIconService(() => app.getPath("userData"), process.platform),
+)

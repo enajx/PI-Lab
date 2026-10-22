@@ -1,29 +1,8 @@
-// Wire protocol for the PTY daemon's Unix-domain socket.
-//
-// Framing: newline-delimited JSON (NDJSON). Every frame is exactly one JSON
-// object serialized with no embedded newlines, terminated by a single `\n`.
-// A reader accumulates bytes and splits on `\n` to recover frames, which
-// cleanly tolerates partial socket reads and coalesced writes.
-//
-// Why NDJSON over length-prefixed binary: the daemon's traffic is a small set
-// of control requests plus a stream of UTF-8 terminal output. Carrying PTY
-// chunks as JSON strings keeps the entire wire human-readable and trivially
-// debuggable (`nc -U socket`), and the parser is a single buffer split — no
-// length bookkeeping, no separate binary tail to reassemble. The cost is JSON
-// string-escaping of terminal bytes, which is acceptable for the per-session
-// throughput PI Lab terminals produce.
-//
-// Direction:
-//   Request   client -> daemon  (carries a correlation `cid`)
-//   Reply     daemon -> client  (echoes the originating `cid`)
-//   Event     daemon -> client  (unsolicited; no `cid`)
+// Socket frames are newline-delimited JSON. Requests and replies share a `cid`;
+// unsolicited events have none.
 
 /** Bump when a backward-incompatible change is made to the frame shapes. */
 export const PROTOCOL_VERSION = 1
-
-// ---------------------------------------------------------------------------
-// Session description shared across frames.
-// ---------------------------------------------------------------------------
 
 export interface SessionInfo {
   /** Daemon-assigned opaque identifier, stable for the session's lifetime. */
@@ -41,9 +20,56 @@ export interface SessionInfo {
   alive: boolean
 }
 
-// ---------------------------------------------------------------------------
-// Requests: client -> daemon. Each carries a `cid` the daemon echoes in its reply.
-// ---------------------------------------------------------------------------
+export interface ProcessParams {
+  command: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  metadata: Record<string, string>
+  timeoutMs?: number
+}
+export interface ProcessResult {
+  code: number | null
+  signal: string | null
+  stdout: string
+  stderr: string
+  error: string | null
+}
+export interface ProcessSummary {
+  id: string
+  metadata: Record<string, string>
+  alive: boolean
+}
+export interface ProcessSnapshot extends ProcessSummary {
+  stdoutBytes: number
+  stderrBytes: number
+  stdout: string
+  stderr: string
+  sequence: number
+  result: ProcessResult | null
+}
+export type ProcessRequest =
+  | ({ kind: "process-start"; cid: string } & ProcessParams)
+  | { kind: "process-list"; cid: string }
+  | { kind: "process-attach" | "process-kill" | "process-forget"; cid: string; id: string }
+export type ProcessReply =
+  | { kind: "process-start-ok" | "process-attach-ok"; cid: string; process: ProcessSnapshot }
+  | { kind: "process-list-ok"; cid: string; processes: ProcessSummary[] }
+  | { kind: "process-kill-ok" | "process-forget-ok"; cid: string }
+export interface ProcessOutputEvent {
+  kind: "process-output"
+  offset: number
+  id: string
+  stream: "stdout" | "stderr"
+  chunk: string
+  sequence: number
+}
+export interface ProcessExitEvent {
+  kind: "process-exit"
+  id: string
+  result: ProcessResult
+}
+export type ProcessEvent = ProcessOutputEvent | ProcessExitEvent
 
 export interface SpawnRequest {
   kind: "spawn"
@@ -100,6 +126,7 @@ export interface ListRequest {
 }
 
 export type ClientRequest =
+  | ProcessRequest
   | SpawnRequest
   | AttachRequest
   | DetachRequest
@@ -168,6 +195,7 @@ export interface ErrorReply {
 }
 
 export type DaemonReply =
+  | ProcessReply
   | SpawnReply
   | AttachReply
   | DetachReply
@@ -195,7 +223,7 @@ export interface ExitEvent {
   signal: number | null
 }
 
-export type DaemonEvent = DataEvent | ExitEvent
+export type DaemonEvent = DataEvent | ExitEvent | ProcessEvent
 
 /** Every frame the daemon can emit. */
 export type DaemonFrame = DaemonReply | DaemonEvent
@@ -256,6 +284,38 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
   const cid = value.cid
 
   switch (value.kind) {
+    case "process-start":
+      if (
+        typeof value.command !== "string" ||
+        !isStringArray(value.args) ||
+        typeof value.cwd !== "string" ||
+        !isStringRecord(value.env) ||
+        !isStringRecord(value.metadata)
+      )
+        return null
+      if (
+        value.timeoutMs !== undefined &&
+        (typeof value.timeoutMs !== "number" ||
+          !Number.isFinite(value.timeoutMs) ||
+          value.timeoutMs <= 0)
+      )
+        return null
+      return {
+        kind: "process-start",
+        cid,
+        command: value.command,
+        args: value.args,
+        cwd: value.cwd,
+        env: value.env,
+        metadata: value.metadata,
+        timeoutMs: value.timeoutMs,
+      }
+    case "process-list":
+      return { kind: "process-list", cid }
+    case "process-attach":
+    case "process-kill":
+    case "process-forget":
+      return typeof value.id === "string" ? { kind: value.kind, cid, id: value.id } : null
     case "spawn": {
       if (typeof value.command !== "string") return null
       if (value.args !== undefined && !isStringArray(value.args)) return null
@@ -304,6 +364,14 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
   // The shapes are simple and produced only by our own daemon; a kind check
   // plus the structural narrowing below is enough to keep the client honest.
   switch (value.kind) {
+    case "process-output":
+    case "process-exit":
+      return typeof value.id === "string" ? (value as unknown as ProcessEvent) : null
+    case "process-start-ok":
+    case "process-attach-ok":
+    case "process-list-ok":
+    case "process-kill-ok":
+    case "process-forget-ok":
     case "spawn-ok":
     case "attach-ok":
     case "detach-ok":

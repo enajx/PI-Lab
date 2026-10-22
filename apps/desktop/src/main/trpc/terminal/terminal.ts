@@ -1,4 +1,4 @@
-import type { DaemonClient, DaemonEvent } from "@pi-lab/pty-daemon"
+import type { DaemonClient, DataEvent, ExitEvent } from "@pi-lab/pty-daemon"
 import { observable } from "@trpc/server/observable"
 import { z } from "zod"
 import { publicProcedure, router } from "../trpc"
@@ -105,7 +105,7 @@ export const terminalRouter = router({
     observable<TerminalEvent>((emit) => {
       const { sessionId } = input
       let attaching = true
-      const deliver = (event: DaemonEvent) => {
+      const deliver = (event: DataEvent | ExitEvent) => {
         if (event.kind === "data") {
           ctx.caffeine.markTerminalActivity()
           emit.next({ type: "data", chunk: event.chunk })
@@ -114,7 +114,7 @@ export const terminalRouter = router({
           emit.complete()
         }
       }
-      const onEvent = (event: DaemonEvent) => {
+      const onEvent = (event: DataEvent | ExitEvent) => {
         // Anything before the attach reply is already included in its snapshot.
         if (!attaching) deliver(event)
       }

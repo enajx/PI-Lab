@@ -1,6 +1,13 @@
 import { TRPCError } from "@trpc/server"
+import { agentLaunchLifecycle } from "../agents/launchLifecycle"
 
 const nonGitLaunches = new Set<string>()
+const pendingLaunches = new Map<string, Promise<void>>()
+
+/** Include launch setup before an agent is registered with the activity monitor. */
+export function hasPendingAgentLaunch(projectId: string): boolean {
+  return pendingLaunches.has(projectId)
+}
 
 interface AgentLaunchGuardOptions<T> {
   projectId: string
@@ -36,16 +43,27 @@ export function acquireAgentLaunchSlot(options: AgentLaunchSlotOptions): () => v
   }
 }
 
-/**
- * Keep the non-Git single-agent rule atomic across every public launch entry.
- * The reservation spans daemon spawn through activity tracking, so two requests
- * cannot both observe an empty monitor before either session becomes visible.
- */
+/** Coordinate workspace selection through registration, independently per project. */
 export async function withAgentLaunchGuard<T>(options: AgentLaunchGuardOptions<T>): Promise<T> {
+  return agentLaunchLifecycle.run(() => coordinateLaunch(options))
+}
+
+/** Hold the project reservation until the launch has registered its session. */
+async function coordinateLaunch<T>(options: AgentLaunchGuardOptions<T>): Promise<T> {
   const release = acquireAgentLaunchSlot(options)
+  const previous = pendingLaunches.get(options.projectId)
+  let complete!: () => void
+  const pending = new Promise<void>((resolve) => {
+    complete = resolve
+  })
+  pendingLaunches.set(options.projectId, pending)
   try {
+    await previous
     return await options.launch()
   } finally {
+    complete()
+    if (pendingLaunches.get(options.projectId) === pending)
+      pendingLaunches.delete(options.projectId)
     release()
   }
 }

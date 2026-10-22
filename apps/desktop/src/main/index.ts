@@ -11,10 +11,8 @@ import {
   isAppIconSelection,
 } from "../shared/appIcon"
 import {
-  BACKGROUND_TRAY_OPEN_APP_CHANNEL,
   BACKGROUND_TRAY_OPEN_FILE_CHANNEL,
   BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL,
-  BACKGROUND_TRAY_QUIT_CHANNEL,
   BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL,
   BACKGROUND_TRAY_SNAPSHOT_CHANNEL,
   type BackgroundTraySnapshot,
@@ -40,17 +38,18 @@ import {
   QUICK_EDIT_STAT_CHANNEL,
 } from "../shared/quickEdit"
 import type { BackgroundTray } from "./background/tray"
+import { createMenuBarIconService } from "./background/trayVisibility"
 import type { FullRuntime } from "./fullRuntime"
 import { loadNativeLanguage } from "./i18n/nativeLanguage"
 import { applyMacDockIcon, applyOptionalIcon } from "./identity/appIcon"
 import {
+  alphaIconNeedsRecolor,
   loadAppIconSelection,
-  normalizeAppIconSelectionForChannel,
   resolveSelectedAppIconPath,
   resolveStartupAppIcon,
   saveAppIconSelection,
 } from "./identity/appIconSelection"
-import { createBetaDockIcon } from "./identity/betaDockIcon"
+import { createAlphaDockIcon } from "./identity/betaDockIcon"
 import { channelDataDir, channelIdentity, resolveAppChannel } from "./identity/channel"
 import { FullBootScheduler } from "./quickEdit/fullBootScheduler"
 import { firstFileArgument } from "./quickEdit/launchArgs"
@@ -87,6 +86,7 @@ if (dataDirOverride) {
   process.env.PI_LAB_DATA_DIR = dataDirOverride
   app.setPath("userData", dataDirOverride)
 }
+const menuBarIcon = createMenuBarIconService(() => app.getPath("userData"), process.platform)
 
 const appIconContext = {
   isPackaged: app.isPackaged,
@@ -94,11 +94,15 @@ const appIconContext = {
   appPath: app.isPackaged ? app.getAppPath() : resolve(__dirname, "../.."),
   channel: iconChannel,
 }
+const trayTemplatePath = app.isPackaged
+  ? join(process.resourcesPath, "trayTemplate.png")
+  : resolve(appIconContext.appPath, "assets/icons/trayTemplate.png")
 const startupIcon = resolveStartupAppIcon(
-  normalizeAppIconSelectionForChannel(
-    loadAppIconSelection(app.getPath("userData"), {
+  loadAppIconSelection(
+    app.getPath("userData"),
+    {
       warn: (message) => console.warn(message),
-    }),
+    },
     iconChannel,
   ),
   appIconContext,
@@ -108,23 +112,24 @@ const startupIcon = resolveStartupAppIcon(
 let appIconSelection = startupIcon.selection
 let appIconPath = startupIcon.path
 
-/** Public Beta uses the shared selection but keeps its signed Finder artwork fixed. */
+/** Apply Alpha's selected palette without changing Finder artwork. */
 function currentDockIcon() {
-  if (process.platform !== "darwin" || publicRelease?.channel !== "beta") return appIconPath
+  if (process.platform !== "darwin" || iconChannel !== "alpha") return appIconPath
+  if (!alphaIconNeedsRecolor(appIconSelection)) return appIconPath
   const palettePath = app.isPackaged
     ? join(process.resourcesPath, "app-icon-palettes.json")
-    : resolve(appIconContext.appPath, "../..", "icons-temp/matplotlib-colormaps-3.11.2.json")
+    : resolve(appIconContext.appPath, "assets/icons/matplotlib-colormaps-3.11.2.json")
   try {
-    return createBetaDockIcon(appIconPath, appIconSelection, palettePath, nativeImage)
+    return createAlphaDockIcon(appIconPath, appIconSelection, palettePath, nativeImage)
   } catch (error) {
-    console.warn(`[pi-lab] Beta Dock icon unavailable; using built-in icon: ${String(error)}`)
+    console.warn(`[pi-lab] Selected Dock icon unavailable; using built-in icon: ${String(error)}`)
     return appIconPath
   }
 }
 
-/** Apply the selected Beta color after the first editor is ready. */
+/** Apply the selected channel color after the first editor is ready. */
 function applySelectedDockIcon(): void {
-  if (publicRelease?.channel !== "beta") return
+  if (iconChannel !== "alpha") return
   const dock = app.dock
   applyMacDockIcon(
     currentDockIcon(),
@@ -206,10 +211,29 @@ async function enterBackground(): Promise<void> {
     return
   }
   if (tray) return
+  if (process.platform === "darwin" && !menuBarIcon.get().visible) {
+    hiddenStartup = false
+    return
+  }
   if (!appIconPath) throw new Error("PI Lab tray icon is missing")
   const { BackgroundTray } = await import("./background/tray")
   if (userWindow || quitting) return
-  const created = new BackgroundTray(appIconPath, identity.name)
+  const created = new BackgroundTray(
+    appIconPath,
+    identity.name,
+    trayTemplatePath,
+    {
+      openApp: () => openFull(null),
+      newProject: () => openFull("/?newProject=1"),
+      hideIcon: async () => {
+        menuBarIcon.set(false)
+        closeTray()
+      },
+      restartToUpdate: () => restartToUpdate?.(),
+      quit: () => app.quit(),
+    },
+    traySnapshot(),
+  )
   tray = created
   hiddenStartup = false
   unsubscribeTray = runtime.subscribeTray((snapshot) =>
@@ -282,28 +306,51 @@ if (ownsInstance) {
 // In test mode there is no auto-update or telemetry to disable yet; the seam is
 // reserved here so future wiring stays gated behind one flag.
 
-const shutdownGuard = installShutdownGuard({ app, ipcMain, createRequestId: randomUUID })
+const shutdownGuard = installShutdownGuard({
+  app,
+  ipcMain,
+  createRequestId: randomUUID,
+  prepareQuit: async () => {
+    // Full boot may still be reconciling retained agents when Quit is requested.
+    try {
+      await fullBootScheduler.startNow()
+      return fullRuntime ? fullRuntime.prepareQuit() : true
+    } catch (error) {
+      dialog.showErrorBox(
+        "Could not quit PI Lab",
+        `Agent state could not be checked. The app remains open.\n${String(error)}`,
+      )
+      return false
+    }
+  },
+})
 let fullRuntime: FullRuntime | null = null
 
 ipcMain.handle(APP_ICON_GET_CHANNEL, () => appIconSelection)
 ipcMain.handle(APP_ICON_IDENTITY_CHANNEL, () => iconChannel)
 ipcMain.handle(APP_ICON_PREVIEW_CHANNEL, async (_event, value: unknown) => {
+  if (iconChannel !== "alpha") throw new Error("App icon choices are available in Alpha only")
   if (!isAppIconSelection(value)) throw new Error("Invalid app icon selection")
-  const selection = normalizeAppIconSelectionForChannel(value, iconChannel)
+  const selection = value
   const selectedPath = resolveSelectedAppIconPath(selection, appIconContext, { exists: existsSync })
-  if (publicRelease?.channel === "beta") {
+  if (!alphaIconNeedsRecolor(selection)) {
+    const png = await readFile(selectedPath)
+    return `data:image/png;base64,${png.toString("base64")}`
+  }
+  if (iconChannel === "alpha") {
     const palettePath = app.isPackaged
       ? join(process.resourcesPath, "app-icon-palettes.json")
-      : resolve(appIconContext.appPath, "../..", "icons-temp/matplotlib-colormaps-3.11.2.json")
-    const png = createBetaDockIcon(selectedPath, selection, palettePath, nativeImage).toPNG()
+      : resolve(appIconContext.appPath, "assets/icons/matplotlib-colormaps-3.11.2.json")
+    const png = createAlphaDockIcon(selectedPath, selection, palettePath, nativeImage).toPNG()
     return `data:image/png;base64,${png.toString("base64")}`
   }
   const png = await readFile(selectedPath)
   return `data:image/png;base64,${png.toString("base64")}`
 })
 ipcMain.handle(APP_ICON_SET_CHANNEL, (_event, value: unknown) => {
+  if (iconChannel !== "alpha") throw new Error("App icon choices are available in Alpha only")
   if (!isAppIconSelection(value)) throw new Error("Invalid app icon selection")
-  const selection = normalizeAppIconSelectionForChannel(value, iconChannel)
+  const selection = value
   const selectedPath = resolveSelectedAppIconPath(selection, appIconContext, { exists: existsSync })
   saveAppIconSelection(app.getPath("userData"), selection)
   appIconSelection = selection
@@ -354,6 +401,9 @@ function startFullBoot(): Promise<void> {
       const runtime = new FullRuntime({
         getAppIconPath: () => appIconPath,
         ensureMainWindow,
+        openAgentSettings: () => {
+          void openFull("/settings?section=agents")
+        },
         initialWindow: () => {
           const existing = userWindow
           if (existing) return existing
@@ -405,12 +455,11 @@ async function openFull(route: string | null): Promise<void> {
 }
 
 ipcMain.handle(BACKGROUND_TRAY_SNAPSHOT_CHANNEL, () => traySnapshot())
-ipcMain.handle(BACKGROUND_TRAY_OPEN_APP_CHANNEL, async () => openFull(null))
 ipcMain.handle(BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL, async (_event, id: unknown) => {
   if (typeof id !== "string" || !fullRuntime?.hasProject(id)) throw new Error("Unknown project")
   await openFull(`/projects/${encodeURIComponent(id)}`)
 })
-ipcMain.handle(BACKGROUND_TRAY_OPEN_FILE_CHANNEL, async () => {
+async function openFileFromTray(): Promise<void> {
   const testFile = isTestMode ? process.env.PI_LAB_TEST_PICK_FILE : undefined
   if (testFile) {
     acceptFile(testFile)
@@ -418,8 +467,8 @@ ipcMain.handle(BACKGROUND_TRAY_OPEN_FILE_CHANNEL, async () => {
   }
   const result = await dialog.showOpenDialog({ properties: ["openFile"] })
   if (!result.canceled && result.filePaths[0]) acceptFile(result.filePaths[0])
-})
-ipcMain.on(BACKGROUND_TRAY_QUIT_CHANNEL, () => app.quit())
+}
+ipcMain.handle(BACKGROUND_TRAY_OPEN_FILE_CHANNEL, openFileFromTray)
 ipcMain.on(BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL, () => restartToUpdate?.())
 
 ipcMain.handle(QUICK_EDIT_CURRENT_CHANNEL, () => quickFiles.current())

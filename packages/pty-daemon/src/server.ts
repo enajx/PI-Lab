@@ -1,12 +1,9 @@
-// The daemon: a Unix-domain socket server that owns a SessionStore and routes
-// the wire protocol. One server can serve many concurrent client connections;
-// each connection tracks which sessions it is attached to and forwards their
-// live events. Sessions outlive connections (that is the whole point of the
-// daemon), so disconnecting only tears down subscriptions, not PTYs.
+// Sessions survive socket disconnection; only event subscriptions end.
 
 import { existsSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { createServer, type Server as NetServer, type Socket } from "node:net"
+import { type ProcessJob, ProcessJobStore, UnknownProcessError } from "./processJobs"
 import {
   type ClientRequest,
   type DaemonFrame,
@@ -19,6 +16,7 @@ import { type SessionHandle, SessionStore, type SessionStoreOptions } from "./se
 
 // Larger than the most-escaped scrollback replay, while bounding stalled readers.
 const MAX_PENDING_OUTPUT_BYTES = 4 * 1024 * 1024
+const MAX_PROCESS_REPLAY_BYTES = 16 * 1024 * 1024
 
 export interface DaemonServerOptions {
   /** Absolute path of the Unix socket to listen on. */
@@ -59,7 +57,13 @@ class Connection {
   send(frame: DaemonFrame): void {
     if (this.socket.destroyed) return
     const encoded = encodeFrame(frame)
-    if (this.socket.writableLength + Buffer.byteLength(encoded) > MAX_PENDING_OUTPUT_BYTES) {
+    const limit =
+      frame.kind === "process-attach-ok" ||
+      frame.kind === "process-start-ok" ||
+      frame.kind === "process-exit"
+        ? MAX_PROCESS_REPLAY_BYTES
+        : MAX_PENDING_OUTPUT_BYTES
+    if (this.socket.writableLength + Buffer.byteLength(encoded) > limit) {
       // The session keeps running and its bounded replay remains available on reattach.
       this.socket.destroy()
       return
@@ -78,6 +82,15 @@ class Connection {
     this.subscriptions.set(session.id, unsubscribe)
   }
 
+  attachProcess(job: ProcessJob): void {
+    const key = `process:${job.id}`
+    this.detach(key)
+    this.subscriptions.set(
+      key,
+      job.subscribe((event) => this.send(event)),
+    )
+  }
+
   detach(sessionId: string): void {
     const unsubscribe = this.subscriptions.get(sessionId)
     if (unsubscribe) {
@@ -94,6 +107,7 @@ class Connection {
 
 export class DaemonServer {
   private readonly server: NetServer
+  private readonly jobs = new ProcessJobStore()
   private readonly store: SessionStore
   private readonly connections = new Set<Connection>()
   private readonly socketPath: string
@@ -139,6 +153,20 @@ export class DaemonServer {
 
   private route(request: ClientRequest, connection: Connection): void {
     switch (request.kind) {
+      case "process-start":
+      case "process-attach":
+      case "process-list":
+      case "process-kill":
+      case "process-forget":
+        void this.handleProcess(request, connection).catch((error: unknown) =>
+          this.fail(
+            connection,
+            request.cid,
+            error instanceof UnknownProcessError ? "unknown-process" : "process-failed",
+            errorMessage(error),
+          ),
+        )
+        break
       case "spawn":
         this.handleSpawn(request, connection)
         break
@@ -159,6 +187,47 @@ export class DaemonServer {
         break
       case "list":
         this.handleList(request, connection)
+        break
+    }
+  }
+
+  private async handleProcess(
+    request: Extract<ClientRequest, { kind: `process-${string}` }>,
+    connection: Connection,
+  ): Promise<void> {
+    switch (request.kind) {
+      case "process-start": {
+        const job = await this.jobs.start(request)
+        const snapshot = job.info()
+        this.reply(connection, { kind: "process-start-ok", cid: request.cid, process: snapshot })
+        connection.attachProcess(job)
+        break
+      }
+      case "process-list":
+        this.reply(connection, {
+          kind: "process-list-ok",
+          cid: request.cid,
+          processes: this.jobs.list(),
+        })
+        break
+      case "process-attach": {
+        const job = this.jobs.get(request.id)
+        const snapshot = job.info()
+        this.reply(connection, { kind: "process-attach-ok", cid: request.cid, process: snapshot })
+        connection.attachProcess(job)
+        break
+      }
+      case "process-kill": {
+        const job = this.jobs.get(request.id)
+        job.kill()
+        await job.closed
+        this.reply(connection, { kind: "process-kill-ok", cid: request.cid })
+        break
+      }
+      case "process-forget":
+        this.jobs.forget(request.id)
+        for (const attached of this.connections) attached.detach(`process:${request.id}`)
+        this.reply(connection, { kind: "process-forget-ok", cid: request.cid })
         break
     }
   }
@@ -274,6 +343,7 @@ export class DaemonServer {
 
   /** Kill every session, close all connections, stop listening, remove the socket file. */
   async close(): Promise<void> {
+    await this.jobs.close()
     for (const connection of this.connections) {
       connection.dispose()
       connection.socket.destroy()

@@ -1,7 +1,17 @@
 import { randomUUID } from "node:crypto"
 import { constants, existsSync } from "node:fs"
-import { copyFile, lstat, mkdtemp, open, readFile, realpath, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
   getAgentSettingsOrDefaults,
@@ -9,11 +19,14 @@ import {
   type Project,
   type ProjectType,
   projects,
+  resolveDataDir,
 } from "@pi-lab/local-db"
 import { buildLaunchArgv, buildNonInteractiveLaunchArgv, getAgent } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import { agentLaunchLifecycle } from "../../agents/launchLifecycle"
+import type { NonInteractiveProcessResult } from "../../automations/nonInteractiveRunner"
 import type { AppContext } from "../context"
 import { resolveWritableTemplateDir, seedWritableTemplate } from "../template"
 import { publicProcedure } from "../trpc"
@@ -23,19 +36,90 @@ const sectionPrefix = "## PI Lab project instructions:"
 const sectionStart = "<!-- PI Lab project instructions start -->"
 const sectionEnd = "<!-- PI Lab project instructions end -->"
 
-interface PlanDraft {
-  projectId: string
-  stageDir: string
-  originalResearch: string | null
-  originalAgents: string | null
-  proposedAgents: string
-  proposedResearch: string | null
-  name: string
-  typeId: string
-  sessionId: string | null
+const planDraftSchema = z.object({
+  projectId: z.string(),
+  stageDir: z.string(),
+  originalResearch: z.string().nullable(),
+  originalAgents: z.string().nullable(),
+  proposedAgents: z.string(),
+  name: z.string(),
+  typeId: z.string(),
+  sessionId: z.string().nullable(),
+  mode: z.enum(["one-shot", "interactive"]),
+  state: z.enum(["running", "ready", "failed"]),
+  error: z.string().nullable(),
+})
+type PlanDraft = z.infer<typeof planDraftSchema>
+
+function draftDirectory(draftId: string): string {
+  return join(resolveDataDir(), "planning", z.string().uuid().parse(draftId))
 }
 
-const drafts = new Map<string, PlanDraft>()
+/** Persist draft metadata outside the agent's working directory. */
+async function writeDraft(draftId: string, draft: PlanDraft): Promise<void> {
+  const path = join(draftDirectory(draftId), "draft.json")
+  const temporary = `${path}.${randomUUID()}.tmp`
+  await writeFile(temporary, JSON.stringify(draft), { mode: 0o600 })
+  await rename(temporary, path)
+}
+
+async function readDraft(draftId: string): Promise<PlanDraft | null> {
+  const raw = await readOptional(join(draftDirectory(draftId), "draft.json"))
+  return raw === null ? null : planDraftSchema.parse(JSON.parse(raw))
+}
+
+/** Read durable pending drafts, including sessions created before app restart. */
+async function listDrafts(): Promise<{ draftId: string; draft: PlanDraft }[]> {
+  const directory = join(resolveDataDir(), "planning")
+  const entries = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return []
+    throw error
+  })
+  const result: { draftId: string; draft: PlanDraft }[] = []
+  for (const draftId of entries) {
+    if (!z.string().uuid().safeParse(draftId).success) continue
+    const draft = await readDraft(draftId)
+    if (draft) result.push({ draftId, draft })
+  }
+  return result
+}
+
+export async function listPlanningAgentSessions(): Promise<
+  { draftId: string; projectId: string; sessionId: string }[]
+> {
+  return (await listDrafts()).flatMap(({ draftId, draft }) =>
+    draft.sessionId ? [{ draftId, projectId: draft.projectId, sessionId: draft.sessionId }] : [],
+  )
+}
+
+/** Retire planning terminals only after the daemon confirms they are absent or stopped. */
+export async function reconcilePlanningSessions(
+  liveSessionIds: ReadonlySet<string>,
+): Promise<void> {
+  for (const { draftId, draft } of await listDrafts()) {
+    if (!draft.sessionId || liveSessionIds.has(draft.sessionId)) continue
+    draft.sessionId = null
+    draft.state = "failed"
+    draft.error = "The planning agent has stopped. Review any saved proposal or discard the draft."
+    await writeDraft(draftId, draft)
+  }
+}
+
+/** Complete a one-shot draft after normal execution or daemon recovery. */
+export async function completePlanningProcess(
+  metadata: Record<string, string>,
+  result: NonInteractiveProcessResult,
+): Promise<void> {
+  if (metadata.kind !== "planning" || !metadata.draftId) return
+  const draft = await readDraft(metadata.draftId)
+  if (!draft) return
+  const failed = result.error !== null || result.signal !== null || result.code !== 0
+  draft.state = failed ? "failed" : "ready"
+  draft.error = failed
+    ? result.error || result.stderr || `Planning agent stopped (${result.signal ?? result.code})`
+    : null
+  await writeDraft(metadata.draftId, draft)
+}
 
 const startInput = z.object({
   id: z.string().min(1),
@@ -141,6 +225,7 @@ function customInstructionsFromAgents(content: string): string {
 /** Copy only the Markdown context the basic setup agent needs into an isolated folder. */
 async function makeStage(
   project: Project,
+  draftId: string,
   proposedAgents: string,
   originalResearch: string | null,
 ): Promise<string> {
@@ -162,7 +247,8 @@ async function makeStage(
       throw new TRPCError({ code: "FORBIDDEN", message: "Task Markdown is outside the project" })
     }
   }
-  const stageDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-plan-")))
+  const stageDir = join(draftDirectory(draftId), "stage")
+  await mkdir(stageDir, { recursive: true, mode: 0o700 })
   await writeFile(join(stageDir, "AGENTS.md"), proposedAgents)
   if (originalResearch !== null) await writeFile(join(stageDir, "RESEARCH.md"), originalResearch)
   if (project.taskRelPath && taskSource) {
@@ -187,6 +273,21 @@ function planningPrompt(name: string, description: string, type: ProjectType): s
 
 /** Shared draft lifecycle used by both one-shot and interactive CLI modes. */
 export const planningProcedures = {
+  pendingPlans: publicProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .query(async ({ input }) =>
+      (await listDrafts())
+        .filter(({ draft }) => draft.projectId === input.id)
+        .map(({ draftId, draft }) => ({
+          draftId,
+          name: draft.name,
+          typeId: draft.typeId,
+          sessionId: draft.sessionId,
+          mode: draft.mode,
+          state: draft.state,
+          error: draft.error,
+        })),
+    ),
   getPlanDefaults: publicProcedure
     .input(z.object({ id: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
@@ -219,8 +320,15 @@ export const planningProcedures = {
     const configured = getAgentSettingsOrDefaults(ctx.db).executableOverrides[agent.id]?.trim()
     const argv =
       input.mode === "one-shot"
-        ? buildNonInteractiveLaunchArgv(agent, prompt)
-        : buildLaunchArgv(agent, { args: [prompt] })
+        ? buildNonInteractiveLaunchArgv(
+            agent,
+            prompt,
+            getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
+          )
+        : buildLaunchArgv(agent, {
+            ...getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
+            args: [prompt],
+          })
     const [catalogCommand, ...args] = argv
     const command = await ctx.resolveAgentExecutable(configured || catalogCommand || "")
     if (!command)
@@ -229,20 +337,22 @@ export const planningProcedures = {
         message: `${agent.label} is not available`,
       })
     const env = { ...(await ctx.getAgentLaunchEnvironment()), ...agent.env }
-    const stageDir = await makeStage(project, proposedAgents, originalResearch)
     const draftId = randomUUID()
+    const stageDir = await makeStage(project, draftId, proposedAgents, originalResearch)
     const draft: PlanDraft = {
       projectId: project.id,
       stageDir,
       originalResearch,
       originalAgents,
       proposedAgents,
-      proposedResearch: null,
       name: input.name,
       typeId: input.typeId,
       sessionId: null,
+      mode: input.mode,
+      state: "running",
+      error: null,
     }
-    drafts.set(draftId, draft)
+    await writeDraft(draftId, draft)
 
     const launch = async () => {
       if (input.mode === "one-shot") {
@@ -252,8 +362,11 @@ export const planningProcedures = {
           cwd: stageDir,
           env,
           timeoutMs: 600_000,
+          metadata: { kind: "planning", draftId, projectId: project.id },
         })
         const result = await started.completion
+        await completePlanningProcess({ kind: "planning", draftId }, result)
+        await started.acknowledge?.()
         if (result.error || result.signal || result.code !== 0) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
@@ -261,28 +374,35 @@ export const planningProcedures = {
           })
         }
       } else {
-        const client = await ctx.getDaemonClient()
-        const spawned = await client.spawn({
-          command,
-          args,
-          cwd: stageDir,
-          env,
-          cols: 80,
-          rows: 24,
+        await agentLaunchLifecycle.run(async () => {
+          const client = await ctx.getDaemonClient()
+          const spawned = await client.spawn({
+            command,
+            args,
+            cwd: stageDir,
+            env,
+            cols: 80,
+            rows: 24,
+          })
+          draft.sessionId = spawned.id
+          await writeDraft(draftId, draft).catch(async (error: unknown) => {
+            await client.kill(spawned.id)
+            throw error
+          })
         })
-        draft.sessionId = spawned.id
       }
     }
     await launch().catch(async (error: unknown) => {
-      drafts.delete(draftId)
-      await rm(stageDir, { recursive: true, force: true })
+      draft.state = "failed"
+      draft.error = String(error)
+      await writeDraft(draftId, draft)
       throw error
     })
     return { draftId, sessionId: draft.sessionId }
   }),
 
   reviewPlan: publicProcedure.input(draftInput).query(async ({ input }) => {
-    const draft = drafts.get(input.draftId)
+    const draft = await readDraft(input.draftId)
     if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "Planning draft not found" })
     const proposed = await readOptional(join(draft.stageDir, proposalFile))
     if (!proposed?.trim()) {
@@ -291,7 +411,11 @@ export const planningProcedures = {
         message: `The agent has not written ${proposalFile} yet`,
       })
     }
-    draft.proposedResearch = proposed
+    await writeFile(
+      join(draftDirectory(input.draftId), "reviewed.json"),
+      JSON.stringify(proposed),
+      { mode: 0o600 },
+    )
     return {
       researchOriginal: draft.originalResearch ?? "",
       researchProposed: proposed,
@@ -303,9 +427,10 @@ export const planningProcedures = {
   applyPlan: publicProcedure
     .input(draftInput.extend({ researchContent: z.string().min(1).max(1_000_000).optional() }))
     .mutation(async ({ ctx, input }) => {
-      const draft = drafts.get(input.draftId)
+      const draft = await readDraft(input.draftId)
       if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "Planning draft not found" })
-      if (draft.proposedResearch === null) {
+      const reviewed = await readOptional(join(draftDirectory(input.draftId), "reviewed.json"))
+      if (reviewed === null) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "Review the proposal before applying it",
@@ -334,7 +459,7 @@ export const planningProcedures = {
       await stopInteractiveDraft(ctx, draft)
       await writeProjectFile(
         researchPath,
-        input.researchContent ?? draft.proposedResearch,
+        input.researchContent ?? z.string().parse(JSON.parse(reviewed)),
         draft.originalResearch !== null,
       )
       await writeProjectFile(agentsPath, draft.proposedAgents, draft.originalAgents !== null).catch(
@@ -350,17 +475,15 @@ export const planningProcedures = {
         .where(eq(projects.id, project.id))
         .returning()
         .get()
-      await rm(draft.stageDir, { recursive: true, force: true })
-      drafts.delete(input.draftId)
+      await rm(draftDirectory(input.draftId), { recursive: true, force: true })
       return row
     }),
 
   discardPlan: publicProcedure.input(draftInput).mutation(async ({ ctx, input }) => {
-    const draft = drafts.get(input.draftId)
+    const draft = await readDraft(input.draftId)
     if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "Planning draft not found" })
     await stopInteractiveDraft(ctx, draft)
-    await rm(draft.stageDir, { recursive: true, force: true })
-    drafts.delete(input.draftId)
+    await rm(draftDirectory(input.draftId), { recursive: true, force: true })
     return { discarded: true as const }
   }),
 }

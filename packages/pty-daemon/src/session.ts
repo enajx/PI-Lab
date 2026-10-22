@@ -43,6 +43,7 @@ class Session {
   readonly createdAt = Date.now()
 
   private readonly pty: IPty
+  private readonly processGroupId: number
   private readonly scrollback: Scrollback
   private cols: number
   private rows: number
@@ -67,6 +68,8 @@ class Session {
       cwd: this.cwd,
       env: { ...(inheritedEnv as Record<string, string>), ...options.env },
     })
+
+    this.processGroupId = this.pty.pid
 
     this.pty.onData((chunk) => {
       this.scrollback.append(chunk)
@@ -132,7 +135,21 @@ class Session {
   }
 
   kill(signal?: string): void {
-    if (this.alive) this.pty.kill(signal)
+    if (!this.alive) return
+    if (process.platform === "win32") {
+      this.pty.kill(signal)
+      return
+    }
+    // node-pty starts a new session/process group; include the agent's children.
+    try {
+      process.kill(-this.processGroupId, (signal ?? "SIGTERM") as NodeJS.Signals)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      // macOS can report EPERM for a group already exiting before onExit fires.
+      // The original PTY kill handles that teardown race without a group lookup.
+      if (code === "EPERM") this.pty.kill(signal)
+      else if (code !== "ESRCH") throw error
+    }
   }
 
   /** Drop all listeners; used during store teardown. */

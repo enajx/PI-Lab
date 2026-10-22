@@ -84,6 +84,17 @@ function harness(overrides: {
 }
 
 describe("NotificationService", () => {
+  test("test-runtime suppression blocks banners and sounds without changing saved preferences", () => {
+    const current = preferences()
+    const fixture = harness({ current })
+    const service = new NotificationService({ ...fixture.options, suppressDelivery: true })
+
+    expect(service.notify(REQUEST)).toBe("muted")
+    expect(fixture.handlers).toEqual([])
+    expect(fixture.sounds).toEqual([])
+    expect(current.muted).toBe(false)
+  })
+
   test("suppresses both banner and sound while PI Lab is focused", () => {
     const fixture = harness({ focused: true })
 

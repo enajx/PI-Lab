@@ -29,6 +29,7 @@ import {
 } from "../automations/nonInteractiveRunner"
 import type { CaffeineControllerPort, CaffeineSettings, CaffeineStatus } from "../caffeine"
 import type { PyToolsExec } from "../diagnostics"
+import type { PiLabChannel } from "../identity/channel"
 import type { SshExec } from "../lib/ssh-config"
 import {
   createNotificationBrokers,
@@ -229,6 +230,7 @@ export const FAKE_PYTHON_RUNTIME_RESOLVER: PythonRuntimeResolver = async () => (
 })
 
 export interface HarnessOptions {
+  appChannel?: PiLabChannel
   /** Skip Git subprocesses for suites that use only the database and filesystem. */
   git?: boolean
   /** Defer the real socket and its clients until a terminal operation needs them. */
@@ -293,6 +295,7 @@ export async function createHarness(
     | "getAgentLaunchEnvironment"
     | "git"
     | "daemon"
+    | "appChannel"
   > = {},
 ): Promise<Harness> {
   // Canonicalize: on macOS `mkdtemp` hands back `/var/...` but git reports the
@@ -363,6 +366,7 @@ export async function createHarness(
   const skillsHomeDir = join(dataDir, "home")
   const context: AppContext = {
     db,
+    appChannel: options.appChannel ?? "alpha",
     skillsHomeDir,
     getDaemonClient: async () => {
       await ensureDaemon()

@@ -5,7 +5,7 @@ import { SHUTDOWN_REQUEST_CHANNEL, SHUTDOWN_RESPONSE_CHANNEL } from "../../share
 import { installShutdownGuard } from "./shutdownGuard"
 
 /** Mocked Electron public events. Real Electron shutdown is checked by the E2E flow. */
-function harness() {
+function harness(prepareQuit?: () => Promise<boolean>) {
   const app = new EventEmitter()
   const ipc = new EventEmitter()
   const window = new EventEmitter()
@@ -41,6 +41,7 @@ function harness() {
     app: Object.assign(app, { quit }) as unknown as App,
     ipcMain: ipc as IpcMain,
     createRequestId: () => `request-${++sequence}`,
+    prepareQuit,
   })
   const electronWindow = Object.assign(window, {
     webContents,
@@ -66,6 +67,36 @@ function harness() {
 }
 
 describe("shutdown guard through mocked Electron events", () => {
+  test("agent shutdown waits for renderer approval and can cancel quitting", async () => {
+    const prepare = vi.fn(async () => false)
+    const h = harness(prepare)
+    h.guard.attachWindow(h.electronWindow)
+    h.quit()
+    expect(prepare).not.toHaveBeenCalled()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce())
+    expect(h.window.listenerCount("close")).toBe(1)
+    prepare.mockResolvedValue(true)
+    h.quit()
+    h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(h.window.listenerCount("close")).toBe(0))
+  })
+
+  test("quit without a window still waits for agent shutdown", async () => {
+    let resolve!: (allow: boolean) => void
+    const prepare = vi.fn(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done
+        }),
+    )
+    const h = harness(prepare)
+    h.quit()
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(h.quit).toHaveBeenCalledTimes(1)
+    resolve(true)
+    await vi.waitFor(() => expect(h.quit).toHaveBeenCalledTimes(2))
+  })
   test("Restart to Update installs only after the current renderer approves quitting", () => {
     const h = harness()
     h.guard.attachWindow(h.electronWindow)

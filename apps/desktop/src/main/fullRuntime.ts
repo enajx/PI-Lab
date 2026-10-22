@@ -1,7 +1,15 @@
 import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
-import { isAbsolute, relative, sep } from "node:path"
-import { getSettingsOrDefaults, MigrationFailure, projects } from "@pi-lab/local-db"
+import { isAbsolute, join, relative, sep } from "node:path"
+import {
+  agentSessions,
+  getAgentSettingsOrDefaults,
+  getSettingsOrDefaults,
+  MigrationFailure,
+  projects,
+  resolveDataDir,
+} from "@pi-lab/local-db"
+import { ne } from "drizzle-orm"
 import { app, type BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
@@ -15,12 +23,16 @@ import {
   systemActivityScheduler,
 } from "./activity"
 import { ActivityStatusFeed } from "./activity/statusFeed"
-import { dispatchAutomation } from "./automations/dispatch"
+import { agentLaunchLifecycle } from "./agents/launchLifecycle"
+import { prepareAgentQuit } from "./agents/quitPolicy"
+import { dispatchAutomation, restoreAutomationProcess } from "./automations/dispatch"
+import { ManagedProcesses } from "./automations/managedProcesses"
 import { AutomationScheduler } from "./automations/scheduler"
 import { trayProjectSnapshot } from "./background/projectSnapshot"
 import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
 import { getDb, initDatabase } from "./db/db"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
+import { channelFromAppName } from "./identity/channel"
 import {
   createElectronAppFocusAdapter,
   createElectronNativeNotificationAdapter,
@@ -45,24 +57,34 @@ import {
   DEFAULT_PYTHON_RUNTIME_RESOLVER,
   DEFAULT_SETUP_PROBE,
   DEFAULT_SSH_EXEC,
-  DEFAULT_WORKFLOW_PROCESS_RUNNER,
 } from "./trpc/context"
 import { electronThumbnailImageProcessor } from "./trpc/projects/electronThumbnailImage"
+import {
+  completePlanningProcess,
+  listPlanningAgentSessions,
+  reconcilePlanningSessions,
+} from "./trpc/projects/planning"
 import { AnalysisInteractiveController } from "./trpc/science/analysis/interactiveController"
 import { seedWritableTemplate } from "./trpc/template"
+import { restoreProjectWorkflow } from "./trpc/workflows/workflows"
+import { publicReleaseFromPackage } from "./updates/release"
+import { initializePublicUpdateChannel } from "./updates/selection"
 import { installAppMenu } from "./window/appMenu"
 
 interface FullRuntimeHost {
   getAppIconPath: () => string | null
   ensureMainWindow: () => BrowserWindow
   initialWindow: () => BrowserWindow | null
+  openAgentSettings: () => void
 }
 
 /** Full-app services are imported and constructed after the quick editor has a caret. */
 export class FullRuntime {
   private ipcHandler: ReturnType<typeof createIPCHandler> | null = null
   private readonly terminalSupervisor = new TerminalSupervisor(
-    isTestMode ? { reapDaemonOnDispose: true } : {},
+    isTestMode && process.env.PI_LAB_TEST_RETAIN_DAEMON !== "1"
+      ? { reapDaemonOnDispose: true }
+      : {},
   )
   private readonly quickPythonRunner = new QuickPythonRunner({
     resolveRuntime: liveQuickPythonRuntimeResolver,
@@ -71,6 +93,11 @@ export class FullRuntime {
     probeRuntime: livePythonProbe,
     getDaemonClient: () => this.terminalSupervisor.ensureClient(),
   })
+  private readonly managedProcesses = new ManagedProcesses(
+    join(resolveDataDir(), "agent-processes"),
+    () => this.terminalSupervisor.ensureClient(),
+  )
+  private readonly processFinalizers = new Set<Promise<void>>()
   private readonly analysisInteractive = new AnalysisInteractiveController()
   private readonly agentCatalog = buildAgentCatalog(isTestMode)
   private readonly notificationBrokers = createNotificationBrokers()
@@ -81,13 +108,14 @@ export class FullRuntime {
   })
   private activityStatus: ActivityStatusFeed | null = null
   private startupReady: Promise<void> = Promise.resolve()
-  private agentLaunchReady: Promise<void> = Promise.resolve()
+  private agentLaunchReady: Promise<void> | null = null
   private activityMonitor: ActivityMonitorPort | null = null
   private caffeineController: CaffeineController | null = null
   private automationScheduler: AutomationScheduler | null = null
 
   constructor(private readonly host: FullRuntimeHost) {
     this.notificationService = new NotificationService({
+      suppressDelivery: isTestMode,
       native: createElectronNativeNotificationAdapter(host.getAppIconPath),
       focus: createElectronAppFocusAdapter(host.ensureMainWindow),
       getPreferences: () => getSettingsOrDefaults(getDb()).notifications,
@@ -117,6 +145,10 @@ export class FullRuntime {
   /** Show the window after database setup; hold IPC contexts until reconciliation finishes. */
   async start(): Promise<void> {
     const dbStatus = initDatabase()
+    initializePublicUpdateChannel(
+      getDb(),
+      publicReleaseFromPackage(app.isPackaged, app.getAppPath()),
+    )
     ipcMain.on(INTERFACE_LANGUAGE_CHANNEL, (_event, language: unknown) => {
       if (language === getNativeLanguage()) return
       if (saveNativeLanguage(app.getPath("userData"), language)) installAppMenu()
@@ -141,8 +173,7 @@ export class FullRuntime {
       initialSettings: getSettingsOrDefaults(getDb()).caffeine,
     })
     this.activityStatus = new ActivityStatusFeed(getDb(), this.activityRegistry)
-    this.agentLaunchReady = this.activityMonitor.reconcile()
-    this.startupReady = this.agentLaunchReady.catch((error) => {
+    this.startupReady = this.ensureAgentRecovery().catch((error) => {
       console.warn(`[pi-lab] activity reconciliation skipped: ${String(error)}`)
     })
     const window = this.host.initialWindow()
@@ -153,6 +184,42 @@ export class FullRuntime {
     })
     this.startAutomationScheduler()
     installAppMenu()
+  }
+
+  /** Share recovery work; a failed connection can be retried by the next launch. */
+  private ensureAgentRecovery(): Promise<void> {
+    if (this.agentLaunchReady) return this.agentLaunchReady
+    if (!this.activityMonitor) return Promise.reject(new Error("Agent monitor is not ready"))
+    this.agentLaunchReady = this.activityMonitor
+      .reconcile()
+      .then(async () => {
+        await this.reconcilePlanningAgents()
+        await this.recoverBackgroundAgents()
+      })
+      .catch((error: unknown) => {
+        this.agentLaunchReady = null
+        throw error
+      })
+    return this.agentLaunchReady
+  }
+
+  /** Attach only unclaimed durable owners, including uncertain spawn replies. */
+  private async recoverBackgroundAgents(): Promise<void> {
+    await this.managedProcesses.recover((metadata, process) => {
+      const ctx = this.createAppContext()
+      const completion =
+        metadata.kind === "automation"
+          ? restoreAutomationProcess(ctx, metadata, process)
+          : metadata.kind === "project-workflow"
+            ? restoreProjectWorkflow(ctx, metadata, process)
+            : metadata.kind === "planning"
+              ? process.completion.then(async (result) => {
+                  await completePlanningProcess(metadata, result)
+                  await process.acknowledge?.()
+                })
+              : Promise.reject(new Error(`Unknown recovered agent mode: ${metadata.kind}`))
+      this.trackFinalizer(completion)
+    })
   }
 
   /** Route a quick file to its longest matching registered project. */
@@ -244,12 +311,112 @@ export class FullRuntime {
       .some((project) => project.id === id)
   }
 
+  /** Apply the same persisted policy to all agents before any actual app quit. */
+  async prepareQuit(): Promise<boolean> {
+    try {
+      await this.ensureAgentRecovery()
+      return await prepareAgentQuit({
+        pause: async () => {
+          await agentLaunchLifecycle.pause()
+          await this.recoverBackgroundAgents()
+        },
+        resume: () => agentLaunchLifecycle.resume(),
+        behavior: () => getAgentSettingsOrDefaults(getDb()).quitBehavior,
+        count: async () =>
+          (await this.liveTerminalAgents()).length + (await this.managedProcesses.runningCount()),
+        confirm: async (count) => {
+          const result = await dialog.showMessageBox({
+            type: "warning",
+            title: "Agents are running",
+            message: `${count} agent${count === 1 ? " is" : "s are"} still running.`,
+            detail:
+              "Your Settings say to stop agents when quitting PI Lab. Quitting will stop them. To leave agents running in the background, change When quitting PI Lab in Settings → Agents & worktrees.",
+            buttons: ["Cancel", "Quit and stop agents", "Open Settings"],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+          })
+          return result.response === 1 ? "stop" : result.response === 2 ? "settings" : "cancel"
+        },
+        settings: () => this.host.openAgentSettings(),
+        stop: async () => {
+          this.automationScheduler?.stop()
+          await Promise.all([this.stopTerminalAgents(), this.managedProcesses.stopAll()])
+          await Promise.all([...this.processFinalizers])
+        },
+      })
+    } catch (error) {
+      agentLaunchLifecycle.resume()
+      this.automationScheduler?.start()
+      dialog.showErrorBox(
+        "Could not quit PI Lab",
+        `Agents could not be safely stopped or checked. The app remains open.\n${String(error)}`,
+      )
+      return false
+    }
+  }
+
+  /** Only PI Lab agent sessions are affected; ordinary shells and Python runs are separate. */
+  private async liveTerminalAgents() {
+    const rows = getDb()
+      .select({ sessionId: agentSessions.sessionId })
+      .from(agentSessions)
+      .where(ne(agentSessions.state, "exited"))
+      .all()
+    const planning = await listPlanningAgentSessions()
+    const ids = new Set([...rows, ...planning].map((row) => row.sessionId))
+    if (ids.size === 0) return []
+    return (await (await this.terminalSupervisor.ensureClient()).list()).filter(
+      (session) => ids.has(session.id) && session.alive,
+    )
+  }
+
+  private async stopTerminalAgents(): Promise<void> {
+    let sessions = await this.liveTerminalAgents()
+    if (sessions.length === 0) {
+      await this.reconcilePlanningAgents()
+      return
+    }
+    const client = await this.terminalSupervisor.ensureClient()
+    // Kill the whole agent group together, including children that ignore SIGTERM.
+    await Promise.all(sessions.map((session) => client.kill(session.id, "SIGKILL")))
+    const deadline = Date.now() + 2_000
+    do {
+      sessions = await this.liveTerminalAgents()
+      if (sessions.length === 0) {
+        await this.activityMonitor?.reconcile()
+        await this.reconcilePlanningAgents()
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    } while (Date.now() < deadline)
+    throw new Error("Some agents did not stop; quit was cancelled")
+  }
+
+  private async reconcilePlanningAgents(): Promise<void> {
+    if ((await listPlanningAgentSessions()).length === 0) return
+    const sessions = await (await this.terminalSupervisor.ensureClient()).list()
+    await reconcilePlanningSessions(
+      new Set(sessions.filter((session) => session.alive).map((session) => session.id)),
+    )
+  }
+
+  private trackFinalizer(completion: Promise<void>): void {
+    this.processFinalizers.add(completion)
+    void completion
+      .finally(() => this.processFinalizers.delete(completion))
+      .catch((error) => {
+        console.error("[pi-lab] background agent result could not be saved", error)
+      })
+  }
+
   /** Close process-owned full-app services on quit. */
   dispose(): void {
     this.automationScheduler?.stop()
     this.caffeineController?.dispose()
     this.activityMonitor?.dispose()
     this.activityRegistry.dispose()
+    this.managedProcesses.dispose()
     this.terminalSupervisor.dispose()
     this.analysisInteractive.dispose()
   }
@@ -269,15 +436,16 @@ export class FullRuntime {
     if (!this.caffeineController) throw new Error("caffeine controller is not initialized")
     return {
       db: getDb(),
+      appChannel: channelFromAppName(app.getName()),
       skillsHomeDir: skillsHomeDirOverride ?? homedir(),
       getDaemonClient: () => this.terminalSupervisor.ensureClient(),
       agentCatalog: this.agentCatalog,
       resolveAgentExecutable: DEFAULT_AGENT_EXECUTABLE_RESOLVER,
       getAgentLaunchEnvironment: async () => {
-        await this.agentLaunchReady
+        await this.ensureAgentRecovery()
         return DEFAULT_AGENT_LAUNCH_ENVIRONMENT()
       },
-      runNonInteractiveProcess: DEFAULT_WORKFLOW_PROCESS_RUNNER,
+      runNonInteractiveProcess: this.managedProcesses.run,
       setupProbe: isTestMode ? testSetupProbe : DEFAULT_SETUP_PROBE,
       credentialCipher: {
         encrypt: (value) => {

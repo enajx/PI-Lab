@@ -102,3 +102,14 @@ describe("agents catalog and project choice", () => {
     expect(await h.caller.workspaces.list({ projectId })).toEqual([])
   })
 })
+
+test.each([
+  "app",
+  "project",
+  "both",
+] as const)("clears the project agent in %s storage", async (storage) => {
+  await h.caller.settings.updateAgents({ projectConfigStorage: storage })
+  await h.caller.agents.setProjectChoice({ projectId, agentId: FAKE_AGENT.id })
+  await h.caller.agents.setProjectChoice({ projectId, agentId: null })
+  expect(await h.caller.agents.projectChoice({ projectId })).toEqual({ agentId: null, storage })
+})

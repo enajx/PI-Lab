@@ -179,8 +179,12 @@ export async function startAgentSession(
   }
 
   const promptArgs = input.prompt?.trim() ? [input.prompt] : []
-  const [catalogCommand, ...args] = buildLaunchArgv(agent, { args: promptArgs })
-  const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[agent.id]?.trim()
+  const agentSettings = getAgentSettingsOrDefaults(ctx.db)
+  const [catalogCommand, ...args] = buildLaunchArgv(agent, {
+    ...agentSettings.launchDefaults[agent.id],
+    args: promptArgs,
+  })
+  const configuredCommand = agentSettings.executableOverrides[agent.id]?.trim()
   const candidate = configuredCommand || catalogCommand
   const command = candidate ? await ctx.resolveAgentExecutable(candidate) : null
   if (!command) {
@@ -190,38 +194,38 @@ export async function startAgentSession(
     })
   }
 
-  const appSettings = getSettingsOrDefaults(ctx.db)
-  const { worktreePerAgent } = appSettings
-  const kind =
-    !gitAvailable || input.workspaceMode === "main"
-      ? "branch"
-      : input.workspaceMode === "worktree"
-        ? "worktree"
-        : decideSessionKind(worktreePerAgent, liveCount)
-
-  const workspace =
-    kind === "branch"
-      ? await getOrCreateBranchWorkspace(ctx.db, project.id)
-      : (
-          await createWorkspace(ctx.db, {
-            projectId: project.id,
-            kind: "worktree",
-            name: freshWorktreeName(input.name),
-          })
-        ).workspace
-
-  // Resolve cwd by kind: repo root for branch, worktree path for worktree.
-  const dir = workspaceWorkingDir(ctx.db, workspace)
-
-  // Seed the workspace before the agent launches (seed-before-launch). A throw
-  // here aborts the start before any PTY is spawned, so it can't orphan a session.
-  if (input.onWorkspaceReady) await input.onWorkspaceReady(dir, workspace)
-
-  const session = await withAgentLaunchGuard({
+  return withAgentLaunchGuard({
     projectId: project.id,
     gitAvailable,
     liveAgentCount: () => ctx.activityMonitor.liveAgentCount(project.id),
     launch: async () => {
+      const appSettings = getSettingsOrDefaults(ctx.db)
+      const { worktreePerAgent } = appSettings
+      const kind =
+        !gitAvailable || input.workspaceMode === "main"
+          ? "branch"
+          : input.workspaceMode === "worktree"
+            ? "worktree"
+            : decideSessionKind(worktreePerAgent, ctx.activityMonitor.liveAgentCount(project.id))
+
+      const workspace =
+        kind === "branch"
+          ? await getOrCreateBranchWorkspace(ctx.db, project.id)
+          : (
+              await createWorkspace(ctx.db, {
+                projectId: project.id,
+                kind: "worktree",
+                name: freshWorktreeName(input.name),
+              })
+            ).workspace
+
+      // Resolve cwd by kind: repo root for branch, worktree path for worktree.
+      const dir = workspaceWorkingDir(ctx.db, workspace)
+
+      // Seed the workspace before the agent launches (seed-before-launch). A throw
+      // here aborts the start before any PTY is spawned, so it can't orphan a session.
+      if (input.onWorkspaceReady) await input.onWorkspaceReady(dir, workspace)
+
       const client = await ctx.getDaemonClient()
       const launchEnvironment = await ctx.getAgentLaunchEnvironment()
       const spawned = await client.spawn({
@@ -243,18 +247,18 @@ export async function startAgentSession(
         cols: input.cols ?? 80,
         rows: input.rows ?? 24,
       })
-      return spawned
+      const session = spawned
+
+      // Mark the workspace active so "recent" ordering reflects the launch.
+      ctx.db
+        .update(workspaces)
+        .set({ lastActiveAt: Date.now() })
+        .where(eq(workspaces.id, workspace.id))
+        .run()
+
+      return { sessionId: session.id, workspaceId: workspace.id, kind }
     },
   })
-
-  // Mark the workspace active so "recent" ordering reflects the launch.
-  ctx.db
-    .update(workspaces)
-    .set({ lastActiveAt: Date.now() })
-    .where(eq(workspaces.id, workspace.id))
-    .run()
-
-  return { sessionId: session.id, workspaceId: workspace.id, kind }
 }
 
 /** Filename PI Lab seeds into an auto-research worktree (placeholder for now). */
@@ -306,7 +310,8 @@ export async function startAutoResearch(
   // The project's remembered agent choice, falling back to the catalog default.
   const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
   const config = await readProjectAgentConfig(project, storage)
-  const agentId = config.agentId ?? DEFAULT_AGENT_ID
+  const agentId =
+    config.agentId ?? getAgentSettingsOrDefaults(ctx.db).defaultAgentId ?? DEFAULT_AGENT_ID
 
   // Seed the placeholder BEFORE the agent launches, via the pre-spawn hook, so the
   // worktree always has AUTORESEARCH.md before the session starts and a failed seed

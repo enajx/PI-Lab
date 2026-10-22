@@ -101,9 +101,9 @@ export const DEFAULT_PROJECT_TEMPLATE_SETTINGS: ProjectTemplateSettings = {
       guidance: "Describe the software goal, design, implementation, tests, and next steps.",
     },
     {
-      id: "paper",
-      name: "Paper",
-      guidance: "Describe the paper question, claims, evidence, draft status, and next steps.",
+      id: "manuscript",
+      name: "Manuscript",
+      guidance: "Describe the manuscript question, claims, evidence, draft status, and next steps.",
     },
   ],
 }
@@ -201,6 +201,10 @@ export type ProjectConfigStorage = "app" | "project" | "both"
 
 /** App-wide agent launch and per-project config persistence preferences. */
 export interface AgentSettings {
+  /** Applies to every PI Lab-managed agent, independent of its execution mode. */
+  quitBehavior: "stop" | "keep-running"
+  defaultAgentId: string | null
+  launchDefaults: Record<string, { model?: string; effort?: string }>
   projectConfigStorage: ProjectConfigStorage
   /** Explicit executable paths keyed by catalog agent id. */
   executableOverrides: Record<string, string>
@@ -209,6 +213,9 @@ export interface AgentSettings {
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  quitBehavior: "stop",
+  defaultAgentId: null,
+  launchDefaults: {},
   projectConfigStorage: "app",
   executableOverrides: {},
   setupCompleted: false,
@@ -216,7 +223,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
 
 /** PI Lab-owned keys stored per project, either in SQLite or `.pi-lab/config.json`. */
 export interface ProjectAgentConfig {
-  agentId?: string
+  agentId?: string | null
 }
 
 /**
@@ -246,7 +253,32 @@ export interface ProjectReferenceLink {
  * Stored as one JSON blob (like {@link ProjectGradient}) so the group can grow
  * without another migration. Null / an all-empty object ⇒ nothing to show.
  */
+export type ProjectTagColor =
+  | "gray"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "blue"
+  | "purple"
+  | "pink"
+
+export interface ProjectTextTag {
+  label: string
+  color: ProjectTagColor
+}
+
+export interface ProjectDetails {
+  name: string
+  typeId: "general" | "research" | "software" | "manuscript"
+  deadline: string | null
+  agentId: string | null
+  emojiTags?: string[]
+  textTags?: ProjectTextTag[]
+}
+
 export interface ProjectMetadata {
+  textTags?: ProjectTextTag[]
   /** Free-text collaborators (e.g. co-authors), as typed by the user. */
   collaborators?: string
   /** Target publishing venue (journal, conference, etc.). */
@@ -643,7 +675,16 @@ export const settings = sqliteTable("settings", {
 // ---------------------------------------------------------------------------
 
 export const agentSettings = sqliteTable("agent_settings", {
+  defaultAgentId: text("default_agent_id"),
+  launchDefaults: text("launch_defaults", { mode: "json" })
+    .notNull()
+    .$type<AgentSettings["launchDefaults"]>()
+    .default({}),
   id: integer("id").primaryKey().default(1),
+  quitBehavior: text("quit_behavior")
+    .notNull()
+    .$type<AgentSettings["quitBehavior"]>()
+    .default("stop"),
   projectConfigStorage: text("project_config_storage")
     .notNull()
     .$type<ProjectConfigStorage>()

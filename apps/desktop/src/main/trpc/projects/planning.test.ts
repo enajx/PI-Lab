@@ -4,9 +4,10 @@ import { join } from "node:path"
 import { projects } from "@pi-lab/local-db"
 import type { TerminalAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { NonInteractiveProcessInput } from "../../automations/nonInteractiveRunner"
 import { createHarness, type Harness } from "../testHarness"
+import { completePlanningProcess, listPlanningAgentSessions } from "./planning"
 
 const agent: TerminalAgent = {
   id: "codex",
@@ -19,9 +20,13 @@ const agent: TerminalAgent = {
 let h: Harness
 let stagedPath: string
 let proposalPresentBeforeRun: boolean
+let acknowledgedState: string | null
+let acknowledgementCount: number
 
 beforeEach(async () => {
   proposalPresentBeforeRun = false
+  acknowledgedState = null
+  acknowledgementCount = 0
   h = await createHarness([agent], {
     runNonInteractiveProcess: async (input: NonInteractiveProcessInput) => {
       stagedPath = input.cwd
@@ -29,6 +34,12 @@ beforeEach(async () => {
       await writeFile(join(input.cwd, "PROPOSED_RESEARCH.md"), "# New research plan\n")
       return {
         completion: Promise.resolve({ code: 0, signal: null, stdout: "", stderr: "", error: null }),
+        acknowledge: async () => {
+          acknowledgementCount += 1
+          if (!input.metadata?.draftId) throw new Error("Missing durable planning owner")
+          const path = join(h.dataDir, "planning", input.metadata.draftId, "draft.json")
+          acknowledgedState = JSON.parse(await readFile(path, "utf8")).state
+        },
       }
     },
   })
@@ -48,13 +59,15 @@ describe("project planning", () => {
       id: project.id,
       name: "My project",
       description: "Study a measurement.",
-      typeId: "paper",
+      typeId: "manuscript",
       customInstructions: "Use SI units.",
       agentId: "codex",
       mode: "one-shot",
     })
 
     expect(started.sessionId).toBeNull()
+    expect(acknowledgedState).toBe("ready")
+    expect(acknowledgementCount).toBe(1)
     expect(stagedPath).not.toBe(h.repoDir)
     expect(await readFile(join(h.repoDir, "RESEARCH.md"), "utf8")).toBe("# Existing research\n")
     expect(await readFile(join(h.repoDir, "AGENTS.md"), "utf8")).toBe("# Existing instructions\n")
@@ -64,12 +77,12 @@ describe("project planning", () => {
     expect(review.researchProposed).toBe("# New research plan\n")
     expect(review.agentsProposed).toContain("Use SI units.")
     expect(review.agentsProposed).toContain("## PI Lab project instructions: My project")
-    expect(review.agentsProposed).toContain("Describe the paper question")
+    expect(review.agentsProposed).toContain("Describe the manuscript question")
 
     await h.caller.projects.applyPlan({ draftId: started.draftId })
     expect(await readFile(join(h.repoDir, "RESEARCH.md"), "utf8")).toBe("# New research plan\n")
     expect(await readFile(join(h.repoDir, "AGENTS.md"), "utf8")).toContain("Use SI units.")
-    expect((await h.caller.projects.get({ id: project.id })).typeId).toBe("paper")
+    expect((await h.caller.projects.get({ id: project.id })).typeId).toBe("manuscript")
     expect((await h.caller.projects.get({ id: project.id })).name).toBe("My project")
   })
 
@@ -190,11 +203,21 @@ describe("project planning", () => {
     const session = (await h.client.list()).find((item) => item.id === started.sessionId)
     if (!session) throw new Error("daemon session missing")
     expect(session.cwd).not.toBe(h.repoDir)
+    vi.resetModules()
+    const recovered = await import("./planning")
+    expect(await recovered.listPlanningAgentSessions()).toEqual([
+      { draftId: started.draftId, projectId: project.id, sessionId: started.sessionId },
+    ])
     await expect(h.caller.projects.reviewPlan({ draftId: started.draftId })).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
     })
 
     await writeFile(join(session.cwd, "PROPOSED_RESEARCH.md"), "# Interactive draft\n")
+    await recovered.reconcilePlanningSessions(new Set())
+    expect((await h.caller.projects.pendingPlans({ id: project.id }))[0]).toMatchObject({
+      sessionId: null,
+      state: "failed",
+    })
     const review = await h.caller.projects.reviewPlan({ draftId: started.draftId })
     expect(review.researchProposed).toBe("# Interactive draft\n")
     await h.caller.projects.discardPlan({ draftId: started.draftId })
@@ -308,4 +331,55 @@ describe("project planning", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
     expect(await readFile(outside, "utf8")).toBe("# Outside\n")
   })
+})
+
+test("planning drafts have durable recovery metadata and remain reviewable and removable", async () => {
+  const project = await h.caller.projects.open({ path: h.repoDir })
+  const started = await h.caller.projects.startPlan({
+    id: project.id,
+    name: "Durable plan",
+    description: "A question",
+    typeId: "research",
+    customInstructions: "Keep this",
+    agentId: "codex",
+    mode: "one-shot",
+  })
+  const pending = await h.caller.projects.pendingPlans({ id: project.id })
+  expect(pending).toEqual([
+    expect.objectContaining({ draftId: started.draftId, name: "Durable plan", sessionId: null }),
+  ])
+  // The disk record is the authority: editing its reviewed state must be visible
+  // to subsequent public calls, with no stale module-local draft copy.
+  const metadataPath = join(h.dataDir, "planning", started.draftId, "draft.json")
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"))
+  expect(metadata.originalResearch).toBeNull()
+  await writeFile(metadataPath, JSON.stringify({ ...metadata, error: "restored status" }))
+  expect((await h.caller.projects.pendingPlans({ id: project.id }))[0]?.error).toBe(
+    "restored status",
+  )
+  expect(metadata.proposedAgents).toContain("Keep this")
+  expect(await listPlanningAgentSessions()).toEqual([])
+  await completePlanningProcess(
+    { kind: "planning", draftId: started.draftId },
+    {
+      code: null,
+      signal: "SIGKILL",
+      error: "Stopped when PI Lab quit",
+      stdout: "",
+      stderr: "",
+    },
+  )
+  expect((await h.caller.projects.pendingPlans({ id: project.id }))[0]).toMatchObject({
+    state: "failed",
+    error: "Stopped when PI Lab quit",
+  })
+  await h.caller.projects.reviewPlan({ draftId: started.draftId })
+  expect(
+    JSON.parse(
+      await readFile(join(h.dataDir, "planning", started.draftId, "reviewed.json"), "utf8"),
+    ),
+  ).toBe("# New research plan\n")
+  await h.caller.projects.discardPlan({ draftId: started.draftId })
+  expect(await h.caller.projects.pendingPlans({ id: project.id })).toEqual([])
+  expect(existsSync(metadataPath)).toBe(false)
 })

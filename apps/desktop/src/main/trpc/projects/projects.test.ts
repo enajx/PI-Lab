@@ -16,12 +16,13 @@ import {
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { promisify } from "node:util"
-import { projects } from "@pi-lab/local-db"
+import { automationRuns, automations, projects } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { isGitRepo } from "../../git"
-import { createHarness, type Harness } from "../testHarness"
+import { withAgentLaunchGuard } from "../agentLaunchGuard"
+import { createHarness, type Harness, LONG_FAKE_AGENT } from "../testHarness"
 
 const execFileAsync = promisify(execFile)
 
@@ -101,6 +102,7 @@ describe("projects.open", () => {
   test.each([
     { files: ["RESEARCH.md"], expected: "research" },
     { files: ["PROJECT.md"], expected: "software" },
+    { files: ["PAPER.md"], expected: "manuscript" },
     { files: ["RESEARCH.md", "PROJECT.md"], expected: "general" },
     { files: [], expected: "general" },
   ])("detects an existing folder type from only one root marker: $files", async ({
@@ -123,18 +125,18 @@ describe("projects.open", () => {
 
     const opened = await h.caller.projects.open({ path: plain })
     expect(opened.typeId).toBe("general")
-    await h.caller.projects.setType({ id: opened.id, typeId: "paper" })
+    await h.caller.projects.setType({ id: opened.id, typeId: "manuscript" })
     await writeFile(join(plain, "PROJECT.md"), "# Software\n")
-    expect((await h.caller.projects.open({ path: plain })).typeId).toBe("paper")
+    expect((await h.caller.projects.open({ path: plain })).typeId).toBe("manuscript")
   })
 
-  test("detects a type for a legacy General row when reopened", async () => {
+  test("preserves a saved unselected type when reopened", async () => {
     const plain = await mkdtemp(join(tmpdir(), "pi-lab-type-legacy-"))
     const opened = await h.caller.projects.open({ path: plain })
     h.db.update(projects).set({ typeId: "general" }).where(eq(projects.id, opened.id)).run()
     await writeFile(join(plain, "RESEARCH.md"), "# Existing research\n")
 
-    expect((await h.caller.projects.open({ path: plain })).typeId).toBe("research")
+    expect((await h.caller.projects.open({ path: plain })).typeId).toBe("general")
   })
 
   test("treats an obsolete custom type as unselected when reopened", async () => {
@@ -485,6 +487,94 @@ describe("projects.list / get / touch / remove", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 
+  test("remove preserves a project during agent launch setup", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const launch = withAgentLaunchGuard({
+      projectId: project.id,
+      gitAvailable: true,
+      liveAgentCount: () => 0,
+      launch: () => gate,
+    })
+    try {
+      await expect(h.caller.projects.remove({ id: project.id })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+      })
+    } finally {
+      release()
+      await launch
+    }
+    await h.caller.projects.remove({ id: project.id })
+  })
+
+  test.each([
+    "pending",
+    "running",
+  ] as const)("remove preserves a project with a %s automation", async (state) => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const automation = h.db
+      .insert(automations)
+      .values({
+        projectId: project.id,
+        name: "Run",
+        agentId: "fake-agent",
+        recurrenceRule: "FREQ=DAILY",
+        timezone: "UTC",
+      })
+      .returning()
+      .get()
+    h.db
+      .insert(automationRuns)
+      .values({ automationId: automation.id, scheduledFor: Date.now(), state })
+      .run()
+    await expect(h.caller.projects.remove({ id: project.id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    })
+  })
+
+  test("remove preserves a project with a live agent", async () => {
+    await h.dispose()
+    h = await createHarness([LONG_FAKE_AGENT])
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const workspace = await h.caller.workspaces.ensureMain({ projectId: project.id })
+    await h.caller.workspaces.launchAgent({
+      workspaceId: workspace.id,
+      agentId: LONG_FAKE_AGENT.id,
+    })
+    await expect(h.caller.projects.remove({ id: project.id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    })
+    expect((await h.caller.projects.get({ id: project.id })).id).toBe(project.id)
+  })
+
+  test("remove waits for a background result to be acknowledged, even after process exit", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const job = await h.client.startProcess({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('result')"],
+      cwd: h.repoDir,
+      env: {},
+      metadata: { projectId: project.id },
+    })
+    await expect(h.caller.projects.remove({ id: project.id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    })
+    await expect
+      .poll(
+        async () => (await h.client.listProcesses()).find((entry) => entry.id === job.id)?.alive,
+      )
+      .toBe(false)
+    await expect(h.caller.projects.remove({ id: project.id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    })
+    await h.client.forgetProcess(job.id)
+    await h.caller.projects.remove({ id: project.id })
+    expect(await h.caller.projects.list()).toHaveLength(0)
+  })
+
   test("remove forgets the project", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     await h.caller.projects.remove({ id: project.id })
@@ -744,4 +834,83 @@ describe("projects.setMetadata", () => {
       h.caller.projects.setMetadata({ id: "missing", metadata: METADATA }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
+})
+
+test("project details survive reopen and preserve hidden metadata", async () => {
+  const project = await h.caller.projects.open({
+    path: h.repoDir,
+    details: {
+      name: "Chosen name",
+      typeId: "manuscript",
+      deadline: null,
+      agentId: null,
+    },
+  })
+  expect(project.name).toBe("Chosen name")
+  await h.caller.projects.setMetadata({
+    id: project.id,
+    metadata: { collaborators: "Ada", venue: "Journal" },
+  })
+  const edited = await h.caller.projects.updateDetails({
+    id: project.id,
+    details: {
+      name: "Edited name",
+      typeId: "software",
+      deadline: "2027-01-02",
+      agentId: null,
+      textTags: [{ label: "Review", color: "blue" }],
+    },
+  })
+  expect(edited.metadata).toMatchObject({
+    collaborators: "Ada",
+    venue: "Journal",
+    deadline: "2027-01-02",
+    textTags: [{ label: "Review", color: "blue" }],
+  })
+  const reopened = await h.caller.projects.open({ path: h.repoDir })
+  expect(reopened.name).toBe("Edited name")
+  expect(reopened.typeId).toBe("software")
+})
+
+test("adding details accepts symlinked project Markdown and leaves no row after config failure", async () => {
+  const target = join(h.dataDir, "outside-project.md")
+  await writeFile(target, "# Existing private project")
+  await symlink(target, join(h.repoDir, "PROJECT.md"))
+  await h.caller.settings.updateAgents({ projectConfigStorage: "project" })
+  const outside = join(h.dataDir, "outside-config")
+  await mkdir(outside)
+  await symlink(outside, join(h.repoDir, ".pi-lab"))
+  const details = {
+    name: "Private project",
+    typeId: "software" as const,
+    deadline: null,
+    agentId: null,
+  }
+  await expect(h.caller.projects.open({ path: h.repoDir, details })).rejects.toMatchObject({
+    code: "FORBIDDEN",
+  })
+  expect(await h.caller.projects.list()).toEqual([])
+  await h.caller.settings.updateAgents({ projectConfigStorage: "app" })
+  const project = await h.caller.projects.open({ path: h.repoDir, details })
+  expect(project.name).toBe("Private project")
+  expect(await readFile(target, "utf8")).toBe("# Existing private project")
+})
+
+test("explicit unselected type stays general on add and can clear an edited type", async () => {
+  await writeFile(join(h.repoDir, "PROJECT.md"), "# Software marker")
+  const details = {
+    name: "Untyped project",
+    typeId: "general" as const,
+    deadline: null,
+    agentId: null,
+  }
+  const added = await h.caller.projects.open({ path: h.repoDir, details })
+  expect(added.typeId).toBe("general")
+  await h.caller.projects.updateDetails({
+    id: added.id,
+    details: { ...details, typeId: "software" },
+  })
+  const cleared = await h.caller.projects.updateDetails({ id: added.id, details })
+  expect(cleared.typeId).toBe("general")
+  expect((await h.caller.projects.open({ path: h.repoDir })).typeId).toBe("general")
 })

@@ -18,6 +18,10 @@ import { and, eq } from "drizzle-orm"
 import { z } from "zod"
 import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { nonInteractiveFailure } from "../../automations/dispatch"
+import type {
+  NonInteractiveProcessResult,
+  StartedNonInteractiveProcess,
+} from "../../automations/nonInteractiveRunner"
 import { computeGitStateHash, isGitRepo } from "../../git"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
@@ -50,6 +54,11 @@ const WORKFLOW_TIMEOUT_MS = 180_000
 const runningTasks = new Set<string>()
 const runningKey = (projectId: string, task: WorkflowTask): string => `${projectId}:${task}`
 
+/** Keep project records until background completion has been persisted. */
+export function hasRunningProjectWorkflow(projectId: string): boolean {
+  return ["summary", "fetch-experiments"].some((task) => runningTasks.has(`${projectId}:${task}`))
+}
+
 /**
  * One event in a run's live output stream, delivered to the renderer via the
  * {@link workflowsRouter.onOutput} subscription so the user can watch the agent
@@ -76,6 +85,7 @@ export type WorkflowOutputEvent =
  * shows that run's log — it is replaced only when a new run for the key starts.
  */
 interface RunStream {
+  process?: StartedNonInteractiveProcess
   command: string | null
   chunks: Extract<WorkflowOutputEvent, { kind: "chunk" }>[]
   bufferedChars: number
@@ -310,13 +320,15 @@ async function executeWorkflow(
   project: Project,
   input: RunProjectWorkflowInput,
   stream: RunStream,
+  inputHash: string,
 ): Promise<string> {
   if (input.task === "fetch-experiments") await scaffoldFetchExperimentsSkill(project.repoPath)
 
   // The project's remembered agent choice, falling back to the catalog default.
   const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
   const config = await readProjectAgentConfig(project, storage)
-  const agentId = config.agentId ?? DEFAULT_AGENT_ID
+  const agentId =
+    config.agentId ?? getAgentSettingsOrDefaults(ctx.db).defaultAgentId ?? DEFAULT_AGENT_ID
   const agent = getAgent(agentId, ctx.agentCatalog)
   if (!agent) throw new Error(`No agent ${agentId}`)
 
@@ -325,6 +337,7 @@ async function executeWorkflow(
   const [catalogCommand, ...baseArgs] = buildNonInteractiveLaunchArgv(
     agent,
     promptForTask(input.task, input.instructions),
+    getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
   )
   const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[agent.id]?.trim()
   const candidate = configuredCommand || catalogCommand
@@ -357,6 +370,14 @@ async function executeWorkflow(
 
   const launchEnvironment = await ctx.getAgentLaunchEnvironment()
   const started = await ctx.runNonInteractiveProcess({
+    metadata: {
+      kind: "project-workflow",
+      projectId: project.id,
+      task: input.task,
+      inputHash,
+      agentLabel: agent.label,
+      agentId: agent.id,
+    },
     command,
     args,
     cwd: project.repoPath,
@@ -372,16 +393,30 @@ async function executeWorkflow(
       pushChunk(stream, streamName, chunk)
     },
   })
+  stream.process = started
   const result = await started.completion
+  return workflowResult(agent.label, isClaude, result, parser)
+}
+
+/** Decode the retained final output as well as live chunks, including after reconnect. */
+function workflowResult(
+  agentLabel: string,
+  isClaude: boolean,
+  result: NonInteractiveProcessResult,
+  liveParser: ClaudeStreamParser | null,
+): string {
   const failed =
     result.error !== null || result.signal !== null || (result.code !== null && result.code !== 0)
-  if (failed) throw new Error(nonInteractiveFailure(agent.label, result))
-  if (parser) {
+  if (failed) throw new Error(nonInteractiveFailure(agentLabel, result))
+  if (isClaude) {
+    liveParser?.flush()
+    const parser = liveParser?.result !== null && liveParser ? liveParser : new ClaudeStreamParser()
+    if (parser !== liveParser) parser.ingest(result.stdout)
     // Drain a trailing line lacking a newline, then take the report from the
     // parsed `result` event (NOT the raw JSON stdout). An `is_error` result
     // surfaces as a failure rather than a silently-stored bad summary.
-    for (const line of parser.flush()) pushChunk(stream, "stdout", `${line}\n`)
-    if (parser.isError) throw new Error(parser.result || `${agent.label} reported an error`)
+    parser.flush()
+    if (parser.isError) throw new Error(parser.result || `${agentLabel} reported an error`)
     return (parser.result ?? "").trim()
   }
   return result.stdout.trim()
@@ -402,9 +437,35 @@ async function executeAndPersist(
   key: string,
   stream: RunStream,
 ): Promise<void> {
+  return persistWorkflow(
+    ctx,
+    project.id,
+    input.task,
+    currentHash,
+    key,
+    stream,
+    executeWorkflow(ctx, project, input, stream, currentHash),
+  )
+}
+
+/** Share completion persistence between original runs and recovered daemon jobs. */
+async function persistWorkflow(
+  ctx: AppContext,
+  projectId: string,
+  task: WorkflowTask,
+  currentHash: string,
+  key: string,
+  stream: RunStream,
+  completion: Promise<string>,
+): Promise<void> {
   try {
-    const result = await executeWorkflow(ctx, project, input, stream)
-    upsertRow(ctx.db, project.id, input.task, {
+    const result = await completion
+    if (
+      !ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).get()
+    ) {
+      throw new Error("The project was removed before its background work finished")
+    }
+    upsertRow(ctx.db, projectId, task, {
       result,
       inputHash: currentHash,
       lastCheckedAt: Date.now(),
@@ -413,16 +474,55 @@ async function executeAndPersist(
     finishStream(stream, { kind: "done", result })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Workflow failed"
-    upsertRow(ctx.db, project.id, input.task, {
-      result: "",
-      inputHash: currentHash,
-      lastCheckedAt: Date.now(),
-      errorMessage: message,
-    })
+    // Older app versions could remove a project while its daemon job was running.
+    // Finish and acknowledge that owner without recreating the removed project.
+    if (ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).get()) {
+      upsertRow(ctx.db, projectId, task, {
+        result: "",
+        inputHash: currentHash,
+        lastCheckedAt: Date.now(),
+        errorMessage: message,
+      })
+    }
     finishStream(stream, { kind: "error", message })
   } finally {
     runningTasks.delete(key)
   }
+  await stream.process?.acknowledge?.()
+}
+
+/** Restore run status and completion from a daemon-owned background workflow. */
+export function restoreProjectWorkflow(
+  ctx: AppContext,
+  rawMetadata: Record<string, string>,
+  process: StartedNonInteractiveProcess,
+): Promise<void> {
+  const metadata = z
+    .object({
+      projectId: z.string(),
+      task: z.enum(["summary", "fetch-experiments"]),
+      inputHash: z.string(),
+      agentLabel: z.string(),
+      agentId: z.string(),
+    })
+    .parse(rawMetadata)
+  const task = metadata.task
+  const key = runningKey(metadata.projectId, task)
+  runningTasks.add(key)
+  const stream = createStream(key)
+  stream.process = process
+  startStream(stream, "Restored background agent")
+  return persistWorkflow(
+    ctx,
+    metadata.projectId,
+    task,
+    metadata.inputHash,
+    key,
+    stream,
+    process.completion.then((result) =>
+      workflowResult(metadata.agentLabel, metadata.agentId === "claude-code", result, null),
+    ),
+  )
 }
 
 /**
@@ -454,6 +554,9 @@ export async function runProjectWorkflow(
   }
 
   const currentHash = await computeGitStateHash(project.repoPath)
+  if (!ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, project.id)).get()) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No project ${project.id}` })
+  }
   const stored = readRow(ctx.db, project.id, input.task)
   if (!input.force && stored && !stored.errorMessage && stored.inputHash === currentHash) {
     return { cached: true, ...toRecord(stored, false) }

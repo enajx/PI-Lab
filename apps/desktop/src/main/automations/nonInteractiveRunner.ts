@@ -8,6 +8,8 @@ const MAX_STDERR_BYTES = 32 * 1024
 const TERMINATION_DRAIN_MS = 1_000
 
 export interface NonInteractiveProcessInput {
+  /** Durable owner used to restore lifecycle reporting after the app reopens. */
+  metadata?: Record<string, string>
   command: string
   args: string[]
   cwd: string
@@ -39,7 +41,10 @@ export interface NonInteractiveProcessResult {
 }
 
 export interface StartedNonInteractiveProcess {
+  processId?: string
   completion: Promise<NonInteractiveProcessResult>
+  /** Remove retained output only after its owner has persisted the outcome. */
+  acknowledge?: () => Promise<void>
 }
 
 export type NonInteractiveProcessRunner = (

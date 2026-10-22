@@ -12,7 +12,7 @@ import { existsSync, writeFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { projectWorkflowRuns, type WorkflowTask } from "@pi-lab/local-db"
+import { projects, projectWorkflowRuns, type WorkflowTask } from "@pi-lab/local-db"
 import type { TerminalAgent } from "@pi-lab/shared"
 import type { Unsubscribable } from "@trpc/server/observable"
 import { and, eq } from "drizzle-orm"
@@ -200,6 +200,57 @@ describe("workflows.run — git-state cache + re-run", () => {
       expect(forcedRecord.result).toBe("summary 2")
       expect(calls).toHaveLength(2)
     } finally {
+      await harness.dispose()
+    }
+  })
+
+  test("acknowledges a completed workflow whose project was removed by an older app", async () => {
+    let release!: (result: NonInteractiveProcessResult) => void
+    let started = false
+    let acknowledged = false
+    const completion = new Promise<NonInteractiveProcessResult>((resolve) => {
+      release = resolve
+    })
+    const { harness, projectId } = await openProject(async () => {
+      started = true
+      return {
+        completion,
+        acknowledge: async () => {
+          acknowledged = true
+        },
+      }
+    })
+    try {
+      await harness.caller.workflows.run({ projectId, task: "summary" })
+      await waitFor(() => started)
+      // Simulate a pre-fix deletion; the public removal route now blocks this.
+      harness.db.delete(projects).where(eq(projects.id, projectId)).run()
+      release(ok("finished"))
+      await waitFor(() => acknowledged)
+    } finally {
+      release(ok("cleanup"))
+      await harness.dispose()
+    }
+  })
+
+  test("project removal waits for an in-flight workflow to save its result", async () => {
+    let release!: (result: NonInteractiveProcessResult) => void
+    const completion = new Promise<NonInteractiveProcessResult>((resolve) => {
+      release = resolve
+    })
+    const { runner } = makeRunner(() => ok("unused"), { completion: () => completion })
+    const { harness, projectId } = await openProject(runner)
+    try {
+      await harness.caller.workflows.run({ projectId, task: "summary" })
+      await expect(harness.caller.projects.remove({ id: projectId })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+      })
+      release(ok("saved result"))
+      expect((await settle(harness, projectId, "summary")).result).toBe("saved result")
+      await harness.caller.projects.remove({ id: projectId })
+      expect(await harness.caller.projects.list()).toHaveLength(0)
+    } finally {
+      release(ok("cleanup"))
       await harness.dispose()
     }
   })

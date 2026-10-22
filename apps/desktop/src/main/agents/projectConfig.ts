@@ -13,7 +13,10 @@ import { eq } from "drizzle-orm"
 
 const CONFIG_RELATIVE_PATH = [".pi-lab", "config.json"] as const
 
-async function assertSafeConfigLocation(project: Project, createParent: boolean): Promise<string> {
+async function assertSafeConfigLocation(
+  project: Pick<Project, "repoPath" | "agentConfig" | "id">,
+  createParent: boolean,
+): Promise<string> {
   const repo = await realpath(project.repoPath)
   const parent = join(repo, CONFIG_RELATIVE_PATH[0])
   const info = await lstat(parent).then(
@@ -62,7 +65,9 @@ function parseConfig(raw: string, path: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
-async function readRepoConfig(project: Project): Promise<Record<string, unknown> | null> {
+async function readRepoConfig(
+  project: Pick<Project, "repoPath" | "agentConfig" | "id">,
+): Promise<Record<string, unknown> | null> {
   const path = await assertSafeConfigLocation(project, false)
   const raw = await readFile(path, "utf8").then(
     (value) => value,
@@ -74,7 +79,10 @@ async function readRepoConfig(project: Project): Promise<Record<string, unknown>
   return raw === null ? null : parseConfig(raw, path)
 }
 
-async function writeRepoConfig(project: Project, config: ProjectAgentConfig): Promise<void> {
+async function writeRepoConfig(
+  project: Pick<Project, "repoPath" | "agentConfig" | "id">,
+  config: ProjectAgentConfig,
+): Promise<void> {
   const existing = (await readRepoConfig(project)) ?? {}
   const next = { ...existing, ...config }
   const path = await assertSafeConfigLocation(project, true)
@@ -83,12 +91,12 @@ async function writeRepoConfig(project: Project, config: ProjectAgentConfig): Pr
   await rename(temp, path)
 }
 
-function appConfig(project: Project): ProjectAgentConfig {
+function appConfig(project: Pick<Project, "repoPath" | "agentConfig" | "id">): ProjectAgentConfig {
   return project.agentConfig ?? {}
 }
 
 export async function readProjectAgentConfig(
-  project: Project,
+  project: Pick<Project, "repoPath" | "agentConfig" | "id">,
   storage: ProjectConfigStorage,
 ): Promise<ProjectAgentConfig> {
   if (storage === "app") return appConfig(project)
@@ -104,7 +112,7 @@ export async function readProjectAgentConfig(
 
 export async function writeProjectAgentConfig(
   db: PiLabDatabase,
-  project: Project,
+  project: Pick<Project, "repoPath" | "agentConfig" | "id">,
   storage: ProjectConfigStorage,
   config: ProjectAgentConfig,
 ): Promise<void> {

@@ -277,11 +277,7 @@ describe("runMigrations", () => {
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
       entries: Array<{ idx: number; tag: string }>
     }
-    const newest = journal.entries.at(-1)
-    if (!newest) throw new Error("Expected at least one generated migration")
-    rmSync(join(legacyMigrations, `${newest.tag}.sql`))
-    rmSync(join(legacyMigrations, "meta", `${String(newest.idx).padStart(4, "0")}_snapshot.json`))
-    journal.entries = journal.entries.filter(({ idx }) => idx < newest.idx)
+    journal.entries = journal.entries.filter(({ idx }) => idx < 9)
     writeFileSync(journalPath, JSON.stringify(journal, null, 2))
 
     const legacy = runMigrations(dbPath, legacyMigrations)
@@ -309,7 +305,7 @@ describe("runMigrations", () => {
     if (version === "older") {
       const path = join(migrations, "meta", "_journal.json")
       const journal = JSON.parse(readFileSync(path, "utf8"))
-      journal.entries.pop()
+      journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 22)
       writeFileSync(path, JSON.stringify(journal))
     }
     const first = runMigrations(dbPath, migrations)
@@ -423,4 +419,34 @@ describe("runMigrations", () => {
     ).toBeUndefined()
     check.close()
   })
+})
+
+it("renames saved paper projects without changing their names or metadata", () => {
+  const legacyMigrations = join(dataDir, "before-manuscript")
+  cpSync(resolveMigrationsDir(), legacyMigrations, { recursive: true })
+  const journalPath = join(legacyMigrations, "meta", "_journal.json")
+  const journal = JSON.parse(readFileSync(journalPath, "utf8"))
+  journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 24)
+  writeFileSync(journalPath, JSON.stringify(journal))
+  const legacy = runMigrations(dbPath, legacyMigrations)
+  legacy.sqlite
+    .prepare(
+      "INSERT INTO projects (id, repo_path, name, type_id, metadata, created_at, updated_at, last_opened_at) VALUES ('paper-id', '/paper', 'Custom name', 'paper', ?, 1, 1, 1)",
+    )
+    .run(JSON.stringify({ venue: "Journal" }))
+  legacy.sqlite.close()
+  const upgraded = runMigrations(dbPath)
+  try {
+    expect(
+      upgraded.sqlite
+        .prepare("SELECT name, type_id, metadata FROM projects WHERE id = 'paper-id'")
+        .get(),
+    ).toEqual({
+      name: "Custom name",
+      type_id: "manuscript",
+      metadata: JSON.stringify({ venue: "Journal" }),
+    })
+  } finally {
+    upgraded.sqlite.close()
+  }
 })

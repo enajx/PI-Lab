@@ -10,6 +10,8 @@ interface ShutdownGuardOptions {
   app: Pick<App, "on" | "removeListener" | "quit">
   ipcMain: Pick<IpcMain, "on" | "removeListener">
   createRequestId: () => string
+  /** Confirm the agent policy and finish stopping agents after draft approval. */
+  prepareQuit?: () => Promise<boolean>
 }
 
 export interface ShutdownGuard {
@@ -28,6 +30,42 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   let approvedClose: BrowserWindow | null = null
   let pendingUpdateInstall: (() => void) | null = null
   let installOnApprovedQuit: (() => void) | null = null
+  let preparingQuit = false
+
+  /** Run asynchronous agent shutdown once; rejection never grants approval. */
+  function prepareAndQuit(install: (() => void) | null): void {
+    if (preparingQuit) return
+    const finish = () => {
+      if (install) {
+        beginApprovedUpdateInstall(install)
+        return
+      }
+      const approval: { event: Event | null; update: boolean } = { event: null, update: false }
+      approvedQuit = approval
+      try {
+        options.app.quit()
+      } finally {
+        if (approvedQuit === approval && (!approval.event || approval.event.defaultPrevented)) {
+          approvedQuit = null
+        }
+      }
+    }
+    if (!options.prepareQuit) {
+      finish()
+      return
+    }
+    preparingQuit = true
+    void options
+      .prepareQuit()
+      .then((allow) => {
+        preparingQuit = false
+        if (allow) finish()
+      })
+      .catch((error) => {
+        preparingQuit = false
+        console.error("[pi-lab] agent shutdown failed; quit cancelled", error)
+      })
+  }
 
   /** Keep approval across asynchronous updater work until quit or explicit failure. */
   function beginApprovedUpdateInstall(install: () => void): void {
@@ -62,10 +100,14 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
       return
     }
     approvedQuit = null
+    if (preparingQuit) {
+      event.preventDefault()
+      return
+    }
     if (!mainWindow || mainWindow.isDestroyed()) {
-      if (installOnApprovedQuit) {
+      if (installOnApprovedQuit || options.prepareQuit) {
         event.preventDefault()
-        beginApprovedUpdateInstall(installOnApprovedQuit)
+        prepareAndQuit(installOnApprovedQuit)
       }
       return
     }
@@ -126,21 +168,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     if (intent === "quit") {
       const install = pendingUpdateInstall ?? installOnApprovedQuit
       pendingUpdateInstall = null
-      if (install) {
-        beginApprovedUpdateInstall(install)
-        return
-      }
-      const approval: { event: Event | null; update: boolean } = { event: null, update: false }
-      approvedQuit = approval
-      try {
-        options.app.quit()
-      } finally {
-        // The approved action must start quitting synchronously. An exception,
-        // cancelled quit, or callback that does not quit cannot approve a later attempt.
-        if (approvedQuit === approval && (!approval.event || approval.event.defaultPrevented)) {
-          approvedQuit = null
-        }
-      }
+      prepareAndQuit(install)
     } else {
       approvedClose = window
       window.close()
@@ -154,7 +182,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   return {
     requestUpdateInstall(install): void {
       if (!mainWindow || mainWindow.isDestroyed()) {
-        beginApprovedUpdateInstall(install)
+        prepareAndQuit(install)
         return
       }
       if (mainWindow.webContents.isDestroyed()) return

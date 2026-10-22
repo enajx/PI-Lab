@@ -1,8 +1,16 @@
 import type { TerminalAgent } from "./catalog"
 
+/** Provider CLI effort names; the selected model may support only a subset. */
+export const AGENT_EFFORT_LEVELS: Readonly<Record<string, readonly string[]>> = {
+  codex: ["low", "medium", "high", "xhigh", "max", "ultra"],
+  "claude-code": ["low", "medium", "high", "xhigh", "max", "ultracode"],
+}
+
 export interface LaunchOptions {
   /** Extra arguments appended after the agent's default args. */
   args?: string[]
+  model?: string
+  effort?: string
 }
 
 /**
@@ -14,14 +22,36 @@ export interface LaunchOptions {
  * default args precede the caller's extra args, both preserved in order.
  */
 export function buildLaunchArgv(agent: TerminalAgent, options: LaunchOptions = {}): string[] {
-  return [agent.command, ...(agent.defaultArgs ?? []), ...(options.args ?? [])]
+  const defaults = launchDefaultsArgv(agent, options)
+  return [agent.command, ...(agent.defaultArgs ?? []), ...defaults, ...(options.args ?? [])]
+}
+
+/** The provider's model and effort flags, shared by interactive and one-shot launches. */
+function launchDefaultsArgv(agent: TerminalAgent, options: LaunchOptions): string[] {
+  const defaults: string[] = []
+  if (agent.id === "codex" || agent.id === "claude-code") {
+    if (options.model) defaults.push("--model", options.model)
+    if (options.effort) {
+      defaults.push(
+        ...(agent.id === "codex"
+          ? ["--config", `model_reasoning_effort=${JSON.stringify(options.effort)}`]
+          : ["--effort", options.effort]),
+      )
+    }
+  }
+  return defaults
 }
 
 /**
  * Build the argv for a one-shot workflow run. The prompt is always one argv
  * element and callers spawn the returned command without a shell.
  */
-export function buildNonInteractiveLaunchArgv(agent: TerminalAgent, prompt: string): string[] {
+export function buildNonInteractiveLaunchArgv(
+  agent: TerminalAgent,
+  prompt: string,
+  options?: LaunchOptions,
+): string[] {
+  const defaults = launchDefaultsArgv(agent, options ?? {})
   if (agent.oneShotArgs) return [agent.command, ...agent.oneShotArgs, prompt]
   // Permission/approval-bypass flags belong in different positions per CLI:
   // Claude takes `--dangerously-skip-permissions` as a global flag; Codex needs
@@ -29,7 +59,7 @@ export function buildNonInteractiveLaunchArgv(agent: TerminalAgent, prompt: stri
   // `exec` subcommand. The interactive `defaultArgs` (catalog) don't apply here.
   if (agent.id === "claude-code") {
     // `--dangerously-skip-permissions` rides `defaultArgs` (valid before `-p`).
-    return [agent.command, ...(agent.defaultArgs ?? []), "-p", prompt]
+    return [agent.command, ...(agent.defaultArgs ?? []), ...defaults, "-p", prompt]
   }
   if (agent.id === "codex") {
     return [
@@ -37,6 +67,7 @@ export function buildNonInteractiveLaunchArgv(agent: TerminalAgent, prompt: stri
       "exec",
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
+      ...defaults,
       prompt,
     ]
   }

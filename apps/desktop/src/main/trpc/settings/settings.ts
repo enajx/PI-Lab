@@ -17,6 +17,7 @@ import {
   type Settings,
   settings,
 } from "@pi-lab/local-db"
+import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
@@ -81,7 +82,25 @@ const generalPatch = z.object({
   publicUpdateChannel: z.enum(["stable", "beta"]).optional(),
 })
 
+const launchDefault = z.object({
+  model: z.string().trim().max(256).optional(),
+  effort: z.string().optional(),
+})
+const launchDefaults = z.record(z.string(), launchDefault).superRefine((defaults, ctx) => {
+  for (const [id, values] of Object.entries(defaults)) {
+    if (
+      !AGENT_EFFORT_LEVELS[id] ||
+      (values.effort && !AGENT_EFFORT_LEVELS[id].includes(values.effort))
+    ) {
+      ctx.addIssue({ code: "custom", path: [id], message: "Unsupported agent or effort" })
+    }
+  }
+})
+
 const agentsPatch = z.object({
+  defaultAgentId: z.string().trim().min(1).optional(),
+  launchDefaults: launchDefaults.optional(),
+  quitBehavior: z.enum(["stop", "keep-running"]).optional(),
   projectConfigStorage: z.enum(["app", "project", "both"]).optional(),
   executableOverrides: z.record(z.string(), z.string().trim()).optional(),
   setupCompleted: z.boolean().optional(),
@@ -113,7 +132,7 @@ const projectTemplatePatch = z.object({
 })
 
 const projectTypeGuidanceInput = z.object({
-  id: z.enum(["research", "software", "paper"]),
+  id: z.enum(["research", "software", "manuscript"]),
   guidance: z.string().max(20_000),
 })
 
@@ -191,7 +210,14 @@ export function writeAgentSettings(
   patch: Partial<AgentSettings>,
 ): AgentSettings {
   const current = getAgentSettingsOrDefaults(db)
+  const launchDefaults = { ...current.launchDefaults }
+  for (const [id, values] of Object.entries(patch.launchDefaults ?? {})) {
+    launchDefaults[id] = { ...launchDefaults[id], ...values }
+  }
   const next: AgentSettings = {
+    quitBehavior: patch.quitBehavior ?? current.quitBehavior,
+    defaultAgentId: patch.defaultAgentId ?? current.defaultAgentId,
+    launchDefaults,
     projectConfigStorage: patch.projectConfigStorage ?? current.projectConfigStorage,
     executableOverrides: patch.executableOverrides ?? current.executableOverrides,
     setupCompleted: patch.setupCompleted ?? current.setupCompleted,
@@ -313,6 +339,15 @@ export const settingsRouter = router({
   updateGeneral: publicProcedure
     .input(generalPatch)
     .mutation(({ ctx, input }): Settings => writeGeneralSettings(ctx.db, input)),
+
+  initializeDefaultAgent: publicProcedure
+    .input(z.object({ agentId: z.string().trim().min(1) }))
+    .mutation(({ ctx, input }): AgentSettings => {
+      const current = getAgentSettingsOrDefaults(ctx.db)
+      return current.defaultAgentId === null
+        ? writeAgentSettings(ctx.db, { defaultAgentId: input.agentId })
+        : current
+    }),
 
   updateAgents: publicProcedure
     .input(agentsPatch)

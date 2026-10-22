@@ -212,14 +212,20 @@ export class ActivityMonitor implements ActivityMonitorPort {
       .where(ne(agentSessions.state, "exited"))
       .all()
     if (durable.length === 0 && this.terminalCommands.size === 0) return
-    const client = await this.options.getMonitorClient()
-    this.wireClient(client)
-    const daemonSessions = new Map((await client.list()).map((session) => [session.id, session]))
+    for (const row of durable) this.options.registry.restore(this.toActivityRecord(row))
+    let client: ActivityDaemonClient
+    let daemonSessions: Map<string, SessionInfo>
+    try {
+      client = await this.options.getMonitorClient()
+      this.wireClient(client)
+      daemonSessions = new Map((await client.list()).map((session) => [session.id, session]))
+    } catch (error) {
+      this.scheduleReconnect()
+      throw error
+    }
 
     for (const row of durable) {
       const daemonSession = daemonSessions.get(row.sessionId)
-      const restored = this.toActivityRecord(row)
-      this.options.registry.restore(restored)
       if (!daemonSession?.alive) {
         this.options.registry.processExited(row.sessionId, "Session was not live after restart")
         continue
@@ -283,8 +289,6 @@ export class ActivityMonitor implements ActivityMonitorPort {
     providedClient?: ActivityDaemonClient,
   ): Promise<void> {
     if (this.disposed || this.terminals.has(sessionId)) return
-    const client = providedClient ?? (await this.options.getMonitorClient())
-    this.wireClient(client)
     const terminal = this.options.terminalFactory(cols, rows)
     const monitored = { terminal, cols, rows, kind, replayPending: true }
     this.terminals.set(sessionId, monitored)
@@ -303,20 +307,17 @@ export class ActivityMonitor implements ActivityMonitorPort {
       if (result.scrollback.length > 0) this.render(sessionId, result.scrollback)
     }
     try {
+      const client = providedClient ?? (await this.options.getMonitorClient())
+      this.wireClient(client)
       const result = await client.attach(sessionId, replay)
       // Keep injected clients that only return a snapshot compatible with the port.
       replay(result)
     } catch (error) {
       terminal.dispose()
       this.terminals.delete(sessionId)
-      if (kind === "agent") {
-        this.options.registry.processExited(
-          sessionId,
-          error instanceof Error ? error.message : String(error),
-        )
-      } else {
-        this.forgetTerminal(sessionId)
-      }
+      // A failed connection says nothing about whether the process is alive.
+      // Reconciliation confirms absence using the daemon's session list.
+      this.scheduleReconnect()
       this.options.logger.warn(
         `[pi-lab] failed to monitor agent session ${sessionId}: ${String(error)}`,
       )
@@ -373,7 +374,11 @@ export class ActivityMonitor implements ActivityMonitorPort {
     if (this.disposed) return
     for (const monitored of this.terminals.values()) monitored.terminal.dispose()
     this.terminals.clear()
-    this.reconnectTimer?.cancel()
+    this.scheduleReconnect()
+  }
+
+  private scheduleReconnect(): void {
+    if (this.disposed || this.reconnectTimer) return
     this.reconnectTimer = this.options.scheduler.schedule(RECONNECT_DELAY_MS, () => {
       this.reconnectTimer = null
       void this.reconcile().catch((error) => {

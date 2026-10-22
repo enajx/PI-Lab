@@ -53,12 +53,12 @@ export const agentsRouter = router({
     }),
 
   setProjectChoice: publicProcedure
-    .input(z.object({ projectId: z.string().min(1), agentId: z.string().min(1) }))
+    .input(z.object({ projectId: z.string().min(1), agentId: z.string().min(1).nullable() }))
     .mutation(async ({ ctx, input }) => {
       const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
       if (!project)
         throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
-      if (!ctx.agentCatalog.some((agent) => agent.id === input.agentId)) {
+      if (input.agentId !== null && !ctx.agentCatalog.some((agent) => agent.id === input.agentId)) {
         throw new TRPCError({ code: "NOT_FOUND", message: `No agent ${input.agentId}` })
       }
       const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage

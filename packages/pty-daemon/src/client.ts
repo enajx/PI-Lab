@@ -1,15 +1,10 @@
-// Typed client for the PTY daemon's Unix socket. Used by the Electron main
-// process (later) and by the integration tests. Requests are correlated by an
-// auto-generated `cid`; the returned promise settles when the matching reply
-// arrives. Unsolicited `data`/`exit` events are surfaced both via an
-// EventEmitter and via an async-iterator subscription per session.
+// Match daemon replies by `cid`; deliver session events to subscribers.
 
 import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
 import { connect, type Socket } from "node:net"
 import {
   type ClientRequest,
-  type DaemonEvent,
   type DaemonFrame,
   type DaemonReply,
   type DataEvent,
@@ -17,6 +12,12 @@ import {
   type ExitEvent,
   encodeFrame,
   FrameDecoder,
+  type ProcessExitEvent,
+  type ProcessOutputEvent,
+  type ProcessParams,
+  type ProcessReply,
+  type ProcessSnapshot,
+  type ProcessSummary,
   parseDaemonFrame,
   type SessionInfo,
 } from "./protocol"
@@ -54,6 +55,8 @@ export interface AttachResult {
 
 /** Listener signatures for the client's session-scoped events. */
 export interface DaemonClientEvents {
+  "process-output": (event: ProcessOutputEvent) => void
+  "process-exit": (event: ProcessExitEvent) => void
   data: (event: DataEvent) => void
   exit: (event: ExitEvent) => void
   /** Emitted when the underlying socket closes. */
@@ -106,6 +109,10 @@ export class DaemonClient extends EventEmitter {
   }
 
   private dispatch(frame: DaemonFrame): void {
+    if (frame.kind === "process-output" || frame.kind === "process-exit") {
+      this.emit(frame.kind, frame)
+      return
+    }
     if (frame.kind === "data" || frame.kind === "exit") {
       this.emit(frame.kind, frame)
       this.emit(`session:${frame.sessionId}`, frame)
@@ -145,6 +152,62 @@ export class DaemonClient extends EventEmitter {
       })
       socket.write(encodeFrame(build(cid)))
     })
+  }
+
+  /** A bounded RPC wait also rejects explicitly when an old daemon ignores job requests. */
+  private processRequest<R extends ProcessReply>(
+    build: (cid: string) => ClientRequest,
+    receive: ((reply: R) => void) | undefined,
+  ): Promise<R> {
+    let timer: ReturnType<typeof setTimeout>
+    let requestId: string | undefined
+    const response = this.request<R>((cid) => {
+      requestId = cid
+      return build(cid)
+    }, receive)
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        if (requestId) this.pending.delete(requestId)
+        reject(new Error("Daemon process request timed out; the running daemon may need an update"))
+      }, 5000)
+      timer.unref()
+    })
+    return Promise.race([response, timeout]).finally(() => clearTimeout(timer))
+  }
+
+  async startProcess(params: ProcessParams): Promise<ProcessSnapshot> {
+    const reply = await this.processRequest<Extract<ProcessReply, { process: ProcessSnapshot }>>(
+      (cid) => ({ kind: "process-start", cid, ...params }),
+      undefined,
+    )
+    return reply.process
+  }
+
+  async listProcesses(): Promise<ProcessSummary[]> {
+    const reply = await this.processRequest<Extract<ProcessReply, { kind: "process-list-ok" }>>(
+      (cid) => ({ kind: "process-list", cid }),
+      undefined,
+    )
+    return reply.processes
+  }
+
+  async attachProcess(
+    id: string,
+    onReplay?: (snapshot: ProcessSnapshot) => void,
+  ): Promise<ProcessSnapshot> {
+    const reply = await this.processRequest<Extract<ProcessReply, { process: ProcessSnapshot }>>(
+      (cid) => ({ kind: "process-attach", cid, id }),
+      (frame) => onReplay?.(frame.process),
+    )
+    return reply.process
+  }
+
+  async killProcess(id: string): Promise<void> {
+    await this.processRequest((cid) => ({ kind: "process-kill", cid, id }), undefined)
+  }
+
+  async forgetProcess(id: string): Promise<void> {
+    await this.processRequest((cid) => ({ kind: "process-forget", cid, id }), undefined)
   }
 
   async spawn(params: SpawnParams): Promise<SessionInfo> {
@@ -226,12 +289,12 @@ export class DaemonClient extends EventEmitter {
    * final `exit` event, after which it completes. Convenient for tests and for
    * draining a session to completion.
    */
-  events(sessionId: string): AsyncIterableIterator<DaemonEvent> {
-    const queue: DaemonEvent[] = []
-    let resolveNext: ((result: IteratorResult<DaemonEvent>) => void) | null = null
+  events(sessionId: string): AsyncIterableIterator<DataEvent | ExitEvent> {
+    const queue: (DataEvent | ExitEvent)[] = []
+    let resolveNext: ((result: IteratorResult<DataEvent | ExitEvent>) => void) | null = null
     let done = false
 
-    const onEvent = (event: DaemonEvent) => {
+    const onEvent = (event: DataEvent | ExitEvent) => {
       if (resolveNext) {
         resolveNext({ value: event, done: false })
         resolveNext = null
@@ -252,8 +315,8 @@ export class DaemonClient extends EventEmitter {
 
     this.on(`session:${sessionId}`, onEvent)
 
-    const iterator: AsyncIterableIterator<DaemonEvent> = {
-      next(): Promise<IteratorResult<DaemonEvent>> {
+    const iterator: AsyncIterableIterator<DataEvent | ExitEvent> = {
+      next(): Promise<IteratorResult<DataEvent | ExitEvent>> {
         const queued = queue.shift()
         if (queued) return Promise.resolve({ value: queued, done: false })
         if (done) return Promise.resolve({ value: undefined, done: true })
@@ -261,7 +324,7 @@ export class DaemonClient extends EventEmitter {
           resolveNext = resolve
         })
       },
-      return(): Promise<IteratorResult<DaemonEvent>> {
+      return(): Promise<IteratorResult<DataEvent | ExitEvent>> {
         finish()
         return Promise.resolve({ value: undefined, done: true })
       },

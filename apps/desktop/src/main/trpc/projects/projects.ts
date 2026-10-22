@@ -3,16 +3,23 @@ import { constants } from "node:fs"
 import { copyFile, cp, mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
+  agentSessions,
+  automationRuns,
+  automations,
+  getAgentSettingsOrDefaults,
   getSettingsOrDefaults,
-  type PiLabDatabase,
   type Project,
+  type ProjectDetails,
   type ProjectMetadata,
   projects,
 } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
-import { desc, eq, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
+import { writeProjectAgentConfig } from "../../agents/projectConfig"
 import { GitError, isGitRepo, repoName, repoRoot, resolveDefaultBranch, runGit } from "../../git"
+import { hasPendingAgentLaunch } from "../agentLaunchGuard"
+import type { AppContext } from "../context"
 import { discoverTaskFile } from "../science/tasks/store"
 import {
   resolveInsideTemplate,
@@ -20,6 +27,7 @@ import {
   seedWritableTemplate,
 } from "../template"
 import { publicProcedure, router } from "../trpc"
+import { hasRunningProjectWorkflow } from "../workflows/workflows"
 import { planningProcedures } from "./planning"
 import { readStoredThumbnail, validateThumbnail } from "./thumbnailImage"
 
@@ -30,9 +38,49 @@ import { readStoredThumbnail, validateThumbnail } from "./thumbnailImage"
  * No orchestration, no cloud — just the local store.
  */
 
+const textTagInput = z.object({
+  label: z.string().trim().min(1).max(80),
+  color: z.enum(["gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"]),
+})
+const projectDetailsInput = z.object({
+  name: z.string().trim().min(1).max(200),
+  typeId: z.enum(["general", "research", "software", "manuscript"]),
+  deadline: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
+  agentId: z.string().min(1).nullable(),
+  emojiTags: z.array(z.string().min(1)).max(50).optional(),
+  textTags: z.array(textTagInput).max(50).optional(),
+})
+
+function detailsValues(project: Pick<Project, "metadata"> | undefined, details: ProjectDetails) {
+  const metadata = { ...project?.metadata }
+  if (details.deadline === null) delete metadata.deadline
+  else metadata.deadline = details.deadline
+  if (details.emojiTags !== undefined) metadata.emojiTags = details.emojiTags
+  if (details.textTags !== undefined) metadata.textTags = details.textTags
+  return { name: details.name, typeId: details.typeId, metadata }
+}
+
+async function saveDetailsAgent(
+  ctx: AppContext,
+  project: Pick<Project, "id" | "repoPath" | "agentConfig">,
+  details: ProjectDetails,
+) {
+  if (details.agentId !== null && !ctx.agentCatalog.some((agent) => agent.id === details.agentId)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown agent" })
+  }
+  const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
+  const agentConfig = { ...project.agentConfig, agentId: details.agentId }
+  if (storage !== "app") await writeProjectAgentConfig(ctx.db, project, "project", agentConfig)
+  return storage === "project" ? {} : { agentConfig }
+}
+
 const openInput = z.object({
   /** Absolute path to a Git working tree or ordinary local folder. */
   path: z.string().min(1),
+  details: projectDetailsInput.optional(),
 })
 
 const idInput = z.object({ id: z.string().min(1) })
@@ -131,6 +179,7 @@ const setMetadataInput = z.object({
       venue: z.string().min(1).optional(),
       deadline: z.string().min(1).optional(),
       emojiTags: z.array(z.string().min(1)).optional(),
+      textTags: z.array(textTagInput).optional(),
       referenceLinks: z
         .array(z.object({ url: z.string().min(1), label: z.string().min(1).optional() }))
         .optional(),
@@ -182,11 +231,13 @@ const cloneInput = z.object({
   url: z.string().min(1),
   /** Absolute directory the clone will land *inside* (the repo gets its own subdir). */
   parentDir: z.string().min(1),
+  details: projectDetailsInput.optional(),
 })
 
 const createFromTemplateInput = z.object({
   /** Absolute directory to create as the new project; the template copies into it. */
   targetDir: z.string().min(1),
+  details: projectDetailsInput.optional(),
   /**
    * Template folder to copy from. Defaults to the user's writable template under
    * the data dir ({@link resolveWritableTemplateDir}); explicit callers/tests may
@@ -204,10 +255,12 @@ const createFromTemplateInput = z.object({
  * the repository top-level; plain folders retain their canonical selected path.
  */
 async function upsertProjectFromDirectory(
-  db: PiLabDatabase,
+  ctx: AppContext,
   dir: string,
   detectExistingType: boolean,
+  details: ProjectDetails | undefined,
 ): Promise<Project> {
+  const db = ctx.db
   const requested = resolve(dir)
   const directory = await statOrNull(requested)
   if (!directory?.isDirectory()) {
@@ -220,26 +273,37 @@ async function upsertProjectFromDirectory(
   const defaultBranch = git ? await resolveDefaultBranch(root) : null
   const taskFile = await discoverTaskFile(root)
   const discoveredTaskPath = taskFile.state === "ready" ? taskFile.relPath : null
-  const detectedType = detectExistingType ? await detectProjectType(root) : null
+  const detectedType = detectExistingType && !details ? await detectProjectType(root) : null
   const now = Date.now()
 
   const existing = db.select().from(projects).where(eq(projects.repoPath, root)).get()
+  const agentValues = details
+    ? await saveDetailsAgent(
+        ctx,
+        existing ?? { id: "", repoPath: root, agentConfig: null },
+        details,
+      )
+    : {}
+  const editedValues = details ? detailsValues(existing, details) : {}
   if (existing) {
     const explicitType =
+      existing.typeId === "general" ||
       existing.typeId === "research" ||
       existing.typeId === "software" ||
-      existing.typeId === "paper"
+      existing.typeId === "manuscript"
         ? existing.typeId
         : null
     return db
       .update(projects)
       .set({
-        name,
+        name: existing.name,
         defaultBranch,
         taskRelPath: existing.taskRelPath ?? discoveredTaskPath,
         typeId: explicitType ?? detectedType ?? "general",
         updatedAt: now,
         lastOpenedAt: now,
+        ...editedValues,
+        ...agentValues,
       })
       .where(eq(projects.id, existing.id))
       .returning()
@@ -254,18 +318,28 @@ async function upsertProjectFromDirectory(
       defaultBranch,
       taskRelPath: discoveredTaskPath,
       typeId: detectedType ?? "general",
+      ...editedValues,
+      ...agentValues,
     })
     .returning()
     .get()
 }
 
 /** Infer a type only when exactly one regular root marker is present. */
-async function detectProjectType(root: string): Promise<"research" | "software" | null> {
+async function detectProjectType(
+  root: string,
+): Promise<"research" | "software" | "manuscript" | null> {
   const entries = await readdir(root, { withFileTypes: true })
-  const hasResearch = entries.some((entry) => entry.name === "RESEARCH.md" && entry.isFile())
-  const hasSoftware = entries.some((entry) => entry.name === "PROJECT.md" && entry.isFile())
-  if (hasResearch === hasSoftware) return null
-  return hasResearch ? "research" : "software"
+  const markers = [
+    { file: "RESEARCH.md", type: "research" },
+    { file: "PROJECT.md", type: "software" },
+    { file: "PAPER.md", type: "manuscript" },
+    { file: "MANUSCRIPT.md", type: "manuscript" },
+  ] as const
+  const found = markers.filter((marker) =>
+    entries.some((entry) => entry.name === marker.file && entry.isFile()),
+  )
+  return found.length === 1 ? (found[0]?.type ?? null) : null
 }
 
 /**
@@ -368,7 +442,7 @@ export const projectsRouter = router({
    * Open a Git repository or ordinary local folder as a project.
    */
   open: publicProcedure.input(openInput).mutation(({ ctx, input }): Promise<Project> => {
-    return upsertProjectFromDirectory(ctx.db, resolve(input.path), true)
+    return upsertProjectFromDirectory(ctx, resolve(input.path), true, input.details)
   }),
 
   /** Report Git capability from the live filesystem rather than stale database state. */
@@ -475,7 +549,7 @@ export const projectsRouter = router({
       throw error
     }
 
-    return upsertProjectFromDirectory(ctx.db, target, true)
+    return upsertProjectFromDirectory(ctx, target, true, input.details)
   }),
 
   /**
@@ -563,7 +637,7 @@ export const projectsRouter = router({
         }
       }
 
-      return upsertProjectFromDirectory(ctx.db, target, false)
+      return upsertProjectFromDirectory(ctx, target, false, input.details)
     }),
 
   /**
@@ -623,7 +697,42 @@ export const projectsRouter = router({
    * `onDelete: "cascade"`). The on-disk repo is the user's own and is never
    * touched — PI Lab only forgets it.
    */
-  remove: publicProcedure.input(idInput).mutation(({ ctx, input }) => {
+  remove: publicProcedure.input(idInput).mutation(async ({ ctx, input }) => {
+    const daemon = await ctx.getDaemonClient()
+    const [sessions, processes] = await Promise.all([daemon.list(), daemon.listProcesses()])
+    const projectSessions = new Set(
+      ctx.db
+        .select({ sessionId: agentSessions.sessionId })
+        .from(agentSessions)
+        .where(eq(agentSessions.projectId, input.id))
+        .all()
+        .map((session) => session.sessionId),
+    )
+    const activeAutomation = ctx.db
+      .select({ id: automationRuns.id })
+      .from(automationRuns)
+      .innerJoin(automations, eq(automationRuns.automationId, automations.id))
+      .where(
+        and(
+          eq(automations.projectId, input.id),
+          inArray(automationRuns.state, ["pending", "running"]),
+        ),
+      )
+      .get()
+    if (
+      activeAutomation ||
+      hasPendingAgentLaunch(input.id) ||
+      ctx.activityMonitor.liveAgentCount(input.id) > 0 ||
+      hasRunningProjectWorkflow(input.id) ||
+      sessions.some((session) => session.alive && projectSessions.has(session.id)) ||
+      processes.some((process) => process.metadata.projectId === input.id)
+    ) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message:
+          "Close this project's agents and wait for background work to finish before removing it",
+      })
+    }
     ctx.db.delete(projects).where(eq(projects.id, input.id)).run()
     return { ok: true as const }
   }),
@@ -760,6 +869,22 @@ export const projectsRouter = router({
         .get()
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
       return row
+    }),
+
+  updateDetails: publicProcedure
+    .input(z.object({ id: z.string().min(1), details: projectDetailsInput }))
+    .mutation(async ({ ctx, input }): Promise<Project> => {
+      const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      const agentValues = await saveDetailsAgent(ctx, project, input.details)
+      const updated = ctx.db
+        .update(projects)
+        .set({ ...detailsValues(project, input.details), ...agentValues, updatedAt: Date.now() })
+        .where(eq(projects.id, project.id))
+        .returning()
+        .get()
+      if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      return updated
     }),
 
   /** Select one of the configured types for a project. */

@@ -113,9 +113,15 @@ function projectTemplateWithDefaults(
   stored: Partial<ProjectTemplateSettings> | null | undefined,
 ): ProjectTemplateSettings {
   const savedTypes = stored?.projectTypes ?? []
-  const builtInTypes = DEFAULT_PROJECT_TEMPLATE_SETTINGS.projectTypes.map(
-    (type) => savedTypes.find((saved) => saved.id === type.id) ?? type,
-  )
+  const builtInTypes = DEFAULT_PROJECT_TEMPLATE_SETTINGS.projectTypes.map((type) => {
+    const saved = savedTypes.find((saved) => saved.id === type.id)
+    if (saved) return saved
+    const paper =
+      type.id === "manuscript" ? savedTypes.find((saved) => saved.id === "paper") : undefined
+    return paper
+      ? { ...paper, id: "manuscript", name: paper.name === "Paper" ? "Manuscript" : paper.name }
+      : type
+  })
   return {
     ...DEFAULT_PROJECT_TEMPLATE_SETTINGS,
     ...stored,
@@ -149,6 +155,9 @@ export function getAgentSettingsOrDefaults(db: PiLabDatabase): AgentSettings {
   const row = db.select().from(agentSettings).where(eq(agentSettings.id, SETTINGS_ROW_ID)).get()
   if (!row) return DEFAULT_AGENT_SETTINGS
   return {
+    quitBehavior: row.quitBehavior,
+    launchDefaults: row.launchDefaults,
+    defaultAgentId: row.defaultAgentId,
     projectConfigStorage: row.projectConfigStorage,
     executableOverrides: row.executableOverrides,
     setupCompleted: row.setupCompleted,

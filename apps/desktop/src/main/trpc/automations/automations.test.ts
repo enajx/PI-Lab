@@ -499,6 +499,15 @@ describe("runNow — non-interactive process lifecycle", () => {
     expect(runId).toBeTruthy()
     expect(runner).toHaveBeenCalledWith({
       command: "/custom/codex",
+      metadata: {
+        kind: "automation",
+        workflowId: created.id,
+        runId,
+        workflowName: "Review",
+        projectId,
+        agentLabel: "Codex",
+        gitAvailable: "true",
+      },
       args: [
         "exec",
         "--skip-git-repo-check",

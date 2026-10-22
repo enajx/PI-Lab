@@ -3,7 +3,59 @@ import { describe, expect, test } from "vitest"
 import { BUILTIN_AGENTS, getAgent, type TerminalAgent } from "./catalog"
 import { buildLaunchArgv, buildNonInteractiveLaunchArgv } from "./command"
 
+test("one-shot launches place saved defaults before the prompt and after Codex exec", () => {
+  const codex = getAgent("codex")
+  const claude = getAgent("claude-code")
+  if (!codex || !claude) throw new Error("Missing built-in agent")
+  const options = { model: "custom-model", effort: "high" }
+  expect(buildNonInteractiveLaunchArgv(codex, "prompt", options)).toEqual([
+    "codex",
+    "exec",
+    "--skip-git-repo-check",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--model",
+    "custom-model",
+    "--config",
+    'model_reasoning_effort="high"',
+    "prompt",
+  ])
+  expect(buildNonInteractiveLaunchArgv(claude, "prompt", options)).toEqual([
+    "claude",
+    "--dangerously-skip-permissions",
+    "--model",
+    "custom-model",
+    "--effort",
+    "high",
+    "-p",
+    "prompt",
+  ])
+})
+
 describe("buildLaunchArgv", () => {
+  test("applies provider model and effort before the prompt without shell interpolation", () => {
+    const codex = getAgent("codex")
+    const claude = getAgent("claude-code")
+    if (!codex || !claude) throw new Error("Missing built-in agent")
+    expect(
+      buildLaunchArgv(codex, { model: "custom model", effort: "high", args: ["hello"] }),
+    ).toEqual([
+      "codex",
+      ...(codex.defaultArgs ?? []),
+      "--model",
+      "custom model",
+      "--config",
+      'model_reasoning_effort="high"',
+      "hello",
+    ])
+    expect(buildLaunchArgv(claude, { model: "opus", effort: "medium" })).toEqual([
+      "claude",
+      ...(claude.defaultArgs ?? []),
+      "--model",
+      "opus",
+      "--effort",
+      "medium",
+    ])
+  })
   test("launches the agent's binary", () => {
     const agent = getAgent("claude-code")
     if (!agent) throw new Error("claude-code missing from catalog")

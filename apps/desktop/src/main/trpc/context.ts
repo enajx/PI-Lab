@@ -15,6 +15,7 @@ import {
 } from "../automations/nonInteractiveRunner"
 import type { CaffeineControllerPort } from "../caffeine"
 import { livePyToolsExec, type PyToolsExec } from "../diagnostics"
+import type { PiLabChannel } from "../identity/channel"
 import { liveSshExec, type SshExec } from "../lib/ssh-config"
 import type { NotificationBrokers, NotificationService } from "../notifications"
 import {
@@ -35,6 +36,8 @@ import type { AnalysisInteractivePort } from "./science/analysis/interactive"
  */
 export interface AppContext {
   db: PiLabDatabase
+  /** Packaged channel; source runs use Alpha. */
+  appChannel?: PiLabChannel
   /** User home whose conventional global agent-skill roots are indexed read-only. */
   skillsHomeDir: string
   getDaemonClient: () => Promise<DaemonClient>
