@@ -1,4 +1,4 @@
-import type { Project } from "@pi-lab/local-db"
+import type { Project, ProjectDetails } from "@pi-lab/local-db"
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { FilePlus2, FolderOpen, FolderPlus, GitFork, Plus, X } from "lucide-react"
@@ -6,7 +6,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { translateKnownError } from "../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import { useTRPC } from "../../../trpc/react"
-import { ProjectSetupWizard } from "./ProjectSetupWizard"
+import { EditProjectDialog } from "../index/components/ProjectCard/EditProjectDialog"
 
 type AddProjectMenuProps =
   | {
@@ -25,6 +25,17 @@ type AddProjectMenuProps =
       onAdded: (project: Project) => void
     }
 
+type PendingProject =
+  | { kind: "folder"; name: string; path: string }
+  | { kind: "clone"; name: string; url: string; parentDir: string }
+  | {
+      kind: "template"
+      name: string
+      targetDir: string
+      templateFiles: string[]
+      externalFiles: string[]
+    }
+
 /**
  * Shared Add Project chooser for every entry point. It owns the three creation
  * flows, loading state, error surface, and close/reset behavior so Dashboard and
@@ -35,7 +46,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const [localOpen, setLocalOpen] = useState(false)
-  const [setup, setSetup] = useState<{ project: Project; optional: boolean } | null>(null)
+  const [setup, setSetup] = useState<PendingProject | null>(null)
   const [mode, setMode] = useState<"menu" | "clone" | "template">("menu")
   const [highlight, setHighlight] = useState(0)
   const [url, setUrl] = useState("")
@@ -67,21 +78,18 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     [onControlledOpenChange],
   )
 
-  const onSuccess = (project: Project, optional: boolean) => {
-    setSetup({ project, optional })
-    if (!global) setOpen(false)
+  const onSuccess = (project: Project) => {
+    setSetup(null)
+    setOpen(false)
+    props.onAdded(project)
   }
   const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
-  const openProject = useMutation(
-    trpc.projects.open.mutationOptions({ onSuccess: (project) => onSuccess(project, true) }),
-  )
-  const cloneProject = useMutation(
-    trpc.projects.clone.mutationOptions({ onSuccess: (project) => onSuccess(project, true) }),
-  )
+  const openProject = useMutation(trpc.projects.open.mutationOptions({ onSuccess }))
+  const cloneProject = useMutation(trpc.projects.clone.mutationOptions({ onSuccess }))
   const pickFile = useMutation(trpc.system.pickFile.mutationOptions())
   const templateProject = useMutation(
     trpc.projects.createFromTemplate.mutationOptions({
-      onSuccess: (project) => onSuccess(project, false),
+      onSuccess,
     }),
   )
   const projectList = useQuery({
@@ -118,6 +126,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
 
   useEffect(() => {
     if (open) return
+    setSetup(null)
     setMode("menu")
     setHighlight(0)
     setUrl("")
@@ -179,7 +188,12 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   const openFromFolder = () => {
     pickDirectory.mutate(undefined, {
       onSuccess: (path) => {
-        if (path) openProject.mutate({ path })
+        if (path)
+          setSetup({
+            kind: "folder",
+            path,
+            name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
+          })
       },
     })
   }
@@ -188,7 +202,18 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     if (!trimmed) return
     pickDirectory.mutate(undefined, {
       onSuccess: (parentDir) => {
-        if (parentDir) cloneProject.mutate({ url: trimmed, parentDir })
+        if (parentDir)
+          setSetup({
+            kind: "clone",
+            url: trimmed,
+            parentDir,
+            name:
+              trimmed
+                .replace(/[\\/]+$/, "")
+                .split(/[\\/:]/)
+                .at(-1)
+                ?.replace(/\.git$/i, "") ?? "",
+          })
       },
     })
   }
@@ -240,11 +265,31 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     const name = templateName.trim()
     const parentPath = templateParentPath.trim()
     if (!name || !parentPath || /[\\/]/.test(name)) return
-    templateProject.mutate({
+    setSetup({
+      kind: "template",
+      name,
       targetDir: joinPath(parentPath, name),
       templateFiles,
       externalFiles,
     })
+  }
+  const addProject = (details: ProjectDetails) => {
+    if (!setup || pending) return
+    if (setup.kind === "folder") openProject.mutate({ path: setup.path, details })
+    else if (setup.kind === "clone")
+      cloneProject.mutate({ url: setup.url, parentDir: setup.parentDir, details })
+    else
+      templateProject.mutate({
+        targetDir: setup.targetDir,
+        templateFiles: setup.templateFiles,
+        externalFiles: setup.externalFiles,
+        details,
+      })
+  }
+  const cancelSetup = () => {
+    if (pending) return
+    setSetup(null)
+    setOpen(false)
   }
   const saveDefaultTemplateLocation = () => {
     const path = templateParentPath.trim()
@@ -274,7 +319,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
       data-testid={dashboardCard ? "new-project-card" : undefined}
       className={cn(
         global
-          ? templateDialog
+          ? templateDialog || setup
             ? "fixed inset-0 z-50"
             : "fixed top-[12vh] left-1/2 z-50 -translate-x-1/2"
           : "relative",
@@ -620,14 +665,13 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
         </>
       ) : null}
       {setup ? (
-        <ProjectSetupWizard
-          project={setup.project}
-          optional={setup.optional}
-          onDone={(project) => {
-            setSetup(null)
-            if (global) setOpen(false)
-            props.onAdded(project)
-          }}
+        <EditProjectDialog
+          mode="add"
+          project={{ name: setup.name, typeId: "general", metadata: null, agentConfig: null }}
+          pending={pending}
+          error={error ? translateKnownError(language, error.message) : null}
+          onClose={cancelSetup}
+          onSave={addProject}
         />
       ) : null}
     </div>

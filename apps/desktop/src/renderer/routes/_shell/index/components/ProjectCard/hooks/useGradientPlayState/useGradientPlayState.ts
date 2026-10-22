@@ -1,25 +1,12 @@
 import { type RefObject, useEffect } from "react"
 
-/**
- * Pauses a project card's gradient drift unless it is both **worth showing** and
- * **worth animating**. The layer runs only while the project is **active** (agents
- * working — `active`) AND the card is **on-screen** (IntersectionObserver) AND the
- * **window is focused & visible** (focus/blur + `visibilitychange`). Anything else
- * parks it at `animation-play-state: paused`. Because drift only runs for active
- * projects, a card's motion doubles as a live activity cue while idle cards stay
- * frozen (and cost nothing).
- *
- * It writes `style.animationPlayState` directly on the layer element — no React
- * state, so toggling visibility never re-renders the card. When the relevant
- * browser APIs are missing (e.g. jsdom has no `IntersectionObserver`) it defaults
- * to "running" so the animation degrades to always-on rather than always-off.
- */
+/** Run the card animation only while active, visible, and focused. */
 export function useGradientPlayState(ref: RefObject<HTMLDivElement | null>, active: boolean): void {
   useEffect(() => {
     const el = ref.current
     if (!el) return
 
-    // Default each input to its "playing" state so missing APIs ⇒ always running.
+    // Missing browser APIs leave the animation enabled.
     let isIntersecting = true
     let isFocused =
       typeof document !== "undefined" && typeof document.hasFocus === "function"
@@ -55,8 +42,6 @@ export function useGradientPlayState(ref: RefObject<HTMLDivElement | null>, acti
     window.addEventListener("blur", onBlur)
     document.addEventListener("visibilitychange", onVisibility)
 
-    // jsdom (and very old engines) lack IntersectionObserver — guard and treat the
-    // layer as visible there, so tests and fallbacks keep the animation running.
     let observer: IntersectionObserver | undefined
     if (typeof IntersectionObserver !== "undefined") {
       observer = new IntersectionObserver((entries) => {

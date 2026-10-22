@@ -1,27 +1,24 @@
-import type { ProjectMetadata } from "@pi-lab/local-db"
+import type { ProjectDetails, ProjectMetadata } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import {
-  BookOpen,
   CalendarClock,
+  ChartArea,
   Eye,
   EyeOff,
   FlaskConical,
   ImagePlus,
-  Link2,
   Pencil,
   Sparkles,
-  Users,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ProjectTypeChoice } from "../../../../../components/ProjectTypeChoice"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import {
-  readFetchExperimentsInstructions,
   useDigitalRainDensity,
   useDigitalRainSpeed,
+  useShowAnalysisSection,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { type ProjectSummary, useProjectThumbnail } from "../../../../../trpc/useProjectThumbnail"
@@ -32,7 +29,6 @@ import { hashString, projectGradient, sampleThemePalette } from "../../utils/pro
 import { DigitalRainThumbnail } from "./DigitalRainThumbnail"
 import { EditProjectDialog } from "./EditProjectDialog"
 import { useGradientPlayState } from "./hooks/useGradientPlayState"
-import { deriveLinkName } from "./utils/deriveLinkName"
 import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
 
 /**
@@ -89,6 +85,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [choosingArtwork, setChoosingArtwork] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [showAnalysis] = useShowAnalysisSection()
   const [digitalRainDensity] = useDigitalRainDensity()
   const [digitalRainSpeed] = useDigitalRainSpeed()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -129,9 +126,15 @@ export function ProjectCard({ project }: ProjectCardProps) {
       onError: reportMutationError,
     }),
   )
-  const setMetadata = useMutation(
-    trpc.projects.setMetadata.mutationOptions({
-      onSuccess: invalidateProjects,
+  const updateDetails = useMutation(
+    trpc.projects.updateDetails.mutationOptions({
+      onSuccess: () => {
+        setEditing(false)
+        invalidateProjects()
+        void queryClient.invalidateQueries({
+          queryKey: trpc.agents.projectChoice.queryKey({ projectId: project.id }),
+        })
+      },
       onError: reportMutationError,
     }),
   )
@@ -252,9 +255,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
     setEditing(true)
   }
 
-  const saveMetadata = (metadata: ProjectMetadata | null) => {
-    setEditing(false)
-    setMetadata.mutate({ id: project.id, metadata })
+  const saveDetails = (details: ProjectDetails) => {
+    updateDetails.mutate({ id: project.id, details })
   }
 
   const setProjectHidden = () => {
@@ -457,24 +459,10 @@ export function ProjectCard({ project }: ProjectCardProps) {
           </div>
         </button>
 
-        {/* Extra metadata (collaborators / venue / deadline / emoji tags / links)
-            under the title — only the fields the user filled render. */}
+        {/* Show the project deadline and assigned tags below the title. */}
         {project.metadata ? <ProjectCardMetadata metadata={project.metadata} /> : null}
       </div>
 
-      <div className="px-3 pb-2">
-        <ProjectTypeChoice
-          projectId={project.id}
-          typeId={project.typeId}
-          testId={`project-card-type-${project.id}`}
-        />
-      </div>
-
-      {/* Card actions pinned to the bottom: launch a placeholder auto-research
-          session in an isolated worktree (interactive), plus the two stateful
-          background workflow controls — "Fetch remote experiments" and "Project
-          summary" — which run headlessly, cache their result per git-state, and
-          open a result popup when done.  */}
       <div
         data-testid="project-card-actions"
         className="mt-auto flex items-center gap-1.5 border-border border-t p-2 transition-[filter] group-hover:brightness-105"
@@ -496,16 +484,22 @@ export function ProjectCard({ project }: ProjectCardProps) {
         >
           <FlaskConical className="size-4 shrink-0" aria-hidden />
         </button>
-        <ProjectWorkflowControl
-          projectId={project.id}
-          projectName={project.name}
-          task="fetch-experiments"
-          variant="compact"
-          testId="project-card-fetch-experiments"
-          instructions={readFetchExperimentsInstructions()}
-          disabled={!gitAvailable}
-          disabledReason={gitAvailable ? undefined : gitDisabledReason}
-        />
+        {showAnalysis ? (
+          <button
+            type="button"
+            data-testid="project-card-analysis"
+            aria-label={`${t("Analysis")} ${project.name}`}
+            title={t("Analysis")}
+            data-feature-label={t("Analysis")}
+            data-feature-help={t("Open this project's analysis files")}
+            className={CARD_ACTION_CLASS}
+            onClick={() =>
+              void navigate({ to: "/science/analysis", search: { projectId: project.id } })
+            }
+          >
+            <ChartArea className="size-4 shrink-0" aria-hidden />
+          </button>
+        ) : null}
         <ProjectWorkflowControl
           projectId={project.id}
           projectName={project.name}
@@ -539,7 +533,10 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <EditProjectDialog
           project={project}
           onClose={() => setEditing(false)}
-          onSave={saveMetadata}
+          mode="edit"
+          pending={updateDetails.isPending}
+          error={updateDetails.error?.message ?? null}
+          onSave={saveDetails}
         />
       ) : null}
     </div>
@@ -555,20 +552,13 @@ function formatDeadline(iso: string, language: string, due: string): string {
   return `${due} ${date.toLocaleDateString(language, { month: "short", day: "numeric", year: "numeric" })}`
 }
 
-/**
- * The filled project metadata rendered under the card title. Each field is
- * independently gated: empty fields (and empty emoji/link lists) render nothing,
- * so the block only shows what the user actually entered.
- */
+/** Render the deadline and assigned tags. */
 function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
   const [language] = useInterfaceLanguage()
   const t = useTranslate()
   const emojiTags = metadata.emojiTags ?? []
-  const links = metadata.referenceLinks ?? []
-  const hasAny =
-    Boolean(metadata.collaborators || metadata.venue || metadata.deadline) ||
-    emojiTags.length > 0 ||
-    links.length > 0
+  const textTags = metadata.textTags ?? []
+  const hasAny = Boolean(metadata.deadline) || emojiTags.length > 0 || textTags.length > 0
   if (!hasAny) return null
 
   return (
@@ -576,18 +566,6 @@ function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
       data-testid="project-card-metadata"
       className="flex flex-col gap-1.5 px-3 pb-3 text-muted-foreground text-xs"
     >
-      {metadata.collaborators ? (
-        <div data-testid="project-card-collaborators" className="flex items-center gap-1.5">
-          <Users className="size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 truncate">{metadata.collaborators}</span>
-        </div>
-      ) : null}
-      {metadata.venue ? (
-        <div data-testid="project-card-venue" className="flex items-center gap-1.5">
-          <BookOpen className="size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 truncate">{metadata.venue}</span>
-        </div>
-      ) : null}
       {metadata.deadline ? (
         <div data-testid="project-card-deadline" className="flex items-center gap-1.5">
           <CalendarClock className="size-3.5 shrink-0" aria-hidden />
@@ -605,21 +583,16 @@ function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
           ))}
         </div>
       ) : null}
-      {links.length > 0 ? (
-        <div data-testid="project-card-links" className="flex flex-col gap-1">
-          {links.map((link, index) => (
-            <a
-              // biome-ignore lint/suspicious/noArrayIndexKey: reference links render in a fixed, non-reordered order, and the index is exactly what disambiguates two links that share the same URL (which would otherwise collide on key).
-              key={`${index}:${link.url}`}
-              href={link.url}
-              target="_blank"
-              rel="noreferrer"
-              data-testid="project-card-link"
-              className="flex items-center gap-1.5 text-accent-brand underline underline-offset-2"
+      {textTags.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {textTags.map((tag) => (
+            <span
+              key={tag.label}
+              data-testid="project-card-text-tag"
+              className="rounded-full bg-brand/15 px-2 py-1 text-xs text-foreground"
             >
-              <Link2 className="size-3.5 shrink-0" aria-hidden />
-              <span className="min-w-0 truncate">{deriveLinkName(link.url)}</span>
-            </a>
+              {tag.label}
+            </span>
           ))}
         </div>
       ) : null}

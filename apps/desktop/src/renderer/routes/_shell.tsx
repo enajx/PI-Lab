@@ -9,6 +9,7 @@ import {
   editorVimChoicePending,
   readEditorVimChoice,
   settleEditorVimChoice,
+  useDefaultAgentId,
   useEditorVimCache,
   useSidebarCollapsed,
 } from "../preferences/preferences"
@@ -45,6 +46,7 @@ export const Route = createFileRoute("/_shell")({
 })
 
 function ShellLayout() {
+  const [, , defaultAgentError] = useDefaultAgentId()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [findProjectsOpen, setFindProjectsOpen] = useState(false)
   const navigate = useNavigate()
@@ -132,6 +134,11 @@ function ShellLayout() {
 
   const content = (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      {defaultAgentError ? (
+        <p role="alert" className="bg-destructive/10 px-4 py-2 text-destructive text-sm">
+          {defaultAgentError}
+        </p>
+      ) : null}
       {vimSyncError ? (
         <div role="alert" className="flex items-center gap-3 border-b px-4 py-2 text-sm">
           <span>{vimSyncError}</span>

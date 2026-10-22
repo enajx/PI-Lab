@@ -79,7 +79,7 @@ function baseHandlers(overrides: FakeHandlers = {}): FakeHandlers {
         projectTypes: [
           { id: "research", name: "Research project", guidance: "Research default" },
           { id: "software", name: "Software project", guidance: "Software default" },
-          { id: "paper", name: "Paper", guidance: "Paper default" },
+          { id: "manuscript", name: "Manuscript", guidance: "Manuscript default" },
         ],
       },
     }),

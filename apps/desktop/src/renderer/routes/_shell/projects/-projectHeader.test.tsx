@@ -55,7 +55,7 @@ describe("Project header", () => {
           projectTypes: [
             { id: "research", name: "Research project", guidance: "" },
             { id: "software", name: "Software project", guidance: "" },
-            { id: "paper", name: "Paper", guidance: "" },
+            { id: "manuscript", name: "Manuscript", guidance: "" },
           ],
         },
       }),
@@ -66,8 +66,8 @@ describe("Project header", () => {
 
     const select = (await screen.findByTestId("project-view-type")) as HTMLSelectElement
     expect(select.value).toBe("")
-    fireEvent.change(select, { target: { value: "paper" } })
-    await waitFor(() => expect(choices).toEqual([{ id: "p1", typeId: "paper" }]))
+    fireEvent.change(select, { target: { value: "manuscript" } })
+    await waitFor(() => expect(choices).toEqual([{ id: "p1", typeId: "manuscript" }]))
   })
 
   test("translates the project type choice and built-in names", async () => {
@@ -84,7 +84,7 @@ describe("Project header", () => {
           projectTypes: [
             { id: "research", name: "Research project", guidance: "" },
             { id: "software", name: "Software project", guidance: "" },
-            { id: "paper", name: "Paper", guidance: "" },
+            { id: "manuscript", name: "Manuscript", guidance: "" },
           ],
         },
       }),
@@ -95,7 +95,7 @@ describe("Project header", () => {
     expect(within(select).getByRole("option", { name: "Elegir tipo" })).toBeTruthy()
     expect(within(select).getByRole("option", { name: "Proyecto de investigación" })).toBeTruthy()
     expect(within(select).getByRole("option", { name: "Proyecto de software" })).toBeTruthy()
-    expect(within(select).getByRole("option", { name: "Artículo" })).toBeTruthy()
+    expect(within(select).getByRole("option", { name: "Manuscrito" })).toBeTruthy()
   })
 
   test("translates the Git notice while preserving the project name", async () => {

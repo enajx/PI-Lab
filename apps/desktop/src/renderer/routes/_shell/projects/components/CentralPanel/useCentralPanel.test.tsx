@@ -18,6 +18,7 @@ function deferred<T>() {
 /** Async restoration races use an injected IPC boundary and the shipping controller. */
 function setup(initialState: CentralPanelRestoreState, handlers: FakeHandlers) {
   const client = createFakeTrpcClient({
+    "settings.get": () => ({ agents: { defaultAgentId: "claude-code" } }),
     "agents.list": () => [],
     "agents.projectChoice": () => ({ agentId: null }),
     "terminal.list": () => [],

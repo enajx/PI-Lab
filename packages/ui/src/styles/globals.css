@@ -1,28 +1,11 @@
 @import "tailwindcss";
 
-/*
- * Scan both the renderer app and this shared UI package for utility classes.
- * `@tailwindcss/vite` auto-detects via the module graph, but these explicit
- * sources make the shared-package classes deterministic regardless of import
- * order. Paths are relative to this CSS file.
- */
+/* Scan app and shared UI classes, regardless of import order. */
 @source "../../../../apps/desktop/src/renderer";
 @source "../components";
 
-/*
- * PI Lab shared design tokens.
- *
- * Calm "analog/scandi" default palette, with light and dark token sets expressed
- * on :root / .dark. The renderer ThemeProvider can override the same tokens with
- * a named curated palette and uses `.dark` for the resolved light/dark/system
- * mode. Tailwind maps the tokens via @theme inline, so `bg-background`,
- * `text-foreground`, `border-border`, … follow changes without a rebuild.
- *
- * Colors are OKLCH so lightness/chroma read predictably and the two themes stay
- * perceptually balanced. The dark background is a warm near-black (NOT #000).
- */
+/* Shared light and dark theme tokens. */
 
-/* Tell Tailwind v4 that `.dark` on an ancestor is the dark-variant signal. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
@@ -159,11 +142,7 @@
   -webkit-app-region: no-drag;
 }
 
-/*
- * Shared compact-control activity treatment. Each variant is deliberately
- * monochrome and transform/opacity-only. Callers provide the authoritative
- * active state; inactive effects disappear completely.
- */
+/* Shared activity animation for compact controls. */
 .control-animation {
   position: relative;
   display: inline-grid;
@@ -483,15 +462,7 @@
   animation-name: pi-lab-gradient-rock;
 }
 
-/* Diagnostic build: the project gradient animation above intentionally remains
-   animated even when macOS Reduce Motion is enabled, so the user can verify that
-   the fallback animation runs. */
-
-/* Animated ellipsis for inline pending labels (e.g. "Working…", or a running
-   background workflow control). Three dots pulse AND gently bounce in a
-   staggered wave so the indicator is unmistakably alive and moving. Under
-   reduced motion they simply hold visible so the label still reads as three
-   static dots. */
+/* Pending dots stay still under reduced motion. */
 .pi-lab-loading-dots {
   display: inline-flex;
   align-items: center;

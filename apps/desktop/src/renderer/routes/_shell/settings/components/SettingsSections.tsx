@@ -6,9 +6,10 @@ import type {
 } from "@pi-lab/local-db"
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
+import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useLayoutEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useState } from "react"
 import { type CaffeineMode, type CaffeineScope, useCaffeine } from "../../../../caffeine"
 import { ProjectMarkdownChoice } from "../../../../components/ProjectMarkdownChoice"
 import { ProjectTypeChoice } from "../../../../components/ProjectTypeChoice"
@@ -58,9 +59,30 @@ import {
 import { useTRPC } from "../../../../trpc/react"
 import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
+import { AlphaTestingResets } from "./AlphaTestingResets"
 import { AppIconGallery } from "./AppIconGallery"
 import { AppThemeGallery } from "./AppThemeGallery"
 import { SelectField, SettingsSection, TextAreaField, ToggleField } from "./SettingsControls"
+
+/** The icon workshop belongs to the separate Alpha app. */
+function AlphaAppIconGallery() {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    let active = true
+    void window.piLab?.appIcon
+      ?.getChannel()
+      .then((channel) => {
+        if (active) setShow(channel === "alpha")
+      })
+      .catch((error: unknown) => {
+        console.warn("[pi-lab] Could not determine app icon channel:", error)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+  return show ? <AppIconGallery /> : null
+}
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   muted: false,
@@ -81,6 +103,7 @@ export function GeneralSection() {
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const startAtLoginQuery = useQuery(trpc.system.startAtLogin.queryOptions())
+  const menuBarIconQuery = useQuery(trpc.system.menuBarIcon.queryOptions())
   const updateGeneral = useMutation(
     trpc.settings.updateGeneral.mutationOptions({
       onSuccess: () =>
@@ -91,6 +114,12 @@ export function GeneralSection() {
     trpc.system.setStartAtLogin.mutationOptions({
       onSuccess: () =>
         void queryClient.invalidateQueries({ queryKey: trpc.system.startAtLogin.queryKey() }),
+    }),
+  )
+  const setMenuBarIcon = useMutation(
+    trpc.system.setMenuBarIcon.mutationOptions({
+      onSuccess: () =>
+        void queryClient.invalidateQueries({ queryKey: trpc.system.menuBarIcon.queryKey() }),
     }),
   )
   const confirmOnQuit = settingsQuery.data?.confirmOnQuit ?? true
@@ -128,7 +157,7 @@ export function GeneralSection() {
       <ToggleField
         testId="settings-keep-running-after-close"
         label="Keep running after window closes"
-        description="Keep PI Lab available in the menu bar or system tray for quick file opens."
+        description="Keep PI Lab running after its last window closes."
         checked={keepRunningAfterClose}
         onChange={(value) => updateGeneral.mutate({ keepRunningAfterClose: value })}
       />
@@ -140,14 +169,34 @@ export function GeneralSection() {
         disabled={startAtLoginQuery.data?.available === false || setStartAtLogin.isPending}
         onChange={(value) => setStartAtLogin.mutate({ enabled: value })}
       />
+      {menuBarIconQuery.data?.available ? (
+        <ToggleField
+          testId="settings-menu-bar-icon"
+          label="Show menu-bar icon"
+          description="Show the icon while PI Lab runs in the background. When hidden, reopen PI Lab from the Dock."
+          checked={menuBarIconQuery.data.visible}
+          disabled={setMenuBarIcon.isPending}
+          onChange={(visible) => setMenuBarIcon.mutate({ visible })}
+        />
+      ) : null}
       {startAtLoginQuery.data?.available === false ? (
         <p className="px-4 py-3 text-muted-foreground text-xs">
           {t("Start at login is available in packaged desktop builds.")}
         </p>
       ) : null}
-      {updateGeneral.error || setStartAtLogin.error || startAtLoginQuery.error ? (
+      {updateGeneral.error ||
+      setStartAtLogin.error ||
+      startAtLoginQuery.error ||
+      menuBarIconQuery.error ||
+      setMenuBarIcon.error ? (
         <p role="alert" className="px-4 py-3 text-destructive text-xs">
-          {String(updateGeneral.error ?? setStartAtLogin.error ?? startAtLoginQuery.error)}
+          {String(
+            updateGeneral.error ??
+              setStartAtLogin.error ??
+              startAtLoginQuery.error ??
+              menuBarIconQuery.error ??
+              setMenuBarIcon.error,
+          )}
         </p>
       ) : null}
       <ToggleField
@@ -183,6 +232,7 @@ export function GeneralSection() {
           {t("Run setup again")}
         </Button>
       </div>
+      <AlphaTestingResets />
     </SettingsSection>
   )
 }
@@ -230,7 +280,7 @@ export function AppearanceSection() {
         onChange={(value) => setMode(value as ThemeMode)}
       />
       <AppThemeGallery />
-      <AppIconGallery />
+      <AlphaAppIconGallery />
       <div
         id="appearance-advanced"
         data-testid="appearance-advanced-editor-typography"
@@ -545,7 +595,7 @@ export function AgentsSection() {
   const queryClient = useQueryClient()
   const agentsQuery = useQuery(trpc.agents.list.queryOptions(undefined, { staleTime: 0 }))
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
-  const [defaultAgent, setDefaultAgent] = useDefaultAgentId()
+  const [defaultAgent, setDefaultAgent, defaultAgentError] = useDefaultAgentId()
   const updateGeneral = useMutation(
     trpc.settings.updateGeneral.mutationOptions({
       onSuccess: () =>
@@ -564,6 +614,9 @@ export function AgentsSection() {
   const agents = agentsQuery.data ?? []
   const worktreePerAgent = settingsQuery.data?.worktreePerAgent ?? false
   const agentSettings: AgentSettings = settingsQuery.data?.agents ?? {
+    quitBehavior: "stop",
+    launchDefaults: {},
+    defaultAgentId: null,
     projectConfigStorage: "app",
     executableOverrides: {},
     setupCompleted: false,
@@ -583,12 +636,35 @@ export function AgentsSection() {
         options={agents.map((agent) => ({ value: agent.id, label: agent.label }))}
         onChange={setDefaultAgent}
       />
+      {agents
+        .filter((agent) => agent.id === "codex" || agent.id === "claude-code")
+        .map((agent) => (
+          <AgentLaunchDefaultsField
+            key={agent.id}
+            agent={agent}
+            configured={agentSettings.launchDefaults?.[agent.id] ?? {}}
+            onSave={(value) => updateAgents.mutate({ launchDefaults: { [agent.id]: value } })}
+          />
+        ))}
       <ToggleField
         testId="settings-worktree-per-agent"
         label="New worktree per agent"
         description="Always isolate each agent in its own git worktree."
         checked={worktreePerAgent}
         onChange={(value) => updateGeneral.mutate({ worktreePerAgent: value })}
+      />
+      <SelectField
+        testId="settings-agent-quit-behavior"
+        label="When quitting PI Lab"
+        description="Applies to all agents started by PI Lab. Closing a window is separate from quitting the app."
+        value={agentSettings.quitBehavior}
+        options={[
+          { value: "stop", label: "Stop agents (confirm before quitting)" },
+          { value: "keep-running", label: "Keep agents running in the background" },
+        ]}
+        onChange={(value) =>
+          updateAgents.mutate({ quitBehavior: value as AgentSettings["quitBehavior"] })
+        }
       />
       <SelectField
         testId="settings-project-config-storage"
@@ -619,12 +695,53 @@ export function AgentsSection() {
           />
         ))}
       </div>
-      {updateAgents.error ? (
+      {updateAgents.error || defaultAgentError ? (
         <p data-testid="settings-agents-error" className="px-4 text-destructive text-xs">
-          {updateAgents.error.message}
+          {updateAgents.error?.message ?? defaultAgentError}
         </p>
       ) : null}
     </SettingsSection>
+  )
+}
+
+/** Per-provider launch choices; empty values leave the CLI's own defaults intact. */
+function AgentLaunchDefaultsField({
+  agent,
+  configured,
+  onSave,
+}: {
+  agent: { id: string; label: string }
+  configured: { model?: string; effort?: string }
+  onSave: (value: { model?: string; effort?: string }) => void
+}) {
+  const [model, setModel] = useState(configured.model ?? "")
+  useEffect(() => setModel(configured.model ?? ""), [configured.model])
+  return (
+    <div>
+      <label className="flex items-center justify-between gap-4 px-4 py-3">
+        <span className="text-sm">{agent.label} model</span>
+        <input
+          data-testid={`settings-agent-model-${agent.id}`}
+          aria-label={`${agent.label} model`}
+          placeholder="CLI default"
+          value={model}
+          onChange={(event) => setModel(event.target.value)}
+          onBlur={() => onSave({ model: model.trim() })}
+          className="w-64 rounded border border-border bg-background px-2 py-1.5 text-xs"
+        />
+      </label>
+      <SelectField
+        testId={`settings-agent-effort-${agent.id}`}
+        label={`${agent.label} effort`}
+        description="Applies when opening a new agent. Available effort levels depend on the model and installed CLI."
+        value={configured.effort ?? ""}
+        options={[
+          { value: "", label: "CLI default" },
+          ...(AGENT_EFFORT_LEVELS[agent.id] ?? []).map((value) => ({ value, label: value })),
+        ]}
+        onChange={(effort) => onSave({ effort })}
+      />
+    </div>
   )
 }
 

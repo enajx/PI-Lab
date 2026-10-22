@@ -1,10 +1,13 @@
 import { cn } from "@pi-lab/ui"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+import { useCallback, useEffect, useRef } from "react"
 import { CaffeineControl } from "../../../../../caffeine"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
 import { useTranslate } from "../../../../../i18n/language"
 import { useShowHiddenProjects, useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { useAddProjectController } from "../../../components/AddProjectController"
 import { AddProjectMenu } from "../../../components/AddProjectMenu"
 import { ProjectVisibilityToggle } from "../../../components/ProjectVisibilityToggle"
 import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
@@ -22,6 +25,9 @@ import { ProjectCard } from "../ProjectCard"
 export function Dashboard() {
   const t = useTranslate()
   const trpc = useTRPC()
+  const navigate = useNavigate()
+  const { openAddProject } = useAddProjectController()
+  const trayRequestHandled = useRef(false)
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const [collapsed] = useSidebarCollapsed()
@@ -33,8 +39,25 @@ export function Dashboard() {
       : projects.filter((project) => Boolean(project.archivedAt)).length
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
   const visibleProjects = showHidden ? projects : projects.filter((project) => !project.archivedAt)
-  const invalidateProjects = () =>
-    queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+  const invalidateProjects = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() }),
+    [queryClient, trpc],
+  )
+
+  useEffect(() => {
+    if (trayRequestHandled.current) return
+    const search = window.location.hash.split("?", 2)[1]
+    if (!search || !new URLSearchParams(search).has("newProject")) return
+    trayRequestHandled.current = true
+    openAddProject({
+      onAdded: (project) => {
+        void invalidateProjects()
+        void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+      },
+    })
+    const cleanHash = window.location.hash.split("?", 1)[0]
+    window.history.replaceState(null, "", `${window.location.href.split("#", 1)[0]}${cleanHash}`)
+  }, [openAddProject, navigate, invalidateProjects])
 
   return (
     <div data-testid="dashboard" className="flex h-full flex-col">

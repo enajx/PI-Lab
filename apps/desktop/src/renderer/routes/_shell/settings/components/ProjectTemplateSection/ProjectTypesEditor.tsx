@@ -32,7 +32,7 @@ export function ProjectTypesEditor() {
             type={type}
             busy={save.isPending}
             onSave={(guidance) =>
-              save.mutate({ id: type.id as "research" | "software" | "paper", guidance })
+              save.mutate({ id: type.id as "research" | "software" | "manuscript", guidance })
             }
           />
         ))}
@@ -62,8 +62,8 @@ function ProjectTypeRow({
       ? t("Research project")
       : type.id === "software"
         ? t("Software project")
-        : type.id === "paper"
-          ? t("Paper")
+        : type.id === "manuscript"
+          ? t("Manuscript")
           : type.name
   const [guidance, setGuidance] = useState(type.guidance)
   useEffect(() => setGuidance(type.guidance), [type.guidance])

@@ -1,22 +1,13 @@
-import type { Project, ProjectMetadata } from "@pi-lab/local-db"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import type { Project, ProjectDetails } from "@pi-lab/local-db"
+import { QueryClient } from "@tanstack/react-query"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
+import { AppProviders } from "../../../../../providers/AppProviders"
+import { createFakeTrpcClient } from "../../../../../test/fakeTrpcClient"
 import { EditProjectDialog } from "./EditProjectDialog"
 
-/**
- * Component test for the "Edit project…" dialog's two reworked sections:
- *
- *   - Emoji tags now draw from a single GLOBAL palette (a renderer preference,
- *     persisted to localStorage). Chips are the union of the palette and the
- *     project's own tags; clicking toggles assignment for THIS project; "+" opens
- *     an emoji picker; right-click removes one from the palette.
- *   - External links are URL-only (no per-link label input); the stored `label`
- *     field is left untouched server-side but never collected here.
- *
- * The dialog needs no router/tRPC — only localStorage — so it renders standalone.
- */
-
+/** Exercises the shared project form with a fake IPC client. */
 function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Project {
   return {
     repoPath: `/tmp/${overrides.id}`,
@@ -28,7 +19,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     metadata: null,
     taskRelPath: null,
     mainRelPath: null,
-    typeId: "general",
+    typeId: "research",
     agentConfig: null,
     sortIndex: 0,
     archivedAt: null,
@@ -39,11 +30,35 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
   }
 }
 
-function renderDialog(p: Project) {
-  const onSave = vi.fn<(metadata: ProjectMetadata | null) => void>()
+function renderDetails(p: Project, mode: "add" | "edit", storedAgentId: string | null) {
+  const onSave = vi.fn<(metadata: ProjectDetails | null) => void>()
   const onClose = vi.fn()
-  render(<EditProjectDialog project={p} onClose={onClose} onSave={onSave} />)
+  render(
+    <AppProviders
+      client={createFakeTrpcClient({
+        "agents.list": () => [
+          { id: "codex", label: "Codex", available: true },
+          { id: "missing", label: "Missing", available: false },
+        ],
+        "agents.projectChoice": () => ({ agentId: storedAgentId }),
+      })}
+      queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <EditProjectDialog
+        mode={mode}
+        project={p}
+        pending={false}
+        error={null}
+        onClose={onClose}
+        onSave={onSave}
+      />
+    </AppProviders>,
+  )
   return { onSave, onClose }
+}
+
+function renderDialog(p: Project) {
+  return renderDetails(p, "edit", null)
 }
 
 const chipFor = (emoji: string): HTMLElement =>
@@ -62,7 +77,7 @@ describe("EditProjectDialog — emoji palette", () => {
     renderDialog(project({ id: "localized", name: "Study", metadata: null }))
     act(() => setInterfaceLanguage("es"))
     expect(screen.getByRole("heading", { name: "Editar proyecto" })).toBeTruthy()
-    expect(screen.getByText("Colaboradores")).toBeTruthy()
+    expect(screen.queryByTestId("edit-project-collaborators")).toBeNull()
     act(() => setInterfaceLanguage("en"))
   })
 
@@ -80,7 +95,7 @@ describe("EditProjectDialog — emoji palette", () => {
     expect(chipFor("🔬").getAttribute("aria-pressed")).toBe("false")
   })
 
-  test("clicking a chip toggles assignment for this project only (palette unchanged)", () => {
+  test("clicking a chip toggles assignment for this project only (palette unchanged)", async () => {
     const { onSave } = renderDialog(project({ id: "e2", name: "B", metadata: null }))
 
     // Assign a seeded emoji to this project.
@@ -89,11 +104,14 @@ describe("EditProjectDialog — emoji palette", () => {
     // The chip stays in the palette (still rendered), it's just assigned now.
     expect(chipFor("🧪").getAttribute("aria-pressed")).toBe("false")
 
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
     fireEvent.click(screen.getByTestId("edit-project-save"))
-    expect(onSave).toHaveBeenCalledWith({ emojiTags: ["🔬"] })
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ emojiTags: ["🔬"] }))
   })
 
-  test("the '+' control opens an emoji picker whose selection joins the palette and assigns it here", () => {
+  test("the '+' control opens an emoji picker whose selection joins the palette and assigns it here", async () => {
     const { onSave } = renderDialog(project({ id: "e3", name: "C", metadata: null }))
 
     fireEvent.click(screen.getByTestId("edit-project-emoji-add"))
@@ -111,8 +129,11 @@ describe("EditProjectDialog — emoji palette", () => {
     // It persisted into the global palette pref (shared across projects).
     expect(window.localStorage.getItem("pi-lab.emojiTagPalette")).toContain("🦾")
 
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
     fireEvent.click(screen.getByTestId("edit-project-save"))
-    expect(onSave).toHaveBeenCalledWith({ emojiTags: ["🦾"] })
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ emojiTags: ["🦾"] }))
   })
 
   test("the picker includes the requested project-tag emoji", () => {
@@ -125,7 +146,7 @@ describe("EditProjectDialog — emoji palette", () => {
     }
   })
 
-  test("right-clicking a chip removes it from the palette and unassigns it here", () => {
+  test("right-clicking a chip removes it from the palette and unassigns it here", async () => {
     const { onSave } = renderDialog(
       project({ id: "e4", name: "D", metadata: { emojiTags: ["🔬"] } }),
     )
@@ -139,40 +160,89 @@ describe("EditProjectDialog — emoji palette", () => {
     expect(window.localStorage.getItem("pi-lab.emojiTagPalette")).not.toContain("🔬")
 
     // Saving no longer includes it, and with nothing else set the group clears.
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
     fireEvent.click(screen.getByTestId("edit-project-save"))
-    expect(onSave).toHaveBeenCalledWith(null)
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ emojiTags: [] }))
   })
 })
 
-describe("EditProjectDialog — external links", () => {
-  test("renders 'External links' with a URL-only row (no label input)", () => {
-    renderDialog(
+describe("project details", () => {
+  test("edits name, type, deadline and text tags without exposing retired fields", async () => {
+    const { onSave } = renderDialog(
       project({
-        id: "l1",
-        name: "E",
-        metadata: { referenceLinks: [{ url: "https://www.overleaf.com/project/x", label: "Old" }] },
+        id: "details",
+        name: "Folder",
+        metadata: {
+          collaborators: "Old",
+          venue: "Old",
+          referenceLinks: [{ url: "https://example.com" }],
+        },
       }),
     )
-
-    expect(screen.getByText("External links")).toBeTruthy()
-    expect(screen.queryByText("Reference links")).toBeNull()
-
-    // The existing URL loads; there is no per-link label field anymore.
-    const url = screen.getByTestId("edit-project-link-url") as HTMLInputElement
-    expect(url.value).toBe("https://www.overleaf.com/project/x")
-    expect(screen.queryByTestId("edit-project-link-label")).toBeNull()
-    expect(url.getAttribute("placeholder")).toContain("overleaf.com")
-  })
-
-  test("saving a link keeps only its URL (label is not collected)", () => {
-    const { onSave } = renderDialog(project({ id: "l2", name: "F", metadata: null }))
-
-    fireEvent.click(screen.getByTestId("edit-project-link-add"))
-    fireEvent.change(screen.getByTestId("edit-project-link-url"), {
-      target: { value: "https://github.com/a/b" },
-    })
+    expect(screen.getByText("Tags")).toBeTruthy()
+    expect(screen.queryByText("Emoji tags")).toBeNull()
+    expect(screen.queryByText(/Click to tag this project/)).toBeNull()
+    expect(screen.queryByText("Collaborators")).toBeNull()
+    expect(screen.queryByText("Publishing venue")).toBeNull()
+    expect(screen.queryByText("External links")).toBeNull()
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "New title" } })
+    fireEvent.change(screen.getByLabelText("Project type"), { target: { value: "manuscript" } })
+    fireEvent.change(screen.getByLabelText("Deadline"), { target: { value: "2026-12-01" } })
+    fireEvent.change(screen.getByLabelText("Text tag"), { target: { value: "Priority" } })
+    expect(screen.queryByLabelText("Tag color")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
     fireEvent.click(screen.getByTestId("edit-project-save"))
-
-    expect(onSave).toHaveBeenCalledWith({ referenceLinks: [{ url: "https://github.com/a/b" }] })
+    expect(onSave).toHaveBeenCalledWith({
+      name: "New title",
+      typeId: "manuscript",
+      deadline: "2026-12-01",
+      agentId: null,
+      emojiTags: [],
+      textTags: [{ label: "Priority", color: "blue" }],
+    })
   })
+})
+
+test("Add uses an unselected type and keeps Plan research disabled", async () => {
+  const { onSave, onClose } = renderDetails(
+    project({ id: "new", name: "folder-name", typeId: "general" }),
+    "add",
+    null,
+  )
+  expect(screen.queryByLabelText("Deadline")).toBeNull()
+  expect(screen.queryByText("Tags")).toBeNull()
+  expect(screen.queryByTestId("edit-project-tag-text")).toBeNull()
+  expect((screen.getByLabelText("Project name") as HTMLInputElement).value).toBe("folder-name")
+  expect(
+    (screen.getByRole("button", { name: "Plan research" }) as HTMLButtonElement).disabled,
+  ).toBe(true)
+  expect(screen.queryByLabelText("Project type")).toBeNull()
+  expect((screen.getByTestId("add-project-confirm") as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.click(screen.getByTestId("add-project-confirm"))
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({ typeId: "general", agentId: null, deadline: null }),
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(onClose).toHaveBeenCalledOnce()
+})
+
+test("Edit loads the saved agent choice and can reset it to Settings default", async () => {
+  const { onSave } = renderDetails(
+    project({ id: "configured", name: "Configured", agentConfig: { agentId: "missing" } }),
+    "edit",
+    "codex",
+  )
+  await waitFor(() =>
+    expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe("codex"),
+  )
+  expect(screen.queryByRole("option", { name: "Missing" })).toBeNull()
+  fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "" } })
+  fireEvent.change(screen.getByLabelText("Project type"), { target: { value: "" } })
+  fireEvent.click(screen.getByTestId("edit-project-save"))
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ agentId: null, typeId: "general" }))
 })

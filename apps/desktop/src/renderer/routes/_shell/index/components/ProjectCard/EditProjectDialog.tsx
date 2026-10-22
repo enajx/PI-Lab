@@ -1,75 +1,12 @@
-import type { Project, ProjectMetadata, ProjectReferenceLink } from "@pi-lab/local-db"
+import type { Project, ProjectDetails, ProjectTextTag } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
+import { useQuery } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useTranslate } from "../../../../../i18n/language"
 import { useEmojiTagPalette } from "../../../../../preferences/preferences"
-
-/**
- * The "Edit project…" modal (reached from the project card's right-click menu). It
- * edits the extra, optional metadata surfaced under the card title —
- * collaborators, publishing venue, a deadline date, a set of emoji tags, and
- * external links (a URL each). On save it normalizes the form into a
- * {@link ProjectMetadata} (trimming and dropping empty fields) and hands it to
- * `onSave`; an all-empty form saves `null`, clearing the group. Closes on Escape,
- * on a backdrop click, or via Cancel.
- *
- * Emoji tags draw from a single GLOBAL palette ({@link useEmojiTagPalette}) shared
- * across every project: a chip is *active* when assigned to THIS project, clicking
- * toggles that assignment only, "+" opens a cross-platform emoji picker whose
- * choice joins the global palette, and right-clicking a chip removes it from it.
- */
-
-/**
- * A reference-link row while editing. `id` is a stable React key for the row (rows
- * have no natural id and can be added/removed). Links are URL-only now — the stored
- * {@link ProjectReferenceLink.label} is no longer collected (the card derives a
- * display name from the URL's domain), but the field is kept optional server-side
- * so already-saved links aren't lost.
- */
-interface LinkDraft {
-  id: string
-  url: string
-}
-
-/** A fresh, empty link-draft row. */
-function newLinkDraft(): LinkDraft {
-  return { id: crypto.randomUUID(), url: "" }
-}
-
-/** Seed the editable link rows from stored metadata (URL only). */
-function toLinkDrafts(links: ProjectReferenceLink[] | undefined): LinkDraft[] {
-  return (links ?? []).map((link) => ({ id: crypto.randomUUID(), url: link.url }))
-}
-
-/**
- * Collapse the form state into stored {@link ProjectMetadata}: trim every string,
- * drop empty fields, keep only links with a non-empty URL, and return `null` when
- * nothing remains (so an emptied form clears the whole group).
- */
-function normalizeMetadata(input: {
-  collaborators: string
-  venue: string
-  deadline: string
-  emojiTags: string[]
-  links: LinkDraft[]
-}): ProjectMetadata | null {
-  const collaborators = input.collaborators.trim()
-  const venue = input.venue.trim()
-  const deadline = input.deadline.trim()
-  const referenceLinks: ProjectReferenceLink[] = input.links
-    .map((link) => ({ url: link.url.trim() }))
-    .filter((link) => link.url.length > 0)
-
-  const metadata: ProjectMetadata = {}
-  if (collaborators.length > 0) metadata.collaborators = collaborators
-  if (venue.length > 0) metadata.venue = venue
-  if (deadline.length > 0) metadata.deadline = deadline
-  if (input.emojiTags.length > 0) metadata.emojiTags = input.emojiTags
-  if (referenceLinks.length > 0) metadata.referenceLinks = referenceLinks
-
-  return Object.keys(metadata).length > 0 ? metadata : null
-}
+import { useTRPC } from "../../../../../trpc/react"
 
 const FIELD_CLASS =
   "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
@@ -123,23 +60,53 @@ const EMOJI_PICKER_OPTIONS = [
   "☑️",
 ] as const
 
+/** Shared compact form for adding and editing project details. */
 export function EditProjectDialog({
   project,
+  mode,
+  pending,
+  error,
   onClose,
   onSave,
 }: {
-  project: Pick<Project, "name" | "metadata">
+  project: Pick<Project, "name" | "typeId" | "metadata" | "agentConfig"> & { id?: string }
+  mode: "add" | "edit"
+  pending: boolean
+  error: string | null
   onClose: () => void
-  onSave: (metadata: ProjectMetadata | null) => void
+  onSave: (details: ProjectDetails) => void
 }) {
   const t = useTranslate()
+  const trpc = useTRPC()
+  const agents = useQuery(trpc.agents.list.queryOptions())
+  const choice = useQuery({
+    ...trpc.agents.projectChoice.queryOptions({ projectId: project.id ?? "" }),
+    enabled: mode === "edit" && Boolean(project.id),
+  })
   const existing = project.metadata
-  const [collaborators, setCollaborators] = useState<string>(existing?.collaborators ?? "")
-  const [venue, setVenue] = useState<string>(existing?.venue ?? "")
-  const [deadline, setDeadline] = useState<string>(existing?.deadline ?? "")
+  const [name, setName] = useState(project.name)
+  const [typeId, setTypeId] = useState(
+    project.typeId === "paper"
+      ? "manuscript"
+      : ["research", "software", "manuscript"].includes(project.typeId)
+        ? project.typeId
+        : "",
+  )
+  const [agentChoice, setAgentChoice] = useState<string | null>(null)
+  const agentId = agentChoice ?? choice.data?.agentId ?? ""
+  const [deadline, setDeadline] = useState(existing?.deadline ?? "")
   const [emojiTags, setEmojiTags] = useState<string[]>(existing?.emojiTags ?? [])
-  const [links, setLinks] = useState<LinkDraft[]>(toLinkDrafts(existing?.referenceLinks))
-
+  const [textTags, setTextTags] = useState<ProjectTextTag[]>(existing?.textTags ?? [])
+  const [tagLabel, setTagLabel] = useState("")
+  const addTextTag = () => {
+    const label = tagLabel.trim()
+    if (!label) return
+    setTextTags((current) => [
+      ...current.filter((tag) => tag.label !== label),
+      { label, color: "blue" },
+    ])
+    setTagLabel("")
+  }
   // The global, cross-project emoji palette (see module doc). The chips shown are
   // the UNION of this palette and the project's already-assigned tags, so a tag
   // already on the project (e.g. 🧠🔥) stays visible and manageable even if it was
@@ -157,11 +124,11 @@ export function EditProjectDialog({
         setEmojiPickerOpen(false)
         return
       }
-      onClose()
+      if (!pending) onClose()
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [emojiPickerOpen, onClose])
+  }, [emojiPickerOpen, onClose, pending])
 
   // Toggle whether THIS project is tagged with `emoji` (project-only; the global
   // palette is untouched).
@@ -185,162 +152,221 @@ export function EditProjectDialog({
     setEmojiTags((current) => current.filter((e) => e !== emoji))
   }
 
-  const updateLink = (index: number, patch: Partial<LinkDraft>) => {
-    setLinks((current) => current.map((link, i) => (i === index ? { ...link, ...patch } : link)))
-  }
-
   const save = () => {
-    onSave(normalizeMetadata({ collaborators, venue, deadline, emojiTags, links }))
+    if (!name.trim() || pending || (choice.isLoading && mode === "edit")) return
+    onSave({
+      name: name.trim(),
+      typeId: (typeId || "general") as ProjectDetails["typeId"],
+      deadline: deadline || null,
+      agentId: agentId || null,
+      emojiTags,
+      textTags,
+    })
   }
 
-  return (
+  return createPortal(
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is a click-to-dismiss surface; Escape (bound above) is the keyboard equivalent, and focus stays on the dialog's own controls.
     // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismissal mirrors Escape, which is already handled; a key handler here would duplicate it.
     <div
       data-testid="edit-project-backdrop"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4"
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget && !pending) onClose()
       }}
     >
       <div
         ref={rootRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`${t("Edit")} ${project.name}`}
-        data-testid="edit-project-dialog"
+        aria-label={mode === "add" ? t("Add project") : `${t("Edit")} ${project.name}`}
+        data-testid={mode === "add" ? "add-project-dialog" : "edit-project-dialog"}
         className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xl"
       >
         <div className="border-border border-b px-4 py-3">
-          <h2 className="font-medium text-foreground text-sm">{t("Edit project")}</h2>
+          <h2 className="font-medium text-foreground text-sm">
+            {t(mode === "add" ? "Add project" : "Edit project")}
+          </h2>
           <p className="truncate text-muted-foreground text-xs">{project.name}</p>
         </div>
 
-        <div className="flex flex-col gap-3.5 overflow-y-auto px-4 py-4">
-          <label className="flex flex-col gap-1">
-            <span className="font-medium text-foreground text-xs">{t("Collaborators")}</span>
+        <fieldset disabled={pending} className="flex flex-col gap-3.5 overflow-y-auto px-4 py-4">
+          <label className="flex flex-col gap-1 text-xs font-medium">
+            {t("Project name")}
             <input
-              type="text"
-              data-testid="edit-project-collaborators"
               className={FIELD_CLASS}
-              value={collaborators}
-              placeholder={t("e.g. Ada Lovelace, Alan Turing")}
-              onChange={(event) => setCollaborators(event.target.value)}
+              data-testid="edit-project-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              disabled={pending}
             />
           </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="font-medium text-foreground text-xs">{t("Publishing venue")}</span>
-            <input
-              type="text"
-              data-testid="edit-project-venue"
-              className={FIELD_CLASS}
-              value={venue}
-              placeholder={t("e.g. NeurIPS 2026")}
-              onChange={(event) => setVenue(event.target.value)}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="font-medium text-foreground text-xs">{t("Deadline")}</span>
-            <input
-              type="date"
-              data-testid="edit-project-deadline"
-              className={FIELD_CLASS}
-              value={deadline}
-              onChange={(event) => setDeadline(event.target.value)}
-            />
-          </label>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="font-medium text-foreground text-xs">{t("Emoji tags")}</span>
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="edit-project-emoji">
-              {paletteChips.map((emoji) => {
-                const active = emojiTags.includes(emoji)
-                return (
-                  <button
-                    key={emoji}
-                    type="button"
-                    data-testid="edit-project-emoji-choice"
-                    data-emoji={emoji}
-                    data-active={active}
-                    aria-pressed={active}
-                    title={t("Click to tag this project · right-click to remove from the palette")}
-                    onClick={() => toggleEmoji(emoji)}
-                    onContextMenu={(event) => {
-                      event.preventDefault()
-                      removeEmojiFromPalette(emoji)
-                    }}
-                    className={cn(
-                      "flex size-8 items-center justify-center rounded-md border text-base transition-colors",
-                      active ? "border-brand bg-brand/15" : "border-border hover:bg-accent/60",
-                    )}
-                  >
-                    {emoji}
-                  </button>
-                )
-              })}
-              <button
-                type="button"
-                data-testid="edit-project-emoji-add"
-                aria-label={t("Choose an emoji to add to the palette")}
-                title={t("Choose an emoji")}
-                onClick={() => setEmojiPickerOpen(true)}
-                className="flex size-8 items-center justify-center rounded-md border border-border border-dashed text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          {mode === "edit" ? (
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              {t("Project type")}
+              <select
+                data-testid="edit-project-type"
+                className={FIELD_CLASS}
+                value={typeId}
+                onChange={(event) => setTypeId(event.target.value)}
+                disabled={pending}
               >
-                <Plus className="size-4" aria-hidden />
-              </button>
-            </div>
-            <span className="text-[11px] text-muted-foreground">
-              {t("Click to tag this project · right-click a tag to remove it from the palette")}
-            </span>
-          </div>
+                <option value="">{t("None")}</option>
+                <option value="research">{t("Research")}</option>
+                <option value="software">{t("Software")}</option>
+                <option value="manuscript">{t("Manuscript")}</option>
+              </select>
+            </label>
+          ) : null}
+          <label className="flex flex-col gap-1 text-xs font-medium">
+            {t("Agent")}
+            <select
+              data-testid="edit-project-agent"
+              className={FIELD_CLASS}
+              value={agentId}
+              onChange={(event) => setAgentChoice(event.target.value)}
+              disabled={pending || (choice.isLoading && mode === "edit")}
+            >
+              <option value="">{t("Use default agent from Settings")}</option>
+              {agentId && !agents.data?.some((agent) => agent.id === agentId && agent.available) ? (
+                <option value={agentId}>
+                  {agentId} {t("(not installed)")}
+                </option>
+              ) : null}
+              {agents.data
+                ?.filter((agent) => agent.available)
+                .map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.label}
+                  </option>
+                ))}
+            </select>
+          </label>
+          {agents.error || choice.error ? (
+            <p role="alert" className="text-xs text-destructive">
+              {(agents.error ?? choice.error)?.message}
+            </p>
+          ) : null}
+          {mode === "edit" ? (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-foreground text-xs">{t("Deadline")}</span>
+                <input
+                  type="date"
+                  data-testid="edit-project-deadline"
+                  className={FIELD_CLASS}
+                  value={deadline}
+                  onChange={(event) => setDeadline(event.target.value)}
+                />
+              </label>
 
-          <div className="flex flex-col gap-1.5">
-            <span className="font-medium text-foreground text-xs">{t("External links")}</span>
-            <div className="flex flex-col gap-2" data-testid="edit-project-links">
-              {links.map((link, index) => (
+              <div className="flex flex-col gap-1.5">
+                <span className="font-medium text-foreground text-xs">{t("Tags")}</span>
                 <div
-                  key={link.id}
-                  className="flex items-center gap-1.5"
-                  data-testid="edit-project-link-row"
+                  className="flex flex-wrap items-center gap-1.5"
+                  data-testid="edit-project-emoji"
                 >
-                  <input
-                    type="url"
-                    data-testid="edit-project-link-url"
-                    className={cn(FIELD_CLASS, "flex-1")}
-                    value={link.url}
-                    placeholder={t("e.g. https://www.overleaf.com/project/…")}
-                    onChange={(event) => updateLink(index, { url: event.target.value })}
-                  />
+                  {textTags.map((tag) => (
+                    <button
+                      type="button"
+                      key={tag.label}
+                      aria-label={`${t("Remove")} ${tag.label}`}
+                      className="inline-flex items-center gap-1 rounded-full bg-brand/15 px-2 py-1 text-xs text-foreground"
+                      onClick={() =>
+                        setTextTags((current) => current.filter((item) => item.label !== tag.label))
+                      }
+                    >
+                      {tag.label}
+                      <X className="size-3" aria-hidden />
+                    </button>
+                  ))}
+                  {paletteChips.map((emoji) => {
+                    const active = emojiTags.includes(emoji)
+                    return (
+                      <button
+                        key={emoji}
+                        type="button"
+                        data-testid="edit-project-emoji-choice"
+                        data-emoji={emoji}
+                        data-active={active}
+                        aria-pressed={active}
+                        onClick={() => toggleEmoji(emoji)}
+                        onContextMenu={(event) => {
+                          event.preventDefault()
+                          removeEmojiFromPalette(emoji)
+                        }}
+                        className={cn(
+                          "flex size-8 items-center justify-center rounded-md border text-base transition-colors",
+                          active ? "border-brand bg-brand/15" : "border-border hover:bg-accent/60",
+                        )}
+                      >
+                        {emoji}
+                      </button>
+                    )
+                  })}
                   <button
                     type="button"
-                    data-testid="edit-project-link-remove"
-                    aria-label={t("Remove link")}
-                    onClick={() => setLinks((current) => current.filter((_, i) => i !== index))}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                    data-testid="edit-project-emoji-add"
+                    aria-label={t("Choose an emoji to add to the palette")}
+                    title={t("Choose an emoji")}
+                    onClick={() => setEmojiPickerOpen(true)}
+                    className="flex size-8 items-center justify-center rounded-md border border-border border-dashed text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
                   >
-                    <X className="size-4" aria-hidden />
+                    <Plus className="size-4" aria-hidden />
+                  </button>
+
+                  <label className="min-w-24 flex-1">
+                    <span className="sr-only">{t("Text tag")}</span>
+                    <input
+                      data-testid="edit-project-tag-text"
+                      className={FIELD_CLASS}
+                      placeholder={t("Add tag")}
+                      value={tagLabel}
+                      maxLength={80}
+                      onChange={(event) => setTagLabel(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          addTextTag()
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    data-testid="edit-project-tag-add"
+                    aria-label={t("Add tag")}
+                    disabled={!tagLabel.trim()}
+                    onClick={addTextTag}
+                    className="p-2 rounded border border-border disabled:opacity-50"
+                  >
+                    <Plus className="size-4" />
                   </button>
                 </div>
-              ))}
-              <button
-                type="button"
-                data-testid="edit-project-link-add"
-                onClick={() => setLinks((current) => [...current, newLinkDraft()])}
-                className="flex items-center gap-1.5 self-start rounded-md px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent/60 hover:text-foreground"
-              >
-                <Plus className="size-3.5" aria-hidden />
-                {t("Add link")}
-              </button>
-            </div>
-          </div>
-        </div>
+              </div>
+            </>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-destructive text-xs">
+              {error}
+            </p>
+          ) : null}
+        </fieldset>
 
         <div className="flex justify-end gap-2 border-border border-t px-4 py-3">
+          {mode === "add" ? (
+            <button
+              type="button"
+              disabled
+              title={t("Coming later")}
+              className="mr-auto rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground opacity-50"
+            >
+              {t("Plan research")}
+            </button>
+          ) : null}
           <button
             type="button"
             data-testid="edit-project-cancel"
+            disabled={pending}
             onClick={onClose}
             className="rounded-md px-3 py-1.5 text-muted-foreground text-sm transition-colors hover:bg-accent/60 hover:text-foreground"
           >
@@ -348,11 +374,17 @@ export function EditProjectDialog({
           </button>
           <button
             type="button"
-            data-testid="edit-project-save"
+            data-testid={mode === "add" ? "add-project-confirm" : "edit-project-save"}
+            disabled={
+              pending ||
+              !name.trim() ||
+              Boolean(choice.error) ||
+              (mode === "edit" && choice.isLoading)
+            }
             onClick={save}
             className="rounded-md bg-brand px-3 py-1.5 font-medium text-brand-foreground text-sm transition-colors hover:bg-brand/90"
           >
-            {t("Save")}
+            {t(mode === "add" ? "Add project" : "Save")}
           </button>
         </div>
       </div>
@@ -382,6 +414,7 @@ export function EditProjectDialog({
                   data-testid="edit-project-emoji-picker-choice"
                   data-emoji={emoji}
                   aria-label={`${t("Add")} ${emoji}`}
+                  disabled={pending}
                   onClick={() => addEmojiToPalette(emoji)}
                   className="flex size-9 items-center justify-center rounded-md text-lg transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
                 >
@@ -392,6 +425,7 @@ export function EditProjectDialog({
           </div>
         </div>
       ) : null}
-    </div>
+    </div>,
+    document.body,
   )
 }

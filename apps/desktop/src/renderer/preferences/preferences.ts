@@ -1,5 +1,7 @@
 import { DEFAULT_AGENT_ID } from "@pi-lab/shared/agents/catalog"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { useTRPC } from "../trpc/react"
 
 /**
  * Renderer-only user preferences (the local, layout/appearance kind) persisted to
@@ -426,9 +428,51 @@ export function readDefaultAgentId(): string {
   return raw && raw.length > 0 ? raw : DEFAULT_AGENT_ID
 }
 
-export function useDefaultAgentId(): [string, (next: string) => void] {
-  const [value, set] = useStringPref(DEFAULT_AGENT_KEY, DEFAULT_AGENT_ID)
-  return [value.trim() || DEFAULT_AGENT_ID, set]
+/** Migrate the legacy renderer preference, then share the persisted app default. */
+export function useDefaultAgentId(): [
+  string,
+  (next: string) => Promise<boolean>,
+  string | null,
+  boolean,
+] {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const query = useQuery(trpc.settings.get.queryOptions())
+  const [legacy, setLegacy] = useStringPref(DEFAULT_AGENT_KEY, DEFAULT_AGENT_ID)
+  const accept = (agents: NonNullable<typeof query.data>["agents"]) => {
+    queryClient.setQueryData(trpc.settings.get.queryKey(), (current) =>
+      current ? { ...current, agents } : current,
+    )
+  }
+  const update = useMutation(trpc.settings.updateAgents.mutationOptions({ onSuccess: accept }))
+  const initialize = useMutation(
+    trpc.settings.initializeDefaultAgent.mutationOptions({ onSuccess: accept }),
+  )
+  const saved = query.data?.agents?.defaultAgentId
+  useEffect(() => {
+    if (saved) setLegacy(saved)
+  }, [saved, setLegacy])
+  useEffect(() => {
+    if (saved !== null || initialize.isPending || initialize.isError) return
+    initialize.mutate({ agentId: legacy.trim() || DEFAULT_AGENT_ID })
+  }, [saved, legacy, initialize.isPending, initialize.isError, initialize.mutate])
+  const set = (next: string) =>
+    update.mutateAsync({ defaultAgentId: next.trim() || DEFAULT_AGENT_ID }).then(
+      () => true,
+      () => false,
+    )
+  return [
+    saved ?? (legacy.trim() || DEFAULT_AGENT_ID),
+    set,
+    update.error?.message ??
+      (saved === null ? initialize.error?.message : undefined) ??
+      query.error?.message ??
+      null,
+    query.isPending ||
+      initialize.isPending ||
+      update.isPending ||
+      (saved === null && !initialize.isError),
+  ]
 }
 
 /**
@@ -436,10 +480,10 @@ export function useDefaultAgentId(): [string, (next: string) => void] {
  * wins, otherwise the user's stored default. Keeps the
  * test seam working while honouring the Settings → Agents default.
  */
-export function resolveLaunchAgentId(): string {
+export function resolveLaunchAgentId(defaultAgentId?: string): string {
   if (typeof window !== "undefined") {
     const override = new URLSearchParams(window.location.search).get("agentId")?.trim()
     if (override && override.length > 0) return override
   }
-  return readDefaultAgentId()
+  return defaultAgentId ?? readDefaultAgentId()
 }

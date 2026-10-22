@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, test } from "vitest"
+import { cssBlocks } from "./cssTestUtils"
 
 const stylesheet = readFileSync(new URL("./globals.css", import.meta.url), "utf8")
 
@@ -21,10 +22,10 @@ describe("control animation treatments", () => {
   })
 
   test("removes all treatment animation when reduced motion is requested", () => {
-    const reducedMotion = stylesheet.slice(
-      stylesheet.indexOf("@media (prefers-reduced-motion: reduce)"),
-      stylesheet.indexOf("/* No-thumbnail project-card"),
-    )
+    const reducedMotion = cssBlocks(
+      stylesheet,
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/,
+    ).join("\n")
     expect(reducedMotion).toContain(".control-animation-steam")
     expect(reducedMotion).toContain(".control-animation-halo")
     expect(reducedMotion).toContain(".control-animation-shimmer::after")

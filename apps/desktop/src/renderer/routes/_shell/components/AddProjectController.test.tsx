@@ -99,48 +99,59 @@ describe("AddProjectControllerProvider", () => {
     expect(screen.getByTestId("add-project-clone-form")).toBeTruthy()
   })
 
-  test("keeps errors visible and reports the returned project on success", async () => {
+  test("collects details before registration and preserves the form for retry", async () => {
     const onAdded = vi.fn()
-    let shouldFail = true
+    const openProject = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Could not add that folder"))
+      .mockResolvedValue(project)
     renderController(onAdded, {
       "system.pickDirectory": () => "/tmp/project-added",
-      "projects.open": () => {
-        if (shouldFail) {
-          shouldFail = false
-          throw new Error("Could not add that folder")
-        }
-        return project
-      },
+      "projects.open": openProject,
+      "agents.list": () => [],
     })
-
     fireEvent.click(screen.getByRole("button", { name: "Open controlled chooser" }))
     fireEvent.click(screen.getByTestId("add-project-folder"))
-
-    expect((await screen.findByTestId("add-project-error")).textContent).toContain(
-      "Could not add that folder",
-    )
-    expect(screen.getByTestId("add-project-menu")).toBeTruthy()
+    const name = await screen.findByTestId("edit-project-name")
+    expect((name as HTMLInputElement).value).toBe("project-added")
+    expect(openProject).not.toHaveBeenCalled()
+    fireEvent.change(name, { target: { value: "My software" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Add project$/ }))
+    expect(await screen.findByText("Could not add that folder")).toBeTruthy()
     expect(onAdded).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByTestId("add-project-folder"))
-    expect(await screen.findByRole("dialog", { name: "Plan this project" })).toBeTruthy()
-    expect(onAdded).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Maybe later" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Add project$/ }))
     await waitFor(() => expect(onAdded).toHaveBeenCalledWith(project))
-    expect(screen.queryByTestId("add-project-menu")).toBeNull()
+    expect(openProject).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        path: "/tmp/project-added",
+        details: expect.objectContaining({
+          name: "My software",
+          typeId: "general",
+          agentId: null,
+        }),
+      }),
+    )
+    expect(screen.queryByTestId("add-project-dialog")).toBeNull()
   })
 
-  test("offers planning after an existing folder is added", async () => {
+  test("Cancel leaves a folder unregistered and Plan research is a disabled placeholder", async () => {
     const onAdded = vi.fn()
+    const openProject = vi.fn()
     renderController(onAdded, {
       "system.pickDirectory": () => "/tmp/project-added",
-      "projects.open": () => project,
+      "projects.open": openProject,
+      "agents.list": () => [],
     })
     fireEvent.click(screen.getByRole("button", { name: "Open controlled chooser" }))
     fireEvent.click(screen.getByTestId("add-project-folder"))
-    expect(await screen.findByText("Plan this project?")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Plan this project" }))
-    expect(screen.getByRole("heading", { name: "Project setup" })).toBeTruthy()
+    await screen.findByTestId("edit-project-name")
+    expect(
+      (screen.getByRole("button", { name: "Plan research" }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(screen.queryByText("Plan this project?")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(openProject).not.toHaveBeenCalled()
     expect(onAdded).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("add-project-dialog")).toBeNull()
   })
 })

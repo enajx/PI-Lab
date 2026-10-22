@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+import { APP_ICON_DEFAULT_SELECTION } from "../../../../../shared/appIcon"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
 import {
@@ -26,6 +27,7 @@ function renderSection(node: React.ReactNode, handlers: FakeHandlers = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "system.fonts": () => ({ families: [], error: null }),
+    "system.menuBarIcon": () => ({ visible: true, available: false }),
     ...handlers,
   })
   render(
@@ -112,6 +114,56 @@ describe("Settings sections", () => {
 
     fireEvent.change(screen.getByTestId("settings-theme-mode"), { target: { value: "dark" } })
     await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true))
+  })
+
+  test("Appearance offers icon choices only in Alpha", async () => {
+    const getChannel = vi.fn(async () => "stable" as const)
+    const previous = window.piLab
+    window.piLab = {
+      platform: "darwin",
+      shutdown: {} as NonNullable<typeof window.piLab>["shutdown"],
+      appIcon: {
+        getChannel,
+        get: async () => APP_ICON_DEFAULT_SELECTION,
+        set: async (selection) => selection,
+        preview: async () => "data:image/png;base64,preview",
+      },
+    } as NonNullable<typeof window.piLab>
+    try {
+      renderSection(<AppearanceSection />)
+      await waitFor(() => expect(getChannel).toHaveBeenCalledOnce())
+      expect(screen.queryByText("App icon")).toBeNull()
+    } finally {
+      window.piLab = previous
+    }
+  })
+
+  test("Appearance shows the icon picker in Alpha", async () => {
+    const previous = window.piLab
+    window.piLab = {
+      platform: "darwin",
+      shutdown: {} as NonNullable<typeof window.piLab>["shutdown"],
+      appIcon: {
+        getChannel: async () => "alpha",
+        get: async () => ({
+          ...APP_ICON_DEFAULT_SELECTION,
+          alphaWhiteBackground: true,
+          piPalette: "viridis",
+        }),
+        set: async (selection) => selection,
+        preview: async () => "data:image/png;base64,preview",
+      },
+    } as NonNullable<typeof window.piLab>
+    try {
+      renderSection(<AppearanceSection />)
+      expect(await screen.findByText("App icon")).toBeTruthy()
+      expect(screen.getByTestId("settings-app-icon-font")).toHaveProperty(
+        "value",
+        "gill-sans-regular",
+      )
+    } finally {
+      window.piLab = previous
+    }
   })
 
   test("Appearance gallery selects and applies a named app theme", async () => {
@@ -238,6 +290,21 @@ describe("Settings sections", () => {
     })
   })
 
+  test("General restores a hidden menu-bar icon", async () => {
+    const changes: unknown[] = []
+    renderSection(<GeneralSection />, {
+      "system.menuBarIcon": () => ({ visible: false, available: true }),
+      "system.setMenuBarIcon": (input) => {
+        changes.push(input)
+        return { visible: true, available: true }
+      },
+    })
+    const toggle = await screen.findByTestId("settings-menu-bar-icon")
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(toggle)
+    await waitFor(() => expect(changes).toContainEqual({ visible: true }))
+  })
+
   test("General lets the user select the public update channel", async () => {
     const patches: unknown[] = []
     renderSection(<GeneralSection />, {
@@ -302,6 +369,43 @@ describe("Settings sections", () => {
       })
     })
     expect(screen.getByText("Not found: codex")).toBeTruthy()
+  })
+
+  test("Agents settings saves model and effort per provider and can restore CLI defaults", async () => {
+    const defaults: Record<string, { model?: string; effort?: string }> = {
+      codex: { model: "initial", effort: "medium" },
+      "claude-code": { model: "opus", effort: "high" },
+    }
+    const update = vi.fn((input: unknown) => {
+      for (const [id, value] of Object.entries(
+        (input as { launchDefaults: typeof defaults }).launchDefaults,
+      )) {
+        defaults[id] = { ...defaults[id], ...value }
+      }
+      return input
+    })
+    renderSection(<AgentsSection />, {
+      "agents.list": () => [{ id: "codex", label: "Codex", available: true, executable: "codex" }],
+      "settings.get": () => ({
+        agents: { launchDefaults: defaults, executableOverrides: {}, projectConfigStorage: "app" },
+      }),
+      "settings.updateAgents": update,
+    })
+    const model = await screen.findByTestId("settings-agent-model-codex")
+    await waitFor(() => expect((model as HTMLInputElement).value).toBe("initial"))
+    fireEvent.change(model, { target: { value: "custom-model" } })
+    fireEvent.blur(model)
+    await waitFor(() => expect(defaults.codex?.model).toBe("custom-model"))
+    fireEvent.change(screen.getByTestId("settings-agent-effort-codex"), {
+      target: { value: "high" },
+    })
+    await waitFor(() => expect(defaults.codex?.effort).toBe("high"))
+    expect(defaults["claude-code"]).toEqual({ model: "opus", effort: "high" })
+    fireEvent.change(model, { target: { value: "" } })
+    fireEvent.blur(model)
+    await waitFor(() => expect(defaults.codex?.model).toBe(""))
+    fireEvent.change(screen.getByTestId("settings-agent-effort-codex"), { target: { value: "" } })
+    await waitFor(() => expect(defaults.codex?.effort).toBe(""))
   })
 
   test("Agents section surfaces config persistence failures", async () => {
@@ -550,7 +654,7 @@ describe("Settings sections", () => {
           projectTypes: [
             { id: "research", name: "Research project", guidance: "" },
             { id: "software", name: "Software project", guidance: "" },
-            { id: "paper", name: "Paper", guidance: "" },
+            { id: "manuscript", name: "Manuscript", guidance: "" },
           ],
         },
       }),
@@ -562,11 +666,11 @@ describe("Settings sections", () => {
     expect(((await screen.findByTestId("settings-project-type")) as HTMLSelectElement).value).toBe(
       "",
     )
-    await screen.findByRole("option", { name: "Paper" })
+    await screen.findByRole("option", { name: "Manuscript" })
     fireEvent.change(screen.getByTestId("settings-project-type"), {
-      target: { value: "paper" },
+      target: { value: "manuscript" },
     })
-    await waitFor(() => expect(selected).toEqual([{ id: "p1", typeId: "paper" }]))
+    await waitFor(() => expect(selected).toEqual([{ id: "p1", typeId: "manuscript" }]))
   })
 
   test("Project view translates its project controls and built-in type names", async () => {
@@ -578,7 +682,7 @@ describe("Settings sections", () => {
           projectTypes: [
             { id: "research", name: "Research project", guidance: "" },
             { id: "software", name: "Software project", guidance: "" },
-            { id: "paper", name: "Paper", guidance: "" },
+            { id: "manuscript", name: "Manuscript", guidance: "" },
           ],
         },
       }),
@@ -587,7 +691,7 @@ describe("Settings sections", () => {
     expect(await screen.findByLabelText("Tipo de proyecto")).toBeTruthy()
     expect(await screen.findByRole("option", { name: "Proyecto de investigación" })).toBeTruthy()
     expect(screen.getByRole("option", { name: "Proyecto de software" })).toBeTruthy()
-    expect(screen.getByRole("option", { name: "Artículo" })).toBeTruthy()
+    expect(screen.getByRole("option", { name: "Manuscrito" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Planificar este proyecto" })).toBeTruthy()
   })
 
@@ -600,7 +704,7 @@ describe("Settings sections", () => {
           projectTypes: [
             { id: "research", name: "Research project", guidance: "" },
             { id: "software", name: "Software project", guidance: "" },
-            { id: "paper", name: "Paper", guidance: "" },
+            { id: "manuscript", name: "Manuscript", guidance: "" },
           ],
         },
       }),
@@ -609,9 +713,9 @@ describe("Settings sections", () => {
       },
     })
 
-    await screen.findByRole("option", { name: "Artículo" })
+    await screen.findByRole("option", { name: "Manuscrito" })
     fireEvent.change(screen.getByLabelText("Tipo de proyecto"), {
-      target: { value: "paper" },
+      target: { value: "manuscript" },
     })
     expect((await screen.findByRole("alert")).textContent).toContain("Tipo de proyecto desconocido")
   })

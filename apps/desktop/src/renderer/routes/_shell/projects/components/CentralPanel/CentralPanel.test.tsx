@@ -191,6 +191,7 @@ function baseHandlers(treeName = "main.py", overrides: FakeHandlers = {}): FakeH
     "diagnostics.format": () => ({ toolsAvailable: true, changed: false, missing: [] }),
     "workspaces.spawnTerminal": () => ({ sessionId: "term-1" }),
     "terminal.list": () => [],
+    "settings.get": () => ({ agents: { defaultAgentId: "claude-code" } }),
     "agents.list": () => [
       {
         id: "claude-code",
@@ -362,71 +363,30 @@ describe("CentralPanel — panel", () => {
     expect(screen.getByTestId("central-add-menu").getAttribute("aria-label")).toBe("Añadir panel")
   })
 
-  test("first robot launch chooses an available harness and remembers it", async () => {
+  test("robot uses the Settings default when no project agent is set", async () => {
+    renderPanel()
+    await waitFor(() =>
+      expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
+    )
+    fireEvent.click(screen.getByTestId("central-new-agent"))
+    await screen.findByTestId("terminal")
+    expect(rememberedAgentId).toBeNull()
+    expect(launchedAgents).toEqual(["claude-code"])
+    expect(launchedWorkspaceModes).toEqual(["policy"])
+  })
+
+  test("an unavailable configured agent opens the chooser", async () => {
+    rememberedAgentId = "codex"
     renderPanel()
     await waitFor(() =>
       expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
     )
     fireEvent.click(screen.getByTestId("central-new-agent"))
     expect(await screen.findByTestId("new-agent-dialog")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Chat" }).hasAttribute("disabled")).toBe(true)
-    expect(screen.getByText("Codex").closest("label")?.getAttribute("data-available")).toBe("false")
-    expect(screen.getByText("Agent CLI")).toBeTruthy()
-    expect(screen.queryByText("/home/example/.local/bin/claude")).toBeNull()
-
     fireEvent.click(screen.getByLabelText("Claude Code"))
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }))
-
     await screen.findByTestId("terminal")
-    expect(rememberedAgentId).toBe("claude-code")
-    expect(launchedAgents).toEqual(["claude-code"])
-    expect(launchedWorkspaceModes).toEqual(["main"])
-  })
-
-  test("the E2E agentId override preselects the first-launch chooser without bypassing it", async () => {
-    window.history.replaceState({}, "", "/?agentId=codex")
-    renderPanel(
-      baseHandlers("main.py", {
-        "agents.list": () => [
-          {
-            id: "claude-code",
-            label: "Claude Code",
-            available: true,
-            executable: "/usr/bin/claude",
-          },
-          { id: "codex", label: "Codex", available: true, executable: "/usr/bin/codex" },
-        ],
-      }),
-    )
-    await waitFor(() =>
-      expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
-    )
-
-    fireEvent.click(screen.getByTestId("central-new-agent"))
-
-    expect(await screen.findByTestId("new-agent-dialog")).toBeTruthy()
-    expect((screen.getByLabelText("Codex") as HTMLInputElement).checked).toBe(true)
-    expect(launchedAgents).toEqual([])
-  })
-
-  test("keeps project-choice persistence failures visible in the chooser", async () => {
-    renderPanel(
-      baseHandlers("main.py", {
-        "agents.setProjectChoice": () => {
-          throw new Error("Could not write .pi-lab/config.json")
-        },
-      }),
-    )
-    await waitFor(() =>
-      expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
-    )
-    fireEvent.click(screen.getByTestId("central-new-agent"))
-    fireEvent.click(await screen.findByLabelText("Claude Code"))
-    fireEvent.click(screen.getByRole("button", { name: "Start agent" }))
-    expect((await screen.findByTestId("new-agent-error")).textContent).toContain(
-      "Could not write .pi-lab/config.json",
-    )
-    expect(screen.getByTestId("new-agent-dialog")).toBeTruthy()
+    expect(rememberedAgentId).toBe("codex")
   })
 
   test("robot direct-launches the remembered harness while plus Agent reopens the chooser", async () => {
@@ -456,11 +416,12 @@ describe("CentralPanel — panel", () => {
     expect(await screen.findByTestId("new-agent-dialog")).toBeTruthy()
     fireEvent.click(screen.getByLabelText("Codex"))
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }))
-    await waitFor(() => expect(rememberedAgentId).toBe("codex"))
+    await waitFor(() => expect(launchedAgents).toHaveLength(2))
+    expect(rememberedAgentId).toBe("claude-code")
     expect(launchedAgents).toEqual(["claude-code", "codex"])
 
     fireEvent.click(screen.getByTestId("central-new-agent"))
-    await waitFor(() => expect(launchedAgents).toEqual(["claude-code", "codex", "codex"]))
+    await waitFor(() => expect(launchedAgents).toEqual(["claude-code", "codex", "claude-code"]))
   })
 
   test("New session shows Agent CLI, disabled Chat, and lets a launch choose Main or Worktree", async () => {
@@ -468,7 +429,8 @@ describe("CentralPanel — panel", () => {
     await waitFor(() =>
       expect(screen.getByTestId("launcher-agent").hasAttribute("disabled")).toBe(false),
     )
-    fireEvent.click(screen.getByTestId("launcher-agent"))
+    fireEvent.click(screen.getByTestId("central-add-menu"))
+    fireEvent.click(screen.getByTestId("central-add-agent"))
     const dialog = await screen.findByTestId("new-agent-dialog")
     expect(within(dialog).getByRole("button", { name: "Chat" }).hasAttribute("disabled")).toBe(true)
     expect(within(dialog).queryByRole("button", { name: "Terminal" })).toBeNull()

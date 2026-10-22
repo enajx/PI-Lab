@@ -12,7 +12,7 @@ import { readTerminalSpawnOverride } from "./utils/terminalSpawnOverride"
  *
  * The terminal test seam is preserved: when the E2E loads with `?termcmd=…` it
  * spawns that deterministic program in a live terminal pane instead of the
- * dashboard, so `e2e/terminal.spec.ts` keeps asserting `app-ready` + `terminal`
+ * dashboard, so `tests/e2e/terminal.spec.ts` keeps asserting `app-ready` + `terminal`
  * without a standalone route. In normal use no params are present and the home is
  * always the dashboard.
  */

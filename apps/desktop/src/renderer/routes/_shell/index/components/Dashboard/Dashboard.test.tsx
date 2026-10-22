@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, test } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ProjectActivityProvider } from "../../../-ProjectActivity"
+import { AddProjectControllerProvider } from "../../../components/AddProjectController"
 import { Dashboard } from "./Dashboard"
 
 /**
@@ -50,8 +51,10 @@ function renderDashboard(handlers: FakeHandlers) {
   const result = render(
     <AppProviders client={client} queryClient={queryClient}>
       <ProjectActivityProvider>
-        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
-        <RouterProvider router={router as any} />
+        <AddProjectControllerProvider>
+          {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+          <RouterProvider router={router as any} />
+        </AddProjectControllerProvider>
       </ProjectActivityProvider>
     </AppProviders>,
   )

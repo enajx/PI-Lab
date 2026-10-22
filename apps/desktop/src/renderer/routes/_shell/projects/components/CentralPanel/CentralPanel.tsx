@@ -827,6 +827,8 @@ function FileSurface({
         missing={editor.statusMissing}
         checking={editor.activeDiagnostics.checking}
         hasRun={editor.activeDiagnostics.hasRun}
+        outdated={editor.activeDiagnostics.outdated}
+        onRefreshDiagnostics={() => void editor.refreshDiagnostics()}
         diagnosticsEnabled={settings.diagnosticsEnabled}
         onToggleDiagnostics={() =>
           onUpdateSettings({ diagnosticsEnabled: !settings.diagnosticsEnabled })

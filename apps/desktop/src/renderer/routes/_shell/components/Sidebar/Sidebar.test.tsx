@@ -25,7 +25,11 @@ import { Sidebar } from "./Sidebar"
 
 function renderSidebar(handlers: FakeHandlers = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const client = createFakeTrpcClient({ "projects.list": () => [], ...handlers })
+  const client = createFakeTrpcClient({
+    "projects.list": () => [],
+    "agents.list": () => [],
+    ...handlers,
+  })
 
   // A handful of stub routes so the sidebar's `<Link>` targets resolve.
   const rootRoute = createRootRoute({ component: Sidebar })
@@ -145,10 +149,20 @@ describe("Sidebar", () => {
       target: { value: "/tmp/projects" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+    await screen.findByTestId("add-project-dialog")
+    fireEvent.click(screen.getByTestId("add-project-confirm"))
 
     await waitFor(() =>
       expect(templateInput).toEqual({
         targetDir: "/tmp/projects/Study",
+        details: {
+          name: "Study",
+          typeId: "general",
+          deadline: null,
+          agentId: null,
+          emojiTags: [],
+          textTags: [],
+        },
         templateFiles: ["AGENTS.md"],
         externalFiles: [],
       }),
@@ -181,9 +195,19 @@ describe("Sidebar", () => {
       target: { value: "/tmp/projects" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+    await screen.findByTestId("add-project-dialog")
+    fireEvent.click(screen.getByTestId("add-project-confirm"))
     await waitFor(() =>
       expect(templateInput).toEqual({
         targetDir: "/tmp/projects/Empty",
+        details: {
+          name: "Empty",
+          typeId: "general",
+          deadline: null,
+          agentId: null,
+          emojiTags: [],
+          textTags: [],
+        },
         templateFiles: [],
         externalFiles: [],
       }),
@@ -248,10 +272,20 @@ describe("Sidebar", () => {
       target: { value: "/tmp/projects" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+    await screen.findByTestId("add-project-dialog")
+    fireEvent.click(screen.getByTestId("add-project-confirm"))
 
     await waitFor(() =>
       expect(createInput).toEqual({
         targetDir: "/tmp/projects/Instance",
+        details: {
+          name: "Instance",
+          typeId: "general",
+          deadline: null,
+          agentId: null,
+          emojiTags: [],
+          textTags: [],
+        },
         templateFiles: ["AGENTS.md"],
         externalFiles: ["/tmp/project-only.txt"],
       }),

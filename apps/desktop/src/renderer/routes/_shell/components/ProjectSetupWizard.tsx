@@ -34,7 +34,9 @@ export function ProjectSetupWizard({
   const [customInstructions, setCustomInstructions] = useState("")
   const [customTouched, setCustomTouched] = useState(false)
   const [typeId, setTypeId] = useState(
-    project.typeId === "research" || project.typeId === "software" || project.typeId === "paper"
+    project.typeId === "research" ||
+      project.typeId === "software" ||
+      project.typeId === "manuscript"
       ? project.typeId
       : "",
   )
@@ -47,6 +49,13 @@ export function ProjectSetupWizard({
   const settings = useQuery(trpc.settings.get.queryOptions())
   const agents = useQuery(trpc.agents.list.queryOptions())
   const currentProject = useQuery(trpc.projects.get.queryOptions({ id: project.id }))
+  const pendingPlans = useQuery({
+    ...trpc.projects.pendingPlans.queryOptions({ id: project.id }),
+    refetchInterval: (query) =>
+      query.state.data?.some((draft) => draft.mode === "one-shot" && draft.state === "running")
+        ? 1_000
+        : false,
+  })
   const planDefaults = useQuery(trpc.projects.getPlanDefaults.queryOptions({ id: project.id }))
   const availableAgent =
     agents.data?.find((agent) => agent.available && agent.oneShot) ??
@@ -61,7 +70,22 @@ export function ProjectSetupWizard({
   })
   const apply = useMutation(trpc.projects.applyPlan.mutationOptions())
   const discard = useMutation(trpc.projects.discardPlan.mutationOptions())
-  const error = planDefaults.error ?? start.error ?? apply.error ?? discard.error
+  const error =
+    pendingPlans.error ?? planDefaults.error ?? start.error ?? apply.error ?? discard.error
+
+  useEffect(() => {
+    const pending = pendingPlans.data?.find((draft) => !draftId || draft.draftId === draftId)
+    if (!pending || start.isPending) return
+    if (!draftId) {
+      setDraftId(pending.draftId)
+      setSessionId(pending.sessionId)
+      setName(pending.name)
+      setTypeId(pending.typeId)
+      setMode(pending.mode)
+      setStep("running")
+    }
+    if (pending.state !== "running") setReviewRequested(true)
+  }, [pendingPlans.data, draftId, start.isPending])
 
   useEffect(() => {
     if (planDefaults.data && !customTouched) {
@@ -74,6 +98,7 @@ export function ProjectSetupWizard({
   }, [review.isSuccess, step])
 
   const finish = (result: Project) => {
+    queryClient.removeQueries({ queryKey: trpc.projects.pendingPlans.queryKey({ id: project.id }) })
     void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
     void queryClient.invalidateQueries({ queryKey: trpc.projects.get.queryKey() })
     void queryClient.invalidateQueries({ queryKey: trpc.projects.getPlanDefaults.queryKey() })
@@ -173,8 +198,8 @@ export function ProjectSetupWizard({
                       ? t("Research project")
                       : type.id === "software"
                         ? t("Software project")
-                        : type.id === "paper"
-                          ? t("Paper")
+                        : type.id === "manuscript"
+                          ? t("Manuscript")
                           : type.name}
                   </option>
                 ))}
@@ -252,7 +277,8 @@ export function ProjectSetupWizard({
                   !planDefaults.isSuccess ||
                   !agentId ||
                   (mode === "one-shot" && !selectedAgent?.oneShot) ||
-                  start.isPending
+                  start.isPending ||
+                  pendingPlans.isPending
                 }
                 onClick={() => void begin().catch(() => undefined)}
                 className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm disabled:opacity-50"
@@ -299,6 +325,11 @@ export function ProjectSetupWizard({
         {step === "running" && !sessionId ? (
           <>
             <h2 className="font-semibold text-lg">{t("Reviewing proposal…")}</h2>
+            {pendingPlans.data?.find((draft) => draft.draftId === draftId)?.error ? (
+              <p role="alert">
+                {pendingPlans.data.find((draft) => draft.draftId === draftId)?.error}
+              </p>
+            ) : null}
             {review.isError ? (
               <button type="button" onClick={() => void leave().catch(() => undefined)}>
                 {t("Discard")}

@@ -1,5 +1,5 @@
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   type EditorBuffersApi,
@@ -7,7 +7,7 @@ import {
   useEditorBuffers,
 } from "../../../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
-import { resolveLaunchAgentId } from "../../../../../preferences/preferences"
+import { resolveLaunchAgentId, useDefaultAgentId } from "../../../../../preferences/preferences"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { useTRPC } from "../../../../../trpc/react"
 
@@ -128,7 +128,7 @@ export function useCentralPanel({
   retainedBuffers,
 }: UseCentralPanelArgs): CentralPanelController {
   const trpc = useTRPC()
-  const queryClient = useQueryClient()
+  const [defaultAgentId, , defaultAgentError, defaultAgentPending] = useDefaultAgentId()
   const editor = useEditorBuffers({
     client,
     workspaceId,
@@ -210,7 +210,6 @@ export function useCentralPanel({
   const projectChoiceQuery = useQuery(
     trpc.agents.projectChoice.queryOptions({ projectId }, { staleTime: 0 }),
   )
-  const setProjectChoice = useMutation(trpc.agents.setProjectChoice.mutationOptions())
   const spawnTerminal = useMutation(trpc.workspaces.spawnTerminal.mutationOptions())
   const runPythonFile = useMutation(trpc.python.runFile.mutationOptions())
   const killTerminal = useMutation(trpc.terminal.kill.mutationOptions())
@@ -442,7 +441,7 @@ export function useCentralPanel({
   )
 
   const launchAgent = useCallback(
-    (agentId: string, workspaceMode: "main" | "worktree") => {
+    (agentId: string, workspaceMode: "policy" | "main" | "worktree") => {
       const option = agentsQuery.data?.find((agent) => agent.id === agentId)
       startSession.mutate(
         { projectId, agentId, workspaceMode },
@@ -469,33 +468,23 @@ export function useCentralPanel({
   )
 
   const openAgent = useCallback(() => {
-    const remembered = projectChoiceQuery.data?.agentId
+    const remembered = projectChoiceQuery.data?.agentId ?? resolveLaunchAgentId(defaultAgentId)
     const option = agentsQuery.data?.find((agent) => agent.id === remembered)
     if (option?.available) {
-      launchAgent(option.id, "main")
+      launchAgent(option.id, "policy")
       return
     }
     setAgentChooserOpen(true)
-  }, [agentsQuery.data, launchAgent, projectChoiceQuery.data?.agentId])
+  }, [agentsQuery.data, defaultAgentId, launchAgent, projectChoiceQuery.data?.agentId])
 
   const openAgentChooser = useCallback(() => setAgentChooserOpen(true), [])
   const closeAgentChooser = useCallback(() => setAgentChooserOpen(false), [])
   const launchChosenAgent = useCallback(
     (agentId: string, workspaceMode: "main" | "worktree") => {
-      setProjectChoice.mutate(
-        { projectId, agentId },
-        {
-          onSuccess: () => {
-            void queryClient.invalidateQueries({
-              queryKey: trpc.agents.projectChoice.queryKey({ projectId }),
-            })
-            setAgentChooserOpen(false)
-            launchAgent(agentId, workspaceMode)
-          },
-        },
-      )
+      setAgentChooserOpen(false)
+      launchAgent(agentId, workspaceMode)
     },
-    [launchAgent, projectId, queryClient, setProjectChoice, trpc.agents.projectChoice],
+    [launchAgent],
   )
 
   const openTerminal = useCallback(() => {
@@ -608,23 +597,23 @@ export function useCentralPanel({
     launchChosenAgent,
     agentChooserOpen,
     agentOptions: agentsQuery.data ?? [],
-    preferredAgentId: projectChoiceQuery.data?.agentId ?? resolveLaunchAgentId(),
+    preferredAgentId: projectChoiceQuery.data?.agentId ?? resolveLaunchAgentId(defaultAgentId),
     openTerminal,
     openNewMarkdown,
     runPython,
     belowEditorRun,
     closeBelowEditorRun,
     pendingAgent:
+      defaultAgentPending ||
       startSession.isPending ||
-      setProjectChoice.isPending ||
       agentsQuery.isPending ||
       projectChoiceQuery.isPending,
     pendingTerminal: spawnTerminal.isPending,
     pendingPython: runPythonFile.isPending,
     launchError:
       restorationError ??
+      defaultAgentError ??
       startSession.error?.message ??
-      setProjectChoice.error?.message ??
       agentsQuery.error?.message ??
       projectChoiceQuery.error?.message ??
       spawnTerminal.error?.message ??

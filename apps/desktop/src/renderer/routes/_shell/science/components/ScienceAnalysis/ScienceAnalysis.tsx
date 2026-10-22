@@ -37,7 +37,7 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  * that way), with a selector at the top of the left column. The two columns each
  * own their own scroll.
  */
-export function ScienceAnalysis() {
+export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: string }) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -46,8 +46,11 @@ export function ScienceAnalysis() {
 
   // Default to the most-recently-opened project (first in the ordered list) and
   // keep the selection valid as the project list loads / changes.
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    initialProjectId ?? null,
+  )
   useEffect(() => {
+    if (projectsQuery.isPending) return
     if (projects.length === 0) {
       if (selectedProjectId !== null) setSelectedProjectId(null)
       return
@@ -55,7 +58,7 @@ export function ScienceAnalysis() {
     if (!selectedProjectId || !projects.some((p) => p.id === selectedProjectId)) {
       setSelectedProjectId(projects[0]?.id ?? null)
     }
-  }, [projects, selectedProjectId])
+  }, [projects, selectedProjectId, projectsQuery.isPending])
 
   const [query, setQuery] = useState("")
   // Top-level filter is a category; an optional sub-kind narrows within it.

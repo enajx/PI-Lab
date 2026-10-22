@@ -52,8 +52,8 @@ export function ProjectTypeChoice({
               ? t("Research project")
               : type.id === "software"
                 ? t("Software project")
-                : type.id === "paper"
-                  ? t("Paper")
+                : type.id === "manuscript"
+                  ? t("Manuscript")
                   : type.name}
           </option>
         ))}

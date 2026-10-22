@@ -14,7 +14,6 @@ export interface CreateAutomationValues {
   timezone: string
 }
 
-/** Only the fields the picker needs — keeps the form decoupled from the full row. */
 type ProjectOption = Pick<ProjectListItem, "id" | "name">
 
 interface CreateAutomationFormProps {
@@ -28,7 +27,6 @@ interface CreateAutomationFormProps {
 
 const DEFAULT_RRULE = "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
 
-/** The browser's IANA timezone, falling back to UTC where unavailable. */
 function localTimezone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
@@ -37,13 +35,6 @@ function localTimezone(): string {
   }
 }
 
-/**
- * Create-workflow form: pick a project + agent, write the prompt
- * the agent is launched on, and choose a recurrence via the {@link ScheduleBuilder}
- * (simple presets or raw RRULE with a live human-readable preview). A plain
- * inline panel (not a Radix dialog) so it renders and is assertable under jsdom.
- * The schedule is evaluated in the user's local timezone.
- */
 export function CreateAutomationForm({
   projects,
   agents,

@@ -14,12 +14,12 @@ import { ScienceAnalysis } from "./ScienceAnalysis"
  * no-projects states — never copy text or shadcn classes.
  */
 
-function renderAnalysis(handlers: FakeHandlers) {
+function renderAnalysis(handlers: FakeHandlers, initialProjectId?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient(handlers)
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceAnalysis />
+      <ScienceAnalysis initialProjectId={initialProjectId} />
     </AppProviders>,
   )
 }
@@ -66,6 +66,25 @@ function listing(files: Array<{ relPath: string; name: string; kind: string }>) 
 
 describe("ScienceAnalysis", () => {
   afterEach(() => setInterfaceLanguage("en"))
+
+  test("opens the project requested by its dashboard card", async () => {
+    const listFiles = vi.fn(() => listing([]))
+    renderAnalysis(
+      {
+        "projects.list": () => [
+          project({ id: "first", name: "First" }),
+          project({ id: "selected", name: "Selected" }),
+        ],
+        "science.analysis.listFiles": listFiles,
+      },
+      "selected",
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "selected"),
+    )
+    expect(listFiles).toHaveBeenCalledWith({ projectId: "selected" })
+    expect(listFiles).not.toHaveBeenCalledWith({ projectId: "first" })
+  })
 
   test("shows Analysis guidance in the selected interface language", async () => {
     setInterfaceLanguage("zh-CN")

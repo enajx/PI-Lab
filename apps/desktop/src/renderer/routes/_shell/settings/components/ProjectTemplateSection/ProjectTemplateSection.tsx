@@ -18,19 +18,7 @@ const DEFAULT_PROJECT_TEMPLATE_SETTINGS = {
   projectTypes: [],
 }
 
-/**
- * Project template editor (Settings → "Project template"). Edits the writable
- * template (`~/.pi-lab/template`) that `createFromTemplate` can copy into new
- * projects. A left file list selects a file; the right pane
- * is a workspace-agnostic {@link CodeMirrorBuffer} that loads via `template.read`
- * and saves via `template.write`.
- *
- * The template starts empty on first run. User files persist across app updates.
- *
- * We deliberately do NOT use `useEditorBuffers` (it requires a workspace + the
- * `files.*` router); only the editor theme + vim toggle are reused from
- * `settings.get` so the buffer matches the user's editor preferences.
- */
+/** Edit the template copied into new projects. */
 export function ProjectTemplateSection() {
   const t = useTranslate()
   const [language] = useInterfaceLanguage()
@@ -58,21 +46,17 @@ export function ProjectTemplateSection() {
   })
   const savedContent = readQuery.data?.content ?? ""
 
-  // The live document for the active file, captured from the buffer's onChange so
-  // ⌘S can write it (CodeMirrorBuffer's onSave carries no payload).
+  // CodeMirrorBuffer's onSave has no payload, so keep the current text here.
   const draftRef = useRef("")
   const [dirty, setDirty] = useState(false)
 
-  // Reset the draft + dirty flag whenever the loaded content changes (a file
-  // switch loads new content, or a post-save refetch returns the saved bytes), so
-  // a save never writes a stale draft from a previously open file.
+  // A file switch or save refetch replaces the draft.
   useEffect(() => {
     draftRef.current = savedContent
     setDirty(false)
   }, [savedContent])
 
-  // Clear dirty immediately on selection too, so switching to a different file
-  // whose content happens to match the current one still resets the indicator.
+  // Also reset when the next file has identical content.
   const handleSelect = (relPath: string) => {
     setSelected(relPath)
     setDirty(false)

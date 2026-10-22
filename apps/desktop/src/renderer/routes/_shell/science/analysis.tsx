@@ -12,8 +12,17 @@ import { ScienceAnalysis } from "./components/ScienceAnalysis"
  * navigation redirects home rather than reaching a hidden surface.
  */
 export const Route = createFileRoute("/_shell/science/analysis")({
+  validateSearch: (search: Record<string, unknown>): { projectId?: string } => ({
+    projectId:
+      typeof search.projectId === "string" && search.projectId ? search.projectId : undefined,
+  }),
   beforeLoad: () => {
     if (!readShowAnalysisSection()) throw redirect({ to: "/" })
   },
-  component: ScienceAnalysis,
+  component: AnalysisRoute,
 })
+
+function AnalysisRoute() {
+  const { projectId } = Route.useSearch()
+  return <ScienceAnalysis key={projectId ?? "default"} initialProjectId={projectId} />
+}

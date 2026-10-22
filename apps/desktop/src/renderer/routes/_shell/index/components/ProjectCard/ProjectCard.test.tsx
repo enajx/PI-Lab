@@ -21,15 +21,7 @@ import { ProjectActivityProvider } from "../../../-ProjectActivity"
 import { readPendingLaunch } from "../../../projects/-pendingLaunch"
 import { ProjectCard } from "./ProjectCard"
 
-/**
- * Component test for a single project card: its extra metadata (plan "Edit
- * project…"), the auto-research launch intent, and the two stateful background
- * workflow controls ("Fetch remote experiments" / "Project summary"), which run
- * headlessly, cache per git-state, and open a result popup when done. Mounts the
- * real card under providers + a router (so `useNavigate` resolves) with a faked
- * tRPC client — jsdom suffices.
- */
-
+/** Card behavior through renderer providers and a fake IPC client. */
 function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Project {
   return {
     repoPath: `/tmp/${overrides.id}`,
@@ -42,7 +34,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     metadata: null,
     taskRelPath: null,
     mainRelPath: null,
-    typeId: "general",
+    typeId: "research",
     agentConfig: null,
     sortIndex: 0,
     archivedAt: null,
@@ -62,6 +54,8 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "sessions.onStatus": () => [],
+    "agents.list": () => [],
+    "agents.projectChoice": () => ({ agentId: null }),
     "projects.capabilities": () => ({ git: true }),
     "workflows.status": () => IDLE_STATUS,
     "projects.thumbnail": () => ({ dataUrl: thumbnail, tooLarge: false }),
@@ -82,8 +76,20 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
       return <div data-testid="on-project-route" data-project-id={projectId} />
     },
   })
+  const analysisRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/science/analysis",
+    validateSearch: (search: Record<string, unknown>) => ({
+      projectId: typeof search.projectId === "string" ? search.projectId : "",
+    }),
+    component: () => (
+      <div data-testid="on-analysis-route">
+        {(analysisRoute.useSearch() as { projectId: string }).projectId}
+      </div>
+    ),
+  })
   const router = createRouter({
-    routeTree: rootRoute.addChildren([indexRoute, projectRoute]),
+    routeTree: rootRoute.addChildren([indexRoute, projectRoute, analysisRoute]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   })
 
@@ -109,32 +115,11 @@ const FULL_METADATA: ProjectMetadata = {
 }
 
 describe("ProjectCard thumbnail", () => {
-  test("shows an untyped project choice on the card without opening the workspace", async () => {
-    const choices: unknown[] = []
-    renderCard(project({ id: "p1", name: "Untyped", typeId: "general" }), {
-      "settings.get": () => ({
-        projectTemplate: {
-          projectTypes: [
-            { id: "research", name: "Research project", guidance: "" },
-            { id: "software", name: "Software project", guidance: "" },
-            { id: "paper", name: "Paper", guidance: "" },
-          ],
-        },
-      }),
-      "projects.setType": (input) => {
-        choices.push(input)
-      },
-    })
-
-    const select = (await screen.findByTestId("project-card-type-p1")) as HTMLSelectElement
-    await waitFor(() =>
-      expect(within(select).getByRole("option", { name: "Software project" })).toBeTruthy(),
-    )
-    expect(select.value).toBe("")
-    fireEvent.click(select)
-    fireEvent.change(select, { target: { value: "software" } })
-    await waitFor(() => expect(choices).toEqual([{ id: "p1", typeId: "software" }]))
-    expect(screen.queryByTestId("on-project-route")).toBeNull()
+  test("does not expose the removed card type dropdown or fetch control", async () => {
+    renderCard(project({ id: "p1", name: "Project" }))
+    await screen.findByTestId("project-card")
+    expect(screen.queryByTestId("project-card-type-p1")).toBeNull()
+    expect(screen.queryByTestId("project-card-fetch-experiments")).toBeNull()
   })
 
   test("loads the card artwork variant separately from the project summary", async () => {
@@ -307,10 +292,8 @@ describe("ProjectCard metadata", () => {
     const image = screen.getByTestId("project-card-image")
     expect(image.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
-    expect(within(block).getByTestId("project-card-collaborators").textContent).toContain(
-      "Ada Lovelace, Alan Turing",
-    )
-    expect(within(block).getByTestId("project-card-venue").textContent).toContain("NeurIPS 2026")
+    expect(within(block).queryByTestId("project-card-collaborators")).toBeNull()
+    expect(within(block).queryByTestId("project-card-venue")).toBeNull()
     // Deadline is formatted from the ISO date; assert locale-robustly.
     const deadline = within(block).getByTestId("project-card-deadline").textContent ?? ""
     expect(deadline).toContain("Due")
@@ -318,34 +301,30 @@ describe("ProjectCard metadata", () => {
 
     expect(within(block).getAllByTestId("project-card-emoji-tag")).toHaveLength(2)
 
-    const [preprint, code] = within(block).getAllByTestId("project-card-link")
-    expect(preprint?.textContent).toContain("example")
-    expect(preprint?.getAttribute("href")).toBe("https://example.com/paper")
-    expect(code?.textContent).toContain("example")
-    expect(code?.getAttribute("href")).toBe("https://example.com/code")
+    expect(within(block).queryByTestId("project-card-links")).toBeNull()
   })
 
   test("all three action buttons render, are compact (icon-only), and share one row", async () => {
     renderCard(project({ id: "pbtn", name: "Kappa", metadata: null }))
 
     const auto = await screen.findByTestId("project-card-auto-research")
-    const fetch = screen.getByTestId("project-card-fetch-experiments")
+    const analysis = screen.getByTestId("project-card-analysis")
     const summary = screen.getByTestId("project-card-summary")
 
     // Icon-forward: no wrapping text labels, so the three fit on one row. Each still
     // carries an accessible name and the hover-help attributes for discoverability.
-    for (const button of [auto, fetch, summary]) {
+    for (const button of [auto, analysis, summary]) {
       expect(button.textContent?.trim()).toBe("")
       expect(button.getAttribute("aria-label")).toBeTruthy()
       expect(button.getAttribute("data-feature-help")).toBeTruthy()
     }
     expect(auto.getAttribute("aria-label")).toContain("Auto-research")
-    expect(fetch.getAttribute("aria-label")).toContain("Fetch experiments")
+    expect(analysis.getAttribute("aria-label")).toContain("Analysis")
     expect(summary.getAttribute("aria-label")).toContain("Project summary")
 
     // The three action buttons live in one shared footer row.
-    expect(auto.parentElement).toBe(fetch.parentElement)
-    expect(fetch.parentElement).toBe(summary.parentElement)
+    expect(auto.parentElement).toBe(analysis.parentElement)
+    expect(analysis.parentElement).toBe(summary.parentElement)
   })
 
   test("disables Git-only card actions with an Initialize Git explanation", async () => {
@@ -357,10 +336,11 @@ describe("ProjectCard metadata", () => {
     )
 
     const auto = await screen.findByTestId("project-card-auto-research")
-    const fetch = screen.getByTestId("project-card-fetch-experiments")
+    const analysis = screen.getByTestId("project-card-analysis")
     const summary = screen.getByTestId("project-card-summary")
 
-    for (const button of [auto, fetch, summary]) {
+    expect((analysis as HTMLButtonElement).disabled).toBe(false)
+    for (const button of [auto, summary]) {
       expect((button as HTMLButtonElement).disabled).toBe(true)
       expect(button.getAttribute("data-feature-help")).toContain("Initialize Git")
     }
@@ -370,15 +350,10 @@ describe("ProjectCard metadata", () => {
     expect(readPendingLaunch("plain-folder")).toBeNull()
   })
 
-  test("renders nothing for empty fields (only the filled one shows)", async () => {
-    renderCard(project({ id: "p2", name: "Beta", metadata: { venue: "ICML 2026" } }))
-
-    const block = await screen.findByTestId("project-card-metadata")
-    expect(within(block).getByTestId("project-card-venue").textContent).toContain("ICML 2026")
-    expect(within(block).queryByTestId("project-card-collaborators")).toBeNull()
-    expect(within(block).queryByTestId("project-card-deadline")).toBeNull()
-    expect(within(block).queryByTestId("project-card-emoji-tags")).toBeNull()
-    expect(within(block).queryByTestId("project-card-links")).toBeNull()
+  test("legacy optional fields are no longer shown", async () => {
+    renderCard(project({ id: "legacy", name: "Legacy", metadata: { venue: "Old venue" } }))
+    await screen.findByTestId("project-card")
+    expect(screen.queryByTestId("project-card-metadata")).toBeNull()
   })
 
   test("shows no metadata block when the project has none", async () => {
@@ -405,10 +380,10 @@ describe("ProjectCard metadata", () => {
     expect(calls).toHaveLength(0)
   })
 
-  test("Edit project… opens the dialog and saves via setMetadata", async () => {
+  test("Edit project… opens the dialog and saves project details", async () => {
     const calls: unknown[] = []
     renderCard(project({ id: "p4", name: "Delta", metadata: null }), {
-      "projects.setMetadata": (input) => {
+      "projects.updateDetails": (input) => {
         calls.push(input)
         return project({ id: "p4", name: "Delta" })
       },
@@ -418,13 +393,28 @@ describe("ProjectCard metadata", () => {
     fireEvent.click(screen.getByTestId("project-card-menu-edit"))
 
     const dialog = screen.getByTestId("edit-project-dialog")
-    fireEvent.change(within(dialog).getByTestId("edit-project-collaborators"), {
+    fireEvent.change(within(dialog).getByTestId("edit-project-name"), {
       target: { value: "Grace Hopper" },
     })
+    await waitFor(() =>
+      expect((within(dialog).getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    )
     fireEvent.click(within(dialog).getByTestId("edit-project-save"))
 
     await waitFor(() => expect(calls).toHaveLength(1))
-    expect(calls[0]).toEqual({ id: "p4", metadata: { collaborators: "Grace Hopper" } })
+    expect(calls[0]).toEqual({
+      id: "p4",
+      details: {
+        name: "Grace Hopper",
+        typeId: "research",
+        deadline: null,
+        agentId: null,
+        emojiTags: [],
+        textTags: [],
+      },
+    })
   })
 
   test("Set thumbnail opens an artwork chooser for a file, gradient, or Digital Rain", async () => {
@@ -619,31 +609,6 @@ describe("ProjectCard background workflow controls", () => {
     expect(within(dialog).queryByTestId("workflow-result-text")).toBeNull()
   })
 
-  test("the fetch-experiments control passes its Settings instructions to the run", async () => {
-    const calls: Array<Record<string, unknown>> = []
-    renderCard(project({ id: "wf-fetch", name: "Photon", metadata: null }), {
-      "workflows.run": (input) => {
-        calls.push(input as Record<string, unknown>)
-        return {
-          cached: false,
-          running: false,
-          result: "fetched",
-          inputHash: "h",
-          lastCheckedAt: Date.now(),
-          errorMessage: null,
-        }
-      },
-    })
-
-    fireEvent.click(await screen.findByTestId("project-card-fetch-experiments"))
-
-    await waitFor(() => expect(calls).toHaveLength(1))
-    expect(calls[0]?.projectId).toBe("wf-fetch")
-    expect(calls[0]?.task).toBe("fetch-experiments")
-    // Instructions are read from Settings (empty by default) and always passed.
-    expect(calls[0]).toHaveProperty("instructions")
-  })
-
   test("an idle control opens the result window on the FIRST click", async () => {
     renderCard(project({ id: "wf-first", name: "Photon", metadata: null }), {
       "workflows.run": () => ({
@@ -704,4 +669,10 @@ describe("ProjectCard background workflow controls", () => {
     // Recheck re-runs with force:true (bypassing the git-state cache).
     await waitFor(() => expect(calls.some((call) => call.force === true)).toBe(true))
   })
+})
+
+test("Analysis opens the selected project without launching an agent", async () => {
+  renderCard(project({ id: "analysis-project", name: "Data" }))
+  fireEvent.click(await screen.findByTestId("project-card-analysis"))
+  expect((await screen.findByTestId("on-analysis-route")).textContent).toBe("analysis-project")
 })
