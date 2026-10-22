@@ -1,0 +1,72 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{tikz}
+
+\title{A Small Reproducible Study of Midpoint Integration}
+\author{PI Lab example project}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We approximate $\pi$ with the composite midpoint rule at three resolutions.
+The example provides a complete, short paper with a numerical result, a figure,
+and a bibliography. It is intended for testing a paper-writing workflow.
+\end{abstract}
+
+\section{Method}
+
+The composite midpoint rule is a standard numerical integration method
+\cite{atkinson1989}. We apply it to
+\begin{equation}
+  \pi = 4\int_0^1 \frac{1}{1+x^2}\,dx,
+  \qquad
+  M_n = \frac{4}{n}\sum_{k=0}^{n-1}
+  \frac{1}{1+\left(\frac{k+1/2}{n}\right)^2}.
+\end{equation}
+The error is $e_n = |M_n-\pi|$. The script
+\texttt{analysis/midpoint.py} calculates the values in Table~\ref{tab:results}
+with Python's standard library.
+
+\section{Results}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{rcc}
+\hline
+$n$ & $M_n$ & $e_n$ \\
+\hline
+8   & 3.142894730 & $1.3021\times 10^{-3}$ \\
+32  & 3.141674034 & $8.1380\times 10^{-5}$ \\
+128 & 3.141597740 & $5.0863\times 10^{-6}$ \\
+\hline
+\end{tabular}
+\caption{Midpoint estimates of $\pi$ and absolute errors.}
+\label{tab:results}
+\end{table}
+
+The error falls by about a factor of 16 when $n$ grows by a factor of four.
+Figure~\ref{fig:convergence} shows the same values as correct decimal digits,
+defined as $-\log_{10} e_n$.
+
+\begin{figure}[h]
+\centering
+\input{figures/convergence.tex}
+\caption{Correct decimal digits increase as the midpoint grid is refined.}
+\label{fig:convergence}
+\end{figure}
+
+\section{Discussion}
+
+These three measurements agree with second-order convergence. They do not
+establish the behavior for all $n$, and the comparison uses the floating-point
+value of $\pi$ supplied by Python. A larger study could compare a second
+integration method and measure the effect of floating-point precision.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

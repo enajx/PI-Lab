@@ -1,0 +1,9 @@
+{
+  "name": "sensor-summary-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/cli.ts data/sample.csv",
+    "test": "bun test"
+  }
+}

@@ -1,4 +1,5 @@
 import { agentsRouter } from "./agents"
+import { alphaTestingRouter } from "./alphaTesting/alphaTesting"
 import { automationsRouter } from "./automations"
 import { caffeineRouter } from "./caffeine"
 import { diagnosticsRouter } from "./diagnostics"
@@ -25,6 +26,7 @@ import { workspacesRouter } from "./workspaces"
  * `createCaller`-testable functions.
  */
 export const appRouter = router({
+  alphaTesting: alphaTestingRouter,
   health: healthRouter,
   notifications: notificationsRouter,
   caffeine: caffeineRouter,
