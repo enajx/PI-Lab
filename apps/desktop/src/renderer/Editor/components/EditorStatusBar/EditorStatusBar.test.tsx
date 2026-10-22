@@ -13,6 +13,8 @@ test("updates Markdown view controls when the interface language changes", () =>
       missing={[]}
       checking={false}
       hasRun={false}
+      outdated={false}
+      onRefreshDiagnostics={() => {}}
       diagnosticsEnabled={false}
       onToggleDiagnostics={vi.fn()}
       pythonRuntime={{ runtime: null, checking: false, error: null }}

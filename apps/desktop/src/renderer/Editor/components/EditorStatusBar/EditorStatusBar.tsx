@@ -8,6 +8,7 @@ import {
   Eye,
   FolderOpen,
   Info,
+  RefreshCw,
   TerminalSquare,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -31,6 +32,8 @@ interface EditorStatusBarProps {
   checking: boolean
   /** Whether a diagnostics check has completed at least once for this file. */
   hasRun: boolean
+  outdated: boolean
+  onRefreshDiagnostics: () => void
   /** Persisted on/off state for Python type-checking and linting. */
   diagnosticsEnabled: boolean
   /** Toggle the persisted diagnostics preference. */
@@ -58,6 +61,8 @@ export function EditorStatusBar({
   missing,
   checking,
   hasRun,
+  outdated,
+  onRefreshDiagnostics,
   diagnosticsEnabled,
   onToggleDiagnostics,
   pythonRuntime,
@@ -86,10 +91,28 @@ export function EditorStatusBar({
               counts={counts}
               missing={missing}
               checking={checking}
-              hasRun={hasRun}
+              hasRun={hasRun && !outdated}
               enabled={diagnosticsEnabled}
               onToggle={onToggleDiagnostics}
             />
+            {diagnosticsEnabled ? (
+              <>
+                {outdated ? (
+                  <span data-testid="editor-diagnostics-outdated">{t("Diagnostics outdated")}</span>
+                ) : null}
+                <button
+                  type="button"
+                  data-testid="editor-diagnostics-refresh"
+                  aria-label={t("Refresh Python diagnostics")}
+                  title={t("Check the saved file")}
+                  disabled={checking}
+                  onClick={onRefreshDiagnostics}
+                  className="rounded px-1 hover:bg-accent disabled:opacity-50"
+                >
+                  <RefreshCw className="size-3" aria-hidden />
+                </button>
+              </>
+            ) : null}
           </>
         ) : null}
       </div>

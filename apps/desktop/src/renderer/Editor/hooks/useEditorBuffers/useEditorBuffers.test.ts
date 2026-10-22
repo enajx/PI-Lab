@@ -633,3 +633,111 @@ describe("bounded editor outcomes (mocked IPC)", () => {
     })
   })
 })
+
+describe("diagnostics ordering and external edits (mocked IPC)", () => {
+  const clean: import("../../utils/pythonDiagnostics").DiagnosticsRunResult = {
+    diagnostics: [],
+    toolsAvailable: true,
+    missing: [],
+  }
+  function diagnosticsSetup() {
+    const requests: ReturnType<typeof deferred<typeof clean>>[] = []
+    const check = vi.fn(() => {
+      const request = deferred<typeof clean>()
+      requests.push(request)
+      return request.promise
+    })
+    const client = createFakeTrpcClient({
+      "python.resolve": () => null,
+      "diagnostics.check": check,
+      "files.stat": () => ({ exists: true, mtimeMs: 2, size: 4 }),
+      "files.read": () => ({ status: "text", content: "new", baseline: { mtimeMs: 2, size: 4 } }),
+    })
+    const view = renderHook(() =>
+      useEditorBuffers({
+        client,
+        workspaceId: "diagnostics-order",
+        initialBuffers: [{ ...initial, relPath: "file.py" }],
+        initialActiveRelPath: "file.py",
+        settings: { ...DEFAULT_EDITOR_SETTINGS, diagnosticsEnabled: true, autosave: false },
+      }),
+    )
+    const finish = (index: number, result: typeof clean): void => {
+      const request = requests[index]
+      if (!request) throw new Error(`Missing diagnostics request ${index}`)
+      request.resolve(result)
+    }
+    return { view, finish, check }
+  }
+  test("only the latest request can set results, including after close and reopen", async () => {
+    const { view, finish } = diagnosticsSetup()
+    act(() => {
+      void view.result.current.refreshDiagnostics()
+    })
+    await act(async () => {
+      finish(1, clean)
+    })
+    await act(async () => {
+      finish(0, { ...clean, missing: ["old checker"] })
+    })
+    expect(view.result.current.statusMissing).toEqual([])
+    act(() => {
+      void view.result.current.refreshDiagnostics()
+    })
+    act(() => view.result.current.closeFile("file.py"))
+    await act(async () => {
+      await view.result.current.openFile("file.py")
+    })
+    await act(async () => {
+      finish(3, clean)
+    })
+    await act(async () => {
+      finish(2, { ...clean, missing: ["closed buffer"] })
+    })
+    expect(view.result.current.statusMissing).toEqual([])
+  })
+  test("external reload invalidates a pending check without starting another, and explicit refresh recovers", async () => {
+    vi.useFakeTimers()
+    const { view, finish, check } = diagnosticsSetup()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500)
+    })
+    expect(view.result.current.active?.content).toBe("new")
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(view.result.current.activeDiagnostics.outdated).toBe(true)
+    await act(async () => {
+      finish(0, clean)
+    })
+    expect(view.result.current.activeDiagnostics.hasRun).toBe(false)
+    act(() => {
+      void view.result.current.refreshDiagnostics()
+    })
+    await act(async () => {
+      finish(1, clean)
+    })
+    expect(view.result.current.activeDiagnostics.outdated).toBe(false)
+    expect(view.result.current.activeDiagnostics.hasRun).toBe(true)
+  })
+})
+
+test("Python checks wait for a workspace during navigation", async () => {
+  const resolve = vi.fn(() => null)
+  const check = vi.fn(() => ({ diagnostics: [], toolsAvailable: true, missing: [] }))
+  const client = createFakeTrpcClient({ "python.resolve": resolve, "diagnostics.check": check })
+  const view = renderHook(
+    ({ workspaceId }) =>
+      useEditorBuffers({
+        client,
+        workspaceId,
+        initialBuffers: [{ ...initial, relPath: "file.py" }],
+        initialActiveRelPath: "file.py",
+        settings: { ...DEFAULT_EDITOR_SETTINGS, diagnosticsEnabled: true, autosave: false },
+      }),
+    { initialProps: { workspaceId: "" } },
+  )
+  expect(resolve).not.toHaveBeenCalled()
+  expect(check).not.toHaveBeenCalled()
+  view.rerender({ workspaceId: "available" })
+  await waitFor(() => expect(check).toHaveBeenCalledTimes(1))
+  expect(resolve).toHaveBeenCalledTimes(1)
+})

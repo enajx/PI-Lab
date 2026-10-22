@@ -53,6 +53,7 @@ interface DiagnosticsState {
   result: DiagnosticsRunResult | null
   checking: boolean
   hasRun: boolean
+  outdated: boolean
 }
 
 export interface PythonRuntimeState {
@@ -67,7 +68,12 @@ const AUTOSAVE_DEBOUNCE_MS = 800
 
 export { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 
-const EMPTY_DIAGNOSTICS: DiagnosticsState = { result: null, checking: false, hasRun: false }
+const EMPTY_DIAGNOSTICS: DiagnosticsState = {
+  result: null,
+  checking: false,
+  hasRun: false,
+  outdated: false,
+}
 const EMPTY_COUNTS: DiagnosticCounts = { errors: 0, warnings: 0, infos: 0 }
 const EMPTY_PYTHON_RUNTIME: PythonRuntimeState = {
   runtime: null,
@@ -120,6 +126,7 @@ export interface EditorBuffersApi {
   statusCounts: DiagnosticCounts
   statusMissing: string[]
   activeDiagnostics: DiagnosticsState
+  refreshDiagnostics: () => Promise<void>
   pythonRuntime: PythonRuntimeState
   listPythonEnvironments: () => Promise<RouterOutputs["python"]["options"]>
   selectPythonEnvironment: (path: string | null) => Promise<boolean>
@@ -199,6 +206,7 @@ export function useEditorBuffers({
   const pythonRuntimeRequestRef = useRef(0)
   const pythonLocalCheckInFlightRef = useRef(false)
   const diagnosticsEpochRef = useRef(0)
+  const diagnosticRequests = useRef(new Map<string, symbol>())
 
   const active = buffers.find((buffer) => buffer.relPath === activeRelPath) ?? null
 
@@ -211,8 +219,17 @@ export function useEditorBuffers({
 
   const runDiagnostics = useCallback(
     async (relPath: string) => {
-      if (!diagnosticsEnabledRef.current || !isPythonPath(relPath)) return
+      if (!workspaceId || !diagnosticsEnabledRef.current || !isPythonPath(relPath)) return
+      const snapshot = buffersRef.current.find((buffer) => buffer.relPath === relPath)
+      if (!snapshot || snapshot.untitled) return
       const epoch = diagnosticsEpochRef.current
+      const request = Symbol(relPath)
+      diagnosticRequests.current.set(relPath, request)
+      const applicable = (): boolean =>
+        diagnosticsEnabledRef.current &&
+        diagnosticsEpochRef.current === epoch &&
+        diagnosticRequests.current.get(relPath) === request &&
+        !!currentInstance(snapshot)
       patchDiagnostics(relPath, { checking: true })
       try {
         const result = await runPythonCheck(client, {
@@ -222,16 +239,31 @@ export function useEditorBuffers({
         })
         // A check may finish after the user turns diagnostics off. Ignore that
         // stale response; the disabling effect below has already cleared state.
-        if (!diagnosticsEnabledRef.current || diagnosticsEpochRef.current !== epoch) return
-        if (result) patchDiagnostics(relPath, { result, checking: false, hasRun: true })
+        if (!applicable()) return
+        if (result)
+          patchDiagnostics(relPath, { result, checking: false, hasRun: true, outdated: false })
         else patchDiagnostics(relPath, { checking: false })
       } catch (cause) {
-        if (!diagnosticsEnabledRef.current || diagnosticsEpochRef.current !== epoch) return
+        if (!applicable()) return
         patchDiagnostics(relPath, { checking: false })
         setError(`Could not check ${relPath}: ${String(cause)}`)
       }
     },
-    [client, workspaceId, patchDiagnostics],
+    [client, workspaceId, patchDiagnostics, currentInstance],
+  )
+
+  const refreshDiagnostics = useCallback(async (): Promise<void> => {
+    const relPath = activeRef.current
+    if (relPath) await runDiagnostics(relPath)
+  }, [runDiagnostics])
+
+  const invalidateDiagnostics = useCallback(
+    (relPath: string): void => {
+      diagnosticRequests.current.delete(relPath)
+      if (diagnosticsEnabledRef.current && isPythonPath(relPath))
+        patchDiagnostics(relPath, { outdated: true, checking: false })
+    },
+    [patchDiagnostics],
   )
 
   // Turning diagnostics off removes existing lint markers/counts immediately.
@@ -239,6 +271,7 @@ export function useEditorBuffers({
   // the user to close/reopen or save it first.
   useEffect(() => {
     if (!settings.diagnosticsEnabled) {
+      diagnosticRequests.current.clear()
       diagnosticsEpochRef.current += 1
       setDiagnostics({})
       return
@@ -321,6 +354,7 @@ export function useEditorBuffers({
 
   const closeFile = useCallback(
     (relPath: string) => {
+      diagnosticRequests.current.delete(relPath)
       openRequestsRef.current.delete(relPath)
       setBuffers((prev) => {
         const next = prev.filter((buffer) => buffer.relPath !== relPath)
@@ -432,6 +466,7 @@ export function useEditorBuffers({
         const afterStat = currentInstance(snapshot)
         if (!afterStat) return false
         if (!explicit && !diskChanged(afterStat, stat)) return true
+        invalidateDiagnostics(snapshot.relPath)
         if (
           !explicit &&
           (afterStat.externalChange || afterStat.content !== afterStat.savedContent)
@@ -484,7 +519,6 @@ export function useEditorBuffers({
               : entry,
           ),
         )
-        void runDiagnostics(snapshot.relPath)
         return true
       }).catch((cause: unknown) => {
         if (currentInstance(snapshot))
@@ -492,7 +526,7 @@ export function useEditorBuffers({
         return false
       })
     },
-    [client, workspaceId, currentInstance, setBuffers, runDiagnostics],
+    [client, workspaceId, currentInstance, setBuffers, invalidateDiagnostics],
   )
 
   const reloadFile = useCallback(
@@ -504,6 +538,7 @@ export function useEditorBuffers({
   )
 
   const refreshPythonRuntime = useCallback(async (): Promise<void> => {
+    if (!workspaceId) return
     pythonRuntimeRequestRef.current += 1
     const requestId = pythonRuntimeRequestRef.current
     setPythonRuntime((current) => ({ ...current, checking: true, error: null }))
@@ -526,7 +561,7 @@ export function useEditorBuffers({
   // Cache one full runtime result for this workspace while Python editing
   // remains active. Leaving Python and returning triggers a fresh resolution.
   useEffect(() => {
-    const pythonActive = activeRelPath !== null && isPythonPath(activeRelPath)
+    const pythonActive = !!workspaceId && activeRelPath !== null && isPythonPath(activeRelPath)
     const shouldResolve =
       pythonActive &&
       (!wasPythonActiveRef.current || pythonRuntimeWorkspaceRef.current !== workspaceId)
@@ -541,7 +576,7 @@ export function useEditorBuffers({
   // the usual workspace directories. This notices a newly-created `.venv`
   // without repeatedly running manager/PATH probes.
   useEffect(() => {
-    const pythonActive = activeRelPath !== null && isPythonPath(activeRelPath)
+    const pythonActive = !!workspaceId && activeRelPath !== null && isPythonPath(activeRelPath)
     if (!pythonActive || pythonRuntime.runtime?.source !== null || pythonRuntime.checking) return
     const id = window.setInterval(() => {
       if (pythonLocalCheckInFlightRef.current) return
@@ -652,7 +687,10 @@ export function useEditorBuffers({
     dirty: buffer.externalChange || buffer.content !== buffer.savedContent,
   }))
 
-  const activeResult = active ? (diagnostics[active.relPath]?.result ?? null) : null
+  const activeResult =
+    active && !diagnostics[active.relPath]?.outdated
+      ? (diagnostics[active.relPath]?.result ?? null)
+      : null
   const diagnosticsSource = useMemo<DiagnosticsSource | undefined>(() => {
     if (
       !settings.diagnosticsEnabled ||
@@ -707,6 +745,7 @@ export function useEditorBuffers({
     statusCounts,
     statusMissing,
     activeDiagnostics,
+    refreshDiagnostics,
     pythonRuntime,
     listPythonEnvironments,
     selectPythonEnvironment,
