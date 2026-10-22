@@ -20,6 +20,7 @@ function renderSetup(
   onClose = vi.fn(),
 ) {
   const client = createFakeTrpcClient({
+    "settings.updateAgents": (input) => input,
     "setup.environment": () => ENVIRONMENT,
     "settings.get": () => ({
       agents: { projectConfigStorage: "app", executableOverrides: {}, setupCompleted: false },
@@ -38,6 +39,72 @@ function renderSetup(
 beforeEach(() => window.localStorage.clear())
 
 describe("FirstRunSetup", () => {
+  test("keeps the initialized Beta choice and saves a Stable choice for future updates", async () => {
+    const previous = window.piLab
+    window.piLab = {
+      ...previous,
+      appIcon: { ...previous?.appIcon, getChannel: async () => "stable" },
+    } as NonNullable<typeof window.piLab>
+    const update = vi.fn((input: unknown) => input)
+    try {
+      renderSetup({
+        "settings.get": () => ({
+          publicUpdateChannel: "beta",
+          agents: { setupCompleted: false },
+        }),
+        "settings.updateGeneral": update,
+      })
+      const channel = await screen.findByLabelText<HTMLSelectElement>("Update channel")
+      expect(channel.value).toBe("beta")
+      expect(update).not.toHaveBeenCalled()
+      fireEvent.change(channel, { target: { value: "stable" } })
+      await waitFor(() => expect(update).toHaveBeenCalledWith({ publicUpdateChannel: "stable" }))
+    } finally {
+      window.piLab = previous
+    }
+  })
+
+  test("does not offer public update channels in Alpha", async () => {
+    const previous = window.piLab
+    const getChannel = vi.fn(async () => "alpha" as const)
+    window.piLab = {
+      ...previous,
+      appIcon: { ...previous?.appIcon, getChannel },
+    } as NonNullable<typeof window.piLab>
+    try {
+      renderSetup({})
+      await waitFor(() => expect(getChannel).toHaveBeenCalled())
+      expect(screen.queryByLabelText("Update channel")).toBeNull()
+    } finally {
+      window.piLab = previous
+    }
+  })
+
+  test("shows a channel save error and keeps the saved choice", async () => {
+    const previous = window.piLab
+    window.piLab = {
+      ...previous,
+      appIcon: { ...previous?.appIcon, getChannel: async () => "stable" },
+    } as NonNullable<typeof window.piLab>
+    try {
+      renderSetup({
+        "settings.get": () => ({
+          publicUpdateChannel: "beta",
+          agents: { setupCompleted: false },
+        }),
+        "settings.updateGeneral": () => {
+          throw new Error("Could not save update channel")
+        },
+      })
+      const channel = await screen.findByLabelText<HTMLSelectElement>("Update channel")
+      fireEvent.change(channel, { target: { value: "stable" } })
+      expect(await screen.findByText("Could not save update channel")).toBeTruthy()
+      expect(channel.value).toBe("beta")
+    } finally {
+      window.piLab = previous
+    }
+  })
+
   test("changes interface language during setup and persists the choice", async () => {
     renderSetup({})
     const language = await screen.findByLabelText<HTMLSelectElement>("Language")
@@ -164,6 +231,6 @@ describe("FirstRunSetup", () => {
     fireEvent.change(screen.getByLabelText("Completion sound"), { target: { value: "success" } })
     fireEvent.click(screen.getByRole("button", { name: "Finish setup" }))
     await waitFor(() => expect(completed).toEqual([{ sound: "success" }]))
-    expect(setup.onClose).toHaveBeenCalledOnce()
+    await waitFor(() => expect(setup.onClose).toHaveBeenCalledOnce())
   })
 })

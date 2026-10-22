@@ -96,7 +96,6 @@ test("production public builds use a Keychain signing identity and notarization 
     for (const key of keys) delete process.env[key]
     process.env.PI_LAB_PUBLIC_RELEASE_CHANNEL = "stable"
     process.env.PI_LAB_RELEASE_VERSION = "1.2.3"
-    process.env.PI_LAB_UPDATE_URL = "https://updates.example.test/pi-lab/"
     process.env.APPLE_KEYCHAIN = "/Users/example/Library/Keychains/login.keychain-db"
     process.env.APPLE_KEYCHAIN_PROFILE = "pi-lab-notary"
     delete require.cache[configPath]
@@ -105,6 +104,23 @@ test("production public builds use a Keychain signing identity and notarization 
     assert.equal(config.mac.type, "distribution")
     assert.equal(config.mac.identity, undefined)
     assert.equal(config.mac.notarize, true)
+    assert.deepEqual(config.publish, {
+      provider: "github",
+      owner: "enajx",
+      repo: "PI-Lab",
+      channel: "latest",
+      releaseType: "release",
+    })
+    process.env.PI_LAB_PUBLIC_RELEASE_CHANNEL = "beta"
+    process.env.PI_LAB_RELEASE_VERSION = "0.1.0-beta.1"
+    delete require.cache[configPath]
+    assert.deepEqual(require(configPath).publish, {
+      provider: "github",
+      owner: "enajx",
+      repo: "PI-Lab",
+      channel: "beta",
+      releaseType: "prerelease",
+    })
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]
@@ -137,6 +153,8 @@ test("public builder config generates mac update metadata and keeps local builds
       const config = require(configPath)
       assert.equal(config.appId, "com.pi-lab.desktop")
       assert.equal(config.productName, "PI Lab")
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: electron-builder expands these placeholders.
+      assert.equal(config.artifactName, "PI-Lab-${version}-${arch}.${ext}")
       assert.equal(config.extraMetadata.piLabChannel, "stable")
       assert.equal(config.extraMetadata.piLabPublicRelease, true)
       assert.equal(config.extraMetadata.piLabReleaseChannel, channel)
@@ -150,22 +168,14 @@ test("public builder config generates mac update metadata and keeps local builds
       assert.equal(config.publish.channel, updaterChannel)
       assert.equal(config.generateUpdatesFilesForAllChannels, false)
       assert.equal(config.forceCodeSigning, false)
-      const iconVariants = config.extraResources.find((resource) =>
+      const iconVariants = config.extraResources.filter((resource) =>
         ["app-icon-variants", "app-icon-channel-variants"].includes(resource.to),
       )
-      assert.equal(
-        iconVariants.to,
-        channel === "stable" ? "app-icon-variants" : "app-icon-channel-variants",
-      )
+      assert.deepEqual(iconVariants, [])
       const palettes = config.extraResources.find(
         (resource) => resource.to === "app-icon-palettes.json",
       )
-      if (channel === "beta") {
-        assert.equal(iconVariants.filter[0], "joyplot-*-beta*.png")
-        assert.equal(palettes.from, "../../icons-temp/matplotlib-colormaps-3.11.2.json")
-      } else {
-        assert.equal(palettes, undefined)
-      }
+      assert.equal(palettes, undefined)
     }
     delete process.env.PI_LAB_PUBLIC_RELEASE_CHANNEL
     delete require.cache[configPath]

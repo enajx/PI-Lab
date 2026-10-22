@@ -12,6 +12,7 @@ export class ElectronUpdateEngine implements UpdateEngine {
     // path installs it, so changing channels can leave an old ZIP unused.
     this.updater.autoInstallOnAppQuit = false
     this.updater.channel = updaterFeedChannel(channel)
+    this.updater.allowPrerelease = channel === "beta"
     // The channel setter enables downgrades. A Stable switch must wait for a
     // newer compatible release instead of opening older data with old code.
     this.updater.allowDowngrade = false

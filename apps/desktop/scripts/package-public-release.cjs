@@ -18,6 +18,8 @@ const {
   publicUpdateUrl,
 } = require("./public-release.cjs")
 
+const PUBLIC_RELEASE_PUBLISH_MODE = "never"
+
 const RELEASE_ROOT = join(__dirname, "..", "release")
 const MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "packages", "local-db", "drizzle")
 
@@ -64,7 +66,7 @@ function packagePublicRelease(channel, version) {
   if (process.platform !== "darwin") throw new Error("Public releases currently support macOS only")
   const release = publicReleaseDefinition(channel, version)
   const testBuild = process.env.PI_LAB_UPDATE_TEST_BUILD === "1"
-  publicUpdateUrl(process.env.PI_LAB_UPDATE_URL, testBuild)
+  if (testBuild) publicUpdateUrl(process.env.PI_LAB_UPDATE_URL, true)
   assertPublicReleaseCredentials(process.env, testBuild)
   const root = join(RELEASE_ROOT, "public")
   const destination = publicReleaseDestination(root, release.channel, release.version)
@@ -84,9 +86,8 @@ function packagePublicRelease(channel, version) {
         PI_LAB_PACKAGE_STAGE: stage,
       },
       true,
-      // electron-builder v26 only writes update metadata in publish mode.
-      // Its generic provider has no uploader, so this remains a local build.
-      "always",
+      // Keep metadata generation local even when a GitHub token is available.
+      PUBLIC_RELEASE_PUBLISH_MODE,
     )
     writeCompatibilityMetadata(stage, release.updaterChannel)
     fanOutUpdateMetadata(stage, release.updaterChannel)
@@ -114,6 +115,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  PUBLIC_RELEASE_PUBLISH_MODE,
   fanOutUpdateMetadata,
   packagePublicRelease,
   publicReleaseDestination,

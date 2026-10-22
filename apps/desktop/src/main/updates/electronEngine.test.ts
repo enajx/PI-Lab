@@ -11,6 +11,7 @@ function harness() {
     autoInstallOnAppQuit: true,
     autoRunAppAfterInstall: true,
     allowDowngrade: true,
+    allowPrerelease: false,
     channel: null as string | null,
     checkForUpdates: vi.fn(async () => null),
     quitAndInstall: vi.fn(),
@@ -23,11 +24,20 @@ describe("Electron update adapter", () => {
     const h = harness()
     h.engine.configure("beta")
     expect(h.updater.channel).toBe("beta")
+    expect(h.updater.allowPrerelease).toBe(true)
     expect(h.updater.allowDowngrade).toBe(false)
     expect(h.updater.autoDownload).toBe(true)
     expect(h.updater.autoInstallOnAppQuit).toBe(false)
     await h.engine.check()
     expect(h.updater.checkForUpdates).toHaveBeenCalledOnce()
+  })
+
+  test("switching to Stable excludes GitHub prereleases", () => {
+    const h = harness()
+    h.engine.configure("beta")
+    h.engine.configure("stable")
+    expect(h.updater.channel).toBe("latest")
+    expect(h.updater.allowPrerelease).toBe(false)
   })
 
   test("announces downloaded ZIPs and controls relaunch on approved installation", () => {

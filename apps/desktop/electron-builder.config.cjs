@@ -40,9 +40,10 @@ const { channel, productName, appId } = publicRelease
   ? channelDefinition("stable")
   : channelDefinition(process.env.PI_LAB_CHANNEL)
 const iconChannel = publicRelease?.iconChannel ?? channel
-const updateUrl = publicRelease
-  ? publicUpdateUrl(process.env.PI_LAB_UPDATE_URL, testPublicRelease)
-  : null
+const updateUrl =
+  publicRelease && testPublicRelease
+    ? publicUpdateUrl(process.env.PI_LAB_UPDATE_URL, testPublicRelease)
+    : null
 
 // Keep only compiled app outputs and audited runtime dependencies.
 // Put this list inside each platform files array. A global files FileSet plus
@@ -76,6 +77,7 @@ const APP_FILES = [
 const config = {
   appId,
   productName,
+  ...(publicRelease ? { artifactName: "PI-Lab-${version}-${arch}.${ext}" } : {}),
   extraMetadata: {
     piLabChannel: channel,
     ...(publicRelease
@@ -143,25 +145,34 @@ const config = {
     // Runtime window/Dock/notification identity. `build:icons` stages the
     // selected channel icon here before every package command.
     { from: "build/icon.png", to: "pi-lab-icon.png" },
-    ...(publicRelease?.channel === "beta"
+    { from: "assets/icons/trayTemplate.png", to: "trayTemplate.png" },
+    { from: "assets/icons/trayTemplate@2x.png", to: "trayTemplate@2x.png" },
+    ...(iconChannel === "alpha"
       ? [
           {
-            from: "../../icons-temp/matplotlib-colormaps-3.11.2.json",
+            from: "assets/icons/matplotlib-colormaps-3.11.2.json",
             to: "app-icon-palettes.json",
           },
         ]
       : []),
-    iconChannel === "stable"
-      ? {
-          from: "src/renderer/routes/_shell/settings/components/AppIconGallery/icons",
-          to: "app-icon-variants",
-          filter: ["joyplot-*.png", "pi-*.png"],
-        }
-      : {
-          from: "src/renderer/routes/_shell/settings/components/AppIconGallery/channel-icons",
-          to: "app-icon-channel-variants",
-          filter: [`joyplot-*-${iconChannel}*.png`, `pi-*-${iconChannel}*.png`],
-        },
+    ...(iconChannel === "alpha"
+      ? [
+          {
+            from: "src/renderer/routes/_shell/settings/components/AppIconGallery/channel-icons",
+            to: "app-icon-channel-variants",
+            filter: ["joyplot-*-alpha.png", "joyplot-*-alpha-expanded.png", "pi-*-alpha.png"],
+          },
+        ]
+      : []),
+    ...(iconChannel === "alpha"
+      ? [
+          {
+            from: "src/renderer/routes/_shell/settings/components/AppIconGallery/icons",
+            to: "app-icon-variants",
+            filter: ["joyplot-*-viridis.png", "joyplot-*-viridis-expanded.png", "pi-*-viridis.png"],
+          },
+        ]
+      : []),
   ],
   // Keep node-pty's spawn-helper executable bit after it's copied into the package
   // (asar packing can drop it; node-pty exec()s this file for every PTY).
@@ -213,7 +224,7 @@ const config = {
     // a Developer ID certificate; distribution builds use the real identity.
     identity: SIGN ? undefined : "-",
     // The app seals these PNG resources in its top-level signature. Signing
-    // each preview as a separate binary would launch codesign ~19,000 times.
+    // each preview as a separate binary would add unnecessary signing work.
     signIgnore: ["/Resources/app-icon-(?:channel-)?variants/.*\\.png$"],
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
@@ -244,7 +255,15 @@ const config = {
   },
   // Public release metadata is generated locally. The packaging command never uploads.
   publish: publicRelease
-    ? { provider: "generic", url: updateUrl, channel: publicRelease.updaterChannel }
+    ? testPublicRelease
+      ? { provider: "generic", url: updateUrl, channel: publicRelease.updaterChannel }
+      : {
+          provider: "github",
+          owner: "enajx",
+          repo: "PI-Lab",
+          channel: publicRelease.updaterChannel,
+          releaseType: publicRelease.channel === "beta" ? "prerelease" : "release",
+        }
     : null,
 }
 

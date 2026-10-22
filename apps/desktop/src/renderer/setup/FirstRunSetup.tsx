@@ -33,7 +33,16 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const environment = useQuery(trpc.setup.environment.queryOptions(undefined, { staleTime: 0 }))
   const settings = useQuery(trpc.settings.get.queryOptions())
   const startAtLogin = useQuery(trpc.system.startAtLogin.queryOptions())
-  const [, setDefaultAgent] = useDefaultAgentId()
+  const appChannel = useQuery({
+    queryKey: ["setup-app-channel"],
+    queryFn: async () => (await window.piLab?.appIcon?.getChannel()) ?? "alpha",
+  })
+  const updateGeneral = useMutation(
+    trpc.settings.updateGeneral.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() }),
+    }),
+  )
+  const [, setDefaultAgent, defaultAgentError, defaultAgentPending] = useDefaultAgentId()
   const [selectedAgent, setSelectedAgent] = useState<"claude-code" | "codex" | null>(null)
   const [selectionTouched, setSelectionTouched] = useState(false)
   const [apiOpenFor, setApiOpenFor] = useState<"claude-code" | "codex" | null>(null)
@@ -86,14 +95,15 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   }
 
   const finish = () => {
-    void complete.mutateAsync({ sound: completionSound }).then(
-      async () => {
-        if (selectedAgent) setDefaultAgent(selectedAgent)
+    const saved = selectedAgent ? setDefaultAgent(selectedAgent) : Promise.resolve(true)
+    void saved
+      .then(async (ok) => {
+        if (!ok) return
+        await complete.mutateAsync({ sound: completionSound })
         await queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
         onClose()
-      },
-      () => undefined,
-    )
+      })
+      .catch(() => undefined)
   }
 
   const skipSetup = () => {
@@ -122,9 +132,12 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const error =
     environment.error ??
     settings.error ??
+    appChannel.error ??
+    updateGeneral.error ??
     startAtLogin.error ??
     setStartAtLogin.error ??
     saveApiKey.error ??
+    (defaultAgentError ? new Error(defaultAgentError) : null) ??
     complete.error ??
     skip.error
 
@@ -136,7 +149,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
       aria-labelledby="first-run-setup-title"
       className="fixed inset-0 z-[100] flex flex-col overflow-hidden bg-background text-foreground"
     >
-      <header className="app-drag flex h-14 shrink-0 items-center border-border border-b px-6">
+      <header className="app-drag flex h-14 shrink-0 items-center border-border border-b pr-6 pl-24">
         <h1 id="first-run-setup-title" className="font-semibold text-base">
           {t("Set up PI Lab")}
         </h1>
@@ -149,7 +162,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
           size="sm"
           className="app-no-drag ms-auto"
           onClick={skipSetup}
-          disabled={skip.isPending || setStartAtLogin.isPending}
+          disabled={skip.isPending || setStartAtLogin.isPending || updateGeneral.isPending}
         >
           {t("Skip setup")}
         </Button>
@@ -174,6 +187,37 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
               </select>
             </label>
           </section>
+          {appChannel.data && appChannel.data !== "alpha" ? (
+            <section className="rounded-xl border border-border bg-card p-5">
+              <label className="flex flex-col gap-1.5 text-xs">
+                <span>{t("Update channel")}</span>
+                <select
+                  aria-label={t("Update channel")}
+                  value={settings.data?.publicUpdateChannel ?? "stable"}
+                  disabled={!settings.data || updateGeneral.isPending}
+                  onChange={(event) =>
+                    updateGeneral.mutate({
+                      publicUpdateChannel: event.target.value as "stable" | "beta",
+                    })
+                  }
+                  className="rounded-md border border-border bg-background px-2 py-2"
+                >
+                  <option value="stable">{t("Stable")}</option>
+                  <option value="beta">{t("Beta")}</option>
+                </select>
+              </label>
+              <p className="mt-2 text-muted-foreground text-xs">
+                {t(
+                  "Stable for everyday work; Beta for trying new features. Both use your projects and settings.",
+                )}
+              </p>
+              <p className="mt-1 text-muted-foreground text-xs">
+                {t(
+                  "This selects future updates. Switching to Stable will not install an older version. You can change this later in Settings.",
+                )}
+              </p>
+            </section>
+          ) : null}
           <section className="rounded-xl border border-border bg-card p-5">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -351,14 +395,20 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
               type="button"
               variant="ghost"
               onClick={skipSetup}
-              disabled={skip.isPending || setStartAtLogin.isPending}
+              disabled={skip.isPending || setStartAtLogin.isPending || updateGeneral.isPending}
             >
               {t("Skip setup")}
             </Button>
             <Button
               type="button"
               onClick={finish}
-              disabled={complete.isPending || saveApiKey.isPending || setStartAtLogin.isPending}
+              disabled={
+                defaultAgentPending ||
+                complete.isPending ||
+                saveApiKey.isPending ||
+                updateGeneral.isPending ||
+                setStartAtLogin.isPending
+              }
             >
               {t("Finish setup")}
             </Button>
