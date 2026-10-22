@@ -1,10 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened]
+  # Run local checks by default; request hosted platform checks explicitly.
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -121,7 +119,8 @@ jobs:
         with:
           name: playwright-${{ matrix.os }}
           path: |
-            test-results/
+            .cache/test-results/
             playwright-report/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
