@@ -14,10 +14,8 @@ function bridge(initial: BackgroundTraySnapshot) {
       }
     }),
     openProject: vi.fn(async () => undefined),
-    openApp: vi.fn(async () => undefined),
     openFile: vi.fn(async () => undefined),
     restartToUpdate: vi.fn(),
-    quit: vi.fn(),
   }
   Object.defineProperty(window, "piLab", { configurable: true, value: { backgroundTray: api } })
   return { api, publish: (snapshot: BackgroundTraySnapshot) => listener?.(snapshot) }
@@ -44,26 +42,24 @@ test("shows working and waiting projects and follows live changes", async () => 
   expect(screen.getByRole("button", { name: /Beta.*Working/ })).toBeTruthy()
 })
 
-test("project and footer actions call the native bridge", async () => {
+test("project monitor opens an active project without general app actions", async () => {
   const { api } = bridge({ projects: [{ id: "alpha", name: "Alpha", state: "working" }] })
   render(<TrayPopover />)
   fireEvent.click(await screen.findByRole("button", { name: /Alpha.*Working/ }))
-  fireEvent.click(screen.getByRole("button", { name: "Open PI Lab" }))
-  fireEvent.click(screen.getByRole("button", { name: "Open File" }))
-  fireEvent.click(screen.getByRole("button", { name: "Quit" }))
-
   await waitFor(() => expect(api.openProject).toHaveBeenCalledWith("alpha"))
-  await waitFor(() => expect(api.openApp).toHaveBeenCalledOnce())
-  await waitFor(() => expect(api.openFile).toHaveBeenCalledOnce())
-  expect(api.quit).toHaveBeenCalledOnce()
+  expect(screen.queryByText("Background activity")).toBeNull()
+  expect(screen.queryByRole("button", { name: "Open PI Lab" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Open File" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Quit" })).toBeNull()
 })
 
-test("shows native action failures", async () => {
-  const { api } = bridge({ projects: [] })
-  vi.mocked(api.openFile).mockRejectedValue(new Error("Dialog unavailable"))
+test("shows project-opening failures", async () => {
+  const { api, publish } = bridge({ projects: [] })
+  vi.mocked(api.openProject).mockRejectedValue(new Error("Project unavailable"))
   render(<TrayPopover />)
-  fireEvent.click(screen.getByRole("button", { name: "Open File" }))
-  expect((await screen.findByRole("alert")).textContent).toContain("Dialog unavailable")
+  publish({ projects: [{ id: "alpha", name: "Alpha", state: "working" }] })
+  fireEvent.click(await screen.findByRole("button", { name: /Alpha.*Working/ }))
+  expect((await screen.findByRole("alert")).textContent).toContain("Project unavailable")
 })
 
 test("shows a downloaded update in the tray and offers an approved restart", async () => {

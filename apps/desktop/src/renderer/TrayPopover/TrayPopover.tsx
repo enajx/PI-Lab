@@ -1,6 +1,12 @@
+/// <reference types="vite/client" />
 import { useEffect, useState } from "react"
+import stableIcon from "../../../assets/icons/icon.svg?url"
+import alphaIcon from "../../../assets/icons/icon-alpha.svg?url"
+import betaIcon from "../../../assets/icons/icon-beta.svg?url"
 import type { BackgroundTrayBridge, BackgroundTraySnapshot } from "../../shared/backgroundTray"
 import "./trayPopover.css"
+
+const CHANNEL_ICONS = { alpha: alphaIcon, beta: betaIcon, stable: stableIcon } as const
 
 /** Small background activity view shown from the macOS menu bar. */
 export function TrayPopover() {
@@ -8,6 +14,20 @@ export function TrayPopover() {
     ?.backgroundTray
   const [snapshot, setSnapshot] = useState<BackgroundTraySnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [channel, setChannel] = useState<keyof typeof CHANNEL_ICONS>("stable")
+
+  useEffect(() => {
+    let mounted = true
+    void window.piLab?.appIcon
+      ?.getChannel()
+      .then((value) => {
+        if (mounted) setChannel(value)
+      })
+      .catch((cause: unknown) => console.warn("[pi-lab] Tray icon channel unavailable:", cause))
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!bridge) {
@@ -47,23 +67,23 @@ export function TrayPopover() {
   return (
     <main className="tray-popover" data-testid="tray-popover">
       <header className="tray-header">
-        <span className="tray-brand-mark" aria-hidden="true">
-          π
-        </span>
-        <span className="tray-brand-copy">
-          <strong>PI Lab</strong>
-          <span>Background activity</span>
-        </span>
-        <span className="tray-project-count">
-          {projects.length} {projects.length === 1 ? "project" : "projects"}
-        </span>
+        <img className="tray-brand-icon" src={CHANNEL_ICONS[channel]} alt="" />
+        <strong className="tray-heading">Active projects</strong>
+        <span className="tray-project-count">{projects.length}</span>
       </header>
 
       <section className="tray-projects" aria-label="Projects with agent activity">
-        {snapshot === null ? (
-          <p className="tray-empty" role="status">
-            {error ? "Projects unavailable" : "Loading projects…"}
+        {error ? (
+          <p className="tray-error" role="alert">
+            {error}
           </p>
+        ) : null}
+        {snapshot === null ? (
+          error ? null : (
+            <p className="tray-empty" role="status">
+              Loading projects…
+            </p>
+          )
         ) : projects.length === 0 ? (
           <p className="tray-empty">No active projects</p>
         ) : (
@@ -77,69 +97,28 @@ export function TrayPopover() {
               }}
               type="button"
             >
-              <span className="tray-project-face" data-state={project.state} aria-hidden="true">
-                <span className="tray-project-eyes" />
-              </span>
+              <span className="tray-project-dot" data-state={project.state} aria-hidden="true" />
               <span className="tray-project-name" title={project.name}>
                 {project.name}
               </span>
               <span className="tray-project-state">
                 {project.state === "working" ? "Working" : "Waiting"}
               </span>
-              <span className="tray-project-chevron" aria-hidden="true">
-                ›
-              </span>
             </button>
           ))
         )}
       </section>
 
-      {error ? (
-        <p className="tray-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <footer className="tray-footer">
-        {snapshot?.updateVersion ? (
+      {snapshot?.updateVersion ? (
+        <footer className="tray-footer">
           <div className="tray-update">
             <span>Ready to update to {snapshot.updateVersion}</span>
             <button onClick={() => bridge?.restartToUpdate()} type="button">
               Restart to Update
             </button>
           </div>
-        ) : null}
-        <div className="tray-primary-actions">
-          <button
-            className="tray-open-app"
-            disabled={!bridge}
-            onClick={() => {
-              if (bridge) run(() => bridge.openApp())
-            }}
-            type="button"
-          >
-            Open PI Lab
-          </button>
-          <button
-            className="tray-open-file"
-            disabled={!bridge}
-            onClick={() => {
-              if (bridge) run(() => bridge.openFile())
-            }}
-            type="button"
-          >
-            Open File
-          </button>
-        </div>
-        <button
-          className="tray-quit"
-          disabled={!bridge}
-          onClick={() => bridge?.quit()}
-          type="button"
-        >
-          Quit
-        </button>
-      </footer>
+        </footer>
+      ) : null}
     </main>
   )
 }

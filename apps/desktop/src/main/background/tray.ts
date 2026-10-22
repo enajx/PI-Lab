@@ -1,32 +1,73 @@
 import { join } from "node:path"
-import { BrowserWindow, nativeImage, type Rectangle, screen, Tray } from "electron"
-import { BACKGROUND_TRAY_CHANGED_CHANNEL } from "../../shared/backgroundTray"
+import { BrowserWindow, dialog, Menu, nativeImage, type Rectangle, screen, Tray } from "electron"
+import {
+  BACKGROUND_TRAY_CHANGED_CHANNEL,
+  type BackgroundTraySnapshot,
+} from "../../shared/backgroundTray"
 import { isTestMode, rendererDevServerUrl } from "../runtime/env"
+import { type TrayMenuActions, trayMenuTemplate } from "./trayMenu"
 
-const POPOVER_WIDTH = 344
-const POPOVER_HEIGHT = 420
+const POPOVER_WIDTH = 240
+const MAX_VISIBLE_PROJECTS = 6
+
+function popoverHeight(snapshot: BackgroundTraySnapshot): number {
+  const projectHeight = snapshot.projects.length
+    ? Math.min(snapshot.projects.length, MAX_VISIBLE_PROJECTS) * 39 + 6
+    : 39
+  return 33 + projectHeight + (snapshot.updateVersion ? 44 : 0)
+}
 
 /** Keep the icon and its small renderer alive while PI Lab runs in the background. */
 export class BackgroundTray {
   private readonly tray: Tray
   private popover: BrowserWindow | null = null
+  private snapshot: BackgroundTraySnapshot
 
-  constructor(iconPath: string, appName: string) {
+  constructor(
+    iconPath: string,
+    appName: string,
+    private readonly templatePath: string,
+    private readonly actions: TrayMenuActions,
+    snapshot: BackgroundTraySnapshot,
+  ) {
+    this.snapshot = snapshot
     this.tray = new Tray(this.imageFor(iconPath))
     this.tray.setToolTip(appName)
     this.tray.on("click", (_event, bounds) => this.toggle(bounds))
+    if (process.platform === "linux") this.tray.setContextMenu(this.menu())
+    else
+      this.tray.on("right-click", () => {
+        this.popover?.hide()
+        this.tray.popUpContextMenu(this.menu())
+      })
   }
 
   /** Update the background icon when Settings changes the application icon. */
   setIcon(iconPath: string): void {
-    this.tray.setImage(this.imageFor(iconPath))
+    if (process.platform !== "darwin") this.tray.setImage(this.imageFor(iconPath))
   }
 
   private imageFor(iconPath: string) {
-    const icon = nativeImage.createFromPath(iconPath).resize({ width: 20, height: 20 })
-    if (icon.isEmpty()) throw new Error(`PI Lab tray icon could not be loaded: ${iconPath}`)
+    const path = process.platform === "darwin" ? this.templatePath : iconPath
+    const source = nativeImage.createFromPath(path)
+    if (source.isEmpty()) throw new Error(`PI Lab tray icon could not be loaded: ${path}`)
+    const icon = process.platform === "darwin" ? source : source.resize({ width: 20, height: 20 })
     if (process.platform === "darwin") icon.setTemplateImage(true)
     return icon
+  }
+
+  private menu(): Menu {
+    return Menu.buildFromTemplate(
+      trayMenuTemplate(
+        this.actions,
+        this.snapshot.updateVersion ?? null,
+        (label, error) => {
+          console.error(`[pi-lab] ${label} failed:`, error)
+          dialog.showErrorBox(`${label} failed`, String(error))
+        },
+        process.platform === "darwin",
+      ),
+    )
   }
 
   /** Hide the popover after one of its actions opens a window. */
@@ -35,9 +76,13 @@ export class BackgroundTray {
   }
 
   /** Send a fresh project list to an already loaded popover. */
-  publish(snapshot: unknown): void {
+  publish(snapshot: BackgroundTraySnapshot): void {
+    this.snapshot = snapshot
+    if (process.platform === "linux") this.tray.setContextMenu(this.menu())
     const window = this.popover
-    if (!window || window.isDestroyed() || window.webContents.isLoadingMainFrame()) return
+    if (!window || window.isDestroyed()) return
+    window.setSize(POPOVER_WIDTH, popoverHeight(snapshot))
+    if (window.webContents.isLoadingMainFrame()) return
     window.webContents.send(BACKGROUND_TRAY_CHANGED_CHANNEL, snapshot)
   }
 
@@ -62,13 +107,15 @@ export class BackgroundTray {
     }
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const area = display.workArea
+    const height = popoverHeight(this.snapshot)
+    window.setSize(POPOVER_WIDTH, height)
     const anchor = bounds.width > 0 ? bounds : { ...bounds, x: screen.getCursorScreenPoint().x }
     const x = Math.min(
       Math.max(anchor.x + anchor.width / 2 - POPOVER_WIDTH / 2, area.x),
       area.x + area.width - POPOVER_WIDTH,
     )
-    const below = anchor.y + anchor.height + POPOVER_HEIGHT <= area.y + area.height
-    const y = below ? anchor.y + anchor.height : anchor.y - POPOVER_HEIGHT
+    const below = anchor.y + anchor.height + height <= area.y + area.height
+    const y = below ? anchor.y + anchor.height : anchor.y - height
     window.setPosition(Math.round(x), Math.round(Math.max(area.y, y)))
     if (isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1") window.showInactive()
     else {
@@ -81,7 +128,7 @@ export class BackgroundTray {
     if (this.popover && !this.popover.isDestroyed()) return this.popover
     const window = new BrowserWindow({
       width: POPOVER_WIDTH,
-      height: POPOVER_HEIGHT,
+      height: popoverHeight(this.snapshot),
       show: false,
       ...(isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1" ? { opacity: 0 } : {}),
       frame: false,

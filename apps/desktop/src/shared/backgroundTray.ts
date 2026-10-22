@@ -1,9 +1,7 @@
 export const BACKGROUND_TRAY_SNAPSHOT_CHANNEL = "background-tray:snapshot"
 export const BACKGROUND_TRAY_CHANGED_CHANNEL = "background-tray:changed"
 export const BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL = "background-tray:open-project"
-export const BACKGROUND_TRAY_OPEN_APP_CHANNEL = "background-tray:open-app"
 export const BACKGROUND_TRAY_OPEN_FILE_CHANNEL = "background-tray:open-file"
-export const BACKGROUND_TRAY_QUIT_CHANNEL = "background-tray:quit"
 export const BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL = "background-tray:restart-to-update"
 
 export interface BackgroundTrayProject {
@@ -22,8 +20,6 @@ export interface BackgroundTrayBridge {
   getSnapshot(): Promise<BackgroundTraySnapshot>
   subscribe(listener: (snapshot: BackgroundTraySnapshot) => void): () => void
   openProject(id: string): Promise<void>
-  openApp(): Promise<void>
   openFile(): Promise<void>
   restartToUpdate(): void
-  quit(): void
 }

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { RadioTower } from "lucide-react"
+import { Bot } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../../trpc/react"
 import { useAgentStatus } from "../../-ProjectActivity"
@@ -61,7 +61,7 @@ export function AgentStatusControl() {
         onClick={() => setOpen((current) => !current)}
         className="app-no-drag relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
       >
-        <RadioTower className="size-4" aria-hidden />
+        <Bot className="size-4" aria-hidden />
         {attention ? (
           <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-500" aria-hidden />
         ) : null}
