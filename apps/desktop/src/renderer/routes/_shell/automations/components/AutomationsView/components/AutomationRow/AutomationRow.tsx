@@ -99,7 +99,7 @@ export function AutomationRow({
           type="button"
           data-testid="toggle-runs"
           aria-label={t(expanded ? "Hide runs" : "Show runs")}
-          data-feature-help={t("Expand or collapse this workflow's recent run history")}
+          data-feature-help={t("Expand or collapse this routine's recent run history")}
           className="shrink-0 text-muted-foreground hover:text-foreground"
           onClick={() => setExpanded((v) => !v)}
         >
@@ -161,7 +161,7 @@ export function AutomationRow({
           disabled={runNow.isPending}
           onClick={() => runNow.mutate({ id: automation.id })}
           title={t("Run now")}
-          data-feature-help={t("Start one run immediately without changing the workflow schedule")}
+          data-feature-help={t("Start one run immediately without changing the routine schedule")}
         >
           <Play aria-hidden />
         </Button>
@@ -173,8 +173,8 @@ export function AutomationRow({
           <input
             type="checkbox"
             data-testid="enabled-checkbox"
-            aria-label={t(automation.enabled ? "Pause workflow" : "Resume workflow")}
-            data-feature-help={t("Pause or resume future scheduled runs for this workflow")}
+            aria-label={t(automation.enabled ? "Pause routine" : "Resume routine")}
+            data-feature-help={t("Pause or resume future scheduled runs for this routine")}
             className="size-3.5 accent-brand"
             checked={automation.enabled}
             disabled={setEnabled.isPending}
@@ -191,7 +191,7 @@ export function AutomationRow({
           disabled={remove.isPending}
           onClick={() => remove.mutate({ id: automation.id })}
           title={t("Delete")}
-          data-feature-help={t("Remove this scheduled workflow from PI Lab")}
+          data-feature-help={t("Remove this scheduled routine from PI Lab")}
         >
           <Trash2 aria-hidden className="text-destructive" />
         </Button>

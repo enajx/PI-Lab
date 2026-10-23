@@ -11,11 +11,13 @@ interface ShutdownGuardOptions {
   ipcMain: Pick<IpcMain, "on" | "removeListener">
   createRequestId: () => string
   /** Confirm the agent policy and finish stopping agents after draft approval. */
-  prepareQuit?: () => Promise<boolean>
+  prepareQuit?: (stopConfirmed: boolean) => Promise<boolean>
 }
 
 export interface ShutdownGuard {
   attachWindow: (window: BrowserWindow) => void
+  requestExplicitQuit: () => void
+  isQuitPending: () => boolean
   requestUpdateInstall: (install: () => void) => void
   setInstallOnApprovedQuit: (install: (() => void) | null) => void
   cancelUpdateInstall: () => void
@@ -31,9 +33,10 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   let pendingUpdateInstall: (() => void) | null = null
   let installOnApprovedQuit: (() => void) | null = null
   let preparingQuit = false
+  let pendingStopConfirmed = false
 
   /** Run asynchronous agent shutdown once; rejection never grants approval. */
-  function prepareAndQuit(install: (() => void) | null): void {
+  function prepareAndQuit(install: (() => void) | null, stopConfirmed: boolean): void {
     if (preparingQuit) return
     const finish = () => {
       if (install) {
@@ -56,7 +59,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     }
     preparingQuit = true
     void options
-      .prepareQuit()
+      .prepareQuit(stopConfirmed)
       .then((allow) => {
         preparingQuit = false
         if (allow) finish()
@@ -107,7 +110,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     if (!mainWindow || mainWindow.isDestroyed()) {
       if (installOnApprovedQuit || options.prepareQuit) {
         event.preventDefault()
-        prepareAndQuit(installOnApprovedQuit)
+        prepareAndQuit(installOnApprovedQuit, false)
       }
       return
     }
@@ -134,6 +137,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     mainWindow?.removeListener("closed", detachWindow)
     mainWindow = null
     pending = null
+    pendingStopConfirmed = false
     if (!approvedQuit?.update) approvedQuit = null
     approvedClose = null
     pendingUpdateInstall = null
@@ -160,6 +164,8 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
       return
 
     const intent = pending.intent
+    const stopConfirmed = pendingStopConfirmed
+    pendingStopConfirmed = false
     pending = null
     if (!value.allow) {
       pendingUpdateInstall = null
@@ -168,7 +174,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     if (intent === "quit") {
       const install = pendingUpdateInstall ?? installOnApprovedQuit
       pendingUpdateInstall = null
-      prepareAndQuit(install)
+      prepareAndQuit(install, stopConfirmed)
     } else {
       approvedClose = window
       window.close()
@@ -180,12 +186,24 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   options.ipcMain.on(SHUTDOWN_RESPONSE_CHANNEL, receiveResponse)
 
   return {
-    requestUpdateInstall(install): void {
+    isQuitPending: () => pending?.intent === "quit" || preparingQuit || approvedQuit !== null,
+    requestExplicitQuit(): void {
+      if (pending?.intent === "quit" || preparingQuit) return
       if (!mainWindow || mainWindow.isDestroyed()) {
-        prepareAndQuit(install)
+        prepareAndQuit(installOnApprovedQuit, true)
         return
       }
       if (mainWindow.webContents.isDestroyed()) return
+      pendingStopConfirmed = true
+      request("quit")
+    },
+    requestUpdateInstall(install): void {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        prepareAndQuit(install, false)
+        return
+      }
+      if (mainWindow.webContents.isDestroyed()) return
+      pendingStopConfirmed = false
       pendingUpdateInstall = install
       request("quit")
     },

@@ -173,6 +173,25 @@ describe("WorkflowResultDialog", () => {
     )
     expect(screen.queryByTestId("workflow-result-text")).toBeNull()
     expect(screen.queryByTestId("workflow-result-working")).toBeNull()
+    expect(screen.queryByTestId("workflow-activity-log")).toBeNull()
+    expect(screen.getByTestId("workflow-result-error").className).not.toContain("text-destructive")
+  })
+
+  test("keeps captured activity visible when an agent run fails", async () => {
+    renderDialog(
+      { running: false, errorMessage: "Agent exited before completing the plan" },
+      {
+        "workflows.onOutput": () => ({
+          kind: "chunk",
+          stream: "stdout",
+          text: "Reading project files",
+        }),
+      },
+    )
+    expect((await screen.findByTestId("workflow-activity-log")).textContent).toContain(
+      "Reading project files",
+    )
+    expect(screen.getByTestId("workflow-result-error").textContent).toContain("Agent exited")
   })
 
   test("survives a missing/failed subscription — the report still renders", async () => {

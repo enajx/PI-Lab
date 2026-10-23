@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import { getSettingsOrDefaults } from "@pi-lab/local-db"
 import { app } from "electron"
 import { autoUpdater } from "electron-updater"
@@ -6,6 +7,8 @@ import { setReadyUpdateMenuItem } from "../window/appMenu"
 import type { ShutdownGuard } from "../window/shutdownGuard"
 import { PublicUpdateController, type UpdateStatus } from "./controller"
 import { ElectronUpdateEngine } from "./electronEngine"
+import { connectUpdateFeedback, publishUpdateMessage, publishUpdateStatus } from "./feedback"
+import { recordInstalledVersion } from "./installedVersion"
 import { onPublicUpdateChannelChanged } from "./selection"
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
@@ -31,11 +34,21 @@ export async function startPublicUpdates(
           ? { version: status.version, restart: () => controller.restartToUpdate() }
           : null,
       )
+      publishUpdateStatus(status)
       onStatus(status, () => controller.restartToUpdate())
     },
     (install) => shutdownGuard.requestUpdateInstall(install),
     (install) => shutdownGuard.setInstallOnApprovedQuit(install),
   )
+  connectUpdateFeedback(controller)
+  if (
+    recordInstalledVersion(
+      join(app.getPath("userData"), "last-installed-version"),
+      app.getVersion(),
+    )
+  ) {
+    publishUpdateMessage(`Updated to PI Lab ${app.getVersion()}`, false)
+  }
   const unsubscribe = onPublicUpdateChannelChanged((channel) => {
     shutdownGuard.cancelUpdateInstall()
     controller.selectedChannelChanged(channel)

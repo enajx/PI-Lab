@@ -94,6 +94,12 @@ describe("Dashboard", () => {
       expect(screen.getByRole("heading", { name: "Projects Dashboard" })).toBeTruthy()
     })
     expect(screen.getByTestId("caffeine-control")).toBeTruthy()
+    expect(
+      screen
+        .getByRole("heading", { name: "Projects Dashboard" })
+        .closest("header")
+        ?.classList.contains("app-drag"),
+    ).toBe(true)
   })
 
   test("translates dashboard copy after choosing Norwegian", async () => {

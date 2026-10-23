@@ -69,7 +69,7 @@ describe("EditorSettingsMenu", () => {
     expect(screen.queryByText("Typography…")).toBeNull()
 
     fireEvent.click(screen.getByTestId("editor-advanced-settings-link"))
-    expect(window.location.hash).toBe("#/settings?section=appearance&advanced=editor-typography")
+    expect(window.location.hash).toBe("#/settings?section=editor&advanced=editor-typography")
     expect(screen.queryByTestId("editor-settings-font-family")).toBeNull()
     expect(screen.queryByTestId("editor-settings-font-size")).toBeNull()
   })

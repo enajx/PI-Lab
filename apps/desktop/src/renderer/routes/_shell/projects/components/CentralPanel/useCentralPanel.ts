@@ -71,7 +71,7 @@ export interface CentralPanelController {
   openFile: (relPath: string) => void
   closeFile: (relPath: string) => void
   closeSession: (id: string) => void
-  /** Close whichever tab is currently active (⌘W); a no-op when none is. */
+  /** Close whichever tab is currently active (Ctrl+W); a no-op when none is. */
   closeActiveTab: () => void
   openAgent: () => void
   openAgentChooser: () => void
@@ -411,7 +411,7 @@ export function useCentralPanel({
     [killTerminal],
   )
 
-  // Close the active tab (bound to ⌘W in the project view). Routes to the same
+  // Close the active tab (bound to Ctrl+W in the project view). Routes to the same
   // close path the tab's "x" button uses; no-op when nothing is active.
   const closeActiveTab = useCallback(() => {
     if (!active) return

@@ -157,7 +157,7 @@ describe("Settings sections", () => {
     try {
       renderSection(<AppearanceSection />)
       expect(await screen.findByText("App icon")).toBeTruthy()
-      expect(screen.getByTestId("settings-app-icon-font")).toHaveProperty(
+      expect(await screen.findByTestId("settings-app-icon-font")).toHaveProperty(
         "value",
         "gill-sans-regular",
       )
@@ -187,10 +187,11 @@ describe("Settings sections", () => {
     renderSection(<AppearanceSection />)
 
     expect(screen.queryByTestId("settings-caffeine-animation")).toBeNull()
+    expect(screen.queryByTestId("settings-editor-font-family")).toBeNull()
   })
 
-  test("Appearance Advanced persists bounded global editor typography and resets it", async () => {
-    renderSection(<AppearanceSection />, {
+  test("Editor persists bounded global editor typography and resets it", async () => {
+    renderSection(<EditorSection />, {
       "system.fonts": () => ({
         families: ["Avenir Next", "Menlo"],
         error: null,
@@ -213,8 +214,8 @@ describe("Settings sections", () => {
     expect(size.value).toBe("14")
   })
 
-  test("Appearance Advanced keeps the safe default visible when font detection fails", async () => {
-    renderSection(<AppearanceSection />, {
+  test("Editor keeps the safe default visible when font detection fails", async () => {
+    renderSection(<EditorSection />, {
       "system.fonts": () => ({
         families: [],
         error: "System fonts could not be detected. The default monospace font is still available.",
@@ -244,19 +245,10 @@ describe("Settings sections", () => {
     expect(window.localStorage.getItem("pi-lab.digitalRain.speed")).toBe("slow")
   })
 
-  test("General section round-trips confirm-on-quit through settings.updateGeneral", async () => {
-    const patches: unknown[] = []
-    renderSection(<GeneralSection />, {
-      "settings.get": () => ({ confirmOnQuit: true, worktreePerAgent: false }),
-      "settings.updateGeneral": (input) => {
-        patches.push(input)
-        return { confirmOnQuit: false, worktreePerAgent: false }
-      },
-    })
-    await waitFor(() => expect(screen.getByTestId("settings-confirm-quit")).toBeTruthy())
-    expect(screen.getByTestId("settings-run-setup").textContent).toBe("Run setup again")
-    fireEvent.click(screen.getByTestId("settings-confirm-quit"))
-    await waitFor(() => expect(patches).toContainEqual({ confirmOnQuit: false }))
+  test("General does not offer a toggle to disable explicit quit confirmation", async () => {
+    renderSection(<GeneralSection />, { "settings.get": () => ({ confirmOnQuit: false }) })
+    await waitFor(() => expect(screen.getByTestId("settings-run-setup")).toBeTruthy())
+    expect(screen.queryByTestId("settings-confirm-quit")).toBeNull()
   })
 
   test("General toggles background operation and OS login separately", async () => {
@@ -290,19 +282,10 @@ describe("Settings sections", () => {
     })
   })
 
-  test("General restores a hidden menu-bar icon", async () => {
-    const changes: unknown[] = []
-    renderSection(<GeneralSection />, {
-      "system.menuBarIcon": () => ({ visible: false, available: true }),
-      "system.setMenuBarIcon": (input) => {
-        changes.push(input)
-        return { visible: true, available: true }
-      },
-    })
-    const toggle = await screen.findByTestId("settings-menu-bar-icon")
-    expect(toggle.getAttribute("aria-checked")).toBe("false")
-    fireEvent.click(toggle)
-    await waitFor(() => expect(changes).toContainEqual({ visible: true }))
+  test("General does not offer a switch to hide the always-visible menu-bar icon", async () => {
+    renderSection(<GeneralSection />, {})
+    await waitFor(() => expect(screen.getByTestId("settings-run-setup")).toBeTruthy())
+    expect(screen.queryByTestId("settings-menu-bar-icon")).toBeNull()
   })
 
   test("General lets the user select the public update channel", async () => {
@@ -469,13 +452,13 @@ describe("Settings sections", () => {
     ).toBe("true")
     expect(
       screen
-        .getByRole("switch", { name: "Workflow started notifications" })
+        .getByRole("switch", { name: "Routine started notifications" })
         .getAttribute("aria-checked"),
     ).toBe("false")
     expect(
-      (screen.getByRole("combobox", { name: "Workflow failed sound" }) as HTMLSelectElement).value,
+      (screen.getByRole("combobox", { name: "Routine failed sound" }) as HTMLSelectElement).value,
     ).toBe("alert")
-    expect(screen.getByRole("button", { name: "Preview Workflow failed sound" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Preview Routine failed sound" })).toBeTruthy()
   })
 
   test("Notifications section sends only changed event fields and mute state", async () => {
@@ -497,7 +480,7 @@ describe("Settings sections", () => {
       },
     })
 
-    fireEvent.click(await screen.findByRole("switch", { name: "Workflow started notifications" }))
+    fireEvent.click(await screen.findByRole("switch", { name: "Routine started notifications" }))
     await waitFor(() =>
       expect(updates).toContainEqual({
         workflowStart: { enabled: true },
@@ -645,79 +628,12 @@ describe("Settings sections", () => {
     )
   })
 
-  test("Project view changes the chosen project's type", async () => {
-    const selected: unknown[] = []
+  test("Project view leaves type editing in right-click Edit project", async () => {
     renderSection(<ProjectViewSection />, {
-      "projects.list": () => [{ id: "p1", name: "Alpha", typeId: null, mainRelPath: null }],
-      "settings.get": () => ({
-        projectTemplate: {
-          projectTypes: [
-            { id: "research", name: "Research project", guidance: "" },
-            { id: "software", name: "Software project", guidance: "" },
-            { id: "manuscript", name: "Manuscript", guidance: "" },
-          ],
-        },
-      }),
-      "projects.setType": (input) => {
-        selected.push(input)
-      },
+      "projects.list": () => [{ id: "p1", name: "Alpha", typeId: "research", mainRelPath: null }],
     })
-
-    expect(((await screen.findByTestId("settings-project-type")) as HTMLSelectElement).value).toBe(
-      "",
-    )
-    await screen.findByRole("option", { name: "Manuscript" })
-    fireEvent.change(screen.getByTestId("settings-project-type"), {
-      target: { value: "manuscript" },
-    })
-    await waitFor(() => expect(selected).toEqual([{ id: "p1", typeId: "manuscript" }]))
-  })
-
-  test("Project view translates its project controls and built-in type names", async () => {
-    window.localStorage.setItem("pi-lab.interface.language", "es")
-    renderSection(<ProjectViewSection />, {
-      "projects.list": () => [{ id: "p1", name: "Alpha", typeId: null, mainRelPath: null }],
-      "settings.get": () => ({
-        projectTemplate: {
-          projectTypes: [
-            { id: "research", name: "Research project", guidance: "" },
-            { id: "software", name: "Software project", guidance: "" },
-            { id: "manuscript", name: "Manuscript", guidance: "" },
-          ],
-        },
-      }),
-    })
-
-    expect(await screen.findByLabelText("Tipo de proyecto")).toBeTruthy()
-    expect(await screen.findByRole("option", { name: "Proyecto de investigación" })).toBeTruthy()
-    expect(screen.getByRole("option", { name: "Proyecto de software" })).toBeTruthy()
-    expect(screen.getByRole("option", { name: "Manuscrito" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Planificar este proyecto" })).toBeTruthy()
-  })
-
-  test("Project view shows a known type error in the selected language", async () => {
-    window.localStorage.setItem("pi-lab.interface.language", "es")
-    renderSection(<ProjectViewSection />, {
-      "projects.list": () => [{ id: "p1", name: "Alpha", typeId: null, mainRelPath: null }],
-      "settings.get": () => ({
-        projectTemplate: {
-          projectTypes: [
-            { id: "research", name: "Research project", guidance: "" },
-            { id: "software", name: "Software project", guidance: "" },
-            { id: "manuscript", name: "Manuscript", guidance: "" },
-          ],
-        },
-      }),
-      "projects.setType": () => {
-        throw new Error("Unknown project type")
-      },
-    })
-
-    await screen.findByRole("option", { name: "Manuscrito" })
-    fireEvent.change(screen.getByLabelText("Tipo de proyecto"), {
-      target: { value: "manuscript" },
-    })
-    expect((await screen.findByRole("alert")).textContent).toContain("Tipo de proyecto desconocido")
+    await screen.findByRole("option", { name: "Alpha" })
+    expect(screen.queryByTestId("settings-project-type")).toBeNull()
   })
 
   test("Sections shows four rows; Cluster/Analysis toggle, Experiments/Research Heartbeat not-yet-available", () => {

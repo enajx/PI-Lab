@@ -12,7 +12,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useState } from "react"
 import { type CaffeineMode, type CaffeineScope, useCaffeine } from "../../../../caffeine"
 import { ProjectMarkdownChoice } from "../../../../components/ProjectMarkdownChoice"
-import { ProjectTypeChoice } from "../../../../components/ProjectTypeChoice"
 import {
   allEditorThemes,
   DEFAULT_EDITOR_THEME_ID,
@@ -57,6 +56,7 @@ import {
   useShortcutBindings,
 } from "../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../trpc/react"
+import { requestUpdateCheck } from "../../../../updates/UpdateFeedback"
 import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
 import { AlphaTestingResets } from "./AlphaTestingResets"
@@ -103,7 +103,6 @@ export function GeneralSection() {
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const startAtLoginQuery = useQuery(trpc.system.startAtLogin.queryOptions())
-  const menuBarIconQuery = useQuery(trpc.system.menuBarIcon.queryOptions())
   const updateGeneral = useMutation(
     trpc.settings.updateGeneral.mutationOptions({
       onSuccess: () =>
@@ -116,13 +115,6 @@ export function GeneralSection() {
         void queryClient.invalidateQueries({ queryKey: trpc.system.startAtLogin.queryKey() }),
     }),
   )
-  const setMenuBarIcon = useMutation(
-    trpc.system.setMenuBarIcon.mutationOptions({
-      onSuccess: () =>
-        void queryClient.invalidateQueries({ queryKey: trpc.system.menuBarIcon.queryKey() }),
-    }),
-  )
-  const confirmOnQuit = settingsQuery.data?.confirmOnQuit ?? true
   const keepRunningAfterClose = settingsQuery.data?.keepRunningAfterClose ?? true
   const publicUpdateChannel = settingsQuery.data?.publicUpdateChannel ?? "stable"
   const [restoreProjectTabs, setRestoreProjectTabs] = useRestoreProjectTabs()
@@ -154,6 +146,17 @@ export function GeneralSection() {
           updateGeneral.mutate({ publicUpdateChannel: next as "stable" | "beta" })
         }
       />
+      <div className="px-4 py-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="settings-check-for-updates"
+          onClick={requestUpdateCheck}
+        >
+          {t("Check for updates")}
+        </Button>
+      </div>
       <ToggleField
         testId="settings-keep-running-after-close"
         label="Keep running after window closes"
@@ -169,43 +172,16 @@ export function GeneralSection() {
         disabled={startAtLoginQuery.data?.available === false || setStartAtLogin.isPending}
         onChange={(value) => setStartAtLogin.mutate({ enabled: value })}
       />
-      {menuBarIconQuery.data?.available ? (
-        <ToggleField
-          testId="settings-menu-bar-icon"
-          label="Show menu-bar icon"
-          description="Show the icon while PI Lab runs in the background. When hidden, reopen PI Lab from the Dock."
-          checked={menuBarIconQuery.data.visible}
-          disabled={setMenuBarIcon.isPending}
-          onChange={(visible) => setMenuBarIcon.mutate({ visible })}
-        />
-      ) : null}
       {startAtLoginQuery.data?.available === false ? (
         <p className="px-4 py-3 text-muted-foreground text-xs">
           {t("Start at login is available in packaged desktop builds.")}
         </p>
       ) : null}
-      {updateGeneral.error ||
-      setStartAtLogin.error ||
-      startAtLoginQuery.error ||
-      menuBarIconQuery.error ||
-      setMenuBarIcon.error ? (
+      {updateGeneral.error || setStartAtLogin.error || startAtLoginQuery.error ? (
         <p role="alert" className="px-4 py-3 text-destructive text-xs">
-          {String(
-            updateGeneral.error ??
-              setStartAtLogin.error ??
-              startAtLoginQuery.error ??
-              menuBarIconQuery.error ??
-              setMenuBarIcon.error,
-          )}
+          {String(updateGeneral.error ?? setStartAtLogin.error ?? startAtLoginQuery.error)}
         </p>
       ) : null}
-      <ToggleField
-        testId="settings-confirm-quit"
-        label="Confirm on quit"
-        description="Ask before quitting while agents are running."
-        checked={confirmOnQuit}
-        onChange={(value) => updateGeneral.mutate({ confirmOnQuit: value })}
-      />
       <ToggleField
         testId="settings-restore-project-tabs"
         label="Restore project tabs"
@@ -241,25 +217,8 @@ export function GeneralSection() {
 export function AppearanceSection() {
   const t = useTranslate()
   const { mode, setMode } = useTheme()
-  const trpc = useTRPC()
-  const fontsQuery = useQuery(trpc.system.fonts.queryOptions())
-  const [fontFamily, setFontFamily] = useEditorFontFamily()
-  const [fontSize, setFontSize] = useEditorFontSize()
   const [digitalRainDensity, setDigitalRainDensity] = useDigitalRainDensity()
   const [digitalRainSpeed, setDigitalRainSpeed] = useDigitalRainSpeed()
-  const detectedFamilies = fontsQuery.data?.families ?? []
-  const familyOptions = [
-    { value: EDITOR_FONT_DEFAULT_FAMILY, label: "System monospace (default)" },
-    ...(fontFamily !== EDITOR_FONT_DEFAULT_FAMILY && !detectedFamilies.includes(fontFamily)
-      ? [{ value: fontFamily, label: `${fontFamily} (currently unavailable)` }]
-      : []),
-    ...detectedFamilies.map((family) => ({ value: family, label: family })),
-  ]
-  const fontError =
-    fontsQuery.data?.error ??
-    (fontsQuery.error
-      ? "System fonts could not be detected. The default monospace font is still available."
-      : null)
 
   return (
     <SettingsSection
@@ -283,7 +242,7 @@ export function AppearanceSection() {
       <AlphaAppIconGallery />
       <div
         id="appearance-advanced"
-        data-testid="appearance-advanced-editor-typography"
+        data-testid="appearance-advanced"
         className="flex flex-col gap-1 px-4 py-3"
       >
         <h3 className="font-medium text-sm">{t("Advanced")}</h3>
@@ -291,6 +250,65 @@ export function AppearanceSection() {
           {t("These controls apply globally across PI Lab.")}
         </p>
       </div>
+      <div className="border-border border-t px-4 pt-3">
+        <h4 className="font-medium text-sm">{t("Digital Rain thumbnails")}</h4>
+        <p className="mt-1 text-muted-foreground text-xs">
+          {t(
+            "Black-and-white ASCII rain uses freshly sampled project files every time PI Lab launches.",
+          )}
+        </p>
+      </div>
+      <SelectField
+        testId="settings-digital-rain-density"
+        label="Digital Rain density"
+        description="Caps the number of visible streams in every Digital Rain thumbnail."
+        value={digitalRainDensity}
+        options={[
+          { value: "sparse", label: "Sparse" },
+          { value: "normal", label: "Normal" },
+          { value: "dense", label: "Dense" },
+        ]}
+        onChange={(value) => setDigitalRainDensity(value as typeof digitalRainDensity)}
+      />
+      <SelectField
+        testId="settings-digital-rain-speed"
+        label="Digital Rain speed"
+        description="Sets the low-frequency animation rate for every Digital Rain thumbnail."
+        value={digitalRainSpeed}
+        options={[
+          { value: "slow", label: "Slow" },
+          { value: "normal", label: "Normal" },
+          { value: "fast", label: "Fast" },
+        ]}
+        onChange={(value) => setDigitalRainSpeed(value as typeof digitalRainSpeed)}
+      />
+    </SettingsSection>
+  )
+}
+
+/** Global font controls shared by every editor. */
+function EditorTypography() {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const fontsQuery = useQuery(trpc.system.fonts.queryOptions())
+  const [fontFamily, setFontFamily] = useEditorFontFamily()
+  const [fontSize, setFontSize] = useEditorFontSize()
+  const detectedFamilies = fontsQuery.data?.families ?? []
+  const familyOptions = [
+    { value: EDITOR_FONT_DEFAULT_FAMILY, label: "System monospace (default)" },
+    ...(fontFamily !== EDITOR_FONT_DEFAULT_FAMILY && !detectedFamilies.includes(fontFamily)
+      ? [{ value: fontFamily, label: `${fontFamily} (currently unavailable)` }]
+      : []),
+    ...detectedFamilies.map((family) => ({ value: family, label: family })),
+  ]
+  const fontError =
+    fontsQuery.data?.error ??
+    (fontsQuery.error
+      ? "System fonts could not be detected. The default monospace font is still available."
+      : null)
+
+  return (
+    <div id="editor-typography" data-testid="editor-typography">
       <SelectField
         testId="settings-editor-font-family"
         label="Editor font family"
@@ -347,39 +365,7 @@ export function AppearanceSection() {
           {t("Reset editor typography")}
         </Button>
       </div>
-      <div className="border-border border-t px-4 pt-3">
-        <h4 className="font-medium text-sm">{t("Digital Rain thumbnails")}</h4>
-        <p className="mt-1 text-muted-foreground text-xs">
-          {t(
-            "Black-and-white ASCII rain uses freshly sampled project files every time PI Lab launches.",
-          )}
-        </p>
-      </div>
-      <SelectField
-        testId="settings-digital-rain-density"
-        label="Digital Rain density"
-        description="Caps the number of visible streams in every Digital Rain thumbnail."
-        value={digitalRainDensity}
-        options={[
-          { value: "sparse", label: "Sparse" },
-          { value: "normal", label: "Normal" },
-          { value: "dense", label: "Dense" },
-        ]}
-        onChange={(value) => setDigitalRainDensity(value as typeof digitalRainDensity)}
-      />
-      <SelectField
-        testId="settings-digital-rain-speed"
-        label="Digital Rain speed"
-        description="Sets the low-frequency animation rate for every Digital Rain thumbnail."
-        value={digitalRainSpeed}
-        options={[
-          { value: "slow", label: "Slow" },
-          { value: "normal", label: "Normal" },
-          { value: "fast", label: "Fast" },
-        ]}
-        onChange={(value) => setDigitalRainSpeed(value as typeof digitalRainSpeed)}
-      />
-    </SettingsSection>
+    </div>
   )
 }
 
@@ -441,6 +427,7 @@ export function EditorSection() {
       title="Editor"
       description="Built-in editor behaviour."
     >
+      <EditorTypography />
       <ToggleField
         testId="settings-editor-autosave"
         label="Autosave"
@@ -655,8 +642,8 @@ export function AgentsSection() {
       />
       <SelectField
         testId="settings-agent-quit-behavior"
-        label="When quitting PI Lab"
-        description="Applies to all agents started by PI Lab. Closing a window is separate from quitting the app."
+        label="Agents during restart or automatic quit"
+        description="Used when restarting to update, or when closing the last window quits PI Lab. Explicit Quit always stops agents; Move to background keeps them running."
         value={agentSettings.quitBehavior}
         options={[
           { value: "stop", label: "Stop agents (confirm before quitting)" },
@@ -803,18 +790,18 @@ const NOTIFICATION_EVENTS: ReadonlyArray<{
   },
   {
     key: "workflowStart",
-    label: "Workflow started",
-    description: "When a workflow begins running.",
+    label: "Routine started",
+    description: "When a routine begins running.",
   },
   {
     key: "workflowCompletion",
-    label: "Workflow completed",
-    description: "When a workflow finishes successfully.",
+    label: "Routine completed",
+    description: "When a routine finishes successfully.",
   },
   {
     key: "workflowFailure",
-    label: "Workflow failed",
-    description: "When a workflow cannot start or finishes unsuccessfully.",
+    label: "Routine failed",
+    description: "When a routine cannot start or finishes unsuccessfully.",
   },
 ]
 
@@ -858,7 +845,7 @@ export function NotificationsSection() {
     <SettingsSection
       testId="settings-section-notifications"
       title="Notifications"
-      description="Choose which agent and workflow events notify you while PI Lab is unfocused."
+      description="Choose which agent and routine events notify you while PI Lab is unfocused."
     >
       <ToggleField
         testId="settings-notifications-muted"
@@ -1124,12 +1111,6 @@ export function ProjectViewSection() {
         </select>
         {selectedProject ? (
           <>
-            <p className="text-xs">{t("Project type")}</p>
-            <ProjectTypeChoice
-              projectId={selectedProject.id}
-              typeId={selectedProject.typeId}
-              testId="settings-project-type"
-            />
             <ProjectMarkdownChoice
               key={selectedProject.id}
               projectId={selectedProject.id}
@@ -1346,6 +1327,7 @@ export function ShortcutsSection() {
           <div className="flex shrink-0 items-center gap-2">
             <kbd
               data-testid={`shortcut-${shortcut.id}`}
+              data-shortcut-recording={recording === shortcut.id}
               className="min-w-12 rounded-md border border-border bg-muted px-2 py-1 text-center font-mono text-foreground text-xs"
             >
               {recording === shortcut.id

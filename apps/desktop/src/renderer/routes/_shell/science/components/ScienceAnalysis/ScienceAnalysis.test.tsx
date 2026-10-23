@@ -94,7 +94,7 @@ describe("ScienceAnalysis", () => {
     expect(screen.getByText("没有打开的项目")).toBeTruthy()
   })
 
-  test("creates HTML and marimo reports from the Analysis header", async () => {
+  test("creates HTML reports and hides Marimo report creation", async () => {
     const createTemplate = vi.fn(() => ({ relPath: "reports/report-2.html" }))
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
@@ -112,10 +112,46 @@ describe("ScienceAnalysis", () => {
     await waitFor(() =>
       expect(createTemplate).toHaveBeenCalledWith({ projectId: "p1", kind: "html" }),
     )
-    fireEvent.click(screen.getByTestId("analysis-new-marimo-notebook"))
+    expect(screen.queryByTestId("analysis-new-marimo-notebook")).toBeNull()
+  })
+
+  test("fetches experiments for the selected Git project and disables plain folders", async () => {
+    window.localStorage.setItem("pi-lab.fetchExperiments.instructions", "Fetch only new results")
+    const run = vi.fn(() => ({ status: "started" }))
+    renderAnalysis({
+      "projects.list": () => [
+        project({ id: "git", name: "Git" }),
+        project({ id: "plain", name: "Plain" }),
+      ],
+      "projects.capabilities": (input) => ({ git: (input as { id: string }).id === "git" }),
+      "science.analysis.listFiles": () => listing([]),
+      "workflows.status": () => ({ summary: null, fetchExperiments: null, planResearch: null }),
+      "workflows.run": run,
+      "workflows.onOutput": () => ({ kind: "start", command: "" }),
+    })
     await waitFor(() =>
-      expect(createTemplate).toHaveBeenCalledWith({ projectId: "p1", kind: "marimo" }),
+      expect(screen.getByTestId("analysis-fetch-experiments")).toHaveProperty("disabled", false),
     )
+    fireEvent.click(screen.getByTestId("analysis-fetch-experiments"))
+    await waitFor(() =>
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "git",
+          task: "fetch-experiments",
+          instructions: "Fetch only new results",
+        }),
+      ),
+    )
+    fireEvent.click(await screen.findByTestId("workflow-result-close"))
+    fireEvent.change(screen.getByTestId("analysis-project-select"), { target: { value: "plain" } })
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-fetch-experiments")).toHaveProperty("disabled", true),
+    )
+  })
+
+  test("disables fetching when no project is selected", async () => {
+    renderAnalysis({ "projects.list": () => [] })
+    expect(await screen.findByTestId("analysis-fetch-experiments")).toHaveProperty("disabled", true)
   })
 
   test("renders a row per discovered file", async () => {

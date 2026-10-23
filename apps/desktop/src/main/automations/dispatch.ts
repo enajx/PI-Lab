@@ -19,6 +19,13 @@ import type {
 } from "./nonInteractiveRunner"
 import { createWorkflowLifecycleReporter } from "./workflowLifecycle"
 
+const runningProjects = new Map<string, string>()
+
+/** Report only routines attached to a live process in this app session. */
+export function hasRunningProjectAutomation(projectId: string): boolean {
+  return [...runningProjects.values()].includes(projectId)
+}
+
 /**
  * Fire one automation once. Interactive runs
  * are targeted to a PTY agent session whose activity monitor owns the later
@@ -83,7 +90,7 @@ export async function dispatchAutomation(
     const failed = updated ?? run
     ctx.notificationService.notify({
       eventType: "workflowFailure",
-      title: nativeText("Workflow failed"),
+      title: nativeText("Routine failed"),
       body: message,
       target: { type: "workflow", workflowId: automation.id, runId: run.id },
     })
@@ -164,6 +171,7 @@ async function dispatchNonInteractiveAutomation(
       releaseAgentSlot()
       throw error
     }
+    runningProjects.set(run.id, project.id)
     void started.completion
       .then(
         async (result) => {
@@ -187,13 +195,14 @@ async function dispatchNonInteractiveAutomation(
           )
         },
       )
+      .finally(() => runningProjects.delete(run.id))
       .catch((error) => {
         console.warn(
           `[pi-lab] failed to persist workflow ${run.id} process lifecycle: ${String(error)}`,
         )
       })
   } catch (error) {
-    lifecycle.failed(error instanceof Error ? error.message : "Failed to run workflow")
+    lifecycle.failed(error instanceof Error ? error.message : "Failed to run routine")
   }
 
   return ctx.db.select().from(automationRuns).where(eq(automationRuns.id, run.id)).get() ?? run
@@ -231,13 +240,17 @@ export function restoreAutomationProcess(
     liveAgentCount: () => ctx.activityMonitor.liveAgentCount(metadata.projectId),
   })
   const endActivity = ctx.caffeine.beginMeaningfulActivity(`workflow:${metadata.runId}`)
-  return started.completion.then(async (result) => {
-    release()
-    endActivity()
-    if (result.code === 0 && result.signal === null && result.error === null) lifecycle.completed()
-    else lifecycle.failed(nonInteractiveFailure(metadata.agentLabel, result))
-    await started.acknowledge?.()
-  })
+  runningProjects.set(metadata.runId, metadata.projectId)
+  return started.completion
+    .then(async (result) => {
+      release()
+      endActivity()
+      if (result.code === 0 && result.signal === null && result.error === null)
+        lifecycle.completed()
+      else lifecycle.failed(nonInteractiveFailure(metadata.agentLabel, result))
+      await started.acknowledge?.()
+    })
+    .finally(() => runningProjects.delete(metadata.runId))
 }
 
 export function nonInteractiveFailure(

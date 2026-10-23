@@ -76,7 +76,7 @@ export const terminalRouter = router({
     return { ok: true as const }
   }),
 
-  /** Terminate a session (SIGTERM by default on the daemon side). */
+  /** Terminate a session (terminal hangup by default on Unix). */
   kill: publicProcedure.input(sessionIdInput).mutation(async ({ ctx, input }) => {
     const client = await ctx.getDaemonClient()
     await client.kill(input.sessionId)

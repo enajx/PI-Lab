@@ -1,7 +1,7 @@
 import { Button, cn } from "@pi-lab/ui"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { useTranslate } from "../../../i18n/language"
 import { useSidebarFeatureHelp } from "../../../preferences/preferences"
@@ -37,15 +37,15 @@ import {
  * Settings is full-screen (the shell hides the sidebar on this route). It mirrors the
  * main view's surfaces: the left section nav uses `bg-sidebar` (the same grey as the
  * app's left sidebar) while the content column stays `bg-background` (white in light),
- * rather than tinting the whole panel. The header carries the only way back: a Back
- * control to the view that opened Settings. The header is an app-drag strip with left padding so the macOS
+ * rather than tinting the whole panel. Escape and the header Back control return to
+ * the view that opened Settings. The header has left padding so the macOS
  * traffic lights don't overlap the title or Back button.
  */
 const SECTIONS = [
   {
     id: "general",
     label: "General",
-    description: "Configure app-wide behavior such as quit confirmation.",
+    description: "Configure updates, background behavior, and login settings.",
     render: () => <GeneralSection />,
   },
   {
@@ -75,7 +75,7 @@ const SECTIONS = [
   {
     id: "notifications",
     label: "Notifications",
-    description: "Choose native banners and sounds for agent and workflow events.",
+    description: "Choose native banners and sounds for agent and routine events.",
     render: () => <NotificationsSection />,
   },
   {
@@ -142,12 +142,12 @@ export function SettingsView() {
   }, [search.section])
 
   useEffect(() => {
-    if (activeId !== "appearance" || search.advanced !== "editor-typography") return
-    const target = document.getElementById("appearance-advanced")
+    if (activeId !== "editor" || search.advanced !== "editor-typography") return
+    const target = document.getElementById("editor-typography")
     target?.scrollIntoView?.({ block: "start" })
   }, [activeId, search.advanced])
 
-  const onBack = () => {
+  const onBack = useCallback(() => {
     if (search.returnTarget) {
       const bridge = window.piLab?.quickEdit
       if (!bridge) {
@@ -165,7 +165,23 @@ export function SettingsView() {
     }
     const previous = readSettingsReturnRoute()
     void navigate({ to: previous.pathname as never, search: previous.search as never })
-  }
+  }, [navigate, search.returnTarget])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      if (
+        document.querySelector(
+          '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]',
+        )
+      )
+        return
+      event.preventDefault()
+      onBack()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [onBack])
 
   return (
     <div data-testid="settings-view" className="flex h-full w-full flex-col overflow-hidden">

@@ -4,10 +4,10 @@
 // long-lived so a session can be held open across a second start). Full cleanup
 // per test; concurrency assertions poll with timeouts, never fixed sleeps.
 import { existsSync, readFileSync } from "node:fs"
-import { mkdtemp } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { agentSessions, settings } from "@pi-lab/local-db"
+import { agentSessions, settings, worktrees } from "@pi-lab/local-db"
 import { DaemonClient } from "@pi-lab/pty-daemon"
 import type { TerminalAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
@@ -18,6 +18,7 @@ import {
   systemActivityClock,
   systemActivityScheduler,
 } from "../../activity"
+import { runGit } from "../../git"
 import { createHarness, FAKE_AGENT, type Harness, LONG_FAKE_AGENT, makeRepo } from "../testHarness"
 import { workspaceWorkingDir } from "../workspaces"
 
@@ -433,6 +434,32 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 })
 
 describe("sessions.startAutoResearch — placeholder worktree launch", () => {
+  test("keeps a selected Git subfolder as the agent and seed directory", async () => {
+    const selected = join(h.repoDir, "research", "python")
+    await mkdir(selected, { recursive: true })
+    await writeFile(join(selected, "PROJECT.md"), "# Python project\n")
+    await runGit(h.repoDir, ["add", "."])
+    await runGit(h.repoDir, ["commit", "-m", "Add nested project"])
+    const project = await h.caller.projects.open({ path: selected })
+    await h.caller.agents.setProjectChoice({ projectId: project.id, agentId: "fake-agent" })
+    const result = await h.caller.sessions.startAutoResearch({ projectId: project.id })
+    const workspace = await h.caller.workspaces.get({ id: result.workspaceId })
+    const checkout = h.db
+      .select()
+      .from(worktrees)
+      .where(eq(worktrees.id, workspace.worktreeId ?? ""))
+      .get()?.path
+    if (!checkout) throw new Error("Expected a worktree checkout")
+    const expected = join(checkout, "research", "python")
+    const live = await h.caller.terminal.list()
+    expect(live.find((session) => session.id === result.sessionId)?.cwd).toBe(expected)
+    expect(existsSync(join(expected, "AUTORESEARCH.md"))).toBe(true)
+    expect(existsSync(join(checkout, "AUTORESEARCH.md"))).toBe(false)
+    await h.caller.terminal.kill({ sessionId: result.sessionId })
+    await h.caller.workspaces.remove({ id: workspace.id })
+    expect(existsSync(checkout)).toBe(false)
+  })
+
   test("creates a worktree workspace and seeds AUTORESEARCH.md into it", async () => {
     // Remember a launchable test agent so the default (`claude-code`, absent from
     // the harness catalog) isn't resolved.

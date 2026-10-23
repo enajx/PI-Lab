@@ -1,4 +1,5 @@
 .tray-popover {
+  position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -90,9 +91,11 @@
 .tray-project-dot[data-state="working"] {
   background: #5d9a69;
   box-shadow: 0 0 0 3px #e6f1e7;
+  animation: tray-agent-pulse 2s ease-in-out infinite;
 }
 
 .tray-project-name {
+  grid-column: 2;
   overflow: hidden;
   font-weight: 550;
   text-overflow: ellipsis;
@@ -139,4 +142,29 @@
   cursor: pointer;
   font: inherit;
   font-size: 11px;
+}
+
+/* Keyboard Dashboard action; pointer clicks are delegated without blocking native scrolling. */
+.tray-dashboard {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.tray-dashboard:focus-visible {
+  outline: 2px solid #668571;
+  outline-offset: -2px;
+}
+
+@keyframes tray-agent-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tray-project-dot[data-state="working"] {
+    animation: none;
+  }
 }

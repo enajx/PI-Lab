@@ -34,7 +34,7 @@ describe("native language preference", () => {
     for (const code of ["zh-CN", "ko", "ja", "es", "ar", "nb"] as const) {
       setNativeLanguage(code)
       expect(nativeText("Edit")).not.toBe("Edit")
-      expect(nativeText("Workflow completed")).not.toBe("Workflow completed")
+      expect(nativeText("Routine completed")).not.toBe("Routine completed")
       expect(nativeText("Agent needs input")).not.toBe("Agent needs input")
       expect(nativeText("PI Lab database could not be opened")).not.toBe(
         "PI Lab database could not be opened",

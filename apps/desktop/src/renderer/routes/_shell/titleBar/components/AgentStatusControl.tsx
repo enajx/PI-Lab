@@ -117,10 +117,17 @@ export function AgentStatusControl() {
                   key={session.sessionId}
                   className="flex items-start justify-between gap-2 text-xs"
                 >
-                  <span className="min-w-0 truncate">
-                    {environment.data?.harnesses.find((agent) => agent.id === session.agentId)
-                      ?.label ?? session.agentId}
-                    <span className="text-muted-foreground"> · {session.projectName}</span>
+                  <span className="min-w-0">
+                    <strong
+                      className="block truncate font-medium text-sm"
+                      title={session.projectName}
+                    >
+                      {session.projectName}
+                    </strong>
+                    <small className="block truncate text-muted-foreground text-xs">
+                      {environment.data?.harnesses.find((agent) => agent.id === session.agentId)
+                        ?.label ?? session.agentId}
+                    </small>
                   </span>
                   <span className="shrink-0 text-muted-foreground">
                     {SESSION_LABELS[session.state] ?? session.state}

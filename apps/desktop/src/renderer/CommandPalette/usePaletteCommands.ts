@@ -35,6 +35,7 @@ import {
 } from "../preferences/preferences"
 import { useTheme } from "../providers/ThemeProvider"
 import { readActiveQuickTarget } from "../QuickEditor/quickEditorState"
+import { rememberSettingsReturnRoute } from "../routes/_shell/-settingsReturnRoute"
 import {
   type AddProjectRequest,
   useAddProjectController,
@@ -45,6 +46,8 @@ import {
 } from "../routes/_shell/components/NewFileController"
 import { setPendingNewFile, setPendingOpenFile } from "../routes/_shell/projects/-pendingOpenFile"
 import { useTRPC } from "../trpc/react"
+import { requestUpdateCheck } from "../updates/UpdateFeedback"
+import { useDirectSettingsCommands } from "./settingsCommands"
 
 /** A single entry in the ⌘P palette: searchable label + the action it runs. */
 export interface PaletteCommand {
@@ -57,8 +60,8 @@ export interface PaletteCommand {
   /** Section this belongs to (kept for ordering; not a header in v1). */
   group: "Navigate" | "View" | "Settings" | "Projects"
   icon: ComponentType<{ className?: string }>
-  /** Perform the action. The palette closes itself after calling this. */
-  run: () => void
+  /** Perform the action. The palette closes after success and shows rejected writes. */
+  run: (() => void) | (() => Promise<unknown>)
 }
 
 /** Param-less navigation targets — literal `to`s so TanStack types them precisely. */
@@ -68,7 +71,7 @@ const NAV_TARGETS = [
   { id: "analysis", label: "Go to Analysis", icon: ChartArea, to: "/science/analysis" },
   { id: "cluster", label: "Go to Cluster", icon: Server, to: "/science/cluster" },
   { id: "skills", label: "Go to Skills", icon: FlaskConical, to: "/science/skills" },
-  { id: "workflows", label: "Go to Workflows", icon: Waypoints, to: "/automations" },
+  { id: "workflows", label: "Go to Routines", icon: Waypoints, to: "/automations" },
   { id: "editor", label: "Go to Editor", icon: FileCode2, to: "/quick-edit" },
   { id: "settings", label: "Open Settings", icon: Settings, to: "/settings" },
 ] as const
@@ -143,7 +146,7 @@ export function usePaletteCommands(): PaletteCommand[] {
         void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() }),
     }),
   )
-  const patchEditor = (next: Partial<EditorSettings>) => updateEditor.mutate(next)
+  const patchEditor = (next: Partial<EditorSettings>) => updateEditor.mutateAsync(next)
 
   // Renderer-only (localStorage) preference toggles.
   const [experimentalV2, setExperimentalV2] = useExperimentalV2()
@@ -155,10 +158,12 @@ export function usePaletteCommands(): PaletteCommand[] {
     label: target.label,
     group: "Navigate",
     icon: target.icon,
-    run: () =>
+    run: () => {
+      if (target.id === "settings") rememberSettingsReturnRoute(location)
       void (target.id === "editor"
         ? navigate({ to: "/quick-edit", search: { target: readActiveQuickTarget()?.id } })
-        : navigate({ to: target.to })),
+        : navigate({ to: target.to }))
+    },
   }))
 
   const viewCommands: PaletteCommand[] = [
@@ -178,7 +183,16 @@ export function usePaletteCommands(): PaletteCommand[] {
     },
   ]
 
+  const directSettingsCommands = useDirectSettingsCommands()
   const settingsCommands: PaletteCommand[] = [
+    ...directSettingsCommands,
+    {
+      id: "check-for-updates",
+      label: "Check for updates",
+      group: "Settings",
+      icon: ScanSearch,
+      run: requestUpdateCheck,
+    },
     {
       id: "open-first-run-setup",
       label: "Run first-launch setup",

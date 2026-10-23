@@ -17,7 +17,7 @@ import { TRPCError } from "@trpc/server"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { writeProjectAgentConfig } from "../../agents/projectConfig"
-import { GitError, isGitRepo, repoName, repoRoot, resolveDefaultBranch, runGit } from "../../git"
+import { GitError, isGitRepo, resolveDefaultBranch, runGit } from "../../git"
 import { hasPendingAgentLaunch } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
 import { discoverTaskFile } from "../science/tasks/store"
@@ -251,8 +251,8 @@ const createFromTemplateInput = z.object({
 })
 
 /**
- * Upsert a Git working tree or ordinary local folder. Git inputs normalize to
- * the repository top-level; plain folders retain their canonical selected path.
+ * Register the canonical selected folder, even when it sits inside a larger Git repo.
+ * Reopening an existing folder preserves its edited project details.
  */
 async function upsertProjectFromDirectory(
   ctx: AppContext,
@@ -268,8 +268,8 @@ async function upsertProjectFromDirectory(
   }
 
   const git = await isGitRepo(requested)
-  const root = git ? await repoRoot(requested) : await realpath(requested)
-  const name = git ? await repoName(root) : basename(root) || root
+  const root = await realpath(requested)
+  const name = basename(root) || root
   const defaultBranch = git ? await resolveDefaultBranch(root) : null
   const taskFile = await discoverTaskFile(root)
   const discoveredTaskPath = taskFile.state === "ready" ? taskFile.relPath : null
@@ -277,14 +277,6 @@ async function upsertProjectFromDirectory(
   const now = Date.now()
 
   const existing = db.select().from(projects).where(eq(projects.repoPath, root)).get()
-  const agentValues = details
-    ? await saveDetailsAgent(
-        ctx,
-        existing ?? { id: "", repoPath: root, agentConfig: null },
-        details,
-      )
-    : {}
-  const editedValues = details ? detailsValues(existing, details) : {}
   if (existing) {
     const explicitType =
       existing.typeId === "general" ||
@@ -302,14 +294,16 @@ async function upsertProjectFromDirectory(
         typeId: explicitType ?? detectedType ?? "general",
         updatedAt: now,
         lastOpenedAt: now,
-        ...editedValues,
-        ...agentValues,
       })
       .where(eq(projects.id, existing.id))
       .returning()
       .get()
   }
 
+  const agentValues = details
+    ? await saveDetailsAgent(ctx, { id: "", repoPath: root, agentConfig: null }, details)
+    : {}
+  const editedValues = details ? detailsValues(undefined, details) : {}
   return db
     .insert(projects)
     .values({

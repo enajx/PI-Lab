@@ -43,8 +43,8 @@ afterEach(async () => {
   await h.dispose()
 })
 
-describe("workflow lifecycle reporter", () => {
-  test("uses the selected interface language for workflow notifications", () => {
+describe("routine lifecycle reporter", () => {
+  test("uses the selected interface language for routine notifications", () => {
     setNativeLanguage("es")
     const notify = vi.fn((_request: NotificationRequest) => "delivered" as const)
     const reporter = createWorkflowLifecycleReporter(
@@ -57,8 +57,8 @@ describe("workflow lifecycle reporter", () => {
     expect(
       notify.mock.calls.map(([request]) => ({ title: request.title, body: request.body })),
     ).toEqual([
-      { title: "Flujo de trabajo iniciado", body: "Mi flujo comenzó en modo no interactivo" },
-      { title: "Flujo de trabajo completado", body: "Mi flujo se completó" },
+      { title: "Rutina iniciada", body: "Mi flujo comenzó en modo no interactivo" },
+      { title: "Rutina completada", body: "Mi flujo se completó" },
     ])
   })
   test("future chat producers use the same exact-run start/completion contract", () => {
@@ -138,7 +138,7 @@ describe("workflow lifecycle reporter", () => {
     )
   })
 
-  test("refuses a mismatched workflow/run target instead of misrouting a notification", () => {
+  test("refuses a mismatched routine/run target instead of misrouting a notification", () => {
     const notify = vi.fn(() => "delivered" as const)
     const reporter = createWorkflowLifecycleReporter(
       { db: h.db, notifications: { notify }, now: () => 999 },

@@ -17,10 +17,11 @@ function popoverHeight(snapshot: BackgroundTraySnapshot): number {
   return 33 + projectHeight + (snapshot.updateVersion ? 44 : 0)
 }
 
-/** Keep the icon and its small renderer alive while PI Lab runs in the background. */
+/** Keep the menu-bar icon alive while PI Lab runs, including with its main window open. */
 export class BackgroundTray {
   private readonly tray: Tray
   private popover: BrowserWindow | null = null
+  private refreshTimer: ReturnType<typeof setInterval> | null = null
   private snapshot: BackgroundTraySnapshot
 
   constructor(
@@ -28,9 +29,9 @@ export class BackgroundTray {
     appName: string,
     private readonly templatePath: string,
     private readonly actions: TrayMenuActions,
-    snapshot: BackgroundTraySnapshot,
+    private readonly readSnapshot: () => BackgroundTraySnapshot,
   ) {
-    this.snapshot = snapshot
+    this.snapshot = readSnapshot()
     this.tray = new Tray(this.imageFor(iconPath))
     this.tray.setToolTip(appName)
     this.tray.on("click", (_event, bounds) => this.toggle(bounds))
@@ -58,15 +59,10 @@ export class BackgroundTray {
 
   private menu(): Menu {
     return Menu.buildFromTemplate(
-      trayMenuTemplate(
-        this.actions,
-        this.snapshot.updateVersion ?? null,
-        (label, error) => {
-          console.error(`[pi-lab] ${label} failed:`, error)
-          dialog.showErrorBox(`${label} failed`, String(error))
-        },
-        process.platform === "darwin",
-      ),
+      trayMenuTemplate(this.actions, this.snapshot.updateVersion ?? null, (label, error) => {
+        console.error(`[pi-lab] ${label} failed:`, error)
+        dialog.showErrorBox(`${label} failed`, String(error))
+      }),
     )
   }
 
@@ -88,12 +84,14 @@ export class BackgroundTray {
 
   /** Open the same popover without a pointer event for the desktop smoke test. */
   showForTest(): void {
+    if (this.popover?.isVisible()) return
     const point = screen.getCursorScreenPoint()
     this.toggle({ x: point.x, y: point.y, width: 0, height: 0 })
   }
 
   /** Remove OS resources during an explicit quit. */
   dispose(): void {
+    this.stopRefreshing()
     this.popover?.destroy()
     this.popover = null
     this.tray.destroy()
@@ -105,6 +103,7 @@ export class BackgroundTray {
       window.hide()
       return
     }
+    this.publish(this.readSnapshot())
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const area = display.workArea
     const height = popoverHeight(this.snapshot)
@@ -124,6 +123,12 @@ export class BackgroundTray {
     }
   }
 
+  /** Poll only while visible, including activity that has no live terminal session. */
+  private stopRefreshing(): void {
+    if (this.refreshTimer !== null) clearInterval(this.refreshTimer)
+    this.refreshTimer = null
+  }
+
   private ensurePopover(): BrowserWindow {
     if (this.popover && !this.popover.isDestroyed()) return this.popover
     const window = new BrowserWindow({
@@ -131,6 +136,8 @@ export class BackgroundTray {
       height: popoverHeight(this.snapshot),
       show: false,
       ...(isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1" ? { opacity: 0 } : {}),
+      // macOS panels take keyboard focus without activating the full application.
+      ...(process.platform === "darwin" ? { type: "panel" as const } : {}),
       frame: false,
       resizable: false,
       skipTaskbar: true,
@@ -147,7 +154,13 @@ export class BackgroundTray {
       window.setIgnoreMouseEvents(true)
     }
     window.on("blur", () => window.hide())
+    window.on("show", () => {
+      this.stopRefreshing()
+      this.refreshTimer = setInterval(() => this.publish(this.readSnapshot()), 1000)
+    })
+    window.on("hide", () => this.stopRefreshing())
     window.on("closed", () => {
+      this.stopRefreshing()
       if (this.popover === window) this.popover = null
     })
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))

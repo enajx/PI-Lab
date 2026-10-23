@@ -40,6 +40,8 @@ export interface AppContext {
   appChannel?: PiLabChannel
   /** User home whose conventional global agent-skill roots are indexed read-only. */
   skillsHomeDir: string
+  /** Read-only skills shipped with PI Lab; absent in isolated callers. */
+  bundledSkillsDir?: string
   getDaemonClient: () => Promise<DaemonClient>
   agentCatalog: readonly TerminalAgent[]
   resolveAgentExecutable: AgentExecutableResolver

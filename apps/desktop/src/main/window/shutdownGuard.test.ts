@@ -5,7 +5,7 @@ import { SHUTDOWN_REQUEST_CHANNEL, SHUTDOWN_RESPONSE_CHANNEL } from "../../share
 import { installShutdownGuard } from "./shutdownGuard"
 
 /** Mocked Electron public events. Real Electron shutdown is checked by the E2E flow. */
-function harness(prepareQuit?: () => Promise<boolean>) {
+function harness(prepareQuit?: (stopConfirmed: boolean) => Promise<boolean>) {
   const app = new EventEmitter()
   const ipc = new EventEmitter()
   const window = new EventEmitter()
@@ -67,6 +67,44 @@ function harness(prepareQuit?: () => Promise<boolean>) {
 }
 
 describe("shutdown guard through mocked Electron events", () => {
+  test("explicit Quit upgrades a pending dirty-window close and prevents another quit choice", async () => {
+    const prepare = vi.fn(async (_stopConfirmed: boolean) => false)
+    const h = harness(prepare)
+    h.guard.attachWindow(h.electronWindow)
+    h.close()
+    expect(h.guard.isQuitPending()).toBe(false)
+    h.guard.requestExplicitQuit()
+    expect(h.guard.isQuitPending()).toBe(true)
+    expect(h.webContents.send).toHaveBeenLastCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-1",
+      intent: "quit",
+    })
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledWith(true))
+    await vi.waitFor(() => expect(h.guard.isQuitPending()).toBe(false))
+  })
+  test("explicit Quit waits for drafts and forgets its stop override when cancelled", async () => {
+    const prepare = vi.fn(async (_stopConfirmed: boolean) => false)
+    const h = harness(prepare)
+    h.guard.attachWindow(h.electronWindow)
+    h.guard.requestExplicitQuit()
+    expect(prepare).not.toHaveBeenCalled()
+    h.respond({ requestId: "request-1", allow: false }, h.webContents, h.mainFrame)
+    expect(prepare).not.toHaveBeenCalled()
+    h.quit()
+    h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(prepare).toHaveBeenLastCalledWith(false))
+    h.guard.requestExplicitQuit()
+    h.respond({ requestId: "request-3", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(prepare).toHaveBeenLastCalledWith(true))
+  })
+
+  test("explicit Quit without a window still confirms stopping work", async () => {
+    const prepare = vi.fn(async (_stopConfirmed: boolean) => false)
+    const h = harness(prepare)
+    h.guard.requestExplicitQuit()
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledWith(true))
+  })
   test("agent shutdown waits for renderer approval and can cancel quitting", async () => {
     const prepare = vi.fn(async () => false)
     const h = harness(prepare)

@@ -135,6 +135,7 @@ export function WorkflowResultDialog({
   }, [log, command])
 
   const isError = errorMessage !== null
+  const showActivity = running || !isError || Boolean(command || log)
 
   return createPortal(
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is a click-to-dismiss surface; Escape (bound above) is the keyboard equivalent, and focus stays on the dialog's own controls.
@@ -151,48 +152,53 @@ export function WorkflowResultDialog({
         aria-modal="true"
         aria-label={`${projectName} — ${t(title)}`}
         data-testid="workflow-result-dialog"
-        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xl"
+        className="flex max-h-full w-full max-w-[470px] flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xl"
       >
-        <div className="border-border border-b px-4 py-3">
+        <div className="border-border border-b px-3 py-2">
           <h2 className="font-medium text-foreground text-sm">
             {isError ? `${t(title)} ${t("failed")}` : t(title)}
           </h2>
           <p className="truncate text-muted-foreground text-xs">{projectName}</p>
         </div>
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-4">
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-3">
           {/* Live agent activity — the "what is happening" view. */}
-          <section aria-label={t("Agent activity")} className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-                {t("Agent activity")}
-              </span>
-              {running ? (
-                <span className="inline-flex items-center gap-1 text-brand text-xs">
-                  <span className="size-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
-                  {t("live")}
+          {showActivity ? (
+            <section aria-label={t("Agent activity")} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+                  {t("Agent activity")}
                 </span>
-              ) : null}
-            </div>
-            <div
-              ref={logRef}
-              data-testid="workflow-activity-log"
-              className="max-h-56 min-h-24 cursor-text select-text overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-accent/40 p-3 font-mono text-[11px] text-foreground/90 leading-relaxed"
-            >
-              {command ? (
-                <div data-testid="workflow-activity-command" className="mb-1 text-muted-foreground">
-                  $ {command}
-                </div>
-              ) : null}
-              {log ? (
-                log
-              ) : (
-                <span className="text-muted-foreground">
-                  {running ? t("Waiting for output…") : t("No output was captured for this run.")}
-                </span>
-              )}
-            </div>
-          </section>
+                {running ? (
+                  <span className="inline-flex items-center gap-1 text-brand text-xs">
+                    <span className="size-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
+                    {t("live")}
+                  </span>
+                ) : null}
+              </div>
+              <div
+                ref={logRef}
+                data-testid="workflow-activity-log"
+                className="max-h-40 min-h-16 cursor-text select-text overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-accent/40 p-2 font-mono text-[11px] text-foreground/90 leading-relaxed"
+              >
+                {command ? (
+                  <div
+                    data-testid="workflow-activity-command"
+                    className="mb-1 text-muted-foreground"
+                  >
+                    $ {command}
+                  </div>
+                ) : null}
+                {log ? (
+                  log
+                ) : (
+                  <span className="text-muted-foreground">
+                    {running ? t("Waiting for output…") : t("No output was captured for this run.")}
+                  </span>
+                )}
+              </div>
+            </section>
+          ) : null}
 
           {/* Report — working state while running, else the markdown result / error. */}
           <section className="flex flex-col gap-2">
@@ -208,7 +214,7 @@ export function WorkflowResultDialog({
             ) : isError ? (
               <p
                 data-testid="workflow-result-error"
-                className="cursor-text select-text whitespace-pre-wrap text-destructive text-sm leading-relaxed"
+                className="cursor-text select-text whitespace-pre-wrap text-foreground text-sm leading-relaxed"
               >
                 {errorMessage}
               </p>
@@ -242,7 +248,7 @@ export function WorkflowResultDialog({
           </section>
         </div>
 
-        <div className="flex justify-end gap-2 border-border border-t px-4 py-3">
+        <div className="flex justify-end gap-2 border-border border-t px-3 py-2">
           <button
             type="button"
             data-testid="workflow-result-recheck"

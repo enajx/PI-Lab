@@ -7,10 +7,10 @@ import {
   ChartArea,
   Eye,
   EyeOff,
-  FlaskConical,
   ImagePlus,
   Pencil,
   Sparkles,
+  Telescope,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
@@ -482,7 +482,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           onClick={onAutoResearch}
           className={CARD_ACTION_CLASS}
         >
-          <FlaskConical className="size-4 shrink-0" aria-hidden />
+          <Telescope className="size-4 shrink-0" aria-hidden />
         </button>
         {showAnalysis ? (
           <button

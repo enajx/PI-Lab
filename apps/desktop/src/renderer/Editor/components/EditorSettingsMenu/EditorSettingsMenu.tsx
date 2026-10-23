@@ -152,7 +152,7 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
             data-testid="editor-advanced-settings-link"
             onClick={() => {
               rememberCurrentSettingsReturnRoute()
-              window.location.hash = "#/settings?section=appearance&advanced=editor-typography"
+              window.location.hash = "#/settings?section=editor&advanced=editor-typography"
             }}
             className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-accent"
           >

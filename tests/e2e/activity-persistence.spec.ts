@@ -176,7 +176,22 @@ test("active output does not rewrite completed sessions in the real app", async 
     expect(activeWrites).toBeLessThanOrEqual(12)
   } finally {
     sqlite?.close()
-    await app?.close()
+    if (app) {
+      await app.evaluate(({ dialog }) => {
+        dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
+      })
+      let forced = false
+      const timeout = setTimeout(() => {
+        forced = true
+        app?.process().kill("SIGKILL")
+      }, 10_000)
+      try {
+        await app.close()
+        expect(forced, "Activity fixture should quit cleanly within ten seconds").toBe(false)
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
     await rm(dataDir, { recursive: true, force: true })
   }
 })

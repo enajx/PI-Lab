@@ -39,7 +39,7 @@ describe("SettingsView", () => {
     expect(header?.className).toContain("pl-24")
   })
 
-  test("opens the Appearance Advanced typography location from a deep link", async () => {
+  test("opens the Editor typography location from a deep link", async () => {
     const client = createFakeTrpcClient({
       "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
       "system.fonts": () => ({ families: ["Menlo"], error: null }),
@@ -49,7 +49,7 @@ describe("SettingsView", () => {
     const router = createRouter({
       routeTree: rootRoute,
       history: createMemoryHistory({
-        initialEntries: ["/?section=appearance&advanced=editor-typography"],
+        initialEntries: ["/?section=editor&advanced=editor-typography"],
       }),
     })
 
@@ -60,9 +60,9 @@ describe("SettingsView", () => {
       </AppProviders>,
     )
 
-    expect(await screen.findByTestId("settings-section-appearance")).toBeTruthy()
-    expect(screen.getByTestId("appearance-advanced-editor-typography")).toBeTruthy()
-    expect(screen.getByTestId("settings-nav-appearance").getAttribute("data-active")).toBe("true")
+    expect(await screen.findByTestId("settings-section-editor")).toBeTruthy()
+    expect(screen.getByTestId("editor-typography")).toBeTruthy()
+    expect(screen.getByTestId("settings-nav-editor").getAttribute("data-active")).toBe("true")
   })
 
   test("shows a return error when the editor file was removed while Settings was open", async () => {

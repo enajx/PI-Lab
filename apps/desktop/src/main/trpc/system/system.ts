@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, type OpenDialogOptions } from "electron"
+import { BrowserWindow, dialog, type OpenDialogOptions } from "electron"
 import { z } from "zod"
 import { createMenuBarIconService, type MenuBarIconService } from "../../background/trayVisibility"
 import {
@@ -120,5 +120,5 @@ export const systemRouter = createSystemRouter(
     get: () => liveStartAtLoginService().get(),
     set: (enabled) => liveStartAtLoginService().set(enabled),
   },
-  createMenuBarIconService(() => app.getPath("userData"), process.platform),
+  createMenuBarIconService(process.platform),
 )

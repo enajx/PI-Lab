@@ -587,7 +587,7 @@ describe("ActivityMonitor agent completion notifications", () => {
     expect(
       fixture.db.select().from(automationRuns).where(eq(automationRuns.id, "run-1")).get()?.state,
     ).toBe("failed")
-    expect(fixture.deliveries).toEqual(["Workflow failed"])
+    expect(fixture.deliveries).toEqual(["Routine failed"])
     expect(recoveredRegistry.get("terminal-1")).toBeNull()
   })
 
@@ -629,16 +629,16 @@ describe("ActivityMonitor agent completion notifications", () => {
     })
     fixture.daemon.emitScreen("OpenAI Codex\n\n› ")
     fixture.time.advance(WAITING_CONFIRMATION_MS)
-    expect(fixture.deliveries).toEqual(["Workflow completed"])
+    expect(fixture.deliveries).toEqual(["Routine completed"])
 
     fixture.monitor.userInput("terminal-1", "\r")
     fixture.daemon.emitScreen("Finished the follow-up.\nOpenAI Codex\n\n› ")
     fixture.time.advance(WAITING_CONFIRMATION_MS)
-    expect(fixture.deliveries).toEqual(["Workflow completed", "Agent finished its turn"])
+    expect(fixture.deliveries).toEqual(["Routine completed", "Agent finished its turn"])
 
     fixture.daemon.emitScreen("Finished the follow-up.\nOpenAI Codex\n\n› ")
     fixture.time.advance(WAITING_CONFIRMATION_MS)
-    expect(fixture.deliveries).toEqual(["Workflow completed", "Agent finished its turn"])
+    expect(fixture.deliveries).toEqual(["Routine completed", "Agent finished its turn"])
   })
 
   test("restores armed and unarmed turns across monitor restart without false completion", async () => {

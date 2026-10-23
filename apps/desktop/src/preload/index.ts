@@ -9,6 +9,7 @@ import {
 } from "../shared/appIcon"
 import {
   BACKGROUND_TRAY_CHANGED_CHANNEL,
+  BACKGROUND_TRAY_OPEN_DASHBOARD_CHANNEL,
   BACKGROUND_TRAY_OPEN_FILE_CHANNEL,
   BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL,
   BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL,
@@ -48,6 +49,13 @@ import {
   type ShutdownRequest,
   type ShutdownResponse,
 } from "../shared/shutdown"
+import {
+  UPDATE_CHANGED_CHANNEL,
+  UPDATE_CHECK_CHANNEL,
+  UPDATE_SNAPSHOT_CHANNEL,
+  type UpdateSnapshot,
+  type UpdatesBridge,
+} from "../shared/updates"
 
 /**
  * Preload bridge. `exposeElectronTRPC()` opens the IPC channel the renderer's
@@ -122,6 +130,7 @@ if (process.isMainFrame) {
       ipcRenderer.on(BACKGROUND_TRAY_CHANGED_CHANNEL, receive)
       return () => ipcRenderer.removeListener(BACKGROUND_TRAY_CHANGED_CHANNEL, receive)
     },
+    openDashboard: () => ipcRenderer.invoke(BACKGROUND_TRAY_OPEN_DASHBOARD_CHANNEL),
     openProject: (id) => ipcRenderer.invoke(BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL, id),
     openFile: () => ipcRenderer.invoke(BACKGROUND_TRAY_OPEN_FILE_CHANNEL),
     restartToUpdate: () => ipcRenderer.send(BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL),
@@ -134,7 +143,18 @@ if (process.isMainFrame) {
     preview: (selection) => ipcRenderer.invoke(APP_ICON_PREVIEW_CHANNEL, selection),
   }
 
+  const updates: UpdatesBridge = {
+    snapshot: () => ipcRenderer.invoke(UPDATE_SNAPSHOT_CHANNEL),
+    check: () => ipcRenderer.invoke(UPDATE_CHECK_CHANNEL),
+    subscribe(listener) {
+      const receive = (_event: IpcRendererEvent, snapshot: UpdateSnapshot) => listener(snapshot)
+      ipcRenderer.on(UPDATE_CHANGED_CHANNEL, receive)
+      return () => ipcRenderer.removeListener(UPDATE_CHANGED_CHANNEL, receive)
+    },
+  }
+
   contextBridge.exposeInMainWorld("piLab", {
+    updates,
     platform: process.platform,
     shutdown,
     quickEdit,

@@ -90,7 +90,7 @@ export function AutomationsView({
           <Workflow className="size-4 shrink-0 text-brand" aria-hidden />
           <div className="flex min-w-0 flex-col gap-0.5">
             <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
-              {t("Workflows")}
+              {t("Routines")}
             </h1>
             <p className="truncate text-muted-foreground text-xs">
               {t("Scheduled & looping agent runs")}
@@ -109,7 +109,7 @@ export function AutomationsView({
             )}
           >
             <Plus aria-hidden />
-            {t("New workflow")}
+            {t("New routine")}
           </Button>
           <AgentStatusControl />
           <CaffeineControl />
@@ -148,12 +148,12 @@ export function AutomationsView({
       </div>
       {findOpen ? (
         <QuickFind
-          ariaLabel={t("Find a workflow")}
-          placeholder={t("Find a workflow…")}
-          scopeLabel={t("Workflows")}
+          ariaLabel={t("Find a routine")}
+          placeholder={t("Find a routine…")}
+          scopeLabel={t("Routines")}
           allowGlobalSearch
           items={findItems}
-          emptyText={t("No matching workflows")}
+          emptyText={t("No matching routines")}
           onSelect={(item) =>
             document
               .querySelector<HTMLElement>(`[data-automation-id="${item.id}"]`)

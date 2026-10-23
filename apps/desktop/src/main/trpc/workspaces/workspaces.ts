@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
-import { dirname } from "node:path"
+import { dirname, join, relative } from "node:path"
 import {
   getAgentSettingsOrDefaults,
   type PiLabDatabase,
@@ -205,8 +206,31 @@ export async function createWorkspace(
   )
 }
 
+/** Preserve the selected project folder inside a checkout of its enclosing repository. */
+function projectDirectoryInWorktree(projectPath: string, worktreePath: string): string {
+  let root = projectPath
+  while (!existsSync(join(root, ".git"))) {
+    const parent = dirname(root)
+    if (parent === root) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `Could not find the Git repository for ${projectPath}. Restore the project folder before opening its worktree.`,
+      })
+    }
+    root = parent
+  }
+  return join(worktreePath, relative(root, projectPath))
+}
+
 /** The working directory an agent/terminal should run in for a workspace. */
 export function workspaceWorkingDir(db: PiLabDatabase, workspace: Workspace): string {
+  const project = db.select().from(projects).where(eq(projects.id, workspace.projectId)).get()
+  if (!project) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: `Missing project ${workspace.projectId}`,
+    })
+  }
   if (workspace.kind === "worktree") {
     if (!workspace.worktreeId) {
       throw new TRPCError({
@@ -221,16 +245,9 @@ export function workspaceWorkingDir(db: PiLabDatabase, workspace: Workspace): st
         message: `Missing worktree ${workspace.worktreeId}`,
       })
     }
-    return wt.path
+    return projectDirectoryInWorktree(project.repoPath, wt.path)
   }
   // Branch workspaces run on the project's primary checkout.
-  const project = db.select().from(projects).where(eq(projects.id, workspace.projectId)).get()
-  if (!project) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: `Missing project ${workspace.projectId}`,
-    })
-  }
   return project.repoPath
 }
 

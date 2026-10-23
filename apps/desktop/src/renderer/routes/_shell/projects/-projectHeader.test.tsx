@@ -24,9 +24,10 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
       name: "Photon Drift",
       repoPath: "/tmp/photon-drift",
     }),
+    "projects.touch": () => ({}),
     "projects.capabilities": () => ({ git: true }),
     "settings.get": () => ({}),
-    "workflows.status": () => ({ summary: null, fetchExperiments: null }),
+    "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
     "workspaces.ensureMain": () => new Promise(() => {}),
     ...handlers,
   })
@@ -41,61 +42,57 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
 describe("Project header", () => {
   afterEach(() => window.localStorage.clear())
 
-  test("offers a compact project type choice while the workspace opens", async () => {
-    const choices: unknown[] = []
+  test("header orders Auto research, Plan research, agents, and Caffeine and prevents duplicate launches", async () => {
+    const calls: unknown[] = []
+    let rejectLaunch!: (error: Error) => void
     renderWorkspace({
-      "projects.get": () => ({
-        id: "p1",
-        name: "Photon Drift",
-        repoPath: "/tmp/photon-drift",
-        typeId: null,
-      }),
-      "settings.get": () => ({
-        projectTemplate: {
-          projectTypes: [
-            { id: "research", name: "Research project", guidance: "" },
-            { id: "software", name: "Software project", guidance: "" },
-            { id: "manuscript", name: "Manuscript", guidance: "" },
-          ],
-        },
-      }),
-      "projects.setType": (input) => {
-        choices.push(input)
+      "workspaces.ensureMain": () => ({ id: "w1" }),
+      "sessions.startAutoResearch": (input) => {
+        calls.push(input)
+        return new Promise((_resolve, reject) => {
+          rejectLaunch = reject
+        })
       },
     })
-
-    const select = (await screen.findByTestId("project-view-type")) as HTMLSelectElement
-    expect(select.value).toBe("")
-    fireEvent.change(select, { target: { value: "manuscript" } })
-    await waitFor(() => expect(choices).toEqual([{ id: "p1", typeId: "manuscript" }]))
+    const button = await screen.findByTestId("project-view-auto-research")
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
+    const plan = screen.getByTestId("project-view-plan-research")
+    expect(button.nextElementSibling).toBe(plan)
+    expect(
+      plan.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
+    ).toBeTruthy()
+    const caffeine = screen.getByTestId("caffeine-control")
+    expect(
+      button.parentElement?.lastElementChild === caffeine ||
+        button.parentElement?.lastElementChild?.contains(caffeine),
+    ).toBe(true)
+    expect(screen.queryByTestId("project-view-fetch-experiments")).toBeNull()
+    fireEvent.click(button)
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true))
+    fireEvent.click(button)
+    expect(calls).toEqual([{ projectId: "p1" }])
+    rejectLaunch(new Error("Launch unavailable"))
+    expect((await screen.findByTestId("project-launch-error")).textContent).toContain(
+      "Launch unavailable",
+    )
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
   })
 
-  test("translates the project type choice and built-in names", async () => {
-    window.localStorage.setItem("pi-lab.interface.language", "es")
+  test("records opening a project for the recent-project menu", async () => {
+    const touched: unknown[] = []
     renderWorkspace({
-      "projects.get": () => ({
-        id: "p1",
-        name: "Photon Drift",
-        repoPath: "/tmp/photon-drift",
-        typeId: null,
-      }),
-      "settings.get": () => ({
-        projectTemplate: {
-          projectTypes: [
-            { id: "research", name: "Research project", guidance: "" },
-            { id: "software", name: "Software project", guidance: "" },
-            { id: "manuscript", name: "Manuscript", guidance: "" },
-          ],
-        },
-      }),
+      "projects.touch": (input) => {
+        touched.push(input)
+        return {}
+      },
     })
+    await waitFor(() => expect(touched).toEqual([{ id: "p1" }]))
+  })
 
-    const select = await screen.findByTestId("project-view-type")
-    expect(select.getAttribute("aria-label")).toBe("Tipo de proyecto")
-    expect(within(select).getByRole("option", { name: "Elegir tipo" })).toBeTruthy()
-    expect(within(select).getByRole("option", { name: "Proyecto de investigación" })).toBeTruthy()
-    expect(within(select).getByRole("option", { name: "Proyecto de software" })).toBeTruthy()
-    expect(within(select).getByRole("option", { name: "Manuscrito" })).toBeTruthy()
+  test("keeps project type editing out of the project header", async () => {
+    renderWorkspace()
+    await screen.findByRole("heading", { name: "Photon Drift" })
+    expect(screen.queryByTestId("project-view-type")).toBeNull()
   })
 
   test("translates the Git notice while preserving the project name", async () => {
@@ -134,14 +131,14 @@ describe("Project header", () => {
     const notice = await screen.findByTestId("non-git-project-notice")
     expect(notice.textContent).toContain("This project is not git tracked")
     expect(notice.textContent).toContain("Initialize Git for worktrees and concurrent agents")
-    expect(screen.getByTestId("project-view-summary").hasAttribute("disabled")).toBe(true)
-    expect(screen.getByTestId("project-view-fetch-experiments").hasAttribute("disabled")).toBe(true)
+    expect(screen.getByTestId("project-view-plan-research").hasAttribute("disabled")).toBe(false)
+    expect(screen.getByTestId("project-view-auto-research").hasAttribute("disabled")).toBe(true)
 
     fireEvent.click(screen.getByRole("button", { name: "Initialize Git" }))
 
     await waitFor(() => expect(initializeCalls).toEqual([{ id: "p1" }]))
     await waitFor(() => expect(screen.queryByTestId("non-git-project-notice")).toBeNull())
-    expect(screen.getByTestId("project-view-summary").hasAttribute("disabled")).toBe(false)
+    expect(screen.getByTestId("project-view-plan-research").hasAttribute("disabled")).toBe(false)
   })
 
   test("allows the concise non-Git notice to be dismissed", async () => {
@@ -160,44 +157,15 @@ describe("Project header", () => {
 
     const alert = await screen.findByTestId("project-git-capability-error")
     expect(alert.textContent).toContain("filesystem unavailable")
-    expect(screen.getByTestId("project-view-summary").hasAttribute("disabled")).toBe(true)
-    expect(screen.getByTestId("project-view-fetch-experiments").hasAttribute("disabled")).toBe(true)
+    expect(screen.getByTestId("project-view-plan-research").hasAttribute("disabled")).toBe(false)
+    expect(screen.getByTestId("project-view-auto-research").hasAttribute("disabled")).toBe(true)
     expect(screen.queryByTestId("non-git-project-notice")).toBeNull()
   })
 
-  test("the labeled Fetch experiments control triggers a background run with its instructions", async () => {
-    const calls: Array<Record<string, unknown>> = []
-    renderWorkspace({
-      "workflows.run": (input) => {
-        calls.push(input as Record<string, unknown>)
-        return {
-          cached: false,
-          running: false,
-          result: "fetched",
-          inputHash: "h",
-          lastCheckedAt: Date.now(),
-          errorMessage: null,
-        }
-      },
-    })
-
-    const button = await screen.findByTestId("project-view-fetch-experiments")
-    expect(button.textContent).toContain("Fetch experiments")
-    expect(button.getAttribute("data-state")).toBe("idle")
-    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
-
-    fireEvent.click(button)
-
-    await waitFor(() => expect(calls).toHaveLength(1))
-    expect(calls[0]?.projectId).toBe("p1")
-    expect(calls[0]?.task).toBe("fetch-experiments")
-    expect(calls[0]).toHaveProperty("instructions")
-  })
-
-  test("a done Project summary control opens the result popup with a last-checked line", async () => {
+  test("a done Plan research control opens the result popup with a last-checked line", async () => {
     renderWorkspace({
       "workflows.status": () => ({
-        summary: {
+        planResearch: {
           running: false,
           result: "Photon Drift is on track.",
           inputHash: "h",
@@ -216,7 +184,7 @@ describe("Project header", () => {
       }),
     })
 
-    const button = await screen.findByTestId("project-view-summary")
+    const button = await screen.findByTestId("project-view-plan-research")
     await waitFor(() => expect(button.getAttribute("data-state")).toBe("done"))
 
     fireEvent.click(button)
@@ -228,13 +196,13 @@ describe("Project header", () => {
     expect(within(dialog).getByTestId("workflow-result-last-checked").textContent).toContain(
       "Last checked:",
     )
-    expect(dialog.textContent).toContain("RESEARCH.md")
+    expect(dialog.textContent).toContain("Research plan")
   })
 
-  test("an errored Project summary control surfaces the failure in the popup (no silent failure)", async () => {
+  test("an errored Plan research control surfaces the failure in the popup (no silent failure)", async () => {
     renderWorkspace({
       "workflows.status": () => ({
-        summary: {
+        planResearch: {
           running: false,
           result: "",
           inputHash: "h",
@@ -253,7 +221,7 @@ describe("Project header", () => {
       }),
     })
 
-    const button = await screen.findByTestId("project-view-summary")
+    const button = await screen.findByTestId("project-view-plan-research")
     await waitFor(() => expect(button.getAttribute("data-state")).toBe("error"))
 
     fireEvent.click(button)
@@ -288,7 +256,7 @@ describe("Card-triggered launch on the project view", () => {
       }),
       "projects.capabilities": () => ({ git: true }),
       "settings.get": () => ({}),
-      "workflows.status": () => ({ summary: null, fetchExperiments: null }),
+      "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
       "workspaces.ensureMain": () => ({ id: "w1" }),
       "agents.list": () => [],
       "agents.projectChoice": () => ({ agentId: null }),

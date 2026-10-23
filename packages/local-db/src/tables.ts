@@ -881,7 +881,7 @@ export const automationRuns = sqliteTable(
 // ---------------------------------------------------------------------------
 
 /** A non-interactive project workflow with a cached, per-project result. */
-export type WorkflowTask = "summary" | "fetch-experiments"
+export type WorkflowTask = "summary" | "fetch-experiments" | "plan-research"
 
 export const projectWorkflowRuns = sqliteTable(
   "project_workflow_runs",

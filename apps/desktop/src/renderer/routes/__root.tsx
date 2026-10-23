@@ -1,4 +1,5 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router"
+import { UpdateFeedback } from "../updates/UpdateFeedback"
 
 /**
  * Root route (TanStack Router, file-based). No auth guard, no loaders — the app
@@ -11,5 +12,10 @@ export const Route = createRootRoute({
 })
 
 function RootLayout() {
-  return <Outlet />
+  return (
+    <>
+      <Outlet />
+      <UpdateFeedback />
+    </>
+  )
 }

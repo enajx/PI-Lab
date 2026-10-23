@@ -10,10 +10,12 @@ import {
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChartArea, FileCode2, FilePlus2, FileText, Search } from "lucide-react"
+import { ChartArea, CloudDownload, FileCode2, FileText, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
+import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
 import { useTranslate } from "../../../../../i18n/language"
+import { useFetchExperimentsInstructions } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
@@ -59,6 +61,19 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
       setSelectedProjectId(projects[0]?.id ?? null)
     }
   }, [projects, selectedProjectId, projectsQuery.isPending])
+
+  const selectedProject = projects.find((project) => project.id === selectedProjectId)
+  const [fetchInstructions] = useFetchExperimentsInstructions()
+  const capabilities = useQuery({
+    ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
+    enabled: Boolean(selectedProject),
+  })
+  const gitAvailable = capabilities.data?.git === true
+  const gitDisabledReason = capabilities.isError
+    ? `${t("Could not check Git availability: ")}${capabilities.error.message}`
+    : capabilities.isPending
+      ? t("Checking Git availability…")
+      : t("Initialize Git to run Git-state-aware project routines.")
 
   const [query, setQuery] = useState("")
   // Top-level filter is a category; an optional sub-kind narrows within it.
@@ -212,18 +227,30 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
             <FileCode2 className="size-3.5" aria-hidden />
             {t("HTML report")}
           </button>
-          <button
-            type="button"
-            data-testid="analysis-new-marimo-notebook"
-            disabled={!selectedProjectId || createTemplate.isPending}
-            onClick={() =>
-              createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "marimo" })
-            }
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FilePlus2 className="size-3.5" aria-hidden />
-            {t("Marimo report")}
-          </button>
+          {selectedProject ? (
+            <ProjectWorkflowControl
+              key={selectedProject.id}
+              projectId={selectedProject.id}
+              projectName={selectedProject.name}
+              task="fetch-experiments"
+              variant="labeled"
+              testId="analysis-fetch-experiments"
+              instructions={fetchInstructions}
+              disabled={!gitAvailable}
+              disabledReason={!gitAvailable ? gitDisabledReason : undefined}
+            />
+          ) : (
+            <button
+              type="button"
+              data-testid="analysis-fetch-experiments"
+              disabled
+              title={t("Select a project")}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CloudDownload className="size-3.5" aria-hidden />
+              {t("Fetch experiments")}
+            </button>
+          )}
         </>
       }
     >

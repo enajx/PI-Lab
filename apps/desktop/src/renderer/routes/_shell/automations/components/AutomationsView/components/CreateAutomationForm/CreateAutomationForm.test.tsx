@@ -55,7 +55,7 @@ describe("CreateAutomationForm", () => {
   test("translates controls but keeps the schedule preview supplied by the service", async () => {
     act(() => setInterfaceLanguage("es"))
     renderForm(validPreview)
-    expect(screen.getByRole("button", { name: "Crear flujo de trabajo" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Crear rutina" })).toBeTruthy()
     expect(screen.getByLabelText("Repetir")).toBeTruthy()
     await waitFor(() => {
       expect(screen.getByTestId("schedule-preview-summary").textContent).toBe("Daily at 9:00 AM")

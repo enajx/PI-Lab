@@ -51,9 +51,7 @@ test("Alpha can add an example, clear its project list, and repeat setup separat
   const addExample = async () => {
     await window.getByTestId("dashboard-add-project").click()
     await window.getByTestId("add-project-folder").click()
-    const planning = window.getByTestId("add-project-dialog")
-    await expect(planning).toBeVisible()
-    await planning.getByTestId("add-project-confirm").click()
+    await expect(window.getByTestId("add-project-dialog")).toHaveCount(0)
     await expect(
       window.getByTestId("project-item").filter({ hasText: "python-research" }),
     ).toBeVisible()
@@ -62,9 +60,9 @@ test("Alpha can add an example, clear its project list, and repeat setup separat
   await addExample()
   await window.getByTestId("nav-settings").click()
   await expect(window.getByTestId("alpha-testing-resets")).toBeVisible()
-  const confirmOnQuit = window.getByRole("switch", { name: "Confirm on quit" })
-  await confirmOnQuit.click()
-  await expect(confirmOnQuit).toHaveAttribute("aria-checked", "false")
+  const keepRunning = window.getByTestId("settings-keep-running-after-close")
+  await keepRunning.click()
+  await expect(keepRunning).toHaveAttribute("aria-checked", "false")
   await window.getByTestId("alpha-clear-projects").click()
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByTestId("project-item")).toHaveCount(0)
@@ -72,7 +70,7 @@ test("Alpha can add an example, clear its project list, and repeat setup separat
 
   await addExample()
   await window.getByTestId("nav-settings").click()
-  await expect(confirmOnQuit).toHaveAttribute("aria-checked", "false")
+  await expect(keepRunning).toHaveAttribute("aria-checked", "false")
   await window.getByTestId("alpha-reset-settings").click()
   await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
   await window.getByRole("button", { name: "Finish setup" }).click()
@@ -80,5 +78,5 @@ test("Alpha can add an example, clear its project list, and repeat setup separat
     window.getByTestId("project-item").filter({ hasText: "python-research" }),
   ).toBeVisible()
   await window.getByTestId("nav-settings").click()
-  await expect(confirmOnQuit).toHaveAttribute("aria-checked", "true")
+  await expect(keepRunning).toHaveAttribute("aria-checked", "true")
 })

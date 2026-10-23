@@ -257,8 +257,8 @@ test("sets global editor typography from the gear deep link and restores it afte
 
   await window.getByTestId("editor-settings").click()
   await window.getByTestId("editor-advanced-settings-link").click()
-  await expect(window.getByTestId("settings-section-appearance")).toBeVisible()
-  await expect(window.getByTestId("appearance-advanced-editor-typography")).toBeVisible()
+  await expect(window.getByTestId("settings-section-editor")).toBeVisible()
+  await expect(window.getByTestId("editor-typography")).toBeVisible()
   await window.getByTestId("settings-editor-font-family").selectOption("PI Lab Test Mono")
   await window.getByTestId("settings-editor-font-size").fill("18")
   await window.getByTestId("settings-back").click()

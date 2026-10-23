@@ -11,6 +11,12 @@ interface ReadyUpdateMenuItem {
 }
 
 let readyUpdate: ReadyUpdateMenuItem | null = null
+let userQuitAction: () => void = () => app.quit()
+
+/** Keep explicit quit behavior when the native menu is rebuilt for updates or language. */
+export function setUserQuitAction(action: () => void): void {
+  userQuitAction = action
+}
 
 /** Refresh the native menu when a public update becomes ready or is cleared. */
 export function setReadyUpdateMenuItem(item: ReadyUpdateMenuItem | null): void {
@@ -18,19 +24,7 @@ export function setReadyUpdateMenuItem(item: ReadyUpdateMenuItem | null): void {
   installAppMenu()
 }
 
-/**
- * Install the application menu, deliberately binding **no** accelerator to ⌘W / Ctrl+W.
- *
- * Electron's default menu has a "Close Window" item (role `"close"`) bound to ⌘W; on the
- * lone PI Lab window that closed the window — and since macOS keeps the app alive with no
- * window (`window-all-closed` is a no-op on darwin), it read as "the app exited". By owning
- * the menu and omitting any ⌘W item, the keystroke instead reaches the renderer, where the
- * project view closes the **active tab** (see `CentralPanel`). The window can still be closed
- * with the traffic-light button, and ⌘Q still quits.
- *
- * Everything else uses standard roles, so Copy/Paste, Reload, DevTools, Minimize/Zoom, About,
- * Hide, and Quit keep working unchanged.
- */
+/** Install native app actions, including Cmd+W to keep the app running in the background. */
 export function installAppMenu(): void {
   const isMac = process.platform === "darwin"
   const appName = app.getName()
@@ -41,6 +35,12 @@ export function installAppMenu(): void {
     label: Parameters<typeof nativeText>[0],
   ): MenuItemConstructorOptions => ({ role, label: nativeText(label) })
 
+  const quitItem: MenuItemConstructorOptions = {
+    id: "user-quit",
+    label: stable ? nativeText("Quit PI Lab") : `Quit ${appName}`,
+    accelerator: "CommandOrControl+Q",
+    click: () => userQuitAction(),
+  }
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
       ? [
@@ -85,16 +85,14 @@ export function installAppMenu(): void {
               item("hideOthers", "Hide Others"),
               item("unhide", "Show All"),
               { type: "separator" },
-              stable ? item("quit", "Quit PI Lab") : { role: "quit", label: `Quit ${appName}` },
+              quitItem,
             ],
           } satisfies MenuItemConstructorOptions,
         ]
       : [
           {
             label: nativeText("File"),
-            submenu: [
-              stable ? item("quit", "Quit PI Lab") : { role: "quit", label: `Quit ${appName}` },
-            ],
+            submenu: [quitItem],
           } satisfies MenuItemConstructorOptions,
         ]),
     {
@@ -127,9 +125,9 @@ export function installAppMenu(): void {
     },
     {
       label: nativeText("Window"),
-      // Note: NO "Close" (⌘W) item here — that is the whole point of this custom menu.
       submenu: isMac
         ? [
+            { label: "Move to background", accelerator: "Command+W", click: () => app.hide() },
             item("minimize", "Minimize"),
             item("zoom", "Zoom"),
             { type: "separator" },

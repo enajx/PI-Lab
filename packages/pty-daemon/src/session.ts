@@ -140,9 +140,10 @@ class Session {
       this.pty.kill(signal)
       return
     }
-    // node-pty starts a new session/process group; include the agent's children.
+    // Match node-pty's terminal hangup default: interactive shells ignore SIGTERM.
+    // Include the process group so agent subprocesses receive the same signal.
     try {
-      process.kill(-this.processGroupId, (signal ?? "SIGTERM") as NodeJS.Signals)
+      process.kill(-this.processGroupId, (signal ?? "SIGHUP") as NodeJS.Signals)
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       // macOS can report EPERM for a group already exiting before onExit fires.

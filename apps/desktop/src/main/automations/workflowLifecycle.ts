@@ -97,7 +97,7 @@ export function createWorkflowLifecycleReporter(
         { launchedAt: startedAt, error: null },
         {
           eventType: "workflowStart",
-          title: nativeText("Workflow started"),
+          title: nativeText("Routine started"),
           body: nativeNotificationBody(
             "workflowStarted",
             target.workflowName,
@@ -113,7 +113,7 @@ export function createWorkflowLifecycleReporter(
         { completedAt: now(), error: null },
         {
           eventType: "workflowCompletion",
-          title: nativeText("Workflow completed"),
+          title: nativeText("Routine completed"),
           body: nativeNotificationBody("workflowCompleted", target.workflowName),
         },
       ),
@@ -124,7 +124,7 @@ export function createWorkflowLifecycleReporter(
         { completedAt: now(), error: reason },
         {
           eventType: "workflowFailure",
-          title: nativeText("Workflow failed"),
+          title: nativeText("Routine failed"),
           body: reason,
         },
       ),

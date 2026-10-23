@@ -18,6 +18,9 @@ const DESKTOP_DIR = join(HERE, "..", "..", "apps", "desktop")
 const MAIN_ENTRY = join(DESKTOP_DIR, "out", "main", "index.js")
 const ELECTRON_PATH = createRequire(join(DESKTOP_DIR, "package.json"))("electron") as string
 
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: Optional packaged Alpha verification.
+const packagedBinary = process.env.PI_LAB_PACKAGED_BINARY
+
 const execFileAsync = promisify(execFile)
 
 let app: ElectronApplication
@@ -40,8 +43,8 @@ test.beforeEach(async () => {
   await initRepo(repoDir)
 
   app = await electron.launch({
-    executablePath: ELECTRON_PATH,
-    args: [MAIN_ENTRY],
+    executablePath: packagedBinary ?? ELECTRON_PATH,
+    args: packagedBinary ? [] : [MAIN_ENTRY],
     env: {
       ...process.env,
       PI_LAB_TEST_MODE: "1",
@@ -57,19 +60,21 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
-test("create a workflow via the UI and see it in the list", async () => {
+test("create a routine via the UI and see it in the list", async () => {
   const window = await app.firstWindow()
 
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
 
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
 
+  await expect(window.getByTestId("nav-automations")).toContainText("Routines")
   await window.getByTestId("nav-automations").click()
   await expect(window.getByTestId("automations-view")).toBeVisible({ timeout: 30_000 })
 
   await expect(window.getByTestId("automations-empty")).toBeVisible({ timeout: 30_000 })
 
   const newButton = window.getByTestId("new-automation")
+  await expect(newButton).toHaveText("New routine")
   await expect(newButton).toBeEnabled({ timeout: 30_000 })
   await newButton.click()
 

@@ -22,6 +22,8 @@ import { type ElectronApplication, _electron as electron, expect, test } from "@
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = join(HERE, "..", "..", "apps", "desktop")
 const MAIN_ENTRY = join(DESKTOP_DIR, "out", "main", "index.js")
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: Optional packaged app verification.
+const packagedBinary = process.env.PI_LAB_PACKAGED_BINARY
 const MARIMO_FIXTURE = join(HERE, "fixtures", "marimo-server.cjs")
 const ELECTRON_PATH = createRequire(join(DESKTOP_DIR, "package.json"))("electron") as string
 
@@ -98,11 +100,12 @@ test.beforeEach(async () => {
   await initRepo(repoDir)
 
   app = await electron.launch({
-    executablePath: ELECTRON_PATH,
-    args: [MAIN_ENTRY],
+    executablePath: packagedBinary ?? ELECTRON_PATH,
+    args: packagedBinary ? [] : [MAIN_ENTRY],
     env: {
       ...process.env,
       PI_LAB_TEST_MODE: "1",
+      PI_LAB_TEST_AGENT_ID: "test-echo",
       PI_LAB_DATA_DIR: dataDir,
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       // Open the temp repo as a project on load (renderer query seam).
@@ -221,4 +224,17 @@ test("marimo starts interactively, stops on artifact switch, and is reaped on ap
 
   await app.close()
   await expect.poll(() => pidIsAlive(finalPid)).toBe(false)
+})
+
+test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("analysis-new-marimo-notebook")).toHaveCount(0)
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path="reports/live.py"]'),
+  ).toBeVisible()
+  await window.getByTestId("analysis-fetch-experiments").click()
+  await expect(window.getByTestId("workflow-result-dialog")).toBeVisible()
+  await expect(window.getByTestId("workflow-result-text")).toBeVisible({ timeout: 30_000 })
 })

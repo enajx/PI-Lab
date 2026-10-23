@@ -57,5 +57,8 @@ describe("AgentStatusControl", () => {
     expect(panel.textContent).toContain("Codex")
     expect(panel.textContent).toContain("Photon Drift")
     expect(panel.textContent).toContain("Working")
+    const session = screen.getByText("Photon Drift").closest("li")
+    expect(session?.querySelector("strong")?.textContent).toBe("Photon Drift")
+    expect(session?.querySelector("small")?.textContent).toBe("Codex")
   })
 })

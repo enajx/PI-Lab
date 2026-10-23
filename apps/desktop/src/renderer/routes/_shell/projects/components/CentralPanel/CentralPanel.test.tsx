@@ -757,11 +757,13 @@ describe("CentralPanel — panel", () => {
     await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
   })
 
-  test("⌘W closes the active tab and stays in the project (returns to the launcher)", async () => {
+  test("Ctrl+W closes the active tab and stays in the project (returns to the launcher)", async () => {
     renderPanel()
     await openFile()
     expect(screen.getByTestId("central-tab")).toBeTruthy()
     fireEvent.keyDown(window, { key: "w", metaKey: true })
+    expect(screen.getByTestId("central-tab")).toBeTruthy()
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true })
     await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
   })
 

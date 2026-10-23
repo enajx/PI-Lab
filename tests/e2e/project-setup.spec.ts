@@ -199,7 +199,7 @@ test("runs a one-shot CLI draft and applies its reviewed proposal", async () => 
   expect(agents.match(/## PI Lab project instructions:/g)).toHaveLength(1)
 })
 
-test("chooses and changes a project type from Dashboard, Project view, and Settings", async () => {
+test("changes project type only through right-click Edit project", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("dashboard-add-project").click()
@@ -218,16 +218,8 @@ test("chooses and changes a project type from Dashboard, Project view, and Setti
   await expect(window.getByTestId("edit-project-dialog")).toHaveCount(0)
   await window.getByTestId("project-card-open").click()
 
-  const viewType = window.getByTestId("project-view-type")
-  await expect(viewType).toHaveValue("software")
-  await viewType.selectOption("manuscript")
-  await expect(viewType).toHaveValue("manuscript")
-
-  if (await window.getByTestId("nav-settings").isVisible())
-    await window.getByTestId("nav-settings").click()
+  await expect(window.getByTestId("project-view-type")).toHaveCount(0)
+  await window.getByTestId("nav-settings").click()
   await window.getByTestId("settings-nav-project-view").click()
-  const settingsType = window.getByTestId("settings-project-type")
-  await expect(settingsType).toHaveValue("manuscript")
-  await settingsType.selectOption("research")
-  await expect(settingsType).toHaveValue("research")
+  await expect(window.getByTestId("settings-project-type")).toHaveCount(0)
 })

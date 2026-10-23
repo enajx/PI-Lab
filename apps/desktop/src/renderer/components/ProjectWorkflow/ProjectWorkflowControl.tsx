@@ -43,6 +43,12 @@ interface TaskMeta {
 }
 
 const TASK_META: Record<WorkflowTask, TaskMeta> = {
+  "plan-research": {
+    icon: FileText,
+    label: "Plan research",
+    reportHeading: "Research plan",
+    guidance: "",
+  },
   summary: {
     icon: FileText,
     label: "Project summary",
@@ -59,13 +65,12 @@ const TASK_META: Record<WorkflowTask, TaskMeta> = {
 
 // State tints. Only a *running* control is coloured — a brand-orange underline
 // moves beneath it, so "thinking" is the one thing that stands out.
-// A done control is deliberately neutral (no green — the result lives in the
-// window); an errored one shows a subtle red so a failure is never hidden.
+// Completed and failed attempts stay neutral; the popup preserves their result.
 const STATE_TINT: Record<WorkflowControlState, string> = {
   idle: "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground",
   running: "border-brand/60 text-foreground",
   done: "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-  error: "border-red-500/50 text-red-600 hover:bg-red-500/10 dark:text-red-400",
+  error: "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground",
 }
 
 export function ProjectWorkflowControl({
@@ -103,14 +108,23 @@ export function ProjectWorkflowControl({
         // completed state without polling forever.
         refetchInterval: (query) => {
           const data = query.state.data
-          const anyRunning = Boolean(data?.summary?.running || data?.fetchExperiments?.running)
+          const anyRunning = Boolean(
+            data?.summary?.running ||
+              data?.fetchExperiments?.running ||
+              data?.planResearch?.running,
+          )
           return anyRunning ? 800 : false
         },
       },
     ),
   )
 
-  const record = task === "summary" ? statusQuery.data?.summary : statusQuery.data?.fetchExperiments
+  const record =
+    task === "summary"
+      ? statusQuery.data?.summary
+      : task === "plan-research"
+        ? statusQuery.data?.planResearch
+        : statusQuery.data?.fetchExperiments
 
   const invalidateStatus = () =>
     void queryClient.invalidateQueries({ queryKey: trpc.workflows.status.queryKey({ projectId }) })
@@ -206,7 +220,7 @@ export function ProjectWorkflowControl({
       </button>
 
       {dialogOpen ? (
-        <Suspense fallback={<div role="status">{t("Loading workflow result…")}</div>}>
+        <Suspense fallback={<div role="status">{t("Loading routine result…")}</div>}>
           <WorkflowResultDialog
             projectId={projectId}
             task={task}
@@ -215,7 +229,7 @@ export function ProjectWorkflowControl({
             projectName={projectName}
             running={state === "running"}
             result={record?.result ?? ""}
-            errorMessage={record?.errorMessage ?? null}
+            errorMessage={run.error?.message ?? record?.errorMessage ?? null}
             lastCheckedAt={record?.lastCheckedAt ?? 0}
             guidance={t(meta.guidance)}
             onRecheck={recheck}

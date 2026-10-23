@@ -65,17 +65,23 @@ const navStateClass = (isActive: boolean): string =>
     ? "bg-accent font-medium text-accent-foreground"
     : "text-sidebar-foreground hover:bg-accent/60"
 
-/**
- * Unified workspace nav entries: the science tabs followed by Workflows and Editor,
- * rendered as ONE `gap-0.5` list so these rows sit flush with their peers (the old
- * gap-3 between two separate `<nav>`s made it read as a detached block). Workflows
- * reuses the {@link ScienceNavItem} shape so the whole list shares one row renderer.
- */
+/** Default only; a persisted drag order takes priority. */
+const DEFAULT_NAV_ORDER = [
+  "editor",
+  "analysis",
+  "tasks",
+  "library",
+  "skills",
+  "workflows",
+  "cluster",
+]
+
+/** Shared row definitions; the default and saved orders determine their positions. */
 const navItems: ScienceNavItem[] = [
   ...scienceNavItems,
   {
     id: "workflows",
-    label: "Workflows",
+    label: "Routines",
     description: "Create and monitor scheduled automations across your projects.",
     icon: Waypoints,
     ready: true,
@@ -852,7 +858,10 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
     navOrder.includes("editor") || workflowsIndex < 0
       ? navOrder
       : [...navOrder.slice(0, workflowsIndex + 1), "editor", ...navOrder.slice(workflowsIndex + 1)]
-  const ordered = orderById(visibleItems, effectiveOrder)
+  const ordered = orderById(
+    visibleItems,
+    effectiveOrder.length ? effectiveOrder : DEFAULT_NAV_ORDER,
+  )
   const navRowProps = useDragReorder(
     ordered.map((item) => item.id),
     setNavOrder,

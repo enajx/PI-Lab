@@ -27,6 +27,7 @@ import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
 import { ClaudeStreamParser } from "./claudeStreamParser"
+import { planResearchPrompt } from "./planResearchSkill"
 
 /**
  * Non-interactive background project workflows (plan "Project cards / panels /
@@ -56,7 +57,9 @@ const runningKey = (projectId: string, task: WorkflowTask): string => `${project
 
 /** Keep project records until background completion has been persisted. */
 export function hasRunningProjectWorkflow(projectId: string): boolean {
-  return ["summary", "fetch-experiments"].some((task) => runningTasks.has(`${projectId}:${task}`))
+  return ["summary", "fetch-experiments", "plan-research"].some((task) =>
+    runningTasks.has(`${projectId}:${task}`),
+  )
 }
 
 /**
@@ -324,6 +327,11 @@ async function executeWorkflow(
 ): Promise<string> {
   if (input.task === "fetch-experiments") await scaffoldFetchExperimentsSkill(project.repoPath)
 
+  const prompt =
+    input.task === "plan-research"
+      ? await planResearchPrompt(project.repoPath, ctx.skillsHomeDir, ctx.bundledSkillsDir)
+      : promptForTask(input.task, input.instructions)
+
   // The project's remembered agent choice, falling back to the catalog default.
   const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
   const config = await readProjectAgentConfig(project, storage)
@@ -336,7 +344,7 @@ async function executeWorkflow(
   // that surfaces as an error record, not a silent no-op.
   const [catalogCommand, ...baseArgs] = buildNonInteractiveLaunchArgv(
     agent,
-    promptForTask(input.task, input.instructions),
+    prompt,
     getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
   )
   const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[agent.id]?.trim()
@@ -473,7 +481,7 @@ async function persistWorkflow(
     })
     finishStream(stream, { kind: "done", result })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Workflow failed"
+    const message = error instanceof Error ? error.message : "Routine failed"
     // Older app versions could remove a project while its daemon job was running.
     // Finish and acknowledge that owner without recreating the removed project.
     if (ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).get()) {
@@ -500,7 +508,7 @@ export function restoreProjectWorkflow(
   const metadata = z
     .object({
       projectId: z.string(),
-      task: z.enum(["summary", "fetch-experiments"]),
+      task: z.enum(["summary", "fetch-experiments", "plan-research"]),
       inputHash: z.string(),
       agentLabel: z.string(),
       agentId: z.string(),
@@ -546,19 +554,26 @@ export async function runProjectWorkflow(
   if (!project) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
   }
-  if (!(await isGitRepo(project.repoPath))) {
+  const needsGit = input.task !== "plan-research"
+  if (needsGit && !(await isGitRepo(project.repoPath))) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "Project workflows require Git. Initialize Git for this project first.",
+      message: "Project routines require Git. Initialize Git for this project first.",
     })
   }
 
-  const currentHash = await computeGitStateHash(project.repoPath)
+  const currentHash = needsGit ? await computeGitStateHash(project.repoPath) : ""
   if (!ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, project.id)).get()) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${project.id}` })
   }
   const stored = readRow(ctx.db, project.id, input.task)
-  if (!input.force && stored && !stored.errorMessage && stored.inputHash === currentHash) {
+  if (
+    needsGit &&
+    !input.force &&
+    stored &&
+    !stored.errorMessage &&
+    stored.inputHash === currentHash
+  ) {
     return { cached: true, ...toRecord(stored, false) }
   }
 
@@ -583,6 +598,7 @@ export async function runProjectWorkflow(
 
 /** Both tasks' current state for a project (null when never run and not running). */
 export interface ProjectWorkflowStatus {
+  planResearch: ProjectWorkflowRecord | null
   summary: ProjectWorkflowRecord | null
   fetchExperiments: ProjectWorkflowRecord | null
 }
@@ -604,12 +620,13 @@ function readStatus(
 /** Current status of both background workflows for a project. */
 export function projectWorkflowStatus(ctx: AppContext, projectId: string): ProjectWorkflowStatus {
   return {
+    planResearch: readStatus(ctx, projectId, "plan-research"),
     summary: readStatus(ctx, projectId, "summary"),
     fetchExperiments: readStatus(ctx, projectId, "fetch-experiments"),
   }
 }
 
-const taskSchema = z.enum(["summary", "fetch-experiments"])
+const taskSchema = z.enum(["summary", "fetch-experiments", "plan-research"])
 
 export const workflowsRouter = router({
   /**

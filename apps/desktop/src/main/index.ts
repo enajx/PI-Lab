@@ -11,6 +11,7 @@ import {
   isAppIconSelection,
 } from "../shared/appIcon"
 import {
+  BACKGROUND_TRAY_OPEN_DASHBOARD_CHANNEL,
   BACKGROUND_TRAY_OPEN_FILE_CHANNEL,
   BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL,
   BACKGROUND_TRAY_RESTART_TO_UPDATE_CHANNEL,
@@ -37,8 +38,8 @@ import {
   QUICK_EDIT_SHOW_SETTINGS_CHANNEL,
   QUICK_EDIT_STAT_CHANNEL,
 } from "../shared/quickEdit"
+import { UPDATE_CHECK_CHANNEL, UPDATE_SNAPSHOT_CHANNEL } from "../shared/updates"
 import type { BackgroundTray } from "./background/tray"
-import { createMenuBarIconService } from "./background/trayVisibility"
 import type { FullRuntime } from "./fullRuntime"
 import { loadNativeLanguage } from "./i18n/nativeLanguage"
 import { applyMacDockIcon, applyOptionalIcon } from "./identity/appIcon"
@@ -56,10 +57,12 @@ import { firstFileArgument } from "./quickEdit/launchArgs"
 import { QuickEditFiles } from "./quickEdit/service"
 import { isTestMode } from "./runtime/env"
 import { registerAnalysisReportScheme } from "./trpc/science/analysis/reportScheme"
+import { checkForUpdates, updateSnapshot } from "./updates/feedback"
 import { publicReleaseFromPackage } from "./updates/release"
-import { installAppMenu } from "./window/appMenu"
+import { installAppMenu, setUserQuitAction } from "./window/appMenu"
 import { createMainWindow, loadWindowPage } from "./window/mainWindow"
 import { installShutdownGuard } from "./window/shutdownGuard"
+import { createUserQuitAction } from "./window/userQuit"
 
 export type { AppRouter } from "./trpc/appRouter"
 
@@ -86,7 +89,6 @@ if (dataDirOverride) {
   process.env.PI_LAB_DATA_DIR = dataDirOverride
   app.setPath("userData", dataDirOverride)
 }
-const menuBarIcon = createMenuBarIconService(() => app.getPath("userData"), process.platform)
 
 const appIconContext = {
   isPackaged: app.isPackaged,
@@ -169,7 +171,7 @@ function traySnapshot(): BackgroundTraySnapshot {
   }
 }
 
-/** Close the background surface before a user window appears. */
+/** Dispose the app-lifetime menu-bar icon during quit. */
 function closeTray(): void {
   unsubscribeTray?.()
   unsubscribeTray = null
@@ -185,7 +187,7 @@ function attachUserWindow(window: BrowserWindow): BrowserWindow {
   window.webContents.on("did-start-loading", () => {
     fullRendererReady = false
   })
-  closeTray()
+  tray?.hide()
   shutdownGuard.attachWindow(window)
   window.on("closed", () => {
     if (userWindow !== window) return
@@ -210,14 +212,19 @@ async function enterBackground(): Promise<void> {
     app.quit()
     return
   }
-  if (tray) return
-  if (process.platform === "darwin" && !menuBarIcon.get().visible) {
-    hiddenStartup = false
-    return
-  }
+  await ensureTray()
+  hiddenStartup = false
+  if (isTestMode && process.env.PI_LAB_TEST_SHOW_TRAY === "1") tray?.showForTest()
+}
+
+/** Keep one menu-bar icon alive while any PI Lab window is open or hidden. */
+async function ensureTray(): Promise<void> {
+  if (tray || quitting) return
+  const runtime = fullRuntime
+  if (!runtime) throw new Error("Full app did not start")
   if (!appIconPath) throw new Error("PI Lab tray icon is missing")
   const { BackgroundTray } = await import("./background/tray")
-  if (userWindow || quitting) return
+  if (tray || quitting) return
   const created = new BackgroundTray(
     appIconPath,
     identity.name,
@@ -225,21 +232,15 @@ async function enterBackground(): Promise<void> {
     {
       openApp: () => openFull(null),
       newProject: () => openFull("/?newProject=1"),
-      hideIcon: async () => {
-        menuBarIcon.set(false)
-        closeTray()
-      },
       restartToUpdate: () => restartToUpdate?.(),
-      quit: () => app.quit(),
+      quit: () => void requestUserQuit(),
     },
-    traySnapshot(),
+    traySnapshot,
   )
   tray = created
-  hiddenStartup = false
   unsubscribeTray = runtime.subscribeTray((snapshot) =>
     created.publish({ ...snapshot, updateVersion: readyUpdateVersion }),
   )
-  if (isTestMode && process.env.PI_LAB_TEST_SHOW_TRAY === "1") created.showForTest()
 }
 
 function acceptFile(path: string): void {
@@ -310,11 +311,11 @@ const shutdownGuard = installShutdownGuard({
   app,
   ipcMain,
   createRequestId: randomUUID,
-  prepareQuit: async () => {
+  prepareQuit: async (stopConfirmed) => {
     // Full boot may still be reconciling retained agents when Quit is requested.
     try {
       await fullBootScheduler.startNow()
-      return fullRuntime ? fullRuntime.prepareQuit() : true
+      return fullRuntime ? fullRuntime.prepareQuit(stopConfirmed) : true
     } catch (error) {
       dialog.showErrorBox(
         "Could not quit PI Lab",
@@ -325,6 +326,49 @@ const shutdownGuard = installShutdownGuard({
   },
 })
 let fullRuntime: FullRuntime | null = null
+
+const requestUserQuit = createUserQuitAction({
+  pending: () => shutdownGuard.isQuitPending(),
+  count: async () => {
+    await fullBootScheduler.startNow()
+    return fullRuntime ? fullRuntime.runningAgentCount() : 0
+  },
+  choose: async (count) => {
+    const result = await dialog.showMessageBox({
+      type: "question",
+      title: `Quit ${app.getName()}?`,
+      message: `Quit ${app.getName()}?`,
+      detail: "Move to background keeps PI Lab and its work running.",
+      buttons: ["Cancel", "Move to background", count > 0 ? "Quit and stop all agents" : "Quit"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    return result.response === 2 ? "quit" : result.response === 1 ? "background" : "cancel"
+  },
+  confirmRunning: async (count) => {
+    const result = await dialog.showMessageBox({
+      type: "warning",
+      title: "Work is still running",
+      message: `${count} agent${count === 1 ? " is" : "s are"} still running.`,
+      detail:
+        "Agents or results fetching are currently running. Quit and stop agents ends that work. Keep agents running in background leaves PI Lab and the work running.",
+      buttons: ["Quit and stop agents", "Keep agents running in background", "Cancel"],
+      defaultId: 2,
+      cancelId: 2,
+      noLink: true,
+    })
+    return result.response === 0 ? "quit" : result.response === 1 ? "background" : "cancel"
+  },
+  quit: () => shutdownGuard.requestExplicitQuit(),
+  background: () => {
+    if (process.platform === "darwin") app.hide()
+    else userWindow?.hide()
+  },
+  error: (error) =>
+    dialog.showErrorBox("Could not quit PI Lab", `The app remains open. ${String(error)}`),
+})
+setUserQuitAction(() => void requestUserQuit())
 
 ipcMain.handle(APP_ICON_GET_CHANNEL, () => appIconSelection)
 ipcMain.handle(APP_ICON_IDENTITY_CHANNEL, () => iconChannel)
@@ -394,6 +438,8 @@ function createQuickWindow(id: string): BrowserWindow {
   return attachUserWindow(window)
 }
 
+let publicUpdatesStarted: Promise<void> | null = null
+
 /** Import full-app code only after the quick editor reports a focused caret. */
 function startFullBoot(): Promise<void> {
   return import("./fullRuntime")
@@ -417,7 +463,7 @@ function startFullBoot(): Promise<void> {
       })
       fullBootComplete = true
       if (publicRelease && !isTestMode && process.platform === "darwin") {
-        void import("./updates/start")
+        publicUpdatesStarted = import("./updates/start")
           .then(({ startPublicUpdates }) =>
             startPublicUpdates(shutdownGuard, (status, restart) => {
               readyUpdateVersion = status.kind === "ready" ? status.version : null
@@ -433,6 +479,10 @@ function startFullBoot(): Promise<void> {
         userWindow.webContents.send(QUICK_EDIT_EDITOR_VIM_CHANNEL, runtime.editorVim())
       }
       if (!userWindow) await enterBackground()
+      else {
+        await ensureTray()
+        if (isTestMode && process.env.PI_LAB_TEST_SHOW_TRAY === "1") tray?.showForTest()
+      }
     })
     .catch((error: unknown) => {
       console.error("[pi-lab] fatal during boot:", error)
@@ -442,6 +492,13 @@ function startFullBoot(): Promise<void> {
 
 const fullBootScheduler = new FullBootScheduler(startFullBoot, 200)
 
+ipcMain.handle(UPDATE_SNAPSHOT_CHANNEL, updateSnapshot)
+ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
+  await fullBootScheduler.startNow()
+  if (!updateSnapshot().available) await publicUpdatesStarted
+  await checkForUpdates()
+})
+
 /** Open the full app in the existing user window or a new one. */
 async function openFull(route: string | null): Promise<void> {
   await fullBootScheduler.startNow()
@@ -449,12 +506,14 @@ async function openFull(route: string | null): Promise<void> {
   const current = quickFiles.current()
   const destination = route ?? (quickWindow && current ? fullRuntime.routeForFile(current) : null)
   const window = ensureMainWindow()
+  tray?.hide()
   if (quickWindow || destination) await loadWindowPage(window, "full", destination ?? undefined)
   quickWindow = false
   showUserWindow(window)
 }
 
 ipcMain.handle(BACKGROUND_TRAY_SNAPSHOT_CHANNEL, () => traySnapshot())
+ipcMain.handle(BACKGROUND_TRAY_OPEN_DASHBOARD_CHANNEL, () => openFull("/"))
 ipcMain.handle(BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL, async (_event, id: unknown) => {
   if (typeof id !== "string" || !fullRuntime?.hasProject(id)) throw new Error("Unknown project")
   await openFull(`/projects/${encodeURIComponent(id)}`)
@@ -610,6 +669,13 @@ app
       { warn: (message) => console.warn(message) },
     )
     loadNativeLanguage(app.getPath("userData"))
+    app.setAboutPanelOptions({
+      applicationName: app.getName(),
+      applicationVersion: app.getVersion(),
+      version: "",
+      copyright: "MIT Licence",
+      website: "https://pilab.science",
+    })
     installAppMenu()
     hiddenStartup =
       process.argv.includes("--pi-lab-background") ||
@@ -637,7 +703,10 @@ app
   })
   .catch((error) => {
     console.error("[pi-lab] fatal during startup:", error)
-    app.quit()
+    // Startup failed before the app could become usable. The normal quit guard
+    // cannot recover that failed boot promise or ask an absent renderer to approve.
+    disposeRuntime()
+    app.exit(1)
   })
 
 app.on("window-all-closed", () => {
@@ -648,10 +717,13 @@ app.on("before-quit", (event) => {
   if (!event.defaultPrevented) quitting = true
 })
 
-app.on("will-quit", () => {
+/** Release initialized services on normal quit and on fatal startup failure. */
+function disposeRuntime(): void {
   quitting = true
   closeTray()
   fullBootScheduler.cancel()
   shutdownGuard.dispose()
   fullRuntime?.dispose()
-})
+}
+
+app.on("will-quit", disposeRuntime)

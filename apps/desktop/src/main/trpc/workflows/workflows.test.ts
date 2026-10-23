@@ -9,7 +9,7 @@
 // record + emitting a terminal stream event). Tests therefore start a run and
 // then wait for it to settle via `status`.
 import { existsSync, writeFileSync } from "node:fs"
-import { mkdtemp } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projects, projectWorkflowRuns, type WorkflowTask } from "@pi-lab/local-db"
@@ -97,7 +97,11 @@ async function recordFor(
   task: WorkflowTask,
 ): Promise<ProjectWorkflowRecord | null> {
   const status = await harness.caller.workflows.status({ projectId })
-  return task === "summary" ? status.summary : status.fetchExperiments
+  return task === "summary"
+    ? status.summary
+    : task === "plan-research"
+      ? status.planResearch
+      : status.fetchExperiments
 }
 
 /** Wait until the (project, task) run is no longer in flight, returning its record. */
@@ -527,12 +531,12 @@ describe("workflows.run — persistence + status", () => {
     }
   })
 
-  test("a fresh project reports null for both tasks", async () => {
+  test("a fresh project reports null for all tasks", async () => {
     const { runner } = makeRunner(() => ok("unused"))
     const { harness, projectId } = await openProject(runner)
     try {
       const status = await harness.caller.workflows.status({ projectId })
-      expect(status).toEqual({ summary: null, fetchExperiments: null })
+      expect(status).toEqual({ summary: null, fetchExperiments: null, planResearch: null })
     } finally {
       await harness.dispose()
     }
@@ -604,6 +608,45 @@ describe("workflows.run — fetch-experiments task", () => {
       expect(existsSync(skillPath)).toBe(true)
       const prompt = calls[0]?.args.at(-1) ?? ""
       expect(prompt).toContain("fetch-experiments skill")
+    } finally {
+      await harness.dispose()
+    }
+  })
+})
+
+describe("Plan research skill", () => {
+  test("missing skill becomes a visible error without launching an agent, including without Git", async () => {
+    const { calls, runner } = makeRunner(() => ok("must not run"))
+    const harness = await createHarness([CODEX_AGENT], {
+      runNonInteractiveProcess: runner,
+      git: false,
+    })
+    try {
+      const project = await harness.caller.projects.open({ path: harness.repoDir })
+      await harness.caller.workflows.run({ projectId: project.id, task: "plan-research" })
+      const record = await settle(harness, project.id, "plan-research")
+      expect(record.errorMessage).toContain("Plan research skill could not be found")
+      expect(calls).toHaveLength(0)
+    } finally {
+      await harness.dispose()
+    }
+  })
+
+  test("invokes a user-installed skill and retries after the skill changes", async () => {
+    const { calls, runner } = makeRunner(() => ok("Research plan ready"))
+    const { harness, projectId } = await openProject(runner)
+    try {
+      const directory = join(harness.skillsHomeDir, ".agents", "skills", "plan-research")
+      await mkdir(directory, { recursive: true })
+      const path = join(directory, "SKILL.md")
+      await writeFile(path, "---\nname: plan-research\n---\nAsk about the scientific question.\n")
+      await harness.caller.workflows.run({ projectId, task: "plan-research" })
+      expect((await settle(harness, projectId, "plan-research")).result).toBe("Research plan ready")
+      expect(calls[0]?.args.join(" ")).toContain(path)
+      await writeFile(path, "Revised research instructions")
+      await harness.caller.workflows.run({ projectId, task: "plan-research" })
+      await settle(harness, projectId, "plan-research")
+      expect(calls).toHaveLength(2)
     } finally {
       await harness.dispose()
     }

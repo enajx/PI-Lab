@@ -66,8 +66,6 @@ test("keep-running preserves the same agent terminal across a real app quit and 
     await window.getByTestId("nav-settings").click()
     const restoreTabs = window.getByTestId("settings-restore-project-tabs")
     if ((await restoreTabs.getAttribute("aria-checked")) !== "true") await restoreTabs.click()
-    const confirmQuit = window.getByTestId("settings-confirm-quit")
-    if ((await confirmQuit.getAttribute("aria-checked")) === "true") await confirmQuit.click()
     await window.getByTestId("settings-nav-agents").click()
     const quitBehavior = window.getByTestId("settings-agent-quit-behavior")
     await quitBehavior.selectOption("keep-running", { timeout: 5_000 })

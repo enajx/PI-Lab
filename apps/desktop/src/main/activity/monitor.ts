@@ -719,10 +719,10 @@ export class ActivityMonitor implements ActivityMonitorPort {
     if (!run) return
     const title =
       eventType === "workflowStart"
-        ? nativeText("Workflow started")
+        ? nativeText("Routine started")
         : eventType === "workflowCompletion"
-          ? nativeText("Workflow completed")
-          : nativeText("Workflow failed")
+          ? nativeText("Routine completed")
+          : nativeText("Routine failed")
     this.options.notifications.notify({
       eventType,
       title,

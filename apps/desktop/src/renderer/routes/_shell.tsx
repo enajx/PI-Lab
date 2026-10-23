@@ -1,8 +1,15 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderGit2 } from "lucide-react"
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
-import { CommandPalette } from "../CommandPalette"
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useTranslate } from "../i18n/language"
 import { NotificationBridge } from "../notifications/NotificationBridge"
 import {
@@ -25,6 +32,11 @@ import { NewFileControllerProvider } from "./_shell/components/NewFileController
 import { Sidebar } from "./_shell/components/Sidebar"
 import { WorkspaceRecoveryController } from "./_shell/components/WorkspaceRecoveryController"
 import { useTitleBarTrafficLights } from "./_shell/titleBar"
+
+/** Load setting-choice dependencies only when the command palette is opened. */
+const CommandPalette = lazy(() =>
+  import("../CommandPalette").then((module) => ({ default: module.CommandPalette })),
+)
 
 /**
  * Pathless layout route — the default app surface: a ROW of
@@ -174,7 +186,11 @@ function ShellLayout() {
               {content}
             </div>
           )}
-          {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
+          {paletteOpen ? (
+            <Suspense fallback={null}>
+              <CommandPalette onClose={() => setPaletteOpen(false)} />
+            </Suspense>
+          ) : null}
           {findProjectsOpen ? <ProjectsFind onClose={() => setFindProjectsOpen(false)} /> : null}
         </NewFileControllerProvider>
       </AddProjectControllerProvider>
@@ -221,14 +237,17 @@ function useGlobalShortcuts(pathname: string, search: unknown, onCommandPalette:
   routeRef.current = { pathname, search }
   useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector('[data-shortcut-recording="true"]')) return
+      if (eventMatchesShortcut(event, "command-palette")) {
+        event.preventDefault()
+        paletteRef.current()
+        return
+      }
       if (routeRef.current.pathname.startsWith("/settings")) return
       if (eventMatchesShortcut(event, "open-settings")) {
         event.preventDefault()
         rememberSettingsReturnRoute(routeRef.current)
         void navigate({ to: "/settings" })
-      } else if (eventMatchesShortcut(event, "command-palette")) {
-        event.preventDefault()
-        paletteRef.current()
       } else if (
         eventMatchesShortcut(event, "quick-open") &&
         routeRef.current.pathname.startsWith("/projects/")

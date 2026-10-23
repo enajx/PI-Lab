@@ -116,7 +116,7 @@ export interface KillRequest {
   kind: "kill"
   cid: string
   sessionId: string
-  /** Defaults to SIGTERM on the daemon side when omitted. */
+  /** Defaults to SIGHUP on Unix when omitted, matching terminal hangup. */
   signal?: string
 }
 

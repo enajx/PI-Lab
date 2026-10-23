@@ -2,11 +2,10 @@ import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { X } from "lucide-react"
+import { Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
-import { ProjectTypeChoice } from "../../../components/ProjectTypeChoice"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
@@ -17,7 +16,6 @@ import {
   RIGHT_SIDEBAR_MAX_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
   readRestoreProjectTabs,
-  useFetchExperimentsInstructions,
   useNonGitNoticeDismissed,
   useRightSidebarWidth,
   useSidebarCollapsed,
@@ -76,6 +74,21 @@ export function ProjectWorkspace({
     if (pendingLaunch) clearPendingLaunch(projectId)
   }, [pendingLaunch, projectId])
 
+  const openedProject = useRef<string | null>(null)
+  const touchProject = useMutation(
+    trpc.projects.touch.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+      },
+    }),
+  )
+  const markOpened = touchProject.mutate
+  useEffect(() => {
+    if (openedProject.current === projectId) return
+    openedProject.current = projectId
+    markOpened({ id: projectId })
+  }, [markOpened, projectId])
+
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
   const capabilitiesQuery = useQuery(trpc.projects.capabilities.queryOptions({ id: projectId }))
   const initializeGit = useMutation(
@@ -97,7 +110,7 @@ export function ProjectWorkspace({
     ? `${t("Could not check Git availability: ")}${translateKnownError(language, capabilitiesQuery.error.message)}`
     : capabilitiesQuery.isPending
       ? t("Checking Git availability…")
-      : t("Initialize Git to run Git-state-aware project workflows.")
+      : t("Initialize Git to run Git-state-aware project routines.")
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editorSettings: EditorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
 
@@ -248,10 +261,6 @@ export function ProjectWorkspace({
     )
   }
 
-  // The extra fetch-experiments prompt instructions from Settings, passed to the
-  // background workflow control below.
-  const [fetchInstructions] = useFetchExperimentsInstructions()
-
   // Run a launch a project card triggered before navigating here, once the main
   // workspace is ready (so a `main`-mode launch reuses the already-ensured branch
   // workspace rather than racing `ensureMain` to create it). The launched session
@@ -346,6 +355,11 @@ export function ProjectWorkspace({
 
   return (
     <div data-testid="project-view" className="flex h-full flex-col gap-3 p-4">
+      {touchProject.isError ? (
+        <p role="alert" className="text-sm text-muted-foreground">
+          {t("Could not record this project's recent activity:")} {touchProject.error.message}
+        </p>
+      ) : null}
       <header
         className={cn(
           "flex items-center justify-between gap-3",
@@ -362,32 +376,29 @@ export function ProjectWorkspace({
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {project ? (
-            <ProjectTypeChoice
-              projectId={projectId}
-              typeId={project.typeId}
-              testId="project-view-type"
-            />
-          ) : null}
+        <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
+          <button
+            type="button"
+            data-testid="project-view-auto-research"
+            aria-busy={startAutoResearch.isPending}
+            title={!gitAvailable ? gitDisabledReason : t("Auto research")}
+            data-feature-label={t("Auto research")}
+            data-feature-help={t(
+              "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
+            )}
+            disabled={!gitAvailable || !workspaceId || startAutoResearch.isPending}
+            onClick={onAutoResearch}
+            className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Telescope className="size-3.5 shrink-0" aria-hidden />
+            <span>{t("Auto research")}</span>
+          </button>
           <ProjectWorkflowControl
             projectId={projectId}
             projectName={project?.name ?? t("Project")}
-            task="fetch-experiments"
+            task="plan-research"
             variant="labeled"
-            testId="project-view-fetch-experiments"
-            instructions={fetchInstructions}
-            disabled={!gitAvailable}
-            disabledReason={gitDisabledReason}
-          />
-          <ProjectWorkflowControl
-            projectId={projectId}
-            projectName={project?.name ?? t("Project")}
-            task="summary"
-            variant="labeled"
-            testId="project-view-summary"
-            disabled={!gitAvailable}
-            disabledReason={gitDisabledReason}
+            testId="project-view-plan-research"
           />
           <AgentStatusControl />
           <CaffeineControl />

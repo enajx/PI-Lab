@@ -10,7 +10,7 @@ import type { TerminalAgent } from "@pi-lab/shared"
 import Database from "better-sqlite3"
 import { eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { dispatchAutomation } from "../../automations/dispatch"
+import { dispatchAutomation, hasRunningProjectAutomation } from "../../automations/dispatch"
 import type {
   NonInteractiveProcessResult,
   NonInteractiveProcessRunner,
@@ -533,8 +533,9 @@ describe("runNow — non-interactive process lifecycle", () => {
       sessionId: null,
     })
     expect(h.db.select().from(agentSessions).all()).toHaveLength(0)
+    expect(hasRunningProjectAutomation(projectId)).toBe(true)
     expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
-      "Workflow started",
+      "Routine started",
     ])
 
     finish({ code: 0, signal: null, error: null, stdout: "", stderr: "" })
@@ -546,9 +547,10 @@ describe("runNow — non-interactive process lifecycle", () => {
           .where(eq(automationRuns.id, runId ?? ""))
           .get()?.state === "completed",
     )
+    expect(hasRunningProjectAutomation(projectId)).toBe(false)
     expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
-      "Workflow started",
-      "Workflow completed",
+      "Routine started",
+      "Routine completed",
     ])
 
     const activations: unknown[] = []
@@ -595,7 +597,7 @@ describe("runNow — non-interactive process lifecycle", () => {
       .get()
     expect(run?.error).toMatch(/code 17.*model unavailable/i)
     expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
-      "Workflow failed",
+      "Routine failed",
     ])
   })
 
@@ -655,7 +657,7 @@ describe("runNow — non-interactive process lifecycle", () => {
     expect(run?.error).toMatch(/not available.*settings/i)
     expect(runner).not.toHaveBeenCalled()
     expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
-      "Workflow failed",
+      "Routine failed",
     ])
   })
 
@@ -689,7 +691,7 @@ describe("runNow — non-interactive process lifecycle", () => {
       error: "Unable to start /custom/codex: spawn EACCES",
     })
     expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
-      "Workflow failed",
+      "Routine failed",
     ])
   })
 
@@ -747,7 +749,7 @@ describe("runNow — non-interactive process lifecycle", () => {
       .get()
     expect(run?.error).toMatch(expectedError)
     expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
-      "Workflow failed",
+      "Routine failed",
     ])
   })
 })
@@ -889,9 +891,10 @@ describe("scheduler fires a due automation end-to-end", () => {
     )
 
     expect(runner).toHaveBeenCalledTimes(1)
+    expect(hasRunningProjectAutomation(projectId)).toBe(false)
     expect(h.notificationDeliveries.map((delivery) => delivery.input.title)).toEqual([
-      "Workflow started",
-      "Workflow completed",
+      "Routine started",
+      "Routine completed",
     ])
   })
 })

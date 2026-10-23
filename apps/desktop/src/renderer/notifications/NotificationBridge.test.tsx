@@ -110,7 +110,7 @@ describe("NotificationBridge", () => {
     })
   })
 
-  test("routes an exact workflow activation to its workflow and run", async () => {
+  test("routes an exact routine activation to its routine and run", async () => {
     render(<NotificationBridge />)
     mocks.activation.emit({
       type: "workflow",

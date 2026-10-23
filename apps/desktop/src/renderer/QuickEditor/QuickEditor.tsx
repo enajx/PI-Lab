@@ -655,7 +655,7 @@ export function QuickEditor({
   useEffect(() => {
     if (!fullApp) return
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key.toLowerCase() !== "w" || !(event.metaKey || event.ctrlKey)) return
+      if (event.key.toLowerCase() !== "w" || !event.ctrlKey || event.metaKey) return
       event.preventDefault()
       event.stopPropagation()
       requestFileClose()

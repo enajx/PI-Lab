@@ -40,7 +40,8 @@ test("the sidebar follows agent activity while the Dashboard is unmounted", asyn
 
     await window.getByTestId("project-item").click()
     await expect(window.getByTestId("dashboard")).toHaveCount(0)
-    await window.getByTestId("central-new-agent").click()
+    await window.getByTestId("central-add-menu").click()
+    await window.getByTestId("central-add-agent").click()
     const chooser = window.getByTestId("new-agent-dialog")
     await chooser.locator("label", { hasText: "Test Activity" }).click()
     await chooser.getByRole("button", { name: "Start agent" }).click()

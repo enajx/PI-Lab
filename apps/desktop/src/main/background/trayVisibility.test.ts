@@ -1,25 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "vitest"
 import { createMenuBarIconService } from "./trayVisibility"
 
-test("menu-bar icon choice persists across app starts and can be restored", () => {
+test("the menu-bar icon stays visible despite an older saved hidden choice", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "pi-lab-menu-bar-"))
-  try {
-    const first = createMenuBarIconService(() => dataDir, "darwin")
-    expect(first.get()).toEqual({ visible: true, available: true })
-    first.set(false)
-    expect(createMenuBarIconService(() => dataDir, "darwin").get()).toEqual({
-      visible: false,
-      available: true,
-    })
-    first.set(true)
-    expect(createMenuBarIconService(() => dataDir, "darwin").get()).toEqual({
-      visible: true,
-      available: true,
-    })
-  } finally {
-    rmSync(dataDir, { recursive: true, force: true })
-  }
+  writeFileSync(join(dataDir, "menu-bar-icon-hidden"), "")
+  const service = createMenuBarIconService("darwin")
+  expect(service.get()).toEqual({ visible: true, available: false })
+  expect(() => service.set(false)).toThrow("always visible")
+  expect(service.set(true)).toEqual({ visible: true, available: false })
+  rmSync(dataDir, { recursive: true })
 })

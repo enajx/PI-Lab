@@ -99,6 +99,43 @@ afterEach(async () => {
 })
 
 describe("projects.open", () => {
+  test("selected sibling folders in one Git repo remain distinct projects and reopen without changing details", async () => {
+    const names = ["paper-latex", "python-research", "cpp-research"] as const
+    const opened = []
+    for (const name of names) {
+      const path = join(h.repoDir, name)
+      await mkdir(path)
+      opened.push(
+        await h.caller.projects.open({
+          path,
+          details: { name, typeId: "general", deadline: null, agentId: null },
+        }),
+      )
+    }
+    expect(new Set(opened.map((project) => project.id)).size).toBe(3)
+    expect(opened.map((project) => project.repoPath)).toEqual(
+      names.map((name) => join(h.repoDir, name)),
+    )
+    expect((await h.caller.projects.list()).map((project) => project.name).sort()).toEqual(
+      [...names].sort(),
+    )
+    const first = opened[0]
+    if (!first) throw new Error("No project created")
+    await h.caller.projects.updateDetails({
+      id: first.id,
+      details: { name: "My paper", typeId: "manuscript", deadline: "2027-01-02", agentId: null },
+    })
+    const reopened = await h.caller.projects.open({
+      path: join(h.repoDir, names[0]),
+      details: { name: names[0], typeId: "general", deadline: null, agentId: null },
+    })
+    expect(reopened.id).toBe(first.id)
+    expect(reopened.name).toBe("My paper")
+    expect(reopened.typeId).toBe("manuscript")
+    expect(reopened.metadata?.deadline).toBe("2027-01-02")
+    expect(await h.caller.projects.list()).toHaveLength(3)
+  })
+
   test.each([
     { files: ["RESEARCH.md"], expected: "research" },
     { files: ["PROJECT.md"], expected: "software" },

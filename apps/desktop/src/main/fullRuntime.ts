@@ -3,13 +3,16 @@ import { homedir } from "node:os"
 import { isAbsolute, join, relative, sep } from "node:path"
 import {
   agentSessions,
+  automationRuns,
+  automations,
   getAgentSettingsOrDefaults,
   getSettingsOrDefaults,
   MigrationFailure,
   projects,
+  projectWorkflowRuns,
   resolveDataDir,
 } from "@pi-lab/local-db"
-import { ne } from "drizzle-orm"
+import { eq, max, ne, sql } from "drizzle-orm"
 import { app, type BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
@@ -25,7 +28,11 @@ import {
 import { ActivityStatusFeed } from "./activity/statusFeed"
 import { agentLaunchLifecycle } from "./agents/launchLifecycle"
 import { prepareAgentQuit } from "./agents/quitPolicy"
-import { dispatchAutomation, restoreAutomationProcess } from "./automations/dispatch"
+import {
+  dispatchAutomation,
+  hasRunningProjectAutomation,
+  restoreAutomationProcess,
+} from "./automations/dispatch"
 import { ManagedProcesses } from "./automations/managedProcesses"
 import { AutomationScheduler } from "./automations/scheduler"
 import { trayProjectSnapshot } from "./background/projectSnapshot"
@@ -66,7 +73,7 @@ import {
 } from "./trpc/projects/planning"
 import { AnalysisInteractiveController } from "./trpc/science/analysis/interactiveController"
 import { seedWritableTemplate } from "./trpc/template"
-import { restoreProjectWorkflow } from "./trpc/workflows/workflows"
+import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "./trpc/workflows/workflows"
 import { publicReleaseFromPackage } from "./updates/release"
 import { initializePublicUpdateChannel } from "./updates/selection"
 import { installAppMenu } from "./window/appMenu"
@@ -259,11 +266,65 @@ export class FullRuntime {
     return best
   }
 
-  /** Current working and waiting projects for the background popover. */
+  /** Recent opened projects and durable agent activity, plus all currently live work. */
   traySnapshot(): BackgroundTraySnapshot {
+    const db = getDb()
+    const recentAgents = db
+      .select({
+        projectId: agentSessions.projectId,
+        at: max(agentSessions.updatedAt).as("agent_at"),
+      })
+      .from(agentSessions)
+      .groupBy(agentSessions.projectId)
+      .as("recent_agents")
+    const recentWorkflows = db
+      .select({
+        projectId: projectWorkflowRuns.projectId,
+        at: max(projectWorkflowRuns.lastCheckedAt).as("workflow_at"),
+      })
+      .from(projectWorkflowRuns)
+      .groupBy(projectWorkflowRuns.projectId)
+      .as("recent_workflows")
+    const recentRoutines = db
+      .select({
+        projectId: automations.projectId,
+        at: sql<
+          number | null
+        >`max(coalesce(${automationRuns.completedAt}, ${automationRuns.launchedAt}))`.as(
+          "routine_at",
+        ),
+      })
+      .from(automationRuns)
+      .innerJoin(automations, eq(automationRuns.automationId, automations.id))
+      .groupBy(automations.projectId)
+      .as("recent_routines")
+    const rows = db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        opened: projects.lastOpenedAt,
+        agent: recentAgents.at,
+        workflow: recentWorkflows.at,
+        routine: recentRoutines.at,
+      })
+      .from(projects)
+      .leftJoin(recentAgents, eq(projects.id, recentAgents.projectId))
+      .leftJoin(recentWorkflows, eq(projects.id, recentWorkflows.projectId))
+      .leftJoin(recentRoutines, eq(projects.id, recentRoutines.projectId))
+      .all()
     return trayProjectSnapshot(
-      getDb().select({ id: projects.id, name: projects.name }).from(projects).all(),
-      this.activityRegistry.snapshot().sessions,
+      rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        lastActivityAt: Math.max(row.opened, row.agent ?? 0, row.workflow ?? 0, row.routine ?? 0),
+      })),
+      [
+        ...this.activityRegistry.snapshot().sessions,
+        ...rows
+          .filter((row) => hasRunningProjectWorkflow(row.id) || hasRunningProjectAutomation(row.id))
+          .map((row) => ({ projectId: row.id, state: "working" as const })),
+      ],
+      Date.now(),
     )
   }
 
@@ -311,8 +372,15 @@ export class FullRuntime {
       .some((project) => project.id === id)
   }
 
-  /** Apply the same persisted policy to all agents before any actual app quit. */
-  async prepareQuit(): Promise<boolean> {
+  /** Count all managed agent modes, including result fetching, before a user quit choice. */
+  async runningAgentCount(): Promise<number> {
+    await this.ensureAgentRecovery()
+    await this.recoverBackgroundAgents()
+    return (await this.liveTerminalAgents()).length + (await this.managedProcesses.runningCount())
+  }
+
+  /** Explicit Quit stops work; programmatic quits retain the saved policy. */
+  async prepareQuit(stopConfirmed: boolean): Promise<boolean> {
     try {
       await this.ensureAgentRecovery()
       return await prepareAgentQuit({
@@ -321,10 +389,11 @@ export class FullRuntime {
           await this.recoverBackgroundAgents()
         },
         resume: () => agentLaunchLifecycle.resume(),
-        behavior: () => getAgentSettingsOrDefaults(getDb()).quitBehavior,
+        behavior: () => (stopConfirmed ? "stop" : getAgentSettingsOrDefaults(getDb()).quitBehavior),
         count: async () =>
           (await this.liveTerminalAgents()).length + (await this.managedProcesses.runningCount()),
         confirm: async (count) => {
+          if (stopConfirmed) return "stop"
           const result = await dialog.showMessageBox({
             type: "warning",
             title: "Agents are running",
@@ -438,6 +507,9 @@ export class FullRuntime {
       db: getDb(),
       appChannel: channelFromAppName(app.getName()),
       skillsHomeDir: skillsHomeDirOverride ?? homedir(),
+      bundledSkillsDir: app.isPackaged
+        ? join(process.resourcesPath, "skills")
+        : join(__dirname, "..", "..", "resources", "skills"),
       getDaemonClient: () => this.terminalSupervisor.ensureClient(),
       agentCatalog: this.agentCatalog,
       resolveAgentExecutable: DEFAULT_AGENT_EXECUTABLE_RESOLVER,

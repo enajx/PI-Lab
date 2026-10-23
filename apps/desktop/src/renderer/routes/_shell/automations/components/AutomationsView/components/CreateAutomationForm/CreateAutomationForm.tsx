@@ -188,7 +188,7 @@ export function CreateAutomationForm({
           data-testid="create-automation-submit"
           disabled={isPending || !canSubmit}
         >
-          {t("Create workflow")}
+          {t("Create routine")}
         </Button>
       </div>
     </form>

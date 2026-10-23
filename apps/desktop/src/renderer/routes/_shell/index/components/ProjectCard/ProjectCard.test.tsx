@@ -460,7 +460,7 @@ describe("ProjectCard metadata", () => {
   })
 })
 
-describe("ProjectCard background workflow controls", () => {
+describe("ProjectCard background routine controls", () => {
   test("an idle control triggers a background run on click (no navigation)", async () => {
     const calls: unknown[] = []
     renderCard(project({ id: "wf-idle", name: "Photon", metadata: null }), {
@@ -574,7 +574,7 @@ describe("ProjectCard background workflow controls", () => {
     await waitFor(() => expect(screen.queryByTestId("workflow-result-dialog")).toBeNull())
   })
 
-  test("an errored control is red and opens the popup showing the failure", async () => {
+  test("an errored control stays neutral and opens the popup showing the failure", async () => {
     renderCard(project({ id: "wf-err", name: "Photon", metadata: null }), {
       "workflows.status": () => ({
         summary: {
@@ -598,7 +598,7 @@ describe("ProjectCard background workflow controls", () => {
 
     const summary = await screen.findByTestId("project-card-summary")
     await waitFor(() => expect(summary.getAttribute("data-state")).toBe("error"))
-    expect(summary.className).toContain("red")
+    expect(summary.className).not.toContain("red")
 
     fireEvent.click(summary)
 

@@ -195,7 +195,7 @@ export class ActivityRegistry {
     const at = this.clock.now()
     if (record.workflowState === "pending" || record.workflowState === "running") {
       record.workflowState = "failed"
-      record.workflowFailureReason = exitDescription ?? "Agent exited before workflow completion"
+      record.workflowFailureReason = exitDescription ?? "Agent exited before routine completion"
       record.workflowCompletedAt = at
     }
     this.transitionToExited(record, at)

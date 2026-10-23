@@ -21,6 +21,8 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = join(HERE, "..", "..", "apps", "desktop")
 const MAIN_ENTRY = join(DESKTOP_DIR, "out", "main", "index.js")
 const ELECTRON_PATH = createRequire(join(DESKTOP_DIR, "package.json"))("electron") as string
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: Optional real packaged app verification.
+const packagedBinary = process.env.PI_LAB_PACKAGED_BINARY
 
 let app: ElectronApplication
 let dataDir: string
@@ -39,8 +41,8 @@ async function initRepo(dir: string): Promise<void> {
 
 async function launchApp(): Promise<void> {
   app = await electron.launch({
-    executablePath: ELECTRON_PATH,
-    args: [MAIN_ENTRY],
+    executablePath: packagedBinary ?? ELECTRON_PATH,
+    args: packagedBinary ? [] : [MAIN_ENTRY],
     env: {
       ...process.env,
       PI_LAB_TEST_MODE: "1",
@@ -581,7 +583,10 @@ test("closing a terminal tab kills the daemon session", async () => {
 
   const daemon = new DaemonClient(join(dataDir, "daemon.sock"))
   await daemon.connect()
-  expect((await daemon.list()).map((session) => session.id)).toContain(sessionId)
+  const session = (await daemon.list()).find((entry) => entry.id === sessionId)
+  expect(session?.alive).toBe(true)
+  const shellPid = session?.pid
+  expect(shellPid).toBeGreaterThan(0)
 
   await window.getByTestId("central-tab-close").click()
   await expect(window.getByTestId("central-tab")).toHaveCount(0)
@@ -590,6 +595,7 @@ test("closing a terminal tab kills the daemon session", async () => {
       async () => (await daemon.list()).find((session) => session.id === sessionId)?.alive ?? false,
     )
     .toBe(false)
+  expect(() => process.kill(shellPid as number, 0)).toThrow(/ESRCH/)
   daemon.close()
 })
 

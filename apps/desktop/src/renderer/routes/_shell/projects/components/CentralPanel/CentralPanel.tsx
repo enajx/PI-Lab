@@ -128,16 +128,14 @@ export function CentralPanel({
     }
   }, [addMenuOpen])
 
-  // ⌘W closes the active tab (and stays in the project). The app menu deliberately
-  // leaves ⌘W unbound (see main/window/appMenu.ts) so the keystroke reaches here
-  // instead of closing the window. Capture phase + a ref so it fires even over a
-  // focused terminal/editor and always sees the current active tab.
+  // Ctrl+W closes the active tab; macOS Cmd+W belongs to the native background action.
   const closeActiveTabRef = useRef(controller.closeActiveTab)
   closeActiveTabRef.current = controller.closeActiveTab
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
-        (event.metaKey || event.ctrlKey) &&
+        event.ctrlKey &&
+        !event.metaKey &&
         !event.shiftKey &&
         !event.altKey &&
         event.key.toLowerCase() === "w"

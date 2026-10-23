@@ -21,16 +21,16 @@ export function AutomationsEmptyState({ canCreate, onCreate }: AutomationsEmptyS
       className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center"
     >
       <Workflow className="size-8 text-muted-foreground/40" aria-hidden />
-      <p className="font-medium text-foreground text-sm">{t("No workflows yet")}</p>
+      <p className="font-medium text-foreground text-sm">{t("No routines yet")}</p>
       <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
         {t(
-          "Workflows run an agent on a project on a schedule — nightly checks, recurring sweeps, or a looping research task.",
+          "Routines run an agent on a project on a schedule — nightly checks, recurring sweeps, or a looping research task.",
         )}
       </p>
       {canCreate ? (
         <Button data-testid="empty-create" size="sm" className="mt-1" onClick={onCreate}>
           <Plus aria-hidden />
-          {t("New workflow")}
+          {t("New routine")}
         </Button>
       ) : (
         <p className="mt-1 text-muted-foreground/70 text-xs">

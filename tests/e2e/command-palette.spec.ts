@@ -114,8 +114,7 @@ test("Add project opens the shared chooser and enters the folder returned by the
   await expect(window.getByTestId("add-project-template")).toBeVisible()
 
   await window.getByTestId("add-project-folder").click()
-  await expect(window.getByTestId("add-project-dialog")).toBeVisible()
-  await window.getByTestId("add-project-confirm").click()
+  await expect(window.getByTestId("add-project-dialog")).toHaveCount(0)
 
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByRole("heading", { name: "added-repo" })).toBeVisible()
@@ -289,4 +288,43 @@ test("⌘F inside a project fuzzy-searches and opens the matched file", async ()
       timeout: 30_000,
     },
   )
+})
+
+test("Settings opened from a project palette returns to that project on Escape", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible()
+  await window.keyboard.press("ControlOrMeta+p")
+  await window.locator('[data-command-id="nav-settings"]').click()
+  await expect(window.getByTestId("settings-nav-general")).toHaveAttribute("data-active", "true")
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("project-view")).toBeVisible()
+})
+
+test("palette changes individual settings directly and preserves them after reload", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  for (const command of [
+    "settings-keep-running-after-close",
+    "settings-restore-project-tabs",
+    "settings-update-channel-beta",
+  ]) {
+    await window.keyboard.press("ControlOrMeta+p")
+    await window.locator(`[data-command-id="${command}"]`).click({ timeout: 5000 })
+    await expect(window.getByTestId("command-palette")).toHaveCount(0)
+    await expect(window.getByTestId("dashboard")).toBeVisible()
+  }
+  await window.reload()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  await window.keyboard.press("ControlOrMeta+,")
+  await expect(window.getByTestId("settings-keep-running-after-close")).toHaveAttribute(
+    "aria-checked",
+    "false",
+  )
+  await expect(window.getByTestId("settings-restore-project-tabs")).toHaveAttribute(
+    "aria-checked",
+    "false",
+  )
+  await expect(window.getByTestId("settings-update-channel")).toHaveValue("beta")
 })

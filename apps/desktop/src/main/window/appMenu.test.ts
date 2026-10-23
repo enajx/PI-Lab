@@ -5,7 +5,7 @@ const menu = vi.hoisted(() => ({
   buildFromTemplate: vi.fn((template) => template),
   setApplicationMenu: vi.fn(),
 }))
-const appState = vi.hoisted(() => ({ isPackaged: false, name: "PI Lab" }))
+const appState = vi.hoisted(() => ({ isPackaged: false, name: "PI Lab", hide: vi.fn() }))
 vi.mock("electron", () => ({
   Menu: menu,
   app: {
@@ -13,10 +13,11 @@ vi.mock("electron", () => ({
       return appState.isPackaged
     },
     getName: () => appState.name,
+    hide: appState.hide,
   },
 }))
 
-import { installAppMenu, setReadyUpdateMenuItem } from "./appMenu"
+import { installAppMenu, setReadyUpdateMenuItem, setUserQuitAction } from "./appMenu"
 
 afterEach(() => {
   setReadyUpdateMenuItem(null)
@@ -27,6 +28,29 @@ afterEach(() => {
 })
 
 describe("app menu", () => {
+  test("Cmd+Q uses the confirmed user action after menu rebuilds", () => {
+    const request = vi.fn()
+    setUserQuitAction(request)
+    setReadyUpdateMenuItem({ version: "1.2.0", restart: vi.fn() })
+    const template = menu.buildFromTemplate.mock.lastCall?.[0]
+    const quit = template
+      .flatMap((item: { submenu?: unknown[] }) => item.submenu ?? [])
+      .find((item: { id?: string }) => item.id === "user-quit")
+    expect(quit.accelerator).toBe("CommandOrControl+Q")
+    quit.click()
+    expect(request).toHaveBeenCalledOnce()
+  })
+  test.skipIf(process.platform !== "darwin")("Cmd+W hides the app without closing windows", () => {
+    installAppMenu()
+    const template = menu.buildFromTemplate.mock.lastCall?.[0]
+    const background = template
+      .flatMap((item: { submenu?: unknown[] }) => item.submenu ?? [])
+      .find((item: { accelerator?: string }) => item.accelerator === "Command+W")
+    expect(background).toBeDefined()
+    background.click()
+    expect(appState.hide).toHaveBeenCalledOnce()
+  })
+
   test.skipIf(process.platform !== "darwin")(
     "offers Restart to Update only when a public update is ready",
     () => {
@@ -78,7 +102,13 @@ describe("app menu", () => {
     installAppMenu()
     const template = menu.buildFromTemplate.mock.calls[0]?.[0]
     expect(template[0].label).toBe("File")
-    expect(template[0].submenu).toEqual([{ role: "quit", label: "Quit PI Lab Beta" }])
+    expect(template[0].submenu).toEqual([
+      expect.objectContaining({
+        id: "user-quit",
+        label: "Quit PI Lab Beta",
+        accelerator: "CommandOrControl+Q",
+      }),
+    ])
     expect(JSON.stringify(template)).not.toContain("Install 'pilab' command")
   })
 })

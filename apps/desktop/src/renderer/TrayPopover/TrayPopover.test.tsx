@@ -13,6 +13,7 @@ function bridge(initial: BackgroundTraySnapshot) {
         listener = null
       }
     }),
+    openDashboard: vi.fn(async () => undefined),
     openProject: vi.fn(async () => undefined),
     openFile: vi.fn(async () => undefined),
     restartToUpdate: vi.fn(),
@@ -47,6 +48,7 @@ test("project monitor opens an active project without general app actions", asyn
   render(<TrayPopover />)
   fireEvent.click(await screen.findByRole("button", { name: /Alpha.*Working/ }))
   await waitFor(() => expect(api.openProject).toHaveBeenCalledWith("alpha"))
+  expect(api.openDashboard).not.toHaveBeenCalled()
   expect(screen.queryByText("Background activity")).toBeNull()
   expect(screen.queryByRole("button", { name: "Open PI Lab" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Open File" })).toBeNull()
@@ -69,4 +71,22 @@ test("shows a downloaded update in the tray and offers an approved restart", asy
   expect(await screen.findByText("Ready to update to 0.1.2")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Restart to Update" }))
   expect(api.restartToUpdate).toHaveBeenCalledOnce()
+  expect(api.openDashboard).not.toHaveBeenCalled()
+})
+
+test("panel background opens Dashboard", async () => {
+  const { api } = bridge({ projects: [] })
+  render(<TrayPopover />)
+  await screen.findByText("No recent projects")
+  fireEvent.click(screen.getByRole("button", { name: "Open Dashboard" }))
+  await waitFor(() => expect(api.openDashboard).toHaveBeenCalledOnce())
+  expect(api.openProject).not.toHaveBeenCalled()
+})
+
+test("empty content and header clicks open Dashboard", async () => {
+  const { api } = bridge({ projects: [] })
+  render(<TrayPopover />)
+  fireEvent.click(await screen.findByText("No recent projects"))
+  fireEvent.click(screen.getByText("PI Lab"))
+  expect(api.openDashboard).toHaveBeenCalledTimes(2)
 })

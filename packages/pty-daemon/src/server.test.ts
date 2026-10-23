@@ -374,6 +374,24 @@ describe("kill", () => {
   })
 })
 
+test.skipIf(process.platform === "win32")(
+  "default kill ends an interactive shell that ignores SIGTERM",
+  async () => {
+    const client = await newClient()
+    const session = await client.spawn({ command: "/bin/sh", args: ["-i"], cwd: socketDir })
+    await client.write(session.id, "printf 'SHELL_READY\\n'\n")
+    await waitFor(async () =>
+      (await client.attach(session.id)).scrollback.includes("SHELL_READY\r\n"),
+    )
+    expect(session.pid).toBeGreaterThan(0)
+    await client.kill(session.id)
+    await waitFor(
+      async () => !(await client.list()).find((entry) => entry.id === session.id)?.alive,
+    )
+    expect(() => process.kill(session.pid as number, 0)).toThrow(/ESRCH/)
+  },
+)
+
 describe("error handling", () => {
   test("attaching to an unknown session yields a DaemonError", async () => {
     const client = await newClient()

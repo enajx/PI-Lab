@@ -757,7 +757,7 @@ test("quick editor keeps its header visible and opens PI Lab with Command Enter"
   }
 })
 
-test("Editor stays below Workflows and opens an Untitled tab or chosen file", async () => {
+test("Editor leads the sidebar and opens an Untitled tab or chosen file", async () => {
   test.setTimeout(120_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-editor-nav-"))
   const firstFile = join(dataDir, "first.py")
@@ -792,10 +792,8 @@ test("Editor stays below Workflows and opens an Untitled tab or chosen file", as
     const editorNav = nav.getByTestId("nav-editor")
     await expect(editorNav).toBeVisible()
     expect(
-      await nav
-        .getByTestId("nav-automations")
-        .evaluate((element) => element.nextElementSibling?.getAttribute("data-testid")),
-    ).toBe("nav-editor")
+      await editorNav.evaluate((element) => element.nextElementSibling?.textContent),
+    ).toContain("Analysis")
     await editorNav.click()
     await expect(window.getByTestId("quick-editor-tab")).toContainText("Untitled")
     await expect(window.getByTestId("quick-editor-full-app").locator(".cm-content")).toBeVisible()
@@ -1040,7 +1038,7 @@ test("full-app Editor has one closable file tab and protects unsaved edits", asy
 
     await editor.press("ControlOrMeta+End")
     await window.keyboard.type("value = 4\n")
-    await editor.press("ControlOrMeta+w")
+    await window.getByTestId("quick-editor-tab-close").click()
     await expect(closeDialog).toBeVisible()
     await closeDialog.getByRole("button", { name: "Save" }).click()
     await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })

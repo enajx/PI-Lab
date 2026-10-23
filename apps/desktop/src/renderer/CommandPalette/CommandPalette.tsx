@@ -27,6 +27,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const t = useTranslate()
   const commands = usePaletteCommands()
   const [query, setQuery] = useState("")
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [running, setRunning] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
@@ -68,9 +70,15 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
 
   const choose = (index: number) => {
     const entry = ranked[index]
-    if (!entry) return
-    onClose()
-    entry.command.run()
+    if (!entry || running) return
+    setActionError(null)
+    setRunning(true)
+    void Promise.resolve()
+      .then(() => entry.command.run())
+      .then(onClose, (error: unknown) => {
+        setActionError(`Could not apply command: ${String(error)}`)
+        setRunning(false)
+      })
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -122,6 +130,11 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
           placeholder={t("Search commands and projects…")}
           className="shrink-0 border-border border-b bg-transparent px-4 py-3 text-foreground text-sm outline-none placeholder:text-muted-foreground"
         />
+        {actionError ? (
+          <p role="alert" className="px-4 py-2 text-destructive text-sm">
+            {actionError}
+          </p>
+        ) : null}
         <ul ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">
           {ranked.length === 0 ? (
             <li
@@ -139,6 +152,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                 <li key={command.id}>
                   <button
                     type="button"
+                    disabled={running}
                     data-testid="command-palette-item"
                     data-command-id={command.id}
                     data-feature-label={command.label}

@@ -304,24 +304,31 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("add-project-menu")).toBeNull()
   })
 
-  test("Workflows is reachable inside the single workspace nav", async () => {
+  test("Routines is reachable inside the single workspace nav", async () => {
     renderSidebar()
     await waitFor(() => expect(screen.getByTestId("nav-automations")).toBeTruthy())
 
     const workflows = screen.getByTestId("nav-automations")
-    expect(workflows.textContent).toContain("Workflows")
+    expect(workflows.textContent).toContain("Routines")
     // Workflows shares the one nav with the science rows (not a separate block).
     expect(screen.getByTestId("science-nav").contains(workflows)).toBe(true)
     expect(screen.getAllByTestId("science-nav-item").length).toBeGreaterThan(0)
   })
 
-  test("Editor stays after Workflows in the workspace nav even without an open file", async () => {
+  test("workspace nav uses the requested default order and Editor opens without a file", async () => {
     const { router } = renderSidebar()
     const nav = await screen.findByTestId("science-nav")
-    const workflows = screen.getByTestId("nav-automations")
     const editor = screen.getByTestId("nav-editor")
     expect(nav.contains(editor)).toBe(true)
-    expect(workflows.nextElementSibling).toBe(editor)
+    expect([...nav.children].map((row) => row.getAttribute("data-science-tab"))).toEqual([
+      "editor",
+      "analysis",
+      "tasks",
+      "library",
+      "skills",
+      "workflows",
+      "cluster",
+    ])
     fireEvent.click(editor)
     await waitFor(() => expect(router.state.location.pathname).toBe("/quick-edit"))
   })
@@ -334,7 +341,7 @@ describe("Sidebar", () => {
     expect(nav.children[1]).toBe(screen.getByTestId("nav-automations"))
   })
 
-  test("adds Editor after Workflows in an older saved nav order", async () => {
+  test("adds Editor after Routines in an older saved nav order", async () => {
     window.localStorage.setItem(
       "pi-lab.sidebar.navOrder",
       JSON.stringify(["workflows", "library", "analysis"]),

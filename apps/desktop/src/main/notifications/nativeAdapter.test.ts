@@ -63,12 +63,12 @@ describe("createNativeNotificationAdapter", () => {
     })
 
     adapter.deliver(
-      { title: "Workflow complete", body: "Analysis finished", silent: true },
+      { title: "Routine complete", body: "Analysis finished", silent: true },
       { onClick: vi.fn(), onFailure: vi.fn() },
     )
 
     expect(harness.create).toHaveBeenCalledWith({
-      title: "Workflow complete",
+      title: "Routine complete",
       body: "Analysis finished",
       silent: true,
     })

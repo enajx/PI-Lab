@@ -6,6 +6,7 @@ import type { AppIconBridge } from "../../../../shared/appIcon"
 import type { BackgroundTrayBridge } from "../../../../shared/backgroundTray"
 import type { QuickEditBridge } from "../../../../shared/quickEdit"
 import type { ShutdownBridge, ShutdownRequest } from "../../../../shared/shutdown"
+import type { UpdatesBridge } from "../../../../shared/updates"
 import { drainFileOperations } from "../../../Editor/hooks/useEditorBuffers/fileOperations"
 import { useTranslate } from "../../../i18n/language"
 import { readRestoreProjectTabs, useRestoreProjectTabs } from "../../../preferences/preferences"
@@ -31,6 +32,7 @@ declare global {
       setInterfaceLanguage?: (language: string) => void
       quickEdit?: QuickEditBridge
       backgroundTray?: BackgroundTrayBridge
+      updates?: UpdatesBridge
       appIcon?: AppIconBridge
     }
   }

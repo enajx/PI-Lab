@@ -26,7 +26,6 @@ type AddProjectMenuProps =
     }
 
 type PendingProject =
-  | { kind: "folder"; name: string; path: string }
   | { kind: "clone"; name: string; url: string; parentDir: string }
   | {
       kind: "template"
@@ -188,12 +187,18 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   const openFromFolder = () => {
     pickDirectory.mutate(undefined, {
       onSuccess: (path) => {
-        if (path)
-          setSetup({
-            kind: "folder",
-            path,
+        if (!path) return
+        openProject.mutate({
+          path,
+          details: {
             name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
-          })
+            typeId: "general",
+            deadline: null,
+            agentId: null,
+            emojiTags: [],
+            textTags: [],
+          },
+        })
       },
     })
   }
@@ -275,8 +280,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   }
   const addProject = (details: ProjectDetails) => {
     if (!setup || pending) return
-    if (setup.kind === "folder") openProject.mutate({ path: setup.path, details })
-    else if (setup.kind === "clone")
+    if (setup.kind === "clone")
       cloneProject.mutate({ url: setup.url, parentDir: setup.parentDir, details })
     else
       templateProject.mutate({

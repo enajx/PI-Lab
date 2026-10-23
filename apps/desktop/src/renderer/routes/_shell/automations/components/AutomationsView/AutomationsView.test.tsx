@@ -51,11 +51,11 @@ const baseHandlers: FakeHandlers = {
 }
 
 describe("AutomationsView", () => {
-  test("translates the workflow empty state after a language change", async () => {
+  test("translates the routine empty state after a language change", async () => {
     renderView({ ...baseHandlers, "automations.list": () => [] })
     await screen.findByTestId("automations-empty")
     act(() => setInterfaceLanguage("es"))
-    expect(screen.getByText("Todavía no hay flujos de trabajo")).toBeTruthy()
+    expect(screen.getByText("Todavía no hay rutinas")).toBeTruthy()
     act(() => setInterfaceLanguage("en"))
   })
 
@@ -180,7 +180,7 @@ describe("AutomationsView", () => {
     scrollIntoView.mockRestore()
   })
 
-  test("the New workflow button reveals the create form", async () => {
+  test("the New routine button reveals the create form", async () => {
     renderView({
       ...baseHandlers,
       "automations.list": () => [],

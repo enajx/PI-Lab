@@ -29,7 +29,7 @@ describe("notification activation contracts", () => {
     ).toBe(false)
   })
 
-  test("accepts exact project and workflow search targets and rejects empty ids", () => {
+  test("accepts exact project and routine search targets and rejects empty ids", () => {
     expect(
       projectNotificationSearchSchema.parse({
         notificationId: "notification-1",
