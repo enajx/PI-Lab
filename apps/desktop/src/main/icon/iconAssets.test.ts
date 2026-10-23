@@ -158,6 +158,19 @@ describe("canonical PI Lab application icon", () => {
     expect(yellowPixels).toBeGreaterThan(500)
   })
 
+  test.each([
+    "stable",
+    "alpha",
+    "beta",
+  ] as const)("stages the pinned %s modern flat catalog", (channel) => {
+    const output = temporaryOutput()
+    generateAppIcons(channel, output)
+    expect(existsSync(join(output, "Assets.car"))).toBe(true)
+    expect(readFileSync(join(output, "Assets.car"))).toEqual(
+      readFileSync(join(ICONS_DIR, "modern", channel, "Assets.car")),
+    )
+  })
+
   test("stages the same master for macOS, Linux, and Windows packaging", () => {
     const output = temporaryOutput()
     generateAppIcons("stable", output)

@@ -8,7 +8,8 @@
  *
  * Outputs:
  *   - `build/icon.png` — Linux source and Windows `.ico` source.
- *   - `build/icon.icns` — macOS icon set, derived with native macOS tools.
+ *   - `build/icon.icns` — legacy macOS icon set, derived with native macOS tools.
+ *   - `build/Assets.car` — pinned flat modern macOS icon catalog; no Xcode needed.
  */
 
 import { execFileSync } from "node:child_process"
@@ -49,6 +50,10 @@ interface IconManifest {
     height: number
   }
   channelVariants: Record<"alpha" | "beta", { master: string; derivative: string }>
+  modernIcons: {
+    compiler: string
+    channels: Record<PiLabChannel, { document: string; artwork: string; catalog: string }>
+  }
 }
 
 export interface RgbaPng {
@@ -256,6 +261,20 @@ export function validateIconSources(): IconManifest {
       assertPixel(icon, 512, 100, [48, 48, 48, 255], "beta gray tile")
     }
   }
+  for (const channel of ["stable", "alpha", "beta"] as const) {
+    const modern = join(ICONS_DIR, "modern", channel)
+    const pin = manifest.modernIcons?.channels[channel]
+    const canonical = channel === "stable" ? SOURCE : join(ICONS_DIR, `icon-${channel}.png`)
+    if (
+      !pin ||
+      sha256(join(modern, "AppIcon.icon", "icon.json")) !== pin.document ||
+      sha256(join(modern, "AppIcon.icon", "Assets", "Flat.png")) !== pin.artwork ||
+      pin.artwork !== sha256(canonical) ||
+      sha256(join(modern, "Assets.car")) !== pin.catalog
+    ) {
+      throw new Error(`${channel} modern icon does not match its provenance manifest`)
+    }
+  }
   return manifest
 }
 
@@ -310,6 +329,7 @@ export function generateAppIcons(channel: PiLabChannel, outputDirectory: string)
   const masterPng = join(outputDirectory, "icon.png")
   const source = channel === "stable" ? SOURCE : join(ICONS_DIR, `icon-${channel}.png`)
   cpSync(source, masterPng)
+  cpSync(join(ICONS_DIR, "modern", channel, "Assets.car"), join(outputDirectory, "Assets.car"))
   console.log(`icon.png  → ${masterPng}`)
 
   if (process.platform === "darwin") {

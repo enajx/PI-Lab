@@ -1,0 +1,29 @@
+{
+  "fill": {
+    "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+  },
+  "groups": [
+    {
+      "name": "Flat artwork",
+      "layers": [
+        {
+          "name": "Flat icon",
+          "image-name": "Flat.png",
+          "glass": false,
+          "position": {
+            "scale": 1.1428571428571428,
+            "translation-in-points": [0, 12]
+          }
+        }
+      ],
+      "specular": false,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": ["macOS"]
+  }
+}

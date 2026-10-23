@@ -87,7 +87,13 @@ test("builder metadata and direct output stay channel-specific", () => {
       assert.equal(config.extraMetadata.piLabChannel, channel)
       assert.equal(config.directories.output, `release/.direct-${channel}`)
       assert.equal(config.fileAssociations.length > 0, channel === "stable")
-      assert.equal(Boolean(config.mac.extendInfo), channel === "stable")
+      assert.equal(Boolean(config.mac.extendInfo.CFBundleDocumentTypes), channel === "stable")
+      assert.equal(config.mac.extendInfo.CFBundleIconName, "AppIcon")
+      assert.ok(
+        config.mac.extraResources.some(
+          (entry) => entry.from === "build/Assets.car" && entry.to === "Assets.car",
+        ),
+      )
       assert.deepEqual(config.mac.signIgnore, [
         "/Resources/app-icon-(?:channel-)?variants/.*\\.png$",
       ])

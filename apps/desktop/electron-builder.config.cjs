@@ -20,6 +20,10 @@
  * `./drizzle`), so the whole `out/**` tree is packaged preserving that layout.
  */
 
+const { join } = require("node:path")
+// Customize the staging image before normal DMG compression, signing and update metadata.
+process.env.CUSTOM_DMGBUILD_PATH = join(__dirname, "scripts/dmg-background.cjs")
+
 const { channelDefinition } = require("./scripts/package-channel.cjs")
 const { publicReleaseDefinition, publicUpdateUrl } = require("./scripts/public-release.cjs")
 const publicReleaseChannel = process.env.PI_LAB_PUBLIC_RELEASE_CHANNEL
@@ -141,6 +145,9 @@ const config = {
   // the asar so they can be dlopen'd / exec'd at runtime.
   asarUnpack: ["**/node_modules/better-sqlite3/**", "**/node_modules/node-pty/**"],
   extraResources: [
+    { from: "assets/dmg/background.tiff", to: "dmg-background.tiff" },
+    { from: "resources", to: ".", filter: ["skills/**/*"] },
+    { from: "resources/Credits.html", to: "Credits.html" },
     { from: "resources/bin/pilab", to: "bin/pilab" },
     // Runtime window/Dock/notification identity. `build:icons` stages the
     // selected channel icon here before every package command.
@@ -179,9 +186,12 @@ const config = {
   beforePack: "./scripts/electron-builder-before-pack.cjs",
   afterPack: "./scripts/electron-builder-after-pack.cjs",
   mac: {
-    ...(channel === "stable"
-      ? {
-          extendInfo: {
+    // Modern macOS uses the flat catalog; older systems retain icon.icns.
+    extraResources: [{ from: "build/Assets.car", to: "Assets.car" }],
+    extendInfo: {
+      CFBundleIconName: "AppIcon",
+      ...(channel === "stable"
+        ? {
             CFBundleDocumentTypes: [
               {
                 CFBundleTypeName: "Plain text",
@@ -190,9 +200,9 @@ const config = {
                 LSItemContentTypes: ["public.plain-text"],
               },
             ],
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
     files: [
       ...APP_FILES,
       "!**/node_modules/better-sqlite3/prebuilds/!(darwin-${arch}).node",
@@ -229,6 +239,17 @@ const config = {
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
     notarize: NOTARIZE,
+  },
+  dmg: {
+    background: "assets/dmg/background.tiff",
+    icon: null,
+    iconSize: 96,
+    iconTextSize: 13,
+    // Center the icons and labels together within the space below Finder’s title bar.
+    contents: [
+      { x: 140, y: 128, type: "file" },
+      { x: 420, y: 128, type: "link", path: "/Applications" },
+    ],
   },
   linux: {
     files: [
