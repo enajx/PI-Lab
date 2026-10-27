@@ -97,7 +97,7 @@ test("global LaTeX choice survives restart and bundled compilation refreshes and
     app = await launch(root, first)
     let page = await latexSettings(app)
     const section = page.getByTestId("settings-section-latex")
-    await expect(page.getByTestId("settings-latex-provider")).toHaveValue("bundled")
+    await expect(page.getByLabel("LaTeX compiler")).toHaveValue("bundled")
     await expect(section).toContainText("applies to all projects")
     await expect(section).toContainText(/tectonic.*\d/iu)
     const systemPath = section.getByText(/^PDFLaTeX:/)

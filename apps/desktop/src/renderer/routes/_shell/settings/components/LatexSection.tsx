@@ -61,7 +61,7 @@ export function LatexSection() {
           <fieldset disabled={update.isPending || installing}>
             <SelectField
               testId="settings-latex-provider"
-              label="LaTeX provider"
+              label="LaTeX compiler"
               value={data.provider}
               options={[
                 { value: "bundled", label: "Bundled Tectonic" },

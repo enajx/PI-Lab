@@ -39,10 +39,10 @@ describe("LaTeX Settings (mocked RPC)", () => {
     expect(details).not.toBeNull()
     expect(details?.open).toBe(false)
     expect(screen.getByText(/applies to all projects/i)).toBeTruthy()
-    fireEvent.change(screen.getByLabelText("LaTeX provider"), { target: { value: "system" } })
+    fireEvent.change(screen.getByLabelText("LaTeX compiler"), { target: { value: "system" } })
     await waitFor(() => expect(update).toHaveBeenCalledWith({ latexProvider: "system" }))
     await waitFor(() =>
-      expect((screen.getByLabelText("LaTeX provider") as HTMLSelectElement).value).toBe("system"),
+      expect((screen.getByLabelText("LaTeX compiler") as HTMLSelectElement).value).toBe("system"),
     )
   })
 
@@ -97,7 +97,7 @@ describe("LaTeX Settings (mocked RPC)", () => {
     expect((screen.getByRole("progressbar") as HTMLProgressElement).value).toBe(25)
     expect((button as HTMLButtonElement).disabled).toBe(true)
     expect(await screen.findByText("PDFLaTeX installed")).toBeTruthy()
-    expect((screen.getByLabelText("LaTeX provider") as HTMLSelectElement).value).toBe("system")
+    expect((screen.getByLabelText("LaTeX compiler") as HTMLSelectElement).value).toBe("system")
   })
 
   it("shows installation and request errors", async () => {
@@ -127,7 +127,7 @@ describe("LaTeX Settings (mocked RPC)", () => {
         throw new Error("Settings could not be saved")
       },
     })
-    const provider = await screen.findByLabelText("LaTeX provider")
+    const provider = await screen.findByLabelText("LaTeX compiler")
     fireEvent.change(provider, { target: { value: "system" } })
     expect(await screen.findByText("Settings could not be saved")).toBeTruthy()
     expect((provider as HTMLSelectElement).value).toBe("bundled")
