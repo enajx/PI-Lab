@@ -1,0 +1,8 @@
+PI Lab includes Tectonic 0.17.0, https://tectonic-typesetting.github.io/.
+Source: https://github.com/tectonic-typesetting/tectonic/tree/tectonic%400.17.0
+The adjacent LICENSE is the upstream Tectonic license.
+The pinned official release assets and their SHA-256 digests are in manifest.json.
+Tectonic derives from XeTeX and TeX and includes components under additional
+open-source licenses. Upstream component sources and notices are available at:
+https://github.com/tectonic-typesetting/tectonic/tree/tectonic%400.17.0/crates
+TeX packages fetched by Tectonic retain their own licenses.

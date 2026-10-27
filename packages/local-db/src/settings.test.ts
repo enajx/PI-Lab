@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runMigrations } from "./migrate"
+import { resolveMigrationsDir } from "./paths"
 import { getAgentSettingsOrDefaults, getSettingsOrDefaults, SETTINGS_ROW_ID } from "./settings"
 import {
   agentSettings,
@@ -161,5 +162,35 @@ describe("getAgentSettingsOrDefaults", () => {
     } finally {
       sqlite.close()
     }
+  })
+})
+
+describe("global LaTeX provider migration", () => {
+  it("adds bundled to legacy JSON while preserving every saved preference", () => {
+    const folder = join(dataDir, "legacy-migrations")
+    cpSync(resolveMigrationsDir(), folder, { recursive: true })
+    const journalPath = join(folder, "meta", "_journal.json")
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"))
+    journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 26)
+    writeFileSync(journalPath, JSON.stringify(journal))
+    const legacy = runMigrations(dbPath, folder)
+    const editor = {
+      autosave: true,
+      vim: true,
+      editorTheme: "custom:my-theme",
+      futureKey: "retain",
+    }
+    legacy.sqlite
+      .prepare("INSERT INTO settings (id, theme, editor, updated_at) VALUES (1, 'dark', ?, 1234)")
+      .run(JSON.stringify(editor))
+    const before = legacy.sqlite.prepare("SELECT * FROM settings").get() as Record<string, unknown>
+    legacy.sqlite.close()
+
+    const migrated = runMigrations(dbPath)
+    const after = migrated.sqlite.prepare("SELECT * FROM settings").get() as Record<string, unknown>
+    expect(JSON.parse(after.editor as string)).toEqual({ ...editor, latexProvider: "bundled" })
+    expect({ ...after, editor: before.editor }).toEqual(before)
+    expect(getSettingsOrDefaults(migrated.db).editor.latexProvider).toBe("bundled")
+    migrated.sqlite.close()
   })
 })

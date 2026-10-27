@@ -18,7 +18,12 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
-  h = await createHarness([], { git: false, daemon: "lazy" })
+  h = await createHarness([], {
+    git: false,
+    daemon: "lazy",
+    resolveAgentExecutable: liveAgentExecutableResolver,
+  })
+  await h.caller.settings.updateEditor({ latexProvider: "system" })
   const project = await h.caller.projects.open({ path: h.repoDir })
   const workspace = await h.caller.workspaces.ensureMain({ projectId: project.id })
   workspaceId = workspace.id

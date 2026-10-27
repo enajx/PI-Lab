@@ -5,6 +5,7 @@ const SETTINGS_SECTION_IDS = [
   "general",
   "appearance",
   "editor",
+  "latex",
   "quick-editor",
   "agents",
   "notifications",

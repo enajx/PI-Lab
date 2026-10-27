@@ -507,6 +507,10 @@ export class FullRuntime {
       db: getDb(),
       appChannel: channelFromAppName(app.getName()),
       skillsHomeDir: skillsHomeDirOverride ?? homedir(),
+      latexResourcesDir: app.isPackaged
+        ? join(process.resourcesPath, "latex")
+        : join(__dirname, "..", "..", "resources", "latex"),
+      latexDataDir: join(resolveDataDir(), "latex"),
       bundledSkillsDir: app.isPackaged
         ? join(process.resourcesPath, "skills")
         : join(__dirname, "..", "..", "resources", "skills"),

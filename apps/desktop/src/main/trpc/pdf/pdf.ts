@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process"
 import { mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { type PiLabDatabase, workspaces } from "@pi-lab/local-db"
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path"
+import { getSettingsOrDefaults, type PiLabDatabase, workspaces } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
-import { liveAgentExecutableResolver, liveAgentLaunchEnvironment } from "../../agents/executable"
+import { type LatexRuntime, resolveLatexRuntime } from "../../latex/runtime"
+import { forwardSync, reverseSync } from "../../latex/synctex"
+import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
 import { workspaceWorkingDir } from "../workspaces/workspaces"
@@ -89,20 +91,16 @@ async function rootSource(dir: string, relPath: string): Promise<string> {
 
 /** Commands use the login shell's PATH but never execute through a shell. */
 async function runTool(
-  command: string,
+  runtime: LatexRuntime,
   args: string[],
   cwd: string,
   timeout: number,
 ): Promise<{ success: boolean; output: string }> {
-  const executable = await liveAgentExecutableResolver(command)
-  if (!executable)
-    throw new Error(`${command} is not installed or is unavailable on your login-shell PATH`)
-  const env = { ...(await liveAgentLaunchEnvironment()), SYNCTEX_EDITOR: "", SYNCTEX_VIEWER: "" }
   return new Promise((done, reject) => {
     execFile(
-      executable,
+      runtime.executable,
       args,
-      { cwd, env, timeout, maxBuffer: 2_000_000, encoding: "utf8" },
+      { cwd, env: runtime.env, timeout, maxBuffer: 2_000_000, encoding: "utf8" },
       (error, stdout, stderr) => {
         if (error && (error as NodeJS.ErrnoException).code === "ENOENT") {
           reject(error)
@@ -130,25 +128,31 @@ async function prepareOutput(dir: string, output: string): Promise<void> {
 }
 
 /** One full compile per root at a time; a later request runs after the earlier one. */
-async function compile(dir: string, source: string): Promise<BuildResult> {
+async function compile(ctx: AppContext, dir: string, source: string): Promise<BuildResult> {
   const pending = builds.get(source)
   const task = (pending ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
       const output = join(dirname(source), "build")
       await prepareOutput(dir, output)
+      const runtime = await resolveLatexRuntime(
+        ctx,
+        getSettingsOrDefaults(ctx.db).editor.latexProvider,
+      )
       const result = await runTool(
-        "latexmk",
-        [
-          "-synctex=1",
-          "-interaction=nonstopmode",
-          "-file-line-error",
-          "-pdf",
-          "-outdir=build",
-          source,
-        ],
+        runtime,
+        runtime.provider === "bundled"
+          ? ["--synctex", "--untrusted", "--outdir", output, source]
+          : [
+              "-synctex=1",
+              "-interaction=nonstopmode",
+              "-file-line-error",
+              "-pdf",
+              "-outdir=build",
+              source,
+            ],
         dirname(source),
-        120_000,
+        runtime.provider === "bundled" ? 300_000 : 120_000,
       )
       return {
         relPath: rendererPath(dir, join(output, `${basename(source, extname(source))}.pdf`)),
@@ -186,7 +190,7 @@ async function pdfForSource(
 }
 
 /** Require SyncTeX files to stay within the workspace, just like the PDF. */
-async function requireSyncFile(dir: string, pdf: string): Promise<void> {
+async function requireSyncFile(dir: string, pdf: string): Promise<string> {
   for (const suffix of [".synctex.gz", ".synctex"]) {
     const path = pdf.slice(0, -extname(pdf).length) + suffix
     const exists = await stat(path).then(
@@ -197,32 +201,10 @@ async function requireSyncFile(dir: string, pdf: string): Promise<void> {
       },
     )
     if (exists) {
-      await insideFile(dir, relative(dir, path))
-      return
+      return insideFile(dir, relative(dir, path))
     }
   }
   throw new Error("No SyncTeX mapping found. Rebuild with SyncTeX enabled (-synctex=1).")
-}
-
-/** Parse only the first result block returned by the SyncTeX CLI. */
-function syncFields(output: string): Record<string, string> {
-  const body = output.split("SyncTeX result begin")[1]?.split("SyncTeX result end")[0]
-  if (!body) throw new Error("No corresponding location found in the SyncTeX mapping")
-  const fields: Record<string, string> = {}
-  for (const line of body.split(/\r?\n/)) {
-    const colon = line.indexOf(":")
-    if (colon < 0) continue
-    const key = line.slice(0, colon)
-    if (fields[key] === undefined) fields[key] = line.slice(colon + 1)
-  }
-  return fields
-}
-
-/** Numeric fields must be finite before crossing the renderer boundary. */
-function syncNumber(fields: Record<string, string>, key: string): number {
-  const value = Number(fields[key])
-  if (!Number.isFinite(value)) throw new Error(`Invalid SyncTeX ${key}`)
-  return value
 }
 
 export const pdfRouter = router({
@@ -256,7 +238,7 @@ export const pdfRouter = router({
   }),
   build: publicProcedure.input(pathInput).mutation(async ({ ctx, input }): Promise<BuildResult> => {
     const dir = await workspaceDirectory(ctx.db, input.workspaceId)
-    return compile(dir, await rootSource(dir, input.relPath))
+    return compile(ctx, dir, await rootSource(dir, input.relPath))
   }),
   forwardSync: publicProcedure
     .input(
@@ -270,21 +252,9 @@ export const pdfRouter = router({
       const dir = await workspaceDirectory(ctx.db, input.workspaceId)
       const source = await insideFile(dir, input.relPath)
       const pdf = await pdfForSource(dir, source, input.pdfRelPath)
-      await requireSyncFile(dir, pdf)
-      const result = await runTool(
-        "synctex",
-        ["view", "-i", `${input.line}:${input.column}:${source}`, "-o", pdf, "-x", ""],
-        dir,
-        10_000,
-      )
-      if (!result.success) throw new Error(result.output)
-      const fields = syncFields(result.output)
-      return {
-        relPath: rendererPath(dir, pdf),
-        page: syncNumber(fields, "Page"),
-        x: syncNumber(fields, "x"),
-        y: syncNumber(fields, "y"),
-      }
+      const mapping = await requireSyncFile(dir, pdf)
+      const result = await forwardSync(mapping, source, input.line, input.column)
+      return { relPath: rendererPath(dir, pdf), ...result }
     }),
   reverseSync: publicProcedure
     .input(
@@ -297,22 +267,13 @@ export const pdfRouter = router({
     .mutation(async ({ ctx, input }) => {
       const dir = await workspaceDirectory(ctx.db, input.workspaceId)
       const pdf = await insideFile(dir, input.relPath)
-      await requireSyncFile(dir, pdf)
-      const result = await runTool(
-        "synctex",
-        ["edit", "-o", `${input.page}:${input.x}:${input.y}:${pdf}`, "-x", ""],
-        dir,
-        10_000,
-      )
-      if (!result.success) throw new Error(result.output)
-      const fields = syncFields(result.output)
-      const name = fields.Input
-      if (!name) throw new Error("SyncTeX did not return a source file")
-      const source = await insideFile(dir, isAbsolute(name) ? relative(dir, name) : name)
+      const mapping = await requireSyncFile(dir, pdf)
+      const result = await reverseSync(mapping, input.page, input.x, input.y)
+      const source = await insideFile(dir, relative(dir, result.sourceAbsolutePath))
       return {
         relPath: rendererPath(dir, source),
-        line: Math.max(1, syncNumber(fields, "Line")),
-        column: Math.max(1, syncNumber(fields, "Column")),
+        line: result.line,
+        column: result.column,
       }
     }),
 })

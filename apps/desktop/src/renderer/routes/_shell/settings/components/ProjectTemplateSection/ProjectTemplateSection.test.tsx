@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   editorTheme: "default",
   customEditorThemes: [],
   pythonRunDestination: "central",
+  latexProvider: "bundled",
 }
 
 let store: Record<string, string>
