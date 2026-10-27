@@ -56,6 +56,8 @@ interface CodeMirrorBufferProps {
   onReady?: () => void
   /** Reports the main cursor's one-based line and column. */
   onCursorChange?: (line: number, column: number) => void
+  /** Optional action at the double-clicked document position, preserving normal selection. */
+  onDoubleClickPosition?: (line: number, column: number) => void
   /** Requested source location, including repeated navigation to the same line. */
   sourceLocation?: { line: number; column: number } | null
   /** Fires on Mod+Enter while this focused buffer is eligible to run. */
@@ -150,6 +152,7 @@ export function CodeMirrorBuffer({
   onSave,
   onReady,
   onCursorChange,
+  onDoubleClickPosition,
   sourceLocation,
   onRun,
   vim: vimEnabled = false,
@@ -264,6 +267,8 @@ export function CodeMirrorBuffer({
   const onSaveRef = useRef(onSave)
   const onReadyRef = useRef(onReady)
   const onRunRef = useRef(onRun)
+  const onDoubleClickPositionRef = useRef(onDoubleClickPosition)
+  onDoubleClickPositionRef.current = onDoubleClickPosition
   const onCursorChangeRef = useRef(onCursorChange)
   onChangeRef.current = onChange
   onSaveRef.current = onSave
@@ -444,6 +449,22 @@ export function CodeMirrorBuffer({
         ),
         markdownMenuKeys,
         changeListener,
+        EditorView.domEventHandlers({
+          dblclick: (event, view) => {
+            const action = onDoubleClickPositionRef.current
+            if (
+              !action ||
+              !(event.target instanceof Element) ||
+              !event.target.closest(".cm-content")
+            )
+              return false
+            const position = view.posAtCoords({ x: event.clientX, y: event.clientY })
+            if (position === null) return false
+            const line = view.state.doc.lineAt(position)
+            action(line.number, position - line.from + 1)
+            return false
+          },
+        }),
         EditorView.lineWrapping,
         // Constrain the view to its bounded host so it scrolls internally instead of
         // growing past the (overflow-hidden) container and being clipped — the

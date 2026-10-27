@@ -4,7 +4,7 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { promisify } from "node:util"
-import { _electron as electron, expect, test } from "@playwright/test"
+import { _electron as electron, expect, type Locator, test } from "@playwright/test"
 
 const execFileAsync = promisify(execFile)
 const ORIGINAL = "Synchronization target in the included chapter."
@@ -32,6 +32,27 @@ async function compileFixture(repo: string): Promise<void> {
       maxBuffer: 2_000_000,
     },
   )
+}
+
+/** Build controls stay on the bottom baseline, and their logs open above it. */
+async function checkBuildFooter(panel: Locator, footer: Locator): Promise<void> {
+  const status = footer.getByTestId("latex-build-status")
+  await expect(status).toBeVisible()
+  const panelBounds = await panel.boundingBox()
+  const footerBounds = await footer.boundingBox()
+  if (!panelBounds || !footerBounds) throw new Error("Expected visible panel and footer")
+  expect(
+    Math.abs(panelBounds.y + panelBounds.height - footerBounds.y - footerBounds.height),
+  ).toBeLessThan(4)
+  await status.click()
+  const log = panel.getByTestId("latex-build-log")
+  await expect(log).toBeVisible()
+  await expect(log).toContainText("Latexmk")
+  const logBounds = await log.boundingBox()
+  if (!logBounds) throw new Error("Expected visible build log")
+  expect(logBounds.y + logBounds.height).toBeLessThanOrEqual(footerBounds.y + 1)
+  await status.click()
+  await expect(log).toBeHidden()
 }
 
 /** Exercise the real filesystem, Electron IPC, PDF.js rendering, and TeX toolchain. */
@@ -146,7 +167,7 @@ test("PDF viewer refreshes compiled output and navigates both ways through SyncT
     await pageNumber.press("Enter")
     await expect(pageNumber).toHaveValue("1")
     await page.getByTestId("central-tab-select").filter({ hasText: "chapter.tex" }).click()
-    await page.getByTestId("latex-show-pdf").click()
+    await editor.locator(".cm-line").filter({ hasText: UPDATED }).dblclick()
     await expect(viewer).toBeVisible()
     await expect(pageNumber).toHaveValue("2")
     await expect(viewer.locator(".textLayer").filter({ hasText: UPDATED })).toBeVisible()
@@ -193,9 +214,13 @@ test("PDF viewer refreshes compiled output and navigates both ways through SyncT
     await page.keyboard.insertText(`% !TeX root = main.tex\n\n${SAVED}\n`)
     await page.keyboard.press("ControlOrMeta+s")
     await expect.poll(() => readFile(join(repo, "chapter.tex"), "utf8")).toContain(SAVED)
-    await expect(page.getByTestId("latex-build-status")).toContainText(/built|complete|success/i, {
-      timeout: 30_000,
-    })
+    await expect(page.locator('[data-testid="latex-build-status"]:visible')).toContainText(
+      /built|complete|success/i,
+      {
+        timeout: 30_000,
+      },
+    )
+    await checkBuildFooter(page.getByTestId("central-panel"), page.getByTestId("editor-status-bar"))
     await page.getByTestId("latex-show-pdf").click()
     await expect(viewer.locator(".textLayer").filter({ hasText: SAVED })).toBeVisible({
       timeout: 15_000,
@@ -203,6 +228,7 @@ test("PDF viewer refreshes compiled output and navigates both ways through SyncT
     await expect(
       viewer.locator(".textLayer span").filter({ hasText: SAVED }).first(),
     ).toBeInViewport({ ratio: 0.8 })
+    await checkBuildFooter(page.getByTestId("central-panel"), viewer.getByTestId("pdf-status"))
     await page.screenshot({ path: test.info().outputPath("pdf-viewer.png") })
     // Recoverable TeX errors can still produce a changed, valid PDF. The viewer
     // must retain the successful version rather than display that failed output.
@@ -219,9 +245,12 @@ ${FAILED_OUTPUT}
 \end{document}
 `)
     await page.keyboard.press("ControlOrMeta+s")
-    await expect(page.getByTestId("latex-build-status")).toContainText("LaTeX build failed", {
-      timeout: 30_000,
-    })
+    await expect(page.locator('[data-testid="latex-build-status"]:visible')).toContainText(
+      "LaTeX build failed",
+      {
+        timeout: 30_000,
+      },
+    )
     const failedPdf = await readFile(join(repo, "build", "main.pdf"))
     expect(
       failedPdf.equals(successfulPdf),

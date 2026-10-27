@@ -4,6 +4,7 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"
 import { EventBus, PDFLinkService, PDFViewer } from "pdfjs-dist/legacy/web/pdf_viewer.mjs"
 import { useEffect, useRef, useState } from "react"
 import type { PiLabTrpcClient } from "../../../trpc/client"
+import { LatexBuildStatus, type LatexBuildStatusData } from "../LatexBuildStatus/LatexBuildStatus"
 import "pdfjs-dist/web/pdf_viewer.css"
 import "./pdfViewer.css"
 
@@ -53,6 +54,7 @@ export function PdfViewer({
   location,
   onSource,
   build,
+  buildStatus,
 }: {
   client: PiLabTrpcClient
   workspaceId: string
@@ -60,6 +62,7 @@ export function PdfViewer({
   location: PdfLocation | null
   onSource: (location: SourceLocation) => void
   build: PdfBuildState | null
+  buildStatus: LatexBuildStatusData | null
 }) {
   const host = useRef<HTMLDivElement>(null)
   const runtime = useRef<Runtime | null>(null)
@@ -434,9 +437,10 @@ export function PdfViewer({
       <div
         data-testid="pdf-status"
         role="status"
-        className="shrink-0 border-border border-t px-3 py-1 text-muted-foreground text-xs"
+        className="flex h-6 shrink-0 items-center gap-3 border-border border-t bg-muted/30 px-3 text-[11px] text-muted-foreground"
       >
-        {message}
+        {buildStatus ? <LatexBuildStatus status={buildStatus} /> : null}
+        <span className="ml-auto truncate">{message}</span>
       </div>
     </div>
   )

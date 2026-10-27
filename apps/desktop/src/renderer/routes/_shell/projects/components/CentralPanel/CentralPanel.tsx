@@ -386,17 +386,6 @@ export function CentralPanel({
       {/* Editor open/save errors live at the panel level so a failed file-open is
           visible even when the body has fallen back to the launcher (no silent
           failures — AGENTS.md). */}
-      {controller.latexBuildStatus ? (
-        <details
-          className="shrink-0 border-border border-b px-3 py-2 text-xs"
-          data-testid="latex-build-status"
-        >
-          <summary className="cursor-pointer">{controller.latexBuildStatus.message}</summary>
-          <pre className="max-h-40 select-text overflow-auto whitespace-pre-wrap py-2">
-            {controller.latexBuildStatus.log}
-          </pre>
-        </details>
-      ) : null}
       {editor.error ? (
         <p
           data-testid="editor-error"
@@ -488,6 +477,7 @@ export function CentralPanel({
                     location={pdfLocation}
                     onSource={navigateSource}
                     build={controller.pdfBuildState ?? null}
+                    buildStatus={controller.latexBuildStatus ?? null}
                   />
                 </Suspense>
               </div>
@@ -514,6 +504,7 @@ export function CentralPanel({
                 onSaveUntitled={onSaveUntitled}
                 sourceLocation={sourceLocation}
                 onPdf={navigatePdf}
+                latexBuildStatus={controller.latexBuildStatus ?? null}
               />
             </div>
           ) : null}
@@ -796,6 +787,7 @@ function FileSurface({
   onSaveUntitled,
   sourceLocation,
   onPdf,
+  latexBuildStatus,
 }: {
   editor: EditorBuffersApi
   settings: EditorSettings
@@ -808,6 +800,7 @@ function FileSurface({
   onSaveUntitled?: (relPath: string) => void
   sourceLocation: SourceLocation | null
   onPdf: (location: PdfLocation) => void
+  latexBuildStatus: CentralPanelController["latexBuildStatus"]
 }) {
   const t = useTranslate()
   const active = editor.active
@@ -816,6 +809,15 @@ function FileSurface({
   const markdownMode = active ? (markdownModes[active.relPath] ?? "render") : "render"
   const cursor = useRef({ line: 1, column: 1 })
   const [syncError, setSyncError] = useState<string | null>(null)
+  /** Both the toolbar and source gesture navigate using the requested source position. */
+  const showPdf = (line: number, column: number): void => {
+    if (!active || !/\.tex$/i.test(active.relPath)) return
+    setSyncError(null)
+    void client.pdf.forwardSync
+      .mutate({ workspaceId, relPath: active.relPath, line, column })
+      .then(onPdf)
+      .catch((cause: unknown) => setSyncError(String(cause)))
+  }
   if (active?.kind === "pdf") return null
   return (
     <>
@@ -825,13 +827,8 @@ function FileSurface({
             type="button"
             data-testid="latex-show-pdf"
             className="rounded px-2 py-1 hover:bg-accent"
-            onClick={() => {
-              setSyncError(null)
-              void client.pdf.forwardSync
-                .mutate({ workspaceId, relPath: active.relPath, ...cursor.current })
-                .then(onPdf)
-                .catch((cause: unknown) => setSyncError(String(cause)))
-            }}
+            onClick={() => showPdf(cursor.current.line, cursor.current.column)}
+            title="Show current source position in PDF. You can also double-click LaTeX text."
           >
             Show in PDF
           </button>
@@ -881,6 +878,7 @@ function FileSurface({
             onCursorChange={(line, column) => {
               cursor.current = { line, column }
             }}
+            onDoubleClickPosition={/\.tex$/i.test(active.relPath) ? showPdf : undefined}
             sourceLocation={sourceLocation?.relPath === active.relPath ? sourceLocation : null}
             onChange={(doc) => editor.onEdit(active.relPath, doc)}
             onSave={() => {
@@ -921,6 +919,7 @@ function FileSurface({
       ) : null}
 
       <EditorStatusBar
+        latexBuildStatus={active && /\.tex$/i.test(active.relPath) ? latexBuildStatus : null}
         isPython={active ? isPythonPath(active.relPath) : false}
         counts={editor.statusCounts}
         missing={editor.statusMissing}
