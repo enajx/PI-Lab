@@ -78,7 +78,10 @@ export function LatexSection() {
             <p>{data.bundled.available ? "Available" : "Unavailable"}</p>
             {data.bundled.version ? <p>{data.bundled.version}</p> : null}
             {data.bundled.path ? (
-              <p className="break-all text-muted-foreground text-xs">{data.bundled.path}</p>
+              <details className="text-muted-foreground text-xs">
+                <summary className="cursor-pointer">Details</summary>
+                <p className="mt-2 break-all">{data.bundled.path}</p>
+              </details>
             ) : null}
             {data.bundled.error ? (
               <p role="alert" className="text-destructive">
@@ -90,30 +93,33 @@ export function LatexSection() {
             <h3 className="font-medium">System LaTeX (PDFLaTeX)</h3>
             <p>{data.system.available ? "Available" : "Unavailable"}</p>
             {data.system.version ? <p>{data.system.version}</p> : null}
-            <p className="break-all text-muted-foreground text-xs">
-              PDFLaTeX: {data.system.pdflatexPath ?? "Not found"}
-            </p>
-            <p className="break-all text-muted-foreground text-xs">
-              latexmk: {data.system.latexmkPath ?? "Not found"}
-            </p>
+            <details className="text-muted-foreground text-xs">
+              <summary className="cursor-pointer">Details</summary>
+              <p className="mt-2 break-all">PDFLaTeX: {data.system.pdflatexPath ?? "Not found"}</p>
+              <p className="mt-1 break-all">latexmk: {data.system.latexmkPath ?? "Not found"}</p>
+            </details>
             {data.system.error ? (
               <p role="alert" className="text-destructive">
                 {data.system.error}
               </p>
             ) : null}
-            <p className="text-muted-foreground text-xs">
-              Install PDFLaTeX downloads TinyTeX when clicked. The installation is shared with VS
-              Code and your terminal.
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={install.isPending || installing}
-              onClick={() => install.mutate()}
-            >
-              Install PDFLaTeX
-            </Button>
+            {!data.system.available ? (
+              <>
+                <p className="text-muted-foreground text-xs">
+                  Install PDFLaTeX downloads TinyTeX when clicked. The installation is shared with
+                  VS Code and your terminal.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={install.isPending || installing}
+                  onClick={() => install.mutate()}
+                >
+                  Install PDFLaTeX
+                </Button>
+              </>
+            ) : null}
             {installation?.message ? <p role="status">{installation.message}</p> : null}
             {installing ? (
               <progress

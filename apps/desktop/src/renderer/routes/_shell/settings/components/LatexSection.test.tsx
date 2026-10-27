@@ -34,13 +34,37 @@ describe("LaTeX Settings (mocked RPC)", () => {
       "settings.updateEditor": update,
     })
     expect(await screen.findByText("Tectonic 0.15")).toBeTruthy()
-    expect(screen.getByText("/app/tectonic")).toBeTruthy()
+    const path = screen.getByText("/app/tectonic")
+    const details = path.closest("details")
+    expect(details).not.toBeNull()
+    expect(details?.open).toBe(false)
     expect(screen.getByText(/applies to all projects/i)).toBeTruthy()
     fireEvent.change(screen.getByLabelText("LaTeX provider"), { target: { value: "system" } })
     await waitFor(() => expect(update).toHaveBeenCalledWith({ latexProvider: "system" }))
     await waitFor(() =>
       expect((screen.getByLabelText("LaTeX provider") as HTMLSelectElement).value).toBe("system"),
     )
+  })
+
+  it("hides installation prompts when system LaTeX is detected and keeps paths in Details", async () => {
+    renderSection({
+      "latex.status": () => ({
+        ...initialStatus,
+        system: {
+          available: true,
+          version: "Latexmk 4.87",
+          pdflatexPath: "/system/pdflatex",
+          latexmkPath: "/system/latexmk",
+          error: null,
+        },
+      }),
+    })
+    expect(await screen.findByText("Latexmk 4.87")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Install PDFLaTeX" })).toBeNull()
+    expect(screen.queryByText(/downloads TinyTeX/i)).toBeNull()
+    const details = screen.getByText(/PDFLaTeX: \/system\/pdflatex/).closest("details")
+    expect(details).not.toBeNull()
+    expect(details?.open).toBe(false)
   })
 
   it("downloads only after a click, shows progress, then uses the installed provider", async () => {
