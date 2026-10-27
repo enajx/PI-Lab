@@ -16,8 +16,11 @@ import { useTranslate } from "../../../i18n/language"
 import type { RouterOutputs } from "../../../trpc/types"
 import type { PythonRuntimeState } from "../../hooks/useEditorBuffers/useEditorBuffers"
 import type { DiagnosticCounts } from "../../utils/pythonDiagnostics"
+import { LatexBuildStatus, type LatexBuildStatusData } from "../LatexBuildStatus/LatexBuildStatus"
 
 interface EditorStatusBarProps {
+  /** Workspace LaTeX compilation summary and its expandable output. */
+  latexBuildStatus?: LatexBuildStatusData | null
   /** Whether the active file is a Python file (drives whether diagnostics show). */
   isPython: boolean
   /** Per-severity diagnostic tallies for the active file's last check. */
@@ -71,6 +74,7 @@ export function EditorStatusBar({
   choosePythonEnvironment,
   markdownMode,
   onMarkdownModeChange,
+  latexBuildStatus,
 }: EditorStatusBarProps) {
   const t = useTranslate()
   return (
@@ -78,6 +82,11 @@ export function EditorStatusBar({
       data-testid="editor-status-bar"
       className="flex h-6 shrink-0 items-center justify-end gap-3 border-border border-t bg-muted/30 px-3 text-[11px] text-muted-foreground"
     >
+      {latexBuildStatus ? (
+        <div className="mr-auto min-w-0">
+          <LatexBuildStatus status={latexBuildStatus} />
+        </div>
+      ) : null}
       <div className="flex shrink-0 items-center gap-3">
         {isPython ? (
           <>

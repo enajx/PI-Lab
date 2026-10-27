@@ -32,6 +32,8 @@ interface DiskBaseline {
 
 /** In-memory state for one open file. */
 export interface OpenBuffer {
+  /** Binary documents belong to the PDF viewer and cannot be saved as text. */
+  kind?: "pdf"
   /** Explicit identity for files that have not been saved to disk. */
   untitled?: boolean
   relPath: string
@@ -221,7 +223,7 @@ export function useEditorBuffers({
     async (relPath: string) => {
       if (!workspaceId || !diagnosticsEnabledRef.current || !isPythonPath(relPath)) return
       const snapshot = buffersRef.current.find((buffer) => buffer.relPath === relPath)
-      if (!snapshot || snapshot.untitled) return
+      if (!snapshot || snapshot.kind === "pdf" || snapshot.untitled) return
       const epoch = diagnosticsEpochRef.current
       const request = Symbol(relPath)
       diagnosticRequests.current.set(relPath, request)
@@ -292,6 +294,26 @@ export function useEditorBuffers({
       const request = Symbol(relPath)
       openRequestsRef.current.set(relPath, request)
       try {
+        if (/\.pdf$/i.test(relPath)) {
+          const baseline = await client.files.stat.query({ workspaceId, relPath })
+          if (!mountedRef.current || openRequestsRef.current.get(relPath) !== request) return
+          if (!baseline.exists) throw new Error(`File does not exist: ${relPath}`)
+          openRequestsRef.current.delete(relPath)
+          setBuffers((previous) => [
+            ...previous,
+            liveBuffer({
+              kind: "pdf",
+              relPath,
+              content: "",
+              savedContent: "",
+              baseline,
+              externalChange: false,
+              epoch: 0,
+            }),
+          ])
+          setActiveRelPath(relPath)
+          return
+        }
         const read = await withFileOperation(workspaceId, relPath, () =>
           client.files.read.query({ workspaceId, relPath }),
         )
@@ -532,7 +554,7 @@ export function useEditorBuffers({
   const reloadFile = useCallback(
     (relPath: string): Promise<boolean> => {
       const snapshot = buffersRef.current.find((entry) => entry.relPath === relPath)
-      return snapshot ? reload(snapshot, true) : Promise.resolve(false)
+      return snapshot && snapshot.kind !== "pdf" ? reload(snapshot, true) : Promise.resolve(false)
     },
     [reload],
   )
@@ -652,7 +674,7 @@ export function useEditorBuffers({
       const relPath = activeRef.current
       if (!relPath) return
       const buffer = buffersRef.current.find((b) => b.relPath === relPath)
-      if (!buffer || externalCheckRef.current) return
+      if (!buffer || buffer.kind === "pdf" || externalCheckRef.current) return
       externalCheckRef.current = true
       void reload(buffer, false).finally(() => {
         externalCheckRef.current = false

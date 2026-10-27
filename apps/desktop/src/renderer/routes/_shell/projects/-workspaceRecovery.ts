@@ -26,6 +26,7 @@ export interface AffectedBuffer {
 }
 
 const bufferSchema = z.object({
+  kind: z.literal("pdf").optional(),
   relPath: z.string(),
   content: z.string(),
   savedContent: z.string(),

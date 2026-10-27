@@ -17,8 +17,10 @@ import {
   X,
 } from "lucide-react"
 import {
+  lazy,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -28,6 +30,10 @@ import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
 import { EditorSettingsMenu } from "../../../../../Editor/components/EditorSettingsMenu"
 import { EditorStatusBar } from "../../../../../Editor/components/EditorStatusBar"
+import type {
+  PdfLocation,
+  SourceLocation,
+} from "../../../../../Editor/components/PdfViewer/PdfViewer"
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import type { EditorBuffersApi } from "../../../../../Editor/hooks/useEditorBuffers"
 import { isPythonPath } from "../../../../../Editor/utils/pythonDiagnostics"
@@ -44,6 +50,12 @@ import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
+
+const PdfViewer = lazy(() =>
+  import("../../../../../Editor/components/PdfViewer/PdfViewer").then((module) => ({
+    default: module.PdfViewer,
+  })),
+)
 
 interface CentralPanelProps {
   controller: CentralPanelController
@@ -148,6 +160,16 @@ export function CentralPanel({
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [])
 
+  const [pdfLocation, setPdfLocation] = useState<PdfLocation | null>(null)
+  const [sourceLocation, setSourceLocation] = useState<SourceLocation | null>(null)
+  const navigateSource = (location: SourceLocation): void => {
+    setSourceLocation(location)
+    void editor.openFile(location.relPath).then(() => controller.selectFile(location.relPath))
+  }
+  const navigatePdf = (location: PdfLocation): void => {
+    setPdfLocation(location)
+    controller.openFile(location.relPath)
+  }
   const hasFileActive = active?.type === "file" && editor.active !== null
   const hasPythonActive =
     hasFileActive && editor.active !== null && isPythonPath(editor.active.relPath)
@@ -433,10 +455,43 @@ export function CentralPanel({
             )
           })}
 
+          {editor.buffers
+            .filter((buffer) => buffer.kind === "pdf")
+            .map((buffer) => (
+              <div
+                key={buffer.relPath}
+                className={cn(
+                  "min-h-0 flex-1 flex-col",
+                  hasFileActive && editor.active?.relPath === buffer.relPath ? "flex" : "hidden",
+                )}
+              >
+                <Suspense
+                  fallback={
+                    <p className="p-4 text-muted-foreground text-xs">Loading PDF viewer…</p>
+                  }
+                >
+                  <PdfViewer
+                    client={client}
+                    workspaceId={workspaceId}
+                    relPath={buffer.relPath}
+                    location={pdfLocation}
+                    onSource={navigateSource}
+                    build={controller.pdfBuildState ?? null}
+                    buildStatus={controller.latexBuildStatus ?? null}
+                  />
+                </Suspense>
+              </div>
+            ))}
+
           {/* The editor surface stays mounted while a session is active (hidden) so
               buffer/cursor state survives a tab switch. */}
           {editor.buffers.length > 0 ? (
-            <div className={cn("min-h-0 flex-1 flex-col", hasFileActive ? "flex" : "hidden")}>
+            <div
+              className={cn(
+                "min-h-0 flex-1 flex-col",
+                hasFileActive && editor.active?.kind !== "pdf" ? "flex" : "hidden",
+              )}
+            >
               <FileSurface
                 editor={editor}
                 settings={settings}
@@ -447,6 +502,9 @@ export function CentralPanel({
                 client={client}
                 workspaceId={workspaceId}
                 onSaveUntitled={onSaveUntitled}
+                sourceLocation={sourceLocation}
+                onPdf={navigatePdf}
+                latexBuildStatus={controller.latexBuildStatus ?? null}
               />
             </div>
           ) : null}
@@ -727,6 +785,9 @@ function FileSurface({
   client,
   workspaceId,
   onSaveUntitled,
+  sourceLocation,
+  onPdf,
+  latexBuildStatus,
 }: {
   editor: EditorBuffersApi
   settings: EditorSettings
@@ -737,14 +798,47 @@ function FileSurface({
   client: PiLabTrpcClient
   workspaceId: string
   onSaveUntitled?: (relPath: string) => void
+  sourceLocation: SourceLocation | null
+  onPdf: (location: PdfLocation) => void
+  latexBuildStatus: CentralPanelController["latexBuildStatus"]
 }) {
   const t = useTranslate()
   const active = editor.active
   const markdownActive = active ? isMarkdownPath(active.relPath) : false
   const [markdownModes, setMarkdownModes] = useState<Record<string, "render" | "source">>({})
   const markdownMode = active ? (markdownModes[active.relPath] ?? "render") : "render"
+  const cursor = useRef({ line: 1, column: 1 })
+  const [syncError, setSyncError] = useState<string | null>(null)
+  /** Both the toolbar and source gesture navigate using the requested source position. */
+  const showPdf = (line: number, column: number): void => {
+    if (!active || !/\.tex$/i.test(active.relPath)) return
+    setSyncError(null)
+    void client.pdf.forwardSync
+      .mutate({ workspaceId, relPath: active.relPath, line, column })
+      .then(onPdf)
+      .catch((cause: unknown) => setSyncError(String(cause)))
+  }
+  if (active?.kind === "pdf") return null
   return (
     <>
+      {active && /\.tex$/i.test(active.relPath) ? (
+        <div className="flex shrink-0 items-center gap-3 border-border border-b px-3 py-1 text-xs">
+          <button
+            type="button"
+            data-testid="latex-show-pdf"
+            className="rounded px-2 py-1 hover:bg-accent"
+            onClick={() => showPdf(cursor.current.line, cursor.current.column)}
+            title="Show current source position in PDF. You can also double-click LaTeX text."
+          >
+            Show in PDF
+          </button>
+          {syncError ? (
+            <span role="alert" className="select-text text-destructive">
+              {syncError}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       {active?.externalChange ? (
         <div
           data-testid="editor-external-warning"
@@ -781,6 +875,11 @@ function FileSurface({
             key={`${active.relPath}#${active.epoch}`}
             relPath={active.relPath}
             initialDoc={active.content}
+            onCursorChange={(line, column) => {
+              cursor.current = { line, column }
+            }}
+            onDoubleClickPosition={/\.tex$/i.test(active.relPath) ? showPdf : undefined}
+            sourceLocation={sourceLocation?.relPath === active.relPath ? sourceLocation : null}
             onChange={(doc) => editor.onEdit(active.relPath, doc)}
             onSave={() => {
               if (/^untitled(?:-\d+)?\.md$/i.test(active.relPath)) {
@@ -820,6 +919,7 @@ function FileSurface({
       ) : null}
 
       <EditorStatusBar
+        latexBuildStatus={active && /\.tex$/i.test(active.relPath) ? latexBuildStatus : null}
         isPython={active ? isPythonPath(active.relPath) : false}
         counts={editor.statusCounts}
         missing={editor.statusMissing}
