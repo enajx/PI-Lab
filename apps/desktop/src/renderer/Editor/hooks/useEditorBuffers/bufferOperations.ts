@@ -36,7 +36,7 @@ export async function saveBuffer(
   overwrite: boolean,
 ): Promise<boolean> {
   const snapshot = access.read().find((entry) => entry.relPath === relPath)
-  if (!snapshot || (snapshot.externalChange && !overwrite)) return false
+  if (!snapshot || snapshot.kind === "pdf" || (snapshot.externalChange && !overwrite)) return false
   access.reportError(null)
   return withFileOperation(workspaceId, relPath, async () => {
     let current = access.current(snapshot)
@@ -132,7 +132,7 @@ export async function saveBufferAs(
   targetRelPath: string,
 ): Promise<SaveAsResult> {
   const snapshot = access.read().find((entry) => entry.relPath === relPath)
-  if (!snapshot || snapshot.externalChange) return { saved: false }
+  if (!snapshot || snapshot.kind === "pdf" || snapshot.externalChange) return { saved: false }
   access.reportError(null)
   return withFileOperation(targetWorkspaceId, targetRelPath, async () => {
     if (!access.current(snapshot)) return { saved: false }

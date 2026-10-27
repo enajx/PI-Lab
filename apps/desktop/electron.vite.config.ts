@@ -1,5 +1,6 @@
-import { writeFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { dirname, resolve } from "node:path"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import react from "@vitejs/plugin-react"
@@ -7,6 +8,50 @@ import { defineConfig, externalizeDepsPlugin } from "electron-vite"
 import { type Plugin, build as viteBuild } from "vite"
 import { copyRuntimeMigrations } from "./scripts/copy-migrations"
 import { validateLocaleFiles } from "./scripts/validate-locales"
+
+/** Ship PDF.js support data locally, with identical URLs in development and ASAR builds. */
+function pdfAssetsPlugin(): Plugin {
+  const packageRoot = dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"))
+  const directories = ["cmaps", "standard_fonts", "wasm", "iccs"]
+  let building = false
+  return {
+    name: "pi-lab:pdf-assets",
+    configResolved(config) {
+      building = config.command === "build"
+    },
+    configureServer(server) {
+      server.middlewares.use("/pdfjs/", (request, response, next) => {
+        const pathname = (request.url ?? "").split("?")[0] ?? ""
+        const match = /^\/?(cmaps|standard_fonts|wasm|iccs)\/([a-zA-Z0-9_.-]+)$/.exec(pathname)
+        if (!match || match[2] === "." || match[2] === "..") {
+          next()
+          return
+        }
+        const [, directory, filename] = match
+        const target = resolve(packageRoot, directory ?? "", filename ?? "")
+        const data = readFileSync(target)
+        response.setHeader(
+          "Content-Type",
+          filename?.endsWith(".wasm") ? "application/wasm" : "application/octet-stream",
+        )
+        response.end(data)
+      })
+    },
+    buildStart() {
+      if (!building) return
+      for (const directory of directories) {
+        for (const file of readdirSync(resolve(packageRoot, directory), { withFileTypes: true })) {
+          if (!file.isFile()) continue
+          this.emitFile({
+            type: "asset",
+            fileName: `pdfjs/${directory}/${file.name}`,
+            source: readFileSync(resolve(packageRoot, directory, file.name)),
+          })
+        }
+      }
+    },
+  }
+}
 
 /**
  * Copy the generated Drizzle migrations next to the compiled main bundle so the
@@ -165,6 +210,7 @@ export default defineConfig({
       dedupe: ["@codemirror/state", "@codemirror/view", "@codemirror/lint"],
     },
     plugins: [
+      pdfAssetsPlugin(),
       {
         name: "pi-lab:validate-locales",
         buildStart() {

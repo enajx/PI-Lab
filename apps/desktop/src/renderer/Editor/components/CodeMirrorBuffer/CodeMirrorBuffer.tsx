@@ -56,6 +56,8 @@ interface CodeMirrorBufferProps {
   onReady?: () => void
   /** Reports the main cursor's one-based line and column. */
   onCursorChange?: (line: number, column: number) => void
+  /** Requested source location, including repeated navigation to the same line. */
+  sourceLocation?: { line: number; column: number } | null
   /** Fires on Mod+Enter while this focused buffer is eligible to run. */
   onRun?: () => void
   /**
@@ -148,6 +150,7 @@ export function CodeMirrorBuffer({
   onSave,
   onReady,
   onCursorChange,
+  sourceLocation,
   onRun,
   vim: vimEnabled = false,
   autocomplete,
@@ -509,6 +512,20 @@ export function CodeMirrorBuffer({
       ),
     })
   }, [activeMarkdownMode, markdown, markdownCompartment])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !sourceLocation) return
+    const line = view.state.doc.line(
+      Math.max(1, Math.min(sourceLocation.line, view.state.doc.lines)),
+    )
+    const position = Math.min(line.to, line.from + Math.max(0, sourceLocation.column - 1))
+    view.dispatch({
+      selection: { anchor: position },
+      effects: EditorView.scrollIntoView(position, { y: "center" }),
+    })
+    view.focus()
+  }, [sourceLocation])
 
   const formatSelection = (prefix: string, suffix: string, placeholder: string) => {
     const view = viewRef.current

@@ -741,3 +741,32 @@ test("Python checks wait for a workspace during navigation", async () => {
   await waitFor(() => expect(check).toHaveBeenCalledTimes(1))
   expect(resolve).toHaveBeenCalledTimes(1)
 })
+
+/** PDFs use viewer metadata and must never pass through editable text (mocked IPC). */
+test("opens PDFs as read-only viewer tabs without reading or saving binary text", async () => {
+  const read = vi.fn(() => ({
+    status: "binary",
+    exists: true,
+    size: 100,
+    baseline: { mtimeMs: 2, size: 100 },
+  }))
+  const write = vi.fn()
+  const view = setup({ "files.read": read, "files.write": write }, initial, false)
+  await act(() => view.result.current.openFile("build/main.pdf"))
+  expect(view.result.current.active).toMatchObject({ relPath: "build/main.pdf", kind: "pdf" })
+  expect(read).not.toHaveBeenCalled()
+  await act(() => view.result.current.saveFile("build/main.pdf"))
+  expect(write).not.toHaveBeenCalled()
+})
+
+/** A missing PDF must report failure instead of silently leaving the prior tab selected. */
+test("reports missing PDFs without adding an unreadable tab (mocked IPC)", async () => {
+  const view = setup(
+    { "files.stat": () => ({ exists: false, mtimeMs: 0, size: 0 }) },
+    initial,
+    false,
+  )
+  await act(() => view.result.current.openFile("missing.pdf"))
+  expect(view.result.current.error).toContain("File does not exist: missing.pdf")
+  expect(view.result.current.buffers.map((buffer) => buffer.relPath)).toEqual(["notes.txt"])
+})

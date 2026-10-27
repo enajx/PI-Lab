@@ -1,0 +1,10 @@
+/* Keep the PDF paper unchanged while the surrounding viewer follows the app theme. */
+.pi-pdf-pages .pdfViewer {
+  --page-margin: 12px auto;
+  --page-border: none;
+  --page-border-image: none;
+  padding: 12px 0;
+}
+.pi-pdf-pages .pdfViewer .page {
+  box-shadow: 0 1px 5px #0002;
+}

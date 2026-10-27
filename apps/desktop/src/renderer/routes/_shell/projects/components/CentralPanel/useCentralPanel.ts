@@ -1,6 +1,7 @@
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { PdfBuildState } from "../../../../../Editor/components/PdfViewer/PdfViewer"
 import {
   type EditorBuffersApi,
   type OpenBuffer,
@@ -10,6 +11,7 @@ import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffe
 import { resolveLaunchAgentId, useDefaultAgentId } from "../../../../../preferences/preferences"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { useTRPC } from "../../../../../trpc/react"
+import { useLatexBuild } from "./useLatexBuild"
 
 /** Which kind of pane the central panel is currently showing. */
 export type ActiveRef = { type: "file"; relPath: string } | { type: "session"; id: string }
@@ -89,6 +91,8 @@ export interface CentralPanelController {
   pendingTerminal: boolean
   pendingPython: boolean
   launchError: string | null
+  latexBuildStatus?: { message: string; log: string } | null
+  pdfBuildState?: PdfBuildState | null
 }
 
 interface UseCentralPanelArgs {
@@ -129,11 +133,16 @@ export function useCentralPanel({
 }: UseCentralPanelArgs): CentralPanelController {
   const trpc = useTRPC()
   const [defaultAgentId, , defaultAgentError, defaultAgentPending] = useDefaultAgentId()
+  const {
+    saved,
+    status: latexBuildStatus,
+    pdfBuildState,
+  } = useLatexBuild(client, workspaceId, onSaved)
   const editor = useEditorBuffers({
     client,
     workspaceId,
     settings,
-    onSaved,
+    onSaved: saved,
     initialBuffers: initialState?.buffers,
     initialActiveRelPath: initialState?.activeRelPath,
     onBuffersChange,
@@ -581,6 +590,8 @@ export function useCentralPanel({
   }, [killTerminal])
 
   return {
+    latexBuildStatus,
+    pdfBuildState,
     editor,
     sessions,
     active,

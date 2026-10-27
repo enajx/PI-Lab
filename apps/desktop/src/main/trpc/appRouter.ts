@@ -6,6 +6,7 @@ import { diagnosticsRouter } from "./diagnostics"
 import { filesRouter } from "./files"
 import { healthRouter } from "./health/health"
 import { notificationsRouter } from "./notifications"
+import { pdfRouter } from "./pdf/pdf"
 import { projectsRouter } from "./projects"
 import { pythonRouter } from "./python"
 import { scienceRouter } from "./science"
@@ -38,6 +39,7 @@ export const appRouter = router({
   workflows: workflowsRouter,
   system: systemRouter,
   files: filesRouter,
+  pdf: pdfRouter,
   diagnostics: diagnosticsRouter,
   science: scienceRouter,
   agents: agentsRouter,
