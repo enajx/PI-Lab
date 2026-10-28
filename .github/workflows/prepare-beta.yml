@@ -1,0 +1,237 @@
+name: Prepare Beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Beta version, for example 0.1.0-beta.4
+        required: true
+        type: string
+      commit:
+        description: main or the full SHA of a commit already merged into main
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-beta-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and check signed Beta
+    runs-on: macos-15
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      artifact-id: ${{ steps.assets.outputs.artifact-id }}
+    env:
+      SKIP_ENV_VALIDATION: "1"
+      BETA_VERSION: ${{ inputs.version }}
+      SOURCE_COMMIT: ${{ inputs.commit }}
+      TOOLING_DIR: ${{ github.workspace }}/workflow
+      CANDIDATE_DIR: ${{ github.workspace }}/source/apps/desktop/release/public/beta/${{ inputs.version }}
+    steps:
+      - name: Check release setup
+        env:
+          RELEASE_REPO_SSH_KEY: ${{ secrets.RELEASE_REPO_SSH_KEY }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          node <<'NODE'
+          if (process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('Run Prepare Beta from main. Select the app commit in the commit input.');
+          const names = ['RELEASE_REPO_SSH_KEY', 'CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'];
+          const missing = names.filter(name => !process.env[name]);
+          if (missing.length) throw new Error('Configure these Actions secrets before preparing a Beta: ' + missing.join(', '));
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.(0|[1-9]\d*)$/.test(process.env.BETA_VERSION)) throw new Error('Choose a numeric Beta version such as 0.1.0-beta.4');
+          if (!/^(main|[a-f0-9]{40})$/.test(process.env.SOURCE_COMMIT)) throw new Error('Choose main or a full lowercase main commit SHA');
+          NODE
+
+      - name: Check out release tooling
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: workflow
+          ssh-key: ${{ secrets.RELEASE_REPO_SSH_KEY }}
+          persist-credentials: false
+
+      - name: Check out selected app source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit }}
+          path: source
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_REPO_SSH_KEY }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.0"
+
+      - name: Verify selected main commit
+        id: source
+        run: node "$TOOLING_DIR/apps/desktop/scripts/prepare-beta-source.cjs" verify "$BETA_VERSION" "$SOURCE_COMMIT" "$GITHUB_REPOSITORY" "$GITHUB_WORKSPACE/source"
+
+      - name: Select previous published Beta
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/beta-releases.json"
+          node "$TOOLING_DIR/apps/desktop/scripts/prepare-beta-source.cjs" previous "$BETA_VERSION" "$RUNNER_TEMP/beta-releases.json"
+
+      - name: Install release-check tooling
+        working-directory: workflow
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Install app dependencies
+        working-directory: source
+        run: bun install --frozen-lockfile --concurrent-scripts 1
+
+      - name: Check source and tests
+        working-directory: source
+        run: |
+          bun run --cwd apps/desktop setup:native
+          bun run typecheck
+          bun run lint
+          bun run test
+          bun run test:scripts
+
+      - name: Build, sign and notarize Beta
+        working-directory: source
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bun run package:public beta "$BETA_VERSION"
+
+      - name: Verify Developer ID signature and notarization
+        run: |
+          app="$CANDIDATE_DIR/mac-arm64/PI Lab.app"
+          codesign --verify --deep --strict "$app"
+          codesign --display --verbose=4 "$app" 2> "$RUNNER_TEMP/beta-signature.txt"
+          node -e "if (!/^Authority=Developer ID Application:/m.test(require('node:fs').readFileSync(process.argv[1], 'utf8'))) throw new Error('Candidate must use Developer ID signing')" "$RUNNER_TEMP/beta-signature.txt"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute "$app"
+
+      - name: Check packaged Beta
+        working-directory: source
+        env:
+          PI_LAB_PACKAGED_BINARY: ${{ github.workspace }}/source/apps/desktop/release/public/beta/${{ inputs.version }}/mac-arm64/PI Lab.app/Contents/MacOS/PI Lab
+          PI_LAB_EXPECTED_CHANNEL_NAME: PI Lab
+        run: node "$TOOLING_DIR/node_modules/@playwright/test/cli.js" test --config "$TOOLING_DIR/playwright.config.ts" "$TOOLING_DIR/tests/e2e/packaged-smoke.spec.ts"
+
+      - name: Download previous Beta for profile check
+        if: steps.previous.outputs.tag != '-'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+          PREVIOUS_ZIP: ${{ steps.previous.outputs.zip }}
+          PREVIOUS_DIGEST: ${{ steps.previous.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous-beta"
+          gh release download "$PREVIOUS_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$PREVIOUS_ZIP" --dir "$RUNNER_TEMP/previous-beta"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const file = require('node:path').join(process.env.RUNNER_TEMP, 'previous-beta', process.env.PREVIOUS_ZIP);
+          if (process.env.PREVIOUS_DIGEST) {
+            const actual = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+            if (actual !== process.env.PREVIOUS_DIGEST) throw new Error('Previous Beta ZIP does not match its GitHub digest');
+          }
+          NODE
+          ditto -x -k "$RUNNER_TEMP/previous-beta/$PREVIOUS_ZIP" "$RUNNER_TEMP/previous-beta/unpacked"
+          codesign --verify --deep --strict "$RUNNER_TEMP/previous-beta/unpacked/PI Lab.app"
+
+      - name: Check Beta profile upgrade
+        if: steps.previous.outputs.tag != '-'
+        working-directory: source
+        env:
+          PI_LAB_PREVIOUS_BETA_BINARY: ${{ runner.temp }}/previous-beta/unpacked/PI Lab.app/Contents/MacOS/PI Lab
+          PI_LAB_PACKAGED_BETA_BINARY: ${{ github.workspace }}/source/apps/desktop/release/public/beta/${{ inputs.version }}/mac-arm64/PI Lab.app/Contents/MacOS/PI Lab
+          PI_LAB_EXPECTED_BETA_VERSION: ${{ inputs.version }}
+        run: |
+          test -x "$PI_LAB_PREVIOUS_BETA_BINARY"
+          test -x "$PI_LAB_PACKAGED_BETA_BINARY"
+          node "$TOOLING_DIR/node_modules/@playwright/test/cli.js" test --config "$TOOLING_DIR/playwright.config.ts" "$TOOLING_DIR/tests/e2e/beta-profile-upgrade.spec.ts"
+
+      - name: Record checked release assets
+        env:
+          SELECTED_SHA: ${{ steps.source.outputs.sha }}
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          node "$TOOLING_DIR/apps/desktop/scripts/prepare-beta-source.cjs" verify "$BETA_VERSION" "$SELECTED_SHA" "$GITHUB_REPOSITORY" "$GITHUB_WORKSPACE/source"
+          node "$TOOLING_DIR/apps/desktop/scripts/prepare-beta.cjs" manifest "$BETA_VERSION" "$SELECTED_SHA" "$CANDIDATE_DIR" "$PREVIOUS_TAG" "$GITHUB_REPOSITORY"
+
+      - name: Transfer checked release assets
+        id: assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/PI-Lab-*.zip
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/PI-Lab-*.dmg
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/PI-Lab-*.zip.blockmap
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/beta-mac.yml
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/prepare-beta.json
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/release-notes.md
+
+      - name: Save failed check reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-checks-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 7
+          path: |
+            source/.cache/test-results/
+            source/playwright-report/
+
+  draft:
+    name: Create draft Beta
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          ssh-key: ${{ secrets.RELEASE_REPO_SSH_KEY }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            apps/desktop/scripts/prepare-beta.cjs
+            apps/desktop/scripts/public-release.cjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v4
+        with:
+          name: beta-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checked-beta
+      - name: Create draft Beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node apps/desktop/scripts/prepare-beta.cjs publish "$RUNNER_TEMP/checked-beta" "$GITHUB_REPOSITORY"
+      - name: Link draft for review
+        run: |
+          echo "Beta candidate prepared from ${{ needs.build.outputs.sha }}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Review the draft and its notes at https://github.com/$GITHUB_REPOSITORY/releases before publishing." >> "$GITHUB_STEP_SUMMARY"

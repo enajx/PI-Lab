@@ -1,20 +1,28 @@
-import { createTRPCClient } from "@trpc/client"
+import { createTRPCClient, type TRPCLink } from "@trpc/client"
 import superjson from "superjson"
 import { ipcLink } from "trpc-electron/renderer"
 import type { AppRouter } from "../../main/trpc/appRouter"
 
+let lastIpcRequestId = 0
+
+/** Give every client in this document a distinct IPC operation ID. */
+const uniqueIpcIds: TRPCLink<AppRouter> =
+  () =>
+  ({ op, next }) => {
+    if (lastIpcRequestId === Number.MAX_SAFE_INTEGER)
+      throw new Error("IPC request IDs exhausted; reload PI Lab")
+    lastIpcRequestId += 1
+    return next({ ...op, id: lastIpcRequestId })
+  }
+
 /**
- * Vanilla typed tRPC client over the `trpc-electron` IPC link. This phase makes
- * a plain imperative call for the health check; TanStack Query / the React
- * client are added in a later phase. The `superjson` transformer here MUST match
- * the main process's `initTRPC` transformer.
- *
- * Constructed via a factory (not a module singleton) so component tests can
- * inject a fake client.
+ * Typed tRPC client over Electron IPC. Independent clients share a request-ID
+ * sequence, and the preload bridge scopes those IDs to the current document.
+ * SuperJSON must match the main router. Components can inject fake clients.
  */
 export function createPiLabTrpcClient() {
   return createTRPCClient<AppRouter>({
-    links: [ipcLink({ transformer: superjson })],
+    links: [uniqueIpcIds, ipcLink({ transformer: superjson })],
   })
 }
 

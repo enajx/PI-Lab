@@ -8,7 +8,6 @@ import {
 
 const electron = vi.hoisted(() => ({
   expose: vi.fn(),
-  exposeTRPC: vi.fn(),
   on: vi.fn(),
   removeListener: vi.fn(),
   send: vi.fn(),
@@ -22,7 +21,7 @@ vi.mock("electron", () => ({
     send: electron.send,
   },
 }))
-vi.mock("trpc-electron/main", () => ({ exposeElectronTRPC: electron.exposeTRPC }))
+vi.mock("trpc-electron/main", () => ({ ELECTRON_TRPC_CHANNEL: "electron-trpc" }))
 
 /** Import the real preload with mocked Electron; native isolation is covered by E2E. */
 async function loadPreload(mainFrame: boolean): Promise<void> {
@@ -45,7 +44,9 @@ describe("shutdown preload bridge with mocked Electron", () => {
 
   test("subscriptions validate requests, hide Electron events, and remove their exact listener", async () => {
     await loadPreload(true)
-    const exposed = electron.expose.mock.calls[0]?.[1] as { shutdown: ShutdownBridge }
+    const exposed = electron.expose.mock.calls.find(([name]) => name === "piLab")?.[1] as {
+      shutdown: ShutdownBridge
+    }
     expect(exposed.shutdown).toBeDefined()
     const listener = vi.fn()
     const unsubscribe = exposed.shutdown.subscribe(listener)
@@ -64,7 +65,9 @@ describe("shutdown preload bridge with mocked Electron", () => {
 
   test("responses use only the typed response channel and payload", async () => {
     await loadPreload(true)
-    const exposed = electron.expose.mock.calls[0]?.[1] as { shutdown: ShutdownBridge }
+    const exposed = electron.expose.mock.calls.find(([name]) => name === "piLab")?.[1] as {
+      shutdown: ShutdownBridge
+    }
     exposed.shutdown.respond({ requestId: "one", allow: true })
     exposed.shutdown.respond({ requestId: "one", allow: "invalid" } as unknown as Parameters<
       ShutdownBridge["respond"]
@@ -78,12 +81,11 @@ describe("shutdown preload bridge with mocked Electron", () => {
   test("child frames receive no preload bridge", async () => {
     await loadPreload(false)
     expect(electron.expose).not.toHaveBeenCalled()
-    expect(electron.exposeTRPC).not.toHaveBeenCalled()
   })
 
   test("interface language bridge sends only supported codes to main", async () => {
     await loadPreload(true)
-    const exposed = electron.expose.mock.calls[0]?.[1] as {
+    const exposed = electron.expose.mock.calls.find(([name]) => name === "piLab")?.[1] as {
       setInterfaceLanguage: (language: string) => void
     }
     exposed.setInterfaceLanguage("ar")

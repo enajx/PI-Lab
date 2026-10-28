@@ -127,7 +127,9 @@ test.each([
   "linux",
   "win",
 ] as const)("normalized %s app filters include only runtime outputs", (platform) => {
-  const normalized = doMergeConfigs([structuredClone(config)])
+  // Preserve the callable build hook while copying the filter configuration.
+  const { beforePack, ...cloneable } = config
+  const normalized = doMergeConfigs([{ ...structuredClone(cloneable), beforePack }])
   const packager = {
     info: {
       projectDir: desktopDir,

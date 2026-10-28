@@ -1,5 +1,5 @@
 import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from "electron"
-import { exposeElectronTRPC } from "trpc-electron/main"
+import { ELECTRON_TRPC_CHANNEL } from "trpc-electron/main"
 import {
   APP_ICON_GET_CHANNEL,
   APP_ICON_IDENTITY_CHANNEL,
@@ -56,9 +56,10 @@ import {
   type UpdateSnapshot,
   type UpdatesBridge,
 } from "../shared/updates"
+import { createDocumentTrpcBridge } from "./trpcBridge"
 
 /**
- * Preload bridge. `exposeElectronTRPC()` opens the IPC channel the renderer's
+ * Preload bridge. The document-scoped bridge opens the IPC channel the renderer's
  * `ipcLink` talks to — it MUST run before any other `contextBridge` expose so
  * the channel is in place when the renderer mounts.
  *
@@ -66,7 +67,15 @@ import {
  * to the page except the small, explicit surface below.
  */
 if (process.isMainFrame) {
-  exposeElectronTRPC()
+  contextBridge.exposeInMainWorld(
+    "electronTRPC",
+    createDocumentTrpcBridge(globalThis.crypto.randomUUID(), {
+      send: (message) => ipcRenderer.send(ELECTRON_TRPC_CHANNEL, message),
+      onMessage: (listener) => {
+        ipcRenderer.on(ELECTRON_TRPC_CHANNEL, (_event, message) => listener(message))
+      },
+    }),
+  )
 
   const shutdown: ShutdownBridge = {
     subscribe(listener: (request: ShutdownRequest) => void): () => void {
