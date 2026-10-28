@@ -78,3 +78,6 @@ apps/desktop/build/icon.png
 apps/desktop/build/icon.icns
 apps/desktop/build/icon.ico
 apps/desktop/build/Assets.car
+
+# Downloaded bundled Tectonic executables are generated before dev/build/package.
+/apps/desktop/resources/latex/*/

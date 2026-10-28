@@ -4,8 +4,8 @@
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "bun run prepare:latex && electron-vite dev",
+    "build": "bun run prepare:latex && electron-vite build",
     "build:icons": "bun scripts/generate-app-icon.ts",
     "setup:native": "node scripts/setup-native.cjs && bun run validate:native:node",
     "validate:native:node": "node scripts/validate-native.cjs",
@@ -21,7 +21,8 @@
     "package:prod:stable": "node scripts/package-channel.cjs stable prod",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "prepare:latex": "node scripts/prepare-latex-runtime.cjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

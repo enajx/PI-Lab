@@ -5,6 +5,7 @@ import { caffeineRouter } from "./caffeine"
 import { diagnosticsRouter } from "./diagnostics"
 import { filesRouter } from "./files"
 import { healthRouter } from "./health/health"
+import { latexRouter } from "./latex/latex"
 import { notificationsRouter } from "./notifications"
 import { pdfRouter } from "./pdf/pdf"
 import { projectsRouter } from "./projects"
@@ -40,6 +41,7 @@ export const appRouter = router({
   system: systemRouter,
   files: filesRouter,
   pdf: pdfRouter,
+  latex: latexRouter,
   diagnostics: diagnosticsRouter,
   science: scienceRouter,
   agents: agentsRouter,

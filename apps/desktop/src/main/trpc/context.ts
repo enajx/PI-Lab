@@ -42,6 +42,12 @@ export interface AppContext {
   skillsHomeDir: string
   /** Read-only skills shipped with PI Lab; absent in isolated callers. */
   bundledSkillsDir?: string
+  /** Read-only directory containing platform-specific bundled LaTeX tools. */
+  latexResourcesDir?: string
+  /** Writable channel-specific LaTeX support cache. */
+  latexDataDir?: string
+  /** User home for discovering a shared TinyTeX installation. */
+  latexUserHome?: string
   getDaemonClient: () => Promise<DaemonClient>
   agentCatalog: readonly TerminalAgent[]
   resolveAgentExecutable: AgentExecutableResolver

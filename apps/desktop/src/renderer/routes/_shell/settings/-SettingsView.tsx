@@ -9,6 +9,7 @@ import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
 import { FeatureHelpPanel, FeatureHelpRestoreButton } from "../components/Sidebar"
 import { AgentStatusControl } from "../titleBar"
+import { LatexSection } from "./components/LatexSection"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
 import { QuickEditorSection } from "./components/QuickEditorSection"
 import {
@@ -59,6 +60,12 @@ const SECTIONS = [
     label: "Editor",
     description: "Configure saving, keybindings, diagnostics, formatting, and editor themes.",
     render: () => <EditorSection />,
+  },
+  {
+    id: "latex",
+    label: "LaTeX",
+    description: "Choose the LaTeX compiler for all projects and install PDFLaTeX.",
+    render: () => <LatexSection />,
   },
   {
     id: "quick-editor",
