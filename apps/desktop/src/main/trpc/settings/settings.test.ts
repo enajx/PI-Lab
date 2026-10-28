@@ -65,6 +65,7 @@ describe("settings.get", () => {
       diagnosticsEnabled: false,
       customEditorThemes: [],
       pythonRunDestination: "central",
+      latexProvider: "bundled",
     })
   })
 })
@@ -188,6 +189,7 @@ describe("settings.updateEditor", () => {
       editorTheme: "default",
       customEditorThemes: [],
       pythonRunDestination: "central",
+      latexProvider: "bundled",
     })
 
     // The patch persisted and `get` reflects it.
@@ -207,6 +209,7 @@ describe("settings.updateEditor", () => {
       editorTheme: "default",
       customEditorThemes: [],
       pythonRunDestination: "central",
+      latexProvider: "bundled",
     })
   })
 
@@ -342,5 +345,24 @@ describe("settings.updateAgents", () => {
       executableOverrides: { codex: "/usr/local/bin/codex" },
       setupCompleted: true,
     })
+  })
+})
+
+describe("global LaTeX provider", () => {
+  it("persists system and bundled choices while retaining saved settings", async () => {
+    await harness.caller.settings.updateEditor({ autosave: true, vim: true })
+    await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    await harness.caller.settings.updateEditor({ latexProvider: "system" })
+    expect((await harness.caller.settings.get()).editor).toMatchObject({
+      latexProvider: "system",
+      autosave: true,
+      vim: true,
+    })
+    expect((await harness.caller.settings.get()).confirmOnQuit).toBe(false)
+    await harness.caller.settings.updateEditor({ latexProvider: "bundled" })
+    expect((await harness.caller.settings.get()).editor.latexProvider).toBe("bundled")
+    await expect(
+      harness.caller.settings.updateEditor({ latexProvider: "managed" as never }),
+    ).rejects.toThrow()
   })
 })

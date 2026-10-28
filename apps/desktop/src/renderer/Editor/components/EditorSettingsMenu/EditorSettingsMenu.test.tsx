@@ -20,6 +20,7 @@ const SETTINGS: EditorSettings = {
   editorTheme: "default",
   customEditorThemes: [],
   pythonRunDestination: "central",
+  latexProvider: "bundled",
 }
 
 describe("EditorSettingsMenu", () => {

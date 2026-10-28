@@ -11,6 +11,8 @@ export type {
   ImportedEditorTokenColor,
 } from "./editorThemeImport"
 
+export type LatexProvider = "bundled" | "system"
+
 export type PythonRunDestination = "central" | "below-editor"
 
 export interface EditorSettings {
@@ -33,6 +35,8 @@ export interface EditorSettings {
   customEditorThemes: ImportedEditorTheme[]
   /** Default destination for Run Python; each run may override it. */
   pythonRunDestination: PythonRunDestination
+  /** LaTeX compiler used for every project. */
+  latexProvider: LatexProvider
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -45,4 +49,5 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   editorTheme: "default",
   customEditorThemes: [],
   pythonRunDestination: "central",
+  latexProvider: "bundled",
 }

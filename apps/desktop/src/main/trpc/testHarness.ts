@@ -22,7 +22,7 @@ import {
   systemActivityScheduler,
 } from "../activity"
 import { ActivityStatusFeed } from "../activity/statusFeed"
-import type { AgentLaunchEnvironmentResolver } from "../agents/executable"
+import type { AgentExecutableResolver, AgentLaunchEnvironmentResolver } from "../agents/executable"
 import {
   type NonInteractiveProcessRunner,
   runNonInteractiveProcess,
@@ -230,6 +230,10 @@ export const FAKE_PYTHON_RUNTIME_RESOLVER: PythonRuntimeResolver = async () => (
 })
 
 export interface HarnessOptions {
+  latexResourcesDir?: string
+  latexDataDir?: string
+  latexUserHome?: string
+  resolveAgentExecutable?: AgentExecutableResolver
   appChannel?: PiLabChannel
   /** Skip Git subprocesses for suites that use only the database and filesystem. */
   git?: boolean
@@ -281,6 +285,10 @@ export async function createHarness(
   agentCatalog: readonly TerminalAgent[] = [FAKE_AGENT],
   options: Pick<
     HarnessOptions,
+    | "latexResourcesDir"
+    | "latexDataDir"
+    | "latexUserHome"
+    | "resolveAgentExecutable"
     | "sshExec"
     | "httpFetch"
     | "openPath"
@@ -368,13 +376,17 @@ export async function createHarness(
     db,
     appChannel: options.appChannel ?? "alpha",
     skillsHomeDir,
+    latexResourcesDir: options.latexResourcesDir,
+    latexDataDir: options.latexDataDir ?? join(dataDir, "latex"),
+    latexUserHome: options.latexUserHome,
     getDaemonClient: async () => {
       await ensureDaemon()
       return client
     },
     agentCatalog,
-    resolveAgentExecutable: async (candidate) =>
-      candidate === "/missing/pi-lab-agent" ? null : candidate,
+    resolveAgentExecutable:
+      options.resolveAgentExecutable ??
+      (async (candidate) => (candidate === "/missing/pi-lab-agent" ? null : candidate)),
     getAgentLaunchEnvironment:
       options.getAgentLaunchEnvironment ??
       (async () => ({ ...process.env }) as Record<string, string>),

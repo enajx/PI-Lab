@@ -183,6 +183,13 @@
       "when": 1792678867726,
       "tag": "0025_sad_lockheed",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1793090000000,
+      "tag": "0026_global_latex_provider",
+      "breakpoints": true
     }
   ]
 }

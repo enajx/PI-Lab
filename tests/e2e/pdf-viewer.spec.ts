@@ -109,6 +109,11 @@ test("PDF viewer refreshes compiled output and navigates both ways through SyncT
       }
     })
     await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await page.getByTestId("nav-settings").click()
+    await page.getByTestId("settings-nav-latex").click()
+    await page.getByTestId("settings-latex-provider").selectOption("system")
+    await expect(page.getByTestId("settings-latex-provider")).toHaveValue("system")
+    await page.getByTestId("settings-back").click()
     await page.getByTestId("project-item").click()
     await page.getByTestId("panel-tab-files").click()
     await page.getByTestId("file-tree-dir").filter({ hasText: "build" }).click()

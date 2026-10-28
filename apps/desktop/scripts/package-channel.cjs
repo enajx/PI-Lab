@@ -133,8 +133,13 @@ async function waitForTargetToClose(bundle) {
 async function packageChannelWithLockHeld(value, production) {
   const { channel, productName } = channelDefinition(value)
   const releaseRoot = join(DESKTOP_DIR, "release")
+  const buildId = `${Date.now()}-${process.pid}-${randomUUID()}`
   if (process.platform !== "darwin") {
-    runBuildSteps({ ...process.env, PI_LAB_CHANNEL: channel }, production, null)
+    runBuildSteps(
+      { ...process.env, PI_LAB_CHANNEL: channel, PI_LAB_BUILD_ID: buildId },
+      production,
+      null,
+    )
     return
   }
   const alias = bundleAlias(channel, productName)
@@ -144,13 +149,17 @@ async function packageChannelWithLockHeld(value, production) {
     lstatSync(applicationsApp, { throwIfNoEntry: false })?.isSymbolicLink() &&
     readlinkSync(applicationsApp) === alias
   const root = join(releaseRoot, channel)
-  const buildId = `${Date.now()}-${process.pid}-${randomUUID()}`
   const stage = join(root, ".staging", buildId)
   try {
     assertPackageOutputIdle(alias)
     if (applicationsLink) assertPackageOutputIdle(applicationsApp)
     mkdirSync(stage, { recursive: true })
-    const env = { ...process.env, PI_LAB_CHANNEL: channel, PI_LAB_PACKAGE_STAGE: stage }
+    const env = {
+      ...process.env,
+      PI_LAB_CHANNEL: channel,
+      PI_LAB_PACKAGE_STAGE: stage,
+      PI_LAB_BUILD_ID: buildId,
+    }
     runBuildSteps(env, production, null)
 
     await waitForTargetToClose(alias)

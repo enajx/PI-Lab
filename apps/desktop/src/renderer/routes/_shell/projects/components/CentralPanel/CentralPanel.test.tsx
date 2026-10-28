@@ -97,6 +97,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   editorTheme: "default",
   customEditorThemes: [],
   pythonRunDestination: "central",
+  latexProvider: "bundled",
 }
 
 const PY_DIAGNOSTIC = {

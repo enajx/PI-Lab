@@ -21,6 +21,7 @@
  */
 
 const { join } = require("node:path")
+const { randomUUID } = require("node:crypto")
 // Customize the staging image before normal DMG compression, signing and update metadata.
 process.env.CUSTOM_DMGBUILD_PATH = join(__dirname, "scripts/dmg-background.cjs")
 
@@ -84,6 +85,9 @@ const config = {
   ...(publicRelease ? { artifactName: "PI-Lab-${version}-${arch}.${ext}" } : {}),
   extraMetadata: {
     piLabChannel: channel,
+    ...(channel === "alpha"
+      ? { piLabBuildId: process.env.PI_LAB_BUILD_ID?.trim() || randomUUID() }
+      : {}),
     ...(publicRelease
       ? {
           piLabPublicRelease: true,
@@ -148,6 +152,7 @@ const config = {
     { from: "assets/dmg/background.tiff", to: "dmg-background.tiff" },
     { from: "resources", to: ".", filter: ["skills/**/*"] },
     { from: "resources/Credits.html", to: "Credits.html" },
+    { from: "resources/latex", to: "latex", filter: ["manifest.json", "LICENSE", "NOTICE"] },
     { from: "resources/bin/pilab", to: "bin/pilab" },
     // Runtime window/Dock/notification identity. `build:icons` stages the
     // selected channel icon here before every package command.
@@ -183,11 +188,17 @@ const config = {
   ],
   // Keep node-pty's spawn-helper executable bit after it's copied into the package
   // (asar packing can drop it; node-pty exec()s this file for every PTY).
-  beforePack: "./scripts/electron-builder-before-pack.cjs",
+  beforePack: async (context) => {
+    await require("./scripts/electron-builder-before-pack.cjs").default(context)
+    await require("./scripts/prepare-latex-runtime.cjs").prepareForPack(context)
+  },
   afterPack: "./scripts/electron-builder-after-pack.cjs",
   mac: {
     // Modern macOS uses the flat catalog; older systems retain icon.icns.
-    extraResources: [{ from: "build/Assets.car", to: "Assets.car" }],
+    extraResources: [
+      { from: "build/Assets.car", to: "Assets.car" },
+      { from: "resources/latex/darwin-${arch}", to: "latex/darwin-${arch}" },
+    ],
     extendInfo: {
       CFBundleIconName: "AppIcon",
       ...(channel === "stable"
@@ -252,6 +263,7 @@ const config = {
     ],
   },
   linux: {
+    extraResources: [{ from: "resources/latex/linux-${arch}", to: "latex/linux-${arch}" }],
     files: [
       ...APP_FILES,
       "!**/node_modules/better-sqlite3/prebuilds/!(linux-${arch}|linuxmusl-${arch}).node",
@@ -263,6 +275,7 @@ const config = {
     icon: "build/icon.png",
   },
   win: {
+    extraResources: [{ from: "resources/latex/win32-${arch}", to: "latex/win32-${arch}" }],
     files: [
       ...APP_FILES,
       "!**/node_modules/better-sqlite3/prebuilds/!(win32-${arch}).node",

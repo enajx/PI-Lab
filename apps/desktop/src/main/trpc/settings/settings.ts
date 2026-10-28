@@ -72,6 +72,7 @@ const editorPatch = z.object({
   editorTheme: z.string().optional(),
   customEditorThemes: z.array(importedTheme).max(100).optional(),
   pythonRunDestination: z.enum(["central", "below-editor"]).optional(),
+  latexProvider: z.enum(["bundled", "system"]).optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */
