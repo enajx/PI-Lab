@@ -52,6 +52,20 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     editable: true,
   },
   {
+    id: "split-right",
+    label: "Split right",
+    description: "Split the focused terminal: a new terminal opens beside it",
+    defaultBinding: "Mod+d",
+    editable: true,
+  },
+  {
+    id: "split-down",
+    label: "Split down",
+    description: "Split the focused terminal: a new terminal opens below it",
+    defaultBinding: "Mod+Shift+d",
+    editable: true,
+  },
+  {
     id: "save-file",
     label: "Save file",
     description: "Save the active editor buffer (CodeMirror)",

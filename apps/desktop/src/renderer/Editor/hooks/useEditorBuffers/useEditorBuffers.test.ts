@@ -770,3 +770,34 @@ test("reports missing PDFs without adding an unreadable tab (mocked IPC)", async
   expect(view.result.current.error).toContain("File does not exist: missing.pdf")
   expect(view.result.current.buffers.map((buffer) => buffer.relPath)).toEqual(["notes.txt"])
 })
+
+/** Splits show several files at once, so a file without focus must also pick up disk edits. */
+test("an open file without focus picks up changes on disk (mocked IPC)", async () => {
+  vi.useFakeTimers()
+  const changed = { exists: true, mtimeMs: 2, size: 4 }
+  const unchanged = { exists: true, mtimeMs: 1, size: 3 }
+  let diskContent = "first"
+  const view = setup(
+    {
+      "files.stat": (input) =>
+        (input as { relPath: string }).relPath === "other.txt" ? { ...changed } : unchanged,
+      "files.read": () => ({ exists: true, content: diskContent }),
+    },
+    initial,
+    false,
+  )
+  await act(async () => {
+    await view.result.current.openFile("other.txt")
+  })
+  // openFile focuses the new file; focus the first file again so other.txt is in the background.
+  act(() => view.result.current.setActiveRelPath("notes.txt"))
+  changed.mtimeMs = 3
+  diskContent = "disk"
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500)
+  })
+  expect(
+    view.result.current.buffers.find((buffer) => buffer.relPath === "other.txt"),
+  ).toMatchObject({ content: "disk", savedContent: "disk" })
+  expect(view.result.current.active?.relPath).toBe("notes.txt")
+})

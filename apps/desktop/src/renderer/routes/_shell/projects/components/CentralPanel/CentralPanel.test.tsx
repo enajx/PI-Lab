@@ -564,6 +564,48 @@ describe("CentralPanel — panel", () => {
     ).toBe("Switch to this interactive shell terminal.")
   })
 
+  /** ⌘D splits the focused terminal into a new split holding a new terminal. */
+  test("the split shortcut opens a new terminal in a new split", async () => {
+    let spawned = 0
+    const { container } = renderPanel(
+      baseHandlers("main.py", {
+        "workspaces.spawnTerminal": () => ({ sessionId: `term-${++spawned}` }),
+      }),
+    )
+    fireEvent.click(screen.getByTestId("launcher-terminal"))
+    await screen.findByTestId("terminal")
+
+    fireEvent.keyDown(window, { key: "d", metaKey: true })
+
+    await waitFor(() => expect(screen.getAllByTestId("terminal")).toHaveLength(2))
+    expect(spawned).toBe(2)
+    // One terminal in each split: the new terminal must not land in the old split.
+    expect(
+      [...container.querySelectorAll(".dv-groupview")].map(
+        (group) => group.querySelectorAll(".dv-tab").length,
+      ),
+    ).toEqual([1, 1])
+  })
+
+  /** Split shortcuts only split terminals; on a file the key is left to the editor. */
+  test("the split shortcut on a file does nothing and leaves the key to the editor", async () => {
+    const { container } = renderPanel()
+    await openFile()
+
+    const event = new KeyboardEvent("keydown", {
+      key: "D",
+      metaKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(screen.queryByTestId("quick-open")).toBeNull()
+    expect(container.querySelectorAll(".dv-groupview")).toHaveLength(1)
+  })
+
   test("closing a terminal tab terminates its PTY instead of leaving a hidden session", async () => {
     const killed: string[] = []
     renderPanel(
@@ -834,7 +876,52 @@ describe("CentralPanel — left Files panel", () => {
   })
 })
 
+/**
+ * Each open file has its own mounted surface; dockview hides the inactive ones
+ * with `visibility: hidden` on their overlay container. Returns the path shown
+ * by the visible surface (computed visibility is inherited in jsdom).
+ */
+function visibleByTestId(testId: string): HTMLElement[] {
+  return screen
+    .queryAllByTestId(testId)
+    .filter((el) => getComputedStyle(el).visibility !== "hidden")
+}
+
+function visibleBufferPath(): string | undefined {
+  return screen
+    .queryAllByTestId("buffer-path")
+    .find((el) => getComputedStyle(el).visibility !== "hidden")?.textContent
+}
+
 describe("CentralPanel — editor behaviour", () => {
+  /** Splits share one bottom bar: it names the focused tab and shows only that tab's controls. */
+  test("one status bar follows the focused file", async () => {
+    renderPanel(
+      baseHandlers("notes.md", {
+        "files.tree": () => [
+          { name: "notes.md", relPath: "notes.md", kind: "file" as const },
+          { name: "cli.ts", relPath: "cli.ts", kind: "file" as const },
+        ],
+      }),
+    )
+    const files = await screen.findAllByTestId("file-tree-file")
+    const byPath = (relPath: string) =>
+      files.find((file) => file.getAttribute("data-rel-path") === relPath) as HTMLElement
+
+    fireEvent.click(byPath("notes.md"))
+    await waitFor(() =>
+      expect(screen.getByTestId("editor-status-label").textContent).toBe("notes.md"),
+    )
+    expect(screen.getByTestId("markdown-mode-toggle")).toBeTruthy()
+
+    fireEvent.click(byPath("cli.ts"))
+    await waitFor(() =>
+      expect(screen.getByTestId("editor-status-label").textContent).toBe("cli.ts"),
+    )
+    expect(screen.getAllByTestId("editor-status-bar")).toHaveLength(1)
+    expect(screen.queryByTestId("markdown-mode-toggle")).toBeNull()
+  })
+
   test("Markdown opens in Render and toggles to raw Source", async () => {
     renderPanel(baseHandlers("notes.md"))
     const note = (await screen.findAllByTestId("file-tree-file")).find(
@@ -844,7 +931,7 @@ describe("CentralPanel — editor behaviour", () => {
     await screen.findByTestId("editor-buffer")
 
     expect(
-      screen.getByRole("button", { name: "Render Markdown" }).getAttribute("aria-pressed"),
+      (await screen.findByRole("button", { name: "Render Markdown" })).getAttribute("aria-pressed"),
     ).toBe("true")
     expect(screen.getByTestId("buffer-markdown-mode").textContent).toBe("render")
     expect(screen.getByTestId("buffer-project-entries").textContent).toBe("")
@@ -1303,8 +1390,8 @@ describe("CentralPanel — editor behaviour", () => {
     fireEvent.click(pythonFile as HTMLElement)
     await waitFor(() => expect(resolveCalls).toBe(1))
     fireEvent.click(textFile as HTMLElement)
-    await waitFor(() => expect(screen.getByTestId("buffer-path").textContent).toBe("notes.txt"))
-    expect(screen.queryByTestId("editor-python-runtime")).toBeNull()
+    await waitFor(() => expect(visibleBufferPath()).toBe("notes.txt"))
+    expect(visibleByTestId("editor-python-runtime")).toHaveLength(0)
 
     const pythonTab = screen
       .getAllByTestId("central-tab")
@@ -1313,7 +1400,7 @@ describe("CentralPanel — editor behaviour", () => {
 
     await waitFor(() => expect(resolveCalls).toBe(2))
     await waitFor(() =>
-      expect(screen.getByTestId("editor-python-runtime").textContent).toBe("refreshed-env"),
+      expect(visibleByTestId("editor-python-runtime")[0]?.textContent).toBe("refreshed-env"),
     )
   })
 
@@ -1387,7 +1474,7 @@ describe("CentralPanel — editor behaviour", () => {
     expect(runTab?.textContent).toContain("Run main.py")
   })
 
-  test("the below-editor default runs in one persistent resizable region without a central tab", async () => {
+  test("the below-editor default opens the run output as its own tab below the file", async () => {
     renderPanel(baseHandlers("main.py"), {
       ...DEFAULT_SETTINGS,
       pythonRunDestination: "below-editor",
@@ -1400,25 +1487,39 @@ describe("CentralPanel — editor behaviour", () => {
       "python-term-1",
     )
     expect(screen.queryByTestId("central-session")).toBeNull()
-    expect(
-      screen
-        .getAllByTestId("central-tab")
-        .some((tab) => tab.getAttribute("data-tab-kind") === "terminal"),
-    ).toBe(false)
-    const resize = screen.getByTestId("editor-run-terminal-resize")
-    Object.defineProperty(resize, "setPointerCapture", { value: vi.fn() })
-    const down = new Event("pointerdown", { bubbles: true })
-    Object.defineProperties(down, {
-      button: { value: 0 },
-      pointerId: { value: 1 },
-      clientY: { value: 300 },
+    const runTab = screen
+      .getAllByTestId("central-tab")
+      .find((tab) => tab.getAttribute("data-tab-kind") === "terminal")
+    expect(runTab?.textContent).toContain("Run main.py")
+    // The run tab sits in its own split, so the file's editor stays mounted.
+    expect(screen.getByTestId("buffer-path").textContent).toBe("main.py")
+    expect(region.contains(screen.getByTestId("buffer-path"))).toBe(false)
+    // No fixed in-editor region controls any more.
+    expect(screen.queryByTestId("editor-run-terminal-resize")).toBeNull()
+    expect(screen.queryByTestId("editor-run-terminal-collapse")).toBeNull()
+  })
+
+  /** Focusing the Run tab sticks: the status bar names it and later renders keep it focused. */
+  test("the Run tab keeps focus when selected", async () => {
+    renderPanel(baseHandlers("main.py"), {
+      ...DEFAULT_SETTINGS,
+      pythonRunDestination: "below-editor",
     })
-    fireEvent(resize, down)
-    const move = new Event("pointermove")
-    Object.defineProperty(move, "clientY", { value: 250 })
-    fireEvent(window, move)
-    await waitFor(() => expect(region.getAttribute("style")).toContain("height: 270px"))
-    fireEvent(window, new Event("pointerup"))
+    await openFile()
+    fireEvent.click(screen.getByTestId("buffer-run"))
+    await screen.findByTestId("editor-run-terminal")
+    const runTab = screen
+      .getAllByTestId("central-tab")
+      .find((tab) => tab.textContent?.includes("Run main.py")) as HTMLElement
+
+    fireEvent.click(within(runTab).getByTestId("central-tab-select"))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("editor-status-label").textContent).toBe("Run main.py"),
+    )
+    // A later render must not pull focus back to the file.
+    fireEvent.click(screen.getByTestId("central-add-menu"))
+    expect(screen.getByTestId("editor-status-label").textContent).toBe("Run main.py")
   })
 
   test("the below-editor region survives switching between file tabs", async () => {
@@ -1436,7 +1537,7 @@ describe("CentralPanel — editor behaviour", () => {
         (entry) => entry.getAttribute("data-rel-path") === "main.py",
       ) as HTMLElement,
     )
-    await waitFor(() => expect(screen.getByTestId("buffer-path").textContent).toBe("main.py"))
+    await waitFor(() => expect(visibleBufferPath()).toBe("main.py"))
     fireEvent.click(screen.getByTestId("buffer-run"))
     await screen.findByTestId("editor-run-terminal")
 
@@ -1445,12 +1546,14 @@ describe("CentralPanel — editor behaviour", () => {
         .getAllByTestId("file-tree-file")
         .find((entry) => entry.getAttribute("data-rel-path") === "other.py") as HTMLElement,
     )
-    await waitFor(() => expect(screen.getByTestId("buffer-path").textContent).toBe("other.py"))
-    expect(screen.getByTestId("editor-run-terminal")).toBeTruthy()
+    await waitFor(() => expect(visibleBufferPath()).toBe("other.py"))
+    expect(getComputedStyle(screen.getByTestId("editor-run-terminal")).visibility).not.toBe(
+      "hidden",
+    )
     expect(screen.getByTestId("terminal").getAttribute("data-session-id")).toBe("python-term-1")
   })
 
-  test("subsequent below-editor runs replace the region session and it can collapse, reopen, and close", async () => {
+  test("subsequent below-editor runs replace the session in the same tab and closing the tab kills it", async () => {
     let run = 0
     const killed: string[] = []
     renderPanel(
@@ -1479,11 +1582,10 @@ describe("CentralPanel — editor behaviour", () => {
     expect(screen.getAllByTestId("editor-run-terminal")).toHaveLength(1)
     expect(killed).toContain("python-below-1")
 
-    fireEvent.click(screen.getByTestId("editor-run-terminal-collapse"))
-    expect(screen.queryByTestId("terminal")).toBeNull()
-    fireEvent.click(screen.getByTestId("editor-run-terminal-collapse"))
-    expect(screen.getByTestId("terminal")).toBeTruthy()
-    fireEvent.click(screen.getByTestId("editor-run-terminal-close"))
+    const runTab = screen
+      .getAllByTestId("central-tab")
+      .find((tab) => tab.getAttribute("data-tab-kind") === "terminal") as HTMLElement
+    fireEvent.click(within(runTab).getByTestId("central-tab-close"))
     await waitFor(() => expect(screen.queryByTestId("editor-run-terminal")).toBeNull())
     expect(killed).toContain("python-below-2")
   })
@@ -1605,8 +1707,8 @@ test("Python Run is blocked by an external conflict and shows explicit resolutio
   await waitFor(() => expect(screen.getByTestId("editor-external-warning")).toBeTruthy())
   expect(run).not.toHaveBeenCalled()
   expect(written).toHaveLength(0)
-  expect(screen.getByRole("button", { name: "Overwrite disk" })).toBeTruthy()
-  fireEvent.click(screen.getByRole("button", { name: "Reload from disk" }))
+  expect(await screen.findByRole("button", { name: "Overwrite disk" })).toBeTruthy()
+  fireEvent.click(await screen.findByRole("button", { name: "Reload from disk" }))
   await waitFor(() => expect(screen.getByTestId("buffer-doc").textContent).toBe("external"))
   expect(screen.queryByTestId("editor-external-warning")).toBeNull()
 })

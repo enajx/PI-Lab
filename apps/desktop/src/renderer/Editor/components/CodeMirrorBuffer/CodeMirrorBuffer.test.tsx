@@ -31,7 +31,9 @@ describe("CodeMirrorBuffer theme reconfiguration", () => {
       onChange: vi.fn(),
       onSave: vi.fn(),
     }
-    const view = render(<CodeMirrorBuffer {...props} theme="one-dark" customThemes={[]} />)
+    const view = render(
+      <CodeMirrorBuffer autoFocus {...props} theme="one-dark" customThemes={[]} />,
+    )
     const editor = view.container.querySelector(".cm-editor")
     expect(editor).toBeTruthy()
     const originalClass = editor?.className
@@ -43,7 +45,9 @@ describe("CodeMirrorBuffer theme reconfiguration", () => {
       colors: { background: "#102030", foreground: "#ddeeff" },
       tokenColors: [{ scopes: ["comment"], foreground: "#778899" }],
     }
-    view.rerender(<CodeMirrorBuffer {...props} theme={custom.id} customThemes={[custom]} />)
+    view.rerender(
+      <CodeMirrorBuffer autoFocus {...props} theme={custom.id} customThemes={[custom]} />,
+    )
 
     const reconfigured = view.container.querySelector(".cm-editor")
     expect(reconfigured).toBe(editor)
@@ -63,6 +67,7 @@ function LiveTypographyFixture() {
         size
       </button>
       <CodeMirrorBuffer
+        autoFocus
         relPath="main.py"
         initialDoc="print('hi')\n"
         onChange={vi.fn()}
@@ -99,6 +104,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     const onChange = vi.fn()
     const rendered = render(
       <CodeMirrorBuffer
+        autoFocus
         relPath="docs/notes.md"
         initialDoc="@res"
         onChange={onChange}
@@ -124,6 +130,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     setInterfaceLanguage("es")
     const rendered = render(
       <CodeMirrorBuffer
+        autoFocus
         relPath="notes.md"
         initialDoc="important result"
         onChange={vi.fn()}
@@ -156,7 +163,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
       onSave: vi.fn(),
     }
     const rendered = render(
-      <CodeMirrorBuffer {...props} markdownMode="render" projectEntries={[]} />,
+      <CodeMirrorBuffer autoFocus {...props} markdownMode="render" projectEntries={[]} />,
     )
 
     expect(rendered.container.querySelector(".cm-md-heading-1")).toBeTruthy()
@@ -167,7 +174,9 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     const editor = findEditor(rendered.container)
     expect(editor.state.doc.toString()).toBe(markdown)
 
-    rendered.rerender(<CodeMirrorBuffer {...props} markdownMode="source" projectEntries={[]} />)
+    rendered.rerender(
+      <CodeMirrorBuffer autoFocus {...props} markdownMode="source" projectEntries={[]} />,
+    )
     expect(rendered.container.querySelector(".cm-md-heading-1")).toBeNull()
     expect(rendered.container.querySelector(".cm-md-source-mark")).toBeNull()
     expect(editor.state.doc.toString()).toBe(markdown)
@@ -177,6 +186,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     const onChange = vi.fn()
     const rendered = render(
       <CodeMirrorBuffer
+        autoFocus
         relPath="notes.md"
         initialDoc="important result"
         onChange={onChange}
@@ -198,6 +208,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     const onChange = vi.fn()
     const rendered = render(
       <CodeMirrorBuffer
+        autoFocus
         relPath="notes.md"
         initialDoc="/"
         onChange={onChange}
@@ -230,6 +241,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     const onChange = vi.fn()
     const rendered = render(
       <CodeMirrorBuffer
+        autoFocus
         relPath="notes.md"
         initialDoc="/"
         onChange={onChange}
@@ -269,6 +281,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
   test("preserves a long malformed link while editing rendered Markdown", () => {
     const rendered = render(
       <CodeMirrorBuffer
+        autoFocus
         relPath="malformed.md"
         initialDoc={`${"[".repeat(60_000)}\n[valid](target.md)`}
         onChange={vi.fn()}
@@ -285,6 +298,7 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     const onChange = vi.fn()
     const rendered = render(
       <CodeMirrorBuffer
+        autoFocus
         relPath="notes.md"
         initialDoc="- first"
         onChange={onChange}
@@ -306,4 +320,19 @@ describe("CodeMirrorBuffer Markdown editing", () => {
     fireEvent.keyDown(editor.contentDOM, { key: "Enter" })
     expect(onChange).toHaveBeenLastCalledWith("- [x] done\n- [ ] ")
   })
+})
+
+/** With several splits, only the focused file's editor may take the keyboard when it (re)mounts. */
+test("an editor that is not focused leaves keyboard focus where it is", () => {
+  const props = { relPath: "main.py", initialDoc: "x = 1\n", onChange: vi.fn(), onSave: vi.fn() }
+  const focused = render(<CodeMirrorBuffer autoFocus {...props} />)
+  expect(focused.container.contains(document.activeElement)).toBe(true)
+  focused.unmount()
+
+  const outside = document.createElement("button")
+  document.body.append(outside)
+  outside.focus()
+  render(<CodeMirrorBuffer autoFocus={false} {...props} />)
+  expect(document.activeElement).toBe(outside)
+  outside.remove()
 })

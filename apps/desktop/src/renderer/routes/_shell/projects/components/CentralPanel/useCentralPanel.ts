@@ -1,5 +1,6 @@
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import type { SerializedDockview } from "dockview-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { PdfBuildState } from "../../../../../Editor/components/PdfViewer/PdfViewer"
 import {
@@ -57,12 +58,20 @@ export interface CentralPanelRestoreState {
   sessions: SessionPane[]
   active: ActiveRef | null
   belowEditorRun: BelowEditorRun | null
+  /** Split layout, saved with the open tabs. */
+  layout?: SerializedDockview | null
 }
 
 export interface CentralPanelController {
   editor: EditorBuffersApi
   sessions: SessionPane[]
   active: ActiveRef | null
+  /** The split layout restored for this project, read once when the panel mounts. */
+  initialLayout: SerializedDockview | null
+  /** Saved files still reopening after startup (large files); their split is kept for them. */
+  restoringRelPaths: string[]
+  /** Record the current split layout so it is saved with the open tabs. */
+  setLayout: (layout: SerializedDockview) => void
   /** Focus an already-open file tab. */
   selectFile: (relPath: string) => void
   /** Focus a session tab. */
@@ -158,6 +167,13 @@ export function useCentralPanel({
     () => initialState?.belowEditorRun ?? null,
   )
   const [agentChooserOpen, setAgentChooserOpen] = useState(false)
+  const [initialLayout] = useState<SerializedDockview | null>(() => initialState?.layout ?? null)
+  const [layout, setLayout] = useState<SerializedDockview | null>(initialLayout)
+  const [restoringRelPaths, setRestoringRelPaths] = useState<string[]>(() =>
+    (initialState?.omittedBuffers ?? [])
+      .filter((buffer) => !buffer.untitled)
+      .map((buffer) => buffer.relPath),
+  )
   const [restorationError, setRestorationError] = useState<string | null>(null)
   const belowEditorRunRef = useRef<BelowEditorRun | null>(null)
   belowEditorRunRef.current = belowEditorRun
@@ -183,10 +199,12 @@ export function useCentralPanel({
       sessions,
       active,
       belowEditorRun,
+      layout,
     })
   }, [
     active,
     belowEditorRun,
+    layout,
     editor.activeRelPath,
     editor.buffers,
     editor.bufferAccess.read,
@@ -205,6 +223,7 @@ export function useCentralPanel({
       for (const descriptor of paths) {
         if (!live) return
         await editor.openFile(descriptor.relPath)
+        setRestoringRelPaths((current) => current.filter((path) => path !== descriptor.relPath))
       }
       if (live && initialState?.activeRelPath) editor.setActiveRelPath(initialState.activeRelPath)
     })()
@@ -595,6 +614,9 @@ export function useCentralPanel({
     editor,
     sessions,
     active,
+    initialLayout,
+    restoringRelPaths,
+    setLayout,
     selectFile,
     selectSession,
     attachSession,

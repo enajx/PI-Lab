@@ -4,7 +4,6 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"
 import { EventBus, PDFLinkService, PDFViewer } from "pdfjs-dist/legacy/web/pdf_viewer.mjs"
 import { useEffect, useRef, useState } from "react"
 import type { PiLabTrpcClient } from "../../../trpc/client"
-import { LatexBuildStatus, type LatexBuildStatusData } from "../LatexBuildStatus/LatexBuildStatus"
 import "pdfjs-dist/web/pdf_viewer.css"
 import "./pdfViewer.css"
 
@@ -46,6 +45,9 @@ interface Position {
   left: number
 }
 
+/** PDF.js scale presets that depend on the viewer's size. */
+const RELATIVE_SCALES = new Set(["page-width", "page-fit", "auto"])
+
 /** PDF.js owns the page DOM; React owns the toolbar and the document lifecycle. */
 export function PdfViewer({
   client,
@@ -54,7 +56,7 @@ export function PdfViewer({
   location,
   onSource,
   build,
-  buildStatus,
+  onMessage,
 }: {
   client: PiLabTrpcClient
   workspaceId: string
@@ -62,7 +64,8 @@ export function PdfViewer({
   location: PdfLocation | null
   onSource: (location: SourceLocation) => void
   build: PdfBuildState | null
-  buildStatus: LatexBuildStatusData | null
+  /** Refresh state such as "PDF up to date", shown by the central panel's status bar. */
+  onMessage: (message: string) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const runtime = useRef<Runtime | null>(null)
@@ -72,6 +75,9 @@ export function PdfViewer({
   const [pages, setPages] = useState(0)
   const [scale, setScale] = useState("page-width")
   const [message, setMessage] = useState("Loading PDF…")
+  const reportMessage = useRef(onMessage)
+  reportMessage.current = onMessage
+  useEffect(() => reportMessage.current(message), [message])
   const [error, setError] = useState<string | null>(null)
   const refreshAction = useRef<() => void>(() => undefined)
   const [ready, setReady] = useState<Runtime | null>(null)
@@ -315,6 +321,21 @@ export function PdfViewer({
     }
   }, [client, workspaceId, relPath])
 
+  // Fit width / fit page are computed from the viewer's size. A split lays out after the
+  // PDF loads and can be resized later, so re-apply a relative scale when the size changes.
+  useEffect(() => {
+    const root = host.current
+    if (!root) return
+    const observer = new ResizeObserver(() => {
+      const viewer = runtime.current?.viewer
+      if (!viewer || root.clientWidth === 0) return
+      const value = viewer.currentScaleValue
+      if (RELATIVE_SCALES.has(value)) viewer.currentScaleValue = value
+    })
+    observer.observe(root)
+    return () => observer.disconnect()
+  }, [])
+
   useEffect(() => {
     const current = ready
     if (
@@ -434,14 +455,6 @@ export function PdfViewer({
         </p>
       ) : null}
       <div ref={host} className="relative min-h-0 flex-1 overflow-hidden bg-muted/40" />
-      <div
-        data-testid="pdf-status"
-        role="status"
-        className="flex h-6 shrink-0 items-center gap-3 border-border border-t bg-muted/30 px-3 text-[11px] text-muted-foreground"
-      >
-        {buildStatus ? <LatexBuildStatus status={buildStatus} /> : null}
-        <span className="ml-auto truncate">{message}</span>
-      </div>
     </div>
   )
 }

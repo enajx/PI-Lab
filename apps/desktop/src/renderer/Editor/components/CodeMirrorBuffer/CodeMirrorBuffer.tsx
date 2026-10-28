@@ -38,6 +38,8 @@ interface CodeMirrorBufferProps {
    * one CodeMirror view per open file.
    */
   relPath: string
+  /** Take keyboard focus when the view mounts. False for editors in splits without focus. */
+  autoFocus: boolean
   /**
    * Initial document text. Changing it remounts the view via the parent's
    * `key`, so this is read once per mount; live external reloads are applied by
@@ -147,6 +149,7 @@ const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: nul
  */
 export function CodeMirrorBuffer({
   relPath,
+  autoFocus,
   initialDoc,
   onChange,
   onSave,
@@ -478,7 +481,7 @@ export function CodeMirrorBuffer({
 
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
-    view.focus()
+    if (autoFocus) view.focus()
     reportCursor(view)
     onReadyRef.current?.()
     if (markdown) updateMarkdownOverlay(view)

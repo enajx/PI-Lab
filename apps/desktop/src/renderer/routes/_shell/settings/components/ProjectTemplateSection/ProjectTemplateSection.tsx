@@ -265,6 +265,7 @@ export function ProjectTemplateSection() {
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {activeRelPath !== null && readQuery.isSuccess ? (
               <CodeMirrorBuffer
+                autoFocus
                 key={`${activeRelPath}:${readQuery.dataUpdatedAt}`}
                 relPath={activeRelPath}
                 initialDoc={savedContent}

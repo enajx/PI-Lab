@@ -668,15 +668,17 @@ export function useEditorBuffers({
     [client, selectPythonEnvironment],
   )
 
-  // Poll the active file's fingerprint to spot agent/git edits.
+  // Poll every open text file's fingerprint to spot agent/git edits: splits can show
+  // several files at once, not only the active one.
   useEffect(() => {
     const id = window.setInterval(() => {
-      const relPath = activeRef.current
-      if (!relPath) return
-      const buffer = buffersRef.current.find((b) => b.relPath === relPath)
-      if (!buffer || buffer.kind === "pdf" || externalCheckRef.current) return
+      if (externalCheckRef.current) return
+      const buffers = buffersRef.current.filter((b) => b.kind !== "pdf")
+      if (buffers.length === 0) return
       externalCheckRef.current = true
-      void reload(buffer, false).finally(() => {
+      void (async () => {
+        for (const buffer of buffers) await reload(buffer, false)
+      })().finally(() => {
         externalCheckRef.current = false
       })
     }, STAT_POLL_MS)

@@ -1,3 +1,4 @@
+import type { SerializedDockview } from "dockview-react"
 import { z } from "zod"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
@@ -67,6 +68,11 @@ const stateSchema = z.object({
   belowEditorRun: z
     .object({ sessionId: z.string(), label: z.string(), relPath: z.string().optional() })
     .nullable(),
+  /** dockview's own serialized split layout; dockview validates its contents on load. */
+  layout: z
+    .custom<SerializedDockview>((value) => typeof value === "object" && value !== null)
+    .nullable()
+    .optional(),
   workspaceId: z.string().optional(),
   rightSidebarCollapsed: z.boolean(),
   rightSidebarActiveId: z.string().nullable(),
@@ -167,6 +173,7 @@ export class WorkspaceRecoveryStore {
       sessions: [],
       active: null,
       belowEditorRun: null,
+      layout: null,
     }
   }
 

@@ -1,10 +1,9 @@
 import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
+import type { AddPanelPositionOptions } from "dockview-react"
 import {
   Bot,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   CircleHelp,
   FileText,
   MessageSquare,
@@ -16,16 +15,7 @@ import {
   TerminalSquare,
   X,
 } from "lucide-react"
-import {
-  lazy,
-  type ReactNode,
-  type PointerEvent as ReactPointerEvent,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react"
+import { lazy, type ReactNode, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
 import { EditorSettingsMenu } from "../../../../../Editor/components/EditorSettingsMenu"
@@ -45,11 +35,19 @@ import {
   useFilesPanelWidth,
   useShowFilesPanel,
 } from "../../../../../preferences/preferences"
+import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { Terminal } from "../../../../../Terminal"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
+import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../SplitDock/SplitDock"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
+
+/** A new Run tab per run, so each run is placed below the split of the file that ran. */
+function runItemId(sessionId: string): string {
+  return `run:${sessionId}`
+}
+const IS_MAC = /Mac/.test(navigator.platform)
 
 const PdfViewer = lazy(() =>
   import("../../../../../Editor/components/PdfViewer/PdfViewer").then((module) => ({
@@ -140,9 +138,20 @@ export function CentralPanel({
     }
   }, [addMenuOpen])
 
+  // The Run tab is not a controller tab, so the panel tracks when it has focus. Any
+  // controller focus change (another tab selected or opened) moves focus off it.
+  const [runFocused, setRunFocused] = useState(false)
+  const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Reset whenever the controller's focus changes.
+  useEffect(() => setRunFocused(false), [active])
+  const belowEditorRun = controller.belowEditorRun
+  const runFocusedNow = runFocused && belowEditorRun !== null
+
   // Ctrl+W closes the active tab; macOS Cmd+W belongs to the native background action.
   const closeActiveTabRef = useRef(controller.closeActiveTab)
-  closeActiveTabRef.current = controller.closeActiveTab
+  closeActiveTabRef.current = runFocusedNow
+    ? controller.closeBelowEditorRun
+    : controller.closeActiveTab
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -160,6 +169,44 @@ export function CentralPanel({
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [])
 
+  // Split shortcuts (⌘D right, ⌘⇧D down) split a focused terminal: a new terminal opens in
+  // a new split. They run in the capture phase so the terminal never sees the key; on any
+  // other tab the key is left alone (⌘D stays "select next match" in the editor).
+  const dock = useRef<SplitDockHandle>(null)
+  /** Split the focused terminal; returns false (doing nothing) when no terminal has focus. */
+  const splitFocusedRef = useRef<(direction: "right" | "below") => boolean>(() => false)
+  // The finder or agent chooser is open: the shortcut would split behind it.
+  const splitBlocked = quickOpen || controller.agentChooserOpen
+  splitFocusedRef.current = (direction) => {
+    if (splitBlocked || runFocusedNow || active?.type !== "session") return false
+    const session = sessions.find((pane) => pane.id === active.id)
+    if (session?.kind !== "terminal" || !dock.current?.splitFocused(direction)) return false
+    controller.openTerminal()
+    return true
+  }
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Ctrl+D must still reach terminals as end-of-input: on macOS Ctrl never counts as
+      // Mod here, and elsewhere (where Mod is Ctrl) a terminal keeps Ctrl keys.
+      if (IS_MAC && event.ctrlKey && !event.metaKey) return
+      const target = event.target instanceof Element ? event.target : null
+      if (!IS_MAC && event.ctrlKey && target?.closest(".xterm")) return
+      // Text fields (Settings shortcut recorder, finder input) keep their keys; xterm's
+      // hidden input textarea does not count as one.
+      if (target?.closest("input, textarea, select") && !target.closest(".xterm")) return
+      const direction = eventMatchesShortcut(event, "split-right")
+        ? "right"
+        : eventMatchesShortcut(event, "split-down")
+          ? "below"
+          : null
+      if (!direction || !splitFocusedRef.current(direction)) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [])
+
   const [pdfLocation, setPdfLocation] = useState<PdfLocation | null>(null)
   const [sourceLocation, setSourceLocation] = useState<SourceLocation | null>(null)
   const navigateSource = (location: SourceLocation): void => {
@@ -170,10 +217,224 @@ export function CentralPanel({
     setPdfLocation(location)
     controller.openFile(location.relPath)
   }
+  // Per-file view state shown in the single panel status bar, whichever split has focus.
+  const [markdownModes, setMarkdownModes] = useState<Record<string, "render" | "source">>({})
+  const [pdfMessages, setPdfMessages] = useState<Record<string, string>>({})
+  const cursors = useRef<Record<string, { line: number; column: number }>>({})
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const markdownModeFor = (relPath: string): "render" | "source" | undefined =>
+    isMarkdownPath(relPath) ? (markdownModes[relPath] ?? "render") : undefined
+  /** Both the status bar button and the source double-click navigate from a source position. */
+  const showInPdf = (relPath: string, line: number, column: number): void => {
+    setSyncError(null)
+    void client.pdf.forwardSync
+      .mutate({ workspaceId, relPath, line, column })
+      .then(navigatePdf)
+      .catch((cause: unknown) => setSyncError(String(cause)))
+  }
   const hasFileActive = active?.type === "file" && editor.active !== null
   const hasPythonActive =
     hasFileActive && editor.active !== null && isPythonPath(editor.active.relPath)
-  const showLauncher = active === null || (active.type === "file" && editor.active === null)
+
+  const dockItems: DockItem[] = [
+    ...sessions.map(
+      (session): DockItem => ({
+        id: `session:${session.id}`,
+        tab: ({ visible, activate }) => (
+          <CentralTab
+            kind={session.kind}
+            label={session.label}
+            badge={
+              session.kind === "agent" && session.wsKind ? (
+                <KindBadge kind={session.wsKind} />
+              ) : undefined
+            }
+            active={visible}
+            onSelect={activate}
+            onClose={() => controller.closeSession(session.id)}
+          />
+        ),
+        content: () => (
+          <div
+            data-testid="central-session"
+            data-session-kind={session.kind}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <Terminal
+              key={session.sessionId}
+              client={client}
+              inputKind={session.kind}
+              sessionId={session.sessionId}
+            />
+          </div>
+        ),
+      }),
+    ),
+    ...editor.tabs.map(
+      (tab): DockItem => ({
+        id: fileItemId(tab.relPath),
+        tab: ({ visible, activate }) => (
+          <CentralTab
+            kind="file"
+            label={basename(tab.relPath)}
+            dirty={tab.dirty}
+            active={visible}
+            onSelect={activate}
+            onClose={() => controller.closeFile(tab.relPath)}
+          />
+        ),
+        content: () =>
+          editor.buffers.find((buffer) => buffer.relPath === tab.relPath)?.kind === "pdf" ? (
+            <Suspense
+              fallback={<p className="p-4 text-muted-foreground text-xs">Loading PDF viewer…</p>}
+            >
+              <PdfViewer
+                client={client}
+                workspaceId={workspaceId}
+                relPath={tab.relPath}
+                location={pdfLocation}
+                onSource={navigateSource}
+                build={controller.pdfBuildState ?? null}
+                onMessage={(message) =>
+                  setPdfMessages((current) =>
+                    current[tab.relPath] === message
+                      ? current
+                      : { ...current, [tab.relPath]: message },
+                  )
+                }
+              />
+            </Suspense>
+          ) : (
+            <FileSurface
+              relPath={tab.relPath}
+              hasFocus={
+                !runFocusedNow && active?.type === "file" && editor.activeRelPath === tab.relPath
+              }
+              editor={editor}
+              settings={settings}
+              onRunPython={() => controller.runPython(runDestination)}
+              client={client}
+              workspaceId={workspaceId}
+              onSaveUntitled={onSaveUntitled}
+              sourceLocation={sourceLocation}
+              markdownMode={markdownModeFor(tab.relPath)}
+              onCursorChange={(line, column) => {
+                cursors.current[tab.relPath] = { line, column }
+              }}
+              onShowInPdf={
+                isTexPath(tab.relPath)
+                  ? (line, column) => showInPdf(tab.relPath, line, column)
+                  : undefined
+              }
+            />
+          ),
+      }),
+    ),
+    ...(belowEditorRun
+      ? [
+          {
+            id: runItemId(belowEditorRun.sessionId),
+            tab: ({ visible, activate }) => (
+              <CentralTab
+                kind="terminal"
+                label={belowEditorRun.label}
+                active={visible}
+                onSelect={activate}
+                onClose={controller.closeBelowEditorRun}
+              />
+            ),
+            content: () => (
+              <div data-testid="editor-run-terminal" className="flex min-h-0 flex-1 flex-col">
+                <Terminal
+                  key={belowEditorRun.sessionId}
+                  client={client}
+                  inputKind="terminal"
+                  sessionId={belowEditorRun.sessionId}
+                />
+              </div>
+            ),
+          } satisfies DockItem,
+        ]
+      : []),
+  ]
+  const focusedFile = !runFocusedNow && active?.type === "file" ? editor.active : null
+  const focusedSession =
+    !runFocusedNow && active?.type === "session"
+      ? sessions.find((session) => session.id === active.id)
+      : undefined
+  const focusedLabel = runFocusedNow
+    ? (belowEditorRun?.label ?? null)
+    : focusedFile
+      ? focusedFile.relPath
+      : (focusedSession?.label ?? null)
+  const statusBar =
+    focusedLabel === null ? null : (
+      <EditorStatusBar
+        label={focusedLabel}
+        pdfMessage={focusedFile?.kind === "pdf" ? pdfMessages[focusedFile.relPath] : null}
+        onShowInPdf={
+          focusedFile && isTexPath(focusedFile.relPath)
+            ? () => {
+                const cursor = cursors.current[focusedFile.relPath] ?? { line: 1, column: 1 }
+                showInPdf(focusedFile.relPath, cursor.line, cursor.column)
+              }
+            : undefined
+        }
+        syncError={focusedFile && isTexPath(focusedFile.relPath) ? syncError : null}
+        latexBuildStatus={
+          focusedFile && (focusedFile.kind === "pdf" || isTexPath(focusedFile.relPath))
+            ? (controller.latexBuildStatus ?? null)
+            : null
+        }
+        isPython={focusedFile ? isPythonPath(focusedFile.relPath) : false}
+        counts={editor.statusCounts}
+        missing={editor.statusMissing}
+        checking={editor.activeDiagnostics.checking}
+        hasRun={editor.activeDiagnostics.hasRun}
+        outdated={editor.activeDiagnostics.outdated}
+        onRefreshDiagnostics={() => void editor.refreshDiagnostics()}
+        diagnosticsEnabled={settings.diagnosticsEnabled}
+        onToggleDiagnostics={() =>
+          onUpdateEditorSettings({ diagnosticsEnabled: !settings.diagnosticsEnabled })
+        }
+        pythonRuntime={editor.pythonRuntime}
+        listPythonEnvironments={editor.listPythonEnvironments}
+        selectPythonEnvironment={editor.selectPythonEnvironment}
+        choosePythonEnvironment={editor.choosePythonEnvironment}
+        markdownMode={focusedFile ? markdownModeFor(focusedFile.relPath) : undefined}
+        onMarkdownModeChange={
+          focusedFile
+            ? (mode) => setMarkdownModes((current) => ({ ...current, [focusedFile.relPath]: mode }))
+            : undefined
+        }
+      />
+    )
+  const activeDockId =
+    runFocusedNow && belowEditorRun
+      ? runItemId(belowEditorRun.sessionId)
+      : active?.type === "file"
+        ? fileItemId(active.relPath)
+        : active?.type === "session"
+          ? `session:${active.id}`
+          : null
+  const activateDockItem = (id: string): void => {
+    setRunFocused(id.startsWith("run:"))
+    if (id.startsWith("file:")) controller.selectFile(id.slice("file:".length))
+    else if (id.startsWith("session:")) controller.selectSession(id.slice("session:".length))
+  }
+  // Run output opens below the split showing the file that ran.
+  const dockPlacement = (id: string): AddPanelPositionOptions | undefined => {
+    const ranFrom = belowEditorRun?.relPath
+    if (
+      !belowEditorRun ||
+      id !== runItemId(belowEditorRun.sessionId) ||
+      !ranFrom ||
+      !editor.tabs.some((tab) => tab.relPath === ranFrom)
+    ) {
+      return undefined
+    }
+    return { referencePanel: fileItemId(ranFrom), direction: "below" }
+  }
 
   const openFile = (relPath: string) => {
     setQuickOpen(false)
@@ -212,37 +473,8 @@ export function CentralPanel({
           </button>
         </div>
 
-        <div
-          data-testid="central-tabs"
-          className="flex min-w-0 flex-1 items-stretch overflow-x-auto"
-        >
-          {sessions.map((session) => (
-            <CentralTab
-              key={session.id}
-              kind={session.kind}
-              label={session.label}
-              badge={
-                session.kind === "agent" && session.wsKind ? (
-                  <KindBadge kind={session.wsKind} />
-                ) : undefined
-              }
-              active={active?.type === "session" && active.id === session.id}
-              onSelect={() => controller.selectSession(session.id)}
-              onClose={() => controller.closeSession(session.id)}
-            />
-          ))}
-          {editor.tabs.map((tab) => (
-            <CentralTab
-              key={`file:${tab.relPath}`}
-              kind="file"
-              label={basename(tab.relPath)}
-              dirty={tab.dirty}
-              active={active?.type === "file" && active.relPath === tab.relPath}
-              onSelect={() => controller.selectFile(tab.relPath)}
-              onClose={() => controller.closeFile(tab.relPath)}
-            />
-          ))}
-        </div>
+        {/* Tabs live in each split's own tab bar below; this row keeps the shared buttons. */}
+        <div className="min-w-0 flex-1" />
 
         {/* Pane creation, file run, and editor settings — intentionally grouped. */}
         <div className="flex shrink-0 items-center gap-0.5 border-border border-s bg-muted/30 px-1">
@@ -386,6 +618,22 @@ export function CentralPanel({
       {/* Editor open/save errors live at the panel level so a failed file-open is
           visible even when the body has fallen back to the launcher (no silent
           failures — AGENTS.md). */}
+      {layoutRestoreError ? (
+        <p
+          data-testid="central-layout-error"
+          className="flex shrink-0 cursor-text select-text items-center gap-2 border-border border-b bg-destructive/10 px-4 py-2 text-destructive text-xs"
+        >
+          <span className="min-w-0 flex-1">{layoutRestoreError}</span>
+          <button
+            type="button"
+            className="shrink-0 underline"
+            onClick={() => setLayoutRestoreError(null)}
+          >
+            {t("Dismiss")}
+          </button>
+        </p>
+      ) : null}
+
       {editor.error ? (
         <p
           data-testid="editor-error"
@@ -440,84 +688,30 @@ export function CentralPanel({
         ) : null}
 
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* Sessions stay mounted so switching tabs never detaches a live agent. */}
-          {sessions.map((session) => {
-            const isActive = active?.type === "session" && active.id === session.id
-            return (
-              <div
-                key={`${session.id}:${session.sessionId}`}
-                data-testid="central-session"
-                data-session-kind={session.kind}
-                className={cn("min-h-0 flex-1 flex-col", isActive ? "flex" : "hidden")}
-              >
-                <Terminal client={client} inputKind={session.kind} sessionId={session.sessionId} />
-              </div>
-            )
-          })}
-
-          {editor.buffers
-            .filter((buffer) => buffer.kind === "pdf")
-            .map((buffer) => (
-              <div
-                key={buffer.relPath}
-                className={cn(
-                  "min-h-0 flex-1 flex-col",
-                  hasFileActive && editor.active?.relPath === buffer.relPath ? "flex" : "hidden",
-                )}
-              >
-                <Suspense
-                  fallback={
-                    <p className="p-4 text-muted-foreground text-xs">Loading PDF viewer…</p>
-                  }
-                >
-                  <PdfViewer
-                    client={client}
-                    workspaceId={workspaceId}
-                    relPath={buffer.relPath}
-                    location={pdfLocation}
-                    onSource={navigateSource}
-                    build={controller.pdfBuildState ?? null}
-                    buildStatus={controller.latexBuildStatus ?? null}
-                  />
-                </Suspense>
-              </div>
-            ))}
-
-          {/* The editor surface stays mounted while a session is active (hidden) so
-              buffer/cursor state survives a tab switch. */}
-          {editor.buffers.length > 0 ? (
-            <div
-              className={cn(
-                "min-h-0 flex-1 flex-col",
-                hasFileActive && editor.active?.kind !== "pdf" ? "flex" : "hidden",
-              )}
-            >
-              <FileSurface
-                editor={editor}
-                settings={settings}
-                onUpdateSettings={onUpdateEditorSettings}
-                onRunPython={() => controller.runPython(runDestination)}
-                belowEditorRun={controller.belowEditorRun}
-                onCloseBelowEditorRun={controller.closeBelowEditorRun}
-                client={client}
-                workspaceId={workspaceId}
-                onSaveUntitled={onSaveUntitled}
-                sourceLocation={sourceLocation}
-                onPdf={navigatePdf}
-                latexBuildStatus={controller.latexBuildStatus ?? null}
+          <SplitDock
+            handle={dock}
+            initialLayout={controller.initialLayout}
+            onLayoutChange={controller.setLayout}
+            onRestoreFailed={(message) =>
+              setLayoutRestoreError(`Could not restore the saved split layout: ${message}`)
+            }
+            items={dockItems}
+            activeId={activeDockId}
+            onActivate={activateDockItem}
+            onOpenDroppedFile={controller.openFile}
+            restoringIds={controller.restoringRelPaths.map(fileItemId)}
+            placementFor={dockPlacement}
+            empty={
+              <Launcher
+                onOpenAgent={controller.openAgentChooser}
+                onOpenTerminal={controller.openTerminal}
+                onOpenFile={() => setQuickOpen(true)}
+                pendingAgent={controller.pendingAgent}
+                pendingTerminal={controller.pendingTerminal}
               />
-            </div>
-          ) : null}
-
-          {showLauncher ? (
-            <Launcher
-              onOpenAgent={controller.openAgentChooser}
-              onOpenTerminal={controller.openTerminal}
-              onOpenFile={() => setQuickOpen(true)}
-              pendingAgent={controller.pendingAgent}
-              pendingTerminal={controller.pendingTerminal}
-            />
-          ) : null}
+            }
+          />
+          {statusBar}
         </div>
       </div>
 
@@ -776,69 +970,43 @@ function NewAgentDialog({
 
 /** The editor body for the active file: banners + buffer + status bar. */
 function FileSurface({
+  relPath,
   editor,
   settings,
-  onUpdateSettings,
   onRunPython,
-  belowEditorRun,
-  onCloseBelowEditorRun,
   client,
   workspaceId,
   onSaveUntitled,
   sourceLocation,
-  onPdf,
-  latexBuildStatus,
+  markdownMode,
+  onCursorChange,
+  onShowInPdf,
+  hasFocus,
 }: {
+  /** The file this surface shows; each split's file tab has its own surface. */
+  relPath: string
+  /** This file's tab is the focused tab, so its editor may take the keyboard. */
+  hasFocus: boolean
   editor: EditorBuffersApi
   settings: EditorSettings
-  onUpdateSettings: (patch: Partial<EditorSettings>) => void
   onRunPython: () => void
-  belowEditorRun: CentralPanelController["belowEditorRun"]
-  onCloseBelowEditorRun: () => void
   client: PiLabTrpcClient
   workspaceId: string
   onSaveUntitled?: (relPath: string) => void
   sourceLocation: SourceLocation | null
-  onPdf: (location: PdfLocation) => void
-  latexBuildStatus: CentralPanelController["latexBuildStatus"]
+  /** Set for Markdown files; the panel status bar switches it. */
+  markdownMode: "render" | "source" | undefined
+  onCursorChange: (line: number, column: number) => void
+  /** Set for LaTeX sources: double-clicking text shows that position in the PDF. */
+  onShowInPdf: ((line: number, column: number) => void) | undefined
 }) {
   const t = useTranslate()
-  const active = editor.active
-  const markdownActive = active ? isMarkdownPath(active.relPath) : false
-  const [markdownModes, setMarkdownModes] = useState<Record<string, "render" | "source">>({})
-  const markdownMode = active ? (markdownModes[active.relPath] ?? "render") : "render"
-  const cursor = useRef({ line: 1, column: 1 })
-  const [syncError, setSyncError] = useState<string | null>(null)
-  /** Both the toolbar and source gesture navigate using the requested source position. */
-  const showPdf = (line: number, column: number): void => {
-    if (!active || !/\.tex$/i.test(active.relPath)) return
-    setSyncError(null)
-    void client.pdf.forwardSync
-      .mutate({ workspaceId, relPath: active.relPath, line, column })
-      .then(onPdf)
-      .catch((cause: unknown) => setSyncError(String(cause)))
-  }
+  const active = editor.buffers.find((buffer) => buffer.relPath === relPath) ?? null
+  // Diagnostics follow the focused file, so only the focused split shows them.
+  const focused = editor.activeRelPath === relPath
   if (active?.kind === "pdf") return null
   return (
     <>
-      {active && /\.tex$/i.test(active.relPath) ? (
-        <div className="flex shrink-0 items-center gap-3 border-border border-b px-3 py-1 text-xs">
-          <button
-            type="button"
-            data-testid="latex-show-pdf"
-            className="rounded px-2 py-1 hover:bg-accent"
-            onClick={() => showPdf(cursor.current.line, cursor.current.column)}
-            title="Show current source position in PDF. You can also double-click LaTeX text."
-          >
-            Show in PDF
-          </button>
-          {syncError ? (
-            <span role="alert" className="select-text text-destructive">
-              {syncError}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
       {active?.externalChange ? (
         <div
           data-testid="editor-external-warning"
@@ -872,13 +1040,12 @@ function FileSurface({
       <div className="flex min-h-0 flex-1 flex-col">
         {active ? (
           <CodeMirrorBuffer
+            autoFocus={hasFocus}
             key={`${active.relPath}#${active.epoch}`}
             relPath={active.relPath}
             initialDoc={active.content}
-            onCursorChange={(line, column) => {
-              cursor.current = { line, column }
-            }}
-            onDoubleClickPosition={/\.tex$/i.test(active.relPath) ? showPdf : undefined}
+            onCursorChange={onCursorChange}
+            onDoubleClickPosition={onShowInPdf}
             sourceLocation={sourceLocation?.relPath === active.relPath ? sourceLocation : null}
             onChange={(doc) => editor.onEdit(active.relPath, doc)}
             onSave={() => {
@@ -892,10 +1059,10 @@ function FileSurface({
             vim={settings.vim}
             theme={settings.editorTheme}
             customThemes={settings.customEditorThemes ?? []}
-            diagnostics={editor.diagnosticsSource}
-            markdownMode={markdownActive ? markdownMode : undefined}
+            diagnostics={focused ? editor.diagnosticsSource : undefined}
+            markdownMode={markdownMode}
             searchProjectFiles={
-              markdownActive
+              markdownMode
                 ? async (query) => {
                     const result = await client.files.search.query({
                       workspaceId,
@@ -913,125 +1080,16 @@ function FileSurface({
           />
         ) : null}
       </div>
-
-      {belowEditorRun ? (
-        <BelowEditorTerminal run={belowEditorRun} client={client} onClose={onCloseBelowEditorRun} />
-      ) : null}
-
-      <EditorStatusBar
-        latexBuildStatus={active && /\.tex$/i.test(active.relPath) ? latexBuildStatus : null}
-        isPython={active ? isPythonPath(active.relPath) : false}
-        counts={editor.statusCounts}
-        missing={editor.statusMissing}
-        checking={editor.activeDiagnostics.checking}
-        hasRun={editor.activeDiagnostics.hasRun}
-        outdated={editor.activeDiagnostics.outdated}
-        onRefreshDiagnostics={() => void editor.refreshDiagnostics()}
-        diagnosticsEnabled={settings.diagnosticsEnabled}
-        onToggleDiagnostics={() =>
-          onUpdateSettings({ diagnosticsEnabled: !settings.diagnosticsEnabled })
-        }
-        pythonRuntime={editor.pythonRuntime}
-        listPythonEnvironments={editor.listPythonEnvironments}
-        selectPythonEnvironment={editor.selectPythonEnvironment}
-        choosePythonEnvironment={editor.choosePythonEnvironment}
-        markdownMode={markdownActive ? markdownMode : undefined}
-        onMarkdownModeChange={
-          active
-            ? (mode) => setMarkdownModes((current) => ({ ...current, [active.relPath]: mode }))
-            : undefined
-        }
-      />
     </>
   )
 }
 
-function isMarkdownPath(relPath: string): boolean {
-  return /\.(?:md|markdown|mdx)$/i.test(relPath)
+function isTexPath(relPath: string): boolean {
+  return /\.tex$/i.test(relPath)
 }
 
-function BelowEditorTerminal({
-  run,
-  client,
-  onClose,
-}: {
-  run: NonNullable<CentralPanelController["belowEditorRun"]>
-  client: PiLabTrpcClient
-  onClose: () => void
-}) {
-  const t = useTranslate()
-  const [collapsed, setCollapsed] = useState(false)
-  const [height, setHeight] = useState(220)
-
-  const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return
-    event.preventDefault()
-    const startY = event.clientY
-    const startHeight = height
-    const target = event.currentTarget
-    target.setPointerCapture(event.pointerId)
-    const onMove = (move: PointerEvent) => {
-      setHeight(Math.min(480, Math.max(120, startHeight - (move.clientY - startY))))
-    }
-    const cleanup = () => {
-      window.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", cleanup)
-      window.removeEventListener("pointercancel", cleanup)
-    }
-    window.addEventListener("pointermove", onMove)
-    window.addEventListener("pointerup", cleanup)
-    window.addEventListener("pointercancel", cleanup)
-  }
-
-  return (
-    <section
-      data-testid="editor-run-terminal"
-      className="relative flex shrink-0 flex-col border-border border-t bg-background"
-      style={collapsed ? undefined : { height }}
-    >
-      <div
-        data-testid="editor-run-terminal-resize"
-        aria-hidden
-        onPointerDown={onResizeStart}
-        className="-top-1.5 absolute inset-x-0 z-20 h-1.5 cursor-row-resize hover:bg-primary/30"
-      />
-      <div className="flex h-7 shrink-0 items-center gap-2 border-border border-b bg-muted/30 px-2">
-        <button
-          type="button"
-          data-testid="editor-run-terminal-collapse"
-          aria-label={collapsed ? t("Reopen run terminal") : t("Collapse run terminal")}
-          onClick={() => setCollapsed((value) => !value)}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          {collapsed ? (
-            <ChevronRight className="size-3.5" aria-hidden />
-          ) : (
-            <ChevronDown className="size-3.5" aria-hidden />
-          )}
-        </button>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">{run.label}</span>
-        <button
-          type="button"
-          data-testid="editor-run-terminal-close"
-          aria-label={t("Close run terminal")}
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <X className="size-3.5" aria-hidden />
-        </button>
-      </div>
-      {collapsed ? null : (
-        <div className="min-h-0 flex-1">
-          <Terminal
-            key={run.sessionId}
-            client={client}
-            inputKind="terminal"
-            sessionId={run.sessionId}
-          />
-        </div>
-      )}
-    </section>
-  )
+function isMarkdownPath(relPath: string): boolean {
+  return /\.(?:md|markdown|mdx)$/i.test(relPath)
 }
 
 interface CentralTabProps {

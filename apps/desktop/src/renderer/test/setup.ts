@@ -50,6 +50,16 @@ if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = () => {}
 }
 
+// jsdom doesn't implement `ResizeObserver`; the central panel's split layout (dockview)
+// constructs one on mount. Tests that need resize callbacks stub their own.
+if (typeof globalThis.ResizeObserver !== "function") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+
 // Renderer (jsdom) component tests: reset persisted state + unmount/reset the DOM between
 // tests so React Testing Library mounts and stored UI state don't leak across cases.
 beforeEach(() => {
