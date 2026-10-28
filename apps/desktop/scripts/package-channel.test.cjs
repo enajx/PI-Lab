@@ -74,6 +74,8 @@ test("one packaging process owns the shared build output at a time", () => {
 test("builder metadata and direct output stay channel-specific", () => {
   const previousChannel = process.env.PI_LAB_CHANNEL
   const previousStage = process.env.PI_LAB_PACKAGE_STAGE
+  const previousBuild = process.env.PI_LAB_BUILD_ID
+  process.env.PI_LAB_BUILD_ID = "one-packaged-build"
   delete process.env.PI_LAB_PACKAGE_STAGE
   try {
     for (const channel of ["alpha", "stable"]) {
@@ -85,6 +87,10 @@ test("builder metadata and direct output stay channel-specific", () => {
       assert.equal(config.appId, identity.appId)
       assert.equal(config.productName, identity.productName)
       assert.equal(config.extraMetadata.piLabChannel, channel)
+      assert.equal(
+        config.extraMetadata.piLabBuildId,
+        channel === "alpha" ? "one-packaged-build" : undefined,
+      )
       assert.equal(config.directories.output, `release/.direct-${channel}`)
       assert.equal(config.fileAssociations.length > 0, channel === "stable")
       assert.equal(Boolean(config.mac.extendInfo.CFBundleDocumentTypes), channel === "stable")
@@ -103,5 +109,30 @@ test("builder metadata and direct output stay channel-specific", () => {
     else process.env.PI_LAB_CHANNEL = previousChannel
     if (previousStage === undefined) delete process.env.PI_LAB_PACKAGE_STAGE
     else process.env.PI_LAB_PACKAGE_STAGE = previousStage
+    if (previousBuild === undefined) delete process.env.PI_LAB_BUILD_ID
+    else process.env.PI_LAB_BUILD_ID = previousBuild
+  }
+})
+
+test("direct Alpha packaging creates one distinct build ID per invocation", () => {
+  const previousChannel = process.env.PI_LAB_CHANNEL
+  const previousBuild = process.env.PI_LAB_BUILD_ID
+  process.env.PI_LAB_CHANNEL = "alpha"
+  delete process.env.PI_LAB_BUILD_ID
+  const configPath = require.resolve("../electron-builder.config.cjs")
+  try {
+    delete require.cache[configPath]
+    const first = require(configPath).extraMetadata.piLabBuildId
+    assert.equal(typeof first, "string")
+    assert.ok(first.length > 0)
+    assert.equal(require(configPath).extraMetadata.piLabBuildId, first)
+    delete require.cache[configPath]
+    assert.notEqual(require(configPath).extraMetadata.piLabBuildId, first)
+  } finally {
+    if (previousChannel === undefined) delete process.env.PI_LAB_CHANNEL
+    else process.env.PI_LAB_CHANNEL = previousChannel
+    if (previousBuild === undefined) delete process.env.PI_LAB_BUILD_ID
+    else process.env.PI_LAB_BUILD_ID = previousBuild
+    delete require.cache[configPath]
   }
 })

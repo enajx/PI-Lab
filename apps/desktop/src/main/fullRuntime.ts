@@ -37,6 +37,11 @@ import { ManagedProcesses } from "./automations/managedProcesses"
 import { AutomationScheduler } from "./automations/scheduler"
 import { trayProjectSnapshot } from "./background/projectSnapshot"
 import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
+import {
+  AlphaBuildResetFailure,
+  prepareAlphaDatabase,
+  readAlphaBuildId,
+} from "./db/alphaBuildReset"
 import { getDb, initDatabase } from "./db/db"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelFromAppName } from "./identity/channel"
@@ -51,6 +56,8 @@ import { liveStandalonePythonDiscoverer } from "./python/standaloneInterpreters"
 import { QuickPythonRunner } from "./quickEdit/pythonRun"
 import { isTestMode, skillsHomeDirOverride } from "./runtime/env"
 import { testSetupProbe } from "./setup/testProbe"
+import { assertAlphaResetDaemonIdle } from "./terminal/alphaResetGuard"
+import { resolveDaemonSocketPath } from "./terminal/socketPath"
 import { TerminalSupervisor } from "./terminal/supervisor"
 import { appRouter } from "./trpc/appRouter"
 import {
@@ -151,6 +158,23 @@ export class FullRuntime {
 
   /** Show the window after database setup; hold IPC contexts until reconciliation finishes. */
   async start(): Promise<void> {
+    const channel = channelFromAppName(app.getName())
+    if (app.isPackaged && channel === "alpha") {
+      const dataDir = resolveDataDir()
+      await Promise.resolve()
+        .then(() =>
+          prepareAlphaDatabase({
+            channel,
+            isPackaged: true,
+            buildId: readAlphaBuildId(true, app.getAppPath()),
+            dataDir,
+            beforeReset: () => assertAlphaResetDaemonIdle(resolveDaemonSocketPath()),
+          }),
+        )
+        .catch((error: unknown) => {
+          throw new AlphaBuildResetFailure(dataDir, error)
+        })
+    }
     const dbStatus = initDatabase()
     initializePublicUpdateChannel(
       getDb(),
@@ -547,7 +571,7 @@ export class FullRuntime {
 
 /** Keep the existing native migration error when the deferred boot fails. */
 export function reportFullBootFailure(error: unknown): void {
-  if (error instanceof MigrationFailure) {
+  if (error instanceof MigrationFailure || error instanceof AlphaBuildResetFailure) {
     dialog.showErrorBox(nativeText("PI Lab database could not be opened"), error.message)
   }
 }

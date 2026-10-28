@@ -21,6 +21,7 @@
  */
 
 const { join } = require("node:path")
+const { randomUUID } = require("node:crypto")
 // Customize the staging image before normal DMG compression, signing and update metadata.
 process.env.CUSTOM_DMGBUILD_PATH = join(__dirname, "scripts/dmg-background.cjs")
 
@@ -84,6 +85,9 @@ const config = {
   ...(publicRelease ? { artifactName: "PI-Lab-${version}-${arch}.${ext}" } : {}),
   extraMetadata: {
     piLabChannel: channel,
+    ...(channel === "alpha"
+      ? { piLabBuildId: process.env.PI_LAB_BUILD_ID?.trim() || randomUUID() }
+      : {}),
     ...(publicRelease
       ? {
           piLabPublicRelease: true,
