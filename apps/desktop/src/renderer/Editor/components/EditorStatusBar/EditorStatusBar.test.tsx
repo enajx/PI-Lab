@@ -8,6 +8,7 @@ afterEach(() => setInterfaceLanguage("en"))
 test("updates Markdown view controls when the interface language changes", () => {
   render(
     <EditorStatusBar
+      label="file"
       isPython={false}
       counts={{ errors: 0, warnings: 0, infos: 0 }}
       missing={[]}
@@ -35,6 +36,7 @@ test("updates Markdown view controls when the interface language changes", () =>
 test("shows LaTeX build status beside Python and toggles an upward log panel", () => {
   render(
     <EditorStatusBar
+      label="file"
       isPython={true}
       counts={{ errors: 0, warnings: 0, infos: 0 }}
       missing={[]}
@@ -69,4 +71,29 @@ test("shows LaTeX build status beside Python and toggles an upward log panel", (
   expect(screen.getByTestId("latex-build-log")).toBeTruthy()
   fireEvent.mouseDown(document.body)
   expect(screen.queryByTestId("latex-build-log")).toBeNull()
+})
+
+/** The single panel bar always names the focused tab, so it is never an empty strip. */
+test("names the focused tab even when it has no controls", () => {
+  render(
+    <EditorStatusBar
+      label="cli.ts"
+      isPython={false}
+      counts={{ errors: 0, warnings: 0, infos: 0 }}
+      missing={[]}
+      checking={false}
+      hasRun={false}
+      outdated={false}
+      onRefreshDiagnostics={() => {}}
+      diagnosticsEnabled={false}
+      onToggleDiagnostics={vi.fn()}
+      pythonRuntime={{ runtime: null, checking: false, error: null }}
+      listPythonEnvironments={async () => []}
+      selectPythonEnvironment={async () => true}
+      choosePythonEnvironment={async () => true}
+      latexBuildStatus={null}
+    />,
+  )
+
+  expect(screen.getByTestId("editor-status-label").textContent).toBe("cli.ts")
 })

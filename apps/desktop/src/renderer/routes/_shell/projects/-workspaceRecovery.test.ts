@@ -66,6 +66,19 @@ describe("project recovery storage", () => {
     store.dispose()
   })
 
+  test("the split layout is saved with the tabs and follows tab restoration", () => {
+    const store = new WorkspaceRecoveryStore(window.localStorage)
+    const layout = {
+      grid: { root: {}, height: 1, width: 1, orientation: "HORIZONTAL" },
+      panels: {},
+    }
+    store.write("a", { ...state("saved"), layout } as CentralPanelRestoreState)
+    store.flush()
+    expect(new WorkspaceRecoveryStore(window.localStorage).read("a", true)?.layout).toEqual(layout)
+    expect(new WorkspaceRecoveryStore(window.localStorage).read("a", false)?.layout).toBeNull()
+    store.dispose()
+  })
+
   test("limits UTF8 current and baseline independently and reports unprotected current edits", () => {
     const store = new WorkspaceRecoveryStore(window.localStorage)
     store.write("a", state("é".repeat(500_000)))

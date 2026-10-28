@@ -19,6 +19,14 @@ import type { DiagnosticCounts } from "../../utils/pythonDiagnostics"
 import { LatexBuildStatus, type LatexBuildStatusData } from "../LatexBuildStatus/LatexBuildStatus"
 
 interface EditorStatusBarProps {
+  /** Name of the focused tab, shown on the left so the bar is never empty. */
+  label: string
+  /** The focused PDF's refresh state, e.g. "PDF up to date". */
+  pdfMessage?: string | null
+  /** For a focused LaTeX source: show the cursor position in the PDF. */
+  onShowInPdf?: () => void
+  /** Why the last Show in PDF failed. */
+  syncError?: string | null
   /** Workspace LaTeX compilation summary and its expandable output. */
   latexBuildStatus?: LatexBuildStatusData | null
   /** Whether the active file is a Python file (drives whether diagnostics show). */
@@ -51,7 +59,8 @@ interface EditorStatusBarProps {
 }
 
 /**
- * The editor's bottom status bar ("a small
+ * The central panel's single bottom status bar. It shows the focused tab's name and
+ * that tab's controls, whichever split it is in ("a small
  * error/warning count in the status bar"). For a Python file it surfaces the last
  * diagnostics run as a compact error/warning/info count (or a clean check), and
  * when the Astral tools are absent it shows a subtle, non-alarming hint to install
@@ -59,6 +68,10 @@ interface EditorStatusBarProps {
  * nothing diagnostic-related.
  */
 export function EditorStatusBar({
+  label,
+  pdfMessage,
+  onShowInPdf,
+  syncError,
   isPython,
   counts,
   missing,
@@ -82,10 +95,29 @@ export function EditorStatusBar({
       data-testid="editor-status-bar"
       className="flex h-6 shrink-0 items-center justify-end gap-3 border-border border-t bg-muted/30 px-3 text-[11px] text-muted-foreground"
     >
+      <span data-testid="editor-status-label" className="mr-auto min-w-0 truncate">
+        {label}
+      </span>
       {latexBuildStatus ? (
-        <div className="mr-auto min-w-0">
+        <div className="min-w-0">
           <LatexBuildStatus status={latexBuildStatus} />
         </div>
+      ) : null}
+      {syncError ? (
+        <span role="alert" className="min-w-0 select-text truncate text-destructive">
+          {syncError}
+        </span>
+      ) : null}
+      {onShowInPdf ? (
+        <button
+          type="button"
+          data-testid="latex-show-pdf"
+          className="shrink-0 rounded px-1 hover:bg-accent hover:text-foreground"
+          onClick={onShowInPdf}
+          title="Show current source position in PDF. You can also double-click LaTeX text."
+        >
+          Show in PDF
+        </button>
       ) : null}
       <div className="flex shrink-0 items-center gap-3">
         {isPython ? (
@@ -158,6 +190,11 @@ export function EditorStatusBar({
             <CodeXml className="size-3" aria-hidden />
           </button>
         </fieldset>
+      ) : null}
+      {pdfMessage ? (
+        <span data-testid="pdf-status" role="status" className="shrink-0 truncate">
+          {pdfMessage}
+        </span>
       ) : null}
     </div>
   )

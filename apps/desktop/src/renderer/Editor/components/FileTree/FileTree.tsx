@@ -18,6 +18,7 @@ import { useTranslate } from "../../../i18n/language"
 import { type FileTreeSort, useFileTreeSort } from "../../../preferences/preferences"
 import { useTRPC } from "../../../trpc/react"
 import type { FileTreeEntry } from "../../../trpc/types"
+import { FILE_DRAG_TYPE } from "../../fileDrag"
 import { fileIconUrl, folderIconUrl } from "./fileIcons"
 
 /** Position + target of the file row's right-click menu. */
@@ -571,6 +572,12 @@ function TreeNode({
         data-feature-label={t("File")}
         data-feature-help={t("Open this project file in a built-in editor tab")}
         onClick={() => onOpenFile(entry.relPath)}
+        // Drag a file into the central panel to open it in a split.
+        draggable
+        onDragStart={(event) => {
+          event.dataTransfer.setData(FILE_DRAG_TYPE, entry.relPath)
+          event.dataTransfer.effectAllowed = "copyMove"
+        }}
         // Right-click a Markdown file to pin it as a right-sidebar panel.
         onContextMenu={
           onContextMenuFile && entry.name.endsWith(".md")

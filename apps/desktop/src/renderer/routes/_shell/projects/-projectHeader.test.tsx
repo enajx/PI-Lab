@@ -287,7 +287,7 @@ describe("Card-triggered launch on the project view", () => {
     // The view — not the card — ran the launch, and its session attached as the
     // active, selectable agent tab (a pane the user can click into).
     await waitFor(() => expect(calls).toEqual([{ projectId: "launch-auto" }]))
-    const tabSelect = await screen.findByLabelText("Auto-research")
+    const tabSelect = await screen.findByRole("button", { name: "Auto-research" })
     const tab = tabSelect.closest("[data-testid='central-tab']")
     expect(tab?.getAttribute("data-tab-kind")).toBe("agent")
     expect(tab?.getAttribute("data-active")).toBe("true")

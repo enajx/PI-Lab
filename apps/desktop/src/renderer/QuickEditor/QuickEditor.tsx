@@ -825,6 +825,7 @@ export function QuickEditor({
       >
         {active ? (
           <CodeMirrorBuffer
+            autoFocus
             key={`${active.target.id}:${active.epoch}`}
             relPath={active.target.path}
             initialDoc={active.content}
@@ -849,6 +850,7 @@ export function QuickEditor({
           />
         ) : untitled ? (
           <CodeMirrorBuffer
+            autoFocus
             key="untitled"
             relPath="Untitled"
             initialDoc={untitledContent}
