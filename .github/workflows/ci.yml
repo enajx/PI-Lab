@@ -3,11 +3,19 @@ name: CI
 on:
   # Run local checks by default; request hosted platform checks explicitly.
   workflow_dispatch:
+  # Release workflows call CI on the exact commit they build.
+  workflow_call:
+    inputs:
+      ref:
+        description: Full commit SHA to check out and test
+        required: true
+        type: string
 
-# Cancel superseded runs on the same ref.
+# Manual runs cancel superseded runs on the same ref. A called run gets a group
+# of its own (caller run id) and is never cancelled by another run.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ inputs.ref && format('ci-call-{0}-{1}', github.run_id, github.run_attempt) || format('ci-{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ !inputs.ref }}
 
 env:
   # CI runs without a local user environment. Set this for build and test steps.
@@ -20,6 +28,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Called: the caller's commit. Manual: the dispatch commit.
+          ref: ${{ inputs.ref || github.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.0"
@@ -39,6 +50,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Called: the caller's commit. Manual: the dispatch commit.
+          ref: ${{ inputs.ref || github.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.0"
@@ -63,6 +77,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Called: the caller's commit. Manual: the dispatch commit.
+          ref: ${{ inputs.ref || github.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.0"
@@ -91,6 +108,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Called: the caller's commit. Manual: the dispatch commit.
+          ref: ${{ inputs.ref || github.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.0"

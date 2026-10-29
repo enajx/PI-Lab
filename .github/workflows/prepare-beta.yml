@@ -21,8 +21,64 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Check release secrets, then pin the selected main commit to one SHA.
+  # CI tests that SHA and build signs it.
+  resolve:
+    name: Select Beta commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      # Fail before CI if signing or release setup is missing. Only this step
+      # sees the secrets, and it prints only the names of missing ones.
+      - name: Check release secrets
+        env:
+          RELEASE_REPO_SSH_KEY: ${{ secrets.RELEASE_REPO_SSH_KEY }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          node <<'NODE'
+          const names = ['RELEASE_REPO_SSH_KEY', 'CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'];
+          const missing = names.filter(name => !process.env[name]);
+          if (missing.length) throw new Error('Configure these Actions secrets before preparing a Beta: ' + missing.join(', '));
+          NODE
+
+      - name: Resolve selected main commit
+        id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BETA_VERSION: ${{ inputs.version }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main || { echo "::error::Run Prepare Beta from main. Select the app commit in the commit input."; exit 1; }
+          [[ "$BETA_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.(0|[1-9][0-9]*)$ ]] || { echo "::error::Choose a numeric Beta version such as 0.1.0-beta.4"; exit 1; }
+          [[ "$SOURCE_COMMIT" =~ ^(main|[a-f0-9]{40})$ ]] || { echo "::error::Choose main or a full lowercase main commit SHA"; exit 1; }
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_COMMIT" --jq .sha)
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::Could not resolve the selected commit"; exit 1; }
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...main" --jq .status)
+          [[ "$status" = identical || "$status" = ahead ]] || { echo "::error::The selected commit is not in main's history"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  # Full CI on the exact commit. No secrets are passed to it.
+  ci:
+    name: CI on Beta commit
+    needs: resolve
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+
   build:
     name: Build and check signed Beta
+    needs: [resolve, ci]
     runs-on: macos-15
     timeout-minutes: 90
     permissions:
@@ -33,7 +89,7 @@ jobs:
     env:
       SKIP_ENV_VALIDATION: "1"
       BETA_VERSION: ${{ inputs.version }}
-      SOURCE_COMMIT: ${{ inputs.commit }}
+      SOURCE_COMMIT: ${{ needs.resolve.outputs.sha }}
       TOOLING_DIR: ${{ github.workspace }}/workflow
       CANDIDATE_DIR: ${{ github.workspace }}/source/apps/desktop/release/public/beta/${{ inputs.version }}
     steps:
@@ -66,7 +122,7 @@ jobs:
       - name: Check out selected app source
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.resolve.outputs.sha }}
           path: source
           fetch-depth: 0
           ssh-key: ${{ secrets.RELEASE_REPO_SSH_KEY }}
@@ -98,15 +154,6 @@ jobs:
       - name: Install app dependencies
         working-directory: source
         run: bun install --frozen-lockfile --concurrent-scripts 1
-
-      - name: Check source and tests
-        working-directory: source
-        run: |
-          bun run --cwd apps/desktop setup:native
-          bun run typecheck
-          bun run lint
-          bun run test
-          bun run test:scripts
 
       - name: Build, sign and notarize Beta
         working-directory: source
