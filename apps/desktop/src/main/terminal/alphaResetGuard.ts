@@ -1,5 +1,9 @@
 import { DaemonClient } from "@pi-lab/pty-daemon"
 
+// The synchronous probe lives in a light module so the startup entry can load
+// it without the daemon client.
+export { ALPHA_RESET_PROBE_FLAG, assertAlphaResetDaemonIdleSync } from "./alphaResetProbe"
+
 /**
  * Refuse a new-build Alpha reset while prior terminals or jobs are alive.
  * Connect only to an existing daemon, never spawn or terminate one, and leave
@@ -33,7 +37,7 @@ export async function assertAlphaResetDaemonIdle(socketPath: string): Promise<vo
       expired = true
       reject(
         new Error(
-          "Checking prior Alpha terminals and jobs timed out. Close them in the previous build, then retry; the app database has been left untouched.",
+          "Checking prior Alpha terminals and jobs timed out. Close them in the previous build, then retry; the app data has been left untouched.",
         ),
       )
     }, 3000)

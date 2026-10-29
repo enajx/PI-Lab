@@ -5,14 +5,14 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
+import { DaemonClient } from "../../packages/pty-daemon/src/index"
 import {
   type ElectronApplication,
   _electron as electron,
   expect,
   type Locator,
   test,
-} from "@playwright/test"
-import { DaemonClient } from "../../packages/pty-daemon/src/index"
+} from "./fixtures/playwright"
 
 // Exercises the dashboard with a temporary repo in the real Electron build.
 

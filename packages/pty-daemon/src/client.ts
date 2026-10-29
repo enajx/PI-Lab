@@ -285,6 +285,19 @@ export class DaemonClient extends EventEmitter {
   }
 
   /**
+   * Ask the daemon to stop every session and job and exit. Resolves with the
+   * daemon's pid once it confirms; a daemon built before this request ignores
+   * it, so callers bound the wait.
+   */
+  async shutdown(): Promise<{ pid: number }> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "shutdown-ok" }>>((cid) => ({
+      kind: "shutdown",
+      cid,
+    }))
+    return { pid: reply.pid }
+  }
+
+  /**
    * Async iterator over a single session's events. Yields `data` events and a
    * final `exit` event, after which it completes. Convenient for tests and for
    * draining a session to completion.

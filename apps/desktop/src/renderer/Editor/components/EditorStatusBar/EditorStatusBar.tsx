@@ -21,7 +21,7 @@ import { LatexBuildStatus, type LatexBuildStatusData } from "../LatexBuildStatus
 interface EditorStatusBarProps {
   /** Name of the focused tab, shown on the left so the bar is never empty. */
   label: string
-  /** The focused PDF's refresh state, e.g. "PDF up to date". */
+  /** The focused PDF's refresh state and current page, e.g. "Page 2 / 5". */
   pdfMessage?: string | null
   /** For a focused LaTeX source: show the cursor position in the PDF. */
   onShowInPdf?: () => void

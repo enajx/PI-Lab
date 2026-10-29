@@ -21,10 +21,33 @@ import { RightSidebar } from "./RightSidebar"
  * to drop the sidebar (mirrored by {@link CollapsibleHarness} here).
  */
 
+const TAB_ORDER_KEY = "pi-lab.projectView.sidebarTabOrder"
+
+/** The right-sidebar tab ids in their rendered order. */
+function tabOrder(): string[] {
+  return screen
+    .getAllByRole("tab")
+    .map((tab) => (tab.getAttribute("data-testid") ?? "").replace("panel-tab-", ""))
+}
+
+/** Drag the tab `from` onto the tab `onto` with native HTML5 drag events. */
+function dragTab(from: string, onto: string) {
+  fireEvent.dragStart(screen.getByTestId(`panel-tab-${from}`))
+  fireEvent.dragOver(screen.getByTestId(`panel-tab-${onto}`))
+  fireEvent.drop(screen.getByTestId(`panel-tab-${onto}`))
+  fireEvent.dragEnd(screen.getByTestId(`panel-tab-${from}`))
+}
+
 function renderSidebar(
   onOpenFile = vi.fn(),
   overrides: FakeHandlers = {},
-  props: { gitAvailable?: boolean } = {},
+  props: {
+    gitAvailable?: boolean
+    projectId?: string
+    pinnedPanels?: string[]
+    filesPanelOpen?: boolean
+    activeId?: string
+  } = {},
 ) {
   const onCollapse = vi.fn()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -36,18 +59,21 @@ function renderSidebar(
     "science.skills.list": () => ({ skills: [], roots: [] }),
     ...overrides,
   })
-  render(
+  const view = render(
     <AppProviders client={client} queryClient={queryClient}>
       <RightSidebar
-        projectId="p1"
+        projectId={props.projectId ?? "p1"}
         workspaceId="ws-1"
         onOpenFile={onOpenFile}
         onCollapse={onCollapse}
         gitAvailable={props.gitAvailable}
+        pinnedPanels={props.pinnedPanels}
+        filesPanelOpen={props.filesPanelOpen ?? false}
+        activeId={props.activeId}
       />
     </AppProviders>,
   )
-  return { onOpenFile, onCollapse }
+  return { onOpenFile, onCollapse, unmount: view.unmount }
 }
 
 /**
@@ -72,6 +98,7 @@ function CollapsibleHarness({ onOpenFile = vi.fn() }: { onOpenFile?: () => void 
       workspaceId="ws-1"
       onOpenFile={onOpenFile}
       onCollapse={() => setCollapsed(true)}
+      filesPanelOpen={false}
     />
   )
 }
@@ -145,6 +172,70 @@ describe("RightSidebar", () => {
     expect(screen.queryByTestId("panel-tab-status")).toBeNull()
     expect(screen.queryByTestId("panel-tab-changes")).toBeNull()
     expect(screen.queryByTestId("panel-tab-skills")).toBeNull()
+  })
+
+  test("a selected tab that no longer exists falls back to Files, not the first tab", () => {
+    window.localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(["todos", "files", "research"]))
+    renderSidebar(vi.fn(), {}, { activeId: "pinned:gone.md" })
+    expect(screen.getByTestId("panel-tab-files").getAttribute("data-active")).toBe("true")
+  })
+
+  test("Files is the first tab and the tab shown by default", () => {
+    renderSidebar()
+    expect(tabOrder()).toEqual(["files", "research", "todos"])
+    expect(screen.getByTestId("panel-tab-files").getAttribute("data-active")).toBe("true")
+    expect(screen.getByTestId("panel-files")).toBeTruthy()
+  })
+
+  test("dragging a tab reorders it, persists the global order, and applies it to another project", () => {
+    const first = renderSidebar()
+    dragTab("todos", "files")
+    expect(tabOrder()).toEqual(["todos", "files", "research"])
+    expect(JSON.parse(window.localStorage.getItem(TAB_ORDER_KEY) ?? "null")).toEqual([
+      "todos",
+      "files",
+      "research",
+    ])
+    // The drag did not change the selection; a plain click still selects.
+    expect(screen.getByTestId("panel-tab-files").getAttribute("data-active")).toBe("true")
+    fireEvent.click(screen.getByTestId("panel-tab-research"))
+    expect(screen.getByTestId("panel-tab-research").getAttribute("data-active")).toBe("true")
+
+    first.unmount()
+    renderSidebar(vi.fn(), {}, { projectId: "p2" })
+    expect(tabOrder()).toEqual(["todos", "files", "research"])
+  })
+
+  test("tabs missing from the saved order go after the known ones in their natural order", () => {
+    window.localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(["todos", "research", "files"]))
+    window.localStorage.setItem("pi-lab.projectView.showSkillsPanel", "true")
+    window.localStorage.setItem("pi-lab.projectView.showCodeChanges", "true")
+    renderSidebar(vi.fn(), {}, { pinnedPanels: ["notes.md"] })
+    expect(tabOrder()).toEqual([
+      "todos",
+      "research",
+      "files",
+      "skills",
+      "changes",
+      "pinned:notes.md",
+    ])
+  })
+
+  test("Alt+Right / Alt+Left move the focused tab and persist the order", () => {
+    renderSidebar()
+    const research = screen.getByTestId("panel-tab-research")
+    research.focus()
+    fireEvent.keyDown(research, { key: "ArrowRight", altKey: true })
+    expect(tabOrder()).toEqual(["files", "todos", "research"])
+    expect(document.activeElement).toBe(screen.getByTestId("panel-tab-research"))
+    fireEvent.keyDown(screen.getByTestId("panel-tab-research"), { key: "ArrowLeft", altKey: true })
+    fireEvent.keyDown(screen.getByTestId("panel-tab-research"), { key: "ArrowLeft", altKey: true })
+    expect(tabOrder()).toEqual(["research", "files", "todos"])
+    expect(JSON.parse(window.localStorage.getItem(TAB_ORDER_KEY) ?? "null")).toEqual([
+      "research",
+      "files",
+      "todos",
+    ])
   })
 
   test("gives every project panel a concise purpose instead of its bare label", () => {
@@ -300,6 +391,7 @@ describe("RightSidebar", () => {
           workspaceId={`ws-${projectId}`}
           onOpenFile={() => {}}
           onCollapse={() => {}}
+          filesPanelOpen={false}
         />
       </AppProviders>
     )
@@ -321,9 +413,8 @@ describe("RightSidebar", () => {
     await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith("main.py"))
   })
 
-  test("excludes the Files tab when the left Files panel is enabled", () => {
-    window.localStorage.setItem("pi-lab.projectView.showFilesPanel", "true")
-    renderSidebar()
+  test("excludes the Files tab when the project's left Files column is open", () => {
+    renderSidebar(vi.fn(), {}, { filesPanelOpen: true })
 
     expect(screen.queryByTestId("panel-tab-files")).toBeNull()
     expect(screen.getByTestId("panel-tab-research")).toBeTruthy()
@@ -383,6 +474,7 @@ function PinnedHarness({ projectId }: { projectId: string }) {
       rightSidebarCollapsed: false,
       rightSidebarActiveId: activeId,
       pinnedPanels: pinned,
+      filesPanelOpen: false,
     })
   }, [projectId, pinned, activeId])
   return (
@@ -398,6 +490,7 @@ function PinnedHarness({ projectId }: { projectId: string }) {
         setPinned((prev) => (prev.includes(relPath) ? prev : [...prev, relPath]))
       }
       onUnpinFile={(relPath) => setPinned((prev) => prev.filter((path) => path !== relPath))}
+      filesPanelOpen={false}
     />
   )
 }
@@ -495,6 +588,7 @@ describe("RightSidebar pinned Markdown panels", () => {
       rightSidebarCollapsed: false,
       rightSidebarActiveId: "pinned:notes.md",
       pinnedPanels: ["notes.md"],
+      filesPanelOpen: false,
     })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const client = createFakeTrpcClient({
@@ -515,8 +609,8 @@ describe("RightSidebar pinned Markdown panels", () => {
     fireEvent.click(screen.getByTestId("right-sidebar-unpin:notes.md"))
 
     await waitFor(() => expect(screen.queryByTestId("panel-tab-pinned:notes.md")).toBeNull())
-    // The active-tab fallback still resolves — Research (the first tab) is shown.
-    expect(await screen.findByTestId("panel-research")).toBeTruthy()
+    // The active-tab fallback still resolves — Files (the first tab) is shown.
+    expect(await screen.findByTestId("panel-files")).toBeTruthy()
     expect(readProjectWorkspaceState("p-unpin", true)?.pinnedPanels).toEqual([])
   })
 })

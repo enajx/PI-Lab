@@ -130,6 +130,22 @@ describe("getSettingsOrDefaults", () => {
     }
   })
 
+  it("shows hidden files and confirms deletes for an editor row saved before the preferences existed", () => {
+    const { db, sqlite } = runMigrations(dbPath)
+    try {
+      sqlite
+        .prepare("INSERT INTO settings (id, editor, updated_at) VALUES (1, ?, 1234)")
+        .run(JSON.stringify({ autosave: true, vim: false }))
+
+      const editor = getSettingsOrDefaults(db).editor
+      expect(editor.showHiddenFiles).toBe(true)
+      expect(editor.confirmFileDelete).toBe(true)
+      expect(editor.autosave).toBe(true)
+    } finally {
+      sqlite.close()
+    }
+  })
+
   it("restores persisted caffeine choices after the database is reopened", () => {
     const first = runMigrations(dbPath)
     first.db

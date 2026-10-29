@@ -73,6 +73,8 @@ const editorPatch = z.object({
   customEditorThemes: z.array(importedTheme).max(100).optional(),
   pythonRunDestination: z.enum(["central", "below-editor"]).optional(),
   latexProvider: z.enum(["bundled", "system"]).optional(),
+  showHiddenFiles: z.boolean().optional(),
+  confirmFileDelete: z.boolean().optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */
@@ -98,14 +100,15 @@ const launchDefaults = z.record(z.string(), launchDefault).superRefine((defaults
   }
 })
 
-const agentsPatch = z.object({
-  defaultAgentId: z.string().trim().min(1).optional(),
-  launchDefaults: launchDefaults.optional(),
-  quitBehavior: z.enum(["stop", "keep-running"]).optional(),
-  projectConfigStorage: z.enum(["app", "project", "both"]).optional(),
-  executableOverrides: z.record(z.string(), z.string().trim()).optional(),
-  setupCompleted: z.boolean().optional(),
-})
+const agentsPatch = z
+  .object({
+    defaultAgentId: z.string().trim().min(1).optional(),
+    launchDefaults: launchDefaults.optional(),
+    projectConfigStorage: z.enum(["app", "project", "both"]).optional(),
+    executableOverrides: z.record(z.string(), z.string().trim()).optional(),
+    setupCompleted: z.boolean().optional(),
+  })
+  .strict()
 
 /** Runtime validation for one notification event's partial settings patch. */
 const notificationEventPatch = z.object({
@@ -216,7 +219,6 @@ export function writeAgentSettings(
     launchDefaults[id] = { ...launchDefaults[id], ...values }
   }
   const next: AgentSettings = {
-    quitBehavior: patch.quitBehavior ?? current.quitBehavior,
     defaultAgentId: patch.defaultAgentId ?? current.defaultAgentId,
     launchDefaults,
     projectConfigStorage: patch.projectConfigStorage ?? current.projectConfigStorage,

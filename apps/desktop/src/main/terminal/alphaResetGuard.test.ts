@@ -4,7 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DaemonClient, DaemonServer } from "@pi-lab/pty-daemon"
 import { afterEach, beforeEach, expect, test } from "vitest"
-import { assertAlphaResetDaemonIdle } from "./alphaResetGuard"
+import {
+  ALPHA_RESET_PROBE_FLAG,
+  assertAlphaResetDaemonIdle,
+  assertAlphaResetDaemonIdleSync,
+} from "./alphaResetGuard"
 
 let dir: string
 let socketPath: string
@@ -85,3 +89,30 @@ test("an unresponsive daemon blocks reset with a bounded error", async () => {
   await expect(assertAlphaResetDaemonIdle(socketPath)).rejects.toThrow(/timed out/i)
   expect(Date.now() - started).toBeLessThan(4000)
 }, 5000)
+
+test("the startup check skips the probe when no daemon socket exists", () => {
+  expect(() =>
+    assertAlphaResetDaemonIdleSync(join(dir, "missing-daemon-entry.js"), socketPath),
+  ).not.toThrow()
+})
+
+/** Stub probe entry (not the bundled daemon): checks the argv contract and exit-code handling. */
+test("the startup check runs the daemon entry in probe mode and surfaces its refusal", async () => {
+  await writeFile(socketPath, "socket stand-in")
+  const entry = join(dir, "probe.cjs")
+  await writeFile(
+    entry,
+    `const [flag, socket] = process.argv.slice(2)
+if (flag !== ${JSON.stringify(ALPHA_RESET_PROBE_FLAG)} || socket !== ${JSON.stringify(socketPath)} || process.env.ELECTRON_RUN_AS_NODE !== "1") process.exit(3)
+if (process.env.PI_LAB_TEST_PROBE_REFUSES === "1") { process.stderr.write("Close Alpha terminals first\\n"); process.exit(1) }`,
+  )
+  expect(() => assertAlphaResetDaemonIdleSync(entry, socketPath)).not.toThrow()
+  process.env.PI_LAB_TEST_PROBE_REFUSES = "1"
+  try {
+    expect(() => assertAlphaResetDaemonIdleSync(entry, socketPath)).toThrow(
+      "Close Alpha terminals first",
+    )
+  } finally {
+    delete process.env.PI_LAB_TEST_PROBE_REFUSES
+  }
+})

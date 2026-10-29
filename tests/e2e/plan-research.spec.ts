@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { _electron as electron, expect, test } from "@playwright/test"
+import { _electron as electron, expect, test } from "./fixtures/playwright"
 
 /** Real renderer, IPC, skill filesystem and fixture agent; no external AI service. */
 test("Plan research reports a missing skill and runs a user skill after installation", async () => {

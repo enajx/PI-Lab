@@ -253,11 +253,12 @@ export const readFetchExperimentsInstructions = (): string =>
 export const useFetchExperimentsInstructions = (): [string, (next: string) => void] =>
   useStringPref(FETCH_EXPERIMENTS_INSTRUCTIONS_KEY, "")
 
-// --- Project view: show the file tree as a left panel (off by default) --------
-// When on, the file tree moves out of the right sidebar into a column on the
-// left of the central panel; the right sidebar drops its "Files" tab.
-const SHOW_FILES_PANEL_KEY = "pi-lab.projectView.showFilesPanel"
-export const readShowFilesPanel = (): boolean => readBoolean(SHOW_FILES_PANEL_KEY, false)
+// --- Project view: show the file tree as a left column (off by default) --------
+// The global default for the left Files column. A project that toggled the column
+// itself keeps its own value (`filesPanelOpen` in its workspace state) instead.
+// A new key: the old `pi-lab.projectView.showFilesPanel` was a global on/off switch,
+// and its saved value must not turn this default on.
+const SHOW_FILES_PANEL_KEY = "pi-lab.projectView.filesPanelDefault"
 export const useShowFilesPanel = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_FILES_PANEL_KEY, false)
 
@@ -398,6 +399,11 @@ export const useProjectOrder = (): [string[], (next: string[]) => void] =>
 /** Persisted drag order for the cluster machine list (by machine id). */
 export const useClusterOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.cluster.machineOrder", EMPTY_ORDER)
+/** Default project-view right-sidebar tab order; tabs not listed follow in their natural order. */
+const DEFAULT_RIGHT_SIDEBAR_TAB_ORDER: string[] = ["files", "research", "todos"]
+/** Persisted drag order for the project-view right-sidebar tabs (by tab id), shared by every project. */
+export const useRightSidebarTabOrder = (): [string[], (next: string[]) => void] =>
+  useOrderPref("pi-lab.projectView.sidebarTabOrder", DEFAULT_RIGHT_SIDEBAR_TAB_ORDER)
 
 // --- Global emoji-tag palette: shared across ALL projects ---------------------
 // The reusable set of emoji the "Edit project…" dialog offers as toggle chips.

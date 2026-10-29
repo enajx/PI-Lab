@@ -6,15 +6,40 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 import { DaemonClient } from "../../packages/pty-daemon/src/index"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const execFileAsync = promisify(execFile)
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
 const electronPath = createRequire(join(desktop, "package.json"))("electron") as string
 
+/** The pty-daemon process serving `socketPath`, if one is running. */
+async function daemonPid(socketPath: string): Promise<number | undefined> {
+  const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="])
+  const line = stdout
+    .split("\n")
+    .find((entry) => entry.includes(`/pty-daemon/index.js ${socketPath}`))
+  return line ? Number(line.trim().split(/\s+/)[0]) : undefined
+}
+
+/** Whether a process exists. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false
+    throw error
+  }
+}
+
 /** Native dialog choices are injected; the app and managed agent process are real. */
-test("default quit policy cancels, opens Settings, then stops the agent while preserving ordinary shells", async () => {
+test("a quit PI Lab did not start (like macOS logout) asks while an agent runs; Cancel keeps it, Quit ends everything", async () => {
   test.skip(process.platform === "win32", "Fixture uses POSIX shell and process listing")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-quit-"))
@@ -53,10 +78,6 @@ test("default quit policy cancels, opens Settings, then stops the agent while pr
     const window = await app.firstWindow()
     await window.getByRole("button", { name: "Skip setup" }).first().click()
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-    await window.getByTestId("nav-settings").click()
-    await window.getByTestId("settings-nav-agents").click()
-    await expect(window.getByTestId("settings-agent-quit-behavior")).toHaveValue("stop")
-    await window.getByTestId("settings-back").click()
     await window.getByTestId("project-item").click()
     await window.getByTestId("central-add-menu").click()
     await window.getByTestId("central-add-agent").click()
@@ -85,7 +106,8 @@ test("default quit policy cancels, opens Settings, then stops the agent while pr
         setImmediate(() => app.quit())
       }, choice)
     }
-    await requestQuit(0)
+    // macOS logout, restart and shutdown reach the app as this same app.quit().
+    await requestQuit(1)
     await expect
       .poll(async () =>
         app?.evaluate(
@@ -94,28 +116,22 @@ test("default quit policy cancels, opens Settings, then stops the agent while pr
       )
       .toBe(1)
     expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
-    await requestQuit(2)
-    await expect.poll(() => window.url()).toContain("#/settings?section=agents")
-    // Test-only outer query parameters collide with TanStack's hash search parser.
-    // Production file URLs have no such query; preserve the requested hash route.
-    await window.evaluate(() => {
-      history.replaceState(history.state, "", window.location.pathname + window.location.hash)
-      window.dispatchEvent(new PopStateEvent("popstate"))
-    })
-    await expect(window.getByTestId("settings-agent-quit-behavior")).toBeVisible()
-    await expect(window.getByTestId("settings-agent-quit-behavior")).toHaveValue("stop")
-    expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
     const prompts = await app.evaluate(
       () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts,
     )
-    expect(prompts).toHaveLength(2)
-    expect(prompts[0]).toContain("stop agents when quitting")
+    const prompt = JSON.parse(prompts[0] ?? "{}")
+    expect(prompt.message).toBe("1 agent is still running.")
+    expect(prompt.detail).toContain(": cat")
+    expect(prompt.buttons).toEqual(["Quit and stop agents", "Cancel"])
+    const daemon = await daemonPid(socketPath)
+    expect(daemon).toBeGreaterThan(0)
     const closed = app.waitForEvent("close")
-    await requestQuit(1)
+    await requestQuit(0)
     await closed
     app = null
-    expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(false)
-    expect((await client.list()).find((session) => session.id === shell.id)?.alive).toBe(true)
+    await expect.poll(() => daemonPid(socketPath)).toBeUndefined()
+    expect(alive(agent.pid as number)).toBe(false)
+    expect(alive(shell.pid as number)).toBe(false)
   } finally {
     if (app) {
       const closed = app.waitForEvent("close")
@@ -133,7 +149,7 @@ test("default quit policy cancels, opens Settings, then stops the agent while pr
 })
 
 /** A local executable fixture crosses the real workflow IPC and daemon process boundaries. */
-test("background summary survives keep-running quit, restores its result, and stops under the default policy", async () => {
+test("background summary survives Restart to Update, restores its result, and a later quit stops it", async () => {
   test.skip(process.platform === "win32", "Fixture executable is a POSIX shell script")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-background-agent-"))
@@ -187,7 +203,6 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
     const executableInput = window.getByTestId("settings-agent-executable-claude-code")
     await executableInput.fill(executable)
     await executableInput.blur()
-    await window.getByTestId("settings-agent-quit-behavior").selectOption("keep-running")
     await window.getByTestId("settings-back").click()
     await window.getByTestId("project-card-summary").click()
     await expect(window.getByTestId("workflow-result-working")).toBeVisible()
@@ -199,8 +214,11 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
     const original = (await client.listProcesses()).find((job) => job.alive)
     if (!original) throw new Error("Background routine not running")
     const closed = app.waitForEvent("close")
-    await app.evaluate(({ app }) => {
-      setImmediate(() => app.quit())
+    await app.evaluate(() => {
+      const hook = (globalThis as { piLabTestRestartToUpdate?: () => void })
+        .piLabTestRestartToUpdate
+      if (!hook) throw new Error("Missing Restart to Update test seam")
+      setImmediate(hook)
     })
     await closed
     app = null
@@ -216,10 +234,6 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
     await expect(window.getByTestId("workflow-result-text")).toContainText("BACKGROUND-RECOVERED")
     await expect.poll(async () => (await client.listProcesses()).length).toBe(0)
     await window.getByTestId("workflow-result-close").click()
-    await window.getByTestId("nav-settings").click()
-    await window.getByTestId("settings-nav-agents").click()
-    await window.getByTestId("settings-agent-quit-behavior").selectOption("stop")
-    await window.getByTestId("settings-back").click()
     await rm(release)
     await window.getByTestId("project-card-summary").click()
     await window.getByTestId("workflow-result-recheck").click()
@@ -227,7 +241,7 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
       .poll(async () => (await client.listProcesses()).filter((job) => job.alive).length)
       .toBe(1)
     await app.evaluate(({ dialog }) => {
-      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
+      dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
     })
     const stopped = app.waitForEvent("close")
     await app.evaluate(({ app }) => {
@@ -235,7 +249,7 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
     })
     await stopped
     app = null
-    expect(await client.listProcesses()).toEqual([])
+    await expect.poll(() => daemonPid(socketPath)).toBeUndefined()
   } finally {
     if (app) {
       const closed = app.waitForEvent("close")

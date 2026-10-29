@@ -222,6 +222,18 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       settings.editor.diagnosticsEnabled,
       (diagnosticsEnabled) => editor.mutateAsync({ diagnosticsEnabled }),
     ),
+    toggle(
+      "editor-show-hidden-files",
+      "Show hidden files",
+      settings.editor.showHiddenFiles,
+      (showHiddenFiles) => editor.mutateAsync({ showHiddenFiles }),
+    ),
+    toggle(
+      "editor-confirm-file-delete",
+      "Confirm before deleting files",
+      settings.editor.confirmFileDelete,
+      (confirmFileDelete) => editor.mutateAsync({ confirmFileDelete }),
+    ),
     ...choices(
       "python-run-destination",
       "Run Python in",
@@ -240,16 +252,6 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ),
       settings.editor.editorTheme,
       (editorTheme) => editor.mutateAsync({ editorTheme }),
-    ),
-    ...choices(
-      "agent-quit-behavior",
-      "agents during restart or automatic quit",
-      [
-        ["stop", "Stop agents"],
-        ["keep-running", "Keep agents running"],
-      ],
-      settings.agents.quitBehavior,
-      (quitBehavior) => agent.mutateAsync({ quitBehavior }),
     ),
     ...choices(
       "project-config-storage",

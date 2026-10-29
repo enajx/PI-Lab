@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client"
 import { initializeInterfaceLanguage } from "./i18n/language"
 import { AppProviders } from "./providers/AppProviders"
 import { createAppRouter } from "./router"
+import { installCloseTabResponder } from "./shortcuts/closeTab"
 
 const rootElement = document.getElementById("root")
 if (!rootElement) {
@@ -50,6 +51,10 @@ function QuickEditOpenController({ router }: { router: ReturnType<typeof createA
   }, [router])
   return null
 }
+
+// Answer the native Cmd+W menu for this window for its whole lifetime.
+const closeTabBridge = window.piLab?.closeTab
+if (closeTabBridge) installCloseTabResponder(closeTabBridge)
 
 void initializeInterfaceLanguage().then(() => {
   const router = createAppRouter()

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { _electron as electron, expect, test } from "@playwright/test"
+import { _electron as electron, expect, test } from "./fixtures/playwright"
 
 /** Actual sidebar drag order persists across a renderer reload. */
 test("sidebar uses the new default order and preserves user reordering", async () => {

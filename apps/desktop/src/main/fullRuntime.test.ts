@@ -94,7 +94,6 @@ test("the window opens while reconciliation is pending and IPC launch context wa
   const initialWindow = vi.fn(() => window)
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
-    openAgentSettings: () => {},
     ensureMainWindow: () => window,
     initialWindow,
   })
@@ -125,7 +124,6 @@ test("a reconciliation failure leaves read-only IPC usable and rejects agent lau
   const window = {} as BrowserWindow
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
-    openAgentSettings: () => {},
     ensureMainWindow: () => window,
     initialWindow: () => window,
   })
@@ -157,7 +155,6 @@ test("a later launch retries failed recovery and concurrent launches share that 
   const window = {} as BrowserWindow
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
-    openAgentSettings: () => {},
     ensureMainWindow: () => window,
     initialWindow: () => window,
   })

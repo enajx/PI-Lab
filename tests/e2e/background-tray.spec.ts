@@ -5,7 +5,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const mainEntry = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -85,6 +90,10 @@ test("closing the last window quits when background mode is off", async () => {
     await expect(toggle).toHaveAttribute("aria-checked", "true")
     await toggle.click()
     await expect(toggle).toHaveAttribute("aria-checked", "false")
+    // With the setting off, closing the window runs the Quit flow; choose Quit.
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 2, checkboxChecked: false })
+    })
     const closed = app.waitForEvent("close")
     await window.evaluate(() => window.close())
     await closed
@@ -109,6 +118,9 @@ test("closing the last window quits when background mode is off", async () => {
     )
     const full = await reopened
     await expect(full.getByTestId("app-ready")).toBeVisible()
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 2, checkboxChecked: false })
+    })
     const closedAfterLogin = app.waitForEvent("close")
     await full.evaluate(() => window.close())
     await closedAfterLogin
@@ -247,10 +259,7 @@ test("working project appears in the tray and opens its full project view", asyn
       }),
     ).toBe(true)
   } finally {
-    // This test owns the live fixture agent; approve its normal quit-time cleanup.
-    await app?.evaluate(({ dialog }) => {
-      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
-    })
+    // The test-mode dialog responder answers the quit confirmation with Quit.
     await app?.close()
     await rm(dir, { recursive: true, force: true })
   }

@@ -4,7 +4,7 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
-import { _electron as electron, expect, test } from "@playwright/test"
+import { _electron as electron, expect, test } from "./fixtures/playwright"
 
 const execFileAsync = promisify(execFile)
 
@@ -60,7 +60,9 @@ test("project Auto research leads the header and launches the existing worktree 
     await expect(page.getByTestId("project-view-fetch-experiments")).toHaveCount(0)
     await button.click()
     await expect(page.getByTestId("terminal")).toContainText("AGENT-UI-OK", { timeout: 15000 })
-    await expect(page.getByLabel("Auto-research", { exact: true })).toBeVisible()
+    await expect(
+      page.getByTestId("central-tab-select").filter({ hasText: "Auto-research" }),
+    ).toBeVisible()
     const worktrees = (
       await execFileAsync("git", ["-C", repo, "worktree", "list", "--porcelain"])
     ).stdout
@@ -74,9 +76,7 @@ test("project Auto research leads the header and launches the existing worktree 
       await readFile(join(isolated as string, "project", "AUTORESEARCH.md"), "utf8"),
     ).toContain("placeholder")
   } finally {
-    await app.evaluate(({ dialog }) => {
-      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
-    })
+    // The test-mode dialog responder answers the quit confirmation with Quit.
     await app.close()
     await rm(dir, { recursive: true, force: true })
   }

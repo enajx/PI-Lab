@@ -49,7 +49,7 @@ import { useTRPC } from "../trpc/react"
 import { requestUpdateCheck } from "../updates/UpdateFeedback"
 import { useDirectSettingsCommands } from "./settingsCommands"
 
-/** A single entry in the ⌘P palette: searchable label + the action it runs. */
+/** A single entry in the global command palette: searchable label + the action it runs. */
 export interface PaletteCommand {
   /** Stable id (React key + `data-command-id`). */
   id: string
@@ -117,7 +117,7 @@ export function createNewFileCommand(
 }
 
 /**
- * Builds the live ⌘P command list: param-less navigations, a couple of global view
+ * Builds the live global command palette list: param-less navigations, a couple of global view
  * toggles (theme, sidebar), the searchable Settings toggles (editor + project-view
  * preferences, flipped in place), and one entry per opened project (most-recently-opened
  * first, jumping to its project view). Project-scoped actions (open agent/terminal/…)

@@ -14,6 +14,7 @@ import {
   writeEditorVimChoice,
 } from "../preferences/preferences"
 import { useTheme } from "../providers/ThemeProvider"
+import { registerCloseTabHandler } from "../shortcuts/closeTab"
 import { QuickEditorStatusBar } from "./QuickEditorStatusBar"
 import {
   closeQuickBuffer,
@@ -663,6 +664,17 @@ export function QuickEditor({
     window.addEventListener("keydown", onKeyDown, true)
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [fullApp, requestFileClose])
+
+  // macOS Cmd+W from the native menu closes the open file like Ctrl+W. An empty
+  // Untitled editor has nothing to close, so main moves the app to the background.
+  useEffect(() => {
+    if (!fullApp) return
+    return registerCloseTabHandler(() => {
+      if (!bufferRef.current && !(untitled && untitledRef.current !== "")) return false
+      requestFileClose()
+      return true
+    })
+  }, [fullApp, requestFileClose, untitled])
 
   const resolveShutdown = async (choice: "save" | "discard" | "cancel"): Promise<void> => {
     const requestId = shutdownRequest

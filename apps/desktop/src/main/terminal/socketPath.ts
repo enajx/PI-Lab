@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { resolveDataDir } from "@pi-lab/local-db"
+import { resolveDataDir } from "@pi-lab/local-db/paths"
 
 /**
  * Where the PTY daemon's Unix socket lives.
@@ -14,4 +14,13 @@ export function resolveDaemonSocketPath(): string {
   const override = process.env.PI_LAB_SOCKET_PATH?.trim()
   if (override && override.length > 0) return override
   return join(resolveDataDir(), "pty-daemon.sock")
+}
+
+/**
+ * Resolve the bundled daemon entry. electron-vite emits the daemon bundle to
+ * `out/pty-daemon/index.js`; the compiled main lives at `out/main/index.js`, so
+ * the sibling directory is one level up from `__dirname`.
+ */
+export function resolveDaemonEntry(): string {
+  return join(__dirname, "..", "pty-daemon", "index.js")
 }

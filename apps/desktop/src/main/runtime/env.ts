@@ -22,6 +22,13 @@ export const isTestMode = process.env.PI_LAB_TEST_MODE === "1"
 export const testFirstRun = isTestMode && process.env.PI_LAB_TEST_FIRST_RUN === "1"
 
 /**
+ * Opt-out of the test-mode dialog responder (runtime/testDialogs.ts): with
+ * `PI_LAB_TEST_NATIVE_DIALOGS=1` a test-mode app shows real native dialogs, for
+ * the scripted macOS Accessibility tests that click them.
+ */
+export const testNativeDialogs = isTestMode && process.env.PI_LAB_TEST_NATIVE_DIALOGS === "1"
+
+/**
  * Override for PI Lab's on-disk state root (DB, future caches). Set BEFORE any
  * disk/DB access via `app.setPath("userData", …)`. `@pi-lab/local-db` reads the
  * same variable to derive the DB path, so the two always agree.

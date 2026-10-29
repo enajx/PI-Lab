@@ -12,10 +12,16 @@ interface ReadyUpdateMenuItem {
 
 let readyUpdate: ReadyUpdateMenuItem | null = null
 let userQuitAction: () => void = () => app.quit()
+let closeTabAction: () => void = () => app.hide()
 
 /** Keep explicit quit behavior when the native menu is rebuilt for updates or language. */
 export function setUserQuitAction(action: () => void): void {
   userQuitAction = action
+}
+
+/** Route Cmd+W to the focused file tab first; the action hides the app when no tab closes. */
+export function setCloseTabAction(action: () => void): void {
+  closeTabAction = action
 }
 
 /** Refresh the native menu when a public update becomes ready or is cleared. */
@@ -24,7 +30,7 @@ export function setReadyUpdateMenuItem(item: ReadyUpdateMenuItem | null): void {
   installAppMenu()
 }
 
-/** Install native app actions, including Cmd+W to keep the app running in the background. */
+/** Install native app actions, including Cmd+W to close a file tab or move the app to the background. */
 export function installAppMenu(): void {
   const isMac = process.platform === "darwin"
   const appName = app.getName()
@@ -127,7 +133,7 @@ export function installAppMenu(): void {
       label: nativeText("Window"),
       submenu: isMac
         ? [
-            { label: "Move to background", accelerator: "Command+W", click: () => app.hide() },
+            { label: "Close", accelerator: "Command+W", click: () => closeTabAction() },
             item("minimize", "Minimize"),
             item("zoom", "Zoom"),
             { type: "separator" },

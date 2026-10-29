@@ -2,7 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const desktop = join(process.cwd(), "apps/desktop")
 const executablePath = createRequire(join(desktop, "package.json"))("electron") as string
@@ -40,7 +45,7 @@ test("Escape returns from Settings to the main view", async () => {
   await expect(window.getByTestId("settings-view")).toBeVisible()
   await window.getByTestId("settings-nav-shortcuts").click()
   await window.getByTestId("shortcut-command-palette-rebind").click()
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await expect(window.getByTestId("command-palette")).toHaveCount(0)
   await expect(window.getByTestId("shortcut-command-palette-rebind")).toHaveText("Rebind")
   await window.keyboard.press("Escape")

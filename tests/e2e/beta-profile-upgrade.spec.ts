@@ -8,7 +8,7 @@ import {
   expect,
   type Page,
   test,
-} from "@playwright/test"
+} from "./fixtures/playwright"
 
 const desktopRequire = createRequire(resolve("apps/desktop/package.json"))
 const Database = desktopRequire("better-sqlite3")

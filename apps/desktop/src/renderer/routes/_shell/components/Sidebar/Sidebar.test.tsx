@@ -412,6 +412,22 @@ describe("Sidebar", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/"))
   })
 
+  test("the whole project row opens the project, and rows show no grab cursor on hover", async () => {
+    const { router } = renderSidebar({
+      "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],
+    })
+    const link = await screen.findByTestId("project-item")
+    const row = screen.getByTestId("project-row")
+    expect(row.contains(link)).toBe(true)
+    // A click on the row outside the name (its padding or the status ring) still opens it.
+    fireEvent.click(screen.getByTestId("project-agent-status"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/a"))
+    // Dragging needs a held button and movement; hovering only shows a pointer.
+    for (const element of [row, ...document.querySelectorAll("[draggable=true]")])
+      expect(element.className).not.toContain("cursor-grab")
+    expect(row.className).toContain("cursor-pointer")
+  })
+
   test("a project’s sidebar ring reflects its active agent state", async () => {
     renderSidebar({
       "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],

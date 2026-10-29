@@ -18,6 +18,7 @@ import {
   readRestoreProjectTabs,
   useNonGitNoticeDismissed,
   useRightSidebarWidth,
+  useShowFilesPanel,
   useSidebarCollapsed,
 } from "../../../preferences/preferences"
 import { stripOuterQuery } from "../../../QuickEditor/routeTarget"
@@ -37,7 +38,7 @@ import {
 import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 import { ProjectPalette } from "./components/ProjectPalette"
-import { RightSidebar } from "./components/RightSidebar"
+import { FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
 
 /**
  * Everything binds to the project's **main checkout** — a `kind:"branch"`
@@ -139,8 +140,10 @@ export function ProjectWorkspace({
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(
     () => restoredWorkspaceState?.rightSidebarCollapsed ?? false,
   )
+  // The right-sidebar tab is remembered per project. A project with no saved tab opens on
+  // Files; a saved tab that no longer exists falls back to Files inside the sidebar.
   const [rightSidebarActiveId, setRightSidebarActiveId] = useState<string | null>(
-    () => restoredWorkspaceState?.rightSidebarActiveId ?? null,
+    () => restoredWorkspaceState?.rightSidebarActiveId ?? FILES_TAB_ID,
   )
   const [savedRightSidebarWidth, persistRightSidebarWidth] = useRightSidebarWidth()
   const [rightSidebarWidth, setRightSidebarWidth] = useState(savedRightSidebarWidth)
@@ -156,13 +159,23 @@ export function ProjectWorkspace({
   const unpinPanel = (relPath: string) =>
     setPinnedPanels((prev) => prev.filter((path) => path !== relPath))
 
+  // The left Files column follows the global default (`useShowFilesPanel`, off) until the
+  // user toggles it in this project; from then on the project keeps its own saved value.
+  // While it is open, Files leaves the right sidebar.
+  const [showFilesPanelByDefault] = useShowFilesPanel()
+  const [filesPanelOverride, setFilesPanelOverride] = useState<boolean | undefined>(
+    () => restoredWorkspaceState?.filesPanelOpen,
+  )
+  const filesPanelOpen = filesPanelOverride ?? showFilesPanelByDefault
+
   useEffect(() => {
     writeProjectWorkspaceViewState(projectId, {
       rightSidebarCollapsed,
       rightSidebarActiveId,
       pinnedPanels,
+      filesPanelOpen: filesPanelOverride,
     })
-  }, [projectId, rightSidebarActiveId, rightSidebarCollapsed, pinnedPanels])
+  }, [projectId, rightSidebarActiveId, rightSidebarCollapsed, pinnedPanels, filesPanelOverride])
 
   // When the left sidebar is collapsed, the traffic lights ride this view's title-bar
   // strip, so the header clears + drags around them (the path text stays selectable).
@@ -487,6 +500,8 @@ export function ProjectWorkspace({
               onUpdateEditorSettings={onUpdateEditorSettings}
               rightSidebarCollapsed={rightSidebarCollapsed}
               onExpandRightSidebar={() => setRightSidebarCollapsed(false)}
+              filesPanelOpen={filesPanelOpen}
+              onFilesPanelOpenChange={setFilesPanelOverride}
               onPinFile={pinPanel}
               onSetMainFile={(relPath) =>
                 setMainFile.mutate({ id: projectId, kind: "main", relPath })
@@ -523,6 +538,7 @@ export function ProjectWorkspace({
                 workspaceId={workspaceId}
                 onOpenFile={controller.openFile}
                 activeRelPath={controller.editor.active?.relPath ?? null}
+                editorTabs={{ tabs: controller.editor.tabs, closeFile: controller.closeFile }}
                 activeId={rightSidebarActiveId}
                 onActiveIdChange={setRightSidebarActiveId}
                 onCollapse={() => setRightSidebarCollapsed(true)}
@@ -530,6 +546,7 @@ export function ProjectWorkspace({
                 onPinFile={pinPanel}
                 onUnpinFile={unpinPanel}
                 gitAvailable={gitAvailable}
+                filesPanelOpen={filesPanelOpen}
               />
             </div>
           )}
@@ -538,6 +555,7 @@ export function ProjectWorkspace({
             workspaceId={workspaceId}
             pinnedPanels={pinnedPanels}
             gitAvailable={gitAvailable}
+            filesPanelOpen={filesPanelOpen}
             onSelectPanel={(panelId) => {
               setRightSidebarActiveId(panelId)
               setRightSidebarCollapsed(false)

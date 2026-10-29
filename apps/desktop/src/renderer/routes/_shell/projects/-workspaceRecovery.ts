@@ -18,8 +18,16 @@ export interface ProjectWorkspaceState extends CentralPanelRestoreState {
   rightSidebarCollapsed: boolean
   rightSidebarActiveId: string | null
   pinnedPanels: string[]
+  /** This project's own left Files column choice; `undefined` follows the global default. */
+  filesPanelOpen?: boolean
   omittedBuffers?: OmittedBuffer[]
 }
+
+/** The project-view fields saved by `writeView`; `filesPanelOpen` must be passed, even as `undefined`. */
+export type ProjectWorkspaceViewState = Pick<
+  ProjectWorkspaceState,
+  "rightSidebarCollapsed" | "rightSidebarActiveId" | "pinnedPanels"
+> & { filesPanelOpen: boolean | undefined }
 
 export interface AffectedBuffer {
   projectId: string
@@ -77,6 +85,8 @@ const stateSchema = z.object({
   rightSidebarCollapsed: z.boolean(),
   rightSidebarActiveId: z.string().nullable(),
   pinnedPanels: z.array(z.string()),
+  // Absent until the project toggles its left Files column; then it overrides the global default.
+  filesPanelOpen: z.boolean().optional(),
   omittedBuffers: z
     .array(z.object({ relPath: z.string(), untitled: z.boolean(), reason: z.string() }))
     .optional(),
@@ -187,6 +197,7 @@ export class WorkspaceRecoveryStore {
       rightSidebarCollapsed: previous?.rightSidebarCollapsed ?? false,
       rightSidebarActiveId: previous?.rightSidebarActiveId ?? null,
       pinnedPanels: previous?.pinnedPanels ?? [],
+      filesPanelOpen: previous?.filesPanelOpen,
       omittedBuffers: (state.omittedBuffers ?? previous?.omittedBuffers ?? []).filter(
         (item) => !state.buffers.some((buffer) => buffer.relPath === item.relPath),
       ),
@@ -214,20 +225,15 @@ export class WorkspaceRecoveryStore {
     this.notifyRecovery()
   }
 
-  writeView(
-    projectId: string,
-    view: Pick<
-      ProjectWorkspaceState,
-      "rightSidebarCollapsed" | "rightSidebarActiveId" | "pinnedPanels"
-    >,
-  ): void {
+  writeView(projectId: string, view: ProjectWorkspaceViewState): void {
     this.hydrate()
     const previous = this.states.get(projectId)
     if (!previous) return
     if (
       previous.rightSidebarCollapsed === view.rightSidebarCollapsed &&
       previous.rightSidebarActiveId === view.rightSidebarActiveId &&
-      previous.pinnedPanels === view.pinnedPanels
+      previous.pinnedPanels === view.pinnedPanels &&
+      previous.filesPanelOpen === view.filesPanelOpen
     )
       return
     this.states.set(projectId, { ...previous, ...view })

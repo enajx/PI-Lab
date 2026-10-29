@@ -19,6 +19,7 @@ let server: DaemonServer
 const clients: DaemonClient[] = []
 let reapedIds: string[]
 let retainingConnectionsAtReap: number[]
+let shutdownRequests: number
 
 /** Inspect the live connections' subscription maps for retained references. */
 function connectionSubscriptions(): Map<string, () => void>[] {
@@ -44,8 +45,12 @@ beforeEach(async () => {
   socketPath = join(socketDir, "daemon.sock")
   reapedIds = []
   retainingConnectionsAtReap = []
+  shutdownRequests = 0
   server = new DaemonServer({
     socketPath,
+    afterShutdownRequest: () => {
+      shutdownRequests++
+    },
     store: {
       onSessionReaped: (sessionId) => {
         reapedIds.push(sessionId)
@@ -354,6 +359,48 @@ describe("list", () => {
     await client.kill(b.id)
   })
 })
+
+test.skipIf(process.platform === "win32")(
+  "list reports the foreground process of each shell",
+  async () => {
+    const client = await newClient()
+    const session = await client.spawn({ command: "/bin/sh", args: ["-i"], cwd: socketDir })
+    const foreground = async () =>
+      (await client.list()).find((entry) => entry.id === session.id)?.foregroundProcess
+    // Platforms differ (`bash` for macOS /bin/sh, an argv path on Linux); the job name is what matters.
+    expect(typeof (await foreground())).toBe("string")
+    await client.write(session.id, "sleep 30\n")
+    await waitFor(async () => (await foreground())?.split("/").pop() === "sleep")
+    await client.kill(session.id, "SIGKILL")
+  },
+)
+
+test.skipIf(process.platform === "win32")(
+  "a shutdown request stops every session and job, then closes the daemon",
+  async () => {
+    const client = await newClient()
+    const shell = await client.spawn({ command: "/bin/sh", args: ["-i"], cwd: socketDir })
+    const job = await client.startProcess({
+      command: NODE,
+      args: ["-e", "console.log(process.pid); setInterval(() => {}, 1000)"],
+      cwd: socketDir,
+      env: {},
+      metadata: {},
+    })
+    let jobPid = 0
+    await waitFor(async () => {
+      jobPid = Number((await client.attachProcess(job.id)).stdout.trim())
+      return jobPid > 0
+    })
+    expect(shell.pid).toBeGreaterThan(0)
+    expect(await client.shutdown()).toEqual({ pid: process.pid })
+    await waitFor(() => shutdownRequests === 1)
+    expect(() => process.kill(shell.pid as number, 0)).toThrow(/ESRCH/)
+    expect(() => process.kill(jobPid, 0)).toThrow(/ESRCH/)
+    const probe = new DaemonClient(socketPath)
+    await expect(probe.connect()).rejects.toThrow()
+  },
+)
 
 describe("kill", () => {
   test("ends a session and emits an exit event", async () => {

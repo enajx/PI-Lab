@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import {
+  CLOSE_TAB_REQUEST_CHANNEL,
+  CLOSE_TAB_RESPONSE_CHANNEL,
+  type CloseTabBridge,
+} from "../../shared/closeTab"
 import { INTERFACE_LANGUAGE_CHANNEL } from "../../shared/interfaceLanguage"
 import {
   SHUTDOWN_REQUEST_CHANNEL,
@@ -75,6 +80,32 @@ describe("shutdown preload bridge with mocked Electron", () => {
     expect(electron.send).toHaveBeenCalledExactlyOnceWith(SHUTDOWN_RESPONSE_CHANNEL, {
       requestId: "one",
       allow: true,
+    })
+  })
+
+  test("close-tab bridge validates requests and sends only typed answers", async () => {
+    await loadPreload(true)
+    const exposed = electron.expose.mock.calls.find(([name]) => name === "piLab")?.[1] as {
+      closeTab: CloseTabBridge
+    }
+    const listener = vi.fn()
+    const unsubscribe = exposed.closeTab.subscribe(listener)
+    const [channel, receive] = electron.on.mock.calls.find(
+      ([name]) => name === CLOSE_TAB_REQUEST_CHANNEL,
+    ) as [string, (event: unknown, value: unknown) => void]
+    expect(channel).toBe(CLOSE_TAB_REQUEST_CHANNEL)
+    receive({ secret: "Electron event" }, { requestId: "one", extra: "hidden" })
+    receive({}, { requestId: "" })
+    expect(listener).toHaveBeenCalledExactlyOnceWith({ requestId: "one" })
+    unsubscribe()
+    expect(electron.removeListener).toHaveBeenCalledWith(CLOSE_TAB_REQUEST_CHANNEL, receive)
+    exposed.closeTab.respond({ requestId: "one", handled: true })
+    exposed.closeTab.respond({ requestId: "one", handled: "yes" } as unknown as Parameters<
+      CloseTabBridge["respond"]
+    >[0])
+    expect(electron.send).toHaveBeenCalledExactlyOnceWith(CLOSE_TAB_RESPONSE_CHANNEL, {
+      requestId: "one",
+      handled: true,
     })
   })
 

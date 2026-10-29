@@ -17,6 +17,14 @@ import {
   type BackgroundTrayBridge,
   type BackgroundTraySnapshot,
 } from "../shared/backgroundTray"
+import {
+  CLOSE_TAB_REQUEST_CHANNEL,
+  CLOSE_TAB_RESPONSE_CHANNEL,
+  type CloseTabBridge,
+  type CloseTabRequest,
+  isCloseTabRequest,
+  isCloseTabResponse,
+} from "../shared/closeTab"
 import { INTERFACE_LANGUAGE_CHANNEL, isInterfaceLanguage } from "../shared/interfaceLanguage"
 import {
   QUICK_EDIT_CLOSE_CHANNEL,
@@ -94,6 +102,23 @@ if (process.isMainFrame) {
     },
   }
 
+  const closeTab: CloseTabBridge = {
+    subscribe(listener: (request: CloseTabRequest) => void): () => void {
+      const receive = (_event: IpcRendererEvent, value: unknown): void => {
+        if (isCloseTabRequest(value)) listener({ requestId: value.requestId })
+      }
+      ipcRenderer.on(CLOSE_TAB_REQUEST_CHANNEL, receive)
+      return () => ipcRenderer.removeListener(CLOSE_TAB_REQUEST_CHANNEL, receive)
+    },
+    respond(response): void {
+      if (!isCloseTabResponse(response)) return
+      ipcRenderer.send(CLOSE_TAB_RESPONSE_CHANNEL, {
+        requestId: response.requestId,
+        handled: response.handled,
+      })
+    },
+  }
+
   const quickEdit: QuickEditBridge = {
     current: () => ipcRenderer.invoke(QUICK_EDIT_CURRENT_CHANNEL),
     read: (id) => ipcRenderer.invoke(QUICK_EDIT_READ_CHANNEL, id),
@@ -166,6 +191,7 @@ if (process.isMainFrame) {
     updates,
     platform: process.platform,
     shutdown,
+    closeTab,
     quickEdit,
     backgroundTray,
     appIcon,

@@ -248,6 +248,10 @@ export interface HarnessOptions {
   /** File-open for the library router's folder source (defaults to {@link FAKE_OPEN_PATH}). */
   openPath?: OpenPath
   revealPath?: (path: string) => void | Promise<void>
+  /** Trash adapter for the files router (defaults to a no-op that never touches the OS Trash). */
+  trashPath?: (path: string) => Promise<void>
+  /** Clipboard adapter for the files router (defaults to a no-op). */
+  writeClipboard?: (text: string) => void
   /** Python-tools exec for the diagnostics router (defaults to {@link FAKE_PY_TOOLS_EXEC}). */
   pyToolsExec?: PyToolsExec
   /** Workspace Python resolver (defaults to a deterministic Node-backed runtime). */
@@ -293,6 +297,8 @@ export async function createHarness(
     | "httpFetch"
     | "openPath"
     | "revealPath"
+    | "trashPath"
+    | "writeClipboard"
     | "pyToolsExec"
     | "discoverPythonEnvironments"
     | "resolvePythonRuntime"
@@ -398,6 +404,8 @@ export async function createHarness(
     httpFetch: options.httpFetch ?? FAKE_HTTP_FETCH,
     openPath: options.openPath ?? FAKE_OPEN_PATH,
     revealPath: options.revealPath ?? (() => {}),
+    trashPath: options.trashPath ?? (async () => {}),
+    writeClipboard: options.writeClipboard ?? (() => {}),
     pyToolsExec: options.pyToolsExec ?? FAKE_PY_TOOLS_EXEC,
     discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
     resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,

@@ -61,6 +61,10 @@ export interface AppContext {
   openPath: OpenPath
   /** Electron shell.showItemInFolder, injected for deterministic router tests. */
   revealPath: (path: string) => void | Promise<void>
+  /** Electron shell.trashItem: move a file or folder to the OS Trash. */
+  trashPath: (path: string) => Promise<void>
+  /** Electron clipboard.writeText, injected so router tests never touch the real clipboard. */
+  writeClipboard: (text: string) => void
   pyToolsExec: PyToolsExec
   discoverPythonEnvironments: PythonEnvironmentDiscoverer
   resolvePythonRuntime: PythonRuntimeResolver

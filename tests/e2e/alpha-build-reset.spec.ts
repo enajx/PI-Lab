@@ -8,7 +8,7 @@ import {
   expect,
   type Page,
   test,
-} from "@playwright/test"
+} from "./fixtures/playwright"
 
 const desktop = resolve("apps/desktop")
 const desktopRequire = createRequire(join(desktop, "package.json"))
@@ -63,16 +63,16 @@ function rememberedProjects(dataDir: string): number {
 }
 
 /** Real Electron/SQLite: simulate an earlier build marker, without changing packaged identity. */
-test("new Alpha build resets its database once and preserves projects on disk and compiler cache", async () => {
+test("new Alpha build archives its whole data dir once and preserves projects on disk", async () => {
   test.skip(!binary, "Requires a packaged Alpha binary")
   test.setTimeout(90_000)
   const root = await mkdtemp(join(tmpdir(), "pi-lab-alpha-reset-e2e-"))
   const data = join(root, "data")
+  // Archives sit beside the data dir, under `<data dir>-archives/<id>/data`.
+  const archiveRoot = `${data}-archives`
   const project = join(root, "paper")
   await mkdir(project)
-  await mkdir(join(data, "latex", "cache"), { recursive: true })
   await writeFile(join(project, "paper.tex"), "Project file must survive.\n")
-  await writeFile(join(data, "latex", "cache", "fixture"), "Compiler cache must survive.\n")
   let app: ElectronApplication | null = null
   try {
     app = await launch(data, project)
@@ -84,9 +84,22 @@ test("new Alpha build resets its database once and preserves projects on disk an
     )
     await close(app)
     app = null
+    // The app creates template/ on first launch; add a file so it has content to archive.
+    await mkdir(join(data, "template"), { recursive: true })
+    await writeFile(join(data, "template", "fixture.md"), "Template file.\n")
+    await mkdir(join(data, "worktrees", "paper-agent"), { recursive: true })
+    // Written after the first launch: a profile without a build marker is archived at once.
+    await mkdir(join(data, "latex", "cache"), { recursive: true })
+    await writeFile(join(data, "latex", "cache", "fixture"), "Compiler cache is archived.\n")
+    await writeFile(join(data, "app-icon-selection.json"), "{}")
     await writeFile(
       join(data, "alpha-build.json"),
       JSON.stringify({ buildId: "previous-alpha-build" }),
+    )
+    // Everything the previous build left, including Chromium storage such as Local Storage.
+    const previousEntries = (await readdir(data)).filter((name) => name !== "daemon.sock").sort()
+    expect(previousEntries).toEqual(
+      expect.arrayContaining(["latex", "local.db", "template", "worktrees"]),
     )
 
     app = await launch(data, null)
@@ -96,9 +109,16 @@ test("new Alpha build resets its database once and preserves projects on disk an
       "true",
     )
     expect(rememberedProjects(data)).toBe(0)
-    const archives = await readdir(join(data, "alpha-db-archives"))
+    const archives = await readdir(archiveRoot)
     expect(archives).toHaveLength(1)
-    const archived = new Database(join(data, "alpha-db-archives", archives[0], "local.db"), {
+    const archivedData = join(archiveRoot, archives[0], "data")
+    expect((await readdir(archivedData)).sort()).toEqual(previousEntries)
+    for (const name of ["latex", "worktrees", "app-icon-selection.json"])
+      expect(await readdir(data)).not.toContain(name)
+    // The fresh build creates its own empty template; the old content is archived.
+    expect(await readdir(join(data, "template"))).not.toContain("fixture.md")
+    expect(await readdir(join(archivedData, "template"))).toContain("fixture.md")
+    const archived = new Database(join(archivedData, "local.db"), {
       readonly: true,
     })
     expect(archived.prepare("SELECT COUNT(*) AS count FROM projects").get().count).toBe(1)
@@ -108,8 +128,8 @@ test("new Alpha build resets its database once and preserves projects on disk an
     ).toBe(0)
     archived.close()
     expect(await readFile(join(project, "paper.tex"), "utf8")).toBe("Project file must survive.\n")
-    expect(await readFile(join(data, "latex", "cache", "fixture"), "utf8")).toBe(
-      "Compiler cache must survive.\n",
+    expect(await readFile(join(archivedData, "latex", "cache", "fixture"), "utf8")).toBe(
+      "Compiler cache is archived.\n",
     )
     await page.getByTestId("settings-keep-running-after-close").click()
     await expect(page.getByTestId("settings-keep-running-after-close")).toHaveAttribute(
@@ -127,7 +147,7 @@ test("new Alpha build resets its database once and preserves projects on disk an
     )
     await page.getByTestId("settings-back").click()
     await expect(page.getByTestId("project-item")).toHaveCount(1)
-    expect(await readdir(join(data, "alpha-db-archives"))).toHaveLength(1)
+    expect(await readdir(archiveRoot)).toHaveLength(1)
     await close(app)
     app = null
 
@@ -150,11 +170,11 @@ test("new Alpha build resets its database once and preserves projects on disk an
       "true",
     )
     expect(rememberedProjects(data)).toBe(0)
-    const saved = await readdir(join(data, "alpha-db-archives"))
+    const saved = await readdir(archiveRoot)
     expect(saved).toHaveLength(2)
     const other = saved.find((name) => name !== archives[0])
     if (!other) throw new Error("Expected an archive for the incompatible database")
-    const incompatible = new Database(join(data, "alpha-db-archives", other, "local.db"), {
+    const incompatible = new Database(join(archiveRoot, other, "data", "local.db"), {
       readonly: true,
     })
     expect(

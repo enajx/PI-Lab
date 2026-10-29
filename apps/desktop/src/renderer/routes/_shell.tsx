@@ -1,15 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderGit2 } from "lucide-react"
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react"
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslate } from "../i18n/language"
 import { NotificationBridge } from "../notifications/NotificationBridge"
 import {
@@ -25,8 +17,8 @@ import { QuickFind, type QuickFindItem } from "../QuickFind"
 import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute"
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
 import { useTRPC, useTRPCClient } from "../trpc/react"
+import { useGlobalShortcuts } from "./_shell/-globalShortcuts"
 import { ProjectActivityProvider } from "./_shell/-ProjectActivity"
-import { rememberSettingsReturnRoute } from "./_shell/-settingsReturnRoute"
 import { AddProjectControllerProvider } from "./_shell/components/AddProjectController"
 import { NewFileControllerProvider } from "./_shell/components/NewFileController"
 import { Sidebar } from "./_shell/components/Sidebar"
@@ -46,7 +38,8 @@ const CommandPalette = lazy(() =>
  * a bounded flex child owning its own vertical scroll. `<Outlet />`.
  *
  * Two global palettes are mounted here:
- *  - **⌘P command palette** (commands + projects) — opens from any surface.
+ *  - **⇧⌘P command palette** (commands + projects) — opens from any surface; ⌘P opens it too
+ *    outside a project view (inside one, ⌘P opens the project palette).
  *  - **⌘F quick-find** is context-aware: inside a project it finds files; each science tab finds
  *    its own content (Library collections, Skills, Cluster machines, Analysis files); everywhere
  *    else (dashboard, Workflows) this shell finds a project to jump to.
@@ -222,45 +215,6 @@ function ProjectsFind({ onClose }: { onClose: () => void }) {
       onClose={onClose}
     />
   )
-}
-
-/**
- * App-global keyboard shortcuts. ⌘, (rebindable) opens Settings; ⌘P (rebindable) opens the
- * command palette. Handlers read the *current* binding at event time, so a rebind in Settings
- * takes effect with no listener re-subscription.
- */
-function useGlobalShortcuts(pathname: string, search: unknown, onCommandPalette: () => void): void {
-  const navigate = useNavigate()
-  const paletteRef = useRef(onCommandPalette)
-  paletteRef.current = onCommandPalette
-  const routeRef = useRef({ pathname, search })
-  routeRef.current = { pathname, search }
-  useLayoutEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (document.querySelector('[data-shortcut-recording="true"]')) return
-      if (eventMatchesShortcut(event, "command-palette")) {
-        event.preventDefault()
-        paletteRef.current()
-        return
-      }
-      if (routeRef.current.pathname.startsWith("/settings")) return
-      if (eventMatchesShortcut(event, "open-settings")) {
-        event.preventDefault()
-        rememberSettingsReturnRoute(routeRef.current)
-        void navigate({ to: "/settings" })
-      } else if (
-        eventMatchesShortcut(event, "quick-open") &&
-        routeRef.current.pathname.startsWith("/projects/")
-      ) {
-        // This listener is installed before transient Settings listeners, so it prevents a
-        // just-closed shortcut recorder from swallowing ⌘F during navigation back to a project.
-        event.preventDefault()
-        window.dispatchEvent(new Event("pi-lab:open-project-file-finder"))
-      }
-    }
-    window.addEventListener("keydown", onKeyDown, true)
-    return () => window.removeEventListener("keydown", onKeyDown, true)
-  }, [navigate])
 }
 
 /**

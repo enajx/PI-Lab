@@ -22,6 +22,8 @@ export interface DaemonServerOptions {
   /** Absolute path of the Unix socket to listen on. */
   socketPath: string
   store?: SessionStoreOptions
+  /** Called after a client's shutdown request has closed the server (the entry exits here). */
+  afterShutdownRequest?: () => void
 }
 
 /** Per-connection state: the socket, its decoder, and its active subscriptions. */
@@ -111,9 +113,12 @@ export class DaemonServer {
   private readonly store: SessionStore
   private readonly connections = new Set<Connection>()
   private readonly socketPath: string
+  private readonly afterShutdownRequest: (() => void) | undefined
+  private closing: Promise<void> | null = null
 
   constructor(options: DaemonServerOptions) {
     this.socketPath = options.socketPath
+    this.afterShutdownRequest = options.afterShutdownRequest
     const onSessionReaped = options.store?.onSessionReaped
     this.store = new SessionStore({
       ...options.store,
@@ -187,6 +192,9 @@ export class DaemonServer {
         break
       case "list":
         this.handleList(request, connection)
+        break
+      case "shutdown":
+        this.handleShutdown(request, connection)
         break
     }
   }
@@ -341,8 +349,24 @@ export class DaemonServer {
     this.reply(connection, { kind: "list-ok", cid: request.cid, sessions: this.store.list() })
   }
 
-  /** Kill every session, close all connections, stop listening, remove the socket file. */
-  async close(): Promise<void> {
+  /** Confirm first, then close once the reply is flushed, since closing destroys the socket. */
+  private handleShutdown(
+    request: Extract<ClientRequest, { kind: "shutdown" }>,
+    connection: Connection,
+  ): void {
+    const reply = encodeFrame({ kind: "shutdown-ok", cid: request.cid, pid: process.pid })
+    connection.socket.write(reply, () => {
+      void this.close().then(() => this.afterShutdownRequest?.())
+    })
+  }
+
+  /** Kill every session, close all connections, stop listening, remove the socket file. Idempotent. */
+  close(): Promise<void> {
+    this.closing ??= this.closeOnce()
+    return this.closing
+  }
+
+  private async closeOnce(): Promise<void> {
     await this.jobs.close()
     for (const connection of this.connections) {
       connection.dispose()

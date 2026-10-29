@@ -56,7 +56,7 @@ describe("Settings sections", () => {
   test("Shortcuts rejects a conflicting chord, preserves the prior binding, and stays ready to retry", async () => {
     renderSection(<ShortcutsSection />)
 
-    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘P")
+    expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⇧⌘P")
     expect(screen.getByTestId("shortcut-quick-open").textContent).toBe("⌘F")
 
     fireEvent.click(screen.getByTestId("shortcut-command-palette-rebind"))
@@ -91,15 +91,15 @@ describe("Settings sections", () => {
     fireEvent.click(screen.getByTestId("shortcut-command-palette-rebind"))
     fireEvent.keyDown(window, { key: "k", metaKey: true })
     fireEvent.click(screen.getByTestId("shortcut-quick-open-rebind"))
-    fireEvent.keyDown(window, { key: "p", metaKey: true })
+    fireEvent.keyDown(window, { key: "p", metaKey: true, shiftKey: true })
 
     expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘K")
-    expect(screen.getByTestId("shortcut-quick-open").textContent).toBe("⌘P")
+    expect(screen.getByTestId("shortcut-quick-open").textContent).toBe("⇧⌘P")
 
     fireEvent.click(screen.getByTestId("shortcut-command-palette-reset"))
 
     const conflict = await screen.findByRole("alert")
-    expect(conflict.textContent).toContain("⌘P")
+    expect(conflict.textContent).toContain("⇧⌘P")
     expect(conflict.textContent).toContain("Quick open file")
     expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("Press keys…")
 
@@ -212,6 +212,38 @@ describe("Settings sections", () => {
     fireEvent.click(screen.getByTestId("settings-editor-font-reset"))
     expect(family.value).toBe("default")
     expect(size.value).toBe("14")
+  })
+
+  test("Editor shows hidden files by default and persists turning them off", async () => {
+    const patches: unknown[] = []
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({ editor: { showHiddenFiles: true } }),
+      "settings.updateEditor": (input) => {
+        patches.push(input)
+        return null
+      },
+    })
+
+    const toggle = await screen.findByRole("switch", { name: "Show hidden files" })
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"))
+    fireEvent.click(toggle)
+    await waitFor(() => expect(patches).toEqual([{ showHiddenFiles: false }]))
+  })
+
+  test("Editor confirms file deletes by default and persists turning it back on", async () => {
+    const patches: unknown[] = []
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({ editor: { confirmFileDelete: false } }),
+      "settings.updateEditor": (input) => {
+        patches.push(input)
+        return null
+      },
+    })
+
+    const toggle = await screen.findByRole("switch", { name: "Confirm before deleting files" })
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"))
+    fireEvent.click(toggle)
+    await waitFor(() => expect(patches).toEqual([{ confirmFileDelete: true }]))
   })
 
   test("Editor keeps the safe default visible when font detection fails", async () => {
@@ -595,6 +627,13 @@ describe("Settings sections", () => {
     renderSection(<ProjectViewSection />)
     fireEvent.click(screen.getByTestId("settings-show-code-changes"))
     expect(window.localStorage.getItem("pi-lab.projectView.showCodeChanges")).toBe("true")
+  })
+
+  test("Project view toggle sets the global default for the left Files column", () => {
+    renderSection(<ProjectViewSection />)
+    const toggle = screen.getByTestId("settings-show-files-panel")
+    fireEvent.click(toggle)
+    expect(window.localStorage.getItem("pi-lab.projectView.filesPanelDefault")).toBe("true")
   })
 
   test('Project view toggle persists "show skills"', () => {

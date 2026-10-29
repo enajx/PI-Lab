@@ -2,12 +2,16 @@
 // is exercised by the app/verify harness). We cover the pure spawn plan, the
 // liveness probe, and the *adopt* branch against an in-process DaemonServer.
 
-import { mkdtemp, rm } from "node:fs/promises"
+import { spawn, spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DaemonServer } from "@pi-lab/pty-daemon"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import {
+  daemonPidsFromProcessList,
   isDaemonListening,
   planDaemonSpawn,
   resolveDaemonEntry,
@@ -148,5 +152,145 @@ describe("reapDaemonOnDispose", () => {
 
     expect(() => supervisor?.dispose()).not.toThrow()
     await expect(supervisor.ensureClient()).rejects.toThrow(/disposed/)
+  })
+})
+
+describe("explicit Quit", () => {
+  test("lists no sessions and starts no daemon when none is listening", async () => {
+    supervisor = new TerminalSupervisor({ socketPath, daemonEntry: join(socketDir, "missing.js") })
+    expect(await supervisor.listSessionsIfRunning()).toEqual([])
+    expect(await isDaemonListening(socketPath)).toBe(false)
+  })
+
+  test("lists the sessions of a listening daemon", async () => {
+    server = new DaemonServer({ socketPath })
+    await server.listen()
+    supervisor = new TerminalSupervisor({ socketPath })
+    const shell = await (await supervisor.ensureClient()).spawn({ command: "/bin/cat", args: [] })
+    expect((await supervisor.listSessionsIfRunning()).map((session) => session.id)).toEqual([
+      shell.id,
+    ])
+  })
+
+  test("shutdownDaemon stops the daemon's sessions and does not reconnect", async () => {
+    const daemon = new DaemonServer({ socketPath })
+    server = daemon
+    await daemon.listen()
+    supervisor = new TerminalSupervisor({
+      socketPath,
+      daemonEntry: join(socketDir, "missing.js"),
+      reconnectBaseMs: 5,
+    })
+    const shell = await (await supervisor.ensureClient()).spawn({ command: "/bin/cat", args: [] })
+    const warn = vi.fn()
+    await supervisor.shutdownDaemon(2_000, warn)
+    expect(warn).not.toHaveBeenCalled()
+    expect(await isDaemonListening(socketPath)).toBe(false)
+    expect(() => process.kill(shell.pid as number, 0)).toThrow(/ESRCH/)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await expect(supervisor.ensureClient()).rejects.toThrow(/disposed/)
+  })
+
+  test("shutdownDaemon connects to a daemon this app has not used yet", async () => {
+    server = new DaemonServer({ socketPath })
+    await server.listen()
+    supervisor = new TerminalSupervisor({ socketPath })
+    const warn = vi.fn()
+    await supervisor.shutdownDaemon(2_000, warn)
+    expect(warn).not.toHaveBeenCalled()
+    expect(await isDaemonListening(socketPath)).toBe(false)
+  })
+
+  test("shutdownDaemon warns and returns when the daemon does not confirm in time", async () => {
+    // Read and ignore requests, like a daemon built before the shutdown request.
+    const silent = createServer((socket) => socket.resume())
+    await new Promise<void>((resolve) => silent.listen(socketPath, resolve))
+    try {
+      supervisor = new TerminalSupervisor({ socketPath })
+      const warn = vi.fn()
+      const started = Date.now()
+      await supervisor.shutdownDaemon(200, warn)
+      expect(Date.now() - started).toBeLessThan(1_500)
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn.mock.calls[0]?.[0]).toMatch(/did not confirm/)
+      expect(warn.mock.calls[0]?.[0]).toMatch(/no pty-daemon process owns/)
+    } finally {
+      await new Promise((resolve) => silent.close(resolve))
+    }
+  })
+
+  test("shutdownDaemon stops a daemon it is still starting", async () => {
+    // A daemon that starts listening only after Quit has begun.
+    const entry = join(socketDir, "slow-daemon.js")
+    const pidFile = join(socketDir, "slow-daemon.pid")
+    await writeFile(
+      entry,
+      `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setTimeout(() => require('node:net').createServer((s) => s.resume()).listen(process.argv[2]), 300)`,
+    )
+    supervisor = new TerminalSupervisor({ socketPath, daemonEntry: entry })
+    const starting = supervisor.ensureClient().catch(() => undefined)
+    const deadline = Date.now() + 5_000
+    while (!existsSync(pidFile)) {
+      if (Date.now() > deadline) throw new Error("slow daemon did not start")
+      await new Promise((done) => setTimeout(done, 10))
+    }
+    const pid = Number(await readFile(pidFile, "utf8"))
+    try {
+      await supervisor.shutdownDaemon(2_000, vi.fn())
+      await starting
+      expect(() => process.kill(pid, 0)).toThrow(/ESRCH/)
+    } finally {
+      spawnSync("kill", ["-9", String(pid)])
+    }
+  })
+
+  test("an old daemon that ignores shutdown and SIGTERM is found by its command line and killed", async () => {
+    // Stands in for a daemon from an earlier build that this app adopted, so its pid is unknown.
+    const entry = join(socketDir, "old app", "pty-daemon", "index.js")
+    await mkdir(join(socketDir, "old app", "pty-daemon"), { recursive: true })
+    await writeFile(
+      entry,
+      "process.on('SIGTERM', () => {});require('node:net').createServer((s) => s.resume()).listen(process.argv[2])",
+    )
+    const old = spawn(process.execPath, [entry, socketPath], { stdio: "ignore" })
+    const exited = new Promise((resolve) => old.once("exit", resolve))
+    try {
+      const deadline = Date.now() + 5_000
+      while (!(await isDaemonListening(socketPath))) {
+        if (Date.now() > deadline) throw new Error("fake daemon did not listen")
+        await new Promise((done) => setTimeout(done, 20))
+      }
+      supervisor = new TerminalSupervisor({ socketPath })
+      await supervisor.ensureClient()
+      const warn = vi.fn()
+      await supervisor.shutdownDaemon(300, warn)
+      await exited
+      expect(old.signalCode).toBe("SIGKILL")
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn.mock.calls[0]?.[0]).toContain(`pid ${old.pid}`)
+    } finally {
+      old.kill("SIGKILL")
+    }
+  })
+})
+
+describe("daemonPidsFromProcessList", () => {
+  const socket = "/Users/me/Library/Application Support/PI Lab/pty-daemon.sock"
+  test("matches only our daemon entry serving exactly this socket", () => {
+    const list = [
+      `  101 /Applications/PI Lab.app/Contents/MacOS/PI Lab /Applications/PI Lab.app/Contents/Resources/app.asar/out/pty-daemon/index.js ${socket}`,
+      `  102 /Applications/PI Lab.app/Contents/MacOS/PI Lab /Applications/PI Lab.app/Contents/Resources/app.asar/out/pty-daemon/index.js ${socket}.other`,
+      `  103 /Applications/PI Lab.app/Contents/MacOS/PI Lab /x/out/pty-daemon/index.js --alpha-reset-probe ${socket}`,
+      `  104 /bin/zsh -c echo pty-daemon/index.js ${socket} && sleep 9`,
+      `  105 /usr/bin/node /other/index.js ${socket}`,
+      `  106 /Applications/PI Lab.app/Contents/MacOS/PI Lab`,
+      "",
+    ].join("\n")
+    expect(daemonPidsFromProcessList(list, socket, 999)).toEqual([101])
+  })
+
+  test("never returns the calling process", () => {
+    const list = ` 7 /a/PI Lab /a/out/pty-daemon/index.js ${socket}\n`
+    expect(daemonPidsFromProcessList(list, socket, 7)).toEqual([])
   })
 })

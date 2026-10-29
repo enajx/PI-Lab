@@ -99,6 +99,8 @@ function harnessContext(): AppContext {
     },
     openPath: async () => "",
     revealPath: () => {},
+    trashPath: async () => {},
+    writeClipboard: () => {},
     pyToolsExec: async () => ({ stdout: "", stderr: "", code: null, notFound: true }),
     discoverPythonEnvironments: async () => [],
     resolvePythonRuntime: async () => ({

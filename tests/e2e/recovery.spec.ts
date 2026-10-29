@@ -9,9 +9,10 @@ import {
   type ElectronApplication,
   _electron as electron,
   expect,
+  type Locator,
   type Page,
   test,
-} from "@playwright/test"
+} from "./fixtures/playwright"
 
 const DESKTOP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
 const MAIN_ENTRY = join(DESKTOP_DIR, "out", "main", "index.js")
@@ -69,14 +70,19 @@ async function openProject(window: Page, name: string): Promise<void> {
   await expect(window.getByTestId("project-view")).toBeVisible()
 }
 
+/** The shown editor. Splits keep every open file's editor mounted while its tab is hidden. */
+function shownEditor(window: Page): Locator {
+  return window.locator('[data-testid="editor-buffer"]:visible')
+}
+
 async function openFile(window: Page, name: string): Promise<void> {
   await window.getByTestId("panel-tab-files").click()
   await window.getByTestId("file-tree-file").filter({ hasText: name }).click()
-  await expect(window.getByTestId("editor-buffer")).toBeVisible()
+  await expect(shownEditor(window)).toBeVisible()
 }
 
 async function append(window: Page, text: string): Promise<void> {
-  await window.getByTestId("editor-buffer").locator(".cm-content").click()
+  await shownEditor(window).locator(".cm-content").click()
   await window.keyboard.press("ControlOrMeta+End")
   await window.keyboard.insertText(text)
   await expect(window.getByTestId("central-tab-dirty").last()).toBeVisible()
@@ -218,7 +224,7 @@ test("native quit flushes protected active and inactive project drafts and resto
   await openProject(window, "repo-alpha")
   await openFile(window, FILE)
   await append(window, "ALPHA-INACTIVE-DRAFT")
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.getByTestId("command-palette-input").fill("add project")
   await window.locator('[data-command-id="add-project"]').click()
   await window.getByTestId("add-project-folder").click()
@@ -247,7 +253,7 @@ test("Save affected on native quit writes unprotected active and inactive projec
   await openProject(window, "repo-alpha")
   await openFile(window, FILE)
   await append(window, "ALPHA-UNPROTECTED-SAVE")
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.getByTestId("command-palette-input").fill("add project")
   await window.locator('[data-command-id="add-project"]').click()
   await window.getByTestId("add-project-folder").click()
@@ -273,7 +279,7 @@ test("canceling untitled Save As during native quit keeps the app and draft open
   const window = await launch()
   await restoreTabs(window, false)
   await openProject(window, "repo-alpha")
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.getByTestId("command-palette-input").fill("new file")
   await window.locator('[data-command-id="new-file"]').click()
   await expect(window.getByTestId("central-tab")).toContainText("untitled.md")
@@ -298,14 +304,14 @@ test("canceling untitled Save As during native quit keeps the app and draft open
 test("ordinary Save As moves an unchanged untitled draft to another project and later saves use that project", async () => {
   const window = await launch()
   await openProject(window, "repo-alpha")
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.getByTestId("command-palette-input").fill("add project")
   await window.locator('[data-command-id="add-project"]').click()
   await window.getByTestId("add-project-folder").click()
   await expect(window.getByTestId("add-project-dialog")).toHaveCount(0)
   await expect(window.getByRole("heading", { name: "repo-beta", exact: true })).toBeVisible()
   await openProject(window, "repo-alpha")
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.getByTestId("command-palette-input").fill("new file")
   await window.locator('[data-command-id="new-file"]').click()
   await expect(window.getByTestId("central-tab")).toContainText("untitled.md")
@@ -366,7 +372,7 @@ test("real recovery storage reaches 4 MiB, rejects the next character visibly, a
   const dialog = window.getByRole("dialog", { name: "Unsaved changes" })
   await expect(dialog).toBeVisible()
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
-  await expect(window.getByTestId("editor-buffer")).toContainText("Z")
+  await expect(shownEditor(window)).toContainText("Z")
   expect(await readFile(join(alpha, "boundary.txt"), "utf8")).toBe("x")
   await requestShutdown("close")
   const closed = window.waitForEvent("close")

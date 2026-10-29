@@ -5,7 +5,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 // Uses the real Electron build with a temporary repo and test agent.
 
@@ -104,8 +109,10 @@ test("open a project, launch an agent, and see its changes", async () => {
     "View the project's selected task Markdown file.",
   )
 
-  // The Research panel (the default right-sidebar tab) reads RESEARCH.md from the
-  // project's main checkout via the `files` router and renders it as markdown.
+  // The project view opens on the Files tab; the Research panel reads RESEARCH.md
+  // from the project's main checkout via the `files` router and renders it as markdown.
+  await expect(window.getByTestId("panel-tab-files")).toHaveAttribute("aria-selected", "true")
+  await window.getByTestId("panel-tab-research").click()
   const research = window.getByTestId("panel-research")
   await expect(research).toBeVisible()
   await expect(research).toContainText(RESEARCH_HEADING, { timeout: 30_000 })

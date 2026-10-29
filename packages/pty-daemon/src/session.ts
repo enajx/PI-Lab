@@ -101,6 +101,7 @@ class Session {
       createdAt: this.createdAt,
       pid: this.pid,
       alive: this.alive,
+      foregroundProcess: this.alive ? this.pty.process : null,
     }
   }
 

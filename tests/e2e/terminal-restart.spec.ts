@@ -5,8 +5,13 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 import { DaemonClient } from "../../packages/pty-daemon/src/index"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const execFileAsync = promisify(execFile)
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
@@ -21,7 +26,7 @@ async function daemonPidFor(socketPath: string): Promise<number | undefined> {
   return line ? Number(line.trim().split(/\s+/)[0]) : undefined
 }
 
-test("keep-running preserves the same agent terminal across a real app quit and restart", async () => {
+test("Restart to Update keeps the same agent terminal and a shell across a real app restart", async () => {
   test.skip(process.platform === "win32", "Daemon cleanup uses the Unix process list")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-restart-"))
@@ -66,10 +71,6 @@ test("keep-running preserves the same agent terminal across a real app quit and 
     await window.getByTestId("nav-settings").click()
     const restoreTabs = window.getByTestId("settings-restore-project-tabs")
     if ((await restoreTabs.getAttribute("aria-checked")) !== "true") await restoreTabs.click()
-    await window.getByTestId("settings-nav-agents").click()
-    const quitBehavior = window.getByTestId("settings-agent-quit-behavior")
-    await quitBehavior.selectOption("keep-running", { timeout: 5_000 })
-    await expect(quitBehavior).toHaveValue("keep-running")
     await window.getByTestId("settings-back").click()
 
     await window.getByTestId("project-item").click()
@@ -92,9 +93,13 @@ test("keep-running preserves the same agent terminal across a real app quit and 
       if (event.sessionId === original.id) outputEvents += 1
     })
 
+    const shell = await client.spawn({ command: "/bin/cat", args: [] })
     const closed = app.waitForEvent("close")
-    await app.evaluate(({ app: electronApp }) => {
-      setImmediate(() => electronApp.quit())
+    await app.evaluate(() => {
+      const hook = (globalThis as { piLabTestRestartToUpdate?: () => void })
+        .piLabTestRestartToUpdate
+      if (!hook) throw new Error("Missing Restart to Update test seam")
+      setImmediate(hook)
     })
     await closed
     app = null
@@ -104,6 +109,7 @@ test("keep-running preserves the same agent terminal across a real app quit and 
       pid: original.pid,
       alive: true,
     })
+    expect((await client.list()).find((session) => session.id === shell.id)?.alive).toBe(true)
 
     app = await launch()
     const reopened = await app.firstWindow()
@@ -116,9 +122,18 @@ test("keep-running preserves the same agent terminal across a real app quit and 
     await reopened.keyboard.insertText("RESTART-PTY-ECHO")
     await expect(restoredTerminal).toContainText("RESTART-PTY-ECHO")
     const live = (await client.list()).filter((session) => session.alive)
-    expect(live).toHaveLength(1)
-    expect(live[0]).toMatchObject({ id: original.id, pid: original.pid })
+    expect(live).toHaveLength(2)
+    expect(live.find((session) => session.id === original.id)).toMatchObject({
+      pid: original.pid,
+    })
+    await client.kill(shell.id, "SIGKILL")
   } finally {
+    // A quit the app did not start asks while the agent runs; choose Quit and stop.
+    await app
+      ?.evaluate(({ dialog }) => {
+        dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
+      })
+      .catch(() => undefined)
     await app?.close()
     daemonPid ??= await daemonPidFor(socketPath)
     if (daemonPid !== undefined && (await daemonPidFor(socketPath)) === daemonPid) {

@@ -5,12 +5,17 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 /**
- * Whole-app E2E for the ⌘P command palette. Launches the
- * real build with one opened project, then: ⌘P opens the palette, an empty query lists
- * entries, Esc dismisses; and typing a project name + Enter jumps to that project view
+ * Whole-app E2E for the command palette (⇧⌘P, or ⌘P outside a project view).
+ * Launches the real build with one opened project, then: ⌘P on the Dashboard opens
+ * the palette, an empty query lists entries, Esc dismisses; and typing a project name + Enter jumps to that project view
  * (proves the projects source + fuzzy filter + navigation end-to-end). Keys use the
  * platform-aware `ControlOrMeta` so the same spec passes on Linux CI.
  */
@@ -150,7 +155,7 @@ test("New file chooses a project and path, then opens the created file in that p
   // The command remains global while this same project view is already mounted.
   // Navigating to the current route does not remount it, so the live handoff must
   // still open the second created file instead of leaving it only on disk.
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.getByTestId("command-palette-input").fill("new file")
   await window.locator('[data-command-id="new-file"]').click()
   const sameProjectDialog = window.getByTestId("new-file-dialog")
@@ -176,7 +181,7 @@ test("Go to Projects returns to the home view", async () => {
   await window.getByTestId("project-item").click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
 
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.getByTestId("command-palette-input").fill("projects")
   const command = window.locator('[data-command-id="nav-dashboard"]')
   await expect(command).toHaveText(/Go to Projects/)
@@ -235,7 +240,7 @@ test("Settings rejects a conflicting palette chord and leaves project ⌘F fuzzy
   await window.keyboard.press("ControlOrMeta+,")
   await expect(window.getByTestId("settings-view")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("settings-nav-shortcuts").click()
-  await expect(window.getByTestId("shortcut-command-palette")).toHaveText("⌘P")
+  await expect(window.getByTestId("shortcut-command-palette")).toHaveText("⇧⌘P")
   await expect(window.getByTestId("shortcut-quick-open")).toHaveText("⌘F")
 
   await window.getByTestId("shortcut-command-palette-rebind").click()
@@ -245,9 +250,9 @@ test("Settings rejects a conflicting palette chord and leaves project ⌘F fuzzy
   await expect(conflict).toContainText("Quick open file")
   await expect(window.getByTestId("shortcut-command-palette")).toHaveText("Press keys…")
 
-  // Cancel the recorder: the rejected chord never replaces the prior ⌘P binding.
+  // Cancel the recorder: the rejected chord never replaces the prior ⇧⌘P binding.
   await window.getByTestId("shortcut-command-palette-rebind").click()
-  await expect(window.getByTestId("shortcut-command-palette")).toHaveText("⌘P")
+  await expect(window.getByTestId("shortcut-command-palette")).toHaveText("⇧⌘P")
   await expect(conflict).toHaveCount(0)
 
   await window.getByTestId("settings-back").click()
@@ -295,11 +300,31 @@ test("Settings opened from a project palette returns to that project on Escape",
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
   await expect(window.getByTestId("project-view")).toBeVisible()
-  await window.keyboard.press("ControlOrMeta+p")
+  await window.keyboard.press("Shift+ControlOrMeta+p")
   await window.locator('[data-command-id="nav-settings"]').click()
   await expect(window.getByTestId("settings-nav-general")).toHaveAttribute("data-active", "true")
   await window.keyboard.press("Escape")
   await expect(window.getByTestId("project-view")).toBeVisible()
+})
+
+test("⌘P in a project opens the project palette and ⇧⌘P the global palette", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  // The project palette mounts once the workspace is ready; before that ⌘P is global.
+  await expect(window.getByTestId("central-panel")).toBeVisible({ timeout: 30_000 })
+  const projectPalette = window.getByRole("dialog", { name: "Project command palette" })
+
+  await window.keyboard.press("ControlOrMeta+p")
+  await expect(projectPalette).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("command-palette")).toHaveCount(0)
+  await window.keyboard.press("Escape")
+  await expect(projectPalette).toHaveCount(0)
+
+  await window.keyboard.press("Shift+ControlOrMeta+p")
+  await expect(window.getByTestId("command-palette")).toBeVisible({ timeout: 30_000 })
+  await expect(projectPalette).toHaveCount(0)
 })
 
 test("palette changes individual settings directly and preserves them after reload", async () => {

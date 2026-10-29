@@ -2,7 +2,8 @@ import type { Project, ProjectDetails } from "@pi-lab/local-db"
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { FilePlus2, FolderOpen, FolderPlus, GitFork, Plus, X } from "lucide-react"
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { translateKnownError } from "../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import { useTRPC } from "../../../trpc/react"
@@ -35,6 +36,11 @@ type PendingProject =
       externalFiles: string[]
     }
 
+type Point = { x: number; y: number }
+
+/** Minimum gap kept between the anchored menu and the window edges. */
+const WINDOW_MARGIN = 8
+
 /**
  * Shared Add Project chooser for every entry point. It owns the three creation
  * flows, loading state, error surface, and close/reset behavior so Dashboard and
@@ -56,6 +62,10 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   const [templateInitialized, setTemplateInitialized] = useState(false)
   const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  // Where the Dashboard card was clicked; null for keyboard activation.
+  const [clickAnchor, setClickAnchor] = useState<Point | null>(null)
+  const [anchorPlacement, setAnchorPlacement] = useState<Point | null>(null)
   const selectMenuItemRef = useRef<(index: number) => void>(() => {})
   const previewDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const labelId = useId()
@@ -63,6 +73,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   const collapsed = props.variant === "sidebar" && props.collapsed
   const global = props.variant === "global"
   const templateDialog = mode === "template"
+  const anchored = dashboardCard && clickAnchor !== null && !templateDialog
   const controlledOpen = global ? props.open : null
   const onControlledOpenChange = global ? props.onOpenChange : null
   const open = controlledOpen ?? localOpen
@@ -123,8 +134,33 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     templateProject.error ??
     updateTemplateSettings.error
 
+  // Place the menu's top-left corner at the click point, shifted left/up only as
+  // far as needed to stay inside the window. Re-run when the step changes size.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mode and error change the menu size
+  useLayoutEffect(() => {
+    if (!anchored || !clickAnchor || !menuRef.current) {
+      setAnchorPlacement(null)
+      return
+    }
+    const { width, height } = menuRef.current.getBoundingClientRect()
+    const next = {
+      x: Math.max(
+        WINDOW_MARGIN,
+        Math.min(clickAnchor.x, window.innerWidth - width - WINDOW_MARGIN),
+      ),
+      y: Math.max(
+        WINDOW_MARGIN,
+        Math.min(clickAnchor.y, window.innerHeight - height - WINDOW_MARGIN),
+      ),
+    }
+    setAnchorPlacement((current) =>
+      current && current.x === next.x && current.y === next.y ? current : next,
+    )
+  }, [anchored, clickAnchor, mode, error, open, setup])
+
   useEffect(() => {
     if (open) return
+    setClickAnchor(null)
     setSetup(null)
     setMode("menu")
     setHighlight(0)
@@ -158,7 +194,9 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   useEffect(() => {
     if (!open || setup) return
     const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setOpen(false)
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false)
@@ -317,6 +355,11 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     if (index === 2) startFromTemplate()
   }
 
+  // The anchored menu is portaled to <body> so `fixed` is relative to the window
+  // even when a Dashboard ancestor has a transform.
+  const renderMenu = (menu: React.ReactNode) =>
+    anchored ? createPortal(menu, document.body) : menu
+
   return (
     <div
       ref={rootRef}
@@ -341,7 +384,13 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
           data-feature-help={t(
             "Open a folder, clone a repository, or create a project from the template",
           )}
-          onClick={() => setOpen(!open)}
+          onClick={(event) => {
+            // detail is 0 for keyboard-triggered clicks, which have no pointer position.
+            setClickAnchor(
+              event.detail > 0 && !open ? { x: event.clientX, y: event.clientY } : null,
+            )
+            setOpen(!open)
+          }}
           className="group flex h-full min-h-0 w-full flex-col items-center justify-center gap-2 rounded-xl border border-border/60 border-dashed bg-muted/15 px-5 text-center text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="flex size-9 items-center justify-center rounded-full border border-border/60 bg-background/50 transition-colors group-hover:border-border">
@@ -380,255 +429,274 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
               onClick={() => setOpen(false)}
             />
           ) : null}
-          <div
-            data-testid="add-project-menu"
-            role="menu"
-            aria-labelledby={labelId}
-            className={cn(
-              "z-50 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl",
-              global
-                ? templateDialog
-                  ? "fixed top-1/2 left-1/2 w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2"
-                  : "relative w-[min(36rem,calc(100vw-2rem))]"
-                : templateDialog
-                  ? "fixed top-1/2 left-1/2 w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2"
-                  : dashboardCard
-                    ? "top-1/2 left-1/2 w-64 -translate-x-1/2 -translate-y-1/2"
-                    : "bottom-11 left-0 w-64",
-              !global && !templateDialog && "absolute",
-            )}
-          >
-            {mode !== "template" ? (
-              <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
-                {t("New/Add Project")}
-              </p>
-            ) : null}
+          {renderMenu(
+            <div
+              ref={menuRef}
+              data-testid="add-project-menu"
+              style={
+                anchored
+                  ? {
+                      left: anchorPlacement?.x ?? clickAnchor?.x,
+                      top: anchorPlacement?.y ?? clickAnchor?.y,
+                    }
+                  : undefined
+              }
+              role="menu"
+              aria-labelledby={labelId}
+              className={cn(
+                "z-50 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl",
+                global
+                  ? templateDialog
+                    ? "fixed top-1/2 left-1/2 w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2"
+                    : "relative w-[min(36rem,calc(100vw-2rem))]"
+                  : templateDialog
+                    ? "fixed top-1/2 left-1/2 w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2"
+                    : anchored
+                      ? "fixed w-64"
+                      : dashboardCard
+                        ? "top-1/2 left-1/2 w-64 -translate-x-1/2 -translate-y-1/2"
+                        : "bottom-11 left-0 w-64",
+                !global && !templateDialog && !anchored && "absolute",
+              )}
+            >
+              {mode !== "template" ? (
+                <p id={labelId} className="px-2 py-1 font-medium text-muted-foreground text-xs">
+                  {t("New/Add Project")}
+                </p>
+              ) : null}
 
-            {mode === "menu" ? (
-              <>
-                <MenuItem
-                  testId="add-project-folder"
-                  icon={FolderOpen}
-                  label={t("Open from folder")}
-                  description={t("Add an existing local project folder to PI Lab.")}
-                  onClick={openFromFolder}
-                  disabled={pending}
-                  selected={global && highlight === 0}
-                />
-                <MenuItem
-                  testId="add-project-clone"
-                  icon={GitFork}
-                  label={t("Clone from git repo")}
-                  description={t("Clone a Git repository into a folder and add it as a project.")}
-                  onClick={() => setMode("clone")}
-                  disabled={pending}
-                  selected={global && highlight === 1}
-                />
-                <MenuItem
-                  testId="add-project-template"
-                  icon={FilePlus2}
-                  label={t("Start from template")}
-                  description={t("Create a new project folder from PI Lab's configured template.")}
-                  onClick={startFromTemplate}
-                  disabled={pending}
-                  selected={global && highlight === 2}
-                />
-              </>
-            ) : null}
-
-            {mode === "clone" ? (
-              <form
-                data-testid="add-project-clone-form"
-                className="flex flex-col gap-2 p-1.5"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  submitClone()
-                }}
-              >
-                <label
-                  className="font-medium text-muted-foreground text-xs"
-                  htmlFor={`${labelId}-url`}
-                >
-                  {t("Git repository URL")}
-                </label>
-                <input
-                  id={`${labelId}-url`}
-                  data-testid="add-project-clone-url"
-                  data-feature-label={t("Git repository URL")}
-                  data-feature-help={t(
-                    "Enter the Git repository to clone into a new local project folder.",
-                  )}
-                  type="text"
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  placeholder="https://github.com/owner/repo.git"
-                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-ring"
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  data-feature-label={t("Choose folder and clone")}
-                  data-feature-help={t(
-                    "Choose a destination folder, clone the repository, and add it to PI Lab.",
-                  )}
-                  disabled={pending || url.trim().length === 0}
-                >
-                  {t("Choose folder & clone")}
-                </Button>
-              </form>
-            ) : null}
-
-            {mode === "template" ? (
-              <form
-                data-testid="add-project-template-form"
-                className="flex max-h-[70vh] w-full flex-col gap-4 overflow-y-auto p-3"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  submitTemplate()
-                }}
-              >
-                <div>
-                  <h2 className="font-semibold text-base">{t("Start from template")}</h2>
-                  <p className="mt-1 text-muted-foreground text-xs">
-                    {t("Choose the project details and Markdown files to start with.")}
-                  </p>
-                </div>
-
-                <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium">{t("Project name")}</span>
-                  <input
-                    data-testid="add-project-template-name"
-                    value={templateName}
-                    onChange={(event) => setTemplateName(event.target.value)}
-                    placeholder={t("My research project")}
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 outline-none focus:border-ring"
+              {mode === "menu" ? (
+                <>
+                  <MenuItem
+                    testId="add-project-folder"
+                    icon={FolderOpen}
+                    label={t("Open from folder")}
+                    description={t("Add an existing local project folder to PI Lab.")}
+                    onClick={openFromFolder}
+                    disabled={pending}
+                    selected={global && highlight === 0}
                   />
-                </label>
+                  <MenuItem
+                    testId="add-project-clone"
+                    icon={GitFork}
+                    label={t("Clone from git repo")}
+                    description={t("Clone a Git repository into a folder and add it as a project.")}
+                    onClick={() => setMode("clone")}
+                    disabled={pending}
+                    selected={global && highlight === 1}
+                  />
+                  <MenuItem
+                    testId="add-project-template"
+                    icon={FilePlus2}
+                    label={t("Start from template")}
+                    description={t(
+                      "Create a new project folder from PI Lab's configured template.",
+                    )}
+                    onClick={startFromTemplate}
+                    disabled={pending}
+                    selected={global && highlight === 2}
+                  />
+                </>
+              ) : null}
 
-                <div className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium">{t("Location")}</span>
-                  <div className="flex gap-2">
-                    <input
-                      data-testid="add-project-template-location"
-                      value={templateParentPath}
-                      onChange={(event) => setTemplateParentPath(event.target.value)}
-                      placeholder={t("Choose a folder")}
-                      className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 outline-none focus:border-ring"
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={pickTemplateLocation}
-                      disabled={pending}
-                    >
-                      {t("Choose")}
-                    </Button>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="w-fit px-1 text-xs"
-                    onClick={saveDefaultTemplateLocation}
-                    disabled={pending || templateParentPath.trim().length === 0}
+              {mode === "clone" ? (
+                <form
+                  data-testid="add-project-clone-form"
+                  className="flex flex-col gap-2 p-1.5"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    submitClone()
+                  }}
+                >
+                  <label
+                    className="font-medium text-muted-foreground text-xs"
+                    htmlFor={`${labelId}-url`}
                   >
-                    {t("Make this the default location")}
+                    {t("Git repository URL")}
+                  </label>
+                  <input
+                    id={`${labelId}-url`}
+                    data-testid="add-project-clone-url"
+                    data-feature-label={t("Git repository URL")}
+                    data-feature-help={t(
+                      "Enter the Git repository to clone into a new local project folder.",
+                    )}
+                    type="text"
+                    value={url}
+                    onChange={(event) => setUrl(event.target.value)}
+                    placeholder="https://github.com/owner/repo.git"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-ring"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    data-feature-label={t("Choose folder and clone")}
+                    data-feature-help={t(
+                      "Choose a destination folder, clone the repository, and add it to PI Lab.",
+                    )}
+                    disabled={pending || url.trim().length === 0}
+                  >
+                    {t("Choose folder & clone")}
                   </Button>
-                </div>
+                </form>
+              ) : null}
 
-                <div className="flex flex-col gap-1.5 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{t("Files to include")}</span>
+              {mode === "template" ? (
+                <form
+                  data-testid="add-project-template-form"
+                  className="flex max-h-[70vh] w-full flex-col gap-4 overflow-y-auto p-3"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    submitTemplate()
+                  }}
+                >
+                  <div>
+                    <h2 className="font-semibold text-base">{t("Start from template")}</h2>
+                    <p className="mt-1 text-muted-foreground text-xs">
+                      {t("Choose the project details and Markdown files to start with.")}
+                    </p>
+                  </div>
+
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    <span className="font-medium">{t("Project name")}</span>
+                    <input
+                      data-testid="add-project-template-name"
+                      value={templateName}
+                      onChange={(event) => setTemplateName(event.target.value)}
+                      placeholder={t("My research project")}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 outline-none focus:border-ring"
+                    />
+                  </label>
+
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <span className="font-medium">{t("Location")}</span>
+                    <div className="flex gap-2">
+                      <input
+                        data-testid="add-project-template-location"
+                        value={templateParentPath}
+                        onChange={(event) => setTemplateParentPath(event.target.value)}
+                        placeholder={t("Choose a folder")}
+                        className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 outline-none focus:border-ring"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={pickTemplateLocation}
+                        disabled={pending}
+                      >
+                        {t("Choose")}
+                      </Button>
+                    </div>
                     <Button
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="h-6 px-1.5 text-xs"
-                      onClick={pickTemplateFile}
-                      disabled={pending}
+                      className="w-fit px-1 text-xs"
+                      onClick={saveDefaultTemplateLocation}
+                      disabled={pending || templateParentPath.trim().length === 0}
                     >
-                      <Plus className="size-3" aria-hidden />
-                      {t("Add file")}
+                      {t("Make this the default location")}
                     </Button>
                   </div>
-                  <div
-                    data-testid="add-project-template-files"
-                    className="rounded-md border border-border"
-                  >
-                    {templateList.isLoading ? (
-                      <p className="px-2 py-2 text-muted-foreground text-xs">
-                        {t("Loading template files…")}
-                      </p>
-                    ) : null}
-                    {templateFiles.map((relPath) => (
-                      <InitializationFileRow
-                        key={`template:${relPath}`}
-                        name={relPath}
-                        onPreviewStart={() => previewAfterHover(relPath)}
-                        onPreviewCancel={cancelHoverPreview}
-                        onPreview={() => {
-                          cancelHoverPreview()
-                          setPreviewFilePath(relPath)
-                        }}
-                        onRemove={() =>
-                          setTemplateFiles((current) => current.filter((file) => file !== relPath))
-                        }
-                      />
-                    ))}
-                    {externalFiles.map((filePath) => (
-                      <InitializationFileRow
-                        key={`external:${filePath}`}
-                        name={fileName(filePath)}
-                        onRemove={() =>
-                          setExternalFiles((current) => current.filter((file) => file !== filePath))
-                        }
-                      />
-                    ))}
-                    {!templateList.isLoading &&
-                    templateFiles.length + externalFiles.length === 0 ? (
-                      <p className="px-2 py-2 text-muted-foreground text-xs">
-                        {t("No Markdown files selected.")}
-                      </p>
-                    ) : null}
+
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{t("Files to include")}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-1.5 text-xs"
+                        onClick={pickTemplateFile}
+                        disabled={pending}
+                      >
+                        <Plus className="size-3" aria-hidden />
+                        {t("Add file")}
+                      </Button>
+                    </div>
+                    <div
+                      data-testid="add-project-template-files"
+                      className="rounded-md border border-border"
+                    >
+                      {templateList.isLoading ? (
+                        <p className="px-2 py-2 text-muted-foreground text-xs">
+                          {t("Loading template files…")}
+                        </p>
+                      ) : null}
+                      {templateFiles.map((relPath) => (
+                        <InitializationFileRow
+                          key={`template:${relPath}`}
+                          name={relPath}
+                          onPreviewStart={() => previewAfterHover(relPath)}
+                          onPreviewCancel={cancelHoverPreview}
+                          onPreview={() => {
+                            cancelHoverPreview()
+                            setPreviewFilePath(relPath)
+                          }}
+                          onRemove={() =>
+                            setTemplateFiles((current) =>
+                              current.filter((file) => file !== relPath),
+                            )
+                          }
+                        />
+                      ))}
+                      {externalFiles.map((filePath) => (
+                        <InitializationFileRow
+                          key={`external:${filePath}`}
+                          name={fileName(filePath)}
+                          onRemove={() =>
+                            setExternalFiles((current) =>
+                              current.filter((file) => file !== filePath),
+                            )
+                          }
+                        />
+                      ))}
+                      {!templateList.isLoading &&
+                      templateFiles.length + externalFiles.length === 0 ? (
+                        <p className="px-2 py-2 text-muted-foreground text-xs">
+                          {t("No Markdown files selected.")}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex justify-end gap-2 border-border border-t pt-3">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setMode("menu")}
-                    disabled={pending}
-                  >
-                    {t("Back")}
-                  </Button>
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={
-                      pending ||
-                      templateName.trim().length === 0 ||
-                      templateParentPath.trim().length === 0 ||
-                      /[\\/]/.test(templateName.trim())
-                    }
-                  >
-                    {t("Create project")}
-                  </Button>
-                </div>
-              </form>
-            ) : null}
+                  <div className="flex justify-end gap-2 border-border border-t pt-3">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setMode("menu")}
+                      disabled={pending}
+                    >
+                      {t("Back")}
+                    </Button>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={
+                        pending ||
+                        templateName.trim().length === 0 ||
+                        templateParentPath.trim().length === 0 ||
+                        /[\\/]/.test(templateName.trim())
+                      }
+                    >
+                      {t("Create project")}
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
 
-            {error ? (
-              <p
-                data-testid="add-project-error"
-                className="cursor-text select-text px-2 py-1 text-destructive text-xs leading-relaxed"
-              >
-                {translateKnownError(language, error.message)}
-              </p>
-            ) : null}
-          </div>
+              {error ? (
+                <p
+                  data-testid="add-project-error"
+                  className="cursor-text select-text px-2 py-1 text-destructive text-xs leading-relaxed"
+                >
+                  {translateKnownError(language, error.message)}
+                </p>
+              ) : null}
+            </div>,
+          )}
           {previewFilePath ? (
             <div
               data-testid="template-file-preview-overlay"

@@ -4,9 +4,14 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
 import type { AppIconBridge } from "../../apps/desktop/src/shared/appIcon"
 import { APP_ICON_DEFAULT_SELECTION } from "../../apps/desktop/src/shared/appIcon"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
 const alphaBinary = join(

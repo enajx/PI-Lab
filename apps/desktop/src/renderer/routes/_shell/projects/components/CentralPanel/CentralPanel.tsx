@@ -33,7 +33,6 @@ import {
   FILES_PANEL_MAX_WIDTH,
   FILES_PANEL_MIN_WIDTH,
   useFilesPanelWidth,
-  useShowFilesPanel,
 } from "../../../../../preferences/preferences"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { Terminal } from "../../../../../Terminal"
@@ -41,6 +40,7 @@ import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../SplitDock/SplitDock"
+import { CloseFilePrompt, useCloseFilePrompt } from "./CloseFilePrompt"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
 
 /** A new Run tab per run, so each run is placed below the split of the file that ran. */
@@ -72,6 +72,9 @@ interface CentralPanelProps {
    * bring it back (the sidebar isn't mounted to host its own expand affordance). */
   rightSidebarCollapsed: boolean
   onExpandRightSidebar: () => void
+  /** Whether this project shows the left Files column (per-project state owned by the route). */
+  filesPanelOpen: boolean
+  onFilesPanelOpenChange: (open: boolean) => void
   /**
    * Pin a `.md` file as a right-sidebar panel. Threaded down to the left Files
    * panel's tree so its right-click "Pin as panel" entry works in this layout too
@@ -102,6 +105,8 @@ export function CentralPanel({
   onUpdateEditorSettings,
   rightSidebarCollapsed,
   onExpandRightSidebar,
+  filesPanelOpen: showFilesPanel,
+  onFilesPanelOpenChange: setShowFilesPanel,
   onPinFile,
   onSetMainFile,
   onSaveUntitled,
@@ -111,7 +116,6 @@ export function CentralPanel({
   const [quickOpen, setQuickOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const addMenuRef = useRef<HTMLDivElement | null>(null)
-  const [showFilesPanel, setShowFilesPanel] = useShowFilesPanel()
   const [filesWidth, setFilesWidth] = useFilesPanelWidth()
   const runDestination = settings.pythonRunDestination ?? "central"
 
@@ -147,11 +151,22 @@ export function CentralPanel({
   const belowEditorRun = controller.belowEditorRun
   const runFocusedNow = runFocused && belowEditorRun !== null
 
-  // Ctrl+W closes the active tab; macOS Cmd+W belongs to the native background action.
+  // Tab ×, Ctrl+W and macOS Cmd+W (from the native menu) close a file tab, asking
+  // first when it has unsaved changes. Cmd+W with no file tab focused moves the app
+  // to the background instead.
+  const closeFilePrompt = useCloseFilePrompt({
+    controller,
+    runFocused: runFocusedNow,
+    onSaveUntitled,
+  })
+
+  // Ctrl+W closes the active tab.
   const closeActiveTabRef = useRef(controller.closeActiveTab)
   closeActiveTabRef.current = runFocusedNow
     ? controller.closeBelowEditorRun
-    : controller.closeActiveTab
+    : active?.type === "file"
+      ? () => closeFilePrompt.requestClose(active.relPath)
+      : controller.closeActiveTab
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -169,7 +184,7 @@ export function CentralPanel({
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [])
 
-  // Split shortcuts (⌘D right, ⌘⇧D down) split a focused terminal: a new terminal opens in
+  // Split shortcuts (⌘D right, ⇧⌘D down) split a focused terminal: a new terminal opens in
   // a new split. They run in the capture phase so the terminal never sees the key; on any
   // other tab the key is left alone (⌘D stays "select next match" in the editor).
   const dock = useRef<SplitDockHandle>(null)
@@ -280,10 +295,10 @@ export function CentralPanel({
             dirty={tab.dirty}
             active={visible}
             onSelect={activate}
-            onClose={() => controller.closeFile(tab.relPath)}
+            onClose={() => closeFilePrompt.requestClose(tab.relPath)}
           />
         ),
-        content: () =>
+        content: ({ visible }) =>
           editor.buffers.find((buffer) => buffer.relPath === tab.relPath)?.kind === "pdf" ? (
             <Suspense
               fallback={<p className="p-4 text-muted-foreground text-xs">Loading PDF viewer…</p>}
@@ -307,6 +322,7 @@ export function CentralPanel({
           ) : (
             <FileSurface
               relPath={tab.relPath}
+              shown={visible}
               hasFocus={
                 !runFocusedNow && active?.type === "file" && editor.activeRelPath === tab.relPath
               }
@@ -484,6 +500,7 @@ export function CentralPanel({
               data-testid="central-add-menu"
               title={t("Add pane")}
               aria-label={t("Add pane")}
+              aria-haspopup="menu"
               aria-expanded={addMenuOpen}
               onClick={() => setAddMenuOpen((open) => !open)}
               className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -493,6 +510,7 @@ export function CentralPanel({
             {addMenuOpen ? (
               <div
                 data-testid="central-add-menu-options"
+                role="menu"
                 className="absolute top-8 end-0 z-30 w-36 rounded-md border border-border bg-popover p-1 shadow-lg"
               >
                 <AddMenuButton
@@ -674,6 +692,7 @@ export function CentralPanel({
                 activeRelPath={editor.active?.relPath}
                 onPinFile={onPinFile}
                 onSetMainFile={onSetMainFile}
+                editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
               />
             </div>
             <EdgeResizeHandle
@@ -715,6 +734,12 @@ export function CentralPanel({
         </div>
       </div>
 
+      {closeFilePrompt.prompt ? (
+        <CloseFilePrompt
+          prompt={closeFilePrompt.prompt}
+          onChoose={(choice) => void closeFilePrompt.choose(choice)}
+        />
+      ) : null}
       {quickOpen ? (
         <QuickOpen
           workspaceId={workspaceId}
@@ -754,6 +779,7 @@ function AddMenuButton({
   return (
     <button
       type="button"
+      role="menuitem"
       data-testid={testId}
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
@@ -982,11 +1008,14 @@ function FileSurface({
   onCursorChange,
   onShowInPdf,
   hasFocus,
+  shown,
 }: {
   /** The file this surface shows; each split's file tab has its own surface. */
   relPath: string
   /** This file's tab is the focused tab, so its editor may take the keyboard. */
   hasFocus: boolean
+  /** This file's tab is the one shown in its split. */
+  shown: boolean
   editor: EditorBuffersApi
   settings: EditorSettings
   onRunPython: () => void
@@ -1041,6 +1070,7 @@ function FileSurface({
         {active ? (
           <CodeMirrorBuffer
             autoFocus={hasFocus}
+            shown={shown}
             key={`${active.relPath}#${active.epoch}`}
             relPath={active.relPath}
             initialDoc={active.content}
@@ -1184,34 +1214,39 @@ function Launcher({
   return (
     <div
       data-testid="central-launcher"
-      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 text-muted-foreground"
+      className="flex min-h-0 flex-1 flex-col items-center text-muted-foreground"
     >
-      <p className="text-sm">{t("Open something to get started")}</p>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <LauncherButton
-          testId="launcher-agent"
-          icon={<Bot className="size-4" aria-hidden />}
-          label="New agent"
-          description="Start a coding agent in this project workspace."
-          disabled={pendingAgent}
-          onClick={onOpenAgent}
-        />
-        <LauncherButton
-          testId="launcher-terminal"
-          icon={<TerminalSquare className="size-4" aria-hidden />}
-          label="New terminal"
-          description="Open an interactive shell in this project workspace."
-          disabled={pendingTerminal}
-          onClick={onOpenTerminal}
-        />
-        <LauncherButton
-          testId="launcher-file"
-          icon={<FileText className="size-4" aria-hidden />}
-          label="New file"
-          description="Find and open a project file in the built-in editor."
-          onClick={onOpenFile}
-        />
+      {/* Spacers 1:2 place the launcher about a third of the way down the panel. */}
+      <div aria-hidden className="flex-1" />
+      <div data-testid="central-launcher-content" className="flex flex-col items-center gap-4">
+        <p className="text-sm">{t("Open something to get started")}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <LauncherButton
+            testId="launcher-agent"
+            icon={<Bot className="size-4" aria-hidden />}
+            label="New agent"
+            description="Start a coding agent in this project workspace."
+            disabled={pendingAgent}
+            onClick={onOpenAgent}
+          />
+          <LauncherButton
+            testId="launcher-terminal"
+            icon={<TerminalSquare className="size-4" aria-hidden />}
+            label="New terminal"
+            description="Open an interactive shell in this project workspace."
+            disabled={pendingTerminal}
+            onClick={onOpenTerminal}
+          />
+          <LauncherButton
+            testId="launcher-file"
+            icon={<FileText className="size-4" aria-hidden />}
+            label="New file"
+            description="Find and open a project file in the built-in editor."
+            onClick={onOpenFile}
+          />
+        </div>
       </div>
+      <div aria-hidden className="flex-[2]" />
     </div>
   )
 }

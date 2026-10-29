@@ -18,6 +18,11 @@ export interface SessionInfo {
   pid: number | null
   /** False once the child process has exited. */
   alive: boolean
+  /**
+   * Name of the PTY's foreground process (a shell at its prompt reports its own
+   * name), or null once exited. Absent from daemons built before this field.
+   */
+  foregroundProcess?: string | null
 }
 
 export interface ProcessParams {
@@ -125,6 +130,12 @@ export interface ListRequest {
   cid: string
 }
 
+/** Stop every session and job, close the socket, and end the daemon process. */
+export interface ShutdownRequest {
+  kind: "shutdown"
+  cid: string
+}
+
 export type ClientRequest =
   | ProcessRequest
   | SpawnRequest
@@ -134,6 +145,7 @@ export type ClientRequest =
   | ResizeRequest
   | KillRequest
   | ListRequest
+  | ShutdownRequest
 
 // ---------------------------------------------------------------------------
 // Replies: daemon -> client, correlated by `cid`.
@@ -185,6 +197,14 @@ export interface ListReply {
   sessions: SessionInfo[]
 }
 
+/** Sent before the daemon stops its sessions and closes. */
+export interface ShutdownReply {
+  kind: "shutdown-ok"
+  cid: string
+  /** OS process id of the daemon. */
+  pid: number
+}
+
 /** Correlated failure for any request that could not be served. */
 export interface ErrorReply {
   kind: "error"
@@ -203,6 +223,7 @@ export type DaemonReply =
   | ResizeReply
   | KillReply
   | ListReply
+  | ShutdownReply
   | ErrorReply
 
 // ---------------------------------------------------------------------------
@@ -353,6 +374,8 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
       return { kind: "kill", cid, sessionId: value.sessionId, signal: value.signal }
     case "list":
       return { kind: "list", cid }
+    case "shutdown":
+      return { kind: "shutdown", cid }
     default:
       return null
   }
@@ -379,6 +402,7 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
     case "resize-ok":
     case "kill-ok":
     case "list-ok":
+    case "shutdown-ok":
     case "error":
       return typeof value.cid === "string" ? (value as unknown as DaemonReply) : null
     case "data":

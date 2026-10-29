@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query"
-import { afterEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { useShowFilesPanel } from "../../../preferences/preferences"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
 // StrictMode-wrapped render (see test/render.tsx) — reproduces the dev build's
@@ -7,6 +8,11 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcC
 import { act, render, screen, waitFor } from "../../../test/render"
 import { ProjectWorkspace } from "./-ProjectWorkspace"
 import { clearPendingOpenFile, setPendingOpenFile } from "./-pendingOpenFile"
+import {
+  readProjectWorkspaceState,
+  writeProjectWorkspaceState,
+  writeProjectWorkspaceViewState,
+} from "./-workspaceState"
 
 const { openFile } = vi.hoisted(() => ({ openFile: vi.fn() }))
 
@@ -18,8 +24,26 @@ const { openFile } = vi.hoisted(() => ({ openFile: vi.fn() }))
 // "Opening project…"; this test fails in that case and passes once the effect
 // applies the result from its still-active run.
 vi.mock("./components/CentralPanel", () => ({
-  CentralPanel: ({ openFileFinder }: { openFileFinder: boolean }) => (
-    <div data-testid="central-panel-stub" data-open-file-finder={String(openFileFinder)} />
+  CentralPanel: ({
+    openFileFinder,
+    filesPanelOpen,
+    onFilesPanelOpenChange,
+  }: {
+    openFileFinder: boolean
+    filesPanelOpen: boolean
+    onFilesPanelOpenChange: (open: boolean) => void
+  }) => (
+    <div
+      data-testid="central-panel-stub"
+      data-open-file-finder={String(openFileFinder)}
+      data-files-panel-open={String(filesPanelOpen)}
+    >
+      <button
+        type="button"
+        data-testid="files-toggle-stub"
+        onClick={() => onFilesPanelOpenChange(!filesPanelOpen)}
+      />
+    </div>
   ),
   useCentralPanel: () => ({
     attachSession: () => {},
@@ -28,11 +52,14 @@ vi.mock("./components/CentralPanel", () => ({
   }),
 }))
 vi.mock("./components/RightSidebar", () => ({
-  RightSidebar: () => <div data-testid="right-sidebar-stub" />,
+  FILES_TAB_ID: "files",
+  RightSidebar: ({ activeId }: { activeId: string | null }) => (
+    <div data-testid="right-sidebar-stub" data-active-id={activeId ?? ""} />
+  ),
 }))
 vi.mock("./components/ProjectPalette", () => ({ ProjectPalette: () => null }))
 
-function renderWorkspaceUnderStrictMode(handlers: FakeHandlers) {
+function renderWorkspaceUnderStrictMode(handlers: FakeHandlers, projectId = "p1") {
   const client = createFakeTrpcClient({
     "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
     "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
@@ -44,14 +71,40 @@ function renderWorkspaceUnderStrictMode(handlers: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ProjectWorkspace projectId="p1" activation={{}} />
+      <ProjectWorkspace projectId={projectId} activation={{}} />
     </AppProviders>,
   )
 }
 
+/** The real central panel seeds each project's workspace state on mount; the stub does not. */
+function seedProject(projectId: string) {
+  writeProjectWorkspaceState(projectId, {
+    buffers: [],
+    activeRelPath: null,
+    sessions: [],
+    active: null,
+    belowEditorRun: null,
+  })
+}
+
+/** Change the global left-column default through its real preference hook. */
+let setGlobalFilesPanel: (open: boolean) => void = () => {
+  throw new Error("GlobalFilesPanelSetter is not mounted")
+}
+function GlobalFilesPanelSetter() {
+  const [, setShowFilesPanel] = useShowFilesPanel()
+  setGlobalFilesPanel = setShowFilesPanel
+  return null
+}
+
+beforeEach(() => {
+  render(<GlobalFilesPanelSetter />)
+})
+
 afterEach(() => {
   clearPendingOpenFile("p1")
   openFile.mockClear()
+  window.localStorage.clear()
 })
 
 describe("Project open", () => {
@@ -62,6 +115,73 @@ describe("Project open", () => {
     // "Opening project…" gate is gone.
     expect(await screen.findByTestId("central-panel-stub")).toBeTruthy()
     expect(screen.queryByText("Opening project…")).toBeNull()
+  })
+
+  test("a project without a saved tab opens on Files; a saved tab is restored", async () => {
+    seedProject("p-tab-new")
+    const fresh = renderWorkspaceUnderStrictMode({}, "p-tab-new")
+    expect((await screen.findByTestId("right-sidebar-stub")).dataset.activeId).toBe("files")
+    fresh.unmount()
+
+    seedProject("p-tab-saved")
+    writeProjectWorkspaceViewState("p-tab-saved", {
+      rightSidebarCollapsed: false,
+      rightSidebarActiveId: "todos",
+      pinnedPanels: [],
+      filesPanelOpen: undefined,
+    })
+    renderWorkspaceUnderStrictMode({}, "p-tab-saved")
+    expect((await screen.findByTestId("right-sidebar-stub")).dataset.activeId).toBe("todos")
+  })
+
+  test("the old global Files-column switch value does not open the column", async () => {
+    // Before the per-project override, this key turned the column on everywhere.
+    window.localStorage.setItem("pi-lab.projectView.showFilesPanel", "true")
+    seedProject("p-old-key")
+    renderWorkspaceUnderStrictMode({}, "p-old-key")
+    const panel = await screen.findByTestId("central-panel-stub")
+    expect(panel.dataset.filesPanelOpen).toBe("false")
+  })
+
+  test("a project without its own left-column value follows the global default live", async () => {
+    seedProject("p-global")
+    setGlobalFilesPanel(true)
+    renderWorkspaceUnderStrictMode({}, "p-global")
+    const panel = await screen.findByTestId("central-panel-stub")
+    expect(panel.dataset.filesPanelOpen).toBe("true")
+
+    act(() => setGlobalFilesPanel(false))
+    expect(screen.getByTestId("central-panel-stub").dataset.filesPanelOpen).toBe("false")
+    act(() => setGlobalFilesPanel(true))
+    expect(screen.getByTestId("central-panel-stub").dataset.filesPanelOpen).toBe("true")
+  })
+
+  test("toggling the left column in a project stores its own value, kept over the global default", async () => {
+    seedProject("p-own-a")
+    seedProject("p-own-b")
+    setGlobalFilesPanel(false)
+    const first = renderWorkspaceUnderStrictMode({}, "p-own-a")
+    expect((await screen.findByTestId("central-panel-stub")).dataset.filesPanelOpen).toBe("false")
+    act(() => screen.getByTestId("files-toggle-stub").click())
+    expect(screen.getByTestId("central-panel-stub").dataset.filesPanelOpen).toBe("true")
+    expect(readProjectWorkspaceState("p-own-a", true)?.filesPanelOpen).toBe(true)
+
+    // A later global change does not move A, which now has its own value.
+    act(() => setGlobalFilesPanel(false))
+    expect(screen.getByTestId("central-panel-stub").dataset.filesPanelOpen).toBe("true")
+    first.unmount()
+
+    // B has no value of its own and follows the global default.
+    act(() => setGlobalFilesPanel(true))
+    const second = renderWorkspaceUnderStrictMode({}, "p-own-b")
+    expect((await screen.findByTestId("central-panel-stub")).dataset.filesPanelOpen).toBe("true")
+    expect(readProjectWorkspaceState("p-own-b", true)?.filesPanelOpen).toBeUndefined()
+    second.unmount()
+
+    // A reopens with its own value although the global default is now on and was off.
+    act(() => setGlobalFilesPanel(false))
+    renderWorkspaceUnderStrictMode({}, "p-own-a")
+    expect((await screen.findByTestId("central-panel-stub")).dataset.filesPanelOpen).toBe("true")
   })
 
   test("opens every globally created file while the chosen project is already mounted", async () => {

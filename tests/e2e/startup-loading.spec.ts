@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures/playwright"
 
 const RENDERER_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),

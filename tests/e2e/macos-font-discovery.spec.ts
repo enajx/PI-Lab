@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { _electron as electron, expect, test } from "@playwright/test"
+import { _electron as electron, expect, test } from "./fixtures/playwright"
 
 /** Exercise the real macOS font scan through Electron, IPC, and the Settings picker. */
 test("Editor discovers real macOS fonts and keeps the selected family", async () => {

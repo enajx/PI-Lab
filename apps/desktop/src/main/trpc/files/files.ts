@@ -1,5 +1,6 @@
-import { mkdir, realpath, writeFile } from "node:fs/promises"
-import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
+import type { Stats } from "node:fs"
+import { constants, copyFile, lstat, mkdir, realpath, rename, writeFile } from "node:fs/promises"
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { type PiLabDatabase, type Workspace, workspaces } from "@pi-lab/local-db"
 import {
   type FileStat,
@@ -29,6 +30,10 @@ import { workspaceWorkingDir } from "../workspaces/workspaces"
  *   - `tree` — the immediate children of one directory, for a lazy file tree.
  *   - `search` — a fuzzy file-name search backing the `⌘F` quick-open palette.
  *
+ * The file tree's manage actions add `trash` (OS Trash via the injected
+ * `trashPath`), `rename`, `duplicate`, and `copyPath` (OS clipboard via the
+ * injected `writeClipboard`), each jailed to the working dir.
+ *
  * The router stays thin: it resolves the workspace's working dir, jails every
  * requested path to that dir, and delegates the real work to
  * `@pi-lab/workspace-fs`. Everything is `createCaller`-testable.
@@ -52,6 +57,16 @@ const treeInput = z.object({
   workspaceId: z.string().min(1),
   /** Directory to list, relative to the working dir. Empty/omitted ⇒ the root. */
   relPath: z.string().default(""),
+})
+
+const renameInput = readInput.extend({
+  /** New path for the entry, relative to the working dir. */
+  newRelPath: z.string().min(1),
+})
+
+const copyPathInput = readInput.extend({
+  /** `absolute` copies the full disk path; `relative` the working-dir-relative path. */
+  form: z.enum(["absolute", "relative"]),
 })
 
 const searchInput = z.object({
@@ -217,6 +232,87 @@ export const filesRouter = router({
     }),
 
   /**
+   * Move one existing file or folder inside the workspace to the OS Trash. The
+   * entry itself must exist and its real parent must stay inside the real
+   * workspace, so a symlinked parent cannot redirect the delete outside it. A
+   * symlink entry is trashed as the link, never its target.
+   */
+  trash: publicProcedure.input(readInput).mutation(async ({ ctx, input }): Promise<void> => {
+    const workspace = requireWorkspace(ctx.db, input.workspaceId)
+    const base = resolve(workspaceWorkingDir(ctx.db, workspace))
+    const target = resolveInsideDir(base, input.relPath)
+    await requireRealParentInside(base, target, input.relPath)
+    await requireEntry(target, input.relPath)
+    await ctx.trashPath(target)
+  }),
+
+  /**
+   * Rename or move one existing entry to a new path inside the workspace without
+   * overwriting another entry. A case-only rename of the same entry is allowed.
+   */
+  rename: publicProcedure
+    .input(renameInput)
+    .mutation(async ({ ctx, input }): Promise<{ relPath: string }> => {
+      const workspace = requireWorkspace(ctx.db, input.workspaceId)
+      const base = resolve(workspaceWorkingDir(ctx.db, workspace))
+      const source = resolveInsideDir(base, input.relPath)
+      const destination = resolveInsideDir(base, input.newRelPath)
+      await requireRealParentInside(base, source, input.relPath)
+      await requireRealParentInside(base, destination, input.newRelPath)
+      const sourceInfo = await requireEntry(source, input.relPath)
+      const existing = await lstat(destination).catch((error: unknown) => {
+        if (nodeErrorCode(error) === "ENOENT") return null
+        throw error
+      })
+      // On a case-insensitive disk `A.txt` → `a.txt` finds the source itself.
+      if (existing && !(existing.ino === sourceInfo.ino && existing.dev === sourceInfo.dev)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `A file or folder already exists at ${input.newRelPath}`,
+        })
+      }
+      await rename(source, destination)
+      return { relPath: toRelPosix(base, destination) }
+    }),
+
+  /**
+   * Copy one file next to itself under a Finder-style name (`name copy.ext`,
+   * then `name copy 2.ext`, ...), never overwriting an existing entry.
+   */
+  duplicate: publicProcedure
+    .input(readInput)
+    .mutation(async ({ ctx, input }): Promise<{ relPath: string }> => {
+      const workspace = requireWorkspace(ctx.db, input.workspaceId)
+      const base = resolve(workspaceWorkingDir(ctx.db, workspace))
+      const source = resolveInsideDir(base, input.relPath)
+      await requireRealParentInside(base, source, input.relPath)
+      const info = await requireEntry(source, input.relPath)
+      if (!info.isFile()) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Only files can be duplicated: ${input.relPath}`,
+        })
+      }
+      for (let attempt = 1; ; attempt += 1) {
+        const destination = join(dirname(source), copyName(basename(source), attempt))
+        try {
+          await copyFile(source, destination, constants.COPYFILE_EXCL)
+          return { relPath: toRelPosix(base, destination) }
+        } catch (error) {
+          if (nodeErrorCode(error) !== "EEXIST") throw error
+        }
+      }
+    }),
+
+  /** Write an entry's absolute or working-dir-relative path to the OS clipboard. */
+  copyPath: publicProcedure.input(copyPathInput).mutation(async ({ ctx, input }): Promise<void> => {
+    const workspace = requireWorkspace(ctx.db, input.workspaceId)
+    const base = resolve(workspaceWorkingDir(ctx.db, workspace))
+    const target = resolveInsideDir(base, input.relPath)
+    ctx.writeClipboard(input.form === "absolute" ? target : toRelPosix(base, target))
+  }),
+
+  /**
    * List one directory's immediate children for a lazy file tree. The root is
    * addressed by an empty `relPath`; child directories are expanded on demand by
    * passing their own `relPath`. Entries are returned directories-first then by
@@ -306,6 +402,33 @@ async function createEntry(
   }
 
   return { relPath: toRelPosix(base, target) }
+}
+
+/** `lstat` an entry (not following a final symlink), mapping absence to NOT_FOUND. */
+async function requireEntry(target: string, relPath: string): Promise<Stats> {
+  try {
+    return await lstat(target)
+  } catch (error) {
+    if (nodeErrorCode(error) === "ENOENT") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: `No file or folder at ${relPath}`,
+        cause: error,
+      })
+    }
+    throw error
+  }
+}
+
+/**
+ * Finder-style duplicate name: `notes.md` → `notes copy.md`, `notes copy 2.md`.
+ * A leading dot is part of the name, so `.env` → `.env copy`.
+ */
+function copyName(name: string, attempt: number): string {
+  const extension = extname(name)
+  const stem = extension ? name.slice(0, -extension.length) : name
+  const suffix = attempt === 1 ? " copy" : ` copy ${attempt}`
+  return `${stem}${suffix}${extension}`
 }
 
 /** Confirm the target's existing real parent remains inside the real workspace. */

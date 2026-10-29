@@ -5,13 +5,19 @@ import {
   SHUTDOWN_RESPONSE_CHANNEL,
   type ShutdownRequest,
 } from "../../shared/shutdown"
+import type { QuitMode } from "../agents/quitPolicy"
 
 interface ShutdownGuardOptions {
   app: Pick<App, "on" | "removeListener" | "quit">
   ipcMain: Pick<IpcMain, "on" | "removeListener">
   createRequestId: () => string
-  /** Confirm the agent policy and finish stopping agents after draft approval. */
-  prepareQuit?: (stopConfirmed: boolean) => Promise<boolean>
+  /** Apply the quit mode to agents and terminals after draft approval. */
+  prepareQuit?: (mode: QuitMode) => Promise<boolean>
+  /**
+   * Called on a user window close. Returning true keeps the window open and sends
+   * no close request: the caller runs its own quit flow instead.
+   */
+  interceptClose?: () => boolean
 }
 
 export interface ShutdownGuard {
@@ -36,7 +42,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   let pendingStopConfirmed = false
 
   /** Run asynchronous agent shutdown once; rejection never grants approval. */
-  function prepareAndQuit(install: (() => void) | null, stopConfirmed: boolean): void {
+  function prepareAndQuit(install: (() => void) | null, mode: QuitMode): void {
     if (preparingQuit) return
     const finish = () => {
       if (install) {
@@ -59,7 +65,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     }
     preparingQuit = true
     void options
-      .prepareQuit(stopConfirmed)
+      .prepareQuit(mode)
       .then((allow) => {
         preparingQuit = false
         if (allow) finish()
@@ -110,7 +116,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     if (!mainWindow || mainWindow.isDestroyed()) {
       if (installOnApprovedQuit || options.prepareQuit) {
         event.preventDefault()
-        prepareAndQuit(installOnApprovedQuit, false)
+        prepareAndQuit(installOnApprovedQuit, "confirm-end")
       }
       return
     }
@@ -129,6 +135,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
       return
     }
     event.preventDefault()
+    if (options.interceptClose?.()) return
     request("close")
   }
 
@@ -172,9 +179,12 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
       return
     }
     if (intent === "quit") {
-      const install = pendingUpdateInstall ?? installOnApprovedQuit
+      const update = pendingUpdateInstall
       pendingUpdateInstall = null
-      prepareAndQuit(install, stopConfirmed)
+      // Explicit Quit ends everything (and installs a ready update); Restart to
+      // Update keeps work running; any other quit asks when work is running.
+      const mode: QuitMode = stopConfirmed ? "end" : update ? "keep" : "confirm-end"
+      prepareAndQuit(update ?? installOnApprovedQuit, mode)
     } else {
       approvedClose = window
       window.close()
@@ -190,7 +200,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     requestExplicitQuit(): void {
       if (pending?.intent === "quit" || preparingQuit) return
       if (!mainWindow || mainWindow.isDestroyed()) {
-        prepareAndQuit(installOnApprovedQuit, true)
+        prepareAndQuit(installOnApprovedQuit, "end")
         return
       }
       if (mainWindow.webContents.isDestroyed()) return
@@ -199,7 +209,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     },
     requestUpdateInstall(install): void {
       if (!mainWindow || mainWindow.isDestroyed()) {
-        prepareAndQuit(install, false)
+        prepareAndQuit(install, "keep")
         return
       }
       if (mainWindow.webContents.isDestroyed()) return
