@@ -5,7 +5,12 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const desktop = join(here, "..", "..", "apps", "desktop")
@@ -1239,6 +1244,10 @@ test("a project file opened from an unsaved full-app quick edit saves the draft"
     await expect(editor).toContainText("value = 1", { timeout: 30_000 })
     await editor.press("ControlOrMeta+End")
     await window.keyboard.type("value = 2\n")
+    // CodeMirror applies typed keys after keyboard.type returns. Wait until the editor
+    // state has them (the cursor is on the new line), so the route save sees the whole
+    // draft instead of refusing a draft that is still changing.
+    await expect(window.getByTestId("quick-editor-cursor")).toHaveText("Ln 3, Col 1")
     await app.evaluate(
       ({ app }, path) => app.emit("open-file", { preventDefault() {} }, path),
       projectFile,

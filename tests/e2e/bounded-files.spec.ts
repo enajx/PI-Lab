@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { _electron as electron, expect, test } from "@playwright/test"
+import { _electron as electron, expect, test } from "./fixtures/playwright"
 
 /** Real Electron IPC and filesystem reads, with no mocked reader. */
 test("oversized and binary files stay out of the editor; rejected reload preserves text", async () => {
@@ -52,7 +52,11 @@ test("oversized and binary files stay out of the editor; rejected reload preserv
     })
     await expect(page.getByTestId("editor-buffer")).toContainText("preserve this text")
     await page.getByTestId("file-tree-file").filter({ hasText: "exact.txt" }).click()
-    const editor = page.getByTestId("editor-buffer").locator(".cm-content")
+    // Splits keep small.txt's editor mounted behind exact.txt's tab: target the shown one.
+    const editor = page
+      .locator('[data-testid="editor-buffer"]:visible')
+      .filter({ hasText: "e".repeat(99) })
+      .locator(".cm-content")
     await expect(editor).toBeVisible()
     await editor.click()
     await page.keyboard.press("ControlOrMeta+End")

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import type { AppIconBridge } from "../../../../shared/appIcon"
 import type { BackgroundTrayBridge } from "../../../../shared/backgroundTray"
+import type { CloseTabBridge } from "../../../../shared/closeTab"
 import type { QuickEditBridge } from "../../../../shared/quickEdit"
 import type { ShutdownBridge, ShutdownRequest } from "../../../../shared/shutdown"
 import type { UpdatesBridge } from "../../../../shared/updates"
@@ -28,6 +29,7 @@ declare global {
     piLab?: {
       platform: string
       shutdown: ShutdownBridge
+      closeTab?: CloseTabBridge
       getPathForFile?: (file: File) => string
       setInterfaceLanguage?: (language: string) => void
       quickEdit?: QuickEditBridge

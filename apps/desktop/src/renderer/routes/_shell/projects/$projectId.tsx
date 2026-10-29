@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { projectNotificationSearchSchema } from "../../../notifications/activation"
+import { useEscapeToDashboard } from "./-escapeToDashboard"
 import { ProjectWorkspace } from "./-ProjectWorkspace"
 
 /**
@@ -14,6 +15,8 @@ import { ProjectWorkspace } from "./-ProjectWorkspace"
  * actual view is keyed on `projectId` ({@link ProjectWorkspace}) — a fresh mount
  * per project resets the central panel's open tabs/sessions and editor buffers so
  * one project's state never leaks into another.
+ *
+ * Escape returns to the Projects Dashboard (see {@link useEscapeToDashboard}).
  */
 export const Route = createFileRoute("/_shell/projects/$projectId")({
   validateSearch: (search) => projectNotificationSearchSchema.parse(search),
@@ -23,5 +26,6 @@ export const Route = createFileRoute("/_shell/projects/$projectId")({
 function ProjectRoute() {
   const { projectId } = Route.useParams()
   const activation = Route.useSearch()
+  useEscapeToDashboard()
   return <ProjectWorkspace key={projectId} projectId={projectId} activation={activation} />
 }

@@ -54,6 +54,8 @@ const DEFAULT_SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  showHiddenFiles: true,
+  confirmFileDelete: true,
 }
 
 let store: Record<string, string>

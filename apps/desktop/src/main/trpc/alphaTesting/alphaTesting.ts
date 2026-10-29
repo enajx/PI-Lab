@@ -69,7 +69,6 @@ export const alphaTestingRouter = router({
         .run()
       tx.update(agentSettings)
         .set({
-          quitBehavior: DEFAULT_AGENT_SETTINGS.quitBehavior,
           defaultAgentId: DEFAULT_AGENT_SETTINGS.defaultAgentId,
           launchDefaults: DEFAULT_AGENT_SETTINGS.launchDefaults,
           projectConfigStorage: DEFAULT_AGENT_SETTINGS.projectConfigStorage,

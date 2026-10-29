@@ -3,7 +3,9 @@ import { QueryClient } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import type { CloseTabRequest } from "../../../../../../shared/closeTab"
 import { AppProviders } from "../../../../../providers/AppProviders"
+import { installCloseTabResponder } from "../../../../../shortcuts/closeTab"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 
@@ -98,6 +100,8 @@ const DEFAULT_SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  showHiddenFiles: true,
+  confirmFileDelete: true,
 }
 
 const PY_DIAGNOSTIC = {
@@ -269,6 +273,8 @@ function Harness({
   useEffect(() => {
     if (activatedSession) controller.attachSession(activatedSession)
   }, [activatedSession, controller.attachSession])
+  // Stands in for the project route, which owns the per-project left Files column state.
+  const [filesPanelOpen, setFilesPanelOpen] = useState(false)
   return (
     <div>
       <FilesPanel
@@ -286,6 +292,8 @@ function Harness({
         onUpdateEditorSettings={onUpdate}
         rightSidebarCollapsed={false}
         onExpandRightSidebar={() => {}}
+        filesPanelOpen={filesPanelOpen}
+        onFilesPanelOpenChange={setFilesPanelOpen}
         onPinFile={onPinFile}
       />
     </div>
@@ -828,6 +836,133 @@ describe("CentralPanel — panel", () => {
   })
 })
 
+/** Send one Cmd+W request through the renderer responder (fake preload bridge). */
+function pressCmdW(): boolean {
+  let listener: ((request: CloseTabRequest) => void) | null = null
+  const answers: boolean[] = []
+  const uninstall = installCloseTabResponder({
+    subscribe: (next) => {
+      listener = next
+      return () => {
+        listener = null
+      }
+    },
+    respond: (response) => answers.push(response.handled),
+  })
+  act(() => listener?.({ requestId: "cmd-w" }))
+  uninstall()
+  expect(answers).toHaveLength(1)
+  return answers[0] as boolean
+}
+
+describe("CentralPanel — Cmd+W through the close-tab responder (fake bridge)", () => {
+  test("a saved focused file closes and the app is not backgrounded", async () => {
+    renderPanel()
+    await openFile()
+    expect(pressCmdW()).toBe(true)
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(screen.queryByTestId("close-file-prompt")).toBeNull()
+  })
+
+  test("a dirty focused file asks first; Cancel keeps it, Discard closes without writing", async () => {
+    renderPanel()
+    await openFile()
+    fireEvent.click(screen.getByTestId("buffer-type"))
+    await waitFor(() => expect(screen.getByTestId("central-tab-dirty")).toBeTruthy())
+
+    expect(pressCmdW()).toBe(true)
+    const prompt = await screen.findByTestId("close-file-prompt")
+    expect(prompt.textContent).toContain("main.py")
+    // A second press while the prompt is open neither closes nor backgrounds.
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(within(prompt).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("close-file-prompt")).toBeNull())
+    expect(screen.getByTestId("central-tab-dirty")).toBeTruthy()
+
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(
+      within(await screen.findByTestId("close-file-prompt")).getByRole("button", {
+        name: "Discard",
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(written).toHaveLength(0)
+  })
+
+  test("Save in the prompt writes the file, then closes it", async () => {
+    renderPanel()
+    await openFile()
+    fireEvent.click(screen.getByTestId("buffer-type"))
+    await waitFor(() => expect(screen.getByTestId("central-tab-dirty")).toBeTruthy())
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(
+      within(await screen.findByTestId("close-file-prompt")).getByRole("button", {
+        name: "Save",
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(written).toEqual([{ relPath: "main.py", content: "print('hi')\n EDIT" }])
+  })
+
+  test("a failed save keeps the file open and shows why", async () => {
+    renderPanel(
+      baseHandlers("main.py", {
+        "files.write": async () => {
+          throw new Error("disk full")
+        },
+      }),
+    )
+    await openFile()
+    fireEvent.click(screen.getByTestId("buffer-type"))
+    await waitFor(() => expect(screen.getByTestId("central-tab-dirty")).toBeTruthy())
+    expect(pressCmdW()).toBe(true)
+    const prompt = await screen.findByTestId("close-file-prompt")
+    fireEvent.click(within(prompt).getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(prompt.textContent).toContain("Could not save main.py"))
+    expect(screen.getByTestId("editor-error").textContent).toContain("disk full")
+    expect(screen.getByTestId("central-tab-dirty")).toBeTruthy()
+  })
+
+  test("the tab × and Ctrl+W on a dirty file ask first; Cancel keeps it, Discard closes it", async () => {
+    renderPanel()
+    await openFile()
+    fireEvent.click(screen.getByTestId("buffer-type"))
+    await waitFor(() => expect(screen.getByTestId("central-tab-dirty")).toBeTruthy())
+
+    fireEvent.click(screen.getByTestId("central-tab-close"))
+    const prompt = await screen.findByTestId("close-file-prompt")
+    fireEvent.click(within(prompt).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("close-file-prompt")).toBeNull())
+    expect(screen.getByTestId("central-tab-dirty")).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true })
+    fireEvent.click(
+      within(await screen.findByTestId("close-file-prompt")).getByRole("button", {
+        name: "Discard",
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(written).toHaveLength(0)
+  })
+
+  test("the tab × on a clean file closes it at once", async () => {
+    renderPanel()
+    await openFile()
+    fireEvent.click(screen.getByTestId("central-tab-close"))
+    expect(screen.queryByTestId("close-file-prompt")).toBeNull()
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+  })
+
+  test("a focused terminal or an empty panel leaves Cmd+W to the background action", async () => {
+    renderPanel()
+    expect(pressCmdW()).toBe(false)
+    fireEvent.click(screen.getByTestId("launcher-terminal"))
+    await screen.findByTestId("terminal")
+    expect(pressCmdW()).toBe(false)
+    expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("terminal")
+  })
+})
+
 describe("CentralPanel — left Files panel", () => {
   test("the files toggle reveals a left Files column and flips its pressed state", () => {
     renderPanel()
@@ -839,7 +974,6 @@ describe("CentralPanel — left Files panel", () => {
 
     expect(toggle.getAttribute("aria-pressed")).toBe("true")
     expect(screen.getByTestId("central-files-panel")).toBeTruthy()
-    expect(window.localStorage.getItem("pi-lab.projectView.showFilesPanel")).toBe("true")
   })
 
   test("opening a file from the left tree opens it in the central editor", async () => {

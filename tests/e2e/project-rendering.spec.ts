@@ -11,7 +11,7 @@ import {
   _electron as electron,
   expect,
   test,
-} from "@playwright/test"
+} from "./fixtures/playwright"
 
 /** Actual Electron rendering, pointer capture, preferences and Python editor flow. */
 const DESKTOP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
@@ -121,8 +121,7 @@ test("sidebar drag persists once and Python typing preserves Markdown and lint c
   await session.send("Profiler.enable")
   await session.send("Profiler.startPreciseCoverage", { callCount: true, detailed: true })
   await window.getByTestId("project-item").click()
-  await expect(window.getByRole("heading", { name: "Rendering fixture" })).toBeVisible()
-  await window.getByTestId("panel-tab-files").click()
+  await expect(window.getByTestId("panel-tab-files")).toHaveAttribute("aria-selected", "true")
   await window.getByTestId("file-tree-file").filter({ hasText: PY_FILE }).click()
   const buffer = window.getByTestId("editor-buffer")
   await expect(buffer).toContainText("return 1")

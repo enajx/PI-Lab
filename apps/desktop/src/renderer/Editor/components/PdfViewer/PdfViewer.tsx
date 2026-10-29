@@ -1,4 +1,3 @@
-import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react"
 import { getDocument, type PDFDocumentProxy, PDFWorker } from "pdfjs-dist/legacy/build/pdf.mjs"
 import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"
 import { EventBus, PDFLinkService, PDFViewer } from "pdfjs-dist/legacy/web/pdf_viewer.mjs"
@@ -6,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import type { PiLabTrpcClient } from "../../../trpc/client"
 import "pdfjs-dist/web/pdf_viewer.css"
 import "./pdfViewer.css"
+import { anchorScroll, pdfStatusText, wheelZoom } from "./pdfZoom"
 
 export interface PdfBuildState {
   state: "building" | "complete" | "failed"
@@ -48,7 +48,7 @@ interface Position {
 /** PDF.js scale presets that depend on the viewer's size. */
 const RELATIVE_SCALES = new Set(["page-width", "page-fit", "auto"])
 
-/** PDF.js owns the page DOM; React owns the toolbar and the document lifecycle. */
+/** PDF.js owns the page DOM; React owns the document lifecycle and wheel zoom. */
 export function PdfViewer({
   client,
   workspaceId,
@@ -64,7 +64,7 @@ export function PdfViewer({
   location: PdfLocation | null
   onSource: (location: SourceLocation) => void
   build: PdfBuildState | null
-  /** Refresh state such as "PDF up to date", shown by the central panel's status bar. */
+  /** Refresh state and current page, e.g. "Page 2 / 5", shown by the central panel's status bar. */
   onMessage: (message: string) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
@@ -73,13 +73,15 @@ export function PdfViewer({
   navigateSource.current = onSource
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(0)
-  const [scale, setScale] = useState("page-width")
-  const [message, setMessage] = useState("Loading PDF…")
+  /** Transient refresh state; null once the PDF is loaded and current. */
+  const [message, setMessage] = useState<string | null>("Loading PDF…")
   const reportMessage = useRef(onMessage)
   reportMessage.current = onMessage
-  useEffect(() => reportMessage.current(message), [message])
+  useEffect(
+    () => reportMessage.current(pdfStatusText(message, page, pages)),
+    [message, page, pages],
+  )
   const [error, setError] = useState<string | null>(null)
-  const refreshAction = useRef<() => void>(() => undefined)
   const [ready, setReady] = useState<Runtime | null>(null)
   const consumedLocation = useRef<PdfLocation | null>(null)
   const buildRef = useRef(build)
@@ -111,7 +113,7 @@ export function PdfViewer({
         }
         const fingerprint = `${stat.mtimeMs}:${stat.size}`
         if (fingerprint === baseline) {
-          setMessage("PDF up to date")
+          setMessage(null)
           return
         }
         setMessage(runtime.current ? "Refreshing PDF…" : "Loading PDF…")
@@ -264,9 +266,6 @@ export function PdfViewer({
         events.on("pagechanging", ({ pageNumber }: { pageNumber: number }) => {
           if (runtime.current === next) setPage(pageNumber)
         })
-        events.on("scalechanging", () => {
-          if (runtime.current === next) setScale(viewer.currentScaleValue)
-        })
         viewer.setDocument(pdf)
         await rendered
         cancelReady = null
@@ -290,8 +289,7 @@ export function PdfViewer({
         baseline = `${snapshot.baseline.mtimeMs}:${snapshot.baseline.size}`
         setPages(pdf.numPages)
         setPage(viewer.currentPageNumber)
-        setScale(viewer.currentScaleValue)
-        setMessage("PDF up to date")
+        setMessage(null)
         setError(null)
         setReady(next)
       } catch (cause) {
@@ -304,10 +302,6 @@ export function PdfViewer({
         busy = false
       }
     }
-    refreshAction.current = () => {
-      baseline = ""
-      void refresh()
-    }
     void refresh()
     const timer = window.setInterval(() => void refresh(), 750)
     return () => {
@@ -317,7 +311,6 @@ export function PdfViewer({
       pendingDispose?.()
       runtime.current?.destroy()
       runtime.current = null
-      refreshAction.current = () => undefined
     }
   }, [client, workspaceId, relPath])
 
@@ -334,6 +327,38 @@ export function PdfViewer({
     })
     observer.observe(root)
     return () => observer.disconnect()
+  }, [])
+
+  // A trackpad pinch (ctrl + wheel) or Shift + wheel zooms instead of scrolling. The
+  // listener is not passive so preventDefault also stops Electron zooming the window.
+  // The page point under the pointer stays under it: PDF.js lays out the pages again
+  // synchronously when the scale is set, so the scroll is corrected right after.
+  useEffect(() => {
+    const root = host.current
+    if (!root) return
+    const zoom = (event: WheelEvent): void => {
+      const current = runtime.current
+      if (!current) return
+      const { viewer, container } = current
+      const next = wheelZoom(viewer.currentScale, event)
+      if (next === null) return
+      event.preventDefault()
+      if (next === viewer.currentScale) return
+      // Anchor on the page under the pointer, or the current page over a gap.
+      const hovered = event.target instanceof Element ? event.target.closest(".page") : null
+      const page =
+        hovered && container.contains(hovered)
+          ? hovered
+          : viewer.getPageView(viewer.currentPageNumber - 1).div
+      const pointer = { x: event.clientX, y: event.clientY }
+      const before = page.getBoundingClientRect()
+      viewer.currentScale = next
+      const shift = anchorScroll(pointer, before, page.getBoundingClientRect())
+      container.scrollLeft += shift.left
+      container.scrollTop += shift.top
+    }
+    root.addEventListener("wheel", zoom, { passive: false })
+    return () => root.removeEventListener("wheel", zoom)
   }, [])
 
   useEffect(() => {
@@ -373,79 +398,6 @@ export function PdfViewer({
 
   return (
     <div data-testid="pdf-viewer" className="flex min-h-0 flex-1 flex-col bg-background">
-      <div
-        role="toolbar"
-        aria-label="PDF controls"
-        className="flex h-10 shrink-0 items-center gap-2 border-border border-b px-3 text-xs"
-      >
-        <button
-          type="button"
-          aria-label="Previous PDF page"
-          disabled={page <= 1}
-          onClick={() => {
-            if (runtime.current) runtime.current.viewer.currentPageNumber = page - 1
-          }}
-          className="rounded p-1 hover:bg-accent disabled:opacity-30"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-        <input
-          data-testid="pdf-page-number"
-          aria-label="PDF page"
-          type="number"
-          min={1}
-          max={pages || 1}
-          value={page}
-          className="w-12 rounded border border-border bg-background px-1 py-0.5 text-center"
-          onChange={(event) => {
-            const value = Number(event.target.value)
-            if (runtime.current && value >= 1 && value <= pages)
-              runtime.current.viewer.currentPageNumber = value
-          }}
-        />
-        <span className="text-muted-foreground">/ {pages || "…"}</span>
-        <button
-          type="button"
-          aria-label="Next PDF page"
-          disabled={page >= pages}
-          onClick={() => {
-            if (runtime.current) runtime.current.viewer.currentPageNumber = page + 1
-          }}
-          className="rounded p-1 hover:bg-accent disabled:opacity-30"
-        >
-          <ChevronRight className="size-4" />
-        </button>
-        <span className="mx-1 h-4 border-border border-l" />
-        <select
-          data-testid="pdf-zoom"
-          aria-label="PDF zoom"
-          value={scale}
-          onChange={(event) => {
-            if (runtime.current) runtime.current.viewer.currentScaleValue = event.target.value
-          }}
-          className="rounded border border-border bg-background px-2 py-1"
-        >
-          <option value="page-width">Fit width</option>
-          <option value="page-fit">Fit page</option>
-          {[0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((value) => (
-            <option key={value} value={String(value)}>
-              {value * 100}%
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          aria-label="Reload PDF"
-          title="Reload PDF"
-          onClick={() => refreshAction.current()}
-          className="rounded p-1 hover:bg-accent"
-        >
-          <RotateCw className="size-3.5" />
-        </button>
-        <span className="ml-auto truncate text-muted-foreground">
-          Double-click to show LaTeX source
-        </span>
-      </div>
       {error ? (
         <p
           role="alert"

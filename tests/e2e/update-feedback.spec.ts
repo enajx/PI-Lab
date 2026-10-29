@@ -2,7 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const desktop = join(process.cwd(), "apps/desktop")
 const executablePath = createRequire(join(desktop, "package.json"))("electron") as string

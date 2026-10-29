@@ -11,6 +11,7 @@ import {
   useEditorFontFamily,
   useEditorFontSize,
 } from "../../../preferences/preferences"
+import { focusHeldOnOpen } from "../../focusOnOpen"
 import { languageForPath } from "../../utils/languageForPath"
 import { editorThemeExtension } from "../editorThemes"
 import { editorSetup } from "./editorSetup"
@@ -38,8 +39,17 @@ interface CodeMirrorBufferProps {
    * one CodeMirror view per open file.
    */
   relPath: string
-  /** Take keyboard focus when the view mounts. False for editors in splits without focus. */
+  /**
+   * Take keyboard focus when the view mounts, unless focus is in a region that holds it
+   * (the file tree). False for editors in splits without focus.
+   */
   autoFocus: boolean
+  /**
+   * False while the editor's split tab is hidden. A browser cannot focus a hidden element,
+   * so focus asked for on mount or by {@link sourceLocation} waits until the tab is shown.
+   * Omitted means always shown.
+   */
+  shown?: boolean
   /**
    * Initial document text. Changing it remounts the view via the parent's
    * `key`, so this is read once per mount; live external reloads are applied by
@@ -132,6 +142,8 @@ interface MarkdownOverlayState {
 }
 
 const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: null, mention: null }
+/** Frames to keep retrying a requested focus while the split dock reveals the editor. */
+const FOCUS_RETRY_FRAMES = 5
 
 /**
  * Thin React wrapper around a CodeMirror 6 `EditorView`. It owns exactly one view for its lifetime: the doc,
@@ -150,6 +162,7 @@ const EMPTY_MARKDOWN_OVERLAY: MarkdownOverlayState = { toolbar: null, slash: nul
 export function CodeMirrorBuffer({
   relPath,
   autoFocus,
+  shown,
   initialDoc,
   onChange,
   onSave,
@@ -170,6 +183,8 @@ export function CodeMirrorBuffer({
   const t = useTranslate()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  /** Focus was asked for (on mount or by a source location) but not yet taken. */
+  const focusPending = useRef(false)
   const [fontFamily] = useEditorFontFamily()
   const [fontSize] = useEditorFontSize()
   const markdown = isMarkdownPath(relPath)
@@ -481,7 +496,8 @@ export function CodeMirrorBuffer({
 
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
-    if (autoFocus) view.focus()
+    // A file opened from the file tree leaves focus on the tree row that opened it.
+    focusPending.current = autoFocus && !focusHeldOnOpen()
     reportCursor(view)
     onReadyRef.current?.()
     if (markdown) updateMarkdownOverlay(view)
@@ -548,8 +564,28 @@ export function CodeMirrorBuffer({
       selection: { anchor: position },
       effects: EditorView.scrollIntoView(position, { y: "center" }),
     })
-    view.focus()
+    focusPending.current = true
   }, [sourceLocation])
+
+  // Take focus asked for on mount or by a source location once this editor is focused and shown.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new source location asks for focus again.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !focusPending.current || !autoFocus || shown === false) return
+    // The split dock reveals a newly shown tab in an animation frame, and the browser
+    // ignores focus on a hidden element, so retry for a few frames until focus is taken.
+    let frame = 0
+    const attempt = (remaining: number): void => {
+      view.focus()
+      if (view.root.activeElement === view.contentDOM) {
+        focusPending.current = false
+        return
+      }
+      if (remaining > 0) frame = requestAnimationFrame(() => attempt(remaining - 1))
+    }
+    attempt(FOCUS_RETRY_FRAMES)
+    return () => cancelAnimationFrame(frame)
+  }, [autoFocus, shown, sourceLocation])
 
   const formatSelection = (prefix: string, suffix: string, placeholder: string) => {
     const view = viewRef.current

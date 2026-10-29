@@ -6,17 +6,6 @@ afterEach(async () => {
   await harness?.dispose()
 })
 
-test("agent quit policy defaults to stop and persists independently of launch preferences", async () => {
-  harness = await createHarness([], { git: false, daemon: "lazy" })
-  expect((await harness.caller.settings.get()).agents).toMatchObject({ quitBehavior: "stop" })
-  await harness.caller.settings.updateAgents({ quitBehavior: "keep-running" })
-  await harness.caller.settings.updateAgents({ projectConfigStorage: "both" })
-  expect((await harness.caller.settings.get()).agents).toMatchObject({
-    quitBehavior: "keep-running",
-    projectConfigStorage: "both",
-  })
-})
-
 test("launch defaults persist per provider and reject unsupported effort values", async () => {
   harness = await createHarness([], { git: false, daemon: "lazy" })
   expect((await harness.caller.settings.get()).agents.launchDefaults).toEqual({})
@@ -25,7 +14,7 @@ test("launch defaults persist per provider and reject unsupported effort values"
     "claude-code": { model: "opus" },
   }
   await harness.caller.settings.updateAgents({ launchDefaults })
-  await harness.caller.settings.updateAgents({ quitBehavior: "keep-running" })
+  await harness.caller.settings.updateAgents({ projectConfigStorage: "both" })
   expect((await harness.caller.settings.get()).agents.launchDefaults).toEqual(launchDefaults)
   await harness.caller.settings.updateAgents({ launchDefaults: { codex: { model: "" } } })
   expect((await harness.caller.settings.get()).agents.launchDefaults).toEqual({

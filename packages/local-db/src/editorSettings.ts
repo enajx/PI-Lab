@@ -37,6 +37,10 @@ export interface EditorSettings {
   pythonRunDestination: PythonRunDestination
   /** LaTeX compiler used for every project. */
   latexProvider: LatexProvider
+  /** Show entries whose name starts with "." in the file tree (default on). */
+  showHiddenFiles: boolean
+  /** Ask before moving a file tree entry to the Trash (default on). */
+  confirmFileDelete: boolean
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -50,4 +54,6 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  showHiddenFiles: true,
+  confirmFileDelete: true,
 }

@@ -1,19 +1,21 @@
-import { type ChildProcess, spawn } from "node:child_process"
+import { type ChildProcess, execFile, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { connect } from "node:net"
-import { join } from "node:path"
-import { DaemonClient } from "@pi-lab/pty-daemon"
-import { resolveDaemonSocketPath } from "./socketPath"
+import { DaemonClient, type SessionInfo } from "@pi-lab/pty-daemon"
+import { resolveDaemonEntry, resolveDaemonSocketPath } from "./socketPath"
+
+export { resolveDaemonEntry }
 
 /**
  * Keeps exactly one PTY daemon reachable for the lifetime of the app.
  *
  * The daemon is a *separate, detached* process on purpose: live
  * terminals and agent sessions must outlive an Electron reload or a full app
- * quit, so in normal use the supervisor never owns the daemon's lifecycle — it
- * only ensures one is listening and holds a client to it. (The one exception is
+ * quit, so in normal use the supervisor only ensures one is listening and holds a
+ * client to it. The exceptions are an explicit user Quit, which asks the daemon to
+ * stop everything and exit ({@link TerminalSupervisor.shutdownDaemon}), and
  * {@link SupervisorOptions.reapDaemonOnDispose}, enabled under test mode, which
- * reaps the spawned daemon on dispose so E2E runs don't orphan one.)
+ * reaps the spawned daemon on dispose so E2E runs don't orphan one.
  *
  * Adopt-or-spawn:
  *   - If something is already listening on the resolved socket (a daemon a prior
@@ -64,15 +66,6 @@ const DEFAULT_RECONNECT_BASE_MS = 200
 const DEFAULT_RECONNECT_MAX_MS = 3_000
 
 /**
- * Resolve the bundled daemon entry. electron-vite emits the daemon bundle to
- * `out/pty-daemon/index.js`; the compiled main lives at `out/main/index.js`, so
- * the sibling directory is one level up from `__dirname`.
- */
-export function resolveDaemonEntry(): string {
-  return join(__dirname, "..", "pty-daemon", "index.js")
-}
-
-/**
  * Plan the child launch. We run the daemon with the *current executable* in
  * pure-Node mode (`ELECTRON_RUN_AS_NODE=1`): Electron's bundled Node executes
  * the bundle as a plain Node process and loads the same N-API node-pty addon.
@@ -108,6 +101,78 @@ export function isDaemonListening(socketPath: string): Promise<boolean> {
     probe.once("connect", () => settle(true))
     probe.once("error", () => settle(false))
   })
+}
+
+/**
+ * Pids of pty-daemon processes serving exactly `socketPath`, from `ps` output of
+ * "pid command" lines. The daemon runs as `<executable> <…>/pty-daemon/index.js
+ * <socket>`; paths may contain spaces, so the line must end with that pair.
+ */
+export function daemonPidsFromProcessList(
+  processList: string,
+  socketPath: string,
+  selfPid: number,
+): number[] {
+  const suffix = `/pty-daemon/index.js ${socketPath}`
+  const pids: number[] = []
+  for (const line of processList.split("\n")) {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line)
+    if (!match?.[1] || !match[2]?.trimEnd().endsWith(suffix)) continue
+    const pid = Number(match[1])
+    if (pid !== selfPid) pids.push(pid)
+  }
+  return pids
+}
+
+/** List processes with `ps` and find the daemon serving `socketPath`. */
+function findDaemonPids(socketPath: string): Promise<{ pids: number[] } | { error: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      "ps",
+      ["-axww", "-o", "pid=,command="],
+      { maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout) => {
+        if (error) resolve({ error: errorText(error) })
+        else resolve({ pids: daemonPidsFromProcessList(stdout, socketPath, process.pid) })
+      },
+    )
+  })
+}
+
+/** SIGTERM, then SIGKILL if the process is still alive after `graceMs`. */
+async function terminateProcess(pid: number, graceMs: number): Promise<void> {
+  signalProcess(pid, "SIGTERM")
+  const deadline = Date.now() + graceMs
+  while (processAlive(pid)) {
+    if (Date.now() >= deadline) {
+      signalProcess(pid, "SIGKILL")
+      return
+    }
+    await delay(25)
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false
+    throw error
+  }
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** Signal a process that may already have exited. */
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+  }
 }
 
 function delay(ms: number): Promise<void> {
@@ -290,6 +355,70 @@ export class TerminalSupervisor {
       }
     }
     this.monitorReconnecting = false
+  }
+
+  /** Sessions of a daemon that is already listening; never starts one. */
+  async listSessionsIfRunning(): Promise<SessionInfo[]> {
+    if (!this.client && !(await isDaemonListening(this.socketPath))) return []
+    return (await this.ensureClient()).list()
+  }
+
+  /**
+   * Explicit Quit: ask the daemon (spawned or adopted) to stop every session and
+   * job and exit, then tear down the supervisor without reconnecting. A daemon
+   * this app spawned that is not listening yet is stopped by pid. It never
+   * throws and never waits past `timeoutMs`: on a missing or late confirmation it
+   * warns, sends SIGTERM to the daemon pid when known, and returns so quit goes on.
+   */
+  async shutdownDaemon(timeoutMs: number, warn: (message: string) => void): Promise<void> {
+    // Set first so the daemon closing our connections does not trigger a reconnect.
+    this.disposed = true
+    const deadline = Date.now() + timeoutMs
+    let pid = this.child?.pid ?? null
+    let client = this.client
+    const shutdown = (async () => {
+      if (!client) {
+        if (!(await isDaemonListening(this.socketPath))) {
+          // A daemon this app spawned but that is not listening yet cannot be asked: stop it by pid.
+          if (pid !== null) await terminateProcess(pid, 1_000)
+          return
+        }
+        client = new DaemonClient(this.socketPath)
+        await client.connect()
+      }
+      pid = (await client.shutdown()).pid
+      // The daemon removes its socket after stopping sessions, then exits.
+      while (await isDaemonListening(this.socketPath)) {
+        if (Date.now() >= deadline) throw new Error("its socket is still listening")
+        await delay(25)
+      }
+    })()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`no reply within ${timeoutMs}ms`)), timeoutMs)
+    })
+    await Promise.race([shutdown, timeout])
+      .catch(async (error: unknown) => {
+        const reason = `[pi-lab] pty-daemon did not confirm shutdown (${errorText(error)})`
+        // An adopted daemon from an earlier build ignores `shutdown` and its pid is unknown:
+        // find it by its command line, which names our entry and this socket.
+        const found = pid === null ? await findDaemonPids(this.socketPath) : { pids: [pid] }
+        if ("error" in found) {
+          warn(`${reason}; listing processes failed (${found.error}), so it may still be running`)
+          return
+        }
+        if (found.pids.length === 0) {
+          warn(`${reason}; no pty-daemon process owns ${this.socketPath}, so nothing was stopped`)
+          return
+        }
+        warn(`${reason}; stopping pid ${found.pids.join(", ")} with SIGTERM, then SIGKILL`)
+        await Promise.all(found.pids.map((target) => terminateProcess(target, 1_000))).catch(
+          (error: unknown) => warn(`[pi-lab] could not stop pty-daemon: ${errorText(error)}`),
+        )
+      })
+      .finally(() => clearTimeout(timer))
+    client?.close()
+    this.dispose()
   }
 
   /** The socket this supervisor uses (for diagnostics/tests). */

@@ -1,4 +1,8 @@
-import { type ProjectWorkspaceState, WorkspaceRecoveryStore } from "./-workspaceRecovery"
+import {
+  type ProjectWorkspaceState,
+  type ProjectWorkspaceViewState,
+  WorkspaceRecoveryStore,
+} from "./-workspaceRecovery"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 
 export type { ProjectWorkspaceState } from "./-workspaceRecovery"
@@ -28,10 +32,7 @@ export function writeProjectWorkspaceState(
 
 export function writeProjectWorkspaceViewState(
   projectId: string,
-  view: Pick<
-    ProjectWorkspaceState,
-    "rightSidebarCollapsed" | "rightSidebarActiveId" | "pinnedPanels"
-  >,
+  view: ProjectWorkspaceViewState,
 ): void {
   workspaceRecovery().writeView(projectId, view)
 }

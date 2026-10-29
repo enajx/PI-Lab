@@ -17,7 +17,12 @@ vi.mock("electron", () => ({
   },
 }))
 
-import { installAppMenu, setReadyUpdateMenuItem, setUserQuitAction } from "./appMenu"
+import {
+  installAppMenu,
+  setCloseTabAction,
+  setReadyUpdateMenuItem,
+  setUserQuitAction,
+} from "./appMenu"
 
 afterEach(() => {
   setReadyUpdateMenuItem(null)
@@ -40,16 +45,24 @@ describe("app menu", () => {
     quit.click()
     expect(request).toHaveBeenCalledOnce()
   })
-  test.skipIf(process.platform !== "darwin")("Cmd+W hides the app without closing windows", () => {
-    installAppMenu()
-    const template = menu.buildFromTemplate.mock.lastCall?.[0]
-    const background = template
-      .flatMap((item: { submenu?: unknown[] }) => item.submenu ?? [])
-      .find((item: { accelerator?: string }) => item.accelerator === "Command+W")
-    expect(background).toBeDefined()
-    background.click()
-    expect(appState.hide).toHaveBeenCalledOnce()
-  })
+  test.skipIf(process.platform !== "darwin")(
+    "Cmd+W runs the close-tab action after menu rebuilds and never closes windows",
+    () => {
+      const closeTab = vi.fn()
+      setCloseTabAction(closeTab)
+      setReadyUpdateMenuItem({ version: "1.2.0", restart: vi.fn() })
+      const template = menu.buildFromTemplate.mock.lastCall?.[0]
+      const close = template
+        .flatMap((item: { submenu?: unknown[] }) => item.submenu ?? [])
+        .find((item: { accelerator?: string }) => item.accelerator === "Command+W")
+      expect(close).toBeDefined()
+      expect(close.label).toBe("Close")
+      expect(close.role).toBeUndefined()
+      close.click()
+      expect(closeTab).toHaveBeenCalledOnce()
+      expect(appState.hide).not.toHaveBeenCalled()
+    },
+  )
 
   test.skipIf(process.platform !== "darwin")(
     "offers Restart to Update only when a public update is ready",

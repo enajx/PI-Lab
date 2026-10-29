@@ -6,7 +6,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = join(HERE, "..", "..", "apps", "desktop")
@@ -88,6 +93,7 @@ test("selects nested task and main Markdown files through the real app", async (
   await window.reload()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
+  await window.getByTestId("panel-tab-research").click()
   await expect(window.getByTestId("panel-research")).toContainText("Selected overview")
   await window.getByTestId("panel-tab-todos").click()
   await expect(window.getByTestId("panel-todos")).toContainText("Nested task")

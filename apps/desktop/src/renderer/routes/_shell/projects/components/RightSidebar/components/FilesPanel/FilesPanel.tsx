@@ -1,4 +1,4 @@
-import { FileTree } from "../../../../../../../Editor/components/FileTree"
+import { FileTree, type FileTreeEditorTabs } from "../../../../../../../Editor/components/FileTree"
 
 /**
  * Files panel — the workspace file tree, moved out of the editor into the right
@@ -11,6 +11,7 @@ export function FilesPanel({
   activeRelPath,
   onPinFile,
   onSetMainFile,
+  editorTabs,
 }: {
   workspaceId: string
   onOpenFile: (relPath: string) => void
@@ -18,6 +19,8 @@ export function FilesPanel({
   /** Pin a `.md` file as a right-sidebar panel (via the file row's right-click menu). */
   onPinFile?: (relPath: string) => void
   onSetMainFile?: (relPath: string) => void
+  /** Open editor tabs, closed or moved when the tree deletes or renames their files. */
+  editorTabs?: FileTreeEditorTabs
 }) {
   return (
     <section data-testid="panel-files" className="flex min-h-0 flex-1 flex-col">
@@ -27,6 +30,7 @@ export function FilesPanel({
         activeRelPath={activeRelPath}
         onPinFile={onPinFile}
         onSetMainFile={onSetMainFile}
+        editorTabs={editorTabs}
       />
     </section>
   )

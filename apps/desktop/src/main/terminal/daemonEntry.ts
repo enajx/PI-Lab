@@ -11,9 +11,14 @@
  * The supervisor launches this under Electron's bundled Node
  * (`ELECTRON_RUN_AS_NODE=1`), passing the socket path as argv[1] and via
  * `PI_LAB_SOCKET_PATH`; `resolveSocketPath` prefers the explicit arg.
+ *
+ * With `ALPHA_RESET_PROBE_FLAG` and a socket path, it instead checks an existing
+ * daemon for live terminals or jobs and exits 1 with the refusal on stderr; the
+ * Alpha build reset runs this synchronously before Electron is ready.
  */
 
 import { resolveSocketPath, startDaemon } from "@pi-lab/pty-daemon"
+import { ALPHA_RESET_PROBE_FLAG, assertAlphaResetDaemonIdle } from "./alphaResetGuard"
 
 async function main(): Promise<void> {
   const socketPath = resolveSocketPath(process.argv[2])
@@ -31,7 +36,19 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown)
 }
 
-main().catch((error) => {
-  process.stderr.write(`pty-daemon failed to start: ${String(error)}\n`)
-  process.exit(1)
-})
+if (process.argv[2] === ALPHA_RESET_PROBE_FLAG) {
+  const socketPath = process.argv[3]
+  if (!socketPath) throw new Error("Alpha reset probe needs a socket path")
+  assertAlphaResetDaemonIdle(socketPath).then(
+    () => process.exit(0),
+    (error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+      process.exit(1)
+    },
+  )
+} else {
+  main().catch((error) => {
+    process.stderr.write(`pty-daemon failed to start: ${String(error)}\n`)
+    process.exit(1)
+  })
+}

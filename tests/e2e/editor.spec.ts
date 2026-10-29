@@ -5,7 +5,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 /**
  * Uses a temporary project and the test-mode project-opening seam.
@@ -361,7 +366,9 @@ test.describe("Python environment and run-file on POSIX", () => {
     await expect(terminal).toContainText(PY_RUN_MARKER, { timeout: 30_000 })
   })
 
-  test("runs below the editor without creating a central terminal tab", async () => {
+  // Since the split layout (#3), a below-editor run opens as its own Run tab in a
+  // split below the file's split, never as a terminal session tab.
+  test("runs below the editor in its own Run tab without a terminal session", async () => {
     const window = await app.firstWindow()
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await window.getByTestId("project-item").click()
@@ -375,21 +382,24 @@ test.describe("Python environment and run-file on POSIX", () => {
     await expect(window.getByTestId("editor-settings-run-destination")).toHaveValue("below-editor")
     await window.keyboard.press("Escape")
 
-    await window.getByTestId("editor-buffer").locator(".cm-content").click()
+    const editor = window.getByTestId("editor-buffer")
+    await editor.locator(".cm-content").click()
     await window.keyboard.press("ControlOrMeta+Enter")
     const region = window.getByTestId("editor-run-terminal")
     await expect(region).toBeVisible({ timeout: 30_000 })
     await expect(region.getByTestId("terminal")).toContainText(PY_RUN_MARKER, {
       timeout: 30_000,
     })
-    await expect(
-      window.getByTestId("central-tab").filter({ hasText: `Run ${PY_FILE}` }),
-    ).toHaveCount(0)
-
-    await window.getByTestId("editor-run-terminal-collapse").click()
-    await expect(region.getByTestId("terminal")).toHaveCount(0)
-    await window.getByTestId("editor-run-terminal-collapse").click()
-    await expect(region.getByTestId("terminal")).toBeVisible()
+    const runTab = window.getByTestId("central-tab").filter({ hasText: `Run ${PY_FILE}` })
+    await expect(runTab).toHaveCount(1)
+    await expect(runTab).toHaveAttribute("data-tab-kind", "terminal")
+    await expect(window.getByTestId("central-session")).toHaveCount(0)
+    // The file's editor stays shown in its own split above the run output.
+    await expect(editor).toBeVisible()
+    const editorBox = await editor.boundingBox()
+    const regionBox = await region.boundingBox()
+    if (!editorBox || !regionBox) throw new Error("Expected the editor and run output on screen")
+    expect(regionBox.y).toBeGreaterThanOrEqual(editorBox.y + editorBox.height - 1)
   })
 })
 

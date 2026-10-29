@@ -155,7 +155,6 @@ export function getAgentSettingsOrDefaults(db: PiLabDatabase): AgentSettings {
   const row = db.select().from(agentSettings).where(eq(agentSettings.id, SETTINGS_ROW_ID)).get()
   if (!row) return DEFAULT_AGENT_SETTINGS
   return {
-    quitBehavior: row.quitBehavior,
     launchDefaults: row.launchDefaults,
     defaultAgentId: row.defaultAgentId,
     projectConfigStorage: row.projectConfigStorage,

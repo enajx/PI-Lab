@@ -896,7 +896,8 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
               className={cn(
                 navRowClass,
                 "text-muted-foreground/50",
-                collapsed ? "cursor-default justify-center" : "cursor-grab",
+                "cursor-default",
+                collapsed && "justify-center",
                 reorder?.dropClass,
               )}
               {...reorder?.dragProps}
@@ -926,7 +927,7 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
             data-feature-help={t(item.description)}
             className={cn(
               navRowClass,
-              collapsed ? "justify-center" : "cursor-grab",
+              collapsed && "justify-center",
               navStateClass(isActive),
               reorder?.dropClass,
             )}
@@ -1039,9 +1040,21 @@ function ProjectItem({
   }
 
   return (
-    <div className={cn(reorder && "cursor-grab", reorder?.dropClass)} {...reorder?.dragProps}>
+    <div className={reorder?.dropClass} {...reorder?.dragProps}>
+      {/* The whole row opens the project; dragging needs a held button and movement. */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the name link inside is the keyboard target. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the click only widens the link's target. */}
       <div
-        className={cn("flex items-center gap-1.5 rounded-md px-2 py-1.5", navStateClass(isActive))}
+        data-testid="project-row"
+        onClick={(event) => {
+          if (event.target instanceof Element && event.target.closest("a, button")) return
+          void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+        }}
+        onContextMenu={onContextMenu}
+        className={cn(
+          "flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5",
+          navStateClass(isActive),
+        )}
       >
         <button
           type="button"
@@ -1071,7 +1084,6 @@ function ProjectItem({
           data-project-id={project.id}
           data-active={isActive}
           data-hidden={Boolean(project.archivedAt)}
-          onContextMenu={onContextMenu}
           className={cn(
             "min-w-0 flex-1 truncate text-start text-sm",
             project.archivedAt && "opacity-60",

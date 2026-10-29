@@ -34,7 +34,7 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     id: "command-palette",
     label: "Command palette",
     description: "Search commands and projects",
-    defaultBinding: "Mod+p",
+    defaultBinding: "Mod+Shift+p",
     editable: true,
   },
   {
@@ -48,7 +48,7 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     id: "project-command-palette",
     label: "Project command palette",
     description: "Run a project action (open agent/terminal/file, switch panel) inside a project",
-    defaultBinding: "Mod+Shift+p",
+    defaultBinding: "Mod+p",
     editable: true,
   },
   {
@@ -129,17 +129,44 @@ export function eventMatchesShortcut(event: KeyboardEvent, id: string): boolean 
   return matchesBinding(event, getBinding(id))
 }
 
-/** Render a binding for display: `"Mod+,"` → `"⌘,"`, `"Mod+p"` → `"⌘P"`. */
+let mountedProjectPalettes = 0
+
+/**
+ * Record that a project palette is mounted (a project view is open). Returns the
+ * cleanup that removes the record. Outside a project view, the project-palette
+ * shortcut opens the global palette instead (see {@link paletteForKeydown}).
+ */
+export function registerProjectPalette(): () => void {
+  mountedProjectPalettes += 1
+  return () => {
+    mountedProjectPalettes -= 1
+  }
+}
+
+/**
+ * Which palette a keydown opens, or `null` when it is not a palette shortcut. The
+ * `command-palette` binding (⇧⌘P) always opens the global palette. The
+ * `project-command-palette` binding (⌘P) opens the project palette while one is
+ * mounted, and the global palette everywhere else. Exactly one palette answers a key.
+ */
+export function paletteForKeydown(event: KeyboardEvent): "global" | "project" | null {
+  if (eventMatchesShortcut(event, "command-palette")) return "global"
+  if (!eventMatchesShortcut(event, "project-command-palette")) return null
+  return mountedProjectPalettes > 0 ? "project" : "global"
+}
+
+/**
+ * Render a binding for display with modifiers in the macOS order (⌥⇧⌘):
+ * `"Mod+,"` → `"⌘,"`, `"Mod+Shift+p"` → `"⇧⌘P"`.
+ */
 export function formatBinding(binding: string): string {
-  return binding
-    .split("+")
-    .map((part) => {
-      if (part === "Mod") return "⌘"
-      if (part === "Shift") return "⇧"
-      if (part === "Alt") return "⌥"
-      return part.toUpperCase()
-    })
-    .join("")
+  const parts = binding.split("+")
+  const key = parts.at(-1) ?? ""
+  const modifiers =
+    (parts.includes("Alt") ? "⌥" : "") +
+    (parts.includes("Shift") ? "⇧" : "") +
+    (parts.includes("Mod") ? "⌘" : "")
+  return modifiers + key.toUpperCase()
 }
 
 /**

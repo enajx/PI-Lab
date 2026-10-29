@@ -33,6 +33,8 @@ export {
   type ProcessSummary,
   type ResizeRequest,
   type SessionInfo,
+  type ShutdownReply,
+  type ShutdownRequest,
   type SpawnReply,
   type SpawnRequest,
   type WriteRequest,

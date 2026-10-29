@@ -8,8 +8,9 @@
 
 import { DaemonServer, resolveSocketPath } from "./server"
 
+/** Listen on `socketPath`; the process exits after a client's shutdown request. */
 export async function startDaemon(socketPath: string): Promise<DaemonServer> {
-  const server = new DaemonServer({ socketPath })
+  const server = new DaemonServer({ socketPath, afterShutdownRequest: () => process.exit(0) })
   await server.listen()
   return server
 }

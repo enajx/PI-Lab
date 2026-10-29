@@ -5,15 +5,15 @@ import {
   agentSessions,
   automationRuns,
   automations,
-  getAgentSettingsOrDefaults,
   getSettingsOrDefaults,
   MigrationFailure,
   projects,
   projectWorkflowRuns,
   resolveDataDir,
+  worktrees,
 } from "@pi-lab/local-db"
 import { eq, max, ne, sql } from "drizzle-orm"
-import { app, type BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron"
+import { app, type BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
@@ -27,7 +27,7 @@ import {
 } from "./activity"
 import { ActivityStatusFeed } from "./activity/statusFeed"
 import { agentLaunchLifecycle } from "./agents/launchLifecycle"
-import { prepareAgentQuit } from "./agents/quitPolicy"
+import { prepareAgentQuit, type QuitMode } from "./agents/quitPolicy"
 import {
   dispatchAutomation,
   hasRunningProjectAutomation,
@@ -37,11 +37,6 @@ import { ManagedProcesses } from "./automations/managedProcesses"
 import { AutomationScheduler } from "./automations/scheduler"
 import { trayProjectSnapshot } from "./background/projectSnapshot"
 import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
-import {
-  AlphaBuildResetFailure,
-  prepareAlphaDatabase,
-  readAlphaBuildId,
-} from "./db/alphaBuildReset"
 import { getDb, initDatabase } from "./db/db"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelFromAppName } from "./identity/channel"
@@ -56,8 +51,7 @@ import { liveStandalonePythonDiscoverer } from "./python/standaloneInterpreters"
 import { QuickPythonRunner } from "./quickEdit/pythonRun"
 import { isTestMode, skillsHomeDirOverride } from "./runtime/env"
 import { testSetupProbe } from "./setup/testProbe"
-import { assertAlphaResetDaemonIdle } from "./terminal/alphaResetGuard"
-import { resolveDaemonSocketPath } from "./terminal/socketPath"
+import { busyTerminals } from "./terminal/busyTerminals"
 import { TerminalSupervisor } from "./terminal/supervisor"
 import { appRouter } from "./trpc/appRouter"
 import {
@@ -84,12 +78,12 @@ import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "./trpc/workfl
 import { publicReleaseFromPackage } from "./updates/release"
 import { initializePublicUpdateChannel } from "./updates/selection"
 import { installAppMenu } from "./window/appMenu"
+import { confirmStopDialog, type QuitWork } from "./window/userQuit"
 
 interface FullRuntimeHost {
   getAppIconPath: () => string | null
   ensureMainWindow: () => BrowserWindow
   initialWindow: () => BrowserWindow | null
-  openAgentSettings: () => void
 }
 
 /** Full-app services are imported and constructed after the quick editor has a caret. */
@@ -158,23 +152,6 @@ export class FullRuntime {
 
   /** Show the window after database setup; hold IPC contexts until reconciliation finishes. */
   async start(): Promise<void> {
-    const channel = channelFromAppName(app.getName())
-    if (app.isPackaged && channel === "alpha") {
-      const dataDir = resolveDataDir()
-      await Promise.resolve()
-        .then(() =>
-          prepareAlphaDatabase({
-            channel,
-            isPackaged: true,
-            buildId: readAlphaBuildId(true, app.getAppPath()),
-            dataDir,
-            beforeReset: () => assertAlphaResetDaemonIdle(resolveDaemonSocketPath()),
-          }),
-        )
-        .catch((error: unknown) => {
-          throw new AlphaBuildResetFailure(dataDir, error)
-        })
-    }
     const dbStatus = initDatabase()
     initializePublicUpdateChannel(
       getDb(),
@@ -396,46 +373,63 @@ export class FullRuntime {
       .some((project) => project.id === id)
   }
 
-  /** Count all managed agent modes, including result fetching, before a user quit choice. */
-  async runningAgentCount(): Promise<number> {
+  /**
+   * Work an explicit Quit would stop: all managed agent modes, including result
+   * fetching, and ordinary shells or Python runs that are running a command.
+   * Does not start the PTY daemon when none is running.
+   */
+  async quitWork(): Promise<QuitWork> {
     await this.ensureAgentRecovery()
     await this.recoverBackgroundAgents()
-    return (await this.liveTerminalAgents()).length + (await this.managedProcesses.runningCount())
+    const agents =
+      (await this.liveTerminalAgents()).length + (await this.managedProcesses.runningCount())
+    const db = getDb()
+    const roots = [
+      ...db.select({ project: projects.name, path: projects.repoPath }).from(projects).all(),
+      ...db
+        .select({ project: projects.name, path: worktrees.path })
+        .from(worktrees)
+        .innerJoin(projects, eq(worktrees.projectId, projects.id))
+        .all(),
+    ]
+    const sessions = await this.terminalSupervisor.listSessionsIfRunning()
+    return { agents, terminals: busyTerminals(sessions, await this.agentSessionIds(), roots) }
   }
 
-  /** Explicit Quit stops work; programmatic quits retain the saved policy. */
-  async prepareQuit(stopConfirmed: boolean): Promise<boolean> {
+  /**
+   * Apply one quit mode (see {@link QuitMode}). `end` and `confirm-end` stop agents
+   * and fetching, then ask the PTY daemon to stop every shell, Python run and job
+   * and exit, so no PI Lab process remains; `keep` (Restart to Update) leaves all
+   * of them running for the restarted app to reattach.
+   */
+  async prepareQuit(mode: QuitMode): Promise<boolean> {
     try {
       await this.ensureAgentRecovery()
       return await prepareAgentQuit({
+        mode,
         pause: async () => {
           await agentLaunchLifecycle.pause()
           await this.recoverBackgroundAgents()
         },
         resume: () => agentLaunchLifecycle.resume(),
-        behavior: () => (stopConfirmed ? "stop" : getAgentSettingsOrDefaults(getDb()).quitBehavior),
-        count: async () =>
-          (await this.liveTerminalAgents()).length + (await this.managedProcesses.runningCount()),
-        confirm: async (count) => {
-          if (stopConfirmed) return "stop"
+        work: () => this.quitWork(),
+        confirm: async (work) => {
           const result = await dialog.showMessageBox({
             type: "warning",
-            title: "Agents are running",
-            message: `${count} agent${count === 1 ? " is" : "s are"} still running.`,
-            detail:
-              "Your Settings say to stop agents when quitting PI Lab. Quitting will stop them. To leave agents running in the background, change When quitting PI Lab in Settings → Agents & worktrees.",
-            buttons: ["Cancel", "Quit and stop agents", "Open Settings"],
-            defaultId: 0,
-            cancelId: 0,
+            title: "Work is still running",
+            ...confirmStopDialog(work),
+            defaultId: 1,
+            cancelId: 1,
             noLink: true,
           })
-          return result.response === 1 ? "stop" : result.response === 2 ? "settings" : "cancel"
+          return result.response === 0 ? "stop" : "cancel"
         },
-        settings: () => this.host.openAgentSettings(),
         stop: async () => {
           this.automationScheduler?.stop()
           await Promise.all([this.stopTerminalAgents(), this.managedProcesses.stopAll()])
           await Promise.all([...this.processFinalizers])
+          // Bounded: a missing or late daemon confirmation warns and quit goes on.
+          await this.terminalSupervisor.shutdownDaemon(3_000, (message) => console.warn(message))
         },
       })
     } catch (error) {
@@ -449,15 +443,20 @@ export class FullRuntime {
     }
   }
 
-  /** Only PI Lab agent sessions are affected; ordinary shells and Python runs are separate. */
-  private async liveTerminalAgents() {
+  /** Daemon session ids of PI Lab agents and planning sessions that have not exited. */
+  private async agentSessionIds(): Promise<Set<string>> {
     const rows = getDb()
       .select({ sessionId: agentSessions.sessionId })
       .from(agentSessions)
       .where(ne(agentSessions.state, "exited"))
       .all()
     const planning = await listPlanningAgentSessions()
-    const ids = new Set([...rows, ...planning].map((row) => row.sessionId))
+    return new Set([...rows, ...planning].map((row) => row.sessionId))
+  }
+
+  /** Only PI Lab agent sessions are affected; ordinary shells and Python runs are separate. */
+  private async liveTerminalAgents() {
+    const ids = await this.agentSessionIds()
     if (ids.size === 0) return []
     return (await (await this.terminalSupervisor.ensureClient()).list()).filter(
       (session) => ids.has(session.id) && session.alive,
@@ -559,6 +558,8 @@ export class FullRuntime {
       httpFetch: DEFAULT_HTTP_FETCH,
       openPath: (path) => shell.openPath(path),
       revealPath: (path) => shell.showItemInFolder(path),
+      trashPath: (path) => shell.trashItem(path),
+      writeClipboard: (text) => clipboard.writeText(text),
       thumbnailImageProcessor: electronThumbnailImageProcessor,
       pyToolsExec: DEFAULT_PY_TOOLS_EXEC,
       discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
@@ -575,7 +576,7 @@ export class FullRuntime {
 
 /** Keep the existing native migration error when the deferred boot fails. */
 export function reportFullBootFailure(error: unknown): void {
-  if (error instanceof MigrationFailure || error instanceof AlphaBuildResetFailure) {
+  if (error instanceof MigrationFailure) {
     dialog.showErrorBox(nativeText("PI Lab database could not be opened"), error.message)
   }
 }

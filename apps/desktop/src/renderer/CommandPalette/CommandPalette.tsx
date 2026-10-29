@@ -16,7 +16,7 @@ interface RankedCommand {
 }
 
 /**
- * The `⌘P` command palette: a centered overlay that
+ * The `⇧⌘P` command palette (also `⌘P` outside a project view): a centered overlay that
  * fuzzy-searches **commands + projects** (NOT files — file quick-open lives on ⌘F).
  * Typing ranks entries by the shared `@pi-lab/shared` fuzzy scorer with match
  * highlighting; ↑/↓ move the highlight, Enter runs the highlighted entry, Esc/backdrop

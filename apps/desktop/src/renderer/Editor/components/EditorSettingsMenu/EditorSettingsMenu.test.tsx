@@ -21,6 +21,8 @@ const SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  showHiddenFiles: true,
+  confirmFileDelete: true,
 }
 
 describe("EditorSettingsMenu", () => {

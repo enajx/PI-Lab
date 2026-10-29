@@ -3,7 +3,12 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DESKTOP_DIR = join(HERE, "..", "..", "apps", "desktop")

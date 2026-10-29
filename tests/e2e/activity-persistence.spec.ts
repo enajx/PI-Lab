@@ -7,7 +7,12 @@ import { dirname, join } from "node:path"
 import { performance } from "node:perf_hooks"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const execFileAsync = promisify(execFile)
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -177,9 +182,7 @@ test("active output does not rewrite completed sessions in the real app", async 
   } finally {
     sqlite?.close()
     if (app) {
-      await app.evaluate(({ dialog }) => {
-        dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
-      })
+      // The test-mode dialog responder answers the quit confirmation with Quit.
       let forced = false
       const timeout = setTimeout(() => {
         forced = true

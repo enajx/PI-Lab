@@ -5,7 +5,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 const execFileAsync = promisify(execFile)
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
@@ -98,9 +103,7 @@ test("Settings defaults reach new agents and a one-off provider leaves the proje
     await expect(window.getByTestId("edit-project-agent")).toHaveValue("")
   } finally {
     if (app) {
-      await app.evaluate(({ dialog }) => {
-        dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
-      })
+      // The test-mode dialog responder answers the quit confirmation with Quit.
       await app.close()
     }
     await rm(dataDir, { recursive: true, force: true })

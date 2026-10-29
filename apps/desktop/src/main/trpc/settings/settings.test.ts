@@ -66,6 +66,8 @@ describe("settings.get", () => {
       customEditorThemes: [],
       pythonRunDestination: "central",
       latexProvider: "bundled",
+      showHiddenFiles: true,
+      confirmFileDelete: true,
     })
   })
 })
@@ -190,6 +192,8 @@ describe("settings.updateEditor", () => {
       customEditorThemes: [],
       pythonRunDestination: "central",
       latexProvider: "bundled",
+      showHiddenFiles: true,
+      confirmFileDelete: true,
     })
 
     // The patch persisted and `get` reflects it.
@@ -210,6 +214,8 @@ describe("settings.updateEditor", () => {
       customEditorThemes: [],
       pythonRunDestination: "central",
       latexProvider: "bundled",
+      showHiddenFiles: true,
+      confirmFileDelete: true,
     })
   })
 
@@ -322,13 +328,19 @@ describe("settings.updateAgents", () => {
     })
     expect(result).toEqual({
       projectConfigStorage: "both",
-      quitBehavior: "stop",
       launchDefaults: {},
       defaultAgentId: null,
       executableOverrides: { codex: "/opt/homebrew/bin/codex" },
       setupCompleted: false,
     })
     expect((await harness.caller.settings.get()).agents).toEqual(result)
+  })
+
+  it("has no agent quit setting and rejects one", async () => {
+    expect((await harness.caller.settings.get()).agents).not.toHaveProperty("quitBehavior")
+    await expect(
+      harness.caller.settings.updateAgents({ quitBehavior: "keep-running" } as never),
+    ).rejects.toThrow()
   })
 
   it("persists first-run setup completion without clobbering launch settings", async () => {
@@ -339,12 +351,30 @@ describe("settings.updateAgents", () => {
     const result = await harness.caller.settings.updateAgents({ setupCompleted: true })
     expect(result).toEqual({
       projectConfigStorage: "project",
-      quitBehavior: "stop",
       launchDefaults: {},
       defaultAgentId: null,
       executableOverrides: { codex: "/usr/local/bin/codex" },
       setupCompleted: true,
     })
+  })
+})
+
+describe("show hidden files", () => {
+  it("persists turning hidden files off and back on", async () => {
+    await harness.caller.settings.updateEditor({ showHiddenFiles: false })
+    expect((await harness.caller.settings.get()).editor.showHiddenFiles).toBe(false)
+    await harness.caller.settings.updateEditor({ showHiddenFiles: true })
+    expect((await harness.caller.settings.get()).editor.showHiddenFiles).toBe(true)
+  })
+})
+
+describe("confirm file delete", () => {
+  it("persists turning delete confirmation off and back on", async () => {
+    expect((await harness.caller.settings.get()).editor.confirmFileDelete).toBe(true)
+    await harness.caller.settings.updateEditor({ confirmFileDelete: false })
+    expect((await harness.caller.settings.get()).editor.confirmFileDelete).toBe(false)
+    await harness.caller.settings.updateEditor({ confirmFileDelete: true })
+    expect((await harness.caller.settings.get()).editor.confirmFileDelete).toBe(true)
   })
 })
 

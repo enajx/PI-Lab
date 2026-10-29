@@ -201,8 +201,6 @@ export type ProjectConfigStorage = "app" | "project" | "both"
 
 /** App-wide agent launch and per-project config persistence preferences. */
 export interface AgentSettings {
-  /** Applies to every PI Lab-managed agent, independent of its execution mode. */
-  quitBehavior: "stop" | "keep-running"
   defaultAgentId: string | null
   launchDefaults: Record<string, { model?: string; effort?: string }>
   projectConfigStorage: ProjectConfigStorage
@@ -213,7 +211,6 @@ export interface AgentSettings {
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
-  quitBehavior: "stop",
   defaultAgentId: null,
   launchDefaults: {},
   projectConfigStorage: "app",
@@ -681,10 +678,6 @@ export const agentSettings = sqliteTable("agent_settings", {
     .$type<AgentSettings["launchDefaults"]>()
     .default({}),
   id: integer("id").primaryKey().default(1),
-  quitBehavior: text("quit_behavior")
-    .notNull()
-    .$type<AgentSettings["quitBehavior"]>()
-    .default("stop"),
   projectConfigStorage: text("project_config_storage")
     .notNull()
     .$type<ProjectConfigStorage>()

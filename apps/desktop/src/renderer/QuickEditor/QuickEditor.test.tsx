@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, test, vi } from "vitest"
+import type { CloseTabRequest } from "../../shared/closeTab"
 import type { QuickEditBridge, QuickEditTarget } from "../../shared/quickEdit"
+import { installCloseTabResponder } from "../shortcuts/closeTab"
 import { QuickEditor } from "./QuickEditor"
 import { readQuickBuffer } from "./quickEditorState"
 
@@ -142,4 +144,73 @@ test("save completion updates the remounted quick draft baseline without replaci
   bridge.save.mockResolvedValueOnce({ status: "saved", baseline: savedBaseline })
   fireEvent.click(screen.getByRole("button", { name: /^Save$/ }))
   expect(bridge.save).toHaveBeenLastCalledWith("save-remount", "newer draft", savedBaseline, false)
+})
+
+/** Send one Cmd+W request through the renderer responder (fake preload bridge). */
+function pressCmdW(): boolean {
+  let listener: ((request: CloseTabRequest) => void) | null = null
+  const answers: boolean[] = []
+  const uninstall = installCloseTabResponder({
+    subscribe: (next) => {
+      listener = next
+      return () => {
+        listener = null
+      }
+    },
+    respond: (response) => answers.push(response.handled),
+  })
+  act(() => listener?.({ requestId: "cmd-w" }))
+  uninstall()
+  expect(answers).toHaveLength(1)
+  return answers[0] as boolean
+}
+
+test("Cmd+W in the full-app Editor closes a saved file and asks before closing a dirty one", async () => {
+  const target = { id: "cmd-w-editor", path: "/tmp/cmd-w-editor.txt" }
+  const { bridge } = installBridge(target, async () => text("abc"))
+  const close = vi.fn(async () => {})
+  Object.assign(bridge, { close, subscribeRoute: () => () => {} })
+  const view = render(<QuickEditor fullApp targetId={target.id} />)
+  await screen.findByRole("textbox")
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "abc changed" } })
+  expect(pressCmdW()).toBe(true)
+  expect(screen.getByRole("dialog", { name: "Close editor file" })).toBeTruthy()
+  expect(close).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "abc" } })
+  expect(pressCmdW()).toBe(true)
+  await waitFor(() => expect(close).toHaveBeenCalledWith(target.id))
+  view.unmount()
+  expect(pressCmdW()).toBe(false)
+})
+
+test("Cmd+W in an empty full-app Editor or the standalone quick editor backgrounds the app", async () => {
+  const { bridge } = installBridge({ id: "cmd-w-quick", path: "/tmp/cmd-w-quick.txt" }, async () =>
+    text("abc"),
+  )
+  const quick = render(<QuickEditor fullApp={false} />)
+  await screen.findByRole("textbox")
+  expect(pressCmdW()).toBe(false)
+  quick.unmount()
+  Object.assign(bridge, { subscribeRoute: () => () => {} })
+  render(<QuickEditor fullApp />)
+  await screen.findByTestId("quick-editor-full-app")
+  expect(pressCmdW()).toBe(false)
+})
+
+test("the full-app Editor tab × asks before closing a dirty file and closes a clean one", async () => {
+  const target = { id: "x-editor", path: "/tmp/x-editor.txt" }
+  const { bridge } = installBridge(target, async () => text("abc"))
+  const close = vi.fn(async () => {})
+  Object.assign(bridge, { close, subscribeRoute: () => () => {} })
+  render(<QuickEditor fullApp targetId={target.id} />)
+  await screen.findByRole("textbox")
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "abc changed" } })
+  fireEvent.click(screen.getByTestId("quick-editor-tab-close"))
+  expect(screen.getByRole("dialog", { name: "Close editor file" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(close).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "abc" } })
+  fireEvent.click(screen.getByTestId("quick-editor-tab-close"))
+  await waitFor(() => expect(close).toHaveBeenCalledWith(target.id))
 })

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest"
-import { WorkspaceRecoveryStore } from "./-workspaceRecovery"
+import { RECOVERY_PREFIX, WorkspaceRecoveryStore } from "./-workspaceRecovery"
 import {
   readProjectWorkspaceState,
   workspaceRecovery,
@@ -42,6 +42,7 @@ describe("project workspace restoration preference", () => {
       rightSidebarCollapsed: true,
       rightSidebarActiveId: "research",
       pinnedPanels: ["PROJECT.md"],
+      filesPanelOpen: true,
     })
 
     expect(readProjectWorkspaceState(projectId, false)?.buffers[0]?.content).toBe("# Draft")
@@ -56,6 +57,27 @@ describe("project workspace restoration preference", () => {
       rightSidebarCollapsed: true,
       rightSidebarActiveId: "research",
       pinnedPanels: ["PROJECT.md"],
+      filesPanelOpen: true,
     })
+  })
+
+  test("a project saved without its own left Files column value keeps none (follows the global default)", () => {
+    const projectId = `legacy-files-panel-${Math.random()}`
+    writeProjectWorkspaceState(projectId, {
+      buffers: [],
+      activeRelPath: null,
+      sessions: [],
+      active: null,
+      belowEditorRun: null,
+    })
+    workspaceRecovery().flush()
+    const key = `${RECOVERY_PREFIX}${projectId}`
+    const stored = JSON.parse(window.localStorage.getItem(key) ?? "null") as Record<string, unknown>
+    delete stored.filesPanelOpen
+    window.localStorage.setItem(key, JSON.stringify(stored))
+
+    const restored = new WorkspaceRecoveryStore(window.localStorage).read(projectId, true)
+    expect(restored).toBeDefined()
+    expect(restored?.filesPanelOpen).toBeUndefined()
   })
 })

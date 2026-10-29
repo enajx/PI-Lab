@@ -336,3 +336,48 @@ test("an editor that is not focused leaves keyboard focus where it is", () => {
   expect(document.activeElement).toBe(outside)
   outside.remove()
 })
+
+/** A file opened by clicking a file tree row leaves keyboard focus on that row, so ⌘⌫ still reaches it. */
+test("an editor mounting while a file tree row holds focus leaves focus on the row", () => {
+  const props = { relPath: "main.py", initialDoc: "x = 1\n", onChange: vi.fn(), onSave: vi.fn() }
+  const tree = document.createElement("div")
+  tree.setAttribute("data-holds-focus-on-open", "")
+  const row = document.createElement("button")
+  tree.append(row)
+  document.body.append(tree)
+  row.focus()
+  render(<CodeMirrorBuffer autoFocus {...props} />)
+  expect(document.activeElement).toBe(row)
+  tree.remove()
+})
+
+/**
+ * A browser cannot focus an element in a hidden split tab, so focus asked for while the
+ * tab is hidden (a new tab, or a SyncTeX jump into an open tab) waits until it is shown.
+ */
+test("focus requested while the editor is hidden is taken once it is shown", () => {
+  const props = { relPath: "main.tex", initialDoc: "a\nb\nc\n", onChange: vi.fn(), onSave: vi.fn() }
+  const location = { line: 3, column: 1 }
+  const outside = document.createElement("button")
+  document.body.append(outside)
+  outside.focus()
+  const view = render(<CodeMirrorBuffer autoFocus shown={false} {...props} />)
+  expect(document.activeElement).toBe(outside)
+  view.rerender(<CodeMirrorBuffer autoFocus shown {...props} />)
+  expect(view.container.contains(document.activeElement)).toBe(true)
+
+  outside.focus()
+  view.rerender(<CodeMirrorBuffer autoFocus shown={false} sourceLocation={location} {...props} />)
+  expect(document.activeElement).toBe(outside)
+  view.rerender(<CodeMirrorBuffer autoFocus shown sourceLocation={location} {...props} />)
+  const editor = findEditor(view.container)
+  expect(view.container.contains(document.activeElement)).toBe(true)
+  expect(editor.state.doc.lineAt(editor.state.selection.main.head).number).toBe(3)
+
+  // Showing the tab again later does not take focus back.
+  outside.focus()
+  view.rerender(<CodeMirrorBuffer autoFocus shown={false} sourceLocation={location} {...props} />)
+  view.rerender(<CodeMirrorBuffer autoFocus shown sourceLocation={location} {...props} />)
+  expect(document.activeElement).toBe(outside)
+  outside.remove()
+})

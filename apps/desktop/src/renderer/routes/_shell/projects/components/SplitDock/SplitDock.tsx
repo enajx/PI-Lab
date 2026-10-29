@@ -30,7 +30,7 @@ export interface DockItem {
   /** Rendered as the tab header. */
   tab: (props: { visible: boolean; activate: () => void }) => ReactNode
   /** Rendered as the tab's content; stays mounted while hidden or moved. */
-  content: () => ReactNode
+  content: (props: { visible: boolean }) => ReactNode
 }
 
 export interface SplitDockProps {
@@ -84,24 +84,42 @@ function useDockContext(): DockContextValue {
   return value
 }
 
-function DockContent({ api }: IDockviewPanelProps) {
-  const item = useDockContext().items.get(api.id)
-  return <div className="flex h-full min-h-0 flex-col">{item ? item.content() : null}</div>
-}
-
-function DockTab({ api }: IDockviewPanelHeaderProps) {
-  const item = useDockContext().items.get(api.id)
+/** Whether the panel's content is shown in its split, following dockview's visibility events. */
+function usePanelVisible(api: IDockviewPanelProps["api"]): boolean {
   const [visible, setVisible] = useState(api.isVisible)
   useEffect(() => {
     setVisible(api.isVisible)
     const subscription = api.onDidVisibilityChange((event) => setVisible(event.isVisible))
     return () => subscription.dispose()
   }, [api])
+  return visible
+}
+
+function DockContent({ api }: IDockviewPanelProps) {
+  const item = useDockContext().items.get(api.id)
+  const visible = usePanelVisible(api)
+  return (
+    <div className="flex h-full min-h-0 flex-col">{item ? item.content({ visible }) : null}</div>
+  )
+}
+
+function DockTab({ api }: IDockviewPanelHeaderProps) {
+  const item = useDockContext().items.get(api.id)
+  const visible = usePanelVisible(api)
   return item ? item.tab({ visible, activate: () => api.setActive() }) : null
 }
 
+/**
+ * Fills the split like {@link DockContent}: dockview mounts the watermark in a plain
+ * block box, so without this flex column the empty state cannot grow to the split's
+ * height and sits at the top under the tab bar.
+ */
 function DockEmpty() {
-  return <>{useDockContext().empty}</>
+  return (
+    <div data-testid="dock-empty" className="flex h-full min-h-0 flex-col">
+      {useDockContext().empty}
+    </div>
+  )
 }
 
 const theme: DockviewTheme = { name: "pi-lab", className: "dockview-theme-pi-lab" }

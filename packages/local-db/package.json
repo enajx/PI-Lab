@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./editor-settings": "./src/editorSettings.ts"
+    "./editor-settings": "./src/editorSettings.ts",
+    "./paths": "./src/paths.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

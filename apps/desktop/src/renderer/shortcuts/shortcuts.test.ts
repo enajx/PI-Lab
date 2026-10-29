@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { findShortcutConflict, SHORTCUTS } from "./shortcuts"
+import { findShortcutConflict, formatBinding, SHORTCUTS } from "./shortcuts"
 
 const defaults = (id: string): string =>
   SHORTCUTS.find((shortcut) => shortcut.id === id)?.defaultBinding ?? ""
@@ -17,5 +17,13 @@ describe("shortcut conflicts", () => {
     expect(findShortcutConflict("command-palette", "Mod+f", defaults)?.id).toBe("quick-open")
     expect(findShortcutConflict("quick-open", "Mod+f", defaults)).toBeNull()
     expect(findShortcutConflict("command-palette", "Mod+s", defaults)?.id).toBe("save-file")
+  })
+})
+
+describe("formatBinding", () => {
+  test("shows modifiers in the macOS order before the key", () => {
+    expect(formatBinding("Mod+Shift+p")).toBe("⇧⌘P")
+    expect(formatBinding("Mod+Alt+Shift+k")).toBe("⌥⇧⌘K")
+    expect(formatBinding("Mod+,")).toBe("⌘,")
   })
 })

@@ -1,7 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: Explicit isolated packaged Beta test target.
 const binary = process.env.PI_LAB_PACKAGED_BETA_BINARY

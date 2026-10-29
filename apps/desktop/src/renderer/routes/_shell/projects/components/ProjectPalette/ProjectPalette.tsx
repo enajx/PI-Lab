@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import { useTranslate } from "../../../../../i18n/language"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
-import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
+import { paletteForKeydown, registerProjectPalette } from "../../../../../shortcuts/shortcuts"
 import type { CentralPanelController } from "../CentralPanel"
 import { type RightSidebarPanel, useRightSidebarPanels } from "../RightSidebar"
 
@@ -13,7 +13,7 @@ interface PaletteAction extends QuickFindItem {
 }
 
 /**
- * The project-scoped command palette (⇧⌘P, the `project-command-palette` shortcut).
+ * The project-scoped command palette (⌘P, the `project-command-palette` shortcut).
  * Mounted INSIDE the project workspace, so it's only active while a project is open
  * (never on the Dashboard / other surfaces) and has direct access to the central-panel
  * controller and the right-sidebar selection. It runs one of four action kinds:
@@ -21,14 +21,16 @@ interface PaletteAction extends QuickFindItem {
  * or switch which right-sidebar panel is active.
  *
  * Reuses the generic {@link QuickFind} overlay for the action list; "Open file…" swaps
- * it for the file picker. The listener is bubble-phase (like the project view's ⌘F
- * quick-open), so a terminal/editor that swallows its own keys keeps focus.
+ * it for the file picker. While mounted it registers itself, so the shell's ⌘P opens this
+ * palette instead of the global one. The listener is capture-phase, like the shell's, so
+ * ⌘P also works while focus is in a terminal or editor.
  */
 export function ProjectPalette({
   controller,
   workspaceId,
   pinnedPanels,
   gitAvailable,
+  filesPanelOpen,
   onSelectPanel,
 }: {
   controller: CentralPanelController
@@ -37,23 +39,29 @@ export function ProjectPalette({
   pinnedPanels: string[]
   /** Whether Git-backed project panels are available. */
   gitAvailable?: boolean
+  /** Whether this project's left Files column is open (Files then leaves the sidebar). */
+  filesPanelOpen: boolean
   /** Switch (and reveal) the right-sidebar panel with this id. */
   onSelectPanel: (panelId: string) => void
 }) {
   const t = useTranslate()
   const [open, setOpen] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
-  const panels = useRightSidebarPanels(pinnedPanels, gitAvailable)
+  const panels = useRightSidebarPanels(pinnedPanels, gitAvailable, filesPanelOpen)
 
   useEffect(() => {
+    const unregister = registerProjectPalette()
     const onKeyDown = (event: KeyboardEvent) => {
-      if (eventMatchesShortcut(event, "project-command-palette")) {
+      if (paletteForKeydown(event) === "project") {
         event.preventDefault()
         setOpen(true)
       }
     }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true)
+      unregister()
+    }
   }, [])
 
   const actions: PaletteAction[] = [

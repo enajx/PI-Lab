@@ -1,12 +1,21 @@
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, PanelRightClose, Pin, Settings2, X } from "lucide-react"
-import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import {
+  type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react"
+import type { FileTreeEditorTabs } from "../../../../../Editor/components/FileTree"
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import { useTranslate } from "../../../../../i18n/language"
 import {
+  useRightSidebarTabOrder,
   useShowCodeChanges,
-  useShowFilesPanel,
   useShowSkillsPanel,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
@@ -25,6 +34,8 @@ interface PanelRenderContext {
   /** Pin a `.md` file as a right-sidebar panel (from the Files tree's right-click menu). */
   onPinFile: (relPath: string) => void
   onSetMainFile: (relPath: string) => void
+  /** Open editor tabs, closed or moved when the Files tree deletes or renames their files. */
+  editorTabs?: FileTreeEditorTabs
 }
 
 /** Tab-id prefix marking a user-pinned Markdown panel (the rest is its relPath). */
@@ -49,13 +60,13 @@ interface PanelTab {
 
 /**
  * The right-sidebar tab set for the project view. **Research / TODOs / Files** are
- * the default panels; **Code changes** (the git working-tree diff) is hidden by
+ * the default panels (shown Files first by default, see {@link orderTabs}); **Code changes** (the git working-tree diff) is hidden by
  * default and toggled on via the gear (persisted in `projectView.showCodeChanges`,
  * also editable in Settings → Project view). The old Status panel was dropped — its
  * content (status header + branch) already lives in Research and the agent tab's
- * kind badge. When the left Files panel is enabled (`projectView.showFilesPanel`,
- * owned by the central panel), Files lives on the left instead, so it's excluded
- * from this tab set.
+ * kind badge. When the project's left Files column is open (per-project state owned
+ * by the project route), Files lives on the left instead, so it's excluded from
+ * this tab set.
  *
  * Markdown doc panels (Research, TODOs) read plain files via `files.read`; Files
  * is the workspace tree (opening a file into the central panel); Code changes
@@ -82,17 +93,21 @@ const BASE_TABS: readonly PanelTab[] = [
   },
 ]
 
+/** Id of the right-sidebar Files tab, the tab a project view opens on. */
+export const FILES_TAB_ID = "files"
+
 const FILES_TAB: PanelTab = {
-  id: "files",
+  id: FILES_TAB_ID,
   label: "Files",
   description: "Browse workspace files and open them in the built-in editor.",
-  render: ({ workspaceId, onOpenFile, activeRelPath, onPinFile, onSetMainFile }) => (
+  render: ({ workspaceId, onOpenFile, activeRelPath, onPinFile, onSetMainFile, editorTabs }) => (
     <FilesPanel
       workspaceId={workspaceId}
       onOpenFile={onOpenFile}
       activeRelPath={activeRelPath}
       onPinFile={onPinFile}
       onSetMainFile={onSetMainFile}
+      editorTabs={editorTabs}
     />
   ),
 }
@@ -142,11 +157,54 @@ const SKILLS_TAB: PanelTab = {
 }
 
 /**
- * The right-sidebar tab set, in display order, for the current view options and
- * pinned panels. The single source of truth shared by the sidebar itself and the
- * project command palette's "switch panel" list (via {@link useRightSidebarPanels}),
- * so the two never drift out of sync. Files moves to the left central column when
- * the left Files panel is on; Skills / Code changes are opt-in; pinned panels last.
+ * Order `tabs` by the global saved tab order: ids present in `order` come first (in
+ * that order), then any tab not in it, in its natural order, so tabs added later
+ * (Skills, Code changes, pinned panels) still appear.
+ */
+function orderTabs(tabs: PanelTab[], order: string[]): PanelTab[] {
+  const byId = new Map(tabs.map((tab) => [tab.id, tab]))
+  const known = order.flatMap((id) => {
+    const tab = byId.get(id)
+    if (!tab) return []
+    byId.delete(id)
+    return [tab]
+  })
+  return [...known, ...tabs.filter((tab) => byId.has(tab.id))]
+}
+
+/**
+ * The new global tab order after moving `moved` before (or after, when `after`) the
+ * visible tab `target`. The visible tabs keep their shown order relative to each
+ * other; saved built-in ids that are hidden right now keep their slots, and saved
+ * pinned ids not shown in this project are dropped so the list does not grow.
+ */
+function movedTabOrder(
+  order: string[],
+  visibleIds: string[],
+  moved: string,
+  target: string,
+  after: boolean,
+): string[] {
+  const visible = new Set(visibleIds)
+  const kept = order.filter((id) => visible.has(id) || pinnedRelPath(id) === null)
+  const keptSet = new Set(kept)
+  const next = [...kept, ...visibleIds.filter((id) => !keptSet.has(id))]
+  const from = next.indexOf(moved)
+  if (from === -1 || moved === target) return order
+  next.splice(from, 1)
+  const to = next.indexOf(target)
+  if (to === -1) return order
+  next.splice(after ? to + 1 : to, 0, moved)
+  return next
+}
+
+/**
+ * The right-sidebar tab set, in display order, for the current view options,
+ * pinned panels and the global saved tab order. The single source of truth shared
+ * by the sidebar itself and the project command palette's "switch panel" list (via
+ * {@link useRightSidebarPanels}), so the two never drift out of sync. Files moves to
+ * the left central column when the left Files panel is on; Skills / Code changes are
+ * opt-in; pinned panels come last unless the saved order places them.
  */
 function buildPanelTabs(options: {
   showFilesPanel: boolean
@@ -154,14 +212,18 @@ function buildPanelTabs(options: {
   showCodeChanges: boolean
   gitAvailable: boolean
   pinnedPanels: string[]
+  order: string[]
 }): PanelTab[] {
-  return [
-    ...BASE_TABS,
-    ...(options.showFilesPanel ? [] : [FILES_TAB]),
-    ...(options.showSkills ? [SKILLS_TAB] : []),
-    ...(options.showCodeChanges && options.gitAvailable ? [CODE_CHANGES_TAB] : []),
-    ...options.pinnedPanels.map(pinnedTab),
-  ]
+  return orderTabs(
+    [
+      ...BASE_TABS,
+      ...(options.showFilesPanel ? [] : [FILES_TAB]),
+      ...(options.showSkills ? [SKILLS_TAB] : []),
+      ...(options.showCodeChanges && options.gitAvailable ? [CODE_CHANGES_TAB] : []),
+      ...options.pinnedPanels.map(pinnedTab),
+    ],
+    options.order,
+  )
 }
 
 /** A right-sidebar panel's identity, for the project palette's "switch panel" list. */
@@ -178,24 +240,27 @@ export interface RightSidebarPanel {
  */
 export function useRightSidebarPanels(
   pinnedPanels: string[],
-  gitAvailable?: boolean,
+  gitAvailable: boolean | undefined,
+  filesPanelOpen: boolean,
 ): RightSidebarPanel[] {
   const t = useTranslate()
   const [showCodeChanges] = useShowCodeChanges()
   const [showSkills] = useShowSkillsPanel()
-  const [showFilesPanel] = useShowFilesPanel()
+  const [order] = useRightSidebarTabOrder()
   return buildPanelTabs({
-    showFilesPanel,
+    showFilesPanel: filesPanelOpen,
     showSkills,
     showCodeChanges,
     gitAvailable: gitAvailable !== false,
     pinnedPanels,
+    order,
   }).map((tab) => ({ id: tab.id, label: pinnedRelPath(tab.id) ? tab.label : t(tab.label) }))
 }
 
 /**
  * Stacked, bounded-flex sidebar: a tab strip on top (plus a collapse button and a
- * gear opening a view-options menu), the active panel below in a `min-h-0 flex-1`
+ * gear opening a view-options menu; tabs reorder by native drag-and-drop or
+ * Alt+Left/Right on a focused tab, saved as one global order), the active panel below in a `min-h-0 flex-1`
  * region so each panel's own `overflow-y-auto` body scrolls without a nested Radix ScrollArea. The collapse button calls `onCollapse`; the project route
  * owns the collapse state (session state, defaulting to EXPANDED on each project open —
  * not persisted), dropping the right column and showing an expand affordance when collapsed.
@@ -213,6 +278,8 @@ export function RightSidebar({
   onPinFile,
   onUnpinFile,
   gitAvailable,
+  editorTabs,
+  filesPanelOpen,
 }: {
   projectId: string
   workspaceId: string
@@ -233,6 +300,10 @@ export function RightSidebar({
   onUnpinFile?: (relPath: string) => void
   /** Whether this project's folder has Git features available. */
   gitAvailable?: boolean
+  /** Open editor tabs, closed or moved when the Files tree deletes or renames their files. */
+  editorTabs?: FileTreeEditorTabs
+  /** Whether this project's left Files column is open; Files then leaves this sidebar. */
+  filesPanelOpen: boolean
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -247,22 +318,84 @@ export function RightSidebar({
   )
   const [showCodeChanges, setShowCodeChanges] = useShowCodeChanges()
   const [showSkills, setShowSkills] = useShowSkillsPanel()
-  const [showFilesPanel] = useShowFilesPanel()
+  const [tabOrder, setTabOrder] = useRightSidebarTabOrder()
   const [pinPickerOpen, setPinPickerOpen] = useState(false)
   const gitEnabled = gitAvailable !== false
   const tabs = buildPanelTabs({
-    showFilesPanel,
+    showFilesPanel: filesPanelOpen,
     showSkills,
     showCodeChanges,
     gitAvailable: gitEnabled,
     pinnedPanels,
+    order: tabOrder,
   })
+  const tabIds = tabs.map((tab) => tab.id)
+  const moveTab = (moved: string, target: string, after: boolean) =>
+    setTabOrder(movedTabOrder(tabOrder, tabIds, moved, target, after))
+
+  // Native drag-to-reorder (same HTML5 drag-and-drop as the left sidebar lists): the
+  // dragged tab id and the hovered drop target, with a before/after side from the
+  // pointer position. A completed drag does not fire `click`, so it never selects.
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null)
+  const resetDrag = () => {
+    setDraggingId(null)
+    setDropTarget(null)
+  }
+  const dragProps = (id: string) => ({
+    draggable: true,
+    onDragStart: (event: DragEvent<HTMLElement>) => {
+      setDraggingId(id)
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"
+    },
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (draggingId === null) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
+      const rect = event.currentTarget.getBoundingClientRect()
+      setDropTarget({ id, after: event.clientX > rect.left + rect.width / 2 })
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      event.preventDefault()
+      if (draggingId !== null && draggingId !== id) {
+        moveTab(draggingId, id, dropTarget?.id === id ? dropTarget.after : false)
+      }
+      resetDrag()
+    },
+    onDragEnd: resetDrag,
+  })
+  const dropClass = (id: string) =>
+    draggingId === null || draggingId === id || dropTarget?.id !== id
+      ? ""
+      : dropTarget.after
+        ? "shadow-[inset_-2px_0_0_0_var(--color-primary)]"
+        : "shadow-[inset_2px_0_0_0_var(--color-primary)]"
+
+  // Alt+Left/Right moves the focused tab one place; focus follows the moved tab
+  // after React re-renders the strip in the new order.
+  const tabButtons = useRef(new Map<string, HTMLButtonElement>())
+  const [refocusId, setRefocusId] = useState<string | null>(null)
+  useEffect(() => {
+    if (refocusId === null) return
+    tabButtons.current.get(refocusId)?.focus()
+    setRefocusId(null)
+  }, [refocusId])
+  const onTabKeyDown = (id: string, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return
+    event.preventDefault()
+    const index = tabIds.indexOf(id)
+    const right = event.key === "ArrowRight"
+    const neighbor = tabIds[right ? index + 1 : index - 1]
+    if (neighbor === undefined) return
+    moveTab(id, neighbor, right)
+    setRefocusId(id)
+  }
   // Selection is controlled when the route passes `activeId` (so the palette can switch
   // panels reactively); otherwise the sidebar owns it internally, seeded once from
   // `initialActiveId`. `onActiveIdChange` still fires in both modes for persistence.
   const controlled = controlledActiveId !== undefined
   const [uncontrolledActiveId, setUncontrolledActiveId] = useState<string>(
-    initialActiveId ?? BASE_TABS[0]?.id ?? "research",
+    initialActiveId ?? FILES_TAB_ID,
   )
   const activeId = controlled ? (controlledActiveId ?? "") : uncontrolledActiveId
   const selectTab = (id: string) => {
@@ -270,9 +403,12 @@ export function RightSidebar({
     onActiveIdChange?.(id)
   }
   // The selected tab can vanish (Files toggled to the left, Code changes hidden, a
-  // pinned panel unpinned) or be unset in controlled mode, so fall back to the first
-  // tab whenever the stored id no longer resolves.
-  const active = tabs.find((tab) => tab.id === activeId) ?? tabs[0]
+  // pinned panel unpinned) or be unset in controlled mode, so fall back to Files, or to
+  // the first tab when Files is in the left column, whenever the stored id no longer resolves.
+  const active =
+    tabs.find((tab) => tab.id === activeId) ??
+    tabs.find((tab) => tab.id === FILES_TAB_ID) ??
+    tabs[0]
 
   // Pinning is a no-op unless the route wired a handler; guard so the "+" picker and
   // the Files tree's right-click menu never silently drop a selection.
@@ -295,6 +431,10 @@ export function RightSidebar({
             const tabButton = (
               <button
                 key={tab.id}
+                ref={(node) => {
+                  if (node) tabButtons.current.set(tab.id, node)
+                  else tabButtons.current.delete(tab.id)
+                }}
                 type="button"
                 role="tab"
                 aria-selected={selected}
@@ -306,20 +446,29 @@ export function RightSidebar({
                 }
                 title={relPath ?? undefined}
                 onClick={() => selectTab(tab.id)}
+                onKeyDown={(event) => onTabKeyDown(tab.id, event)}
+                {...(relPath === null ? dragProps(tab.id) : {})}
                 className={cn(
                   "min-w-0 flex-1 truncate rounded-md px-2 py-1 text-xs transition-colors",
                   selected
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  draggingId === tab.id && "opacity-50",
+                  relPath === null && dropClass(tab.id),
                 )}
               >
                 {relPath ? tab.label : t(tab.label)}
               </button>
             )
             if (relPath === null) return tabButton
-            // Pinned tabs carry an inline unpin affordance (built-in tabs can't be removed).
+            // Pinned tabs carry an inline unpin affordance (built-in tabs can't be removed);
+            // the wrapper is the drag unit so the unpin button moves with its tab.
             return (
-              <span key={tab.id} className="flex min-w-0 flex-1 items-center">
+              <span
+                key={tab.id}
+                {...dragProps(tab.id)}
+                className={cn("flex min-w-0 flex-1 items-center rounded-md", dropClass(tab.id))}
+              >
                 {tabButton}
                 <button
                   type="button"
@@ -381,6 +530,7 @@ export function RightSidebar({
           activeRelPath,
           onPinFile: pinFile,
           onSetMainFile: (relPath) => setMain.mutate({ id: projectId, kind: "main", relPath }),
+          editorTabs,
         })}
       </div>
       {pinPickerOpen ? (

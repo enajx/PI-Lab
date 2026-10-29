@@ -4,15 +4,21 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { promisify } from "node:util"
-import { expect, test } from "@playwright/test"
+import {
+  TEST_DIALOG_LOG_PREFIX,
+  type TestDialogRecord,
+} from "../../apps/desktop/src/main/runtime/testDialogs"
+import { expect, test } from "./fixtures/playwright"
 
 const desktopRequire = createRequire(resolve("apps/desktop/package.json"))
 const Database = desktopRequire("better-sqlite3")
 const electronPath: string = desktopRequire("electron")
+const mainEntry = resolve("apps/desktop/out/main/index.js")
 
 const execFileAsync = promisify(execFile)
 
-// Real Electron startup and SQLite. Only the native modal is intercepted so this
+// Real Electron startup and SQLite. Test mode's dialog responder answers the
+// native error box in place of showing it and prints it to stdout, so this
 // unattended regression can inspect its text and let the process finish.
 for (const fixture of ["partial schema", "unreadable file"]) {
   test(`startup reports migration failure for ${fixture}`, async () => {
@@ -27,18 +33,9 @@ for (const fixture of ["partial schema", "unreadable file"]) {
       } else {
         await writeFile(join(dir, "local.db"), "not a database".repeat(100))
       }
-      const resultPath = join(dir, "dialog.json")
-      const launcher = join(dir, "launch.cjs")
-      await writeFile(
-        launcher,
-        `const { dialog } = require("electron");
-      dialog.showErrorBox = (title, content) => require('node:fs').writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({title, content}));
-      process.argv[1] = ${JSON.stringify(resolve("apps/desktop/out/main/index.js"))};
-      require(process.argv[1]);`,
-      )
       const result = await execFileAsync(
         electronPath,
-        process.platform === "linux" ? ["--no-sandbox", launcher] : [launcher],
+        process.platform === "linux" ? ["--no-sandbox", mainEntry] : [mainEntry],
         {
           env: {
             ...process.env,
@@ -51,17 +48,26 @@ for (const fixture of ["partial schema", "unreadable file"]) {
           killSignal: "SIGKILL",
         },
       ).then(
-        () => ({ code: 0 }),
-        (error: { code: number | string; stderr: string }) => error,
+        ({ stdout }) => ({ code: 0, stdout }),
+        (error: { code: number | string; stdout: string }) => error,
       )
       expect(result.code).toBe(1)
-      const dialog = JSON.parse(await readFile(resultPath, "utf8"))
+      const dialogs: TestDialogRecord[] = result.stdout
+        .split("\n")
+        .filter((line) => line.includes(TEST_DIALOG_LOG_PREFIX))
+        .map((line) =>
+          JSON.parse(
+            line.slice(line.indexOf(TEST_DIALOG_LOG_PREFIX) + TEST_DIALOG_LOG_PREFIX.length),
+          ),
+        )
+      const dialog = dialogs.find(({ kind }) => kind === "errorBox")
+      if (!dialog) throw new Error(`Expected a startup error box, got ${result.stdout}`)
       expect(dialog.title).toContain("database")
-      expect(dialog.content).toContain("backup")
-      expect(dialog.content).toContain(join(dir, "local.db"))
+      expect(dialog.message).toContain("backup")
+      expect(dialog.message).toContain(join(dir, "local.db"))
       const backups = (await readdir(dir)).filter((name) => name.startsWith("local.db.backup-"))
       if (fixture === "unreadable file") {
-        expect(dialog.content).toContain("backup could not be created")
+        expect(dialog.message).toContain("backup could not be created")
         expect(backups).toHaveLength(0)
         expect(await readFile(join(dir, "local.db"), "utf8")).toBe("not a database".repeat(100))
         return

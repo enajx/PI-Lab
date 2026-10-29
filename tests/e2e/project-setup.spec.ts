@@ -10,7 +10,7 @@ import {
   expect,
   type Page,
   test,
-} from "@playwright/test"
+} from "./fixtures/playwright"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const desktopDir = join(here, "..", "..", "apps", "desktop")

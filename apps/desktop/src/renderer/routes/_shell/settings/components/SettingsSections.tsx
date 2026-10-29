@@ -44,6 +44,7 @@ import {
   useShowClusterSection,
   useShowCodeChanges,
   useShowExperimentsSection,
+  useShowFilesPanel,
   useShowResearchHeartbeatSection,
   useShowSkillsPanel,
 } from "../../../../preferences/preferences"
@@ -456,6 +457,20 @@ export function EditorSection() {
         checked={editor.formatOnSave}
         onChange={(value) => patch({ formatOnSave: value })}
       />
+      <ToggleField
+        testId="settings-editor-show-hidden-files"
+        label="Show hidden files"
+        description="List files and folders whose name starts with a dot in the file tree."
+        checked={editor.showHiddenFiles}
+        onChange={(value) => patch({ showHiddenFiles: value })}
+      />
+      <ToggleField
+        testId="settings-editor-confirm-file-delete"
+        label="Confirm before deleting files"
+        description="Ask before moving a file or folder in the file tree to the Trash."
+        checked={editor.confirmFileDelete}
+        onChange={(value) => patch({ confirmFileDelete: value })}
+      />
       <SelectField
         testId="settings-editor-checker"
         label="Type checker"
@@ -601,7 +616,6 @@ export function AgentsSection() {
   const agents = agentsQuery.data ?? []
   const worktreePerAgent = settingsQuery.data?.worktreePerAgent ?? false
   const agentSettings: AgentSettings = settingsQuery.data?.agents ?? {
-    quitBehavior: "stop",
     launchDefaults: {},
     defaultAgentId: null,
     projectConfigStorage: "app",
@@ -639,19 +653,6 @@ export function AgentsSection() {
         description="Always isolate each agent in its own git worktree."
         checked={worktreePerAgent}
         onChange={(value) => updateGeneral.mutate({ worktreePerAgent: value })}
-      />
-      <SelectField
-        testId="settings-agent-quit-behavior"
-        label="Agents during restart or automatic quit"
-        description="Used when restarting to update, or when closing the last window quits PI Lab. Explicit Quit always stops agents; Move to background keeps them running."
-        value={agentSettings.quitBehavior}
-        options={[
-          { value: "stop", label: "Stop agents (confirm before quitting)" },
-          { value: "keep-running", label: "Keep agents running in the background" },
-        ]}
-        onChange={(value) =>
-          updateAgents.mutate({ quitBehavior: value as AgentSettings["quitBehavior"] })
-        }
       />
       <SelectField
         testId="settings-project-config-storage"
@@ -1071,6 +1072,7 @@ export function ProjectViewSection() {
     projects.find((project) => project.id === selectedProjectId) ?? projects[0]
   const [showCodeChanges, setShowCodeChanges] = useShowCodeChanges()
   const [showSkillsPanel, setShowSkillsPanel] = useShowSkillsPanel()
+  const [showFilesPanel, setShowFilesPanel] = useShowFilesPanel()
   return (
     <SettingsSection
       testId="settings-section-project-view"
@@ -1090,6 +1092,13 @@ export function ProjectViewSection() {
         description="Reveal project-local and global skills in the right sidebar (off by default)."
         checked={showSkillsPanel}
         onChange={setShowSkillsPanel}
+      />
+      <ToggleField
+        testId="settings-show-files-panel"
+        label="Show Files panel"
+        description="Show the file tree as a left column in projects that have not set it themselves (off by default)."
+        checked={showFilesPanel}
+        onChange={setShowFilesPanel}
       />
       <div className="flex flex-col gap-3 px-4 py-3">
         <label htmlFor="settings-main-project" className="text-sm">

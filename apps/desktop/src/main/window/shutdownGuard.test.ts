@@ -2,10 +2,14 @@ import { EventEmitter } from "node:events"
 import type { App, BrowserWindow, IpcMain } from "electron"
 import { describe, expect, test, vi } from "vitest"
 import { SHUTDOWN_REQUEST_CHANNEL, SHUTDOWN_RESPONSE_CHANNEL } from "../../shared/shutdown"
+import type { QuitMode } from "../agents/quitPolicy"
 import { installShutdownGuard } from "./shutdownGuard"
 
 /** Mocked Electron public events. Real Electron shutdown is checked by the E2E flow. */
-function harness(prepareQuit?: (stopConfirmed: boolean) => Promise<boolean>) {
+function harness(
+  prepareQuit?: (mode: QuitMode) => Promise<boolean>,
+  interceptClose?: () => boolean,
+) {
   const app = new EventEmitter()
   const ipc = new EventEmitter()
   const window = new EventEmitter()
@@ -42,6 +46,7 @@ function harness(prepareQuit?: (stopConfirmed: boolean) => Promise<boolean>) {
     ipcMain: ipc as IpcMain,
     createRequestId: () => `request-${++sequence}`,
     prepareQuit,
+    interceptClose,
   })
   const electronWindow = Object.assign(window, {
     webContents,
@@ -68,7 +73,7 @@ function harness(prepareQuit?: (stopConfirmed: boolean) => Promise<boolean>) {
 
 describe("shutdown guard through mocked Electron events", () => {
   test("explicit Quit upgrades a pending dirty-window close and prevents another quit choice", async () => {
-    const prepare = vi.fn(async (_stopConfirmed: boolean) => false)
+    const prepare = vi.fn(async (_mode: QuitMode) => false)
     const h = harness(prepare)
     h.guard.attachWindow(h.electronWindow)
     h.close()
@@ -80,11 +85,11 @@ describe("shutdown guard through mocked Electron events", () => {
       intent: "quit",
     })
     h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
-    await vi.waitFor(() => expect(prepare).toHaveBeenCalledWith(true))
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledWith("end"))
     await vi.waitFor(() => expect(h.guard.isQuitPending()).toBe(false))
   })
   test("explicit Quit waits for drafts and forgets its stop override when cancelled", async () => {
-    const prepare = vi.fn(async (_stopConfirmed: boolean) => false)
+    const prepare = vi.fn(async (_mode: QuitMode) => false)
     const h = harness(prepare)
     h.guard.attachWindow(h.electronWindow)
     h.guard.requestExplicitQuit()
@@ -93,17 +98,17 @@ describe("shutdown guard through mocked Electron events", () => {
     expect(prepare).not.toHaveBeenCalled()
     h.quit()
     h.respond({ requestId: "request-2", allow: true }, h.webContents, h.mainFrame)
-    await vi.waitFor(() => expect(prepare).toHaveBeenLastCalledWith(false))
+    await vi.waitFor(() => expect(prepare).toHaveBeenLastCalledWith("confirm-end"))
     h.guard.requestExplicitQuit()
     h.respond({ requestId: "request-3", allow: true }, h.webContents, h.mainFrame)
-    await vi.waitFor(() => expect(prepare).toHaveBeenLastCalledWith(true))
+    await vi.waitFor(() => expect(prepare).toHaveBeenLastCalledWith("end"))
   })
 
   test("explicit Quit without a window still confirms stopping work", async () => {
-    const prepare = vi.fn(async (_stopConfirmed: boolean) => false)
+    const prepare = vi.fn(async (_mode: QuitMode) => false)
     const h = harness(prepare)
     h.guard.requestExplicitQuit()
-    await vi.waitFor(() => expect(prepare).toHaveBeenCalledWith(true))
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledWith("end"))
   })
   test("agent shutdown waits for renderer approval and can cancel quitting", async () => {
     const prepare = vi.fn(async () => false)
@@ -135,6 +140,46 @@ describe("shutdown guard through mocked Electron events", () => {
     resolve(true)
     await vi.waitFor(() => expect(h.quit).toHaveBeenCalledTimes(2))
   })
+  test("Restart to Update keeps work running and installs after preparing", async () => {
+    const prepare = vi.fn(async (_mode: QuitMode) => true)
+    const h = harness(prepare)
+    h.guard.attachWindow(h.electronWindow)
+    const install = vi.fn()
+    h.guard.requestUpdateInstall(install)
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(install).toHaveBeenCalledOnce())
+    expect(prepare).toHaveBeenCalledWith("keep")
+  })
+
+  test("a full Quit with a ready update ends everything before it installs", async () => {
+    const order: string[] = []
+    const prepare = vi.fn(async (mode: QuitMode) => {
+      order.push(`prepare:${mode}`)
+      return true
+    })
+    const h = harness(prepare)
+    h.guard.attachWindow(h.electronWindow)
+    h.guard.setInstallOnApprovedQuit(() => order.push("install"))
+    h.guard.requestExplicitQuit()
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(order).toEqual(["prepare:end", "install"]))
+  })
+
+  test("an intercepted window close keeps the window open and sends no close request", () => {
+    const intercept = vi.fn(() => true)
+    const h = harness(undefined, intercept)
+    h.guard.attachWindow(h.electronWindow)
+    expect(h.close()).toBe(false)
+    expect(intercept).toHaveBeenCalledOnce()
+    expect(h.webContents.send).not.toHaveBeenCalled()
+    intercept.mockReturnValue(false)
+    h.close()
+    expect(h.webContents.send).toHaveBeenCalledWith(SHUTDOWN_REQUEST_CHANNEL, {
+      requestId: "request-1",
+      intent: "close",
+    })
+  })
+
   test("Restart to Update installs only after the current renderer approves quitting", () => {
     const h = harness()
     h.guard.attachWindow(h.electronWindow)

@@ -1,12 +1,17 @@
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test"
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  test,
+} from "./fixtures/playwright"
 
 // Exercises native SQLite and PTY modules in a packaged app, when available.
 
@@ -39,6 +44,7 @@ const EXPECTED_CHANNEL_NAME =
   process.env.PI_LAB_EXPECTED_CHANNEL_NAME ?? "PI Lab Alpha"
 
 let app: ElectronApplication
+let rootDir: string
 let dataDir: string
 let repoDir: string
 
@@ -59,8 +65,12 @@ test.skip(
 )
 
 test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-pkg-smoke-"))
-  repoDir = join(dataDir, "repo")
+  // The repo sits beside the data dir: a packaged Alpha archives everything in a
+  // data dir without its build marker on first launch (db/alphaBuildReset.ts).
+  rootDir = await mkdtemp(join(tmpdir(), "pi-lab-pkg-smoke-"))
+  dataDir = join(rootDir, "data")
+  repoDir = join(rootDir, "repo")
+  await mkdir(dataDir)
   await initRepo(repoDir)
 
   app = await electron.launch({
@@ -79,7 +89,7 @@ test.beforeEach(async () => {
 
 test.afterEach(async () => {
   await app?.close()
-  if (dataDir) await rm(dataDir, { recursive: true, force: true })
+  if (rootDir) await rm(rootDir, { recursive: true, force: true })
 })
 
 test("packaged ASAR contains only runtime app roots and excludes source/debug maps", () => {

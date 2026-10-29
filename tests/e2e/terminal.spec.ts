@@ -9,7 +9,7 @@ import {
   expect,
   type Locator,
   test,
-} from "@playwright/test"
+} from "./fixtures/playwright"
 
 /**
  * Whole-app E2E: launch the real Electron build, boot to
@@ -72,6 +72,12 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
+  // The fixture terminal runs a Node process, so quitting asks; choose Quit and stop.
+  await app
+    ?.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
+    })
+    .catch(() => undefined)
   await app?.close()
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })

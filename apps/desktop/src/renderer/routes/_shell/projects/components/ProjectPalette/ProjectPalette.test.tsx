@@ -10,7 +10,7 @@ import { RightSidebar } from "../RightSidebar"
 import { ProjectPalette } from "./ProjectPalette"
 
 /**
- * Integration test for the project-scoped command palette (⇧⌘P). It's mounted INSIDE
+ * Integration test for the project-scoped command palette (⌘P). It's mounted INSIDE
  * the project workspace alongside the right sidebar, so these tests wire both to one
  * shared `activeId` state — mirroring `$projectId.tsx` — and drive the palette through
  * its real keyboard trigger and the shared QuickFind/QuickOpen overlays. Covers: the
@@ -58,6 +58,7 @@ function Harness({
           onActiveIdChange={setActiveId}
           onCollapse={() => setCollapsed(true)}
           pinnedPanels={[]}
+          filesPanelOpen={false}
         />
       )}
       {mountPalette ? (
@@ -65,6 +66,7 @@ function Harness({
           controller={controller}
           workspaceId="ws-1"
           pinnedPanels={[]}
+          filesPanelOpen={false}
           onSelectPanel={(panelId) => {
             setActiveId(panelId)
             setCollapsed(false)
@@ -86,7 +88,7 @@ function renderHarness(controller: CentralPanelController, mountPalette = true) 
 }
 
 function pressPalette() {
-  fireEvent.keyDown(window, { key: "p", metaKey: true, shiftKey: true })
+  fireEvent.keyDown(window, { key: "p", metaKey: true })
 }
 
 beforeEach(() => {
@@ -102,7 +104,7 @@ describe("ProjectPalette", () => {
     expect(screen.getByTestId("quick-find-scope").textContent).toContain("Buscando:")
     act(() => setInterfaceLanguage("en"))
   })
-  test("⇧⌘P opens the project palette and lists the action kinds", () => {
+  test("⌘P opens the project palette and lists the action kinds", () => {
     renderHarness(makeController())
     expect(screen.queryByTestId("quick-find")).toBeNull()
 
@@ -117,7 +119,7 @@ describe("ProjectPalette", () => {
     expect(screen.getByText("Switch to Files panel")).toBeTruthy()
   })
 
-  test("⇧⌘P is inert when the palette is not mounted (e.g. the Dashboard)", () => {
+  test("⌘P does not open the project palette when it is not mounted (e.g. the Dashboard)", () => {
     renderHarness(makeController(), false)
     pressPalette()
     expect(screen.queryByTestId("quick-find")).toBeNull()
@@ -157,14 +159,14 @@ describe("ProjectPalette", () => {
 
   test("switching a panel changes the active right-sidebar tab", () => {
     renderHarness(makeController())
-    // Research (the first tab) is active by default.
-    expect(screen.getByTestId("panel-tab-research").getAttribute("data-active")).toBe("true")
+    // Files (the first tab) is active by default.
+    expect(screen.getByTestId("panel-tab-files").getAttribute("data-active")).toBe("true")
     expect(screen.getByTestId("panel-tab-todos").getAttribute("data-active")).toBe("false")
 
     pressPalette()
     fireEvent.click(screen.getByText("Switch to TODOs panel"))
 
     expect(screen.getByTestId("panel-tab-todos").getAttribute("data-active")).toBe("true")
-    expect(screen.getByTestId("panel-tab-research").getAttribute("data-active")).toBe("false")
+    expect(screen.getByTestId("panel-tab-files").getAttribute("data-active")).toBe("false")
   })
 })

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
-import { app, type BrowserWindow, dialog, ipcMain, nativeImage } from "electron"
+import { basename, dirname, join, resolve } from "node:path"
+import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron"
 import {
   APP_ICON_GET_CHANNEL,
   APP_ICON_IDENTITY_CHANNEL,
@@ -40,8 +40,13 @@ import {
 } from "../shared/quickEdit"
 import { UPDATE_CHECK_CHANNEL, UPDATE_SNAPSHOT_CHANNEL } from "../shared/updates"
 import type { BackgroundTray } from "./background/tray"
+import {
+  AlphaBuildResetFailure,
+  prepareAlphaBuildData,
+  readAlphaBuildId,
+} from "./db/alphaBuildReset"
 import type { FullRuntime } from "./fullRuntime"
-import { loadNativeLanguage } from "./i18n/nativeLanguage"
+import { loadNativeLanguage, nativeText } from "./i18n/nativeLanguage"
 import { applyMacDockIcon, applyOptionalIcon } from "./identity/appIcon"
 import {
   alphaIconNeedsRecolor,
@@ -55,14 +60,18 @@ import { channelDataDir, channelIdentity, resolveAppChannel } from "./identity/c
 import { FullBootScheduler } from "./quickEdit/fullBootScheduler"
 import { firstFileArgument } from "./quickEdit/launchArgs"
 import { QuickEditFiles } from "./quickEdit/service"
-import { isTestMode } from "./runtime/env"
+import { isTestMode, testNativeDialogs } from "./runtime/env"
+import { installTestDialogResponder } from "./runtime/testDialogs"
+import { assertAlphaResetDaemonIdleSync } from "./terminal/alphaResetProbe"
+import { resolveDaemonEntry, resolveDaemonSocketPath } from "./terminal/socketPath"
 import { registerAnalysisReportScheme } from "./trpc/science/analysis/reportScheme"
 import { checkForUpdates, updateSnapshot } from "./updates/feedback"
 import { publicReleaseFromPackage } from "./updates/release"
-import { installAppMenu, setUserQuitAction } from "./window/appMenu"
+import { installAppMenu, setCloseTabAction, setUserQuitAction } from "./window/appMenu"
+import { installCloseTabAction } from "./window/closeTabAction"
 import { createMainWindow, loadWindowPage } from "./window/mainWindow"
 import { installShutdownGuard } from "./window/shutdownGuard"
-import { createUserQuitAction } from "./window/userQuit"
+import { createUserQuitAction, runningWorkDialog } from "./window/userQuit"
 
 export type { AppRouter } from "./trpc/appRouter"
 
@@ -71,6 +80,12 @@ export type { AppRouter } from "./trpc/appRouter"
  * Full services start after the caret is ready or immediately for a full-app
  * request.
  */
+
+// Test mode never shows a native message dialog: install the responder before
+// any startup path can raise one (see runtime/testDialogs.ts). Only
+// PI_LAB_TEST_NATIVE_DIALOGS=1 keeps the real dialogs for Accessibility tests.
+if (isTestMode && !testNativeDialogs)
+  installTestDialogResponder(dialog, (line) => console.log(line))
 
 // Set the channel before reading userData or opening the database. The packaged
 // metadata is injected by electron-builder; source runs use Alpha.
@@ -88,6 +103,48 @@ if (dataDirOverride) {
   mkdirSync(dataDirOverride, { recursive: true })
   process.env.PI_LAB_DATA_DIR = dataDirOverride
   app.setPath("userData", dataDirOverride)
+}
+
+/**
+ * Step 3 — a new packaged Alpha build starts from an empty data dir, like a
+ * fresh install. Runs after the instance lock and before Electron is ready, so
+ * Chromium has not opened its storage there yet; Chromium's lock entries and the
+ * daemon socket stay in place. A failure is shown, the app quits, and the build
+ * marker is not written, so the next launch retries.
+ */
+function prepareAlphaBuild(): boolean {
+  if (!app.isPackaged || channel !== "alpha" || !dataDirOverride) return true
+  const dataDir = dataDirOverride
+  const socketPath = resolveDaemonSocketPath()
+  try {
+    prepareAlphaBuildData({
+      channel,
+      isPackaged: true,
+      buildId: readAlphaBuildId(true, app.getAppPath()),
+      dataDir,
+      keepEntries: [
+        "SingletonLock",
+        "SingletonSocket",
+        "SingletonCookie",
+        ...(dirname(socketPath) === dataDir ? [basename(socketPath)] : []),
+      ],
+      beforeReset: () => assertAlphaResetDaemonIdleSync(resolveDaemonEntry(), socketPath),
+    })
+    return true
+  } catch (error) {
+    const failure = new AlphaBuildResetFailure(dataDir, error)
+    console.error("[pi-lab] fatal during startup:", failure)
+    dialog.showErrorBox(nativeText("PI Lab database could not be opened"), failure.message)
+    return false
+  }
+}
+
+// Step 2 — one instance per data dir in normal use; the smoke harness launches
+// many parallel instances against throwaway data dirs, so test mode opts out.
+// Both steps run before anything reads the data dir (such as the icon choice).
+const ownsInstance = (isTestMode || app.requestSingleInstanceLock()) && prepareAlphaBuild()
+if (!ownsInstance) {
+  app.quit()
 }
 
 const appIconContext = {
@@ -139,13 +196,6 @@ function applySelectedDockIcon(): void {
     dock ? { setIcon: (image) => dock.setIcon(image) } : null,
     { warn: (message) => console.warn(message) },
   )
-}
-
-// Step 2 — one instance per data dir in normal use; the smoke harness launches
-// many parallel instances against throwaway data dirs, so test mode opts out.
-const ownsInstance = isTestMode || app.requestSingleInstanceLock()
-if (!ownsInstance) {
-  app.quit()
 }
 
 const quickFiles = new QuickEditFiles()
@@ -311,11 +361,11 @@ const shutdownGuard = installShutdownGuard({
   app,
   ipcMain,
   createRequestId: randomUUID,
-  prepareQuit: async (stopConfirmed) => {
+  prepareQuit: async (mode) => {
     // Full boot may still be reconciling retained agents when Quit is requested.
     try {
       await fullBootScheduler.startNow()
-      return fullRuntime ? fullRuntime.prepareQuit(stopConfirmed) : true
+      return fullRuntime ? fullRuntime.prepareQuit(mode) : true
     } catch (error) {
       dialog.showErrorBox(
         "Could not quit PI Lab",
@@ -324,16 +374,31 @@ const shutdownGuard = installShutdownGuard({
       return false
     }
   },
+  // With "Keep running after window closes" off, closing the window is a Quit:
+  // run the Cmd+Q flow; Cancel leaves the window open. Before full boot the
+  // window closes and the later automatic quit asks only if work is running.
+  interceptClose: () => {
+    if (!fullRuntime || fullRuntime.keepRunningAfterClose()) return false
+    void requestUserQuit()
+    return true
+  },
 })
 let fullRuntime: FullRuntime | null = null
 
+if (isTestMode) {
+  // E2E seam: public updates are off in test mode, so tests run Restart to
+  // Update's quit path directly; the stand-in installer only quits.
+  ;(globalThis as { piLabTestRestartToUpdate?: () => void }).piLabTestRestartToUpdate = () =>
+    shutdownGuard.requestUpdateInstall(() => app.quit())
+}
+
 const requestUserQuit = createUserQuitAction({
   pending: () => shutdownGuard.isQuitPending(),
-  count: async () => {
+  work: async () => {
     await fullBootScheduler.startNow()
-    return fullRuntime ? fullRuntime.runningAgentCount() : 0
+    return fullRuntime ? fullRuntime.quitWork() : { agents: 0, terminals: [] }
   },
-  choose: async (count) => {
+  choose: async ({ agents: count }) => {
     const result = await dialog.showMessageBox({
       type: "question",
       title: `Quit ${app.getName()}?`,
@@ -346,14 +411,11 @@ const requestUserQuit = createUserQuitAction({
     })
     return result.response === 2 ? "quit" : result.response === 1 ? "background" : "cancel"
   },
-  confirmRunning: async (count) => {
+  confirmRunning: async (work) => {
     const result = await dialog.showMessageBox({
       type: "warning",
       title: "Work is still running",
-      message: `${count} agent${count === 1 ? " is" : "s are"} still running.`,
-      detail:
-        "Agents or results fetching are currently running. Quit and stop agents ends that work. Keep agents running in background leaves PI Lab and the work running.",
-      buttons: ["Quit and stop agents", "Keep agents running in background", "Cancel"],
+      ...runningWorkDialog(work),
       defaultId: 2,
       cancelId: 2,
       noLink: true,
@@ -369,6 +431,22 @@ const requestUserQuit = createUserQuitAction({
     dialog.showErrorBox("Could not quit PI Lab", `The app remains open. ${String(error)}`),
 })
 setUserQuitAction(() => void requestUserQuit())
+
+// Cmd+W closes the focused file tab in the user window; otherwise the app hides.
+// The tray popover (or another focused window) and a hidden user window get no request.
+const closeTabAction = installCloseTabAction({
+  ipcMain,
+  targetWindow: () => {
+    const focused = BrowserWindow.getFocusedWindow()
+    if (focused !== null && focused !== userWindow) return null
+    return userWindow && !userWindow.isDestroyed() && userWindow.isVisible() ? userWindow : null
+  },
+  hide: () => app.hide(),
+  warn: (message) => console.warn(message),
+  createRequestId: randomUUID,
+  timeoutMs: 1_500,
+})
+setCloseTabAction(() => closeTabAction.request())
 
 ipcMain.handle(APP_ICON_GET_CHANNEL, () => appIconSelection)
 ipcMain.handle(APP_ICON_IDENTITY_CHANNEL, () => iconChannel)
@@ -447,9 +525,6 @@ function startFullBoot(): Promise<void> {
       const runtime = new FullRuntime({
         getAppIconPath: () => appIconPath,
         ensureMainWindow,
-        openAgentSettings: () => {
-          void openFull("/settings?section=agents")
-        },
         initialWindow: () => {
           const existing = userWindow
           if (existing) return existing
@@ -723,6 +798,7 @@ function disposeRuntime(): void {
   closeTray()
   fullBootScheduler.cancel()
   shutdownGuard.dispose()
+  closeTabAction.dispose()
   fullRuntime?.dispose()
 }
 
