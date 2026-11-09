@@ -101,7 +101,7 @@ interface CentralPanelProps {
   /** LaTeX Editor layout of the left column; the project view leaves it out. */
   leftColumn?: CentralPanelLeftColumn
   /**
-   * The LaTeX Editor's "Paper folder" status bar item; the project view leaves
+   * The LaTeX Editor's status bar items (Sync status, output folder, paper folder); the project view leaves
    * it out. With it, the status bar shows even when no tab is focused.
    */
   paperFolderItem?: ReactNode

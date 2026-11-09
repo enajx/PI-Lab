@@ -159,6 +159,8 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
       projectId,
       projectName: expect.any(String),
       agentId: LONG_FAKE_AGENT.id,
+      workspaceId: null,
+      origin: "project",
       state: "working",
     })
   })

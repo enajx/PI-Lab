@@ -85,6 +85,32 @@ describe("Settings sections", () => {
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
+  test("Shortcuts lists the Dashboard and waiting-agent shortcuts and rebinds them", async () => {
+    renderSection(<ShortcutsSection />)
+
+    expect(screen.getByTestId("shortcut-go-to-dashboard").textContent).toBe("⌘ESCAPE")
+    expect(screen.getByTestId("shortcut-next-waiting-agent").textContent).toBe("⌥TAB")
+    expect(screen.getByTestId("shortcut-next-waiting-agent-in-project").textContent).toBe("⌥⇧TAB")
+
+    fireEvent.click(screen.getByTestId("shortcut-next-waiting-agent-rebind"))
+    fireEvent.keyDown(window, { key: "j", metaKey: true })
+    await waitFor(() =>
+      expect(screen.getByTestId("shortcut-next-waiting-agent").textContent).toBe("⌘J"),
+    )
+    expect(window.localStorage.getItem("pi-lab.shortcuts")).toContain(
+      '"next-waiting-agent":"Mod+j"',
+    )
+
+    fireEvent.click(screen.getByTestId("shortcut-go-to-dashboard-rebind"))
+    fireEvent.keyDown(window, { key: "Tab", altKey: true, shiftKey: true })
+    const conflict = await screen.findByRole("alert")
+    expect(conflict.textContent).toContain("Next waiting agent in project")
+    fireEvent.click(screen.getByTestId("shortcut-go-to-dashboard-rebind"))
+
+    fireEvent.click(screen.getByTestId("shortcut-next-waiting-agent-reset"))
+    expect(screen.getByTestId("shortcut-next-waiting-agent").textContent).toBe("⌥TAB")
+  })
+
   test("Shortcuts refuses a reset when another action uses the default chord", async () => {
     renderSection(<ShortcutsSection />)
 

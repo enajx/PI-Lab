@@ -5,6 +5,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { ChartArea, Waypoints } from "lucide-react"
 import { useState } from "react"
 import type { ProjectAgentRow, ProjectAgentStatus } from "../../../../../../shared/projectAgents"
+import { elapsedSince } from "../../../../../components/elapsed"
 import { LatexLogo } from "../../../../../components/LatexText"
 import { ProjectWorkflowDialog, workflowTaskLabel } from "../../../../../components/ProjectWorkflow"
 import { useTranslate } from "../../../../../i18n/language"
@@ -25,13 +26,11 @@ const STATUS_LABELS: Record<ProjectAgentStatus, string> = {
  * "5m ago", "2h ago", "1 day ago", "7 days ago".
  */
 export function formatLastActive(lastActiveAt: number, now: number): string {
-  const minutes = Math.floor((now - lastActiveAt) / 60_000)
-  if (minutes < 1) return "now"
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return days === 1 ? "1 day ago" : `${days} days ago`
+  const elapsed = elapsedSince(lastActiveAt, now)
+  if (elapsed.unit === "now") return "now"
+  if (elapsed.unit === "minute") return `${elapsed.count}m ago`
+  if (elapsed.unit === "hour") return `${elapsed.count}h ago`
+  return elapsed.count === 1 ? "1 day ago" : `${elapsed.count} days ago`
 }
 
 /**

@@ -66,6 +66,29 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     editable: true,
   },
   {
+    id: "go-to-dashboard",
+    label: "Go to Dashboard",
+    description:
+      "Open the Projects Dashboard, unless an editor, terminal, text field or dialog has focus",
+    defaultBinding: "Mod+Escape",
+    editable: true,
+  },
+  {
+    id: "next-waiting-agent",
+    label: "Next waiting agent",
+    description: "Go to the next agent waiting for your input, in any project",
+    defaultBinding: "Alt+Tab",
+    editable: true,
+  },
+  {
+    id: "next-waiting-agent-in-project",
+    label: "Next waiting agent in project",
+    description: "Go to the next agent waiting for your input in the current project",
+    // Modifier order matches `bindingFromEvent`, so conflict checks compare equal strings.
+    defaultBinding: "Shift+Alt+Tab",
+    editable: true,
+  },
+  {
     id: "save-file",
     label: "Save file",
     description: "Save the active editor buffer (CodeMirror)",

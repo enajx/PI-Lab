@@ -97,7 +97,8 @@ function hasRestoredTabs(state: ReturnType<typeof readProjectWorkspaceState>): b
  * PDF side by side, with build, build log and SyncTeX) whose left column holds
  * the paper folder's file tree with the outline below it, a "Paper folder"
  * item in the editor status bar to change or clear the folder, and the Sync controls
- * (the Sync button in the page top bar, the rest in a bar below the editor).
+ * (the Sync button in the page top bar; the last sync time, Sync messages and
+ * the output folder item in the editor status bar, before the paper folder item).
  * Saving a .tex builds it and opens the built PDF beside the source when it is
  * not open yet (an open PDF reloads itself when the file changes).
  */
@@ -127,6 +128,8 @@ export function PaperEditor({
   const [outlineOpen, setOutlineOpen] = useLatexEditorOutlineOpen()
   const [filesOpen, setFilesOpen] = useLatexEditorFilesOpen()
   const [openError, setOpenError] = useState<string | null>(null)
+  // The editor footer element the Sync controls put their footer items in.
+  const [footerSlot, setFooterSlot] = useState<HTMLElement | null>(null)
   const onSaved = useCallback(
     (relPath: string): void => {
       if (!/\.(tex|bib)$/i.test(relPath)) return
@@ -312,7 +315,10 @@ export function PaperEditor({
             onFilesOpenChange: setFilesOpen,
           }}
           paperFolderItem={
-            <PaperFolderStatusItem projectId={projectId} dir={paperDir} displayDir={displayDir} />
+            <>
+              <div ref={setFooterSlot} data-testid="paper-footer-slot" className="contents" />
+              <PaperFolderStatusItem projectId={projectId} dir={paperDir} displayDir={displayDir} />
+            </>
           }
         />
       </div>
@@ -320,6 +326,7 @@ export function PaperEditor({
         projectId={projectId}
         workspaceId={workspaceId}
         syncSlot={syncSlot}
+        footerSlot={footerSlot}
         lastSyncAt={lastSyncAt}
         hasRemote={hasRemote}
         syncEnabled={syncEnabled}

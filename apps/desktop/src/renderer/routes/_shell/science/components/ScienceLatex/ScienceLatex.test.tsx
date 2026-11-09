@@ -93,7 +93,7 @@ function renderPageWith(paperGet: FakeHandlers[string], extra: FakeHandlers) {
   )
 }
 
-test("with a paper linked, the Sync button is in the page top bar next to the project picker", async () => {
+test("with a paper linked, the Sync button is in the page top bar and the other Sync items are in the editor footer", async () => {
   const { container } = renderPage(() => ({
     paper: {
       lastSyncAt: null,
@@ -108,7 +108,19 @@ test("with a paper linked, the Sync button is in the page top bar next to the pr
   const header = container.querySelector("header") as HTMLElement
   expect(await within(header).findByTestId("paper-sync")).toBeTruthy()
   expect(within(header).getByTestId("latex-project-select")).toBeTruthy()
-  expect(within(screen.getByTestId("paper-sync-bar")).queryByTestId("paper-sync")).toBeNull()
+  expect(within(header).queryByTestId("paper-last-sync")).toBeNull()
+  expect(screen.queryByTestId("paper-sync-bar")).toBeNull()
+  const footer = screen.getByTestId("editor-status-bar")
+  expect(within(footer).getByTestId("paper-last-sync").textContent).toBe("Not synced yet")
+  expect(within(footer).getByTestId("paper-output-folder").textContent).toBe("Output: build")
+  // Order after the file name: last sync, output folder, paper folder.
+  const ids = Array.from(footer.querySelectorAll("[data-testid]"), (node) =>
+    node.getAttribute("data-testid"),
+  ).filter(
+    (id) =>
+      id === "paper-last-sync" || id === "paper-output-folder" || id === "editor-paper-folder",
+  )
+  expect(ids).toEqual(["paper-last-sync", "paper-output-folder", "editor-paper-folder"])
 })
 
 test("without a paper there is no Sync button", async () => {

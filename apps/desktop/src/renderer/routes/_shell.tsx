@@ -17,6 +17,7 @@ import { QuickFind, type QuickFindItem } from "../QuickFind"
 import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute"
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
 import { useTRPC, useTRPCClient } from "../trpc/react"
+import { AgentShortcuts } from "./_shell/-agentShortcuts"
 import { useGlobalShortcuts } from "./_shell/-globalShortcuts"
 import { ProjectActivityProvider } from "./_shell/-ProjectActivity"
 import { AddProjectControllerProvider } from "./_shell/components/AddProjectController"
@@ -164,6 +165,7 @@ function ShellLayout() {
         <NewFileControllerProvider>
           <WorkspaceRecoveryController />
           <NotificationBridge />
+          <AgentShortcuts pathname={location.pathname} search={location.search} />
           {redirectToSetup || awaitingSetupDecision ? (
             <div
               data-testid="setup-gate-loading"

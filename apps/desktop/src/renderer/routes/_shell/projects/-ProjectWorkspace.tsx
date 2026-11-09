@@ -326,6 +326,7 @@ export function ProjectWorkspace({
   const handledActivation = useRef<string | null>(null)
   useEffect(() => {
     if (
+      !workspaceId ||
       !activation.notificationId ||
       !activation.notificationSessionId ||
       !activation.notificationKind ||
@@ -354,6 +355,7 @@ export function ProjectWorkspace({
     activation.notificationLabel,
     activation.notificationSessionId,
     controller.attachSession,
+    workspaceId,
   ])
 
   if (projectQuery.isError) {

@@ -260,9 +260,12 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     await expect(page.getByTestId("paper-commit-dialog")).toContainText("main.tex")
     await page.getByTestId("paper-commit-dont-ask").check()
     await page.getByTestId("paper-commit-confirm").click()
-    await expect(page.getByTestId("paper-last-sync")).toContainText("Last Overleaf sync", {
-      timeout: 15_000,
-    })
+    await expect(page.getByTestId("editor-status-bar").getByTestId("paper-last-sync")).toHaveText(
+      "Synced just now",
+      {
+        timeout: 15_000,
+      },
+    )
     await git(overleaf, "pull", "--no-rebase", "--no-edit")
     expect(await readFile(join(overleaf, "main.tex"), "utf8")).toContain("Local method text.")
 
@@ -344,12 +347,18 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     await openAndLink(page, "test-merge")
 
     // This paper builds into its own folder.
-    const outputField = page.getByTestId("paper-output-dir")
+    // The output folder is set from the editor footer's popover.
+    const footer = page.getByTestId("editor-status-bar")
+    const outputItem = footer.getByTestId("paper-output-folder")
+    await expect(outputItem).toHaveText("Output: build")
+    await outputItem.click()
+    const outputField = footer.getByTestId("paper-output-dir")
     await expect(outputField).toHaveAttribute("placeholder", "build")
     await outputField.fill("pdfout")
     await outputField.press("Enter")
-    await expect(outputField).toBeEnabled()
-    await expect(page.getByTestId("paper-sync-bar").getByRole("alert")).toHaveCount(0)
+    await expect(outputField).toHaveCount(0)
+    await expect(outputItem).toHaveText("Output: pdfout")
+    await expect(footer.getByRole("alert")).toHaveCount(0)
 
     // Cmd+S builds and opens the PDF beside the source, without Show in PDF.
     const editor = page.getByTestId("editor-buffer")
@@ -381,7 +390,7 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     await expect(dialog).toContainText("main.tex")
     await expect(dialog).not.toContainText("pdfout")
     await page.getByTestId("paper-commit-confirm").click()
-    await expect(page.getByTestId("paper-last-sync")).toContainText("Last Overleaf sync", {
+    await expect(page.getByTestId("paper-last-sync")).toHaveText("Synced just now", {
       timeout: 15_000,
     })
     await git(overleaf, "pull", "--no-rebase", "--no-edit")
@@ -471,7 +480,7 @@ test("LaTeX Editor links a project folder that is an Overleaf clone without the 
     const dialog = page.getByTestId("paper-commit-dialog")
     await expect(dialog).toContainText("main.tex")
     await page.getByTestId("paper-commit-confirm").click()
-    await expect(page.getByTestId("paper-last-sync")).toContainText("Last Overleaf sync", {
+    await expect(page.getByTestId("paper-last-sync")).toHaveText("Synced just now", {
       timeout: 15_000,
     })
     await git(overleaf, "pull", "--no-rebase", "--no-edit")
@@ -517,6 +526,7 @@ test("LaTeX Editor asks before using a project folder that is not an Overleaf cl
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
     const topBar = page.getByTestId("science-latex").locator("header")
     await expect(topBar.getByTestId("paper-sync-off")).toHaveText("Sync is off for this paper")
+    await expect(page.getByTestId("paper-last-sync")).toHaveCount(0)
     await expect(page.getByTestId("paper-sync")).toHaveCount(0)
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
   } finally {

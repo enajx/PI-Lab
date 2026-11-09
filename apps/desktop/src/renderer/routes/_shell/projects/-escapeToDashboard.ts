@@ -1,20 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
-
-/**
- * Open overlays that take Escape first: the set Settings checks, plus an open
- * disclosure popover (a button with `aria-controls` and `aria-expanded`, such as the
- * LaTeX build log).
- */
-const OPEN_OVERLAY =
-  '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"], [aria-controls][aria-expanded="true"]'
-
-/**
- * Focus targets that keep Escape: terminals (agents use Escape to interrupt), the
- * CodeMirror and Markdown editors, and text fields.
- */
-const KEEPS_ESCAPE =
-  '.xterm, .cm-editor, input, textarea, select, [contenteditable]:not([contenteditable="false"])'
+import { KEEPS_ESCAPE, OPEN_OVERLAY } from "../../../shortcuts/keyGuards"
 
 /**
  * Escape in the project view returns to the Projects Dashboard, like Escape in

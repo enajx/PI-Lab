@@ -56,7 +56,7 @@ interface EditorStatusBarProps {
   /** Markdown buffers can switch their source/render presentation from the lower status bar. */
   markdownMode?: "render" | "source"
   onMarkdownModeChange?: (mode: "render" | "source") => void
-  /** The LaTeX Editor's "Paper folder" item; the project view leaves it out. */
+  /** The LaTeX Editor's footer items (Sync status, output folder, paper folder); the project view leaves it out. */
   paperFolderItem?: ReactNode
 }
 
@@ -98,7 +98,7 @@ export function EditorStatusBar({
       data-testid="editor-status-bar"
       className="flex h-6 shrink-0 items-center justify-end gap-3 border-border border-t bg-muted/30 px-3 text-[11px] text-muted-foreground"
     >
-      <span data-testid="editor-status-label" className="mr-auto min-w-0 truncate">
+      <span data-testid="editor-status-label" className="mr-auto min-w-16 truncate">
         {label}
       </span>
       {latexBuildStatus ? (

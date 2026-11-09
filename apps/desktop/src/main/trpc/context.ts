@@ -164,6 +164,25 @@ export const TEST_PLAN_AGENT: TerminalAgent = {
 }
 
 /**
+ * A test-only agent that prints a permission prompt and stays alive, so the
+ * activity monitor marks it as waiting for input (for the waiting-agent
+ * shortcut E2E).
+ */
+export const TEST_WAITING_AGENT_ID = "test-waiting"
+
+export const TEST_WAITING_AGENT: TerminalAgent = {
+  id: TEST_WAITING_AGENT_ID,
+  label: "Test Waiting",
+  command: process.execPath,
+  detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+  defaultArgs: [
+    "-e",
+    "process.stdout.write('Do you want to proceed? (yes/no)\\n');setInterval(()=>{},1000)",
+  ],
+}
+
+/**
  * A test-only merge agent for the LaTeX Editor "Ask agent to merge" E2E: in its
  * working folder it replaces every Git conflict block in `.tex` files with both
  * sides, mine first, so the review shows a real, deterministic merge.
@@ -188,6 +207,13 @@ export const TEST_MERGE_AGENT: TerminalAgent = {
  */
 export function buildAgentCatalog(testMode: boolean): readonly TerminalAgent[] {
   return testMode
-    ? [...BUILTIN_AGENTS, TEST_AGENT, TEST_ACTIVITY_AGENT, TEST_PLAN_AGENT, TEST_MERGE_AGENT]
+    ? [
+        ...BUILTIN_AGENTS,
+        TEST_AGENT,
+        TEST_ACTIVITY_AGENT,
+        TEST_WAITING_AGENT,
+        TEST_PLAN_AGENT,
+        TEST_MERGE_AGENT,
+      ]
     : BUILTIN_AGENTS
 }

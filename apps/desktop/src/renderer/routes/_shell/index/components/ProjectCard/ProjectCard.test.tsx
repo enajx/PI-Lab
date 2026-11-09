@@ -222,6 +222,8 @@ describe("ProjectCard metadata", () => {
       projectId: "rain-working",
       projectName: "Working rain",
       agentId: "codex",
+      workspaceId: "w1",
+      origin: "project" as const,
     }
 
     const idle = renderCard(project({ id: "rain-idle", name: "Idle rain", digitalRain: true }), {

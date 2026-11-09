@@ -1,6 +1,12 @@
 import { BUILTIN_AGENTS } from "@pi-lab/shared"
 import { describe, expect, test } from "vitest"
-import { buildAgentCatalog, TEST_ACTIVITY_AGENT_ID, TEST_AGENT_ID } from "./context"
+import { classifyRenderedAgentScreen } from "../activity/classifyScreen"
+import {
+  buildAgentCatalog,
+  TEST_ACTIVITY_AGENT_ID,
+  TEST_AGENT_ID,
+  TEST_WAITING_AGENT_ID,
+} from "./context"
 
 describe("buildAgentCatalog", () => {
   test("normal mode is exactly the built-ins (no test agent leaks in)", () => {
@@ -21,5 +27,14 @@ describe("buildAgentCatalog", () => {
     expect(testAgent?.defaultArgs?.join(" ")).toContain("AGENT-UI-OK")
     expect(activityAgent?.command).toBe(process.execPath)
     expect(activityAgent?.defaultArgs?.join(" ")).toContain("AGENT-ACTIVE")
+  })
+
+  test("test mode has a waiting agent whose prompt the monitor reads as a permission request", () => {
+    const waiting = buildAgentCatalog(true).find((agent) => agent.id === TEST_WAITING_AGENT_ID)
+    expect(waiting?.command).toBe(process.execPath)
+    const script = waiting?.defaultArgs?.join(" ") ?? ""
+    const printed = /write\('([^']*)\\n'\)/.exec(script)?.[1] ?? ""
+    expect(classifyRenderedAgentScreen(printed).kind).toBe("permission")
+    expect(buildAgentCatalog(false).some((agent) => agent.id === TEST_WAITING_AGENT_ID)).toBe(false)
   })
 })

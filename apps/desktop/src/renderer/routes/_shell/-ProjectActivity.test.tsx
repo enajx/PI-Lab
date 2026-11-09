@@ -21,7 +21,14 @@ test("one shell subscription keeps cards and sidebar current across dashboard un
   let calls = 0
   const stop = vi.fn()
   let emit: Observer<LiveAgentStatus[], unknown> | undefined
-  const row = { sessionId: "s1", projectId: "a", projectName: "Alpha", agentId: "codex" }
+  const row = {
+    sessionId: "s1",
+    projectId: "a",
+    projectName: "Alpha",
+    agentId: "codex",
+    workspaceId: "w1",
+    origin: "project" as const,
+  }
   const client = createFakeTrpcClient({
     "sessions.onStatus": () =>
       observable<LiveAgentStatus[]>((observer) => {
@@ -82,6 +89,8 @@ test("a subscription error keeps the last activity snapshot and exposes the erro
             projectId: "a",
             projectName: "Alpha",
             agentId: "codex",
+            workspaceId: "w1",
+            origin: "project",
             state: "working",
           },
         ])

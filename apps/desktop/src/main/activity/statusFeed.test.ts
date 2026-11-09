@@ -31,6 +31,8 @@ test("status subscribers get initial state, changed fields and names without out
       projectId: "p1",
       projectName: "Original",
       agentId: "codex",
+      workspaceId: null,
+      origin: "project",
       state: "working",
     },
   ])

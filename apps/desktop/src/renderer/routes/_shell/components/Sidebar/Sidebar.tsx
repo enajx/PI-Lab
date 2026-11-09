@@ -201,7 +201,7 @@ interface RowReorder {
  * order), then any ids not yet stored, in their natural order — so freshly-added
  * entries still appear. Stable for both the nav list and the project list.
  */
-function orderById<T extends { id: string }>(items: T[], order: string[]): T[] {
+export function orderById<T extends { id: string }>(items: T[], order: string[]): T[] {
   const byId = new Map(items.map((item) => [item.id, item]))
   const seen = new Set<string>()
   const result: T[] = []

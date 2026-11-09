@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { RefreshCw } from "lucide-react"
-import { type ReactNode, useEffect, useState } from "react"
+import { ChevronDown, RefreshCw } from "lucide-react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { elapsedSince } from "../../../../../components/elapsed"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 import { AgentMergeReview } from "./AgentMergeReview"
@@ -13,7 +14,7 @@ type SyncResult =
   | { state: "synced"; lastSyncAt: number }
   | { state: "no-remote" }
 
-/** The dialog the bar is showing, if any. */
+/** The dialog the Sync controls are showing, if any. */
 type Prompt =
   | { kind: "commit"; files: string[] }
   | { kind: "conflict"; files: string[] }
@@ -24,8 +25,10 @@ interface PaperSyncBarProps {
   projectId: string
   /** The paper folder's workspace, used to read files for the agent-merge review. */
   workspaceId: string
-  /** The page top bar's element that gets the last sync time and the Sync button, or null before it mounts. */
+  /** The page top bar's element that gets the Sync button, or null before it mounts. */
   syncSlot: HTMLElement | null
+  /** The editor footer's element that gets the last sync time, Sync messages and the output folder item, or null before it mounts. */
+  footerSlot: HTMLElement | null
   lastSyncAt: number | null
   /** False when the paper folder has no Git remote; Sync is then disabled. */
   hasRemote: boolean
@@ -43,18 +46,34 @@ interface PaperSyncBarProps {
   saveOpenFiles: () => Promise<string[]>
 }
 
+/** How often the footer's last sync time is refreshed (ms). */
+const LAST_SYNC_REFRESH_MS = 30_000
+
 /**
- * The LaTeX Editor Sync controls. The last Overleaf sync time and the Sync
- * button are placed in the page top bar (`syncSlot`), or a short note there
- * when Sync is off for the paper; the bar below the editor
- * holds the output folder field and the Sync messages and errors. Also shows
- * the dialogs Sync can lead to: the commit question for edits not yet sent,
- * the conflict choices, and the review of an agent merge.
+ * The last Overleaf sync as a short phrase: "Synced just now" (under a minute),
+ * "Synced 5 minutes ago", "Synced 1 hour ago", "Synced 2 days ago", or
+ * "Not synced yet" when the paper was never synced.
+ */
+export function formatLastSync(lastSyncAt: number | null, now: number): string {
+  if (lastSyncAt === null) return "Not synced yet"
+  const elapsed = elapsedSince(lastSyncAt, now)
+  if (elapsed.unit === "now") return "Synced just now"
+  return `Synced ${elapsed.count} ${elapsed.unit}${elapsed.count === 1 ? "" : "s"} ago`
+}
+
+/**
+ * The LaTeX Editor Sync controls. The Sync button is placed in the page top bar
+ * (`syncSlot`), or a short note there when Sync is off for the paper. The
+ * editor footer (`footerSlot`) gets the last sync time, the Sync messages and
+ * errors, and the output folder item. Also shows the dialogs Sync can lead to:
+ * the commit question for edits not yet sent, the conflict choices, and the
+ * review of an agent merge.
  */
 export function PaperSyncBar({
   projectId,
   workspaceId,
   syncSlot,
+  footerSlot,
   lastSyncAt,
   hasRemote,
   syncEnabled,
@@ -70,6 +89,7 @@ export function PaperSyncBar({
   const [prompt, setPrompt] = useState<Prompt>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const now = useNow(LAST_SYNC_REFRESH_MS)
 
   /** Show the next step for a Sync or resolve result. */
   const handle = (result: SyncResult): void => {
@@ -107,17 +127,6 @@ export function PaperSyncBar({
     }),
   )
   const busy = sync.isPending || resolve.isPending
-  // The typed output folder, or null while it shows the saved value.
-  const [outputDraft, setOutputDraft] = useState<string | null>(null)
-  const setOutputDir = useMutation(
-    trpc.paper.setOutputDir.mutationOptions({
-      onSuccess: () => {
-        setOutputDraft(null)
-        void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
-      },
-      onError,
-    }),
-  )
 
   /** Save open edits so they are sent too, then sync; a failed save stops the sync. */
   const startSync = async (commit: boolean): Promise<void> => {
@@ -131,10 +140,7 @@ export function PaperSyncBar({
   }
 
   return (
-    <div
-      data-testid="paper-sync-bar"
-      className="flex shrink-0 items-center gap-3 border-border border-t px-3 py-1.5 text-xs"
-    >
+    <>
       {syncSlot && !syncEnabled
         ? createPortal(
             <span data-testid="paper-sync-off" className="text-muted-foreground text-xs">
@@ -145,52 +151,60 @@ export function PaperSyncBar({
         : null}
       {syncSlot && syncEnabled
         ? createPortal(
-            <>
-              <span data-testid="paper-last-sync" className="text-muted-foreground text-xs">
-                {lastSyncAt
-                  ? `${t("Last Overleaf sync:")} ${new Date(lastSyncAt).toLocaleString()}`
-                  : t("Not synced yet")}
-              </span>
-              <button
-                type="button"
-                data-testid="paper-sync"
-                disabled={!hasRemote || busy}
-                title={hasRemote ? t("Pull from and push to Overleaf") : t("No Git remote")}
-                onClick={() => void startSync(!confirmCommit)}
-                className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
-              >
-                <RefreshCw className={busy ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
-                {t("Sync")}
-              </button>
-            </>,
+            <button
+              type="button"
+              data-testid="paper-sync"
+              disabled={!hasRemote || busy}
+              title={hasRemote ? t("Pull from and push to Overleaf") : t("No Git remote")}
+              onClick={() => void startSync(!confirmCommit)}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+            >
+              <RefreshCw className={busy ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
+              {t("Sync")}
+            </button>,
             syncSlot,
           )
         : null}
-      {notice ? <span className="text-muted-foreground">{notice}</span> : null}
-      {error ? (
-        <span role="alert" className="cursor-text select-text text-destructive">
-          {error}
-        </span>
-      ) : null}
-      <label className="ml-auto flex items-center gap-1.5 text-muted-foreground">
-        {t("Output folder")}
-        <input
-          data-testid="paper-output-dir"
-          value={outputDraft ?? outputDir ?? ""}
-          placeholder={defaultOutputDir}
-          title={t(
-            "Build output folder for this paper, relative to the main .tex file's folder (. for next to it). Leave empty to use the default from Settings > LaTeX. Press Enter to apply.",
-          )}
-          disabled={setOutputDir.isPending}
-          onChange={(event) => setOutputDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" || outputDraft === null) return
-            setError(null)
-            setOutputDir.mutate({ projectId, outputDir: outputDraft })
-          }}
-          className="h-6 w-28 rounded border border-border bg-background px-1.5 text-foreground"
-        />
-      </label>
+      {footerSlot
+        ? createPortal(
+            <>
+              {notice ? (
+                <span
+                  data-testid="paper-sync-notice"
+                  title={notice}
+                  className="min-w-0 max-w-96 select-text truncate"
+                >
+                  {notice}
+                </span>
+              ) : null}
+              {error ? (
+                <span
+                  role="alert"
+                  data-testid="paper-sync-error"
+                  title={error}
+                  className="min-w-0 max-w-96 cursor-text select-text truncate text-destructive"
+                >
+                  {error}
+                </span>
+              ) : null}
+              {syncEnabled ? (
+                <span
+                  data-testid="paper-last-sync"
+                  title={lastSyncAt === null ? undefined : new Date(lastSyncAt).toLocaleString()}
+                  className="shrink-0"
+                >
+                  {formatLastSync(lastSyncAt, now)}
+                </span>
+              ) : null}
+              <OutputFolderItem
+                projectId={projectId}
+                outputDir={outputDir}
+                defaultOutputDir={defaultOutputDir}
+              />
+            </>,
+            footerSlot,
+          )
+        : null}
       {prompt?.kind === "commit" ? (
         <CommitDialog
           files={prompt.files}
@@ -229,6 +243,130 @@ export function PaperSyncBar({
           onAccept={() => void startSync(true)}
           onReject={() => resolve.mutate({ projectId, choice: "restore-conflicts" })}
         />
+      ) : null}
+    </>
+  )
+}
+
+/** The current time in ms, updated every `intervalMs`. */
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs)
+    return () => window.clearInterval(timer)
+  }, [intervalMs])
+  return now
+}
+
+/**
+ * The footer's "Output: <folder>" item. It opens a small popover with this
+ * paper's build output folder field (empty uses the global default, shown as
+ * the placeholder): Enter applies and closes it, Escape or a click outside
+ * closes it. A rejected value is shown in the popover; while it is closed, the
+ * item turns red with the error as its tooltip, so the error stays visible.
+ */
+function OutputFolderItem({
+  projectId,
+  outputDir,
+  defaultOutputDir,
+}: {
+  projectId: string
+  outputDir: string | null
+  defaultOutputDir: string
+}) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  // The typed output folder, or null while it shows the saved value.
+  const [draft, setDraft] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const setOutputDir = useMutation(
+    trpc.paper.setOutputDir.mutationOptions({
+      onSuccess: () => {
+        setDraft(null)
+        setOpen(false)
+        void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+      },
+      onError: (cause) => setError(cause.message),
+    }),
+  )
+
+  useEffect(() => {
+    if (!open) return
+    const dismiss = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("mousedown", dismiss)
+    document.addEventListener("keydown", dismissOnEscape)
+    return () => {
+      document.removeEventListener("mousedown", dismiss)
+      document.removeEventListener("keydown", dismissOnEscape)
+    }
+  }, [open])
+
+  return (
+    <div ref={rootRef} className="relative flex shrink-0 items-center">
+      <button
+        type="button"
+        data-testid="paper-output-folder"
+        title={error ?? t("Build output folder for this paper")}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={
+          error
+            ? "flex items-center gap-0.5 rounded px-1 text-destructive transition-colors hover:bg-accent"
+            : "flex items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
+        }
+      >
+        {`${t("Output:")} ${outputDir ?? defaultOutputDir}`}
+        <ChevronDown className="size-3" aria-hidden />
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label={t("Output folder")}
+          data-testid="paper-output-popover"
+          className="absolute end-0 bottom-full z-30 mb-1 w-72 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+        >
+          <label className="flex flex-col gap-1 text-muted-foreground text-xs">
+            {t("Output folder")}
+            <input
+              data-testid="paper-output-dir"
+              // biome-ignore lint/a11y/noAutofocus: the popover opens to edit this one field.
+              autoFocus
+              value={draft ?? outputDir ?? ""}
+              placeholder={defaultOutputDir}
+              disabled={setOutputDir.isPending}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return
+                if (draft === null) {
+                  setOpen(false)
+                  return
+                }
+                setError(null)
+                setOutputDir.mutate({ projectId, outputDir: draft })
+              }}
+              className="h-7 rounded border border-border bg-background px-1.5 text-foreground"
+            />
+          </label>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t(
+              "Relative to the main .tex file's folder (. for next to it). Leave empty to use the default from Settings > LaTeX. Press Enter to apply.",
+            )}
+          </p>
+          {error ? (
+            <p role="alert" className="mt-1 cursor-text select-text text-destructive text-xs">
+              {error}
+            </p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )
@@ -306,7 +444,7 @@ function CommitDialog({
 }: {
   files: string[]
   pending: boolean
-  /** A Sync failure, shown here because the dialog covers the bar. */
+  /** A Sync failure, shown here because the dialog covers the footer. */
   error: string | null
   onCancel: () => void
   onConfirm: (dontAskAgain: boolean) => void
