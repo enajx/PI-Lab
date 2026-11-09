@@ -16,7 +16,7 @@ import {
   Waypoints,
   X,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { LatexText } from "../../../../components/LatexText"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import {
@@ -28,12 +28,16 @@ import {
   useRestoreProjectTabs,
   useShowAnalysisSection,
   useShowClusterSection,
+  useShowEditorSection,
   useShowHiddenProjects,
   useSidebarCollapsed,
   useSidebarFeatureHelp,
   useSidebarWidth,
 } from "../../../../preferences/preferences"
-import { readActiveQuickTarget } from "../../../../QuickEditor/quickEditorState"
+import {
+  readActiveQuickTarget,
+  subscribeQuickEditor,
+} from "../../../../QuickEditor/quickEditorState"
 import { useTRPC } from "../../../../trpc/react"
 import type { ProjectSummary } from "../../../../trpc/useProjectThumbnail"
 import { useProjectThumbnail } from "../../../../trpc/useProjectThumbnail"
@@ -66,13 +70,15 @@ const navStateClass = (isActive: boolean): string =>
     ? "bg-accent font-medium text-accent-foreground"
     : "text-sidebar-foreground hover:bg-accent/60"
 
-/** Default only; a persisted drag order takes priority. */
+/**
+ * Default only; a persisted drag order takes priority. Editor is not listed: it is
+ * hidden by default and, when shown, goes to the bottom unless the user dragged it.
+ */
 const DEFAULT_NAV_ORDER = [
-  "editor",
-  "analysis",
   "tasks",
-  "latex",
   "library",
+  "analysis",
+  "latex",
   "skills",
   "workflows",
   "cluster",
@@ -296,7 +302,7 @@ interface ProjectMenuState {
 /**
  * Left sidebar.
  * Top to bottom: a "Dashboard" entry (carrying the divider below it), one unified
- * workspace nav (Library, Analysis, Cluster, Tasks, Skills, Workflows) rendered as a
+ * workspace nav (Tasks, Library, Analysis, LaTeX Editor, Skills, Routines, Cluster) rendered as a
  * single `gap-0.5` list, a divider-topped "Projects" label + the opened projects (the
  * scroll region), then a tight bottom cluster of "Add project" + Settings under a single
  * divider. Both the workspace nav and the project list are drag-reorderable within
@@ -846,30 +852,27 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
   const [navOrder, setNavOrder] = useNavOrder()
   const [showCluster] = useShowClusterSection()
   const [showAnalysis] = useShowAnalysisSection()
-  // Hide the optional sections whose Settings toggle is off (the surfaces stay
-  // route-guarded too, so a bookmarked URL can't reach a hidden section).
+  const [showEditorSetting] = useShowEditorSection()
+  // A file outside every project is open in the Editor (project files open in
+  // their project view instead, so only outside files reach the quick-edit state).
+  const outsideFileOpen =
+    useSyncExternalStore(subscribeQuickEditor, readActiveQuickTarget, readActiveQuickTarget) !==
+    null
+  // Hide the optional sections whose Settings toggle is off (Cluster and Analysis
+  // stay route-guarded too, so a bookmarked URL can't reach a hidden section).
+  // Editor is only hidden from the list: /quick-edit stays reachable.
   const visibleItems = navItems.filter((item) => {
     if (item.id === "cluster") return showCluster
     if (item.id === "analysis") return showAnalysis
+    if (item.id === "editor") return showEditorSetting || outsideFileOpen
     return true
   })
-  // Existing saved orders predate Editor. Place the new row after Workflows
-  // once, then let drag-and-drop persist any position the user chooses.
-  const workflowsIndex = navOrder.indexOf("workflows")
-  const effectiveOrder =
-    navOrder.includes("editor") || workflowsIndex < 0
-      ? navOrder
-      : [...navOrder.slice(0, workflowsIndex + 1), "editor", ...navOrder.slice(workflowsIndex + 1)]
-  // Saved orders also predate LaTeX Editor: place it below Tasks once.
-  const tasksIndex = effectiveOrder.indexOf("tasks")
+  // Saved orders predate LaTeX Editor: place it below Tasks once.
+  const tasksIndex = navOrder.indexOf("tasks")
   const orderWithLatex =
-    effectiveOrder.includes("latex") || tasksIndex < 0
-      ? effectiveOrder
-      : [
-          ...effectiveOrder.slice(0, tasksIndex + 1),
-          "latex",
-          ...effectiveOrder.slice(tasksIndex + 1),
-        ]
+    navOrder.includes("latex") || tasksIndex < 0
+      ? navOrder
+      : [...navOrder.slice(0, tasksIndex + 1), "latex", ...navOrder.slice(tasksIndex + 1)]
   const ordered = orderById(
     visibleItems,
     orderWithLatex.length ? orderWithLatex : DEFAULT_NAV_ORDER,

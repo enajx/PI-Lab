@@ -6,9 +6,10 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../providers/AppProviders"
+import { closeQuickBuffer, writeQuickBuffer } from "../../../../QuickEditor/quickEditorState"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
 import { ProjectActivityProvider } from "../../-ProjectActivity"
 import { writeProjectWorkspaceState } from "../../projects/-workspaceState"
@@ -315,26 +316,40 @@ describe("Sidebar", () => {
     expect(screen.getAllByTestId("science-nav-item").length).toBeGreaterThan(0)
   })
 
-  test("workspace nav uses the requested default order and Editor opens without a file", async () => {
-    const { router } = renderSidebar()
+  test("workspace nav uses the requested default order and hides Editor by default", async () => {
+    renderSidebar()
     const nav = await screen.findByTestId("science-nav")
-    const editor = screen.getByTestId("nav-editor")
-    expect(nav.contains(editor)).toBe(true)
     expect([...nav.children].map((row) => row.getAttribute("data-science-tab"))).toEqual([
-      "editor",
-      "analysis",
       "tasks",
-      "latex",
       "library",
+      "analysis",
+      "latex",
       "skills",
       "workflows",
       "cluster",
     ])
+    expect(screen.queryByTestId("nav-editor")).toBeNull()
+  })
+
+  test("the Sections setting shows Editor at the bottom, and it opens without a file", async () => {
+    window.localStorage.setItem("pi-lab.sections.showEditor", "true")
+    const { router } = renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const editor = screen.getByTestId("nav-editor")
+    expect(nav.lastElementChild).toBe(editor)
     fireEvent.click(editor)
     await waitFor(() => expect(router.state.location.pathname).toBe("/quick-edit"))
   })
 
-  test("Editor respects a saved workspace nav order", async () => {
+  test("a saved order that contains Editor does not make it visible", async () => {
+    window.localStorage.setItem("pi-lab.sidebar.navOrder", JSON.stringify(["editor", "workflows"]))
+    renderSidebar()
+    await screen.findByTestId("science-nav")
+    expect(screen.queryByTestId("nav-editor")).toBeNull()
+  })
+
+  test("Editor keeps its dragged position from a saved order when shown", async () => {
+    window.localStorage.setItem("pi-lab.sections.showEditor", "true")
     window.localStorage.setItem("pi-lab.sidebar.navOrder", JSON.stringify(["editor", "workflows"]))
     renderSidebar()
     const nav = await screen.findByTestId("science-nav")
@@ -342,17 +357,38 @@ describe("Sidebar", () => {
     expect(nav.children[1]).toBe(screen.getByTestId("nav-automations"))
   })
 
-  test("adds Editor after Routines in an older saved nav order", async () => {
+  test("shown Editor goes to the bottom of an older saved order without it", async () => {
+    window.localStorage.setItem("pi-lab.sections.showEditor", "true")
     window.localStorage.setItem(
       "pi-lab.sidebar.navOrder",
       JSON.stringify(["workflows", "library", "analysis"]),
     )
     renderSidebar()
-    const workflows = await screen.findByTestId("nav-automations")
-    expect(workflows.nextElementSibling).toBe(screen.getByTestId("nav-editor"))
-    expect(
-      screen.getByTestId("nav-editor").nextElementSibling?.getAttribute("data-science-tab"),
-    ).toBe("library")
+    const nav = await screen.findByTestId("science-nav")
+    expect(nav.lastElementChild).toBe(screen.getByTestId("nav-editor"))
+  })
+
+  test("Editor shows at the bottom while a file outside any project is open, and hides after", async () => {
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    expect(screen.queryByTestId("nav-editor")).toBeNull()
+
+    const target = { id: "outside-file", path: "/tmp/outside.txt" }
+    act(() =>
+      writeQuickBuffer({
+        target,
+        content: "x",
+        savedContent: "x",
+        baseline: { exists: true, mtimeMs: 1, size: 1 },
+        epoch: 0,
+        conflict: false,
+      }),
+    )
+    const editor = await screen.findByTestId("nav-editor")
+    expect(nav.lastElementChild).toBe(editor)
+
+    act(() => closeQuickBuffer(target.id))
+    await waitFor(() => expect(screen.queryByTestId("nav-editor")).toBeNull())
   })
 
   test("the LaTeX Editor row shows the stylised LaTeX logo", async () => {

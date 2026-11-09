@@ -231,7 +231,7 @@ export const FAKE_PYTHON_RUNTIME_RESOLVER: PythonRuntimeResolver = async () => (
 
 export interface HarnessOptions {
   latexResourcesDir?: string
-  latexDataDir?: string
+  latexCacheDir?: string
   latexUserHome?: string
   resolveAgentExecutable?: AgentExecutableResolver
   appChannel?: PiLabChannel
@@ -290,7 +290,7 @@ export async function createHarness(
   options: Pick<
     HarnessOptions,
     | "latexResourcesDir"
-    | "latexDataDir"
+    | "latexCacheDir"
     | "latexUserHome"
     | "resolveAgentExecutable"
     | "sshExec"
@@ -383,7 +383,7 @@ export async function createHarness(
     appChannel: options.appChannel ?? "alpha",
     skillsHomeDir,
     latexResourcesDir: options.latexResourcesDir,
-    latexDataDir: options.latexDataDir ?? join(dataDir, "latex"),
+    latexCacheDir: options.latexCacheDir ?? join(dataDir, "latex", "cache"),
     latexUserHome: options.latexUserHome,
     getDaemonClient: async () => {
       await ensureDaemon()

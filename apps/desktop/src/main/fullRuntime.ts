@@ -40,6 +40,7 @@ import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
 import { getDb, initDatabase } from "./db/db"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelFromAppName } from "./identity/channel"
+import { tectonicCacheDir } from "./latex/runtime"
 import {
   createElectronAppFocusAdapter,
   createElectronNativeNotificationAdapter,
@@ -533,7 +534,13 @@ export class FullRuntime {
       latexResourcesDir: app.isPackaged
         ? join(process.resourcesPath, "latex")
         : join(__dirname, "..", "..", "resources", "latex"),
-      latexDataDir: join(resolveDataDir(), "latex"),
+      latexCacheDir: tectonicCacheDir(
+        isTestMode,
+        resolveDataDir(),
+        process.platform,
+        homedir(),
+        process.env,
+      ),
       bundledSkillsDir: app.isPackaged
         ? join(process.resourcesPath, "skills")
         : join(__dirname, "..", "..", "resources", "skills"),

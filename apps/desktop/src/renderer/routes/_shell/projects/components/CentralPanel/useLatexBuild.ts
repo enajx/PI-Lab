@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import type { BuildOutputEvent } from "../../../../../../main/trpc/pdf/pdf"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
+
+/** Most live output kept per build, so a long build cannot grow memory without limit. */
+const MAX_LIVE_LOG = 100_000
 
 interface Fingerprint {
   mtimeMs: number
@@ -22,6 +26,14 @@ interface BuildFailure {
   log: string
 }
 
+/** Live output of one compile, from the `pdf.onBuildOutput` subscription. */
+interface RunningBuild {
+  text: string
+  firstBuild: boolean
+  downloading: boolean
+  ended: boolean
+}
+
 interface BuildScope {
   client: PiLabTrpcClient
   workspaceId: string
@@ -30,6 +42,10 @@ interface BuildScope {
   failures: BuildFailure[]
   failedOutputs: Record<string, Fingerprint>
   lastLog: string
+  /** Compiles seen on the live output stream since the last idle point, by build id. */
+  running: Map<number, RunningBuild>
+  /** Why the live output stream failed, shown at the top of the log; null while it works. */
+  streamError: string | null
 }
 
 interface BuildSnapshot {
@@ -63,41 +79,87 @@ export function useLatexBuild(
       failures: [],
       failedOutputs: {},
       lastLog: "",
+      running: new Map(),
+      streamError: null,
     }),
     [client, workspaceId],
   )
   const [snapshot, setSnapshot] = useState<BuildSnapshot | null>(null)
+
+  /**
+   * Publish an immutable view while keeping pending operations in the owning
+   * scope. While building, the log is the live compiler output (when any has
+   * arrived) and the message says when TeX packages are being downloaded.
+   */
+  const publish = useCallback((): void => {
+    if (!scope.live) return
+    const state = scope.pending > 0 ? "building" : scope.failures.length ? "failed" : "complete"
+    const active = [...scope.running.values()].filter((build) => !build.ended)
+    const liveLog = [...scope.running.values()].map((build) => build.text).join("\n")
+    const finishedLog = scope.failures.length
+      ? scope.failures.map((failure) => `${failure.source}\n${failure.log}`).join("\n\n")
+      : scope.lastLog
+    setSnapshot({
+      scope,
+      status: {
+        message:
+          state === "building"
+            ? active.some((build) => build.firstBuild)
+              ? "First build: downloading TeX packages…"
+              : active.some((build) => build.downloading)
+                ? "Downloading TeX packages…"
+                : "Building LaTeX…"
+            : state === "failed"
+              ? "LaTeX build failed"
+              : "LaTeX build complete",
+        log: [scope.streamError, state === "building" && liveLog !== "" ? liveLog : finishedLog]
+          .filter((part) => part !== null)
+          .join("\n"),
+      },
+      pdfBuildState: { state, failedOutputs: { ...scope.failedOutputs } },
+    })
+  }, [scope])
+
   useEffect(() => {
     scope.live = true
+    /** Apply one live output event to the build it belongs to. */
+    const apply = (event: BuildOutputEvent): void => {
+      if (event.kind === "start") {
+        scope.running.set(event.buildId, {
+          text: "",
+          firstBuild: event.firstBuild,
+          downloading: false,
+          ended: false,
+        })
+      }
+      const build = scope.running.get(event.buildId)
+      if (!build) return
+      if (event.kind === "chunk") build.text = (build.text + event.text).slice(-MAX_LIVE_LOG)
+      if (event.kind === "downloading") build.downloading = true
+      if (event.kind === "end") build.ended = true
+      if (scope.pending > 0) publish()
+    }
+    const subscription = scope.client.pdf.onBuildOutput.subscribe(
+      { workspaceId: scope.workspaceId },
+      {
+        onData: apply,
+        onError: (cause: unknown) => {
+          // Builds still run and report their full log at the end; the next
+          // published status shows why live output is missing.
+          scope.streamError = `Live build output is unavailable: ${String(cause)}`
+        },
+      },
+    )
     return () => {
       scope.live = false
+      subscription.unsubscribe()
     }
-  }, [scope])
+  }, [scope, publish])
 
   const saved = useCallback(
     (relPath: string): void => {
       onSaved?.(relPath)
       if (!/\.tex$/i.test(relPath) || !scope.live) return
-      /** Publish an immutable view while keeping pending operations in the owning scope. */
-      const publish = (): void => {
-        if (!scope.live) return
-        const state = scope.pending > 0 ? "building" : scope.failures.length ? "failed" : "complete"
-        setSnapshot({
-          scope,
-          status: {
-            message:
-              state === "building"
-                ? "Building LaTeX…"
-                : state === "failed"
-                  ? "LaTeX build failed"
-                  : "LaTeX build complete",
-            log: scope.failures.length
-              ? scope.failures.map((failure) => `${failure.source}\n${failure.log}`).join("\n\n")
-              : scope.lastLog,
-          },
-          pdfBuildState: { state, failedOutputs: { ...scope.failedOutputs } },
-        })
-      }
       scope.pending += 1
       publish()
       void client.pdf.build
@@ -142,10 +204,11 @@ export function useLatexBuild(
         })
         .finally(() => {
           scope.pending -= 1
+          if (scope.pending === 0) scope.running.clear()
           publish()
         })
     },
-    [client, workspaceId, onSaved, onBuilt, scope],
+    [client, workspaceId, onSaved, onBuilt, scope, publish],
   )
 
   return {

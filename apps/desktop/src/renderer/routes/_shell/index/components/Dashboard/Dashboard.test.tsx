@@ -100,6 +100,9 @@ describe("Dashboard", () => {
         .closest("header")
         ?.classList.contains("app-drag"),
     ).toBe(true)
+    const title = screen.getByRole("heading", { name: "Projects Dashboard" })
+    expect(title.className).not.toMatch(/font-(semibold|bold|medium)/)
+    expect(title.className).toContain("text-sm")
   })
 
   test("translates dashboard copy after choosing Norwegian", async () => {

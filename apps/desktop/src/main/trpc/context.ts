@@ -44,8 +44,8 @@ export interface AppContext {
   bundledSkillsDir?: string
   /** Read-only directory containing platform-specific bundled LaTeX tools. */
   latexResourcesDir?: string
-  /** Writable channel-specific LaTeX support cache. */
-  latexDataDir?: string
+  /** Writable Tectonic package cache, outside the data folder (see tectonicCacheDir). */
+  latexCacheDir?: string
   /** User home for discovering a shared TinyTeX installation. */
   latexUserHome?: string
   getDaemonClient: () => Promise<DaemonClient>

@@ -8,8 +8,10 @@ import { ToggleField } from "./SettingsControls"
 
 /**
  * Overleaf rows of the LaTeX settings: the one Overleaf Git token used for every
- * project (save, replace, remove; the token is never shown), and whether Sync
- * asks before committing edits not yet sent.
+ * project (save, replace, remove; the token is never shown), or a note that the
+ * user's own Git credentials already hold one (a token can still be saved, and
+ * a saved token is used first), and whether Sync asks before committing edits
+ * not yet sent.
  */
 export function OverleafSettings() {
   const t = useTranslate()
@@ -38,7 +40,8 @@ export function OverleafSettings() {
       },
     }),
   )
-  const configured = status.data?.configured === true
+  const source = status.data?.source ?? null
+  const configured = source === "saved"
   const error = status.error ?? save.error ?? clear.error ?? update.error
 
   return (
@@ -50,7 +53,13 @@ export function OverleafSettings() {
             data-testid="settings-overleaf-token-state"
             className="text-muted-foreground text-xs"
           >
-            {status.isPending ? t("Checking…") : configured ? t("Saved") : t("Not saved")}
+            {status.isPending
+              ? t("Checking…")
+              : source === "saved"
+                ? t("Saved")
+                : source === "git"
+                  ? t("Found in your Git credentials")
+                  : t("Not saved")}
           </span>
         </div>
         <p className="text-muted-foreground text-xs">

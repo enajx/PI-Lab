@@ -26,7 +26,7 @@ describe("Overleaf Settings (mocked RPC)", () => {
       configured = false
     })
     renderSettings({
-      "paper.token.status": () => ({ configured }),
+      "paper.token.status": () => ({ configured, source: configured ? "saved" : null }),
       "paper.token.set": set,
       "paper.token.clear": clear,
       "settings.get": () => ({ editor: DEFAULT_EDITOR_SETTINGS }),
@@ -48,10 +48,31 @@ describe("Overleaf Settings (mocked RPC)", () => {
     )
   })
 
+  it("says when the token is found in the user's Git credentials and still offers to save one", async () => {
+    const set = vi.fn()
+    renderSettings({
+      "paper.token.status": () => ({ configured: true, source: "git" }),
+      "paper.token.set": set,
+      "settings.get": () => ({ editor: DEFAULT_EDITOR_SETTINGS }),
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-overleaf-token-state").textContent).toBe(
+        "Found in your Git credentials",
+      ),
+    )
+    expect(screen.queryByTestId("settings-overleaf-token-remove")).toBeNull()
+    expect(screen.getByTestId("settings-overleaf-token-save").textContent).toBe("Save")
+    fireEvent.change(screen.getByTestId("settings-overleaf-token"), {
+      target: { value: "olp_own" },
+    })
+    fireEvent.click(screen.getByTestId("settings-overleaf-token-save"))
+    await waitFor(() => expect(set).toHaveBeenCalledWith({ token: "olp_own" }))
+  })
+
   it("turns the commit question back on", async () => {
     const update = vi.fn(() => ({}))
     renderSettings({
-      "paper.token.status": () => ({ configured: false }),
+      "paper.token.status": () => ({ configured: false, source: null }),
       "settings.get": () => ({
         editor: { ...DEFAULT_EDITOR_SETTINGS, confirmOverleafCommit: false },
       }),

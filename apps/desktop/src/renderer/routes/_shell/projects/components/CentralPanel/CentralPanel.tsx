@@ -57,10 +57,10 @@ const PdfViewer = lazy(() =>
   })),
 )
 
-/** The LaTeX Editor's use of the left column: extra content above a collapsible Files section. */
+/** The LaTeX Editor's use of the left column: a collapsible Files section with extra content below it. */
 export interface CentralPanelLeftColumn {
-  /** Shown above the Files section (the paper outline). */
-  top: ReactNode
+  /** Shown below the Files section (the paper outline). */
+  bottom: ReactNode
   /** Whether the Files section is expanded (state kept by the caller). */
   filesOpen: boolean
   onFilesOpenChange: (open: boolean) => void
@@ -743,7 +743,6 @@ export function CentralPanel({
             >
               {leftColumn ? (
                 <>
-                  {leftColumn.top}
                   {leftColumn.filesOpen ? (
                     // Open: the tree's own "Files" header carries the collapse chevron.
                     <FilesPanel
@@ -766,6 +765,7 @@ export function CentralPanel({
                       {null}
                     </CollapsibleSection>
                   )}
+                  {leftColumn.bottom}
                 </>
               ) : (
                 filesPanel

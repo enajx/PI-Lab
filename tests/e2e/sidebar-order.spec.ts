@@ -27,11 +27,12 @@ test("sidebar uses the new default order and preserves user reordering", async (
       nav
         .locator("[data-science-tab]")
         .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-science-tab")))
-    const defaults = ["editor", "analysis", "tasks", "library", "skills", "workflows", "cluster"]
+    // The Editor row is hidden by default, so it is not in the list.
+    const defaults = ["tasks", "library", "analysis", "latex", "skills", "workflows", "cluster"]
     await expect.poll(order).toEqual(defaults)
     await nav
       .locator('[data-science-tab="cluster"]')
-      .dragTo(nav.locator('[data-science-tab="editor"]'), { targetPosition: { x: 20, y: 2 } })
+      .dragTo(nav.locator('[data-science-tab="tasks"]'), { targetPosition: { x: 20, y: 2 } })
     const custom = ["cluster", ...defaults.slice(0, -1)]
     await expect.poll(order).toEqual(custom)
     await page.reload()

@@ -83,6 +83,7 @@ function renderEditor(
         settings={DEFAULT_EDITOR_SETTINGS}
         onUpdateEditorSettings={() => undefined}
         focusSession={focusSession}
+        syncSlot={null}
       />
     </AppProviders>,
   )
@@ -148,6 +149,29 @@ describe("PaperEditor agents (mocked server)", () => {
     expect((await screen.findByTestId("central-launch-warning")).textContent).toContain(
       startWarning,
     )
+    cleanup()
+  })
+})
+
+describe("PaperEditor left column (mocked server)", () => {
+  test("Outline sits below Files; Files starts collapsed and Outline open", async () => {
+    window.localStorage.removeItem("pi-lab.latexEditor.filesOpen")
+    window.localStorage.removeItem("pi-lab.latexEditor.outlineOpen")
+    const client = createFakeTrpcClient(handlers())
+    renderEditor(client, "p4", null)
+    const column = await screen.findByTestId("central-files-panel")
+    const files = within(column).getByTestId("central-files-section")
+    const outline = within(column).getByTestId("paper-outline-section")
+    expect(files.getAttribute("aria-expanded")).toBe("false")
+    expect(outline.getAttribute("aria-expanded")).toBe("true")
+    // Files comes first in the column, Outline after it.
+    expect(files.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // A saved open state still applies, and the order stays the same.
+    fireEvent.click(files)
+    const tree = await within(column).findByTestId("panel-files")
+    expect(tree.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(window.localStorage.getItem("pi-lab.latexEditor.filesOpen")).toContain("true")
     cleanup()
   })
 })

@@ -12,10 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useState } from "react"
 import { type CaffeineMode, type CaffeineScope, useCaffeine } from "../../../../caffeine"
 import { ProjectMarkdownChoice } from "../../../../components/ProjectMarkdownChoice"
-import {
-  allEditorThemes,
-  DEFAULT_EDITOR_THEME_ID,
-} from "../../../../Editor/components/editorThemes"
+import { allEditorThemes, defaultEditorThemeId } from "../../../../Editor/components/editorThemes"
 import {
   type InterfaceLanguage,
   LANGUAGES,
@@ -43,6 +40,7 @@ import {
   useShowAnalysisSection,
   useShowClusterSection,
   useShowCodeChanges,
+  useShowEditorSection,
   useShowExperimentsSection,
   useShowFilesPanel,
   useShowResearchHeartbeatSection,
@@ -377,6 +375,7 @@ export function EditorSection() {
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editor: EditorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
+  const { resolvedMode } = useTheme()
   const customEditorThemes = editor.customEditorThemes ?? []
   const pythonRunDestination = editor.pythonRunDestination ?? "central"
   const update = useMutation(
@@ -418,7 +417,8 @@ export function EditorSection() {
   const removeCustomTheme = (id: string) => {
     patch({
       customEditorThemes: customEditorThemes.filter((theme) => theme.id !== id),
-      ...(editor.editorTheme === id ? { editorTheme: DEFAULT_EDITOR_THEME_ID } : {}),
+      // Back to the stored default, which follows the app's light/dark appearance.
+      ...(editor.editorTheme === id ? { editorTheme: DEFAULT_EDITOR_SETTINGS.editorTheme } : {}),
     })
   }
 
@@ -499,8 +499,8 @@ export function EditorSection() {
         description="Color theme for the code editor."
         value={
           themes.some((theme) => theme.id === editor.editorTheme)
-            ? (editor.editorTheme ?? DEFAULT_EDITOR_THEME_ID)
-            : DEFAULT_EDITOR_THEME_ID
+            ? editor.editorTheme
+            : defaultEditorThemeId(resolvedMode)
         }
         groups={[
           {
@@ -1161,6 +1161,7 @@ export function ProjectViewSection() {
 export function SectionsSection() {
   const [showCluster, setShowCluster] = useShowClusterSection()
   const [showAnalysis, setShowAnalysis] = useShowAnalysisSection()
+  const [showEditor, setShowEditor] = useShowEditorSection()
   const [showExperiments] = useShowExperimentsSection()
   const [showResearchHeartbeat] = useShowResearchHeartbeatSection()
   return (
@@ -1182,6 +1183,13 @@ export function SectionsSection() {
         description="Show the Analysis section for browsing and previewing data files."
         checked={showAnalysis}
         onChange={setShowAnalysis}
+      />
+      <ToggleField
+        testId="settings-show-editor-section"
+        label="Editor"
+        description="Always show the Editor section for files outside your projects. When off, it shows only while such a file is open."
+        checked={showEditor}
+        onChange={setShowEditor}
       />
       <ToggleField
         testId="settings-show-experiments-section"

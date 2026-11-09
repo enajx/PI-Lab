@@ -95,6 +95,13 @@ describe("Project header", () => {
     expect(screen.queryByTestId("project-view-type")).toBeNull()
   })
 
+  test("the project title in the top bar is not bold and keeps its size", async () => {
+    renderWorkspace()
+    const title = await screen.findByRole("heading", { level: 1, name: "Photon Drift" })
+    expect(title.className).not.toMatch(/font-(semibold|bold|medium)/)
+    expect(title.className).toContain("text-sm")
+  })
+
   test("translates the Git notice while preserving the project name", async () => {
     window.localStorage.setItem("pi-lab.interface.language", "nb")
     renderWorkspace({ "projects.capabilities": () => ({ git: false }) })

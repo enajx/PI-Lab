@@ -1,7 +1,14 @@
 import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
-import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, test, vi } from "vitest"
+import { fireEvent, type RenderResult, render as renderBare, screen } from "@testing-library/react"
+import type { ReactElement } from "react"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { ThemeProvider } from "../../../providers/ThemeProvider"
 import { EditorSettingsMenu } from "./EditorSettingsMenu"
+
+/** Render under the app's ThemeProvider, which sets the default editor theme. */
+function render(ui: ReactElement): RenderResult {
+  return renderBare(ui, { wrapper: ThemeProvider })
+}
 
 /**
  * Component test for the in-toolbar editor-settings popover (spec: TODO
@@ -28,6 +35,22 @@ const SETTINGS: EditorSettings = {
 }
 
 describe("EditorSettingsMenu", () => {
+  afterEach(() => window.localStorage.clear())
+
+  test("the stored default theme shows GitHub for the app appearance", () => {
+    window.localStorage.setItem("pi-lab.theme", "dark")
+    const dark = render(<EditorSettingsMenu settings={SETTINGS} />)
+    fireEvent.click(screen.getByTestId("editor-settings"))
+    expect(screen.getByTestId<HTMLSelectElement>("editor-settings-theme").value).toBe("github-dark")
+    dark.unmount()
+    window.localStorage.setItem("pi-lab.theme", "light")
+    render(<EditorSettingsMenu settings={SETTINGS} />)
+    fireEvent.click(screen.getByTestId("editor-settings"))
+    expect(screen.getByTestId<HTMLSelectElement>("editor-settings-theme").value).toBe(
+      "github-light",
+    )
+  })
+
   test("the gear toggles the menu open and closed", () => {
     render(<EditorSettingsMenu settings={SETTINGS} />)
     expect(screen.queryByTestId("editor-settings-menu")).toBeNull()

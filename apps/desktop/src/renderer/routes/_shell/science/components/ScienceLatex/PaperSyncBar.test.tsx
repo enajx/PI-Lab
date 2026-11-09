@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
@@ -18,11 +18,16 @@ function renderBar(
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient(handlers)
+  // Stands in for the page top bar that holds the Sync button.
+  const syncSlot = document.createElement("div")
+  syncSlot.dataset.testid = "top-bar-slot"
+  document.body.appendChild(syncSlot)
   return render(
     <AppProviders client={client} queryClient={queryClient}>
       <PaperSyncBar
         projectId="p1"
         workspaceId="w1"
+        syncSlot={syncSlot}
         lastSyncAt={null}
         hasRemote={true}
         confirmCommit={confirmCommit}
@@ -36,6 +41,28 @@ function renderBar(
 }
 
 describe("PaperSyncBar (mocked server)", () => {
+  test("the Sync button and last sync time go in the top bar; the output folder and errors stay in the bar", async () => {
+    renderBar(
+      {
+        "paper.sync": () => {
+          throw new Error("push rejected")
+        },
+        "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      },
+      false,
+      () => undefined,
+      async () => [],
+    )
+    const slot = screen.getAllByTestId("top-bar-slot").at(-1) as HTMLElement
+    const bar = screen.getByTestId("paper-sync-bar")
+    expect(within(slot).getByTestId("paper-sync")).toBeTruthy()
+    expect(within(slot).getByTestId("paper-last-sync").textContent).toContain("Not synced yet")
+    expect(within(bar).queryByTestId("paper-sync")).toBeNull()
+    expect(within(bar).getByTestId("paper-output-dir")).toBeTruthy()
+    fireEvent.click(within(slot).getByTestId("paper-sync"))
+    expect((await within(bar).findByRole("alert")).textContent).toContain("push rejected")
+  })
+
   test("asks before committing unsent edits, and Don't ask again turns the question off", async () => {
     const sync = vi.fn((input: unknown) =>
       (input as { commit: boolean }).commit

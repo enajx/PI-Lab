@@ -67,9 +67,7 @@ export function Dashboard() {
           titleBarHeaderClass(collapsed),
         )}
       >
-        <h1 className="font-semibold text-foreground text-sm tracking-tight">
-          {t("Projects Dashboard")}
-        </h1>
+        <h1 className="text-foreground text-sm tracking-tight">{t("Projects Dashboard")}</h1>
         <div className={cn("flex shrink-0 items-center gap-3", titleBarControlClass(collapsed))}>
           <ProjectVisibilityToggle
             hiddenCount={hiddenCount ?? 0}

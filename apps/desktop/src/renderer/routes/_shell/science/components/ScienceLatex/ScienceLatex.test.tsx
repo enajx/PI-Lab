@@ -1,7 +1,8 @@
 import { QueryClient } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
+import type { FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { createFakeTrpcClient } from "../../../../../test/fakeTrpcClient"
 
 /**
@@ -10,6 +11,13 @@ import { createFakeTrpcClient } from "../../../../../test/fakeTrpcClient"
  */
 const mocks = vi.hoisted(() => ({ navigate: vi.fn() }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => mocks.navigate }))
+// xterm and CodeMirror need layout APIs jsdom lacks.
+vi.mock("../../../../../Terminal", () => ({ Terminal: () => <div data-testid="terminal" /> }))
+vi.mock("../../../../../Editor/components/CodeMirrorBuffer", () => ({
+  CodeMirrorBuffer: ({ relPath }: { relPath: string }) => (
+    <div data-testid="editor-buffer">{relPath}</div>
+  ),
+}))
 
 const { ScienceLatex } = await import("./ScienceLatex")
 
@@ -47,4 +55,55 @@ test("after arriving with a project in the address, the picker still switches pr
     replace: true,
   })
   expect(window.localStorage.getItem("pi-lab.latexEditor.project")).toContain("p2")
+})
+
+/** Mount the page for project p1 with the given `paper.get` answer. */
+function renderPage(paperGet: FakeHandlers[string]) {
+  const client = createFakeTrpcClient({
+    "projects.list": () => [{ id: "p1", name: "One" }],
+    "settings.get": () => ({}),
+    "paper.get": paperGet,
+    "paper.token.status": () => ({ configured: true, source: "saved" }),
+    "paper.outline": () => [],
+    "files.tree": () => [],
+    "files.stat": () => ({ exists: false, mtimeMs: 0, size: 0 }),
+    "files.read": () => ({
+      status: "text",
+      exists: true,
+      content: "",
+      baseline: { exists: true, mtimeMs: 1, size: 0 },
+    }),
+    "agents.list": () => [],
+    "agents.projectChoice": () => ({ agentId: null, storage: "app" }),
+    "terminal.list": () => [],
+  })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <AppProviders client={client} queryClient={queryClient}>
+      <ScienceLatex initialProjectId="p1" focusSession={null} />
+    </AppProviders>,
+  )
+}
+
+test("with a paper linked, the Sync button is in the page top bar next to the project picker", async () => {
+  const { container } = renderPage(() => ({
+    paper: {
+      lastSyncAt: null,
+      remoteUrl: "https://git.overleaf.com/abc",
+      outputDir: null,
+      effectiveOutputDir: "build",
+    },
+    workspaceId: "paper-ws",
+    rootRelPath: "main.tex",
+  }))
+  const header = container.querySelector("header") as HTMLElement
+  expect(await within(header).findByTestId("paper-sync")).toBeTruthy()
+  expect(within(header).getByTestId("latex-project-select")).toBeTruthy()
+  expect(within(screen.getByTestId("paper-sync-bar")).queryByTestId("paper-sync")).toBeNull()
+})
+
+test("without a paper there is no Sync button", async () => {
+  renderPage(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
+  await screen.findByTestId("paper-setup")
+  expect(screen.queryByTestId("paper-sync")).toBeNull()
 })

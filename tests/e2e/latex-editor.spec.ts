@@ -136,6 +136,14 @@ async function openAndLink(page: Page, agentId: string): Promise<void> {
   expect(folder.x).toBeGreaterThanOrEqual(overleaf.x + overleaf.width)
   expect(Math.abs(folder.y - overleaf.y)).toBeLessThan(1)
   expect(Math.abs(folder.width - overleaf.width)).toBeLessThan(1)
+  // No Sync button before a paper is linked; the Overleaf card links to its token page and docs.
+  await expect(page.getByTestId("paper-sync")).toHaveCount(0)
+  const setupCard = page.getByTestId("paper-setup-overleaf")
+  await expect(setupCard.getByRole("link", { name: "Get a Git token" })).toHaveAttribute(
+    "href",
+    "https://www.overleaf.com/user/settings",
+  )
+  await expect(setupCard.getByRole("link", { name: "How Overleaf Git works" })).toBeVisible()
   await page.getByTestId("paper-use-folder").click()
   await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
 }
@@ -173,10 +181,20 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     await openAndLink(page, "test-merge")
     await page.screenshot({ path: test.info().outputPath("latex-editor.png") })
 
-    // Outline above the paper's file tree in the editor's left column (open by
-    // default), and the main .tex open with LaTeX colouring.
+    // The editor's left column: Files (collapsed by default) with the Outline
+    // below it (open by default), and the main .tex open with LaTeX colouring.
     const column = page.getByTestId("central-files-panel")
+    const filesHeader = page.getByTestId("central-files-section")
+    const outlineHeader = page.getByTestId("paper-outline-section")
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
+    await expect(filesHeader).toHaveAttribute("aria-expanded", "false")
+    await expect(outlineHeader).toHaveAttribute("aria-expanded", "true")
+    await expect(column.getByTestId("panel-files")).toHaveCount(0)
+    const filesBox = await filesHeader.boundingBox()
+    const outlineBox = await outlineHeader.boundingBox()
+    if (!filesBox || !outlineBox) throw new Error("left column sections are not visible")
+    expect(outlineBox.y).toBeGreaterThan(filesBox.y)
+    await filesHeader.click()
     await expect(column.getByTestId("file-tree-file").filter({ hasText: "main.tex" })).toBeVisible()
     // The panel button hides and shows the column.
     await page.getByTestId("central-files-toggle").click()
@@ -184,25 +202,23 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     await page.getByTestId("central-files-toggle").click()
     await expect(column.getByTestId("paper-outline")).toBeVisible()
     // Outline and Files collapse, and stay collapsed after a reload.
-    await page.getByTestId("paper-outline-section").click()
-    await page.getByTestId("central-files-section").click()
+    await outlineHeader.click()
+    await filesHeader.click()
     await expect(column.getByTestId("paper-outline")).toHaveCount(0)
     await expect(column.getByTestId("panel-files")).toHaveCount(0)
     await page.reload()
     await expect(page.getByTestId("nav-dashboard")).toBeVisible({ timeout: 30_000 })
     await openLatexEditor(page)
-    await expect(page.getByTestId("paper-outline-section")).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
-    await expect(page.getByTestId("central-files-section")).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
+    await expect(outlineHeader).toHaveAttribute("aria-expanded", "false")
+    await expect(filesHeader).toHaveAttribute("aria-expanded", "false")
     await expect(column.getByTestId("panel-files")).toHaveCount(0)
-    await page.getByTestId("paper-outline-section").click()
-    await page.getByTestId("central-files-section").click()
+    await outlineHeader.click()
+    await filesHeader.click()
     await expect(column.getByTestId("panel-files")).toBeVisible()
+    // The Sync button is in the page top bar, next to the project picker.
+    const topBar = page.getByTestId("science-latex").locator("header")
+    await expect(topBar.getByTestId("paper-sync")).toBeVisible()
+    await expect(topBar.getByTestId("latex-project-select")).toBeVisible()
     const editor = page.getByTestId("editor-buffer")
     await expect(editor.locator(".cm-content")).toContainText("Shared first line.")
     await expect(editor.locator(".cm-line span").first()).toBeVisible()

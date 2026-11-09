@@ -1,5 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { observable } from "@trpc/server/observable"
 import { expect, test, vi } from "vitest"
+import type { BuildOutputEvent } from "../../../../../../main/trpc/pdf/pdf"
 import { createFakeTrpcClient } from "../../../../../test/fakeTrpcClient"
 import { useLatexBuild } from "./useLatexBuild"
 
@@ -178,4 +180,53 @@ test("reports each successful build's PDF path and source", async () => {
   act(() => view.result.current.saved("main.tex"))
   await waitFor(() => expect(view.result.current.pdfBuildState?.state).toBe("failed"))
   expect(built).toHaveBeenCalledTimes(1)
+})
+
+/** Mocked IPC: live compiler output and a first build that downloads TeX packages show while building. */
+test("streams live build output and says when the first build downloads TeX packages", async () => {
+  const pending = deferred<BuildResult>()
+  let send: (event: BuildOutputEvent) => void = () => {}
+  const client = createFakeTrpcClient({
+    "pdf.build": () => pending.promise,
+    "pdf.onBuildOutput": () =>
+      observable<BuildOutputEvent>((emit) => {
+        send = (event) => emit.next(event)
+        return () => {}
+      }),
+  })
+  const view = renderHook(() => useLatexBuild(client, "workspace", undefined, undefined))
+  act(() => view.result.current.saved("main.tex"))
+  expect(view.result.current.status?.message).toBe("Building LaTeX…")
+  act(() => send({ kind: "start", buildId: 1, relPath: "main.tex", firstBuild: true }))
+  act(() => send({ kind: "chunk", buildId: 1, text: "note: downloading index\n" }))
+  expect(view.result.current.status?.message).toBe("First build: downloading TeX packages…")
+  expect(view.result.current.status?.log).toContain("note: downloading index")
+  act(() => send({ kind: "chunk", buildId: 1, text: "Output written on main.pdf\n" }))
+  expect(view.result.current.status?.log).toContain("Output written on main.pdf")
+  act(() => send({ kind: "end", buildId: 1 }))
+  await act(async () =>
+    pending.resolve({ relPath: "build/main.pdf", success: true, log: "final log" }),
+  )
+  expect(view.result.current.status).toEqual({ message: "LaTeX build complete", log: "final log" })
+})
+
+/** Mocked IPC: a later build that downloads new packages says so without calling it the first build. */
+test("says when a later build downloads TeX packages", async () => {
+  const pending = deferred<BuildResult>()
+  let send: (event: BuildOutputEvent) => void = () => {}
+  const client = createFakeTrpcClient({
+    "pdf.build": () => pending.promise,
+    "pdf.onBuildOutput": () =>
+      observable<BuildOutputEvent>((emit) => {
+        send = (event) => emit.next(event)
+        return () => {}
+      }),
+  })
+  const view = renderHook(() => useLatexBuild(client, "workspace", undefined, undefined))
+  act(() => view.result.current.saved("main.tex"))
+  act(() => send({ kind: "start", buildId: 7, relPath: "main.tex", firstBuild: false }))
+  expect(view.result.current.status?.message).toBe("Building LaTeX…")
+  act(() => send({ kind: "downloading", buildId: 7 }))
+  expect(view.result.current.status?.message).toBe("Downloading TeX packages…")
+  await act(async () => pending.resolve({ relPath: "build/main.pdf", success: true, log: "" }))
 })

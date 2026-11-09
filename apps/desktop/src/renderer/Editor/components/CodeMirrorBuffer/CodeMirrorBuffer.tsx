@@ -11,6 +11,7 @@ import {
   useEditorFontFamily,
   useEditorFontSize,
 } from "../../../preferences/preferences"
+import { useTheme } from "../../../providers/ThemeProvider"
 import { focusHeldOnOpen } from "../../focusOnOpen"
 import { languageForPath } from "../../utils/languageForPath"
 import { editorThemeExtension } from "../editorThemes"
@@ -85,8 +86,9 @@ interface CodeMirrorBufferProps {
   /**
    * Optional color-theme id (the stored `EditorSettings.editorTheme`). Resolved to
    * a CodeMirror extension via {@link editorThemeExtension} and layered on top of
-   * the structural height/scroll theme. Omitted / `"default"` / unknown ⇒ the
-   * registry's default theme. Changing it reconfigures live (no remount).
+   * the structural height/scroll theme. Omitted / `"default"` / unknown ⇒ GitHub,
+   * Light or Dark following the app's appearance. Changing it, or the appearance,
+   * reconfigures live (no remount).
    */
   theme?: string
   /** Parsed custom themes copied into editor settings. */
@@ -299,6 +301,7 @@ export function CodeMirrorBuffer({
   const vimCompartment = useRef(new Compartment()).current
   const autocompleteCompartment = useRef(new Compartment()).current
   const themeCompartment = useRef(new Compartment()).current
+  const { resolvedMode } = useTheme()
   const lintCompartment = useRef(new Compartment()).current
   const markdownCompartment = useRef(new Compartment()).current
 
@@ -459,7 +462,7 @@ export function CodeMirrorBuffer({
         // Color theme (chrome + syntax highlighting) chosen in Settings → Editor.
         // Layered over the default highlight; the structural height theme
         // below only sets layout, so the two never conflict on color.
-        themeCompartment.of(editorThemeExtension(theme, customThemes)),
+        themeCompartment.of(editorThemeExtension(theme, customThemes ?? [], resolvedMode)),
         editorTypographyExtension,
         lintCompartment.of(lintExtension(diagnostics)),
         markdownCompartment.of(
@@ -534,9 +537,11 @@ export function CodeMirrorBuffer({
   // Swap the color theme live.
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: themeCompartment.reconfigure(editorThemeExtension(theme, customThemes)),
+      effects: themeCompartment.reconfigure(
+        editorThemeExtension(theme, customThemes ?? [], resolvedMode),
+      ),
     })
-  }, [theme, customThemes, themeCompartment])
+  }, [theme, customThemes, resolvedMode, themeCompartment])
 
   // Swap the diagnostics source live.
   useEffect(() => {

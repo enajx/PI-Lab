@@ -984,7 +984,7 @@ describe("CentralPanel — LaTeX Editor left column", () => {
         settings={DEFAULT_SETTINGS}
         onUpdate={() => {}}
         leftColumn={{
-          top: <div data-testid="outline-stub">Outline</div>,
+          bottom: <div data-testid="outline-stub">Outline</div>,
           filesOpen,
           onFilesOpenChange: setFilesOpen,
         }}
@@ -992,7 +992,7 @@ describe("CentralPanel — LaTeX Editor left column", () => {
     )
   }
 
-  test("shows the given content above the file tree, and the Files section collapses", async () => {
+  test("shows the given content below the file tree, and the Files section collapses", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const client = createFakeTrpcClient(baseHandlers())
     render(
@@ -1004,7 +1004,7 @@ describe("CentralPanel — LaTeX Editor left column", () => {
     const column = screen.getByTestId("central-files-panel")
     const outline = within(column).getByTestId("outline-stub")
     const tree = await within(column).findByTestId("panel-files")
-    expect(outline.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tree.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // One "Files" header: the tree's own header carries the collapse chevron.
     expect(within(column).getAllByText("Files")).toHaveLength(1)
     const header = within(column).getByTestId("central-files-section")

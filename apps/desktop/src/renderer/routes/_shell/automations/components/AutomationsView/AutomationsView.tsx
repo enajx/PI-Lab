@@ -89,9 +89,7 @@ export function AutomationsView({
         <div className="flex min-w-0 items-center gap-2">
           <Workflow className="size-4 shrink-0 text-brand" aria-hidden />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
-              {t("Routines")}
-            </h1>
+            <h1 className="truncate text-foreground text-sm tracking-tight">{t("Routines")}</h1>
             <p className="truncate text-muted-foreground text-xs">
               {t("Scheduled & looping agent runs")}
             </p>

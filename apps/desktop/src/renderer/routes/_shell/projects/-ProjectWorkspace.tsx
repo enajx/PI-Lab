@@ -382,7 +382,7 @@ export function ProjectWorkspace({
         )}
       >
         <div className={cn("flex min-w-0 flex-col", titleBarControlClass(collapsed))}>
-          <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
+          <h1 className="truncate text-foreground text-sm tracking-tight">
             {project?.name ?? t("Loading…")}
           </h1>
           {project ? (

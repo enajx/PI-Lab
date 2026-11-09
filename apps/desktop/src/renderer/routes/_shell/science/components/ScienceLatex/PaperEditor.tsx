@@ -44,6 +44,8 @@ interface PaperEditorProps {
   onUpdateEditorSettings: (patch: Partial<EditorSettings>) => void
   /** An agent session to focus (and open as a tab when it is not open), or null. */
   focusSession: FocusSessionRequest | null
+  /** The page top bar's element that holds the Sync button, or null before it mounts. */
+  syncSlot: HTMLElement | null
 }
 
 /** A request to show one agent session in the LaTeX Editor, e.g. from the Project Agents box. */
@@ -86,7 +88,8 @@ function hasRestoredTabs(state: ReturnType<typeof readProjectWorkspaceState>): b
 /**
  * The LaTeX Editor workspace for a linked paper: the editor panel (source and
  * PDF side by side, with build, build log and SyncTeX) whose left column holds
- * the outline above the paper folder's file tree, with the Sync bar below.
+ * the paper folder's file tree with the outline below it, and the Sync controls
+ * (the Sync button in the page top bar, the rest in a bar below the editor).
  * Saving a .tex builds it and opens the built PDF beside the source when it is
  * not open yet (an open PDF reloads itself when the file changes).
  */
@@ -102,6 +105,7 @@ export function PaperEditor({
   settings,
   onUpdateEditorSettings,
   focusSession,
+  syncSlot,
 }: PaperEditorProps) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -223,7 +227,14 @@ export function PaperEditor({
       open={outlineOpen}
       onOpenChange={setOutlineOpen}
       testId="paper-outline-section"
-      className={outlineOpen ? "max-h-[45%] shrink-0 border-border border-b" : "shrink-0"}
+      className={
+        // Below an open file tree it takes at most part of the column; alone it fills it.
+        outlineOpen
+          ? filesOpen
+            ? "max-h-[45%] shrink-0 border-border border-t"
+            : "flex-1 border-border border-t"
+          : "shrink-0 border-border border-t"
+      }
     >
       <div className="min-h-0 overflow-y-auto pb-1 text-xs">
         {outline.isError ? (
@@ -285,7 +296,7 @@ export function PaperEditor({
           pdfBesideSource={true}
           sourceRequest={sourceRequest}
           leftColumn={{
-            top: outlineSection,
+            bottom: outlineSection,
             filesOpen,
             onFilesOpenChange: setFilesOpen,
           }}
@@ -294,6 +305,7 @@ export function PaperEditor({
       <PaperSyncBar
         projectId={projectId}
         workspaceId={workspaceId}
+        syncSlot={syncSlot}
         lastSyncAt={lastSyncAt}
         hasRemote={hasRemote}
         confirmCommit={settings.confirmOverleafCommit}

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { EventEmitter } from "node:events"
 import { existsSync } from "node:fs"
 import { lstat, mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
@@ -10,6 +11,7 @@ import {
   workspaces,
 } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
+import { observable } from "@trpc/server/observable"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { GENERATED_EXTENSIONS } from "../../latex/outputDir"
@@ -25,6 +27,31 @@ const MAX_PDF_BYTES = 100_000_000
 const MAX_TEX_BYTES = 2_000_000
 const pathInput = z.object({ workspaceId: z.string().min(1), relPath: z.string().min(1) })
 const builds = new Map<string, Promise<BuildResult>>()
+
+/**
+ * Live events of the builds in one workspace, sent by the
+ * {@link pdfRouter.onBuildOutput} subscription while a build runs:
+ *   - `start`: a compile of root `relPath` began. `firstBuild` is true when
+ *     bundled Tectonic starts with an empty package cache, so it will download
+ *     TeX packages.
+ *   - `downloading`: the compiler output shows it is downloading TeX packages.
+ *   - `chunk`: compiler output as it is printed.
+ *   - `end`: the compile finished; its result comes from the `build` mutation.
+ * `buildId` tells apart builds of different roots running at the same time.
+ */
+export type BuildOutputEvent =
+  | { kind: "start"; buildId: number; relPath: string; firstBuild: boolean }
+  | { kind: "downloading"; buildId: number }
+  | { kind: "chunk"; buildId: number; text: string }
+  | { kind: "end"; buildId: number }
+
+/** Build output events, emitted under the workspace id that asked for the build. */
+const buildOutput = new EventEmitter()
+buildOutput.setMaxListeners(0)
+let nextBuildId = 1
+
+/** Tectonic prints "downloading" for each bundle file it fetches. */
+const DOWNLOADING_PATTERN = /\bdownloading\b/i
 
 export interface BuildResult {
   relPath: string
@@ -146,15 +173,19 @@ async function rootSource(dir: string, relPath: string): Promise<string> {
   }
 }
 
-/** Commands use the login shell's PATH but never execute through a shell. */
+/**
+ * Commands use the login shell's PATH but never execute through a shell.
+ * `onOutput` receives stdout and stderr text as it is printed.
+ */
 async function runTool(
   runtime: LatexRuntime,
   args: string[],
   cwd: string,
   timeout: number,
+  onOutput: (text: string) => void,
 ): Promise<{ success: boolean; output: string }> {
   return new Promise((done, reject) => {
-    execFile(
+    const child = execFile(
       runtime.executable,
       args,
       { cwd, env: runtime.env, timeout, maxBuffer: 2_000_000, encoding: "utf8" },
@@ -169,7 +200,15 @@ async function runTool(
         })
       },
     )
+    child.stdout?.on("data", (text: string) => onOutput(text))
+    child.stderr?.on("data", (text: string) => onOutput(text))
   })
+}
+
+/** True when Tectonic's package cache folder is empty, so the build downloads packages. */
+async function cacheIsEmpty(runtime: LatexRuntime): Promise<boolean> {
+  if (!runtime.cacheDir) return false
+  return (await readdir(runtime.cacheDir)).length === 0
 }
 
 /**
@@ -215,8 +254,16 @@ async function prepareOutput(dir: string, source: string, outputDir: string): Pr
   return output
 }
 
-/** One full compile per root at a time; a later request runs after the earlier one. */
-async function compile(ctx: AppContext, target: BuildTarget, source: string): Promise<BuildResult> {
+/**
+ * One full compile per root at a time; a later request runs after the earlier
+ * one. Live output goes to `workspaceId`'s {@link BuildOutputEvent} listeners.
+ */
+async function compile(
+  ctx: AppContext,
+  workspaceId: string,
+  target: BuildTarget,
+  source: string,
+): Promise<BuildResult> {
   const { dir } = target
   const pending = builds.get(source)
   const task = (pending ?? Promise.resolve())
@@ -229,6 +276,23 @@ async function compile(ctx: AppContext, target: BuildTarget, source: string): Pr
         ctx,
         getSettingsOrDefaults(ctx.db).editor.latexProvider,
       )
+      const buildId = nextBuildId++
+      const send = (event: BuildOutputEvent): void => {
+        buildOutput.emit(workspaceId, event)
+      }
+      send({
+        kind: "start",
+        buildId,
+        relPath: rendererPath(dir, source),
+        firstBuild: await cacheIsEmpty(runtime),
+      })
+      let downloading = false
+      const onOutput = (text: string): void => {
+        send({ kind: "chunk", buildId, text })
+        if (downloading || runtime.provider !== "bundled" || !DOWNLOADING_PATTERN.test(text)) return
+        downloading = true
+        send({ kind: "downloading", buildId })
+      }
       const result = await runTool(
         runtime,
         runtime.provider === "bundled"
@@ -243,7 +307,8 @@ async function compile(ctx: AppContext, target: BuildTarget, source: string): Pr
             ],
         dirname(source),
         runtime.provider === "bundled" ? 300_000 : 120_000,
-      )
+        onOutput,
+      ).finally(() => send({ kind: "end", buildId }))
       return {
         relPath: rendererPath(dir, join(output, `${basename(source, extname(source))}.pdf`)),
         success: result.success,
@@ -331,8 +396,23 @@ export const pdfRouter = router({
   }),
   build: publicProcedure.input(pathInput).mutation(async ({ ctx, input }): Promise<BuildResult> => {
     const target = await workspaceDirectory(ctx.db, input.workspaceId)
-    return compile(ctx, target, await rootSource(target.dir, input.relPath))
+    return compile(ctx, input.workspaceId, target, await rootSource(target.dir, input.relPath))
   }),
+  /**
+   * Live output of the builds in one workspace; see {@link BuildOutputEvent}.
+   * Only builds that start after subscribing are sent; nothing is replayed.
+   */
+  onBuildOutput: publicProcedure
+    .input(z.object({ workspaceId: z.string().min(1) }))
+    .subscription(({ input }) =>
+      observable<BuildOutputEvent>((emit) => {
+        const listener = (event: BuildOutputEvent): void => emit.next(event)
+        buildOutput.on(input.workspaceId, listener)
+        return () => {
+          buildOutput.off(input.workspaceId, listener)
+        }
+      }),
+    ),
   forwardSync: publicProcedure
     .input(
       pathInput.extend({

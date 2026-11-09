@@ -1,7 +1,7 @@
 import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslate } from "../../../../../i18n/language"
 import { useLatexEditorProject } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
@@ -12,7 +12,8 @@ import { PaperSetup } from "./PaperSetup"
 /**
  * LaTeX Editor science tab: a project picker at the top (remembers the last
  * project; a project card can open it with a project chosen), then either the
- * setup to link the project's paper or the paper workspace. `focusSession`
+ * setup to link the project's paper or the paper workspace. With a paper
+ * linked, the workspace puts its Sync button next to the picker. `focusSession`
  * focuses one agent tab of the initial project (see the Project Agents box).
  */
 export function ScienceLatex({
@@ -53,6 +54,8 @@ export function ScienceLatex({
       },
     }),
   )
+  // The top bar element the paper workspace puts its Sync controls in.
+  const [syncSlot, setSyncSlot] = useState<HTMLElement | null>(null)
   const paper = useQuery({
     ...trpc.paper.get.queryOptions({ projectId: selected?.id ?? "" }),
     enabled: selected !== null,
@@ -63,19 +66,22 @@ export function ScienceLatex({
       title={t("LaTeX Editor")}
       testId="science-latex"
       actions={
-        <select
-          data-testid="latex-project-select"
-          aria-label={t("LaTeX Editor project")}
-          value={selected?.id ?? ""}
-          onChange={(event) => chooseProject(event.target.value)}
-          className="h-8 max-w-56 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
+        <>
+          <select
+            data-testid="latex-project-select"
+            aria-label={t("LaTeX Editor project")}
+            value={selected?.id ?? ""}
+            onChange={(event) => chooseProject(event.target.value)}
+            className="h-8 max-w-56 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          <div ref={setSyncSlot} data-testid="latex-sync-slot" className="contents" />
+        </>
       }
     >
       {updateEditor.isError ? (
@@ -109,6 +115,7 @@ export function ScienceLatex({
           settings={settings}
           onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
           focusSession={selected.id === initialProjectId ? focusSession : null}
+          syncSlot={syncSlot}
         />
       ) : (
         <PaperSetup key={selected.id} projectId={selected.id} />

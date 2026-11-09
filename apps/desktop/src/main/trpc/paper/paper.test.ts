@@ -60,15 +60,41 @@ async function seedRemote(root: string): Promise<string> {
   return remote
 }
 
+/** Git config values these tests replace, restored after each test. */
+const GIT_ENV_KEYS = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"] as const
+let previousGitEnv: Record<string, string | undefined> = {}
+
 beforeEach(async () => {
   h = await createHarness([], { daemon: "lazy" })
+  // Every git call here, including the Overleaf credential lookup, sees only an
+  // empty test global config and no system config, so the real keychain
+  // (osxkeychain is set in the macOS system config) is never read.
+  previousGitEnv = Object.fromEntries(GIT_ENV_KEYS.map((key) => [key, process.env[key]]))
+  process.env.GIT_CONFIG_GLOBAL = join(h.dataDir, "test-gitconfig")
+  process.env.GIT_CONFIG_NOSYSTEM = "1"
   projectId = (await h.caller.projects.open({ path: h.repoDir })).id
   bare = await seedRemote(h.dataDir)
 })
 
 afterEach(async () => {
+  for (const key of GIT_ENV_KEYS) {
+    const value = previousGitEnv[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
   await h.dispose()
 })
+
+/** Configure a test credential helper (a small script) that holds an Overleaf credential. */
+async function useTestCredentialHelper(): Promise<void> {
+  const helper = join(h.dataDir, "test-credential-helper.sh")
+  await writeFile(
+    helper,
+    "#!/bin/sh\n[ \"$1\" = get ] || exit 0\nprintf 'username=git\\npassword=helper-secret\\n'\n",
+    { mode: 0o700 },
+  )
+  await execFileAsync("git", ["config", "--global", "credential.helper", helper])
+}
 
 /** Clone the remote outside the project and link it, returning the paper folder. */
 async function linkOutsideClone(): Promise<string> {
@@ -106,15 +132,30 @@ async function remoteMainTex(): Promise<string> {
 
 describe("token", () => {
   test("set, status and clear never return the token and store it encrypted", async () => {
-    expect(await h.caller.paper.token.status()).toEqual({ configured: false })
-    expect(await h.caller.paper.token.set({ token: "olp_secret" })).toEqual({ configured: true })
-    expect(await h.caller.paper.token.status()).toEqual({ configured: true })
+    expect(await h.caller.paper.token.status()).toEqual({ configured: false, source: null })
+    expect(await h.caller.paper.token.set({ token: "olp_secret" })).toEqual({
+      configured: true,
+      source: "saved",
+    })
+    expect(await h.caller.paper.token.status()).toEqual({ configured: true, source: "saved" })
     const stored = h.db.select().from(serviceCredentials).all()
     expect(stored).toHaveLength(1)
     expect(stored[0]?.service).toBe("overleaf")
     expect(stored[0]?.encryptedValue).not.toContain("olp_secret")
-    expect(await h.caller.paper.token.clear()).toEqual({ configured: false })
-    expect(await h.caller.paper.token.status()).toEqual({ configured: false })
+    expect(await h.caller.paper.token.clear()).toEqual({ configured: false, source: null })
+    expect(await h.caller.paper.token.status()).toEqual({ configured: false, source: null })
+  })
+
+  test("finds an Overleaf credential in the user's Git (test helper), never returns or stores it, and a saved token wins", async () => {
+    await useTestCredentialHelper()
+    const found = await h.caller.paper.token.status()
+    expect(found).toEqual({ configured: true, source: "git" })
+    expect(JSON.stringify(found)).not.toContain("helper-secret")
+    expect(h.db.select().from(serviceCredentials).all()).toHaveLength(0)
+    await h.caller.paper.token.set({ token: "olp_secret" })
+    expect(await h.caller.paper.token.status()).toEqual({ configured: true, source: "saved" })
+    expect(await h.caller.paper.token.clear()).toEqual({ configured: true, source: "git" })
+    expect(h.db.select().from(serviceCredentials).all()).toHaveLength(0)
   })
 })
 
@@ -242,6 +283,14 @@ describe("addOverleaf", () => {
 
   test("refuses when the project already has a paper folder", async () => {
     await h.caller.paper.token.set({ token: "olp_secret" })
+    await mkdir(join(h.repoDir, "paper"))
+    await expect(
+      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+  })
+
+  test("a credential in the user's Git (test helper) is enough: no token is asked for", async () => {
+    await useTestCredentialHelper()
     await mkdir(join(h.repoDir, "paper"))
     await expect(
       h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc" }),

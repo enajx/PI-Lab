@@ -1,8 +1,8 @@
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { BrowserWindow } from "electron"
+import { BrowserWindow, shell } from "electron"
 import { isTestMode, rendererDevServerUrl, testFirstRun } from "../runtime/env"
-import { isTrustedNavigation } from "./mainWindowNavigation"
+import { browserUrlForNewWindow, isTrustedNavigation } from "./mainWindowNavigation"
 import { buildMainWindowOptions } from "./windowOptions"
 
 /**
@@ -86,7 +86,16 @@ export function createMainWindow(
     if (isTestMode) window.showInactive()
     else window.show()
   })
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  // New windows are never opened in the app; https links go to the user's browser.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const browserUrl = browserUrlForNewWindow(url)
+    if (browserUrl) {
+      shell
+        .openExternal(browserUrl)
+        .catch((cause: unknown) => console.error(`Could not open ${browserUrl}:`, cause))
+    }
+    return { action: "deny" }
+  })
   const trustedEntries = rendererDevServerUrl
     ? [rendererDevServerUrl]
     : ["index", "quick"].map(

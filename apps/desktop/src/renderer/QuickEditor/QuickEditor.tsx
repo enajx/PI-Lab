@@ -13,7 +13,6 @@ import {
   useQuickEditorRunPython,
   writeEditorVimChoice,
 } from "../preferences/preferences"
-import { useTheme } from "../providers/ThemeProvider"
 import { registerCloseTabHandler } from "../shortcuts/closeTab"
 import { QuickEditorStatusBar } from "./QuickEditorStatusBar"
 import {
@@ -56,7 +55,6 @@ export function QuickEditor({
   customEditorThemes,
   saveInProject,
 }: QuickEditorProps) {
-  const { resolvedMode } = useTheme()
   const [vim] = useEditorVimCache()
   const [autocomplete] = useQuickEditorAutocomplete()
   const [runPythonEnabled] = useQuickEditorRunPython()
@@ -702,9 +700,7 @@ export function QuickEditor({
       >
         {fullApp ? (
           <div className="flex min-w-0 flex-1 items-baseline gap-3" title={active?.target.path}>
-            <h1 className="shrink-0 font-semibold text-foreground text-sm tracking-tight">
-              Editor
-            </h1>
+            <h1 className="shrink-0 text-foreground text-sm tracking-tight">Editor</h1>
             {active || untitled ? (
               <span
                 className="truncate text-muted-foreground text-sm"
@@ -716,7 +712,7 @@ export function QuickEditor({
           </div>
         ) : (
           <div className="flex min-w-0 flex-1 items-baseline gap-4">
-            <h1 className="shrink-0 font-semibold text-sm">PI Lab Editor</h1>
+            <h1 className="shrink-0 text-sm">PI Lab Editor</h1>
             {active ? (
               <span
                 className="min-w-0 truncate text-muted-foreground text-sm"
@@ -841,9 +837,7 @@ export function QuickEditor({
             key={`${active.target.id}:${active.epoch}`}
             relPath={active.target.path}
             initialDoc={active.content}
-            theme={
-              editorTheme && editorTheme !== "default" ? editorTheme : `pi-lab-${resolvedMode}`
-            }
+            theme={editorTheme}
             customThemes={customEditorThemes}
             vim={vim}
             autocomplete={autocomplete ? "words" : false}
@@ -866,9 +860,7 @@ export function QuickEditor({
             key="untitled"
             relPath="Untitled"
             initialDoc={untitledContent}
-            theme={
-              editorTheme && editorTheme !== "default" ? editorTheme : `pi-lab-${resolvedMode}`
-            }
+            theme={editorTheme}
             customThemes={customEditorThemes}
             vim={vim}
             autocomplete={autocomplete ? "words" : false}

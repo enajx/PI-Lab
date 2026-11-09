@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process"
 import { constants } from "node:fs"
 import { access, mkdir, readdir } from "node:fs/promises"
-import { homedir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { promisify } from "node:util"
 import type { AppContext } from "../trpc/context"
@@ -15,7 +14,7 @@ type RuntimeContext = Pick<
   | "getAgentLaunchEnvironment"
   | "skillsHomeDir"
   | "latexResourcesDir"
-  | "latexDataDir"
+  | "latexCacheDir"
   | "latexUserHome"
 >
 export interface LatexRuntime {
@@ -23,6 +22,32 @@ export interface LatexRuntime {
   executable: string
   pdflatexPath: string | null
   env: Record<string, string>
+  /** Tectonic's package cache folder (bundled only), or null for system LaTeX. */
+  cacheDir: string | null
+}
+
+/**
+ * Per-user folder for Tectonic's downloaded TeX packages. It is outside PI
+ * Lab's data folder, so the Alpha reset (which archives the whole data folder)
+ * keeps it, and all channels share it because the packages are the same. In
+ * test mode it stays at `<dataDir>/latex/cache`, so tests and e2e runs never
+ * touch the user's cache and can link that folder to a shared test cache.
+ * macOS: `~/Library/Caches/PI Lab/tectonic`; Windows: `%LOCALAPPDATA%\PI Lab\tectonic`;
+ * others: `$XDG_CACHE_HOME/pi-lab/tectonic` (default `~/.cache`).
+ */
+export function tectonicCacheDir(
+  testMode: boolean,
+  dataDir: string,
+  platform: NodeJS.Platform,
+  home: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  if (testMode) return join(dataDir, "latex", "cache")
+  if (platform === "darwin") return join(home, "Library", "Caches", "PI Lab", "tectonic")
+  if (platform === "win32") {
+    return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "PI Lab", "tectonic")
+  }
+  return join(env.XDG_CACHE_HOME || join(home, ".cache"), "pi-lab", "tectonic")
 }
 
 /** Test executability without starting a shell. */
@@ -84,20 +109,23 @@ export async function resolveLatexRuntime(
       throw new Error(
         `Bundled Tectonic is unavailable for ${process.platform}/${process.arch}. Rebuild PI Lab or select system LaTeX in Settings.`,
       )
-    const cache = join(ctx.latexDataDir ?? join(homedir(), ".pi-lab", "latex"), "cache")
+    const cache = ctx.latexCacheDir
+    if (!cache) throw new Error("No Tectonic package cache folder is configured.")
     await mkdir(cache, { recursive: true })
     return {
       provider,
       executable: path,
       pdflatexPath: null,
       env: { ...env, TECTONIC_CACHE_DIR: cache },
+      cacheDir: cache,
     }
   }
   const [latexmk, pdflatex] = await Promise.all([
     ctx.resolveAgentExecutable("latexmk"),
     ctx.resolveAgentExecutable("pdflatex"),
   ])
-  if (latexmk && pdflatex) return { provider, executable: latexmk, pdflatexPath: pdflatex, env }
+  if (latexmk && pdflatex)
+    return { provider, executable: latexmk, pdflatexPath: pdflatex, env, cacheDir: null }
   const shared = await sharedTools(ctx)
   if (shared)
     return {
@@ -105,6 +133,7 @@ export async function resolveLatexRuntime(
       executable: shared.latexmk,
       pdflatexPath: shared.pdflatex,
       env: { ...env, PATH: `${dirname(shared.latexmk)}${delimiter}${env.PATH ?? ""}` },
+      cacheDir: null,
     }
   throw new Error(
     "System PDFLaTeX and latexmk are required. Install PDFLaTeX in Settings or choose bundled Tectonic.",

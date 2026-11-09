@@ -42,8 +42,11 @@ import {
 } from "../../paper/outputs"
 import {
   displayRemoteUrl,
+  gitHasOverleafCredential,
   isOverleafUrl,
   OVERLEAF_TOKEN_REQUIRED,
+  type OverleafAuth,
+  type OverleafTokenStatus,
   remoteEnv,
   writeAskpassScript,
 } from "../../paper/overleaf"
@@ -269,15 +272,34 @@ function tokenConfigured(db: PiLabDatabase): boolean {
 }
 
 /**
- * Git env for a remote call to `urls` (fetch and push URLs). Reads the token
- * and writes the askpass script only when every URL is Overleaf.
+ * Where the Overleaf credential comes from: a saved token wins (checked
+ * without decrypting it), else a credential the user's own Git has for
+ * git.overleaf.com. The secret is never part of the result.
+ */
+async function tokenStatus(db: PiLabDatabase): Promise<OverleafTokenStatus> {
+  if (tokenConfigured(db)) return { configured: true, source: "saved" }
+  if (await gitHasOverleafCredential(process.env)) return { configured: true, source: "git" }
+  return { configured: false, source: null }
+}
+
+/**
+ * Git env for a remote call to `urls` (fetch and push URLs). Only when every
+ * URL is Overleaf does it read the saved token and write the askpass script,
+ * or, with no saved token, check the user's Git for a credential.
  */
 async function remoteOptions(ctx: AppContext, urls: string[]): Promise<RemoteCallOptions> {
-  if (!urls.every(isOverleafUrl)) return { env: remoteEnv(urls, null, "") }
+  if (!urls.every(isOverleafUrl)) return { env: remoteEnv(urls, null) }
+  return { env: remoteEnv(urls, await overleafAuth(ctx)) }
+}
+
+/** How Overleaf git calls authenticate now; see {@link OverleafAuth}. */
+async function overleafAuth(ctx: AppContext): Promise<OverleafAuth> {
   const token = readToken(ctx)
-  if (!token) throw new TRPCError({ code: "PRECONDITION_FAILED", message: OVERLEAF_TOKEN_REQUIRED })
-  const askpass = await writeAskpassScript(join(resolveDataDir(), "git"))
-  return { env: remoteEnv(urls, token, askpass) }
+  if (token) {
+    const askpassPath = await writeAskpassScript(join(resolveDataDir(), "git"))
+    return { source: "saved", token, askpassPath }
+  }
+  return (await gitHasOverleafCredential(process.env)) ? { source: "git" } : null
 }
 
 /** Git env for sync calls in `dir`, from its `origin` fetch and push URLs. */
@@ -380,15 +402,16 @@ async function resolvePaper(
 }
 
 const tokenRouter = router({
-  /** Whether an Overleaf token is saved. The token itself is never returned. */
-  status: publicProcedure.query(({ ctx }): { configured: boolean } => ({
-    configured: tokenConfigured(ctx.db),
-  })),
+  /**
+   * Whether an Overleaf credential is available and where it comes from (a
+   * saved token wins over the user's Git). The secret itself is never returned.
+   */
+  status: publicProcedure.query(({ ctx }): Promise<OverleafTokenStatus> => tokenStatus(ctx.db)),
 
   /** Save (or replace) the Overleaf Git token, encrypted with the OS keychain. */
   set: publicProcedure
     .input(z.object({ token: z.string().trim().min(1).max(4096) }))
-    .mutation(({ ctx, input }): { configured: boolean } => {
+    .mutation(({ ctx, input }): OverleafTokenStatus => {
       const encryptedValue = ctx.credentialCipher.encrypt(input.token)
       const updatedAt = Date.now()
       ctx.db
@@ -399,13 +422,13 @@ const tokenRouter = router({
           set: { encryptedValue, updatedAt },
         })
         .run()
-      return { configured: true }
+      return { configured: true, source: "saved" }
     }),
 
-  /** Delete the saved Overleaf token. */
-  clear: publicProcedure.mutation(({ ctx }): { configured: boolean } => {
+  /** Delete the saved Overleaf token and return the status after it (Git may still have one). */
+  clear: publicProcedure.mutation(({ ctx }): Promise<OverleafTokenStatus> => {
     ctx.db.delete(serviceCredentials).where(eq(serviceCredentials.service, OVERLEAF_SERVICE)).run()
-    return { configured: false }
+    return tokenStatus(ctx.db)
   }),
 })
 
@@ -432,7 +455,10 @@ export const paperRouter = router({
       ({ ctx, input }): Promise<PaperState> => linkPaper(ctx.db, input.projectId, input.dir),
     ),
 
-  /** Clone an Overleaf project into `<project>/paper` with the saved token, then link it. */
+  /**
+   * Clone an Overleaf project into `<project>/paper` with the saved token (or
+   * the user's Git credential when no token is saved), then link it.
+   */
   addOverleaf: publicProcedure
     .input(z.object({ projectId: z.string().min(1), url: z.string().trim().min(1) }))
     .mutation(async ({ ctx, input }): Promise<PaperState> => {
@@ -442,7 +468,7 @@ export const paperRouter = router({
           message: "Enter an Overleaf Git URL (https://git.overleaf.com/…)",
         })
       }
-      if (!tokenConfigured(ctx.db)) {
+      if (!(await tokenStatus(ctx.db)).configured) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: OVERLEAF_TOKEN_REQUIRED })
       }
       const project = requireProject(ctx.db, input.projectId)

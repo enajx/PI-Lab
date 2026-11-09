@@ -42,7 +42,7 @@ export function ScienceTabShell({
         )}
       >
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
+          <h1 className="truncate text-foreground text-sm tracking-tight">
             <LatexText text={title} />
           </h1>
           {subtitle ? <p className="truncate text-muted-foreground text-xs">{subtitle}</p> : null}

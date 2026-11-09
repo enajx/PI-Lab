@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { RefreshCw } from "lucide-react"
 import { type ReactNode, useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 import { AgentMergeReview } from "./AgentMergeReview"
@@ -23,6 +24,8 @@ interface PaperSyncBarProps {
   projectId: string
   /** The paper folder's workspace, used to read files for the agent-merge review. */
   workspaceId: string
+  /** The page top bar's element that gets the last sync time and the Sync button, or null before it mounts. */
+  syncSlot: HTMLElement | null
   lastSyncAt: number | null
   /** False when the paper folder has no Git remote; Sync is then disabled. */
   hasRemote: boolean
@@ -39,13 +42,16 @@ interface PaperSyncBarProps {
 }
 
 /**
- * The LaTeX Editor status row: last Overleaf sync time and the Sync button,
- * plus the dialogs Sync can lead to: the commit question for edits not yet
- * sent, the conflict choices, and the review of an agent merge.
+ * The LaTeX Editor Sync controls. The last Overleaf sync time and the Sync
+ * button are placed in the page top bar (`syncSlot`); the bar below the editor
+ * holds the output folder field and the Sync messages and errors. Also shows
+ * the dialogs Sync can lead to: the commit question for edits not yet sent,
+ * the conflict choices, and the review of an agent merge.
  */
 export function PaperSyncBar({
   projectId,
   workspaceId,
+  syncSlot,
   lastSyncAt,
   hasRemote,
   confirmCommit,
@@ -125,11 +131,29 @@ export function PaperSyncBar({
       data-testid="paper-sync-bar"
       className="flex shrink-0 items-center gap-3 border-border border-t px-3 py-1.5 text-xs"
     >
-      <span data-testid="paper-last-sync" className="text-muted-foreground">
-        {lastSyncAt
-          ? `${t("Last Overleaf sync:")} ${new Date(lastSyncAt).toLocaleString()}`
-          : t("Not synced yet")}
-      </span>
+      {syncSlot
+        ? createPortal(
+            <>
+              <span data-testid="paper-last-sync" className="text-muted-foreground text-xs">
+                {lastSyncAt
+                  ? `${t("Last Overleaf sync:")} ${new Date(lastSyncAt).toLocaleString()}`
+                  : t("Not synced yet")}
+              </span>
+              <button
+                type="button"
+                data-testid="paper-sync"
+                disabled={!hasRemote || busy}
+                title={hasRemote ? t("Pull from and push to Overleaf") : t("No Git remote")}
+                onClick={() => void startSync(!confirmCommit)}
+                className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+              >
+                <RefreshCw className={busy ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
+                {t("Sync")}
+              </button>
+            </>,
+            syncSlot,
+          )
+        : null}
       {notice ? <span className="text-muted-foreground">{notice}</span> : null}
       {error ? (
         <span role="alert" className="cursor-text select-text text-destructive">
@@ -155,18 +179,6 @@ export function PaperSyncBar({
           className="h-6 w-28 rounded border border-border bg-background px-1.5 text-foreground"
         />
       </label>
-      <button
-        type="button"
-        data-testid="paper-sync"
-        disabled={!hasRemote || busy}
-        title={hasRemote ? t("Pull from and push to Overleaf") : t("No Git remote")}
-        onClick={() => void startSync(!confirmCommit)}
-        className="flex items-center gap-1.5 rounded border border-border px-2 py-1 hover:bg-accent disabled:opacity-50"
-      >
-        <RefreshCw className={busy ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
-        {t("Sync")}
-      </button>
-
       {prompt?.kind === "commit" ? (
         <CommitDialog
           files={prompt.files}

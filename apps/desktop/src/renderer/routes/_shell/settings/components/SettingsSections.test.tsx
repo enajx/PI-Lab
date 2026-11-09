@@ -698,6 +698,16 @@ describe("Settings sections", () => {
     expect(window.localStorage.getItem("pi-lab.sections.showAnalysis")).toBe("false")
   })
 
+  test("Sections has an Editor toggle, off by default, that shows the Editor row", () => {
+    renderSection(<SectionsSection />)
+    const editor = screen.getByTestId("settings-show-editor-section")
+    expect(editor.getAttribute("aria-checked")).toBe("false")
+    expect((editor as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(editor)
+    expect(window.localStorage.getItem("pi-lab.sections.showEditor")).toBe("true")
+    expect(editor.getAttribute("aria-checked")).toBe("true")
+  })
+
   test("Editor section round-trips an autosave patch through settings.updateEditor", async () => {
     const patches: unknown[] = []
     renderSection(<EditorSection />, {
@@ -823,8 +833,26 @@ describe("Settings sections", () => {
     for (const option of lightOptions) expect(option.textContent?.endsWith("(Light)")).toBe(true)
     for (const option of darkOptions) expect(option.textContent?.endsWith("(Dark)")).toBe(true)
 
-    // A legacy/unknown stored id normalizes to the default light theme for display.
-    expect(select.value).toBe("solarized-light")
+    // The stored "default" shows GitHub for the current (light) appearance.
+    expect(select.value).toBe("github-light")
+  })
+
+  test("Editor theme picker shows GitHub (Dark) for the stored default in dark appearance", async () => {
+    window.localStorage.setItem("pi-lab.theme", "dark")
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({
+        editor: {
+          autosave: false,
+          vim: false,
+          diagnosticsEnabled: false,
+          typeChecker: "ty",
+          formatOnSave: false,
+          editorTheme: "default",
+        },
+      }),
+    })
+    const select = await screen.findByTestId<HTMLSelectElement>("settings-editor-theme")
+    expect(select.value).toBe("github-dark")
   })
 
   test("Editor custom-theme gallery selects/removes persisted themes and shows import errors", async () => {
@@ -867,7 +895,7 @@ describe("Settings sections", () => {
     await waitFor(() =>
       expect(patches).toContainEqual({
         customEditorThemes: [],
-        editorTheme: "solarized-light",
+        editorTheme: "default",
       }),
     )
     await waitFor(() =>

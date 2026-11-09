@@ -164,13 +164,13 @@ export const useLatexEditorProject = (): [string, (next: string) => void] =>
 export const useLatexEditorLeftColumn = (): [boolean, (next: boolean) => void] =>
   useBooleanPref("pi-lab.latexEditor.leftColumn", true)
 
-/** Whether the LaTeX Editor's Outline section is expanded. */
+/** Whether the LaTeX Editor's Outline section is expanded; open by default. */
 export const useLatexEditorOutlineOpen = (): [boolean, (next: boolean) => void] =>
   useBooleanPref("pi-lab.latexEditor.outlineOpen", true)
 
-/** Whether the LaTeX Editor's Files section is expanded. */
+/** Whether the LaTeX Editor's Files section is expanded; collapsed by default. */
 export const useLatexEditorFilesOpen = (): [boolean, (next: boolean) => void] =>
-  useBooleanPref("pi-lab.latexEditor.filesOpen", true)
+  useBooleanPref("pi-lab.latexEditor.filesOpen", false)
 
 // --- Dashboard Digital Rain: global, renderer-only animation tuning --------
 // These settings deliberately don't belong to a project: every card uses the
@@ -208,8 +208,8 @@ export const readShowCodeChanges = (): boolean => readBoolean(SHOW_CODE_CHANGES_
 export const useShowCodeChanges = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_CODE_CHANGES_KEY, false)
 
-// --- Optional app sections: show/hide from Settings (all shown by default) ----
-// Cluster and Analysis are live surfaces: their pref gates the sidebar nav row
+// --- Optional app sections: show/hide from Settings ---------------------------
+// Cluster and Analysis are live surfaces, shown by default: their pref gates the sidebar nav row
 // and guards the route. Experiments and Research Heartbeat have no surface yet, so
 // Settings renders them as disabled, not-yet-available rows — their toggles are
 // no-ops today (they never write), and the pref simply stays at its default until
@@ -223,6 +223,13 @@ const SHOW_ANALYSIS_SECTION_KEY = "pi-lab.sections.showAnalysis"
 export const readShowAnalysisSection = (): boolean => readBoolean(SHOW_ANALYSIS_SECTION_KEY, true)
 export const useShowAnalysisSection = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_ANALYSIS_SECTION_KEY, true)
+
+// The Editor row is hidden by default; the sidebar also shows it while a file
+// outside every project is open in the Editor. The /quick-edit route stays open
+// either way (e.g. for "Open with PI Lab").
+const SHOW_EDITOR_SECTION_KEY = "pi-lab.sections.showEditor"
+export const useShowEditorSection = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_EDITOR_SECTION_KEY, false)
 
 // --- Projects: one reveal state shared by Dashboard and sidebar ---------------
 // This controls only whether archived projects are temporarily visible; the
