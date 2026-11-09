@@ -12,7 +12,7 @@ import { promisify } from "node:util"
 import { serviceCredentials } from "@pi-lab/local-db"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { createHarness, type Harness } from "../testHarness"
-import { clonePaper } from "./paper"
+import { clonePaper, displayPaperDir } from "./paper"
 
 const execFileAsync = promisify(execFile)
 
@@ -165,11 +165,13 @@ describe("link, get, outline, unlink", () => {
       paper: null,
       workspaceId: null,
       rootRelPath: null,
+      autoDetect: true,
     })
     const dir = await linkOutsideClone()
     const result = await h.caller.paper.get({ projectId })
     expect(result.paper).toEqual({
       dir,
+      displayDir: expect.any(String),
       remoteUrl: bare,
       lastSyncAt: null,
       isOverleaf: false,
@@ -212,11 +214,63 @@ describe("link, get, outline, unlink", () => {
       paper: null,
       workspaceId: null,
       rootRelPath: null,
+      autoDetect: false,
     })
     expect((await h.caller.projects.get({ id: projectId })).metadata?.venue).toBe("NeurIPS")
     expect(existsSync(join(dir, "main.tex"))).toBe(true)
     await expect(h.caller.files.read({ workspaceId, relPath: "main.tex" })).rejects.toMatchObject({
       code: "NOT_FOUND",
+    })
+  })
+
+  test("clearing the paper folder turns auto-detection off until a folder is chosen again", async () => {
+    expect((await h.caller.paper.get({ projectId })).autoDetect).toBe(true)
+    const dir = await linkOutsideClone()
+    expect((await h.caller.paper.get({ projectId })).autoDetect).toBe(true)
+    await h.caller.paper.unlink({ projectId })
+    expect((await h.caller.paper.get({ projectId })).autoDetect).toBe(false)
+    expect((await h.caller.projects.get({ id: projectId })).metadata?.paperAutoDetect).toBe(false)
+    await h.caller.paper.link({ projectId, dir, rootChoice: null })
+    expect((await h.caller.paper.get({ projectId })).autoDetect).toBe(true)
+    expect(
+      (await h.caller.projects.get({ id: projectId })).metadata?.paperAutoDetect,
+    ).toBeUndefined()
+  })
+
+  test("shows the paper folder relative to the project folder, or as the project folder", async () => {
+    const inside = join(h.repoDir, "paper")
+    await mkdir(inside)
+    await writeFile(join(inside, "main.tex"), "\\documentclass{article}\n")
+    const check = await h.caller.paper.checkFolder({ projectId, dir: inside })
+    expect(check.displayDir).toBe("paper")
+    await h.caller.paper.link({ projectId, dir: inside, rootChoice: null })
+    expect((await h.caller.paper.get({ projectId })).paper?.displayDir).toBe("paper")
+    expect((await h.caller.paper.checkFolder({ projectId, dir: h.repoDir })).displayDir).toBe(".")
+    await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "no-sync" })
+    expect((await h.caller.paper.get({ projectId })).paper?.displayDir).toBe(".")
+  })
+
+  test("displayPaperDir: relative inside the project, ~ under home, full path elsewhere", () => {
+    expect(displayPaperDir("/home/me/proj", "/home/me/proj", "/home/me")).toBe(".")
+    expect(displayPaperDir("/home/me/proj/a/paper", "/home/me/proj", "/home/me")).toBe("a/paper")
+    expect(displayPaperDir("/home/me/papers/x", "/home/me/proj", "/home/me")).toBe("~/papers/x")
+    expect(displayPaperDir("/home/me", "/home/me/proj", "/home/me")).toBe("~")
+    expect(displayPaperDir("/opt/papers/x", "/home/me/proj", "/home/me")).toBe("/opt/papers/x")
+    expect(displayPaperDir("/home/me/proj2", "/home/me/proj", "/home/me")).toBe("~/proj2")
+  })
+
+  test("error messages say paper folder, never link", async () => {
+    await expect(
+      h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "sync" }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Use it for editing and building only"),
+    })
+    await expect(h.caller.paper.outline({ projectId })).rejects.toMatchObject({
+      message: expect.not.stringMatching(/link/i),
+    })
+    await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "no-sync" })
+    await expect(h.caller.paper.sync({ projectId, commit: true })).rejects.toMatchObject({
+      message: expect.not.stringMatching(/link/i),
     })
   })
 
@@ -706,6 +760,7 @@ describe("project folder as the paper folder", { timeout: 30_000 }, () => {
   test("an Overleaf clone project folder links with no choice and keeps Sync on", async () => {
     await git(h.repoDir, ["remote", "add", "origin", OVERLEAF_ORIGIN])
     expect(await h.caller.paper.checkFolder({ projectId, dir: h.repoDir })).toEqual({
+      displayDir: ".",
       projectFolder: true,
       overleaf: true,
       remoteUrl: OVERLEAF_ORIGIN,
@@ -718,6 +773,7 @@ describe("project folder as the paper folder", { timeout: 30_000 }, () => {
   test("another project folder needs an explicit choice; the check reports its remote without credentials", async () => {
     await git(h.repoDir, ["remote", "add", "origin", "https://user:secret@github.com/u/p.git"])
     expect(await h.caller.paper.checkFolder({ projectId, dir: h.repoDir })).toEqual({
+      displayDir: ".",
       projectFolder: true,
       overleaf: false,
       remoteUrl: "https://github.com/u/p.git",
@@ -732,6 +788,7 @@ describe("project folder as the paper folder", { timeout: 30_000 }, () => {
     const outside = join(h.dataDir, "elsewhere")
     await mkdir(outside)
     expect(await h.caller.paper.checkFolder({ projectId, dir: outside })).toEqual({
+      displayDir: expect.any(String),
       projectFolder: false,
       overleaf: false,
       remoteUrl: null,

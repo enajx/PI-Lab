@@ -11,6 +11,11 @@ import { PaperSetup } from "./PaperSetup"
  * and the e2e test.
  */
 function renderSetup(handlers: FakeHandlers) {
+  return renderSetupWith(handlers, true)
+}
+
+/** {@link renderSetup} with auto-detection on or off (off after the user cleared the folder). */
+function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "paper.detect": () => ({ clones: [], stoppedEarly: false }),
@@ -18,7 +23,7 @@ function renderSetup(handlers: FakeHandlers) {
   })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <PaperSetup projectId="p1" />
+      <PaperSetup projectId="p1" autoDetect={autoDetect} />
     </AppProviders>,
   )
 }
@@ -100,6 +105,34 @@ describe("PaperSetup (mocked server)", () => {
     )
     expect(link).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId("paper-setup-overleaf")).toBeNull()
+  })
+
+  test("with auto-detection off (folder cleared), shows the two cards and neither searches nor sets a folder", async () => {
+    const detect = vi.fn(() => ({
+      clones: [{ dir: "/proj/paper", relPath: "paper" }],
+      stoppedEarly: false,
+    }))
+    const link = vi.fn(() => undefined)
+    renderSetupWith(
+      {
+        "paper.token.status": () => ({ configured: true, source: "saved" }),
+        "paper.detect": detect,
+        "paper.link": link,
+        "paper.get": () => ({
+          paper: null,
+          workspaceId: null,
+          rootRelPath: null,
+          autoDetect: false,
+        }),
+      },
+      false,
+    )
+    expect(await screen.findByTestId("paper-setup-overleaf")).toBeTruthy()
+    expect(screen.getByTestId("paper-setup-folder")).toBeTruthy()
+    expect(screen.queryByTestId("paper-detecting")).toBeNull()
+    expect(screen.queryByTestId("paper-detected")).toBeNull()
+    expect(detect).not.toHaveBeenCalled()
+    expect(link).not.toHaveBeenCalled()
   })
 
   test("with several Overleaf clones, asks which one to link", async () => {
@@ -289,7 +322,7 @@ describe("PaperSetup (mocked server)", () => {
       expect(card.className).toContain("text-center")
     }
     expect(overleaf.textContent).toContain("Clone your Overleaf project into paper/.")
-    expect(folder.textContent).toContain("Link a paper folder you already cloned.")
+    expect(folder.textContent).toContain("Open a paper folder you already cloned.")
     expect(folder.textContent).not.toContain("outside this project")
     await screen.findByTestId("paper-overleaf-token")
     expect(overleaf.textContent).not.toContain("keychain")

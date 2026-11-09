@@ -25,6 +25,7 @@ import {
 } from "../../../projects/components/CentralPanel"
 import { CollapsibleSection } from "../../../projects/components/CentralPanel/CollapsibleSection"
 import type { CentralPanelRestoreState } from "../../../projects/components/CentralPanel/useCentralPanel"
+import { PaperFolderStatusItem } from "./PaperFolder"
 import { PaperSyncBar } from "./PaperSyncBar"
 
 interface PaperEditorProps {
@@ -32,6 +33,10 @@ interface PaperEditorProps {
   projectName: string
   /** The paper folder's workspace (kind "paper"). */
   workspaceId: string
+  /** The paper folder's full path. */
+  paperDir: string
+  /** The paper folder as shown to the user (from `paper.get`). */
+  displayDir: string
   /** The main .tex file, relative to the paper folder, or null when none was found. */
   rootRelPath: string | null
   lastSyncAt: number | null
@@ -90,7 +95,8 @@ function hasRestoredTabs(state: ReturnType<typeof readProjectWorkspaceState>): b
 /**
  * The LaTeX Editor workspace for a linked paper: the editor panel (source and
  * PDF side by side, with build, build log and SyncTeX) whose left column holds
- * the paper folder's file tree with the outline below it, and the Sync controls
+ * the paper folder's file tree with the outline below it, a "Paper folder"
+ * item in the editor status bar to change or clear the folder, and the Sync controls
  * (the Sync button in the page top bar, the rest in a bar below the editor).
  * Saving a .tex builds it and opens the built PDF beside the source when it is
  * not open yet (an open PDF reloads itself when the file changes).
@@ -99,6 +105,8 @@ export function PaperEditor({
   projectId,
   projectName,
   workspaceId,
+  paperDir,
+  displayDir,
   rootRelPath,
   lastSyncAt,
   hasRemote,
@@ -303,6 +311,9 @@ export function PaperEditor({
             filesOpen,
             onFilesOpenChange: setFilesOpen,
           }}
+          paperFolderItem={
+            <PaperFolderStatusItem projectId={projectId} dir={paperDir} displayDir={displayDir} />
+          }
         />
       </div>
       <PaperSyncBar

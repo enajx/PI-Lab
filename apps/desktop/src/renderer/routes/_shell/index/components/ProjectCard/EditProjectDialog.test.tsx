@@ -1,10 +1,10 @@
 import type { Project, ProjectDetails } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
-import { createFakeTrpcClient } from "../../../../../test/fakeTrpcClient"
+import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { EditProjectDialog } from "./EditProjectDialog"
 
 /** Exercises the shared project form with a fake IPC client. */
@@ -31,11 +31,24 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
 }
 
 function renderDetails(p: Project, mode: "add" | "edit", storedAgentId: string | null) {
+  return renderDetailsWith(p, mode, storedAgentId, {
+    "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null, autoDetect: true }),
+  })
+}
+
+/** {@link renderDetails} with extra fake procedures (the paper folder ones). */
+function renderDetailsWith(
+  p: Project,
+  mode: "add" | "edit",
+  storedAgentId: string | null,
+  extra: FakeHandlers,
+) {
   const onSave = vi.fn<(metadata: ProjectDetails | null) => void>()
   const onClose = vi.fn()
   render(
     <AppProviders
       client={createFakeTrpcClient({
+        ...extra,
         "agents.list": () => [
           { id: "codex", label: "Codex", available: true },
           { id: "missing", label: "Missing", available: false },
@@ -245,4 +258,146 @@ test("Edit loads the saved agent choice and can reset it to Settings default", a
   fireEvent.change(screen.getByLabelText("Project type"), { target: { value: "" } })
   fireEvent.click(screen.getByTestId("edit-project-save"))
   expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ agentId: null, typeId: "general" }))
+})
+
+/** A paper folder state as `paper.get` returns it, or no folder when `displayDir` is null. */
+function paperGet(displayDir: string | null) {
+  return () =>
+    displayDir === null
+      ? { paper: null, workspaceId: null, rootRelPath: null, autoDetect: true }
+      : {
+          paper: { dir: "/real/paper", displayDir, syncEnabled: true },
+          workspaceId: "ws",
+          rootRelPath: "main.tex",
+          autoDetect: true,
+        }
+}
+
+describe("Paper folder row (mocked server)", () => {
+  test("shows the current folder, the project folder, or None (with no Clear)", async () => {
+    for (const [displayDir, shown] of [
+      ["paper", "paper"],
+      [".", "Project folder"],
+      ["~/papers/x", "~/papers/x"],
+      [null, "None"],
+    ] as const) {
+      renderDetailsWith(project({ id: "pf", name: "P" }), "edit", null, {
+        "paper.get": paperGet(displayDir),
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId("edit-project-paper-folder").textContent).toBe(shown),
+      )
+      expect(screen.getByTestId("edit-project-paper-choose").textContent).toBe("Choose…")
+      if (displayDir === null) expect(screen.queryByTestId("edit-project-paper-clear")).toBeNull()
+      else expect(screen.getByTestId("edit-project-paper-clear").textContent).toBe("Clear")
+      cleanup()
+    }
+  })
+
+  test("is not shown when adding a project", () => {
+    renderDetails(project({ id: "new", name: "N" }), "add", null)
+    expect(screen.queryByTestId("edit-project-paper-folder")).toBeNull()
+  })
+
+  test("Choose sets the folder when the dialog is saved, not before", async () => {
+    const link = vi.fn(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
+    const { onSave } = renderDetailsWith(project({ id: "pf", name: "P" }), "edit", null, {
+      "paper.get": paperGet(null),
+      "system.pickDirectory": () => "/Users/me/papers/x",
+      "paper.checkFolder": () => ({
+        displayDir: "~/papers/x",
+        projectFolder: false,
+        overleaf: false,
+        remoteUrl: null,
+      }),
+      "paper.link": link,
+    })
+    fireEvent.click(await screen.findByTestId("edit-project-paper-choose"))
+    await waitFor(() =>
+      expect(screen.getByTestId("edit-project-paper-folder").textContent).toBe("~/papers/x"),
+    )
+    expect(link).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
+    fireEvent.click(screen.getByTestId("edit-project-save"))
+    await waitFor(() =>
+      expect(link).toHaveBeenCalledWith({
+        projectId: "pf",
+        dir: "/Users/me/papers/x",
+        rootChoice: null,
+      }),
+    )
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+  })
+
+  test("choosing the project folder asks with the project-folder pop-up, and saves the choice", async () => {
+    const link = vi.fn(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
+    renderDetailsWith(project({ id: "pf", name: "P" }), "edit", null, {
+      "paper.get": paperGet("paper"),
+      "system.pickDirectory": () => "/proj",
+      "paper.checkFolder": () => ({
+        displayDir: ".",
+        projectFolder: true,
+        overleaf: false,
+        remoteUrl: null,
+      }),
+      "paper.link": link,
+    })
+    fireEvent.click(await screen.findByTestId("edit-project-paper-choose"))
+    const dialog = await screen.findByTestId("paper-root-dialog")
+    expect(within(dialog).getByTestId("paper-root-other")).toBeTruthy()
+    fireEvent.click(within(dialog).getByTestId("paper-root-no-sync"))
+    await waitFor(() =>
+      expect(screen.getByTestId("edit-project-paper-folder").textContent).toBe("Project folder"),
+    )
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
+    fireEvent.click(screen.getByTestId("edit-project-save"))
+    await waitFor(() =>
+      expect(link).toHaveBeenCalledWith({ projectId: "pf", dir: "/proj", rootChoice: "no-sync" }),
+    )
+  })
+
+  test("Clear forgets the folder when the dialog is saved; Cancel changes nothing", async () => {
+    const unlink = vi.fn(() => ({ ok: true }))
+    renderDetailsWith(project({ id: "pf", name: "P" }), "edit", null, {
+      "paper.get": paperGet("paper"),
+      "paper.unlink": unlink,
+    })
+    fireEvent.click(await screen.findByTestId("edit-project-paper-clear"))
+    expect(screen.getByTestId("edit-project-paper-folder").textContent).toBe("None")
+    fireEvent.click(screen.getByTestId("edit-project-cancel"))
+    expect(unlink).not.toHaveBeenCalled()
+    cleanup()
+
+    const { onSave } = renderDetailsWith(project({ id: "pf", name: "P" }), "edit", null, {
+      "paper.get": paperGet("paper"),
+      "paper.unlink": unlink,
+    })
+    fireEvent.click(await screen.findByTestId("edit-project-paper-clear"))
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
+    fireEvent.click(screen.getByTestId("edit-project-save"))
+    await waitFor(() => expect(unlink).toHaveBeenCalledWith({ projectId: "pf" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+  })
+
+  test("a failed paper folder change is shown and the other details are not saved", async () => {
+    const { onSave } = renderDetailsWith(project({ id: "pf", name: "P" }), "edit", null, {
+      "paper.get": paperGet("paper"),
+      "paper.unlink": () => {
+        throw new Error("could not clear")
+      },
+    })
+    fireEvent.click(await screen.findByTestId("edit-project-paper-clear"))
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
+    fireEvent.click(screen.getByTestId("edit-project-save"))
+    expect((await screen.findByRole("alert")).textContent).toContain("could not clear")
+    expect(onSave).not.toHaveBeenCalled()
+  })
 })

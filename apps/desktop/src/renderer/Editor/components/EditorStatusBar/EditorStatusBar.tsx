@@ -11,7 +11,7 @@ import {
   RefreshCw,
   TerminalSquare,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { useTranslate } from "../../../i18n/language"
 import type { RouterOutputs } from "../../../trpc/types"
 import type { PythonRuntimeState } from "../../hooks/useEditorBuffers/useEditorBuffers"
@@ -56,6 +56,8 @@ interface EditorStatusBarProps {
   /** Markdown buffers can switch their source/render presentation from the lower status bar. */
   markdownMode?: "render" | "source"
   onMarkdownModeChange?: (mode: "render" | "source") => void
+  /** The LaTeX Editor's "Paper folder" item; the project view leaves it out. */
+  paperFolderItem?: ReactNode
 }
 
 /**
@@ -88,6 +90,7 @@ export function EditorStatusBar({
   markdownMode,
   onMarkdownModeChange,
   latexBuildStatus,
+  paperFolderItem,
 }: EditorStatusBarProps) {
   const t = useTranslate()
   return (
@@ -119,6 +122,7 @@ export function EditorStatusBar({
           Show in PDF
         </button>
       ) : null}
+      {paperFolderItem}
       <div className="flex shrink-0 items-center gap-3">
         {isPython ? (
           <>

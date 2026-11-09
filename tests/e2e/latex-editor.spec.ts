@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -140,6 +140,7 @@ async function openAndLink(page: Page, agentId: string): Promise<void> {
       if (folder.x < overleaf.x + overleaf.width) return "cards are not side by side"
       if (Math.abs(folder.y - overleaf.y) >= 1) return `cards are ${folder.y - overleaf.y}px apart`
       if (Math.abs(folder.width - overleaf.width) >= 1) return "cards differ in width"
+      if (Math.abs(folder.height - overleaf.height) >= 1) return "cards differ in height"
       return "ok"
     })
     .toBe("ok")
@@ -518,6 +519,87 @@ test("LaTeX Editor asks before using a project folder that is not an Overleaf cl
     await expect(topBar.getByTestId("paper-sync-off")).toHaveText("Sync is off for this paper")
     await expect(page.getByTestId("paper-sync")).toHaveCount(0)
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * The paper folder can be changed and cleared from the LaTeX Editor footer and
+ * set from Edit project. The project holds an Overleaf clone at `paper/` (its
+ * `origin` is an Overleaf URL; nothing is fetched), which auto-detection uses
+ * on the first visit. The test folder picker always returns a clone OUTSIDE
+ * the project (`papers/my-paper`).
+ */
+test("LaTeX Editor changes and clears the paper folder from the footer, and Edit project sets it", async () => {
+  test.setTimeout(120_000)
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-paper-folder-e2e-"))
+  const { project, paper } = await setUp(root)
+  const detected = join(project, "paper")
+  await execFileAsync("git", ["clone", join(root, "remote.git"), detected])
+  await git(detected, "remote", "set-url", "origin", "https://git@git.overleaf.com/0123abcd")
+  const outside = await realpath(paper)
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, paper)
+    const page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await openLatexEditor(page)
+    // Auto-detection uses the clone inside the project; the footer shows it relative to the project.
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    const item = page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder")
+    await expect(item).toHaveText("paper")
+
+    // Footer: Choose paper folder… uses the picked folder outside the project (full path).
+    await item.click()
+    await page
+      .getByRole("menu", { name: "Paper folder" })
+      .getByTestId("paper-folder-choose")
+      .click()
+    await expect(item).toHaveText(outside, { timeout: 15_000 })
+    await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
+    await page.screenshot({ path: test.info().outputPath("latex-paper-folder-footer.png") })
+
+    // Footer: Clear paper folder shows the setup page; the detected clone is not used again.
+    await item.click()
+    await page.getByTestId("paper-folder-clear").click()
+    await expect(page.getByTestId("paper-setup-overleaf")).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId("paper-setup-folder")).toContainText(
+      "Open a paper folder you already cloned.",
+    )
+    await expect(page.getByTestId("paper-detecting")).toHaveCount(0)
+    await page.waitForTimeout(1_000)
+    await expect(page.getByTestId("paper-editor")).toHaveCount(0)
+    expect(existsSync(join(outside, "main.tex"))).toBe(true)
+    expect(existsSync(join(detected, "main.tex"))).toBe(true)
+
+    // Edit project: the row shows None, Choose… picks the folder, and Save applies it.
+    await page.getByTestId("nav-dashboard").click()
+    await page
+      .getByTestId("project-card")
+      .getByTestId("project-card-body")
+      .click({ button: "right", position: { x: 24, y: 24 } })
+    await page.getByTestId("project-card-menu-edit").click()
+    await expect(page.getByTestId("edit-project-paper-folder")).toHaveText("None")
+    await expect(page.getByTestId("edit-project-paper-clear")).toHaveCount(0)
+    await page.getByTestId("edit-project-paper-choose").click()
+    await expect(page.getByTestId("edit-project-paper-folder")).toHaveText(outside)
+    // A long path is cut short; the buttons and the other fields stay inside the dialog.
+    const dialogBox = await page.getByTestId("edit-project-dialog").boundingBox()
+    const chooseBox = await page.getByTestId("edit-project-paper-choose").boundingBox()
+    const nameBox = await page.getByTestId("edit-project-name").boundingBox()
+    if (!dialogBox || !chooseBox || !nameBox) throw new Error("Edit project dialog is not visible")
+    expect(chooseBox.x + chooseBox.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width)
+    expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width)
+    await page.screenshot({ path: test.info().outputPath("latex-paper-folder-edit-project.png") })
+    await page.getByTestId("edit-project-save").click()
+    await expect(page.getByTestId("edit-project-dialog")).toHaveCount(0)
+    await page.getByTestId("project-card").getByTestId("project-card-latex").click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder"),
+    ).toHaveText(outside)
   } finally {
     if (app) await close(app)
     await rm(root, { recursive: true, force: true })

@@ -131,7 +131,7 @@ test("opening a project with one Overleaf clone links it and shows the editor, n
     workspaceId: "paper-ws",
     rootRelPath: "main.tex",
   }
-  let current: unknown = { paper: null, workspaceId: null, rootRelPath: null }
+  let current: unknown = { paper: null, workspaceId: null, rootRelPath: null, autoDetect: true }
   const link = vi.fn(() => {
     current = linked
     return linked
@@ -146,4 +146,56 @@ test("opening a project with one Overleaf clone links it and shows the editor, n
   expect(await screen.findByTestId("paper-editor")).toBeTruthy()
   expect(link).toHaveBeenCalledWith({ projectId: "p1", dir: "/proj/paper", rootChoice: null })
   expect(screen.queryByTestId("paper-setup-overleaf")).toBeNull()
+})
+
+test("the footer shows the paper folder; Clear paper folder shows the setup page without setting a folder again", async () => {
+  const linked = {
+    paper: {
+      dir: "/proj/paper",
+      displayDir: "paper",
+      lastSyncAt: null,
+      remoteUrl: "https://git.overleaf.com/abc",
+      isOverleaf: true,
+      outputDir: null,
+      effectiveOutputDir: "build",
+      syncEnabled: true,
+    },
+    workspaceId: "paper-ws",
+    rootRelPath: "main.tex",
+    autoDetect: true,
+  }
+  // First visit: no folder yet, and auto-detection finds one clone and uses it.
+  let current: unknown = { paper: null, workspaceId: null, rootRelPath: null, autoDetect: true }
+  const unlink = vi.fn(() => {
+    current = { paper: null, workspaceId: null, rootRelPath: null, autoDetect: false }
+    return { ok: true }
+  })
+  const detect = vi.fn(() => ({
+    clones: [{ dir: "/proj/paper", relPath: "paper" }],
+    stoppedEarly: false,
+  }))
+  const link = vi.fn(() => {
+    current = linked
+    return linked
+  })
+  renderPageWith(() => current, {
+    "paper.unlink": unlink,
+    "paper.detect": detect,
+    "paper.link": link,
+  })
+  const bar = await screen.findByTestId("editor-status-bar")
+  const item = await within(bar).findByTestId("editor-paper-folder")
+  expect(item.textContent).toBe("paper")
+  expect(link).toHaveBeenCalledTimes(1)
+  fireEvent.click(item)
+  fireEvent.click(screen.getByTestId("paper-folder-clear"))
+  expect(await screen.findByTestId("paper-setup-overleaf")).toBeTruthy()
+  expect(screen.getByTestId("paper-setup-folder")).toBeTruthy()
+  expect(unlink).toHaveBeenCalledWith({ projectId: "p1" })
+  // The earlier search result is not used again.
+  await new Promise((done) => setTimeout(done, 200))
+  expect(screen.queryByTestId("paper-editor")).toBeNull()
+  expect(screen.queryByTestId("paper-detecting")).toBeNull()
+  expect(link).toHaveBeenCalledTimes(1)
+  expect(detect).toHaveBeenCalledTimes(1)
 })

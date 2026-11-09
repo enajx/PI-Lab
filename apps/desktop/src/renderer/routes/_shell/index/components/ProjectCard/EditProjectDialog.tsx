@@ -1,12 +1,17 @@
 import type { Project, ProjectDetails, ProjectTextTag } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useTranslate } from "../../../../../i18n/language"
 import { useEmojiTagPalette } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import {
+  type ChosenPaperFolder,
+  paperFolderLabel,
+  usePaperFolderPicker,
+} from "../../../science/components/ScienceLatex/PaperFolder"
 
 const FIELD_CLASS =
   "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
@@ -60,7 +65,19 @@ const EMOJI_PICKER_OPTIONS = [
   "☑️",
 ] as const
 
-/** Shared compact form for adding and editing project details. */
+/**
+ * A change to the paper folder made in the dialog, applied when it is saved:
+ * keep the current one, use a chosen folder, or clear it.
+ */
+type PaperFolderDraft = { kind: "keep" } | ({ kind: "set" } & ChosenPaperFolder) | { kind: "clear" }
+
+/**
+ * Shared compact form for adding and editing project details. When editing, a
+ * "Paper folder" row shows the LaTeX Editor's paper folder and can choose
+ * another one (same checks as the LaTeX Editor) or clear it. Like the other
+ * fields, the change is applied only when the dialog is saved, before the
+ * other details; if it fails, the error is shown and nothing else is saved.
+ */
 export function EditProjectDialog({
   project,
   mode,
@@ -117,6 +134,53 @@ export function EditProjectDialog({
 
   const rootRef = useRef<HTMLDivElement | null>(null)
 
+  const queryClient = useQueryClient()
+  const projectId = project.id ?? ""
+  const showPaperFolder = mode === "edit" && projectId !== ""
+  const paperState = useQuery({
+    ...trpc.paper.get.queryOptions({ projectId }),
+    enabled: showPaperFolder,
+  })
+  const [paperDraft, setPaperDraft] = useState<PaperFolderDraft>({ kind: "keep" })
+  const [paperError, setPaperError] = useState<string | null>(null)
+  const onPaperError = (cause: { message: string }): void => setPaperError(cause.message)
+  const paperPicker = usePaperFolderPicker(
+    projectId,
+    (chosen) => setPaperDraft({ kind: "set", ...chosen }),
+    onPaperError,
+  )
+  const linkPaper = useMutation(trpc.paper.link.mutationOptions())
+  const unlinkPaper = useMutation(trpc.paper.unlink.mutationOptions())
+  const paperPending = linkPaper.isPending || unlinkPaper.isPending
+  const shownPaperDir =
+    paperDraft.kind === "set"
+      ? paperDraft.displayDir
+      : paperDraft.kind === "clear"
+        ? null
+        : (paperState.data?.paper?.displayDir ?? null)
+
+  /** Apply the paper folder change, if any; resolves to false when it failed (the error is shown). */
+  const applyPaperDraft = (): Promise<boolean> => {
+    const change =
+      paperDraft.kind === "set"
+        ? linkPaper.mutateAsync({
+            projectId,
+            dir: paperDraft.dir,
+            rootChoice: paperDraft.rootChoice,
+          })
+        : unlinkPaper.mutateAsync({ projectId })
+    return change.then(
+      () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+        return true
+      },
+      (cause: { message: string }) => {
+        onPaperError(cause)
+        return false
+      },
+    )
+  }
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
@@ -153,14 +217,22 @@ export function EditProjectDialog({
   }
 
   const save = () => {
-    if (!name.trim() || pending || (choice.isLoading && mode === "edit")) return
-    onSave({
+    if (!name.trim() || pending || paperPending || (choice.isLoading && mode === "edit")) return
+    const details: ProjectDetails = {
       name: name.trim(),
       typeId: (typeId || "general") as ProjectDetails["typeId"],
       deadline: deadline || null,
       agentId: agentId || null,
       emojiTags,
       textTags,
+    }
+    if (paperDraft.kind === "keep") {
+      onSave(details)
+      return
+    }
+    setPaperError(null)
+    void applyPaperDraft().then((applied) => {
+      if (applied) onSave(details)
     })
   }
 
@@ -189,7 +261,10 @@ export function EditProjectDialog({
           <p className="truncate text-muted-foreground text-xs">{project.name}</p>
         </div>
 
-        <fieldset disabled={pending} className="flex flex-col gap-3.5 overflow-y-auto px-4 py-4">
+        <fieldset
+          disabled={pending || paperPending}
+          className="flex min-w-0 flex-col gap-3.5 overflow-y-auto px-4 py-4"
+        >
           <label className="flex flex-col gap-1 text-xs font-medium">
             {t("Project name")}
             <input
@@ -345,9 +420,54 @@ export function EditProjectDialog({
               </div>
             </>
           ) : null}
-          {error ? (
+          {showPaperFolder ? (
+            <div className="flex flex-col gap-1">
+              <span className="font-medium text-foreground text-xs">{t("Paper folder")}</span>
+              <div className="flex items-center gap-2">
+                <span
+                  data-testid="edit-project-paper-folder"
+                  title={paperDraft.kind === "set" ? paperDraft.dir : paperState.data?.paper?.dir}
+                  className="min-w-0 flex-1 truncate text-sm"
+                >
+                  {shownPaperDir === null ? t("None") : paperFolderLabel(shownPaperDir, t)}
+                </span>
+                <button
+                  type="button"
+                  data-testid="edit-project-paper-choose"
+                  disabled={paperPicker.busy}
+                  onClick={() => {
+                    setPaperError(null)
+                    paperPicker.choose()
+                  }}
+                  className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60 disabled:opacity-50"
+                >
+                  {t("Choose…")}
+                </button>
+                {shownPaperDir !== null ? (
+                  <button
+                    type="button"
+                    data-testid="edit-project-paper-clear"
+                    title={t("Forget this folder. No files are deleted.")}
+                    onClick={() => {
+                      setPaperError(null)
+                      setPaperDraft({ kind: "clear" })
+                    }}
+                    className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60"
+                  >
+                    {t("Clear")}
+                  </button>
+                ) : null}
+              </div>
+              {paperState.error ? (
+                <p role="alert" className="text-destructive text-xs">
+                  {paperState.error.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {error || paperError ? (
             <p role="alert" className="text-destructive text-xs">
-              {error}
+              {paperError ?? error}
             </p>
           ) : null}
         </fieldset>
@@ -377,6 +497,7 @@ export function EditProjectDialog({
             data-testid={mode === "add" ? "add-project-confirm" : "edit-project-save"}
             disabled={
               pending ||
+              paperPending ||
               !name.trim() ||
               Boolean(choice.error) ||
               (mode === "edit" && choice.isLoading)
@@ -389,6 +510,7 @@ export function EditProjectDialog({
         </div>
       </div>
 
+      {paperPicker.dialog}
       {emojiPickerOpen ? (
         // biome-ignore lint/a11y/noStaticElementInteractions: this is the picker backdrop; its visible dialog contains the keyboard-accessible choices, and Escape closes it.
         // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled at dialog level and provides the keyboard dismissal path.

@@ -100,6 +100,11 @@ interface CentralPanelProps {
   sourceRequest?: (SourceLocation & { nonce: number }) | null
   /** LaTeX Editor layout of the left column; the project view leaves it out. */
   leftColumn?: CentralPanelLeftColumn
+  /**
+   * The LaTeX Editor's "Paper folder" status bar item; the project view leaves
+   * it out. With it, the status bar shows even when no tab is focused.
+   */
+  paperFolderItem?: ReactNode
 }
 
 /**
@@ -130,6 +135,7 @@ export function CentralPanel({
   pdfBesideSource: placePdfBesideSource,
   sourceRequest,
   leftColumn,
+  paperFolderItem,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -411,9 +417,10 @@ export function CentralPanel({
       ? focusedFile.relPath
       : (focusedSession?.label ?? null)
   const statusBar =
-    focusedLabel === null ? null : (
+    focusedLabel === null && !paperFolderItem ? null : (
       <EditorStatusBar
-        label={focusedLabel}
+        label={focusedLabel ?? ""}
+        paperFolderItem={paperFolderItem}
         pdfMessage={focusedFile?.kind === "pdf" ? pdfMessages[focusedFile.relPath] : null}
         onShowInPdf={
           focusedFile && isTexPath(focusedFile.relPath)

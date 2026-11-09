@@ -75,6 +75,8 @@ function renderEditor(
         projectId={projectId}
         projectName="Project"
         workspaceId="paper-ws"
+        paperDir="/proj/paper"
+        displayDir="paper"
         rootRelPath="main.tex"
         lastSyncAt={null}
         hasRemote={false}

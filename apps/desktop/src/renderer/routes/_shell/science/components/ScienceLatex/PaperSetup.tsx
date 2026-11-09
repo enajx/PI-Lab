@@ -4,7 +4,7 @@ import { FolderOpen, GitBranch } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
-import { PaperDialog } from "./PaperSyncBar"
+import { usePaperFolderPicker } from "./PaperFolder"
 
 /** Overleaf's account settings, where a Git token is created. */
 const TOKEN_URL = "https://www.overleaf.com/user/settings"
@@ -15,27 +15,28 @@ const cardClass =
   "flex flex-col items-center justify-center gap-3 rounded-lg border border-border p-6 text-center"
 const linkClass = "text-muted-foreground underline underline-offset-2 hover:text-foreground"
 
-/** A project folder that is not an Overleaf clone, waiting for the user's choice. */
-interface RootPrompt {
-  dir: string
-  /** Its `origin` URL without credentials, or null when it has no remote. */
-  remoteUrl: string | null
-}
-
 /**
- * Shown when the chosen project has no paper linked yet. It first looks for
- * Overleaf clones in the project (`paper.detect`): exactly one is linked
- * right away, and several are listed to pick one (with a note when the
- * search stopped early on a large project). Then it offers the two
- * agreed ways to link a paper, side by side as two cards of the same height
+ * Shown when the chosen project has no paper folder yet. With `autoDetect` on
+ * it first looks for Overleaf clones in the project (`paper.detect`): exactly
+ * one is used right away, and several are listed to pick one (with a note when
+ * the search stopped early on a large project). With it off (the user cleared
+ * the paper folder) it does not search. Then it offers the two
+ * agreed ways to set a paper folder, side by side as two cards of the same height
  * (stacked when the page is too narrow), centred on the page, each with its
  * content centred: clone an Overleaf project into `<project>/paper/` from its
- * Git URL, or link a folder the user already cloned. The one Overleaf token is
+ * Git URL, or open a folder the user already cloned. The one Overleaf token is
  * asked for only when none is available; the token and docs links are shown
  * only then. Choosing the project folder when it is not an Overleaf clone asks
  * first whether Sync stays on (Sync would commit and push the whole project).
  */
-export function PaperSetup({ projectId }: { projectId: string }) {
+export function PaperSetup({
+  projectId,
+  autoDetect,
+}: {
+  projectId: string
+  /** False after the user cleared the paper folder: no search for Overleaf clones. */
+  autoDetect: boolean
+}) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -45,8 +46,10 @@ export function PaperSetup({ projectId }: { projectId: string }) {
   const tokenStatus = useQuery(trpc.paper.token.status.queryOptions())
   const needsToken = tokenStatus.data?.configured === false
   const tokenFromGit = tokenStatus.data?.source === "git"
-  const detect = useQuery(trpc.paper.detect.queryOptions({ projectId }))
-  const [rootPrompt, setRootPrompt] = useState<RootPrompt | null>(null)
+  const detect = useQuery({
+    ...trpc.paper.detect.queryOptions({ projectId }),
+    enabled: autoDetect,
+  })
 
   const linked = (): void => {
     void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
@@ -58,12 +61,18 @@ export function PaperSetup({ projectId }: { projectId: string }) {
     trpc.paper.addOverleaf.mutationOptions({ onSuccess: linked, onError }),
   )
   const link = useMutation(trpc.paper.link.mutationOptions({ onSuccess: linked, onError }))
-  const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions({ onError }))
-  const busy =
-    addOverleaf.isPending || link.isPending || setTokenMutation.isPending || pickDirectory.isPending
+  const picker = usePaperFolderPicker(
+    projectId,
+    (chosen) => link.mutate({ projectId, dir: chosen.dir, rootChoice: chosen.rootChoice }),
+    onError,
+  )
+  const busy = addOverleaf.isPending || link.isPending || setTokenMutation.isPending || picker.busy
 
   // Exactly one Overleaf clone in the project: link it once, without asking.
-  const clones = detect.data?.clones ?? []
+  // A disabled query still returns cached data (from a visit before the folder
+  // was cleared), so results are ignored while auto-detection is off.
+  const search = autoDetect ? detect.data : undefined
+  const clones = search?.clones ?? []
   const onlyClone = clones.length === 1 ? (clones[0] ?? null) : null
   const autoLinked = useRef(false)
   const { mutate: linkMutate } = link
@@ -72,26 +81,12 @@ export function PaperSetup({ projectId }: { projectId: string }) {
     autoLinked.current = true
     linkMutate({ projectId, dir: onlyClone.dir, rootChoice: null })
   }, [onlyClone, linkMutate, projectId])
-  const autoLinking = detect.isPending || (onlyClone !== null && !link.isError)
+  const autoLinking = autoDetect && (detect.isPending || (onlyClone !== null && !link.isError))
 
-  /**
-   * Ask for a folder, then link it. The project folder, when it is not an
-   * Overleaf clone, waits for the user's choice in the dialog instead.
-   */
+  /** Ask for a folder, check it (see {@link usePaperFolderPicker}), then use it. */
   const chooseFolder = (): void => {
     setError(null)
-    pickDirectory.mutate(undefined, {
-      onSuccess: (dir) => {
-        if (!dir) return
-        queryClient
-          .fetchQuery(trpc.paper.checkFolder.queryOptions({ projectId, dir }))
-          .then((check) => {
-            if (check.projectFolder && !check.overleaf) {
-              setRootPrompt({ dir, remoteUrl: check.remoteUrl })
-            } else link.mutate({ projectId, dir, rootChoice: null })
-          }, onError)
-      },
-    })
+    picker.choose()
   }
 
   const submit = async (): Promise<void> => {
@@ -120,12 +115,12 @@ export function PaperSetup({ projectId }: { projectId: string }) {
         {autoLinking ? (
           <p data-testid="paper-detecting" className="text-center text-muted-foreground text-sm">
             {link.isPending
-              ? t("Linking the Overleaf folder…")
+              ? t("Opening the Overleaf folder…")
               : t("Looking for Overleaf folders…")}
           </p>
         ) : (
           <>
-            {detect.data?.stoppedEarly ? (
+            {search?.stoppedEarly ? (
               <p
                 data-testid="paper-detect-stopped"
                 className="text-center text-muted-foreground text-xs"
@@ -140,7 +135,7 @@ export function PaperSetup({ projectId }: { projectId: string }) {
                 <h2 className="font-medium text-sm">
                   {t("Overleaf folders found in this project")}
                 </h2>
-                <p className="text-muted-foreground text-xs">{t("Choose the one to link.")}</p>
+                <p className="text-muted-foreground text-xs">{t("Choose the paper folder.")}</p>
                 <div className="flex flex-wrap justify-center gap-2">
                   {clones.map((clone) => (
                     <button
@@ -219,7 +214,7 @@ export function PaperSetup({ projectId }: { projectId: string }) {
                 <FolderOpen className="size-5 text-muted-foreground" aria-hidden />
                 <h2 className="font-medium text-sm">{t("Use an existing folder")}</h2>
                 <p className="text-muted-foreground text-xs">
-                  {t("Link a paper folder you already cloned.")}
+                  {t("Open a paper folder you already cloned.")}
                 </p>
                 <button
                   type="button"
@@ -235,7 +230,7 @@ export function PaperSetup({ projectId }: { projectId: string }) {
           </>
         )}
 
-        {detect.isError ? (
+        {autoDetect && detect.isError ? (
           <p role="alert" className="cursor-text select-text text-destructive text-xs">
             {detect.error.message}
           </p>
@@ -251,80 +246,7 @@ export function PaperSetup({ projectId }: { projectId: string }) {
           </p>
         ) : null}
       </div>
-      {rootPrompt ? (
-        <RootFolderDialog
-          remoteUrl={rootPrompt.remoteUrl}
-          onChoice={(choice) => {
-            setRootPrompt(null)
-            if (choice === "other") chooseFolder()
-            else if (choice !== "cancel") {
-              link.mutate({ projectId, dir: rootPrompt.dir, rootChoice: choice })
-            }
-          }}
-        />
-      ) : null}
+      {picker.dialog}
     </div>
-  )
-}
-
-/** What the user chose in {@link RootFolderDialog}. */
-type RootDialogChoice = "no-sync" | "sync" | "other" | "cancel"
-
-/**
- * Asked when the chosen folder is the project folder and it is not an Overleaf
- * clone: Sync would commit and push the whole project to its remote. With no
- * remote, "Use it with Sync" is not offered.
- */
-function RootFolderDialog({
-  remoteUrl,
-  onChoice,
-}: {
-  remoteUrl: string | null
-  onChoice: (choice: RootDialogChoice) => void
-}) {
-  const t = useTranslate()
-  const buttonClass = "rounded border border-border px-3 py-1.5 text-sm hover:bg-accent"
-  return (
-    <PaperDialog
-      testId="paper-root-dialog"
-      title={t("Use the project folder as the paper folder?")}
-      onClose={() => onChoice("cancel")}
-    >
-      <p className="mt-2 cursor-text select-text text-muted-foreground text-xs">
-        {remoteUrl
-          ? `${t("This folder is not an Overleaf clone. Sync would commit and push the whole project to:")} ${remoteUrl}`
-          : t(
-              "This folder is not an Overleaf clone, and it has no Git remote, so Sync cannot run.",
-            )}
-      </p>
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <button
-          type="button"
-          data-testid="paper-root-no-sync"
-          className={buttonClass}
-          onClick={() => onChoice("no-sync")}
-        >
-          {t("Use it, edit and build only (no Sync)")}
-        </button>
-        {remoteUrl ? (
-          <button
-            type="button"
-            data-testid="paper-root-sync"
-            className={buttonClass}
-            onClick={() => onChoice("sync")}
-          >
-            {t("Use it with Sync")}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          data-testid="paper-root-other"
-          className={buttonClass}
-          onClick={() => onChoice("other")}
-        >
-          {t("Choose another folder")}
-        </button>
-      </div>
-    </PaperDialog>
   )
 }

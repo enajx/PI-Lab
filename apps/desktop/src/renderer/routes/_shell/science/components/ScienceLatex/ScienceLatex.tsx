@@ -12,8 +12,8 @@ import { PaperSetup } from "./PaperSetup"
 /**
  * LaTeX Editor science tab: a project picker at the top (remembers the last
  * project; a project card can open it with a project chosen), then either the
- * setup to link the project's paper or the paper workspace. With a paper
- * linked, the workspace puts its Sync button next to the picker. `focusSession`
+ * setup to choose the project's paper folder or the paper workspace. With a
+ * paper folder set, the workspace puts its Sync button next to the picker. `focusSession`
  * focuses one agent tab of the initial project (see the Project Agents box).
  */
 export function ScienceLatex({
@@ -107,6 +107,8 @@ export function ScienceLatex({
           projectId={selected.id}
           projectName={selected.name}
           workspaceId={paper.data.workspaceId}
+          paperDir={paper.data.paper.dir}
+          displayDir={paper.data.paper.displayDir}
           rootRelPath={paper.data.rootRelPath}
           lastSyncAt={paper.data.paper.lastSyncAt}
           hasRemote={paper.data.paper.remoteUrl !== null}
@@ -119,7 +121,7 @@ export function ScienceLatex({
           syncSlot={syncSlot}
         />
       ) : (
-        <PaperSetup key={selected.id} projectId={selected.id} />
+        <PaperSetup key={selected.id} projectId={selected.id} autoDetect={paper.data.autoDetect} />
       )}
     </ScienceTabShell>
   )

@@ -313,6 +313,11 @@ export interface ProjectMetadata {
   referenceLinks?: ProjectReferenceLink[]
   /** Linked LaTeX paper folder; absent when none is linked. */
   paper?: ProjectPaper
+  /**
+   * False after the user cleared the paper folder: the LaTeX Editor then does
+   * not look for Overleaf clones until a folder is chosen again. Absent: it does.
+   */
+  paperAutoDetect?: boolean
 }
 
 /** A locally-known v2 Team. */

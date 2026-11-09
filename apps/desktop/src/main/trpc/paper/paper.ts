@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs"
 import { realpath, stat } from "node:fs/promises"
+import { homedir } from "node:os"
 import { isAbsolute, join, relative, sep } from "node:path"
 import {
   getSettingsOrDefaults,
@@ -74,6 +75,8 @@ const SYNC_COMMIT_MESSAGE = "Sync from PI Lab"
 /** The linked paper folder as the renderer sees it. */
 export interface PaperView {
   dir: string
+  /** The folder as shown to the user; see {@link displayPaperDir}. */
+  displayDir: string
   remoteUrl: string | null
   lastSyncAt: number | null
   isOverleaf: boolean
@@ -93,6 +96,8 @@ export type RootChoice = "sync" | "no-sync"
 
 /** Result of `paper.checkFolder`: what linking a folder would mean. */
 export interface FolderCheck {
+  /** The folder as shown to the user; see {@link displayPaperDir}. */
+  displayDir: string
   /** True when the folder is the project folder itself. */
   projectFolder: boolean
   /** True when the folder is the top of its own repo with an Overleaf `origin`. */
@@ -107,7 +112,7 @@ const ROOT_CHOICE_REQUIRED =
 
 /** Error message for a project folder with no remote linked with Sync on. */
 const ROOT_SYNC_NO_REMOTE =
-  "The project folder has no Git remote, so Sync cannot run. Link it for editing and building only, or choose another folder."
+  "The project folder has no Git remote, so Sync cannot run. Use it for editing and building only, or choose another folder."
 
 /** Result of `paper.get`, `paper.link` and `paper.addOverleaf`. */
 export interface PaperState {
@@ -116,6 +121,8 @@ export interface PaperState {
   workspaceId: string | null
   /** Main .tex file relative to the paper folder, or null when it cannot be chosen. */
   rootRelPath: string | null
+  /** False after the user cleared the paper folder: the LaTeX Editor then does not look for Overleaf clones. */
+  autoDetect: boolean
 }
 
 /** Result of `paper.sync` and `paper.resolve`. */
@@ -140,17 +147,21 @@ function requirePaper(project: Project): ProjectPaper {
   if (!paper) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "No paper folder is linked to this project",
+      message: "This project has no paper folder",
     })
   }
   return paper
 }
 
-/** Store (or remove, with null) the project's paper link, keeping the other metadata. */
+/**
+ * Store the project's paper link, keeping the other metadata, or remove it
+ * with null. Removing it also turns auto-detection off (`paperAutoDetect:
+ * false`); storing one turns it back on.
+ */
 function writePaper(db: PiLabDatabase, projectId: string, paper: ProjectPaper | null): void {
   const project = requireProject(db, projectId)
-  const { paper: _old, ...rest } = project.metadata ?? {}
-  const metadata = paper ? { ...rest, paper } : rest
+  const { paper: _old, paperAutoDetect: _flag, ...rest } = project.metadata ?? {}
+  const metadata = paper ? { ...rest, paper } : { ...rest, paperAutoDetect: false }
   db.update(projects)
     .set({ metadata, updatedAt: Date.now() })
     .where(eq(projects.id, projectId))
@@ -168,14 +179,45 @@ function paperWorkspace(db: PiLabDatabase, projectId: string): Workspace | null 
   )
 }
 
+/**
+ * How a paper folder is shown to the user: "." for the project folder, the
+ * path relative to the project folder when inside it, else the full path with
+ * `~` for the home folder. All paths must be real paths.
+ */
+export function displayPaperDir(dir: string, projectDir: string, home: string): string {
+  if (containsOrEquals(projectDir, dir)) {
+    const rel = relative(projectDir, dir)
+    return rel === "" ? "." : rel.split(sep).join("/")
+  }
+  if (containsOrEquals(home, dir)) {
+    const rel = relative(home, dir)
+    return rel === "" ? "~" : `~/${rel.split(sep).join("/")}`
+  }
+  return dir
+}
+
+/** {@link displayPaperDir} for a project's folder and the user's home folder. */
+async function displayDirFor(project: Project, dir: string): Promise<string> {
+  // A missing project folder cannot be resolved; its stored path is compared as is.
+  const projectDir = existsSync(project.repoPath)
+    ? await realpath(project.repoPath)
+    : project.repoPath
+  const home = existsSync(homedir()) ? await realpath(homedir()) : homedir()
+  return displayPaperDir(dir, projectDir, home)
+}
+
 /** Current paper state for a project. */
 async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperState> {
-  const paper = requireProject(db, projectId).metadata?.paper
-  if (!paper) return { paper: null, workspaceId: null, rootRelPath: null }
+  const project = requireProject(db, projectId)
+  const paper = project.metadata?.paper
+  const autoDetect = project.metadata?.paperAutoDetect !== false
+  if (!paper) return { paper: null, workspaceId: null, rootRelPath: null, autoDetect }
   const files = await listPaperFiles(paper.dir)
   return {
+    autoDetect,
     paper: {
       dir: paper.dir,
+      displayDir: await displayDirFor(project, paper.dir),
       remoteUrl: paper.remoteUrl,
       lastSyncAt: paper.lastSyncAt,
       isOverleaf: paper.remoteUrl !== null && isOverleafUrl(paper.remoteUrl),
@@ -215,6 +257,7 @@ async function checkFolder(
   const canonical = await requireFolder(dir)
   const origin = (await isOwnRepo(canonical)) ? await remoteUrl(canonical) : null
   return {
+    displayDir: await displayDirFor(project, canonical),
     projectFolder: canonical === (await realpath(project.repoPath)),
     overleaf: await isOverleafClone(canonical),
     remoteUrl: origin === null ? null : displayRemoteUrl(origin),
@@ -601,7 +644,10 @@ export const paperRouter = router({
       return paperState(ctx.db, input.projectId)
     }),
 
-  /** Remove the link and the hidden paper workspace. Never deletes files. */
+  /**
+   * Remove the link and the hidden paper workspace, and turn auto-detection
+   * off until a folder is chosen again. Never deletes files.
+   */
   unlink: publicProcedure.input(projectIdInput).mutation(({ ctx, input }): { ok: true } => {
     requireProject(ctx.db, input.projectId)
     ctx.db

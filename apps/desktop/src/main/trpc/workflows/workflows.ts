@@ -563,7 +563,7 @@ async function workflowTarget(project: Project, task: WorkflowTask): Promise<Wor
   if (!paper) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "No paper folder is linked to this project",
+      message: "This project has no paper folder",
     })
   }
   requireSyncEnabled(paper.syncEnabled)
