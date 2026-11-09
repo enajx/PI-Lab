@@ -437,6 +437,7 @@ export const workspacesRouter = router({
             workspaceId: workspace.id,
             agentId: agent.id,
             workflowRunId: null,
+            origin: "project",
             turnArmed: false,
             cols: input.cols,
             rows: input.rows,

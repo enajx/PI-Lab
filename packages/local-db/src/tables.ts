@@ -52,6 +52,8 @@ export type AutomationExecutionMode = "interactive" | "noninteractive"
 
 /** Current lifecycle classification for a durable interactive agent session. */
 export type AgentSessionState = "working" | "waiting" | "exited"
+/** The app view an interactive agent was started from; each view shows only its own agents. */
+export type AgentSessionOrigin = "project" | "latex" | "analysis"
 
 /** Why a live interactive agent is waiting for the user. */
 export type AgentSessionWaitingReason =
@@ -970,6 +972,8 @@ export const agentSessions = sqliteTable(
     workflowRunId: text("workflow_run_id").references(() => automationRuns.id, {
       onDelete: "set null",
     }),
+    /** The view the agent was started from (Project view, LaTeX Editor, Analysis). */
+    origin: text("origin").notNull().$type<AgentSessionOrigin>().default("project"),
     state: text("state").notNull().$type<AgentSessionState>().default("working"),
     /**
      * Whether a real user/launch prompt has armed the current turn. Persisted so

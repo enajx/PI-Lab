@@ -38,6 +38,7 @@ import {
   excludeEffectiveOutputs,
   isOwnRepo,
   outputDirOrBadRequest,
+  requireUntrackedOutputDir,
 } from "../../paper/outputs"
 import {
   displayRemoteUrl,
@@ -469,6 +470,7 @@ export const paperRouter = router({
         input.outputDir.trim() === ""
           ? rest
           : { ...rest, outputDir: outputDirOrBadRequest(input.outputDir) }
+      if (next.outputDir !== undefined) await requireUntrackedOutputDir(next.dir, next.outputDir)
       await excludeEffectiveOutputs(next, getSettingsOrDefaults(ctx.db).editor.latexOutputDir)
       writePaper(ctx.db, input.projectId, next)
       return paperState(ctx.db, input.projectId)

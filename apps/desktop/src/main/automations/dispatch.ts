@@ -74,6 +74,7 @@ export async function dispatchAutomation(
       prompt: automation.prompt,
       name: automation.name,
       workflowRunId: run.id,
+      origin: "project",
     })
     // The activity monitor records the pending-to-running transition during
     // startAgentSession, including the single launch timestamp.

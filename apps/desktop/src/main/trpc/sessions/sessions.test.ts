@@ -4,7 +4,7 @@
 // long-lived so a session can be held open across a second start). Full cleanup
 // per test; concurrency assertions poll with timeouts, never fixed sleeps.
 import { existsSync, readFileSync } from "node:fs"
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { agentSessions, settings, worktrees } from "@pi-lab/local-db"
@@ -66,9 +66,24 @@ const ENVIRONMENT_AGENT: TerminalAgent = {
   ],
 }
 
+/** Prints its own arguments and stays alive, so a test can read the launch argv. */
+const ARGV_AGENT: TerminalAgent = {
+  id: "argv-agent",
+  label: "Argv Agent",
+  command: process.execPath,
+  detect: "node",
+  defaultArgs: [
+    "-e",
+    "process.stdout.write('ARGV:'+JSON.stringify(process.argv.slice(1))+':END');setInterval(()=>{},1000)",
+    "--",
+  ],
+  addDirArg: "--add-dir",
+}
+
 beforeEach(async () => {
   h = await createHarness(
     [
+      ARGV_AGENT,
       FAKE_AGENT,
       LONG_FAKE_AGENT,
       PROMPT_AGENT,
@@ -117,6 +132,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
       workspaceId: null,
       agentId: LONG_FAKE_AGENT.id,
       workflowRunId: null,
+      origin: "project",
       turnArmed: true,
     })
     let status: unknown
@@ -137,7 +153,11 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
   })
 
   test("no prior agent -> kind 'branch', cwd is the repo root, agent runs", async () => {
-    const result = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
+    const result = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "fake-agent",
+    })
 
     expect(result.kind).toBe("branch")
     expect(result.sessionId).toBeTruthy()
@@ -173,6 +193,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
   test("the public mutation passes an initial prompt to the selected agent", async () => {
     const result = await h.caller.sessions.start({
+      origin: "project",
       projectId,
       agentId: "prompt-agent",
       prompt: "Implement the selected TODO",
@@ -191,6 +212,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
   test("agents and manual project terminals receive the same resolved launch environment", async () => {
     const agent = await h.caller.sessions.start({
+      origin: "project",
       projectId,
       agentId: ENVIRONMENT_AGENT.id,
     })
@@ -227,6 +249,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
   test("the public launch path renders and durably classifies a stable permission prompt", async () => {
     const result = await h.caller.sessions.start({
+      origin: "project",
       projectId,
       agentId: PERMISSION_AGENT.id,
     })
@@ -254,6 +277,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
   test("an unfocused app notifies exactly once when a submitted turn returns to its prompt", async () => {
     const result = await h.caller.sessions.start({
+      origin: "project",
       projectId,
       agentId: TURN_COMPLETE_AGENT.id,
     })
@@ -301,6 +325,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
         workspaceId: result.workspaceId,
         sessionId: result.sessionId,
         agentId: TURN_COMPLETE_AGENT.id,
+        origin: "project",
       },
     ])
     unsubscribe()
@@ -310,8 +335,8 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
   test("overlapping starts reserve main once through activity registration", async () => {
     const results = await Promise.all([
-      h.caller.sessions.start({ projectId, agentId: LONG_FAKE_AGENT.id }),
-      h.caller.sessions.start({ projectId, agentId: LONG_FAKE_AGENT.id }),
+      h.caller.sessions.start({ origin: "project", projectId, agentId: LONG_FAKE_AGENT.id }),
+      h.caller.sessions.start({ origin: "project", projectId, agentId: LONG_FAKE_AGENT.id }),
     ])
     expect(results.map((result) => result.kind).sort()).toEqual(["branch", "worktree"])
     expect(h.activityMonitor.liveAgentCount(projectId)).toBe(2)
@@ -319,12 +344,20 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
   test("a long-lived agent makes the 2nd start (same project) a 'worktree'; another project stays 'branch'", async () => {
     // First start: branch (main checkout), held live by the long agent.
-    const first = await h.caller.sessions.start({ projectId, agentId: "long-fake-agent" })
+    const first = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "long-fake-agent",
+    })
     expect(first.kind).toBe("branch")
     await waitFor(() => h.activityMonitor.liveAgentCount(projectId) === 1)
 
     // A second concurrent start for the SAME project must get its own worktree.
-    const second = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
+    const second = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "fake-agent",
+    })
     expect(second.kind).toBe("worktree")
     expect(second.workspaceId).not.toBe(first.workspaceId)
 
@@ -338,6 +371,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     const repo2 = await makeRepo(h.dataDir)
     const project2 = await h.caller.projects.open({ path: repo2 })
     const other = await h.caller.sessions.start({
+      origin: "project",
       projectId: project2.id,
       agentId: "fake-agent",
     })
@@ -355,6 +389,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
     await expect(
       h.caller.sessions.start({
+        origin: "project",
         projectId: plainProject.id,
         agentId: "fake-agent",
         workspaceMode: "worktree",
@@ -365,6 +400,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     })
 
     const first = await h.caller.sessions.start({
+      origin: "project",
       projectId: plainProject.id,
       agentId: "long-fake-agent",
     })
@@ -373,6 +409,7 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
     await expect(
       h.caller.sessions.start({
+        origin: "project",
         projectId: plainProject.id,
         agentId: "fake-agent",
       }),
@@ -390,10 +427,12 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 
     const results = await Promise.allSettled([
       h.caller.sessions.start({
+        origin: "project",
         projectId: plainProject.id,
         agentId: "long-fake-agent",
       }),
       h.caller.sessions.start({
+        origin: "project",
         projectId: plainProject.id,
         agentId: "long-fake-agent",
       }),
@@ -416,10 +455,15 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
   })
 
   test("a source-file-bound launch stays in the main checkout despite a live agent", async () => {
-    const first = await h.caller.sessions.start({ projectId, agentId: "long-fake-agent" })
+    const first = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "long-fake-agent",
+    })
     await waitFor(() => h.activityMonitor.liveAgentCount(projectId) === 1)
 
     const taskAgent = await h.caller.sessions.start({
+      origin: "project",
       projectId,
       agentId: "fake-agent",
       workspaceMode: "main",
@@ -496,7 +540,11 @@ describe("sessions.start — worktreePerAgent ON", () => {
   test("the FIRST start is already a 'worktree'", async () => {
     enableWorktreePerAgent()
 
-    const result = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
+    const result = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "fake-agent",
+    })
     expect(result.kind).toBe("worktree")
 
     const workspace = await h.caller.workspaces.get({ id: result.workspaceId })
@@ -508,6 +556,7 @@ describe("sessions.start — worktreePerAgent ON", () => {
     enableWorktreePerAgent()
 
     const result = await h.caller.sessions.start({
+      origin: "project",
       projectId,
       agentId: "fake-agent",
       workspaceMode: "main",
@@ -522,11 +571,19 @@ describe("sessions.start — worktreePerAgent ON", () => {
 describe("sessions.start — registry drains on exit", () => {
   test("after a session exits the next start is 'branch' again, reusing the one branch workspace", async () => {
     // Hold a live agent so a 2nd start would be a worktree.
-    const live = await h.caller.sessions.start({ projectId, agentId: "long-fake-agent" })
+    const live = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "long-fake-agent",
+    })
     expect(live.kind).toBe("branch")
     await waitFor(() => h.activityMonitor.liveAgentCount(projectId) === 1)
 
-    const second = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
+    const second = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "fake-agent",
+    })
     expect(second.kind).toBe("worktree")
 
     // Kill the long-lived session; the registry drains via the daemon exit event.
@@ -535,7 +592,11 @@ describe("sessions.start — registry drains on exit", () => {
 
     // The next start is branch again — and reuses the existing single branch
     // workspace (no CONFLICT, same workspace id as the first branch start).
-    const third = await h.caller.sessions.start({ projectId, agentId: "fake-agent" })
+    const third = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: "fake-agent",
+    })
     expect(third.kind).toBe("branch")
     expect(third.workspaceId).toBe(live.workspaceId)
 
@@ -546,7 +607,11 @@ describe("sessions.start — registry drains on exit", () => {
   })
 
   test("a real socket closing during attach preserves the agent and reconnects automatically", async () => {
-    const live = await h.caller.sessions.start({ projectId, agentId: LONG_FAKE_AGENT.id })
+    const live = await h.caller.sessions.start({
+      origin: "project",
+      projectId,
+      agentId: LONG_FAKE_AGENT.id,
+    })
     h.activityMonitor.dispose()
     const brokenClient = new DaemonClient(join(h.dataDir, "daemon.sock"))
     const recoveredClient = new DaemonClient(join(h.dataDir, "daemon.sock"))
@@ -595,6 +660,7 @@ describe("sessions.start — registry drains on exit", () => {
 
   test("a fresh app-lifetime monitor reconciles a durable still-live daemon session", async () => {
     const live = await h.caller.sessions.start({
+      origin: "project",
       projectId,
       agentId: LONG_FAKE_AGENT.id,
     })
@@ -627,5 +693,142 @@ describe("sessions.start — registry drains on exit", () => {
     recoveredMonitor.dispose()
     recoveredRegistry.dispose()
     recoveredClient.close()
+  })
+})
+
+/** Collect a session's terminal output until it contains `marker`. */
+async function outputUntil(sessionId: string, marker: string): Promise<string> {
+  const chunks: string[] = []
+  const stream = await h.caller.terminal.onData({ sessionId })
+  const sub = stream.subscribe({
+    next: (event) => {
+      if (event.type === "data") chunks.push(event.chunk)
+    },
+  })
+  await waitFor(() => chunks.join("").includes(marker))
+  sub.unsubscribe()
+  return chunks.join("")
+}
+
+/** The argv an {@link ARGV_AGENT} session printed. */
+async function launchedArgs(sessionId: string): Promise<string[]> {
+  const output = await outputUntil(sessionId, ":END")
+  const match = /ARGV:(.*):END/s.exec(output.replace(/\r?\n/g, ""))
+  if (!match?.[1]) throw new Error(`No argv in output: ${output}`)
+  return JSON.parse(match[1]) as string[]
+}
+
+describe("sessions.start — origin view and the paper folder", () => {
+  test("records the origin with the session", async () => {
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: LONG_FAKE_AGENT.id,
+      origin: "latex",
+    })
+    const row = h.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, result.sessionId))
+      .get()
+    expect(row?.origin).toBe("latex")
+  })
+
+  test("a LaTeX Editor agent gets a paper folder outside the project as an extra folder", async () => {
+    // The link stores the folder's real path (macOS temp folders live under /private).
+    const paperDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-")))
+    await h.caller.paper.link({ projectId, dir: paperDir })
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: ARGV_AGENT.id,
+      origin: "latex",
+    })
+    expect(await launchedArgs(result.sessionId)).toEqual(["--add-dir", paperDir])
+  })
+
+  test("a paper folder inside the project, or a Project view agent, gets no extra folder", async () => {
+    const insideDir = join(h.repoDir, "paper")
+    await mkdir(insideDir)
+    await h.caller.paper.link({ projectId, dir: insideDir })
+    const inside = await h.caller.sessions.start({
+      projectId,
+      agentId: ARGV_AGENT.id,
+      origin: "latex",
+    })
+    expect(await launchedArgs(inside.sessionId)).toEqual([])
+    await h.caller.terminal.kill({ sessionId: inside.sessionId })
+
+    const outsideDir = await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-"))
+    await h.caller.paper.link({ projectId, dir: outsideDir })
+    const fromProject = await h.caller.sessions.start({
+      projectId,
+      agentId: ARGV_AGENT.id,
+      origin: "project",
+    })
+    expect(await launchedArgs(fromProject.sessionId)).toEqual([])
+  })
+
+  test("a LaTeX Editor agent in a worktree gets the paper folder inside the project as an extra folder", async () => {
+    const insideDir = join(h.repoDir, "paper")
+    await mkdir(insideDir)
+    await h.caller.paper.link({ projectId, dir: insideDir })
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: ARGV_AGENT.id,
+      origin: "latex",
+      workspaceMode: "worktree",
+    })
+    expect(result.kind).toBe("worktree")
+    expect(result.warning).toBeNull()
+    expect(await launchedArgs(result.sessionId)).toEqual(["--add-dir", await realpath(insideDir)])
+  })
+
+  test("an agent without an extra-folder flag still starts, with a warning naming the paper folder", async () => {
+    const paperDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-")))
+    await h.caller.paper.link({ projectId, dir: paperDir })
+    const result = await h.caller.sessions.start({
+      projectId,
+      agentId: LONG_FAKE_AGENT.id,
+      origin: "latex",
+    })
+    expect(result.warning).toBe(
+      `${LONG_FAKE_AGENT.label} cannot be given the paper folder ${paperDir}; it only sees the project folder.`,
+    )
+    await outputUntil(result.sessionId, "AGENT-LIVE")
+  })
+})
+
+describe("sessions.projectAgents", () => {
+  test("lists only live agents started outside the Project view, with status and last activity", async () => {
+    const fromProject = await h.caller.sessions.start({
+      projectId,
+      agentId: LONG_FAKE_AGENT.id,
+      origin: "project",
+    })
+    expect(await h.caller.sessions.projectAgents({ projectId })).toEqual([])
+
+    h.activityRegistry.register({
+      sessionId: "latex-session",
+      projectId,
+      workspaceId: null,
+      agentId: LONG_FAKE_AGENT.id,
+      workflowRunId: null,
+      origin: "latex",
+      turnArmed: true,
+    })
+    const rows = await h.caller.sessions.projectAgents({ projectId })
+    expect(rows).toEqual([
+      {
+        kind: "agent",
+        sessionId: "latex-session",
+        agentId: LONG_FAKE_AGENT.id,
+        origin: "latex",
+        name: LONG_FAKE_AGENT.label,
+        status: "working",
+        lastActiveAt: expect.any(Number),
+      },
+    ])
+    expect(
+      rows.some((row) => row.kind === "agent" && row.sessionId === fromProject.sessionId),
+    ).toBe(false)
   })
 })

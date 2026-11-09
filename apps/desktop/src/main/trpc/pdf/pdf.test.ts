@@ -196,3 +196,56 @@ test("builds into the paper's output folder or the global default, and excludes 
   expect(exclude).toContain("/other.pdf")
   expect(exclude).toContain("*.synctex.gz")
 }, 60_000)
+
+test("a Project view build of a paper inside the project uses the paper's output folder, and Sync sends no output", async (context) => {
+  if (missingTools.length) context.skip(`Requires installed TeX tools: ${missingTools.join(", ")}`)
+  const git = (dir: string, ...args: string[]) =>
+    promisify(execFile)("git", [
+      "-C",
+      dir,
+      "-c",
+      "user.name=PI Lab Test",
+      "-c",
+      "user.email=test@example.invalid",
+      ...args,
+    ])
+  // A stand-in Overleaf remote, cloned as the paper folder inside the project.
+  const remote = join(h.dataDir, "remote.git")
+  await promisify(execFile)("git", ["init", "-q", "--bare", "-b", "main", remote])
+  const paperDir = join(h.repoDir, "paper")
+  await promisify(execFile)("git", ["clone", "-q", remote, paperDir])
+  await writeFile(
+    join(paperDir, "main.tex"),
+    "\\documentclass{article}\n\\begin{document}\nInside paper.\n\\end{document}\n",
+  )
+  await git(paperDir, "add", "main.tex")
+  await git(paperDir, "commit", "-q", "-m", "seed")
+  await git(paperDir, "push", "-q", "origin", "HEAD:main")
+  const projectId = (await h.caller.projects.list())[0]?.id ?? ""
+  await h.caller.paper.link({ projectId, dir: paperDir })
+  await h.caller.paper.setOutputDir({ projectId, outputDir: "out" })
+
+  // Built from the Project view (the main workspace), not the LaTeX Editor.
+  const built = await h.caller.pdf.build({ workspaceId, relPath: "paper/main.tex" })
+  expect(built.success, built.log).toBe(true)
+  expect(built.relPath).toBe("paper/out/main.pdf")
+  const forward = await h.caller.pdf.forwardSync({
+    workspaceId,
+    relPath: "paper/main.tex",
+    line: 3,
+    column: 1,
+  })
+  expect(forward.relPath).toBe("paper/out/main.pdf")
+
+  const status = await h.caller.paper.sync({ projectId, commit: true })
+  expect(status.state).toBe("synced")
+  const { stdout } = await promisify(execFile)("git", [
+    "-C",
+    remote,
+    "ls-tree",
+    "-r",
+    "--name-only",
+    "main",
+  ])
+  expect(stdout.trim().split("\n")).toEqual(["main.tex"])
+}, 60_000)

@@ -204,6 +204,13 @@
       "when": 1794229638133,
       "tag": "0028_service_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794234086699,
+      "tag": "0029_agent_session_origin",
+      "breakpoints": true
     }
   ]
 }

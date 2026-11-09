@@ -461,6 +461,7 @@ describe("runNow — non-interactive process lifecycle", () => {
     )
 
     const interactive = await h.caller.sessions.start({
+      origin: "project",
       projectId: plainProject.id,
       agentId: WORKFLOW_AGENT.id,
     })

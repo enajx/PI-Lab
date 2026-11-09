@@ -21,7 +21,11 @@ import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
-import { excludeDefaultOutputs, outputDirOrBadRequest } from "../../paper/outputs"
+import {
+  excludeDefaultOutputs,
+  outputDirOrBadRequest,
+  requireUntrackedDefaultOutputDir,
+} from "../../paper/outputs"
 import { publishPublicUpdateChannelChanged } from "../../updates/selection"
 import { publicProcedure, router } from "../trpc"
 
@@ -339,10 +343,9 @@ export const settingsRouter = router({
       if (input.latexOutputDir === undefined) return writeEditorSettings(ctx.db, input)
       // A new default output folder is checked, then kept out of every linked
       // paper's commits that uses it (see excludeDefaultOutputs).
-      const next = writeEditorSettings(ctx.db, {
-        ...input,
-        latexOutputDir: outputDirOrBadRequest(input.latexOutputDir),
-      })
+      const latexOutputDir = outputDirOrBadRequest(input.latexOutputDir)
+      await requireUntrackedDefaultOutputDir(ctx.db, latexOutputDir)
+      const next = writeEditorSettings(ctx.db, { ...input, latexOutputDir })
       await excludeDefaultOutputs(ctx.db)
       return next
     }),

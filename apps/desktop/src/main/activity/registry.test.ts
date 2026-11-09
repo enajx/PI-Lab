@@ -55,6 +55,7 @@ const AGENT_SESSION: RegisterAgentActivity = {
   workspaceId: "workspace-1",
   agentId: "claude-code",
   workflowRunId: null,
+  origin: "project",
   turnArmed: false,
 }
 
@@ -64,6 +65,7 @@ const WORKFLOW_SESSION: RegisterAgentActivity = {
   workspaceId: "workspace-2",
   agentId: "codex",
   workflowRunId: "run-1",
+  origin: "project",
   turnArmed: true,
 }
 
@@ -123,6 +125,7 @@ describe("ActivityRegistry agent lifecycle", () => {
       state: "waiting",
       waitingReason: "initial-prompt",
       waitingEpisode: 1,
+      origin: "project",
       turnArmed: false,
     })
     expect(registry.claimWaitingNotification(AGENT_SESSION.sessionId)).toBeNull()
@@ -206,6 +209,7 @@ describe("ActivityRegistry agent lifecycle", () => {
     expect(registry.get(AGENT_SESSION.sessionId)).toMatchObject({
       state: "waiting",
       waitingReason: "idle",
+      origin: "project",
       turnArmed: true,
     })
   })

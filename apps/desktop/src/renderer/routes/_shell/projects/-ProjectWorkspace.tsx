@@ -37,6 +37,7 @@ import {
 } from "./-workspaceState"
 import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
+import { ProjectAgentsBox } from "./components/ProjectAgents/ProjectAgentsBox"
 import { ProjectPalette } from "./components/ProjectPalette"
 import { FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
 
@@ -241,6 +242,7 @@ export function ProjectWorkspace({
   // Hooks are unconditional; the central panel does no file I/O until a workspace
   // id is set and the panel is rendered, so an empty id pre-resolve is inert.
   const controller = useCentralPanel({
+    origin: "project",
     client,
     workspaceId: workspaceId ?? "",
     projectId,
@@ -522,8 +524,17 @@ export function ProjectWorkspace({
               }
             />
           </div>
-          {rightSidebarCollapsed ? null : (
-            <div className="relative flex min-h-0 shrink-0" style={{ width: rightSidebarWidth }}>
+          {rightSidebarCollapsed ? (
+            <ProjectAgentsBox
+              projectId={projectId}
+              projectName={project?.name ?? t("Project")}
+              className="w-64 shrink-0 self-start"
+            />
+          ) : (
+            <div
+              className="relative flex min-h-0 shrink-0 flex-col gap-3"
+              style={{ width: rightSidebarWidth }}
+            >
               <EdgeResizeHandle
                 side="left"
                 width={rightSidebarWidth}
@@ -532,6 +543,11 @@ export function ProjectWorkspace({
                 min={RIGHT_SIDEBAR_MIN_WIDTH}
                 max={RIGHT_SIDEBAR_MAX_WIDTH}
                 testId="right-sidebar-edge-drag"
+              />
+              <ProjectAgentsBox
+                projectId={projectId}
+                projectName={project?.name ?? t("Project")}
+                className="shrink-0"
               />
               <RightSidebar
                 projectId={projectId}

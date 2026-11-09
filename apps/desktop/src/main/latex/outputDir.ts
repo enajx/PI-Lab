@@ -22,17 +22,36 @@ export const GENERATED_EXTENSIONS = [
 
 /**
  * Why an output folder typed by the user is not allowed, or null when it is
- * fine: it is empty, absolute, or has a `..` part (it could then point outside
- * the paper folder).
+ * fine. It must be a relative path inside the paper folder (no `..`), and it
+ * must read the same as a Git exclude rule: no part starting with `#` or `!`,
+ * no `*`, `?`, `[` or `]`, no control characters, no backslash, and no `.git`
+ * part.
  */
 export function outputDirProblem(value: string): string | null {
   const trimmed = value.trim()
   if (trimmed === "") return "Enter a folder for the build output, or . for next to the .tex file"
-  if (trimmed.startsWith("/") || trimmed.startsWith("\\") || /^[A-Za-z]:/.test(trimmed)) {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what is rejected.
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    return "The build output folder cannot contain line breaks or other control characters"
+  }
+  if (trimmed.startsWith("/") || /^[A-Za-z]:/.test(trimmed)) {
     return `The build output folder must be relative to the .tex file's folder: ${trimmed}`
   }
-  if (trimmed.split(/[/\\]/).includes("..")) {
+  if (trimmed.includes("\\")) {
+    return `Use / to separate folders in the build output folder, not \\: ${trimmed}`
+  }
+  const parts = trimmed.split("/")
+  if (parts.includes("..")) {
     return `The build output folder cannot contain "..": ${trimmed}`
+  }
+  if (parts.some((part) => part.toLowerCase() === ".git")) {
+    return `The build output folder cannot be or contain a .git folder: ${trimmed}`
+  }
+  if (parts.some((part) => part.startsWith("#") || part.startsWith("!"))) {
+    return `A folder name in the build output folder cannot start with # or !: ${trimmed}`
+  }
+  if (/[*?[\]]/.test(trimmed)) {
+    return `The build output folder cannot contain *, ?, [ or ]: ${trimmed}`
   }
   return null
 }
@@ -45,7 +64,7 @@ export function outputDirProblem(value: string): string | null {
 export function normalizeOutputDir(value: string): string {
   const problem = outputDirProblem(value)
   if (problem) throw new Error(problem)
-  const normalized = posix.normalize(value.trim().split("\\").join("/")).replace(/\/+$/, "")
+  const normalized = posix.normalize(value.trim()).replace(/\/+$/, "")
   return normalized === "" ? "." : normalized
 }
 

@@ -37,6 +37,7 @@ test.each([
   })
   const project = await harness.caller.projects.open({ path: harness.repoDir })
   const session = await harness.caller.sessions.start({
+    origin: "project",
     projectId: project.id,
     agentId: id,
     prompt: "test prompt",

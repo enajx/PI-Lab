@@ -113,19 +113,19 @@ async function openLatexEditor(page: Page): Promise<void> {
 }
 
 /**
- * Open LaTeX Editor from the project's dashboard card and link the paper
- * folder. The setup shows its two options side by side first.
+ * Choose the project's agent (a deterministic test agent), open LaTeX Editor
+ * from the project's dashboard card and link the paper folder. The setup shows
+ * its two options side by side first.
  */
-async function openAndLink(page: Page): Promise<void> {
+async function openAndLink(page: Page, agentId: string): Promise<void> {
   await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await page.getByTestId("nav-dashboard").click()
-  // Background agent work (Ask agent to merge) uses the deterministic test merge agent.
   await page
     .getByTestId("project-card")
     .getByTestId("project-card-body")
     .click({ button: "right", position: { x: 24, y: 24 } })
   await page.getByTestId("project-card-menu-edit").click()
-  await page.getByTestId("edit-project-agent").selectOption("test-merge")
+  await page.getByTestId("edit-project-agent").selectOption(agentId)
   await page.getByTestId("edit-project-save").click()
   await page.getByTestId("project-card").getByTestId("project-card-latex").click()
   await expect(page.getByTestId("science-latex")).toBeVisible()
@@ -169,7 +169,8 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
   try {
     app = await launch(root, project, paper)
     const page = await app.firstWindow()
-    await openAndLink(page)
+    // Background agent work (Ask agent to merge) uses the deterministic test merge agent.
+    await openAndLink(page, "test-merge")
     await page.screenshot({ path: test.info().outputPath("latex-editor.png") })
 
     // Outline above the paper's file tree in the editor's left column (open by
@@ -293,7 +294,8 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
   try {
     app = await launch(root, project, paper)
     const page = await app.firstWindow()
-    await openAndLink(page)
+    // Background agent work (Ask agent to merge) uses the deterministic test merge agent.
+    await openAndLink(page, "test-merge")
 
     // This paper builds into its own folder.
     const outputField = page.getByTestId("paper-output-dir")
@@ -339,6 +341,52 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     await git(overleaf, "pull", "--no-rebase", "--no-edit")
     expect(await readFile(join(overleaf, "main.tex"), "utf8")).toContain("Zyxrefresh")
     expect((await git(overleaf, "ls-files")).split("\n")).toEqual(["main.tex", ""])
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("LaTeX Editor agents stay in the LaTeX Editor and show in the Project view's Project Agents box", async () => {
+  test.setTimeout(120_000)
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-agents-e2e-"))
+  const { project, paper } = await setUp(root)
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, paper)
+    const page = await app.firstWindow()
+    // test-activity keeps printing, so it stays a live, working agent (no real agent CLI).
+    await openAndLink(page, "test-activity")
+    const agentTab = page.locator('[data-testid="central-tab"][data-tab-kind="agent"]')
+    await expect(agentTab).toHaveCount(0)
+    await page.getByTestId("central-new-agent").click()
+    await expect(agentTab).toHaveCount(1, { timeout: 15_000 })
+    await expect(agentTab).toContainText("Test Activity")
+
+    // The Project view does not show it as a tab, but lists it in Project Agents.
+    await page.getByTestId("project-item").click()
+    await expect(page.getByTestId("project-view")).toBeVisible()
+    const box = page.getByTestId("project-agents-box")
+    const row = box.locator('[data-testid="project-agent-row"][data-origin="latex"]')
+    await expect(row).toContainText("Test Activity", { timeout: 15_000 })
+    await expect(row).toContainText("working")
+    await expect(row.getByTestId("latex-logo")).toBeVisible()
+    await expect(agentTab).toHaveCount(0)
+    await page.screenshot({ path: test.info().outputPath("project-agents-box.png") })
+
+    // Clicking the row opens the LaTeX Editor with the agent's tab focused.
+    await row.click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible()
+    await expect(agentTab).toHaveCount(1)
+    await expect(agentTab).toHaveAttribute("data-active", "true")
+
+    // Leaving the LaTeX Editor and coming back keeps the agent tab.
+    await page.getByTestId("nav-dashboard").click()
+    await expect(page.getByTestId("science-latex")).toHaveCount(0)
+    await openLatexEditor(page)
+    await expect(page.getByTestId("paper-editor")).toBeVisible()
+    await expect(agentTab).toHaveCount(1)
+    await expect(agentTab).toContainText("Test Activity")
   } finally {
     if (app) await close(app)
     await rm(root, { recursive: true, force: true })

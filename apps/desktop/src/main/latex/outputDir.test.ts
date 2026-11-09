@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { normalizeOutputDir, outputExcludePatterns } from "./outputDir"
+import { normalizeOutputDir, outputDirProblem, outputExcludePatterns } from "./outputDir"
 
 describe("normalizeOutputDir", () => {
   test("accepts relative folders and '.', and tidies them", () => {
@@ -17,6 +17,38 @@ describe("normalizeOutputDir", () => {
     expect(() => normalizeOutputDir("../out")).toThrow("..")
     expect(() => normalizeOutputDir("a/../../out")).toThrow("..")
     expect(() => normalizeOutputDir("a/..")).toThrow("..")
+  })
+})
+
+describe("outputDirProblem", () => {
+  test("rejects names Git exclude rules would read as something else, in plain English", () => {
+    expect(outputDirProblem("#out")).toBe(
+      "A folder name in the build output folder cannot start with # or !: #out",
+    )
+    expect(outputDirProblem("out/!pdf")).toBe(
+      "A folder name in the build output folder cannot start with # or !: out/!pdf",
+    )
+    for (const value of ["out*", "o?t", "out[1]", "a]b"]) {
+      expect(outputDirProblem(value)).toBe(
+        `The build output folder cannot contain *, ?, [ or ]: ${value}`,
+      )
+    }
+    for (const value of ["out\npdf", "out\tx", "a\u0007b"]) {
+      expect(outputDirProblem(value)).toBe(
+        "The build output folder cannot contain line breaks or other control characters",
+      )
+    }
+    for (const value of [".git", "out/.git", ".git/out", "./.GIT"]) {
+      expect(outputDirProblem(value)).toBe(
+        `The build output folder cannot be or contain a .git folder: ${value}`,
+      )
+    }
+    for (const value of ["out\\pdf", "\\#out", "out\\ x"]) {
+      expect(outputDirProblem(value)).toBe(
+        `Use / to separate folders in the build output folder, not \\: ${value}`,
+      )
+    }
+    expect(outputDirProblem("out/pdf-2 (final)")).toBeNull()
   })
 })
 

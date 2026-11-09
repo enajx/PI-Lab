@@ -1,3 +1,4 @@
+import type { AgentSessionOrigin } from "@pi-lab/local-db"
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { SerializedDockview } from "dockview-react"
@@ -100,6 +101,8 @@ export interface CentralPanelController {
   pendingTerminal: boolean
   pendingPython: boolean
   launchError: string | null
+  /** A limit reported by the last agent start (e.g. no access to the paper folder), or null. */
+  launchWarning: string | null
   latexBuildStatus?: { message: string; log: string } | null
   pdfBuildState?: PdfBuildState | null
 }
@@ -108,6 +111,8 @@ interface UseCentralPanelArgs {
   client: PiLabTrpcClient
   workspaceId: string
   projectId: string
+  /** The view this panel belongs to; agents it starts record it as their origin. */
+  origin: AgentSessionOrigin
   settings: EditorSettings
   onSaved?: (relPath: string) => void
   /** After a successful LaTeX build: the built PDF (as returned by `pdf.build`) and the saved source. */
@@ -134,6 +139,7 @@ export function useCentralPanel({
   client,
   workspaceId,
   projectId,
+  origin,
   settings,
   onSaved,
   onBuilt,
@@ -170,6 +176,7 @@ export function useCentralPanel({
     () => initialState?.belowEditorRun ?? null,
   )
   const [agentChooserOpen, setAgentChooserOpen] = useState(false)
+  const [launchWarning, setLaunchWarning] = useState<string | null>(null)
   const [initialLayout] = useState<SerializedDockview | null>(() => initialState?.layout ?? null)
   const [layout, setLayout] = useState<SerializedDockview | null>(initialLayout)
   const [restoringRelPaths, setRestoringRelPaths] = useState<string[]>(() =>
@@ -308,10 +315,12 @@ export function useCentralPanel({
           }
           const result = await client.sessions.start.mutate({
             projectId,
+            origin,
             agentId: pane.launch.agentId,
             workspaceMode: pane.launch.workspaceMode,
           })
           createdSessionIds.add(result.sessionId)
+          if (result.warning && isCurrent()) setLaunchWarning(result.warning)
           return { ...pane, sessionId: result.sessionId, wsKind: result.kind }
         }
         const restored = await Promise.all(
@@ -394,7 +403,7 @@ export function useCentralPanel({
       if (isCurrent()) restorationGeneration.current += 1
       killUnclaimedSessions()
     }
-  }, [client, initialState?.belowEditorRun, initialState?.sessions, projectId, workspaceId])
+  }, [client, initialState?.belowEditorRun, initialState?.sessions, origin, projectId, workspaceId])
 
   const selectFile = useCallback(
     (relPath: string) => {
@@ -475,9 +484,10 @@ export function useCentralPanel({
     (agentId: string, workspaceMode: "policy" | "main" | "worktree") => {
       const option = agentsQuery.data?.find((agent) => agent.id === agentId)
       startSession.mutate(
-        { projectId, agentId, workspaceMode },
+        { projectId, origin, agentId, workspaceMode },
         {
           onSuccess: (result) => {
+            setLaunchWarning(result.warning)
             const id = nextPaneId()
             updateSessions((prev) => [
               ...prev,
@@ -495,7 +505,7 @@ export function useCentralPanel({
         },
       )
     },
-    [agentsQuery.data, projectId, startSession, nextPaneId, updateSessions],
+    [agentsQuery.data, origin, projectId, startSession, nextPaneId, updateSessions],
   )
 
   const openAgent = useCallback(() => {
@@ -646,6 +656,7 @@ export function useCentralPanel({
       projectChoiceQuery.isPending,
     pendingTerminal: spawnTerminal.isPending,
     pendingPython: runPythonFile.isPending,
+    launchWarning,
     launchError:
       restorationError ??
       defaultAgentError ??

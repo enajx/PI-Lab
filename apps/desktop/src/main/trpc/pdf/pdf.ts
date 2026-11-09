@@ -1,7 +1,14 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
 import { lstat, mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
-import { basename, dirname, extname, join, relative, resolve, sep } from "node:path"
-import { getSettingsOrDefaults, type PiLabDatabase, projects, workspaces } from "@pi-lab/local-db"
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import {
+  getSettingsOrDefaults,
+  type PiLabDatabase,
+  type ProjectPaper,
+  projects,
+  workspaces,
+} from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
@@ -25,30 +32,59 @@ export interface BuildResult {
   log: string
 }
 
-/** A workspace's real directory and where its LaTeX builds write their output. */
+/** A workspace's real directory and the project it belongs to. */
 interface BuildTarget {
   dir: string
+  projectId: string
+}
+
+/** Where one root .tex builds to, and the paper repo that must not commit that output. */
+interface SourceOutput {
   /** Output folder relative to the root .tex file's folder ("." means next to it). */
   outputDir: string
-  /** True for a linked paper folder, whose build output is kept out of its commits. */
-  isPaper: boolean
+  /** Real path of the linked paper folder holding the root, or null when it is not in one. */
+  paperDir: string | null
 }
 
 /**
  * Resolve the workspace once and keep all file access inside its real
- * directory. A paper workspace uses its paper's output folder (override, else
- * the global default); every other workspace uses the global default.
+ * directory. A paper workspace needs a linked paper.
  */
 async function workspaceDirectory(db: PiLabDatabase, workspaceId: string): Promise<BuildTarget> {
   const workspace = db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).get()
   if (!workspace) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" })
   const dir = await realpath(workspaceWorkingDir(db, workspace))
+  if (workspace.kind === "paper" && !projectPaper(db, workspace.projectId)) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "No paper folder is linked" })
+  }
+  return { dir, projectId: workspace.projectId }
+}
+
+/** The project's linked paper, if any. */
+function projectPaper(db: PiLabDatabase, projectId: string): ProjectPaper | undefined {
+  return db.select().from(projects).where(eq(projects.id, projectId)).get()?.metadata?.paper
+}
+
+/**
+ * The output folder of a root .tex: when the root lies inside the project's
+ * linked paper folder (whichever workspace builds it, e.g. the Project view for
+ * a paper inside the project), the paper's output folder (override, else the
+ * global default); otherwise the global default.
+ */
+async function sourceOutput(
+  db: PiLabDatabase,
+  target: BuildTarget,
+  source: string,
+): Promise<SourceOutput> {
   const defaultOutputDir = getSettingsOrDefaults(db).editor.latexOutputDir
-  if (workspace.kind !== "paper") return { dir, outputDir: defaultOutputDir, isPaper: false }
-  const project = db.select().from(projects).where(eq(projects.id, workspace.projectId)).get()
-  const paper = project?.metadata?.paper
-  if (!paper) throw new TRPCError({ code: "NOT_FOUND", message: "No paper folder is linked" })
-  return { dir, outputDir: effectiveOutputDir(paper, defaultOutputDir), isPaper: true }
+  const paper = projectPaper(db, target.projectId)
+  if (!paper || !existsSync(paper.dir)) return { outputDir: defaultOutputDir, paperDir: null }
+  const paperDir = await realpath(paper.dir)
+  const path = relative(paperDir, source)
+  if (path === "" || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+    return { outputDir: defaultOutputDir, paperDir: null }
+  }
+  return { outputDir: effectiveOutputDir(paper, defaultOutputDir), paperDir }
 }
 
 /** Reject lexical traversal and symlinks whose targets leave the workspace. */
@@ -181,13 +217,14 @@ async function prepareOutput(dir: string, source: string, outputDir: string): Pr
 
 /** One full compile per root at a time; a later request runs after the earlier one. */
 async function compile(ctx: AppContext, target: BuildTarget, source: string): Promise<BuildResult> {
-  const { dir, outputDir } = target
+  const { dir } = target
   const pending = builds.get(source)
   const task = (pending ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
+      const { outputDir, paperDir } = await sourceOutput(ctx.db, target, source)
       const output = await prepareOutput(dir, source, outputDir)
-      if (target.isPaper) await excludePaperOutputs(dir, outputDir, rendererPath(dir, source))
+      if (paperDir) await excludePaperOutputs(paperDir, outputDir, rendererPath(paperDir, source))
       const runtime = await resolveLatexRuntime(
         ctx,
         getSettingsOrDefaults(ctx.db).editor.latexProvider,
@@ -221,6 +258,7 @@ async function compile(ctx: AppContext, target: BuildTarget, source: string): Pr
 
 /** Locate an explicit or standard output and the matching SyncTeX data. */
 async function pdfForSource(
+  db: PiLabDatabase,
   target: BuildTarget,
   source: string,
   explicit: string | undefined,
@@ -229,7 +267,8 @@ async function pdfForSource(
   if (explicit) return insideFile(dir, explicit)
   const root = await rootSource(dir, rendererPath(dir, source))
   const name = `${basename(root, extname(root))}.pdf`
-  const candidates = [join(dirname(root), target.outputDir, name), join(dirname(root), name)]
+  const { outputDir } = await sourceOutput(db, target, root)
+  const candidates = [join(dirname(root), outputDir, name), join(dirname(root), name)]
   for (const path of candidates) {
     const exists = await stat(path).then(
       () => true,
@@ -306,7 +345,7 @@ export const pdfRouter = router({
       const target = await workspaceDirectory(ctx.db, input.workspaceId)
       const { dir } = target
       const source = await insideFile(dir, input.relPath)
-      const pdf = await pdfForSource(target, source, input.pdfRelPath)
+      const pdf = await pdfForSource(ctx.db, target, source, input.pdfRelPath)
       const mapping = await requireSyncFile(dir, pdf)
       const result = await forwardSync(mapping, source, input.line, input.column)
       return { relPath: rendererPath(dir, pdf), ...result }

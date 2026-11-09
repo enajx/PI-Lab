@@ -6,6 +6,17 @@ import {
 } from "./activation"
 
 describe("notification activation contracts", () => {
+  test("an agent target from before views were recorded opens the Project view", () => {
+    expect(
+      notificationActivationSchema.parse({
+        type: "agent",
+        projectId: "project-1",
+        workspaceId: "workspace-1",
+        sessionId: "session-1",
+        agentId: "codex",
+      }),
+    ).toMatchObject({ origin: "project" })
+  })
   test("accepts an exact durable agent-session target", () => {
     expect(
       notificationActivationSchema.parse({
@@ -14,6 +25,7 @@ describe("notification activation contracts", () => {
         workspaceId: "workspace-1",
         sessionId: "session-1",
         agentId: "codex",
+        origin: "project",
       }),
     ).toMatchObject({ sessionId: "session-1", projectId: "project-1" })
   })

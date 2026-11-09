@@ -33,6 +33,19 @@ export function NotificationBridge() {
         const target = parsed.data
         activationSequence.current += 1
         const notificationId = `${target.type}-${activationSequence.current}`
+        if (target.type === "agent" && target.origin === "latex") {
+          // LaTeX Editor agents are tabs of the LaTeX Editor, not of the Project view.
+          void navigate({
+            to: "/science/latex",
+            search: {
+              projectId: target.projectId,
+              sessionId: target.sessionId,
+              agentId: target.agentId,
+              agentLabel: target.label ?? target.agentId,
+            },
+          })
+          return
+        }
         if (target.type === "agent") {
           void navigate({
             to: "/projects/$projectId",

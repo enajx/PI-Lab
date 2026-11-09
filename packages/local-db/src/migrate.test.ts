@@ -202,6 +202,7 @@ describe("runMigrations", () => {
       "workspace_id",
       "agent_id",
       "workflow_run_id",
+      "origin",
       "state",
       "waiting_reason",
       "waiting_since",
@@ -447,6 +448,49 @@ it("renames saved paper projects without changing their names or metadata", () =
       type_id: "manuscript",
       metadata: JSON.stringify({ venue: "Journal" }),
     })
+  } finally {
+    upgraded.sqlite.close()
+  }
+})
+
+it("keeps every settings value and agent session through the 0029 settings rebuild", () => {
+  const before = join(dataDir, "before-agent-origin")
+  cpSync(resolveMigrationsDir(), before, { recursive: true })
+  const journalPath = join(before, "meta", "_journal.json")
+  const journal = JSON.parse(readFileSync(journalPath, "utf8"))
+  journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 29)
+  writeFileSync(journalPath, JSON.stringify(journal))
+  const legacy = runMigrations(dbPath, before)
+  legacy.sqlite
+    .prepare(
+      `INSERT INTO settings (id, theme, editor_font_family, editor_font_size, terminal_font_family,
+        terminal_font_size, agent_presets, confirm_on_quit, keep_running_after_close,
+        public_update_channel, worktree_per_agent, editor, notifications, caffeine,
+        project_template, known_teams, zotero, updated_at)
+       VALUES (1, 'dark', 'Mono A', 15, 'Mono B', 13, '[{"id":"x"}]', 0, 0, 'beta', 1,
+        '{"vim":true}', '{"muted":true}', '{"mode":"on"}', '{"projectTypes":[]}',
+        '["team"]', '{"userId":"7"}', 4321)`,
+    )
+    .run()
+  legacy.sqlite
+    .prepare(
+      "INSERT INTO projects (id, repo_path, name, created_at, updated_at, last_opened_at) VALUES ('p', '/p', 'P', 1, 1, 1)",
+    )
+    .run()
+  legacy.sqlite
+    .prepare(
+      "INSERT INTO agent_sessions (id, session_id, project_id, agent_id, state, updated_at, created_at) VALUES ('a', 's', 'p', 'codex', 'working', 1, 1)",
+    )
+    .run()
+  const stored = legacy.sqlite.prepare("SELECT * FROM settings").all()
+  legacy.sqlite.close()
+
+  const upgraded = runMigrations(dbPath)
+  try {
+    expect(upgraded.sqlite.prepare("SELECT * FROM settings").all()).toEqual(stored)
+    expect(upgraded.sqlite.prepare("SELECT session_id, origin FROM agent_sessions").all()).toEqual([
+      { session_id: "s", origin: "project" },
+    ])
   } finally {
     upgraded.sqlite.close()
   }

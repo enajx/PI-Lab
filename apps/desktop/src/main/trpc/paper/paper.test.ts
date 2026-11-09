@@ -297,6 +297,46 @@ describe("build output folder", () => {
   })
 })
 
+describe("build output folder holding tracked files", () => {
+  test("a paper's output folder cannot be a folder with files tracked in the paper repo", async () => {
+    await linkOutsideClone()
+    await expect(
+      h.caller.paper.setOutputDir({ projectId, outputDir: "figures" }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message:
+        'The folder "figures" holds files tracked in the paper repo (figures/plot.png). Choose another folder for the build output.',
+    })
+    // Any folder holding tracked files is refused.
+    await expect(
+      h.caller.paper.setOutputDir({ projectId, outputDir: "sections" }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+    expect((await h.caller.paper.get({ projectId })).paper?.outputDir).toBeNull()
+    expect(
+      (await h.caller.paper.setOutputDir({ projectId, outputDir: "out" })).paper?.outputDir,
+    ).toBe("out")
+  })
+
+  test("the global default cannot be a folder with tracked files in a linked paper that uses it", async () => {
+    await linkOutsideClone()
+    const name = (await h.caller.projects.get({ id: projectId })).name
+    await expect(
+      h.caller.settings.updateEditor({ latexOutputDir: "figures" }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: `The folder "figures" holds files tracked in the paper repo of project "${name}" (figures/plot.png). Choose another folder for the build output.`,
+    })
+    expect((await h.caller.settings.get()).editor.latexOutputDir).toBe("build")
+    // A paper with its own override does not block the default.
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "out" })
+    expect(
+      (await h.caller.settings.updateEditor({ latexOutputDir: "figures" })).latexOutputDir,
+    ).toBe("figures")
+  })
+})
+
 // Each test runs many real git commands (clones, merges, pushes); they need more than the 5 s default under load.
 describe("sync and resolve", { timeout: 30_000 }, () => {
   test("build output is not committed or pushed by sync", async () => {

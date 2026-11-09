@@ -68,6 +68,7 @@ describe("NotificationBridge", () => {
       workspaceId: "workspace-1",
       sessionId: "session-1",
       agentId: "codex",
+      origin: "project",
       label: "Review agent",
     })
 
@@ -82,6 +83,29 @@ describe("NotificationBridge", () => {
         notificationWorkspaceId: "workspace-1",
         notificationAgentId: "codex",
         notificationLabel: "Review agent",
+      },
+    })
+  })
+
+  test("routes a LaTeX Editor agent to the LaTeX Editor with its tab focused", async () => {
+    render(<NotificationBridge />)
+    mocks.activation.emit({
+      type: "agent",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      agentId: "codex",
+      origin: "latex",
+    })
+
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledOnce())
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/latex",
+      search: {
+        projectId: "project-1",
+        sessionId: "session-1",
+        agentId: "codex",
+        agentLabel: "codex",
       },
     })
   })

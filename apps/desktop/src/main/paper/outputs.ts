@@ -7,7 +7,7 @@ import {
   projects,
 } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
-import { isGitRepo, repoRoot } from "../git"
+import { isGitRepo, repoRoot, runGit } from "../git"
 import { addLocalExclude } from "../git/remote"
 import { normalizeOutputDir, outputDirProblem, outputExcludePatterns } from "../latex/outputDir"
 import { findRootTex, listPaperFiles } from "./files"
@@ -66,6 +66,62 @@ export async function excludeDefaultOutputs(db: PiLabDatabase): Promise<void> {
     const paper = project.metadata?.paper
     if (paper && paper.outputDir === undefined && existsSync(paper.dir)) {
       await excludeEffectiveOutputs(paper, defaultOutputDir)
+    }
+  }
+}
+
+/**
+ * A file tracked in the paper repo that lies in a folder named `outputDir` (at
+ * any depth, as the exclude rule matches it), or null. Excluding such a folder
+ * would hide sources (e.g. `figures`) from Sync. "." is not a folder and is
+ * never refused here.
+ */
+export async function trackedFileInOutputDir(
+  paperDir: string,
+  outputDir: string,
+): Promise<string | null> {
+  if (outputDir === "." || !(await isOwnRepo(paperDir))) return null
+  const { stdout } = await runGit(paperDir, ["ls-files", "-z"], {})
+  const folder = `${outputDir}/`
+  return (
+    stdout.split("\0").find((file) => file.startsWith(folder) || file.includes(`/${folder}`)) ??
+    null
+  )
+}
+
+/** The message for an output folder that holds the tracked file `file`. */
+function trackedFolderMessage(outputDir: string, where: string, file: string): string {
+  return `The folder "${outputDir}" holds files tracked in the paper repo${where} (${file}). Choose another folder for the build output.`
+}
+
+/** Refuse (BAD_REQUEST) a paper's own output folder that holds tracked files. */
+export async function requireUntrackedOutputDir(
+  paperDir: string,
+  outputDir: string,
+): Promise<void> {
+  const file = await trackedFileInOutputDir(paperDir, outputDir)
+  if (file) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: trackedFolderMessage(outputDir, "", file) })
+  }
+}
+
+/**
+ * Refuse (BAD_REQUEST) a new global default output folder that holds tracked
+ * files in a linked paper using the default (no override), naming its project.
+ */
+export async function requireUntrackedDefaultOutputDir(
+  db: PiLabDatabase,
+  outputDir: string,
+): Promise<void> {
+  for (const project of db.select().from(projects).all()) {
+    const paper = project.metadata?.paper
+    if (!paper || paper.outputDir !== undefined || !existsSync(paper.dir)) continue
+    const file = await trackedFileInOutputDir(paper.dir, outputDir)
+    if (file) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: trackedFolderMessage(outputDir, ` of project "${project.name}"`, file),
+      })
     }
   }
 }

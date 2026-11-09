@@ -5,6 +5,10 @@ import { CloudDownload, FileText, GitMerge, type LucideIcon } from "lucide-react
 import { lazy, Suspense, useState } from "react"
 import { useTranslate } from "../../i18n/language"
 import { useTRPC } from "../../trpc/react"
+import type { RouterOutputs } from "../../trpc/types"
+
+type ProjectWorkflowStatusData = RouterOutputs["workflows"]["status"]
+type ProjectWorkflowRecordData = ProjectWorkflowStatusData["summary"]
 
 const WorkflowResultDialog = lazy(() =>
   import("./WorkflowResultDialog").then((module) => ({ default: module.WorkflowResultDialog })),
@@ -67,6 +71,82 @@ const TASK_META: Record<WorkflowTask, TaskMeta> = {
     reportHeading: "Fetch results",
     guidance: "Fetched — check Analysis for the results.",
   },
+}
+
+/** The user-facing label of a background workflow task, e.g. "Plan research". */
+export function workflowTaskLabel(task: WorkflowTask): string {
+  return TASK_META[task].label
+}
+
+/** The status record of one task in a `workflows.status` result. */
+function taskRecord(
+  status: ProjectWorkflowStatusData | undefined,
+  task: WorkflowTask,
+): ProjectWorkflowRecordData | undefined {
+  if (!status) return undefined
+  if (task === "summary") return status.summary
+  if (task === "plan-research") return status.planResearch
+  if (task === "latex-merge") return status.latexMerge
+  return status.fetchExperiments
+}
+
+/**
+ * The result/progress window of one background workflow, opened from outside
+ * its control (the Project Agents box). Same window and Recheck as the control.
+ */
+export function ProjectWorkflowDialog({
+  projectId,
+  projectName,
+  task,
+  onClose,
+}: {
+  projectId: string
+  projectName: string
+  task: WorkflowTask
+  onClose: () => void
+}) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const statusQuery = useQuery(
+    trpc.workflows.status.queryOptions(
+      { projectId },
+      {
+        staleTime: 0,
+        refetchInterval: (query) => (taskRecord(query.state.data, task)?.running ? 800 : false),
+      },
+    ),
+  )
+  const run = useMutation(
+    trpc.workflows.run.mutationOptions({
+      onSettled: () =>
+        void queryClient.invalidateQueries({
+          queryKey: trpc.workflows.status.queryKey({ projectId }),
+        }),
+    }),
+  )
+  const record = taskRecord(statusQuery.data, task)
+  const meta = TASK_META[task]
+  return (
+    <Suspense fallback={<div role="status">{t("Loading routine result…")}</div>}>
+      <WorkflowResultDialog
+        projectId={projectId}
+        task={task}
+        title={t(meta.label)}
+        reportHeading={t(meta.reportHeading)}
+        projectName={projectName}
+        running={run.isPending || Boolean(record?.running)}
+        result={record?.result ?? ""}
+        errorMessage={
+          statusQuery.error?.message ?? run.error?.message ?? record?.errorMessage ?? null
+        }
+        lastCheckedAt={record?.lastCheckedAt ?? 0}
+        guidance={t(meta.guidance)}
+        onRecheck={() => run.mutateAsync({ projectId, task, force: true })}
+        onClose={onClose}
+      />
+    </Suspense>
+  )
 }
 
 // State tints. Only a *running* control is coloured — a brand-orange underline

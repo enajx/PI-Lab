@@ -678,6 +678,16 @@ export function CentralPanel({
         </p>
       ) : null}
 
+      {controller.launchWarning ? (
+        <p
+          role="status"
+          data-testid="central-launch-warning"
+          className="shrink-0 cursor-text select-text border-border border-b bg-amber-500/10 px-4 py-2 text-amber-700 text-xs dark:text-amber-400"
+        >
+          {controller.launchWarning}
+        </p>
+      ) : null}
+
       {/* Editor open/save errors live at the panel level so a failed file-open is
           visible even when the body has fallen back to the launcher (no silent
           failures — AGENTS.md). */}

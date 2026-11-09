@@ -1,25 +1,41 @@
 import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
 import { useTranslate } from "../../../../../i18n/language"
 import { useLatexEditorProject } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { ScienceTabShell } from "../ScienceTabShell"
-import { PaperEditor } from "./PaperEditor"
+import { type FocusSessionRequest, PaperEditor } from "./PaperEditor"
 import { PaperSetup } from "./PaperSetup"
 
 /**
  * LaTeX Editor science tab: a project picker at the top (remembers the last
  * project; a project card can open it with a project chosen), then either the
- * setup to link the project's paper or the paper workspace.
+ * setup to link the project's paper or the paper workspace. `focusSession`
+ * focuses one agent tab of the initial project (see the Project Agents box).
  */
-export function ScienceLatex({ initialProjectId }: { initialProjectId?: string }) {
+export function ScienceLatex({
+  initialProjectId,
+  focusSession,
+}: {
+  initialProjectId?: string
+  /** An agent session of the initial project to focus, or null. */
+  focusSession: FocusSessionRequest | null
+}) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
   const [savedProjectId, setSavedProjectId] = useLatexEditorProject()
+  const navigate = useNavigate()
+  // The picker always wins over a project in the address: it remembers the
+  // choice and replaces the address (dropping any agent to focus).
+  const chooseProject = (projectId: string): void => {
+    setSavedProjectId(projectId)
+    void navigate({ to: "/science/latex", search: { projectId }, replace: true })
+  }
 
   // A project chosen from a dashboard card wins and becomes the remembered one.
   useEffect(() => {
@@ -51,7 +67,7 @@ export function ScienceLatex({ initialProjectId }: { initialProjectId?: string }
           data-testid="latex-project-select"
           aria-label={t("LaTeX Editor project")}
           value={selected?.id ?? ""}
-          onChange={(event) => setSavedProjectId(event.target.value)}
+          onChange={(event) => chooseProject(event.target.value)}
           className="h-8 max-w-56 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
           {projects.map((project) => (
@@ -92,6 +108,7 @@ export function ScienceLatex({ initialProjectId }: { initialProjectId?: string }
           effectiveOutputDir={paper.data.paper.effectiveOutputDir}
           settings={settings}
           onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
+          focusSession={selected.id === initialProjectId ? focusSession : null}
         />
       ) : (
         <PaperSetup key={selected.id} projectId={selected.id} />

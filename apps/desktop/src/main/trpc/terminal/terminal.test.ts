@@ -85,6 +85,7 @@ beforeEach(async () => {
       trackTerminal: async () => {},
       reconcile: async () => {},
       liveAgentCount: () => 0,
+      liveAgents: () => [],
       userInput: () => {},
       resize: () => {},
       dispose: () => {},

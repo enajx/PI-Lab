@@ -66,3 +66,29 @@ test("project-list reset refuses recovered drafts and allows saved files", () =>
   expect(alphaProjectsHaveUnsavedWork(["project-1"], recovery)).toBe(false)
   recovery.dispose()
 })
+
+test("project-list reset covers the LaTeX Editor tabs of each project", () => {
+  window.localStorage.setItem("pi-lab.projectWorkspace.v2.latex:project-1", "latex tabs")
+  clearAlphaProjectUiState(window.localStorage, ["project-1"])
+  expect(window.localStorage.getItem("pi-lab.projectWorkspace.v2.latex:project-1")).toBeNull()
+
+  const recovery = new WorkspaceRecoveryStore(window.localStorage)
+  recovery.write("latex:project-1", {
+    buffers: [
+      {
+        relPath: "main.tex",
+        content: "unsaved",
+        savedContent: "saved",
+        baseline: { mtimeMs: 1, size: 5 },
+        externalChange: false,
+        epoch: 0,
+      },
+    ],
+    activeRelPath: "main.tex",
+    sessions: [],
+    active: { type: "file" as const, relPath: "main.tex" },
+    belowEditorRun: null,
+  })
+  expect(alphaProjectsHaveUnsavedWork(["project-1"], recovery)).toBe(true)
+  recovery.dispose()
+})

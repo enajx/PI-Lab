@@ -31,11 +31,16 @@ export function LatexLogo() {
 
 /** Render `text` with every "LaTeX" drawn as {@link LatexLogo}; other text is unchanged. */
 export function LatexText({ text }: { text: string }) {
-  const parts = text.split("LaTeX")
   const nodes: ReactNode[] = []
-  parts.forEach((part, index) => {
-    if (index > 0) nodes.push(<LatexLogo key={`logo-${index}`} />)
-    if (part) nodes.push(<Fragment key={`text-${index}`}>{part}</Fragment>)
-  })
+  // Keys are character offsets in `text`, which are stable for a given string.
+  let offset = 0
+  for (const [index, part] of text.split("LaTeX").entries()) {
+    if (index > 0) {
+      nodes.push(<LatexLogo key={`logo-${offset}`} />)
+      offset += "LaTeX".length
+    }
+    if (part) nodes.push(<Fragment key={`text-${offset}`}>{part}</Fragment>)
+    offset += part.length
+  }
   return <>{nodes}</>
 }

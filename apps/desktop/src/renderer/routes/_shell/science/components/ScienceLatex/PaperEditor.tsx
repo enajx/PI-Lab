@@ -1,19 +1,30 @@
 import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
+import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { useTranslate } from "../../../../../i18n/language"
 import {
+  readRestoreProjectTabs,
   useLatexEditorFilesOpen,
   useLatexEditorLeftColumn,
   useLatexEditorOutlineOpen,
 } from "../../../../../preferences/preferences"
 import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
+import { registerProjectEditor } from "../../../projects/-workspaceEditorOperations"
+import {
+  latexWorkspaceKey,
+  readProjectWorkspaceState,
+  workspaceRecovery,
+  writeProjectWorkspaceState,
+} from "../../../projects/-workspaceState"
 import {
   CentralPanel,
   type CentralPanelController,
   useCentralPanel,
 } from "../../../projects/components/CentralPanel"
 import { CollapsibleSection } from "../../../projects/components/CentralPanel/CollapsibleSection"
+import type { CentralPanelRestoreState } from "../../../projects/components/CentralPanel/useCentralPanel"
 import { PaperSyncBar } from "./PaperSyncBar"
 
 interface PaperEditorProps {
@@ -31,6 +42,16 @@ interface PaperEditorProps {
   effectiveOutputDir: string
   settings: EditorSettings
   onUpdateEditorSettings: (patch: Partial<EditorSettings>) => void
+  /** An agent session to focus (and open as a tab when it is not open), or null. */
+  focusSession: FocusSessionRequest | null
+}
+
+/** A request to show one agent session in the LaTeX Editor, e.g. from the Project Agents box. */
+export interface FocusSessionRequest {
+  sessionId: string
+  agentId: string
+  /** Tab label, e.g. "Claude Code". */
+  agentLabel: string
 }
 
 /**
@@ -42,6 +63,24 @@ function pdfFor(rootRelPath: string, outputDir: string): string {
   const dir = slash < 0 ? "" : rootRelPath.slice(0, slash + 1)
   const name = rootRelPath.slice(slash + 1).replace(/\.tex$/i, "")
   return outputDir === "." ? `${dir}${name}.pdf` : `${dir}${outputDir}/${name}.pdf`
+}
+
+/** The saved LaTeX Editor state, only when it belongs to this paper workspace. */
+function restorableState(
+  state: ReturnType<typeof readProjectWorkspaceState>,
+  workspaceId: string,
+): ReturnType<typeof readProjectWorkspaceState> {
+  return state?.workspaceId === workspaceId ? state : undefined
+}
+
+/** Whether a restored state reopens any file or session tab. */
+function hasRestoredTabs(state: ReturnType<typeof readProjectWorkspaceState>): boolean {
+  return Boolean(
+    state &&
+      (state.buffers.length > 0 ||
+        (state.omittedBuffers ?? []).length > 0 ||
+        state.sessions.length > 0),
+  )
 }
 
 /**
@@ -62,6 +101,7 @@ export function PaperEditor({
   effectiveOutputDir,
   settings,
   onUpdateEditorSettings,
+  focusSession,
 }: PaperEditorProps) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -90,15 +130,47 @@ export function PaperEditor({
       (cause: unknown) => setOpenError(`${pdfRelPath}: ${String(cause)}`),
     )
   }, [])
+  // Open tabs and agents are kept per project with the same recovery store as
+  // the Project view, under their own key, and only for this paper workspace.
+  const stateKey = latexWorkspaceKey(projectId)
+  const restoredState = useRef(
+    restorableState(readProjectWorkspaceState(stateKey, readRestoreProjectTabs()), workspaceId),
+  ).current
+  const onStateChange = useCallback(
+    (state: CentralPanelRestoreState) => writeProjectWorkspaceState(stateKey, state, workspaceId),
+    [stateKey, workspaceId],
+  )
+  const onBuffersChange = useCallback(
+    (buffers: OpenBuffer[]) => workspaceRecovery().updateBuffers(stateKey, () => buffers),
+    [stateKey],
+  )
+  useEffect(() => () => workspaceRecovery().flush(stateKey), [stateKey])
+  const retainedBuffers = useMemo<RetainedBuffers>(
+    () => ({
+      read: () => workspaceRecovery().read(stateKey, true)?.buffers ?? [],
+      update: (update) => workspaceRecovery().updateBuffers(stateKey, update),
+    }),
+    [stateKey],
+  )
   const controller = useCentralPanel({
     client,
     workspaceId,
     projectId,
+    origin: "latex",
     settings,
     onSaved,
     onBuilt,
+    initialState: restoredState,
+    onStateChange,
+    onBuffersChange,
+    retainedBuffers,
   })
   controllerRef.current = controller
+  // Lets the quit dialog save this view's unsaved files through the mounted editor.
+  const editorRef = useRef(controller)
+  editorRef.current = controller
+  useEffect(() => registerProjectEditor(stateKey, () => editorRef.current), [stateKey])
+
   const [sourceRequest, setSourceRequest] = useState<{
     relPath: string
     line: number
@@ -106,9 +178,12 @@ export function PaperEditor({
     nonce: number
   } | null>(null)
 
-  // Open the main .tex and, when it was built before, its PDF beside it, once per paper.
-  const openedFor = useRef<string | null>(null)
+  // Open the main .tex and, when it was built before, its PDF beside it, once per
+  // paper, unless tabs from an earlier visit were restored.
+  const openedFor = useRef<string | null>(hasRestoredTabs(restoredState) ? workspaceId : null)
   const openFile = controller.openFile
+  const openBuffer = controller.editor.openFile
+  const focusRequested = useRef(focusSession !== null)
   useEffect(() => {
     if (!rootRelPath || openedFor.current === workspaceId) return
     openedFor.current = workspaceId
@@ -116,12 +191,32 @@ export function PaperEditor({
     const pdf = pdfFor(rootRelPath, effectiveOutputDir)
     client.files.stat.query({ workspaceId, relPath: pdf }).then(
       (stat) => {
-        if (stat.exists) openFile(pdf)
+        if (!stat.exists) return
+        // A requested agent tab keeps the focus; the PDF still opens beside the source.
+        if (focusRequested.current) {
+          openBuffer(pdf).then(undefined, (cause: unknown) =>
+            setOpenError(`${pdf}: ${String(cause)}`),
+          )
+        } else openFile(pdf)
       },
       (cause: unknown) => setOpenError(`${pdf}: ${String(cause)}`),
     )
-  }, [client, effectiveOutputDir, openFile, rootRelPath, workspaceId])
+  }, [client, effectiveOutputDir, openBuffer, openFile, rootRelPath, workspaceId])
 
+  // Focus a requested agent session once, opening it as a tab when it is not open.
+  // This runs after the main .tex opens, so the agent tab ends up focused.
+  const focusedRequest = useRef<string | null>(null)
+  const attachSession = controller.attachSession
+  useEffect(() => {
+    if (!focusSession || focusedRequest.current === focusSession.sessionId) return
+    focusedRequest.current = focusSession.sessionId
+    attachSession({
+      kind: "agent",
+      sessionId: focusSession.sessionId,
+      label: focusSession.agentLabel,
+      launch: { type: "agent", agentId: focusSession.agentId, workspaceMode: "policy" },
+    })
+  }, [attachSession, focusSession])
   const outlineSection = (
     <CollapsibleSection
       title={t("Outline")}

@@ -109,6 +109,7 @@ function registerAgent(
     workspaceId: "workspace-1",
     agentId: "codex",
     workflowRunId,
+    origin: "project",
     turnArmed: workflowRunId !== null,
   })
 }

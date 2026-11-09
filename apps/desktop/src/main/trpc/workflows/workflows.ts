@@ -29,6 +29,7 @@ import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
 import { ClaudeStreamParser } from "./claudeStreamParser"
 import { planResearchPrompt } from "./planResearchSkill"
+import { runningKey, runningProjectWorkflowTasks, runningTasks } from "./running"
 
 /**
  * Non-interactive background project workflows (plan "Project cards / panels /
@@ -47,20 +48,9 @@ import { planResearchPrompt } from "./planResearchSkill"
 /** Hard wall-clock cap for a single workflow run; a hang past this is a failure. */
 const WORKFLOW_TIMEOUT_MS = 180_000
 
-/**
- * In-memory "currently running" tracker, keyed by `${projectId}:${task}`. The DB
- * only ever stores the last COMPLETED result, so this is the sole source of the
- * transient running flag `status` reports. It lives for the process lifetime, so
- * on startup nothing is running — exactly the desired reset.
- */
-const runningTasks = new Set<string>()
-const runningKey = (projectId: string, task: WorkflowTask): string => `${projectId}:${task}`
-
 /** Keep project records until background completion has been persisted. */
 export function hasRunningProjectWorkflow(projectId: string): boolean {
-  return ["summary", "fetch-experiments", "plan-research", "latex-merge"].some((task) =>
-    runningTasks.has(`${projectId}:${task}`),
-  )
+  return runningProjectWorkflowTasks(projectId).length > 0
 }
 
 /**

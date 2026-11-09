@@ -320,6 +320,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: null,
+      origin: "project",
       turnArmed: false,
       cols: 80,
       rows: 24,
@@ -336,6 +337,29 @@ describe("ActivityMonitor agent completion notifications", () => {
     expect(fixture.db.select().from(agentSessions).get()?.state).toBe("exited")
   })
 
+  test("records the view an agent was started from and keeps it across a restart (injected daemon)", async () => {
+    const fixture = setupAgentMonitor()
+    onTestFinished(fixture.dispose)
+    await fixture.monitor.track({
+      sessionId: "terminal-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      agentId: "codex",
+      workflowRunId: null,
+      origin: "latex",
+      turnArmed: false,
+      cols: 80,
+      rows: 24,
+    })
+    expect(fixture.registry.get("terminal-1")?.origin).toBe("latex")
+    expect(fixture.db.select().from(agentSessions).get()?.origin).toBe("latex")
+    fixture.monitor.dispose()
+    fixture.registry.dispose()
+    const registry = fixture.createRegistry()
+    await fixture.createMonitor(registry).reconcile()
+    expect(registry.get("terminal-1")?.origin).toBe("latex")
+  })
+
   test("restores live counts when reconnect listing fails after app restart (injected daemon)", async () => {
     const fixture = setupAgentMonitor()
     onTestFinished(fixture.dispose)
@@ -345,6 +369,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: null,
+      origin: "project",
       turnArmed: false,
       cols: 80,
       rows: 24,
@@ -378,6 +403,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: null,
+      origin: "project",
       turnArmed: false,
       cols: 80,
       rows: 24,
@@ -397,6 +423,7 @@ describe("ActivityMonitor agent completion notifications", () => {
         workspaceId: "workspace-1",
         agentId: "codex",
         workflowRunId: null,
+        origin: "project",
         turnArmed: false,
         cols: 80,
         rows: 24,
@@ -429,6 +456,7 @@ describe("ActivityMonitor agent completion notifications", () => {
         workspaceId: "workspace-1",
         agentId: "codex",
         workflowRunId: null,
+        origin: "project",
         turnArmed: false,
         cols: 80,
         rows: 24,
@@ -471,6 +499,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: null,
+      origin: "project",
       turnArmed: false,
       cols: 80,
       rows: 24,
@@ -499,6 +528,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: null,
+      origin: "project",
       turnArmed: false,
       cols: 80,
       rows: 24,
@@ -554,6 +584,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: "run-1",
+      origin: "project",
       turnArmed: true,
       cols: 80,
       rows: 24,
@@ -623,6 +654,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: "run-1",
+      origin: "project",
       turnArmed: true,
       cols: 80,
       rows: 24,
@@ -652,6 +684,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "claude-code",
       workflowRunId: null,
+      origin: "project",
       turnArmed: false,
       cols: 80,
       rows: 24,
@@ -662,6 +695,7 @@ describe("ActivityMonitor agent completion notifications", () => {
       workspaceId: "workspace-1",
       agentId: "codex",
       workflowRunId: null,
+      origin: "project",
       turnArmed: false,
       cols: 80,
       rows: 24,

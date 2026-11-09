@@ -267,6 +267,7 @@ function Harness({
   leftColumn?: import("./CentralPanel").CentralPanelLeftColumn
 }) {
   const controller = useCentralPanel({
+    origin: "project",
     client,
     workspaceId: "ws-1",
     projectId: "p-1",
@@ -695,7 +696,12 @@ describe("CentralPanel — panel", () => {
     })
     expect(spawned).toEqual([])
     expect(launched).toEqual([
-      { projectId: "p-1", agentId: "claude-code", workspaceMode: "worktree" },
+      {
+        projectId: "p-1",
+        origin: "project",
+        agentId: "claude-code",
+        workspaceMode: "worktree",
+      },
     ])
     const activeTab = screen
       .getAllByTestId("central-tab")

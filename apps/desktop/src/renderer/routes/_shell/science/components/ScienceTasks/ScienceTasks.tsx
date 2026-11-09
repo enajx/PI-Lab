@@ -130,6 +130,8 @@ export function ScienceTasks() {
     }
     const result = await startSession.mutateAsync({
       projectId: task.projectId,
+      // Task agents open as tabs in the Project view.
+      origin: "project",
       agentId,
       prompt,
       workspaceMode: "main",
