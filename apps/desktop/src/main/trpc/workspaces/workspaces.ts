@@ -13,7 +13,7 @@ import {
 import { portBaseForSlot } from "@pi-lab/port-scanner"
 import { buildLaunchArgv, getAgent } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
-import { eq } from "drizzle-orm"
+import { and, eq, ne } from "drizzle-orm"
 import { z } from "zod"
 import { addWorktree, type GitChange, GitError, isGitRepo, removeWorktree, status } from "../../git"
 import { withAgentLaunchGuard } from "../agentLaunchGuard"
@@ -247,6 +247,17 @@ export function workspaceWorkingDir(db: PiLabDatabase, workspace: Workspace): st
     }
     return projectDirectoryInWorktree(project.repoPath, wt.path)
   }
+  if (workspace.kind === "paper") {
+    // Paper workspaces run in the linked LaTeX paper folder, which may be outside the project.
+    const dir = project.metadata?.paper?.dir
+    if (!dir) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `Project ${project.id} has no linked paper folder`,
+      })
+    }
+    return dir
+  }
   // Branch workspaces run on the project's primary checkout.
   return project.repoPath
 }
@@ -260,9 +271,13 @@ export const workspacesRouter = router({
     .input(createInput)
     .mutation(({ ctx, input }): Promise<WorkspaceWithWorktree> => createWorkspace(ctx.db, input)),
 
-  /** All workspaces in a project, most-recently-active first. */
+  /** All workspaces in a project except the hidden paper workspace (see the `paper` router). */
   list: publicProcedure.input(projectIdInput).query(({ ctx, input }): Workspace[] => {
-    return ctx.db.select().from(workspaces).where(eq(workspaces.projectId, input.projectId)).all()
+    return ctx.db
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.projectId, input.projectId), ne(workspaces.kind, "paper")))
+      .all()
   }),
 
   /** A single workspace by id, or throws NOT_FOUND. */

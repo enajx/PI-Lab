@@ -553,6 +553,12 @@ export class FullRuntime {
           }
           return safeStorage.encryptString(value).toString("base64")
         },
+        decrypt: (encrypted) => {
+          if (!safeStorage.isEncryptionAvailable()) {
+            throw new Error("Your operating system keychain is unavailable for reading credentials")
+          }
+          return safeStorage.decryptString(Buffer.from(encrypted, "base64"))
+        },
       },
       sshExec: DEFAULT_SSH_EXEC,
       httpFetch: DEFAULT_HTTP_FETCH,

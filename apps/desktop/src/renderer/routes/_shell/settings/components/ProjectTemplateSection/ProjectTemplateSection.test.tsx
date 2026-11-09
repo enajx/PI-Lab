@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   latexProvider: "bundled",
   showHiddenFiles: true,
   confirmFileDelete: true,
+  confirmOverleafCommit: true,
 }
 
 let store: Record<string, string>

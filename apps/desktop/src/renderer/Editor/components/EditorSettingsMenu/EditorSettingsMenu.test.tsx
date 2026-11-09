@@ -23,6 +23,7 @@ const SETTINGS: EditorSettings = {
   latexProvider: "bundled",
   showHiddenFiles: true,
   confirmFileDelete: true,
+  confirmOverleafCommit: true,
 }
 
 describe("EditorSettingsMenu", () => {

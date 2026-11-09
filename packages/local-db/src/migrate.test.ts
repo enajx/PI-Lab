@@ -90,6 +90,7 @@ describe("runMigrations", () => {
       "settings",
       "agent_settings",
       "agent_credentials",
+      "service_credentials",
       "browser_history",
       "machines",
       "automations",

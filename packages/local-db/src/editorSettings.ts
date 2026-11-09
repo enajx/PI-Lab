@@ -41,6 +41,8 @@ export interface EditorSettings {
   showHiddenFiles: boolean
   /** Ask before moving a file tree entry to the Trash (default on). */
   confirmFileDelete: boolean
+  /** Ask before committing unsent paper edits when syncing with Overleaf (default on). */
+  confirmOverleafCommit: boolean
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -56,4 +58,5 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   latexProvider: "bundled",
   showHiddenFiles: true,
   confirmFileDelete: true,
+  confirmOverleafCommit: true,
 }

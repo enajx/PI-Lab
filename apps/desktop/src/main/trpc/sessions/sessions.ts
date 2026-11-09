@@ -55,7 +55,8 @@ const startInput = z.object({
 })
 
 /** Which kind of workspace an agent session was opened in. */
-export type SessionKind = Workspace["kind"]
+/** Agent sessions run only in branch or worktree workspaces, never in a paper workspace. */
+export type SessionKind = Exclude<Workspace["kind"], "paper">
 
 export interface StartSessionResult {
   sessionId: string

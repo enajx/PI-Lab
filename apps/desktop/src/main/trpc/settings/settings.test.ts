@@ -68,6 +68,7 @@ describe("settings.get", () => {
       latexProvider: "bundled",
       showHiddenFiles: true,
       confirmFileDelete: true,
+      confirmOverleafCommit: true,
     })
   })
 })
@@ -194,6 +195,7 @@ describe("settings.updateEditor", () => {
       latexProvider: "bundled",
       showHiddenFiles: true,
       confirmFileDelete: true,
+      confirmOverleafCommit: true,
     })
 
     // The patch persisted and `get` reflects it.
@@ -216,6 +218,7 @@ describe("settings.updateEditor", () => {
       latexProvider: "bundled",
       showHiddenFiles: true,
       confirmFileDelete: true,
+      confirmOverleafCommit: true,
     })
   })
 
@@ -394,5 +397,15 @@ describe("global LaTeX provider", () => {
     await expect(
       harness.caller.settings.updateEditor({ latexProvider: "managed" as never }),
     ).rejects.toThrow()
+  })
+})
+
+describe("confirm Overleaf commit", () => {
+  it("defaults on and persists turning it off and back on", async () => {
+    expect((await harness.caller.settings.get()).editor.confirmOverleafCommit).toBe(true)
+    await harness.caller.settings.updateEditor({ confirmOverleafCommit: false })
+    expect((await harness.caller.settings.get()).editor.confirmOverleafCommit).toBe(false)
+    await harness.caller.settings.updateEditor({ confirmOverleafCommit: true })
+    expect((await harness.caller.settings.get()).editor.confirmOverleafCommit).toBe(true)
   })
 })

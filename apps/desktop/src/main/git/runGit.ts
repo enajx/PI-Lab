@@ -55,6 +55,11 @@ export interface RunGitOptions {
    * seam keeps callers from re-implementing exec).
    */
   allowFailure?: boolean
+  /**
+   * Extra environment variables for this call, added on top of the app's own
+   * environment. Leave unset to run git with the inherited environment only.
+   */
+  env?: Record<string, string>
 }
 
 export interface GitResult {
@@ -77,6 +82,7 @@ export async function runGit(
       maxBuffer: MAX_BUFFER,
       timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       windowsHide: true,
+      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     })
     return { stdout, stderr }
   } catch (error) {

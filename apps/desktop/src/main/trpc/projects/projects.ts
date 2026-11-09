@@ -831,7 +831,14 @@ export const projectsRouter = router({
    * row so the dashboard re-renders from the mutation result.
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
-    const metadata: ProjectMetadata | null = input.metadata
+    // The linked paper folder is not part of the card dialog; keep it across edits.
+    const paper = ctx.db
+      .select({ metadata: projects.metadata })
+      .from(projects)
+      .where(eq(projects.id, input.id))
+      .get()?.metadata?.paper
+    const metadata: ProjectMetadata | null =
+      paper === undefined ? input.metadata : { ...input.metadata, paper }
     const row = ctx.db
       .update(projects)
       .set({ metadata, updatedAt: Date.now() })

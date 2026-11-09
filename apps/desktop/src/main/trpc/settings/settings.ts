@@ -75,6 +75,7 @@ const editorPatch = z.object({
   latexProvider: z.enum(["bundled", "system"]).optional(),
   showHiddenFiles: z.boolean().optional(),
   confirmFileDelete: z.boolean().optional(),
+  confirmOverleafCommit: z.boolean().optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */

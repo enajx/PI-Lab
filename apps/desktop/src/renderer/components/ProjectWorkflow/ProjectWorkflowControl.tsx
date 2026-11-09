@@ -1,7 +1,7 @@
 import type { WorkflowTask } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CloudDownload, FileText, type LucideIcon } from "lucide-react"
+import { CloudDownload, FileText, GitMerge, type LucideIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import { useTranslate } from "../../i18n/language"
 import { useTRPC } from "../../trpc/react"
@@ -54,6 +54,12 @@ const TASK_META: Record<WorkflowTask, TaskMeta> = {
     label: "Project summary",
     reportHeading: "Project status",
     guidance: "Check RESEARCH.md for the updated status.",
+  },
+  "latex-merge": {
+    icon: GitMerge,
+    label: "Agent merge",
+    reportHeading: "Agent merge",
+    guidance: "",
   },
   "fetch-experiments": {
     icon: CloudDownload,

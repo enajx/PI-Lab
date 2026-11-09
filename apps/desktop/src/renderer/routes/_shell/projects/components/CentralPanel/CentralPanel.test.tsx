@@ -102,6 +102,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   latexProvider: "bundled",
   showHiddenFiles: true,
   confirmFileDelete: true,
+  confirmOverleafCommit: true,
 }
 
 const PY_DIAGNOSTIC = {

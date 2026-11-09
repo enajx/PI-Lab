@@ -92,7 +92,7 @@ function harnessContext(): AppContext {
     runNonInteractiveProcess: async () => {
       throw new Error("interactive test unexpectedly ran a one-shot workflow")
     },
-    credentialCipher: { encrypt: (value) => value },
+    credentialCipher: { encrypt: (value) => value, decrypt: (value) => value },
     sshExec: async () => ({ ok: true, detail: "" }),
     httpFetch: async () => {
       throw new Error("no network in tests")

@@ -32,8 +32,11 @@ const createdNow = () =>
  *                 of these may exist per project (see the partial unique index
  *                 added in migration 0001 — Drizzle can't express filtered
  *                 indexes in the schema DSL).
+ *   - "paper":    the project's linked LaTeX paper folder ({@link ProjectPaper}),
+ *                 which may be outside the project folder. At most one per
+ *                 project; hidden from workspace lists.
  */
-export type WorkspaceKind = "worktree" | "branch"
+export type WorkspaceKind = "worktree" | "branch" | "paper"
 
 /**
  * Lifecycle of a single automation firing.
@@ -274,6 +277,16 @@ export interface ProjectDetails {
   textTags?: ProjectTextTag[]
 }
 
+/** The LaTeX paper folder linked to a project (LaTeX Editor page). */
+export interface ProjectPaper {
+  /** Absolute path of the paper folder; may be inside or outside the project folder. */
+  dir: string
+  /** URL of the folder's `origin` remote when linked, or null when it has none. */
+  remoteUrl: string | null
+  /** When the last successful sync finished (epoch ms), or null before the first. */
+  lastSyncAt: number | null
+}
+
 export interface ProjectMetadata {
   textTags?: ProjectTextTag[]
   /** Free-text collaborators (e.g. co-authors), as typed by the user. */
@@ -286,6 +299,8 @@ export interface ProjectMetadata {
   emojiTags?: string[]
   /** Reference links, each a URL with an optional label. */
   referenceLinks?: ProjectReferenceLink[]
+  /** Linked LaTeX paper folder; absent when none is linked. */
+  paper?: ProjectPaper
 }
 
 /** A locally-known v2 Team. */
@@ -705,6 +720,19 @@ export const agentCredentials = sqliteTable("agent_credentials", {
     .$defaultFn(() => Date.now()),
 })
 
+/**
+ * Encrypted, machine-local credentials for outside services (one row per
+ * service, e.g. "overleaf" for the Overleaf Git token). Ciphertext comes from
+ * Electron safeStorage in the main process; the renderer only sees presence.
+ */
+export const serviceCredentials = sqliteTable("service_credentials", {
+  service: text("service").primaryKey(),
+  encryptedValue: text("encrypted_value").notNull(),
+  updatedAt: integer("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+})
+
 // ---------------------------------------------------------------------------
 // browserHistory — URL autocomplete for the in-app browser.
 // ---------------------------------------------------------------------------
@@ -874,7 +902,7 @@ export const automationRuns = sqliteTable(
 // ---------------------------------------------------------------------------
 
 /** A non-interactive project workflow with a cached, per-project result. */
-export type WorkflowTask = "summary" | "fetch-experiments" | "plan-research"
+export type WorkflowTask = "summary" | "fetch-experiments" | "plan-research" | "latex-merge"
 
 export const projectWorkflowRuns = sqliteTable(
   "project_workflow_runs",
