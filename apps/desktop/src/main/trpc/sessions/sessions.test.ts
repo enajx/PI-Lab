@@ -3,7 +3,7 @@
 // an in-process pty-daemon, and injected fake agents (one short-lived, one
 // long-lived so a session can be held open across a second start). Full cleanup
 // per test; concurrency assertions poll with timeouts, never fixed sleeps.
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -21,6 +21,17 @@ import {
 import { runGit } from "../../git"
 import { createHarness, FAKE_AGENT, type Harness, LONG_FAKE_AGENT, makeRepo } from "../testHarness"
 import { workspaceWorkingDir } from "../workspaces"
+
+/**
+ * Give a test paper folder a `main.tex` when it has no .tex file at its top level,
+ * since PI Lab only accepts folders that can be a paper. Returns the link input unchanged.
+ */
+function withTex<T extends { dir: string }>(input: T): T {
+  if (!readdirSync(input.dir).some((name) => name.endsWith(".tex"))) {
+    writeFileSync(join(input.dir, "main.tex"), "\\documentclass{article}\n")
+  }
+  return input
+}
 
 let h: Harness
 let projectId: string
@@ -736,7 +747,7 @@ describe("sessions.start — origin view and the paper folder", () => {
   test("a LaTeX Editor agent gets a paper folder outside the project as an extra folder", async () => {
     // The link stores the folder's real path (macOS temp folders live under /private).
     const paperDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-")))
-    await h.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
+    await h.caller.paper.link(withTex({ projectId, dir: paperDir, rootChoice: null }))
     const result = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -748,7 +759,7 @@ describe("sessions.start — origin view and the paper folder", () => {
   test("a paper folder inside the project, or a Project view agent, gets no extra folder", async () => {
     const insideDir = join(h.repoDir, "paper")
     await mkdir(insideDir)
-    await h.caller.paper.link({ projectId, dir: insideDir, rootChoice: null })
+    await h.caller.paper.link(withTex({ projectId, dir: insideDir, rootChoice: null }))
     const inside = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -758,7 +769,7 @@ describe("sessions.start — origin view and the paper folder", () => {
     await h.caller.terminal.kill({ sessionId: inside.sessionId })
 
     const outsideDir = await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-"))
-    await h.caller.paper.link({ projectId, dir: outsideDir, rootChoice: null })
+    await h.caller.paper.link(withTex({ projectId, dir: outsideDir, rootChoice: null }))
     const fromProject = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -770,7 +781,7 @@ describe("sessions.start — origin view and the paper folder", () => {
   test("a LaTeX Editor agent in a worktree gets the paper folder inside the project as an extra folder", async () => {
     const insideDir = join(h.repoDir, "paper")
     await mkdir(insideDir)
-    await h.caller.paper.link({ projectId, dir: insideDir, rootChoice: null })
+    await h.caller.paper.link(withTex({ projectId, dir: insideDir, rootChoice: null }))
     const result = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -784,7 +795,7 @@ describe("sessions.start — origin view and the paper folder", () => {
 
   test("an agent without an extra-folder flag still starts, with a warning naming the paper folder", async () => {
     const paperDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-")))
-    await h.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
+    await h.caller.paper.link(withTex({ projectId, dir: paperDir, rootChoice: null }))
     const result = await h.caller.sessions.start({
       projectId,
       agentId: LONG_FAKE_AGENT.id,

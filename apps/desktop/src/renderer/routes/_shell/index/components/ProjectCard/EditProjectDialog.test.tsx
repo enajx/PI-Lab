@@ -309,6 +309,9 @@ describe("Paper folder row (mocked server)", () => {
         projectFolder: false,
         overleaf: false,
         remoteUrl: null,
+        isPaper: true,
+        inside: [],
+        stoppedEarly: false,
       }),
       "paper.link": link,
     })
@@ -341,6 +344,9 @@ describe("Paper folder row (mocked server)", () => {
         projectFolder: true,
         overleaf: false,
         remoteUrl: null,
+        isPaper: true,
+        inside: [],
+        stoppedEarly: false,
       }),
       "paper.link": link,
     })
@@ -357,6 +363,55 @@ describe("Paper folder row (mocked server)", () => {
     fireEvent.click(screen.getByTestId("edit-project-save"))
     await waitFor(() =>
       expect(link).toHaveBeenCalledWith({ projectId: "pf", dir: "/proj", rootChoice: "no-sync" }),
+    )
+  })
+
+  test("a chosen folder that is not a paper shows the papers inside it; the project folder from the list still asks first", async () => {
+    const link = vi.fn(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
+    renderDetailsWith(project({ id: "pf", name: "P" }), "edit", null, {
+      "paper.get": paperGet(null),
+      "system.pickDirectory": () => "/Users/me",
+      "paper.checkFolder": (input) =>
+        (input as { dir: string }).dir === "/Users/me"
+          ? {
+              displayDir: "~",
+              projectFolder: false,
+              overleaf: false,
+              remoteUrl: null,
+              isPaper: false,
+              inside: [{ dir: "/Users/me/proj", relPath: "proj", overleaf: false }],
+              stoppedEarly: false,
+            }
+          : {
+              displayDir: ".",
+              projectFolder: true,
+              overleaf: false,
+              remoteUrl: null,
+              isPaper: true,
+              inside: [],
+              stoppedEarly: false,
+            },
+      "paper.link": link,
+    })
+    fireEvent.click(await screen.findByTestId("edit-project-paper-choose"))
+    const notPaper = await screen.findByTestId("paper-not-paper-dialog")
+    expect(screen.getByTestId("edit-project-paper-folder").textContent).toBe("None")
+    fireEvent.click(within(notPaper).getByTestId("paper-inside-option"))
+    const root = await screen.findByTestId("paper-root-dialog")
+    fireEvent.click(within(root).getByTestId("paper-root-no-sync"))
+    await waitFor(() =>
+      expect(screen.getByTestId("edit-project-paper-folder").textContent).toBe("Project folder"),
+    )
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
+    fireEvent.click(screen.getByTestId("edit-project-save"))
+    await waitFor(() =>
+      expect(link).toHaveBeenCalledWith({
+        projectId: "pf",
+        dir: "/Users/me/proj",
+        rootChoice: "no-sync",
+      }),
     )
   })
 

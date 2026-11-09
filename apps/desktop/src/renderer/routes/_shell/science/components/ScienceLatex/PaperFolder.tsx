@@ -25,6 +25,22 @@ interface RootPrompt {
   remoteUrl: string | null
 }
 
+/** A folder found inside a chosen folder that can be a paper folder (from `paper.checkFolder`). */
+interface PaperCandidate {
+  dir: string
+  /** Path relative to the chosen folder. */
+  relPath: string
+  /** True when it is an Overleaf clone. */
+  overleaf: boolean
+}
+
+/** A chosen folder that cannot be a paper folder, with the papers found inside it. */
+interface NotPaperPrompt {
+  inside: PaperCandidate[]
+  /** True when the search inside it stopped early, so papers may be missing. */
+  stoppedEarly: boolean
+}
+
 /** The label for a paper folder's `displayDir`: "Project folder" for ".", else the path itself. */
 export function paperFolderLabel(displayDir: string, t: (english: string) => string): string {
   return displayDir === "." ? t("Project folder") : displayDir
@@ -33,9 +49,12 @@ export function paperFolderLabel(displayDir: string, t: (english: string) => str
 /**
  * The folder picker with the paper folder checks, shared by the setup page,
  * the editor footer and the Edit project dialog. `choose` asks for a folder
- * and checks it (`paper.checkFolder`). The project folder, when it is not an
- * Overleaf clone, first shows the pop-up (`dialog`, which the caller renders)
- * with its three options; "Choose another folder" opens the picker again.
+ * and checks it (`paper.checkFolder`). A folder that cannot be a paper (no
+ * .tex file at its top level and not an Overleaf clone) is never used: a
+ * dialog lists the papers found inside it to choose one (checked the same
+ * way), or says none were found. The project folder, when it is not an
+ * Overleaf clone, first shows the pop-up with its three options; "Choose
+ * another folder" opens the picker again. The caller renders `dialog`.
  * The chosen folder goes to `onChosen`, and errors go to `onError`.
  */
 export function usePaperFolderPicker(
@@ -46,27 +65,43 @@ export function usePaperFolderPicker(
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [rootPrompt, setRootPrompt] = useState<RootPrompt | null>(null)
+  const [notPaperPrompt, setNotPaperPrompt] = useState<NotPaperPrompt | null>(null)
   const [checking, setChecking] = useState(false)
   const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions({ onError }))
+
+  /** Check `dir`, then use it, or ask first (not a paper, or the project folder). */
+  const checkAndChoose = (dir: string): void => {
+    setChecking(true)
+    queryClient
+      .fetchQuery(trpc.paper.checkFolder.queryOptions({ projectId, dir }))
+      .then((check) => {
+        if (!check.isPaper) {
+          setNotPaperPrompt({ inside: check.inside, stoppedEarly: check.stoppedEarly })
+        } else if (check.projectFolder && !check.overleaf) {
+          setRootPrompt({ dir, displayDir: check.displayDir, remoteUrl: check.remoteUrl })
+        } else onChosen({ dir, rootChoice: null, displayDir: check.displayDir })
+      }, onError)
+      .finally(() => setChecking(false))
+  }
 
   const choose = (): void => {
     pickDirectory.mutate(undefined, {
       onSuccess: (dir) => {
-        if (!dir) return
-        setChecking(true)
-        queryClient
-          .fetchQuery(trpc.paper.checkFolder.queryOptions({ projectId, dir }))
-          .then((check) => {
-            if (check.projectFolder && !check.overleaf) {
-              setRootPrompt({ dir, displayDir: check.displayDir, remoteUrl: check.remoteUrl })
-            } else onChosen({ dir, rootChoice: null, displayDir: check.displayDir })
-          }, onError)
-          .finally(() => setChecking(false))
+        if (dir) checkAndChoose(dir)
       },
     })
   }
 
-  const dialog = rootPrompt ? (
+  const dialog = notPaperPrompt ? (
+    <NotPaperDialog
+      prompt={notPaperPrompt}
+      onChoice={(choice) => {
+        setNotPaperPrompt(null)
+        if (choice === "other") choose()
+        else if (choice !== "cancel") checkAndChoose(choice.dir)
+      }}
+    />
+  ) : rootPrompt ? (
     <RootFolderDialog
       remoteUrl={rootPrompt.remoteUrl}
       onChoice={(choice) => {
@@ -79,6 +114,83 @@ export function usePaperFolderPicker(
     />
   ) : null
   return { choose, busy: pickDirectory.isPending || checking, dialog }
+}
+
+/**
+ * Shown when the chosen folder cannot be a paper folder: lists the papers
+ * found inside it (Overleaf clones marked) to choose one, or says none were
+ * found. "Choose another folder" opens the picker again.
+ */
+function NotPaperDialog({
+  prompt,
+  onChoice,
+}: {
+  prompt: NotPaperPrompt
+  onChoice: (choice: PaperCandidate | "other" | "cancel") => void
+}) {
+  const t = useTranslate()
+  const buttonClass = "rounded border border-border px-3 py-1.5 text-sm hover:bg-accent"
+  return (
+    <PaperDialog
+      testId="paper-not-paper-dialog"
+      title={t("Not a paper folder")}
+      onClose={() => onChoice("cancel")}
+    >
+      <p className="mt-2 text-muted-foreground text-xs">
+        {prompt.inside.length > 0
+          ? t("This folder is not a paper folder. Papers found inside it:")
+          : t("This folder has no LaTeX files. Choose the paper's own folder.")}
+      </p>
+      {prompt.inside.length > 0 ? (
+        <ul className="mt-2 flex max-h-60 flex-col gap-1 overflow-y-auto">
+          {prompt.inside.map((paper) => (
+            <li key={paper.dir}>
+              <button
+                type="button"
+                data-testid="paper-inside-option"
+                data-rel-path={paper.relPath}
+                title={paper.dir}
+                onClick={() => onChoice(paper)}
+                className="flex w-full items-center gap-2 rounded border border-border px-3 py-1.5 text-left font-mono text-xs hover:bg-accent"
+              >
+                <span className="min-w-0 truncate">{paper.relPath}</span>
+                {paper.overleaf ? (
+                  <span className="shrink-0 rounded bg-muted px-1.5 font-sans text-[10px] text-muted-foreground">
+                    {t("Overleaf")}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {prompt.stoppedEarly ? (
+        <p className="mt-2 text-muted-foreground text-xs">
+          {t(
+            "This folder has many folders, so the search stopped early. Some papers may be missing.",
+          )}
+        </p>
+      ) : null}
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          data-testid="paper-not-paper-other"
+          className={buttonClass}
+          onClick={() => onChoice("other")}
+        >
+          {t("Choose another folder")}
+        </button>
+        <button
+          type="button"
+          data-testid="paper-not-paper-cancel"
+          className={buttonClass}
+          onClick={() => onChoice("cancel")}
+        >
+          {t("Cancel")}
+        </button>
+      </div>
+    </PaperDialog>
+  )
 }
 
 /** What the user chose in {@link RootFolderDialog}. */

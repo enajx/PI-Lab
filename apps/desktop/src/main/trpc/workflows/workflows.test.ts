@@ -9,7 +9,7 @@
 // record + emitting a terminal stream event). Tests therefore start a run and
 // then wait for it to settle via `status`.
 import { execFileSync, spawnSync } from "node:child_process"
-import { existsSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -26,6 +26,17 @@ import type {
 import { computeGitStateHash } from "../../git"
 import { createHarness, type Harness } from "../testHarness"
 import type { ProjectWorkflowRecord, WorkflowOutputEvent } from "./workflows"
+
+/**
+ * Give a test paper folder a `main.tex` when it has no .tex file at its top level,
+ * since PI Lab only accepts folders that can be a paper. Returns the link input unchanged.
+ */
+function withTex<T extends { dir: string }>(input: T): T {
+  if (!readdirSync(input.dir).some((name) => name.endsWith(".tex"))) {
+    writeFileSync(join(input.dir, "main.tex"), "\\documentclass{article}\n")
+  }
+  return input
+}
 
 // A non-interactive-capable agent (buildNonInteractiveLaunchArgv supports codex).
 const CODEX_AGENT: TerminalAgent = {
@@ -688,7 +699,7 @@ describe("LaTeX merge (latex-merge)", () => {
       const paperDir = join(harness.dataDir, "paper-outside")
       await mkdir(paperDir)
       conflictedPaperRepo(paperDir)
-      await harness.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
+      await harness.caller.paper.link(withTex({ projectId, dir: paperDir, rootChoice: null }))
 
       await harness.caller.workflows.run({ projectId, task: "latex-merge" })
       expect((await settle(harness, projectId, "latex-merge")).result).toBe("Merged main.tex")
@@ -696,6 +707,7 @@ describe("LaTeX merge (latex-merge)", () => {
       await settle(harness, projectId, "latex-merge")
 
       // Never served from the git-state cache.
+
       expect(calls).toHaveLength(2)
       expect(calls[0]?.cwd).toBe(paperDir)
       const prompt = calls[0]?.args.at(-1) ?? ""
@@ -710,7 +722,9 @@ describe("LaTeX merge (latex-merge)", () => {
     const { calls, runner } = makeRunner(() => ok("must not run"))
     const { harness, projectId } = await openProject(runner)
     try {
-      await harness.caller.paper.link({ projectId, dir: harness.repoDir, rootChoice: "no-sync" })
+      await harness.caller.paper.link(
+        withTex({ projectId, dir: harness.repoDir, rootChoice: "no-sync" }),
+      )
       await expect(
         harness.caller.workflows.run({ projectId, task: "latex-merge" }),
       ).rejects.toMatchObject({
@@ -732,7 +746,7 @@ describe("LaTeX merge (latex-merge)", () => {
       ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
       const plainPaper = join(harness.repoDir, "paper")
       await mkdir(plainPaper)
-      await harness.caller.paper.link({ projectId, dir: plainPaper, rootChoice: null })
+      await harness.caller.paper.link(withTex({ projectId, dir: plainPaper, rootChoice: null }))
       await expect(
         harness.caller.workflows.run({ projectId, task: "latex-merge" }),
       ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })

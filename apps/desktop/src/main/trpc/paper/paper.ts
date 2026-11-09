@@ -32,7 +32,14 @@ import {
   takeSide,
   unresolvedFiles,
 } from "../../git/remote"
-import { findOverleafClones, isOverleafClone, type OverleafCloneSearch } from "../../paper/detect"
+import {
+  findOverleafClones,
+  findPapersInside,
+  isOverleafClone,
+  isPaperFolder,
+  type OverleafCloneSearch,
+  type PaperCandidate,
+} from "../../paper/detect"
 import { findRootTex, listPaperFiles, readPaperText } from "../../paper/files"
 import { buildOutline, type OutlineEntry } from "../../paper/outline"
 import {
@@ -104,11 +111,21 @@ export interface FolderCheck {
   overleaf: boolean
   /** The folder's `origin` URL without credentials, or null when it has none (or is not its own repo). */
   remoteUrl: string | null
+  /** True when it can be a paper folder: a .tex file at its top level, or an Overleaf clone. */
+  isPaper: boolean
+  /** When it is not a paper folder: the folders inside it that can be (else empty). */
+  inside: PaperCandidate[]
+  /** True when the search inside it stopped early, so papers may be missing. */
+  stoppedEarly: boolean
 }
 
 /** Error message for a non-Overleaf project folder linked without a choice. */
 const ROOT_CHOICE_REQUIRED =
   "This is the project folder and it is not an Overleaf clone. Sync would commit and push the whole project, so choose whether Sync is on for this paper."
+
+/** Error message for a folder that cannot be a paper folder. */
+const NOT_A_PAPER =
+  "This folder is not a paper folder: it has no .tex file at its top level and is not an Overleaf clone. Choose the paper's own folder."
 
 /** Error message for a project folder with no remote linked with Sync on. */
 const ROOT_SYNC_NO_REMOTE =
@@ -256,18 +273,24 @@ async function checkFolder(
   const project = requireProject(db, projectId)
   const canonical = await requireFolder(dir)
   const origin = (await isOwnRepo(canonical)) ? await remoteUrl(canonical) : null
+  const isPaper = await isPaperFolder(canonical)
+  const search = isPaper ? { papers: [], stoppedEarly: false } : await findPapersInside(canonical)
   return {
     displayDir: await displayDirFor(project, canonical),
     projectFolder: canonical === (await realpath(project.repoPath)),
     overleaf: await isOverleafClone(canonical),
     remoteUrl: origin === null ? null : displayRemoteUrl(origin),
+    isPaper,
+    inside: search.papers,
+    stoppedEarly: search.stoppedEarly,
   }
 }
 
 /**
  * Link an existing folder as the project's paper folder, replacing any earlier
- * link. The folder must exist and be a directory. A folder that contains the
- * project folder is refused. The project folder itself is accepted when it is
+ * link. The folder must exist and be a directory, and it must be able to be a
+ * paper (a .tex file at its top level, or an Overleaf clone). A folder that
+ * contains the project folder is refused. The project folder itself is accepted when it is
  * an Overleaf clone; otherwise `rootChoice` must say whether Sync is on for it
  * (Sync would commit and push the whole project): "sync" needs a Git remote,
  * and "no-sync" stores Sync as off. When the folder is the top of its own Git
@@ -292,6 +315,9 @@ export async function linkPaper(
       message:
         "The paper folder cannot be a folder that contains the project folder. Choose the paper's own folder or the project folder.",
     })
+  }
+  if (!(await isPaperFolder(canonical))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: NOT_A_PAPER })
   }
   const ownRepo = await isOwnRepo(canonical)
   const origin = ownRepo ? await remoteUrl(canonical) : null
@@ -573,7 +599,10 @@ export const paperRouter = router({
         findOverleafClones(await realpath(requireProject(ctx.db, input.projectId).repoPath)),
     ),
 
-  /** What linking a folder would mean (project folder, Overleaf clone, remote URL). */
+  /**
+   * What linking a folder would mean (project folder, Overleaf clone, remote
+   * URL), whether it can be a paper, and if not, the papers found inside it.
+   */
   checkFolder: publicProcedure
     .input(z.object({ projectId: z.string().min(1), dir: z.string().min(1) }))
     .query(

@@ -75,7 +75,14 @@ describe("PaperSetup (mocked server)", () => {
     renderSetup({
       "paper.token.status": () => ({ configured: true, source: "saved" }),
       "system.pickDirectory": () => "/Users/me/papers/my-paper",
-      "paper.checkFolder": () => ({ projectFolder: false, overleaf: false, remoteUrl: null }),
+      "paper.checkFolder": () => ({
+        projectFolder: false,
+        overleaf: false,
+        remoteUrl: null,
+        isPaper: true,
+        inside: [],
+        stoppedEarly: false,
+      }),
       "paper.link": link,
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
     })
@@ -84,6 +91,47 @@ describe("PaperSetup (mocked server)", () => {
       expect(link).toHaveBeenCalledWith({
         projectId: "p1",
         dir: "/Users/me/papers/my-paper",
+        rootChoice: null,
+      }),
+    )
+  })
+
+  test("a chosen folder that is not a paper shows the papers inside it instead of being used", async () => {
+    const link = vi.fn(() => undefined)
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "system.pickDirectory": () => "/Users/me/papers",
+      "paper.checkFolder": (input) =>
+        (input as { dir: string }).dir === "/Users/me/papers"
+          ? {
+              displayDir: "~/papers",
+              projectFolder: false,
+              overleaf: false,
+              remoteUrl: null,
+              isPaper: false,
+              inside: [{ dir: "/Users/me/papers/a", relPath: "a", overleaf: false }],
+              stoppedEarly: false,
+            }
+          : {
+              displayDir: "~/papers/a",
+              projectFolder: false,
+              overleaf: false,
+              remoteUrl: null,
+              isPaper: true,
+              inside: [],
+              stoppedEarly: false,
+            },
+      "paper.link": link,
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+    })
+    fireEvent.click(await screen.findByTestId("paper-use-folder"))
+    const dialog = await screen.findByTestId("paper-not-paper-dialog")
+    expect(link).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByTestId("paper-inside-option"))
+    await waitFor(() =>
+      expect(link).toHaveBeenCalledWith({
+        projectId: "p1",
+        dir: "/Users/me/papers/a",
         rootChoice: null,
       }),
     )
@@ -191,6 +239,9 @@ describe("PaperSetup (mocked server)", () => {
         projectFolder: true,
         overleaf: true,
         remoteUrl: "https://git@git.overleaf.com/abc",
+        isPaper: true,
+        inside: [],
+        stoppedEarly: false,
       }),
       "paper.link": link,
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
@@ -215,6 +266,9 @@ describe("PaperSetup (mocked server)", () => {
           projectFolder: true,
           overleaf: false,
           remoteUrl: "https://github.com/u/p.git",
+          isPaper: true,
+          inside: [],
+          stoppedEarly: false,
         }),
         "paper.link": link,
         "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
@@ -244,7 +298,14 @@ describe("PaperSetup (mocked server)", () => {
     renderSetup({
       "paper.token.status": () => ({ configured: true, source: "saved" }),
       "system.pickDirectory": pick,
-      "paper.checkFolder": () => ({ projectFolder: true, overleaf: false, remoteUrl: null }),
+      "paper.checkFolder": () => ({
+        projectFolder: true,
+        overleaf: false,
+        remoteUrl: null,
+        isPaper: true,
+        inside: [],
+        stoppedEarly: false,
+      }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
     })
     fireEvent.click(await screen.findByTestId("paper-use-folder"))

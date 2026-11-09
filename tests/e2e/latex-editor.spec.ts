@@ -144,7 +144,7 @@ async function openAndLink(page: Page, agentId: string): Promise<void> {
       return "ok"
     })
     .toBe("ok")
-  await expectCentredSetup(page)
+  await expect(() => expectCentredSetup(page)).toPass({ timeout: 5_000 })
   await page.screenshot({ path: test.info().outputPath("latex-setup.png") })
   // No Sync button before a paper is linked.
   await expect(page.getByTestId("paper-sync")).toHaveCount(0)
@@ -600,6 +600,45 @@ test("LaTeX Editor changes and clears the paper folder from the footer, and Edit
     await expect(
       page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder"),
     ).toHaveText(outside)
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Choosing a folder that is not a paper (here the parent folder holding two
+ * paper clones) never saves it: a dialog lists the papers inside it, and the
+ * one chosen there is used. `papers/second` is an Overleaf clone (its
+ * `origin` is an Overleaf URL; nothing is fetched).
+ */
+test("LaTeX Editor lists the papers inside a chosen folder that is not a paper", async () => {
+  test.setTimeout(120_000)
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-not-paper-e2e-"))
+  const { project } = await setUp(root)
+  const parent = join(root, "papers")
+  const second = join(parent, "second")
+  await execFileAsync("git", ["clone", join(root, "remote.git"), second])
+  await git(second, "remote", "set-url", "origin", "https://git@git.overleaf.com/0123abcd")
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, parent)
+    const page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await openLatexEditor(page)
+    await page.getByTestId("paper-use-folder").click()
+    const dialog = page.getByTestId("paper-not-paper-dialog")
+    await expect(dialog).toContainText("This folder is not a paper folder. Papers found inside it:")
+    const options = dialog.getByTestId("paper-inside-option")
+    await expect(options).toHaveText(["my-paper", "secondOverleaf"])
+    await page.screenshot({ path: test.info().outputPath("latex-not-paper-dialog.png") })
+    await expect(page.getByTestId("paper-editor")).toHaveCount(0)
+    await options.nth(1).click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder"),
+    ).toHaveText(await realpath(second))
+    await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
   } finally {
     if (app) await close(app)
     await rm(root, { recursive: true, force: true })

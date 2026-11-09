@@ -391,6 +391,15 @@ describe("Sidebar", () => {
     await waitFor(() => expect(screen.queryByTestId("nav-editor")).toBeNull())
   })
 
+  test("the active nav row is not bold", async () => {
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const row = [...nav.children].find((item) => item.getAttribute("data-science-tab") === "tasks")
+    fireEvent.click(row?.querySelector("a") ?? (row as HTMLElement))
+    await waitFor(() => expect(nav.querySelector(".bg-accent")).not.toBeNull())
+    expect(nav.querySelector(".font-medium, .font-semibold, .font-bold")).toBeNull()
+  })
+
   test("the LaTeX Editor row shows the stylised LaTeX logo", async () => {
     renderSidebar()
     const nav = await screen.findByTestId("science-nav")

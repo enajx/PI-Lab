@@ -45,6 +45,9 @@ describe("PaperFolderStatusItem (mocked server)", () => {
         projectFolder: false,
         overleaf: false,
         remoteUrl: null,
+        isPaper: true,
+        inside: [],
+        stoppedEarly: false,
       }),
       "paper.link": link,
     })
@@ -69,6 +72,9 @@ describe("PaperFolderStatusItem (mocked server)", () => {
         projectFolder: true,
         overleaf: false,
         remoteUrl: "https://github.com/u/p.git",
+        isPaper: true,
+        inside: [],
+        stoppedEarly: false,
       }),
       "paper.link": link,
     })
@@ -83,6 +89,95 @@ describe("PaperFolderStatusItem (mocked server)", () => {
     await waitFor(() =>
       expect(link).toHaveBeenCalledWith({ projectId: "p1", dir: "/proj", rootChoice: "no-sync" }),
     )
+  })
+
+  test("a folder that is not a paper lists the papers inside it; choosing one uses it", async () => {
+    const link = vi.fn(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
+    const check = vi.fn((input: unknown) => {
+      const { dir } = input as { dir: string }
+      return dir === "/Users/me/papers"
+        ? {
+            displayDir: "~/papers",
+            projectFolder: false,
+            overleaf: false,
+            remoteUrl: null,
+            isPaper: false,
+            inside: [
+              { dir: "/Users/me/papers/a", relPath: "a", overleaf: false },
+              { dir: "/Users/me/papers/group/b", relPath: "group/b", overleaf: true },
+            ],
+            stoppedEarly: false,
+          }
+        : {
+            displayDir: "~/papers/group/b",
+            projectFolder: false,
+            overleaf: true,
+            remoteUrl: "https://git.overleaf.com/abc",
+            isPaper: true,
+            inside: [],
+            stoppedEarly: false,
+          }
+    })
+    renderItem("paper", {
+      "system.pickDirectory": () => "/Users/me/papers",
+      "paper.checkFolder": check,
+      "paper.link": link,
+    })
+    fireEvent.click(screen.getByTestId("editor-paper-folder"))
+    fireEvent.click(screen.getByTestId("paper-folder-choose"))
+    const dialog = await screen.findByTestId("paper-not-paper-dialog")
+    expect(dialog.textContent).toContain(
+      "This folder is not a paper folder. Papers found inside it:",
+    )
+    const options = within(dialog).getAllByTestId("paper-inside-option")
+    expect(options.map((option) => option.getAttribute("data-rel-path"))).toEqual(["a", "group/b"])
+    expect(options[0]?.textContent).toBe("a")
+    expect(options[1]?.textContent).toBe("group/bOverleaf")
+    expect(link).not.toHaveBeenCalled()
+    fireEvent.click(options[1] as HTMLElement)
+    await waitFor(() =>
+      expect(link).toHaveBeenCalledWith({
+        projectId: "p1",
+        dir: "/Users/me/papers/group/b",
+        rootChoice: null,
+      }),
+    )
+    expect(check).toHaveBeenCalledWith({ projectId: "p1", dir: "/Users/me/papers/group/b" })
+    expect(screen.queryByTestId("paper-not-paper-dialog")).toBeNull()
+  })
+
+  test("a folder with no papers inside says so; Choose another folder opens the picker again, Cancel closes", async () => {
+    const pick = vi.fn(() => "/Users/me/empty")
+    const link = vi.fn(() => undefined)
+    renderItem("paper", {
+      "system.pickDirectory": pick,
+      "paper.checkFolder": () => ({
+        displayDir: "~/empty",
+        projectFolder: false,
+        overleaf: false,
+        remoteUrl: null,
+        isPaper: false,
+        inside: [],
+        stoppedEarly: false,
+      }),
+      "paper.link": link,
+    })
+    fireEvent.click(screen.getByTestId("editor-paper-folder"))
+    fireEvent.click(screen.getByTestId("paper-folder-choose"))
+    const dialog = await screen.findByTestId("paper-not-paper-dialog")
+    expect(dialog.textContent).toContain(
+      "This folder has no LaTeX files. Choose the paper's own folder.",
+    )
+    expect(within(dialog).queryByTestId("paper-inside-option")).toBeNull()
+    fireEvent.click(within(dialog).getByTestId("paper-not-paper-other"))
+    await waitFor(() => expect(pick).toHaveBeenCalledTimes(2))
+    fireEvent.click(
+      within(await screen.findByTestId("paper-not-paper-dialog")).getByTestId(
+        "paper-not-paper-cancel",
+      ),
+    )
+    expect(screen.queryByTestId("paper-not-paper-dialog")).toBeNull()
+    expect(link).not.toHaveBeenCalled()
   })
 
   test("Clear paper folder forgets the folder", async () => {
