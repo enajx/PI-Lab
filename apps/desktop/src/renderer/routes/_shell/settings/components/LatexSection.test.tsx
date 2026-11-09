@@ -149,4 +149,20 @@ describe("LaTeX Settings (mocked RPC)", () => {
     })
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Tool discovery failed")
   })
+  it("saves the default build output folder and shows a rejected value", async () => {
+    const update = vi.fn((input: unknown) => {
+      if ((input as { latexOutputDir: string }).latexOutputDir.includes(".."))
+        throw new Error('The build output folder cannot contain "..": ../x')
+      return {}
+    })
+    renderSection({ "latex.status": () => initialStatus, "settings.updateEditor": update })
+    const field = (await screen.findByLabelText("Build output folder")) as HTMLInputElement
+    await waitFor(() => expect(field.value).toBe("build"))
+    fireEvent.change(field, { target: { value: "out" } })
+    fireEvent.click(screen.getByTestId("settings-latex-output-dir-save"))
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ latexOutputDir: "out" }))
+    fireEvent.change(field, { target: { value: "../x" } })
+    fireEvent.click(screen.getByTestId("settings-latex-output-dir-save"))
+    expect((await screen.findByRole("alert")).textContent).toContain('cannot contain ".."')
+  })
 })

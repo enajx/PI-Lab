@@ -21,6 +21,7 @@ const SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  latexOutputDir: "build",
   showHiddenFiles: true,
   confirmFileDelete: true,
   confirmOverleafCommit: true,

@@ -26,6 +26,8 @@ function renderBar(
         lastSyncAt={null}
         hasRemote={true}
         confirmCommit={confirmCommit}
+        outputDir={null}
+        defaultOutputDir="build"
         onOpenFiles={onOpenFiles}
         saveOpenFiles={saveOpenFiles}
       />
@@ -167,5 +169,32 @@ describe("PaperSyncBar (mocked server)", () => {
     fireEvent.click(screen.getByTestId("paper-sync"))
     expect((await screen.findByRole("alert")).textContent).toContain("intro.tex")
     expect(sync).toHaveBeenCalledTimes(1)
+  })
+  test("sets this paper's output folder on Enter and shows a rejected value", async () => {
+    const setOutputDir = vi.fn((input: unknown) => {
+      if ((input as { outputDir: string }).outputDir.includes(".."))
+        throw new Error('The build output folder cannot contain "..": ../x')
+      return { paper: null, workspaceId: null, rootRelPath: null }
+    })
+    renderBar(
+      {
+        "paper.setOutputDir": setOutputDir,
+        "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      },
+      true,
+      () => undefined,
+      async () => [],
+    )
+    const field = screen.getByTestId("paper-output-dir") as HTMLInputElement
+    expect(field.placeholder).toBe("build")
+    expect(field.value).toBe("")
+    fireEvent.change(field, { target: { value: "out/pdf" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    await waitFor(() =>
+      expect(setOutputDir).toHaveBeenCalledWith({ projectId: "p1", outputDir: "out/pdf" }),
+    )
+    fireEvent.change(field, { target: { value: "../x" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect((await screen.findByRole("alert")).textContent).toContain('cannot contain ".."')
   })
 })

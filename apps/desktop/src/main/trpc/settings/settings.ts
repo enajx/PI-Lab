@@ -21,6 +21,7 @@ import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import { excludeDefaultOutputs, outputDirOrBadRequest } from "../../paper/outputs"
 import { publishPublicUpdateChannelChanged } from "../../updates/selection"
 import { publicProcedure, router } from "../trpc"
 
@@ -73,6 +74,7 @@ const editorPatch = z.object({
   customEditorThemes: z.array(importedTheme).max(100).optional(),
   pythonRunDestination: z.enum(["central", "below-editor"]).optional(),
   latexProvider: z.enum(["bundled", "system"]).optional(),
+  latexOutputDir: z.string().max(512).optional(),
   showHiddenFiles: z.boolean().optional(),
   confirmFileDelete: z.boolean().optional(),
   confirmOverleafCommit: z.boolean().optional(),
@@ -333,7 +335,17 @@ export const settingsRouter = router({
    */
   updateEditor: publicProcedure
     .input(editorPatch)
-    .mutation(({ ctx, input }): EditorSettings => writeEditorSettings(ctx.db, input)),
+    .mutation(async ({ ctx, input }): Promise<EditorSettings> => {
+      if (input.latexOutputDir === undefined) return writeEditorSettings(ctx.db, input)
+      // A new default output folder is checked, then kept out of every linked
+      // paper's commits that uses it (see excludeDefaultOutputs).
+      const next = writeEditorSettings(ctx.db, {
+        ...input,
+        latexOutputDir: outputDirOrBadRequest(input.latexOutputDir),
+      })
+      await excludeDefaultOutputs(ctx.db)
+      return next
+    }),
 
   /**
    * Patch the general app preferences (worktree-per-agent policy, confirm-on-quit).

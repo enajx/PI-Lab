@@ -88,6 +88,8 @@ export function ScienceLatex({ initialProjectId }: { initialProjectId?: string }
           rootRelPath={paper.data.rootRelPath}
           lastSyncAt={paper.data.paper.lastSyncAt}
           hasRemote={paper.data.paper.remoteUrl !== null}
+          outputDir={paper.data.paper.outputDir}
+          effectiveOutputDir={paper.data.paper.effectiveOutputDir}
           settings={settings}
           onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
         />

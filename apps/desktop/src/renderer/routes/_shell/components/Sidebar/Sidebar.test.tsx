@@ -355,6 +355,13 @@ describe("Sidebar", () => {
     ).toBe("library")
   })
 
+  test("the LaTeX Editor row shows the stylised LaTeX logo", async () => {
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const row = [...nav.children].find((item) => item.getAttribute("data-science-tab") === "latex")
+    expect(row?.querySelector('[data-testid="latex-logo"]')).not.toBeNull()
+  })
+
   test("adds LaTeX Editor below Tasks in an older saved nav order", async () => {
     window.localStorage.setItem(
       "pi-lab.sidebar.navOrder",

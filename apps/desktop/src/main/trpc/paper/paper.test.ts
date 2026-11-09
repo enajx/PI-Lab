@@ -118,7 +118,7 @@ describe("token", () => {
   })
 })
 
-describe("link, get, files, outline, unlink", () => {
+describe("link, get, outline, unlink", () => {
   test("links a cloned folder outside the project and serves it as a hidden paper workspace", async () => {
     expect(await h.caller.paper.get({ projectId })).toEqual({
       paper: null,
@@ -127,7 +127,14 @@ describe("link, get, files, outline, unlink", () => {
     })
     const dir = await linkOutsideClone()
     const result = await h.caller.paper.get({ projectId })
-    expect(result.paper).toEqual({ dir, remoteUrl: bare, lastSyncAt: null, isOverleaf: false })
+    expect(result.paper).toEqual({
+      dir,
+      remoteUrl: bare,
+      lastSyncAt: null,
+      isOverleaf: false,
+      outputDir: null,
+      effectiveOutputDir: "build",
+    })
     expect(result.rootRelPath).toBe("main.tex")
     const workspaceId = result.workspaceId
     if (!workspaceId) throw new Error("expected a paper workspace")
@@ -142,14 +149,6 @@ describe("link, get, files, outline, unlink", () => {
     const listed = await h.caller.workspaces.list({ projectId })
     expect(listed.some((workspace) => workspace.id === workspaceId)).toBe(false)
 
-    expect(await h.caller.paper.files({ projectId })).toEqual([
-      { relPath: "figures/plot.png", kind: "figure" },
-      { relPath: "main.pdf", kind: "figure" },
-      { relPath: "main.tex", kind: "tex" },
-      { relPath: "refs.bib", kind: "bib" },
-      { relPath: "sections/method.tex", kind: "tex" },
-      { relPath: "style.sty", kind: "other-text" },
-    ])
     expect(await h.caller.paper.outline({ projectId })).toEqual([
       { level: 2, command: "section", title: "Intro", relPath: "main.tex", line: 3 },
       { level: 2, command: "section", title: "Method", relPath: "sections/method.tex", line: 1 },
@@ -264,6 +263,40 @@ describe("addOverleaf", () => {
   })
 })
 
+describe("build output folder", () => {
+  test("a per-paper override is validated, reported, excluded locally, and cleared with an empty value", async () => {
+    const dir = await linkOutsideClone()
+    await expect(
+      h.caller.paper.setOutputDir({ projectId, outputDir: "../outside" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("..") })
+    await expect(
+      h.caller.paper.setOutputDir({ projectId, outputDir: "/tmp/out" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    const set = await h.caller.paper.setOutputDir({ projectId, outputDir: "out/pdf/" })
+    expect(set.paper).toMatchObject({ outputDir: "out/pdf", effectiveOutputDir: "out/pdf" })
+    const exclude = async (): Promise<string[]> =>
+      (await readFile(join(dir, ".git", "info", "exclude"), "utf8")).split("\n")
+    expect(await exclude()).toContain("**/out/pdf/")
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "." })
+    expect(await exclude()).toContain("/main.pdf")
+    const cleared = await h.caller.paper.setOutputDir({ projectId, outputDir: "" })
+    expect(cleared.paper).toMatchObject({ outputDir: null, effectiveOutputDir: "build" })
+  })
+
+  test("the global default is validated, and papers without an override exclude the new folder", async () => {
+    const dir = await linkOutsideClone()
+    await expect(h.caller.settings.updateEditor({ latexOutputDir: "../x" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+    expect(
+      (await h.caller.settings.updateEditor({ latexOutputDir: " pdfout/ " })).latexOutputDir,
+    ).toBe("pdfout")
+    expect((await h.caller.paper.get({ projectId })).paper?.effectiveOutputDir).toBe("pdfout")
+    const exclude = await readFile(join(dir, ".git", "info", "exclude"), "utf8")
+    expect(exclude.split("\n")).toContain("pdfout/")
+  })
+})
+
 // Each test runs many real git commands (clones, merges, pushes); they need more than the 5 s default under load.
 describe("sync and resolve", { timeout: 30_000 }, () => {
   test("build output is not committed or pushed by sync", async () => {
@@ -280,6 +313,37 @@ describe("sync and resolve", { timeout: 30_000 }, () => {
     const files = await remoteFiles()
     expect(files).not.toContain("build/main.aux")
     expect(files).not.toContain("sections/build/x.log")
+  })
+
+  test("Sync does not commit build output in a custom output folder or next to main.tex", async () => {
+    const dir = await linkOutsideClone()
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "out/pdf" })
+    await mkdir(join(dir, "out", "pdf"), { recursive: true })
+    await writeFile(join(dir, "out", "pdf", "main.pdf"), "%PDF-1.4\n")
+    await writeFile(join(dir, "out", "pdf", "main.aux"), "aux\n")
+    await writeFile(join(dir, "main.tex"), "\\documentclass{article}\nedited\n")
+    expect(await h.caller.paper.sync({ projectId, commit: false })).toEqual({
+      state: "needs-commit",
+      changedFiles: ["main.tex"],
+    })
+    expect((await h.caller.paper.sync({ projectId, commit: true })).state).toBe("synced")
+    expect((await remoteFiles()).filter((file) => file.startsWith("out/"))).toEqual([])
+
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "." })
+    for (const extension of [".pdf", ".aux", ".log", ".synctex.gz", ".fdb_latexmk"]) {
+      await writeFile(join(dir, `main${extension}`), "output\n")
+    }
+    // A figure PDF is a source and must still be sent.
+    await writeFile(join(dir, "figures", "main.pdf"), "%PDF-1.4\n")
+    await writeFile(join(dir, "main.tex"), "\\documentclass{article}\nedited again\n")
+    expect(await h.caller.paper.sync({ projectId, commit: false })).toEqual({
+      state: "needs-commit",
+      changedFiles: ["main.tex", "figures/main.pdf"],
+    })
+    expect((await h.caller.paper.sync({ projectId, commit: true })).state).toBe("synced")
+    const files = await remoteFiles()
+    expect(files).toContain("figures/main.pdf")
+    expect(files.filter((file) => file.startsWith("main.") && file !== "main.tex")).toEqual([])
   })
 
   test("a binary conflict is not settled by Sync", async () => {

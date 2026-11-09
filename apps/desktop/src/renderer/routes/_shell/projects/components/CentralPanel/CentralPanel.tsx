@@ -41,6 +41,7 @@ import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../SplitDock/SplitDock"
 import { CloseFilePrompt, useCloseFilePrompt } from "./CloseFilePrompt"
+import { CollapsibleSection } from "./CollapsibleSection"
 import { pdfBesideSource } from "./pdfBesideSource"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
 
@@ -55,6 +56,15 @@ const PdfViewer = lazy(() =>
     default: module.PdfViewer,
   })),
 )
+
+/** The LaTeX Editor's use of the left column: extra content above a collapsible Files section. */
+export interface CentralPanelLeftColumn {
+  /** Shown above the Files section (the paper outline). */
+  top: ReactNode
+  /** Whether the Files section is expanded (state kept by the caller). */
+  filesOpen: boolean
+  onFilesOpenChange: (open: boolean) => void
+}
 
 interface CentralPanelProps {
   controller: CentralPanelController
@@ -88,6 +98,8 @@ interface CentralPanelProps {
   pdfBesideSource?: boolean
   /** Open a source file at a position (the LaTeX Editor outline); a new nonce repeats the jump. */
   sourceRequest?: (SourceLocation & { nonce: number }) | null
+  /** LaTeX Editor layout of the left column; the project view leaves it out. */
+  leftColumn?: CentralPanelLeftColumn
 }
 
 /**
@@ -117,6 +129,7 @@ export function CentralPanel({
   onSaveUntitled,
   pdfBesideSource: placePdfBesideSource,
   sourceRequest,
+  leftColumn,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -473,6 +486,17 @@ export function CentralPanel({
     return { referencePanel: fileItemId(ranFrom), direction: "below" }
   }
 
+  const filesPanel = (
+    <FilesPanel
+      workspaceId={workspaceId}
+      onOpenFile={controller.openFile}
+      activeRelPath={editor.active?.relPath}
+      onPinFile={onPinFile}
+      onSetMainFile={onSetMainFile}
+      editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
+    />
+  )
+
   const openFile = (relPath: string) => {
     setQuickOpen(false)
     controller.openFile(relPath)
@@ -707,14 +731,35 @@ export function CentralPanel({
               data-testid="central-files-panel"
               className="flex min-h-0 w-full flex-col overflow-y-auto border-border border-r"
             >
-              <FilesPanel
-                workspaceId={workspaceId}
-                onOpenFile={controller.openFile}
-                activeRelPath={editor.active?.relPath}
-                onPinFile={onPinFile}
-                onSetMainFile={onSetMainFile}
-                editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
-              />
+              {leftColumn ? (
+                <>
+                  {leftColumn.top}
+                  {leftColumn.filesOpen ? (
+                    // Open: the tree's own "Files" header carries the collapse chevron.
+                    <FilesPanel
+                      workspaceId={workspaceId}
+                      onOpenFile={controller.openFile}
+                      activeRelPath={editor.active?.relPath}
+                      onPinFile={onPinFile}
+                      onSetMainFile={onSetMainFile}
+                      editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
+                      onCollapse={() => leftColumn.onFilesOpenChange(false)}
+                    />
+                  ) : (
+                    <CollapsibleSection
+                      title={t("Files")}
+                      open={false}
+                      onOpenChange={leftColumn.onFilesOpenChange}
+                      testId="central-files-section"
+                      className="shrink-0"
+                    >
+                      {null}
+                    </CollapsibleSection>
+                  )}
+                </>
+              ) : (
+                filesPanel
+              )}
             </div>
             <EdgeResizeHandle
               side="right"

@@ -37,6 +37,11 @@ export interface EditorSettings {
   pythonRunDestination: PythonRunDestination
   /** LaTeX compiler used for every project. */
   latexProvider: LatexProvider
+  /**
+   * Default LaTeX build output folder, relative to the root .tex file's folder
+   * ("." means next to the .tex). A paper can override it (default `build`).
+   */
+  latexOutputDir: string
   /** Show entries whose name starts with "." in the file tree (default on). */
   showHiddenFiles: boolean
   /** Ask before moving a file tree entry to the Trash (default on). */
@@ -56,6 +61,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  latexOutputDir: "build",
   showHiddenFiles: true,
   confirmFileDelete: true,
   confirmOverleafCommit: true,

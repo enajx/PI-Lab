@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { LatexText } from "../../../../components/LatexText"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import {
   dismissNonGitNotice,
@@ -916,7 +917,9 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
               <Icon className="size-4" aria-hidden />
               {collapsed ? null : (
                 <>
-                  <span className="flex-1 truncate">{t(item.label)}</span>
+                  <span className="flex-1 truncate">
+                    <LatexText text={t(item.label)} />
+                  </span>
                   <span className="text-[10px] uppercase tracking-wide">{t("soon")}</span>
                 </>
               )}
@@ -945,7 +948,11 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
             {...reorder?.dragProps}
           >
             <Icon className="size-4" aria-hidden />
-            {collapsed ? null : <span className="flex-1 truncate">{t(item.label)}</span>}
+            {collapsed ? null : (
+              <span className="flex-1 truncate">
+                <LatexText text={t(item.label)} />
+              </span>
+            )}
           </Link>
         )
       })}

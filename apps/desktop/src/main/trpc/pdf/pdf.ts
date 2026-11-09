@@ -1,12 +1,14 @@
 import { execFile } from "node:child_process"
-import { mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
+import { lstat, mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path"
-import { getSettingsOrDefaults, type PiLabDatabase, workspaces } from "@pi-lab/local-db"
+import { getSettingsOrDefaults, type PiLabDatabase, projects, workspaces } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import { GENERATED_EXTENSIONS } from "../../latex/outputDir"
 import { type LatexRuntime, resolveLatexRuntime } from "../../latex/runtime"
 import { forwardSync, reverseSync } from "../../latex/synctex"
+import { effectiveOutputDir, excludePaperOutputs } from "../../paper/outputs"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
@@ -23,11 +25,30 @@ export interface BuildResult {
   log: string
 }
 
-/** Resolve the workspace once and keep all file access inside its real directory. */
-async function workspaceDirectory(db: PiLabDatabase, workspaceId: string): Promise<string> {
+/** A workspace's real directory and where its LaTeX builds write their output. */
+interface BuildTarget {
+  dir: string
+  /** Output folder relative to the root .tex file's folder ("." means next to it). */
+  outputDir: string
+  /** True for a linked paper folder, whose build output is kept out of its commits. */
+  isPaper: boolean
+}
+
+/**
+ * Resolve the workspace once and keep all file access inside its real
+ * directory. A paper workspace uses its paper's output folder (override, else
+ * the global default); every other workspace uses the global default.
+ */
+async function workspaceDirectory(db: PiLabDatabase, workspaceId: string): Promise<BuildTarget> {
   const workspace = db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).get()
   if (!workspace) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" })
-  return realpath(workspaceWorkingDir(db, workspace))
+  const dir = await realpath(workspaceWorkingDir(db, workspace))
+  const defaultOutputDir = getSettingsOrDefaults(db).editor.latexOutputDir
+  if (workspace.kind !== "paper") return { dir, outputDir: defaultOutputDir, isPaper: false }
+  const project = db.select().from(projects).where(eq(projects.id, workspace.projectId)).get()
+  const paper = project?.metadata?.paper
+  if (!paper) throw new TRPCError({ code: "NOT_FOUND", message: "No paper folder is linked" })
+  return { dir, outputDir: effectiveOutputDir(paper, defaultOutputDir), isPaper: true }
 }
 
 /** Reject lexical traversal and symlinks whose targets leave the workspace. */
@@ -115,26 +136,58 @@ async function runTool(
   })
 }
 
-/** Ensure existing output entries cannot redirect compiler writes outside the workspace. */
-async function prepareOutput(dir: string, output: string): Promise<void> {
-  const parent = await realpath(dirname(output))
-  if (parent !== dir) resolveInsideDir(dir, relative(dir, parent))
-  await mkdir(output, { recursive: true })
-  const checked = await realpath(output)
-  resolveInsideDir(dir, relative(dir, checked))
-  for (const entry of await readdir(checked, { withFileTypes: true })) {
-    if (entry.isSymbolicLink()) await insideFile(dir, relative(dir, join(checked, entry.name)))
+/**
+ * Create the output folder under the root's folder one part at a time, so an
+ * existing symlinked part cannot send compiler writes outside the workspace,
+ * and check that existing output entries do not point outside it either. For
+ * "." only the root's generated files are checked (the folder holds sources).
+ * Returns the real output folder.
+ */
+async function prepareOutput(dir: string, source: string, outputDir: string): Promise<string> {
+  let output = await realpath(dirname(source))
+  for (const part of outputDir === "." ? [] : outputDir.split("/")) {
+    const next = join(output, part)
+    const exists = await stat(next).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return false
+        throw error
+      },
+    )
+    if (!exists) await mkdir(next)
+    output = await realpath(next)
+    resolveInsideDir(dir, relative(dir, output))
   }
+  const name = basename(source, extname(source))
+  const entries =
+    outputDir === "."
+      ? GENERATED_EXTENSIONS.map((extension) => `${name}${extension}`)
+      : (await readdir(output, { withFileTypes: true }))
+          .filter((entry) => entry.isSymbolicLink())
+          .map((entry) => entry.name)
+  for (const entry of entries) {
+    const path = join(output, entry)
+    const isLink = await lstat(path).then(
+      (info) => info.isSymbolicLink(),
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return false
+        throw error
+      },
+    )
+    if (isLink) await insideFile(dir, relative(dir, path))
+  }
+  return output
 }
 
 /** One full compile per root at a time; a later request runs after the earlier one. */
-async function compile(ctx: AppContext, dir: string, source: string): Promise<BuildResult> {
+async function compile(ctx: AppContext, target: BuildTarget, source: string): Promise<BuildResult> {
+  const { dir, outputDir } = target
   const pending = builds.get(source)
   const task = (pending ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
-      const output = join(dirname(source), "build")
-      await prepareOutput(dir, output)
+      const output = await prepareOutput(dir, source, outputDir)
+      if (target.isPaper) await excludePaperOutputs(dir, outputDir, rendererPath(dir, source))
       const runtime = await resolveLatexRuntime(
         ctx,
         getSettingsOrDefaults(ctx.db).editor.latexProvider,
@@ -148,7 +201,7 @@ async function compile(ctx: AppContext, dir: string, source: string): Promise<Bu
               "-interaction=nonstopmode",
               "-file-line-error",
               "-pdf",
-              "-outdir=build",
+              `-outdir=${output}`,
               source,
             ],
         dirname(source),
@@ -168,14 +221,15 @@ async function compile(ctx: AppContext, dir: string, source: string): Promise<Bu
 
 /** Locate an explicit or standard output and the matching SyncTeX data. */
 async function pdfForSource(
-  dir: string,
+  target: BuildTarget,
   source: string,
   explicit: string | undefined,
 ): Promise<string> {
+  const { dir } = target
   if (explicit) return insideFile(dir, explicit)
   const root = await rootSource(dir, rendererPath(dir, source))
   const name = `${basename(root, extname(root))}.pdf`
-  const candidates = [join(dirname(root), "build", name), join(dirname(root), name)]
+  const candidates = [join(dirname(root), target.outputDir, name), join(dirname(root), name)]
   for (const path of candidates) {
     const exists = await stat(path).then(
       () => true,
@@ -209,7 +263,7 @@ async function requireSyncFile(dir: string, pdf: string): Promise<string> {
 
 export const pdfRouter = router({
   read: publicProcedure.input(pathInput).query(async ({ ctx, input }) => {
-    const dir = await workspaceDirectory(ctx.db, input.workspaceId)
+    const { dir } = await workspaceDirectory(ctx.db, input.workspaceId)
     const path = await insideFile(dir, input.relPath)
     if (extname(path).toLowerCase() !== ".pdf") throw new Error("Select a PDF file")
     const handle = await open(path, "r")
@@ -237,8 +291,8 @@ export const pdfRouter = router({
     })().finally(() => handle.close())
   }),
   build: publicProcedure.input(pathInput).mutation(async ({ ctx, input }): Promise<BuildResult> => {
-    const dir = await workspaceDirectory(ctx.db, input.workspaceId)
-    return compile(ctx, dir, await rootSource(dir, input.relPath))
+    const target = await workspaceDirectory(ctx.db, input.workspaceId)
+    return compile(ctx, target, await rootSource(target.dir, input.relPath))
   }),
   forwardSync: publicProcedure
     .input(
@@ -249,9 +303,10 @@ export const pdfRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const dir = await workspaceDirectory(ctx.db, input.workspaceId)
+      const target = await workspaceDirectory(ctx.db, input.workspaceId)
+      const { dir } = target
       const source = await insideFile(dir, input.relPath)
-      const pdf = await pdfForSource(dir, source, input.pdfRelPath)
+      const pdf = await pdfForSource(target, source, input.pdfRelPath)
       const mapping = await requireSyncFile(dir, pdf)
       const result = await forwardSync(mapping, source, input.line, input.column)
       return { relPath: rendererPath(dir, pdf), ...result }
@@ -265,7 +320,7 @@ export const pdfRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const dir = await workspaceDirectory(ctx.db, input.workspaceId)
+      const { dir } = await workspaceDirectory(ctx.db, input.workspaceId)
       const pdf = await insideFile(dir, input.relPath)
       const mapping = await requireSyncFile(dir, pdf)
       const result = await reverseSync(mapping, input.page, input.x, input.y)

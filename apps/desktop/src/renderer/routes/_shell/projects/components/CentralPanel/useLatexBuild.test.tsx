@@ -31,7 +31,7 @@ test("tracks concurrent roots and preserves failed output across another root's 
     "pdf.build": build,
     "files.stat": () => ({ exists: true, mtimeMs: 10, size: 20 }),
   })
-  const view = renderHook(() => useLatexBuild(client, "workspace", saved))
+  const view = renderHook(() => useLatexBuild(client, "workspace", saved, undefined))
   act(() => {
     view.result.current.saved("a.tex")
     view.result.current.saved("b.tex")
@@ -65,7 +65,7 @@ test("accepts results from different roots out of order", async () => {
     "pdf.build": vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise),
     "files.stat": () => ({ exists: true, mtimeMs: 30, size: 40 }),
   })
-  const view = renderHook(() => useLatexBuild(client, "workspace", undefined))
+  const view = renderHook(() => useLatexBuild(client, "workspace", undefined, undefined))
   act(() => {
     view.result.current.saved("a.tex")
     view.result.current.saved("b.tex")
@@ -94,7 +94,7 @@ test("retains compiler log if output stat fails and reports missing commands", a
       throw new Error("permission denied")
     },
   })
-  const view = renderHook(() => useLatexBuild(client, "workspace", undefined))
+  const view = renderHook(() => useLatexBuild(client, "workspace", undefined, undefined))
   act(() => view.result.current.saved("a.tex"))
   await waitFor(() => expect(view.result.current.pdfBuildState?.state).toBe("failed"))
   expect(view.result.current.status?.log).toContain("Original compiler diagnostic")
@@ -109,7 +109,7 @@ test("ignores old workspace results and only builds tex saves", async () => {
   const build = vi.fn(() => pending.promise)
   const saved = vi.fn()
   const client = createFakeTrpcClient({ "pdf.build": build })
-  const view = renderHook(({ workspace }) => useLatexBuild(client, workspace, saved), {
+  const view = renderHook(({ workspace }) => useLatexBuild(client, workspace, saved, undefined), {
     initialProps: { workspace: "old" },
   })
   act(() => {
@@ -134,7 +134,7 @@ test("a successful rebuild clears a failure whose stat response is still pending
     .mockResolvedValueOnce({ relPath: "build/a.pdf", success: false, log: "failed" })
     .mockResolvedValueOnce({ relPath: "build/a.pdf", success: true, log: "fixed" })
   const client = createFakeTrpcClient({ "pdf.build": build, "files.stat": () => stat.promise })
-  const view = renderHook(() => useLatexBuild(client, "workspace", undefined))
+  const view = renderHook(() => useLatexBuild(client, "workspace", undefined, undefined))
   await act(async () => view.result.current.saved("a.tex"))
   await act(async () => view.result.current.saved("a.tex"))
   await act(async () => stat.resolve({ exists: true, mtimeMs: 50, size: 60 }))
@@ -152,11 +152,30 @@ test("success clears only the matching output even when the saved source is the 
     "pdf.build": build,
     "files.stat": () => ({ exists: true, mtimeMs: 1, size: 2 }),
   })
-  const view = renderHook(() => useLatexBuild(client, "workspace", undefined))
+  const view = renderHook(() => useLatexBuild(client, "workspace", undefined, undefined))
   await act(async () => view.result.current.saved("chapter.tex"))
   await act(async () => view.result.current.saved("chapter.tex"))
   expect(view.result.current.pdfBuildState?.failedOutputs).toEqual({
     "build/a.pdf": { mtimeMs: 1, size: 2 },
   })
   expect(view.result.current.status?.log).toContain("A failed")
+})
+
+/** Mocked IPC: a successful build reports the PDF path the server returned; a failed one does not. */
+test("reports each successful build's PDF path and source", async () => {
+  const built = vi.fn()
+  const client = createFakeTrpcClient({
+    "pdf.build": vi
+      .fn()
+      .mockReturnValueOnce({ relPath: "out/main.pdf", success: true, log: "" })
+      .mockReturnValueOnce({ relPath: "out/main.pdf", success: false, log: "failed" }),
+    "files.stat": () => ({ exists: false, mtimeMs: 0, size: 0 }),
+  })
+  const view = renderHook(() => useLatexBuild(client, "workspace", undefined, built))
+  act(() => view.result.current.saved("main.tex"))
+  await waitFor(() => expect(view.result.current.pdfBuildState?.state).toBe("complete"))
+  expect(built).toHaveBeenCalledWith("out/main.pdf", "main.tex")
+  act(() => view.result.current.saved("main.tex"))
+  await waitFor(() => expect(view.result.current.pdfBuildState?.state).toBe("failed"))
+  expect(built).toHaveBeenCalledTimes(1)
 })

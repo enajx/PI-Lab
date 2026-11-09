@@ -89,6 +89,8 @@ interface FileTreeProps {
    * rename moves them. Omitted only where no editor tabs exist.
    */
   editorTabs?: FileTreeEditorTabs
+  /** When given, the header starts with a chevron that collapses the tree (LaTeX Editor column). */
+  onCollapse?: () => void
 }
 
 /**
@@ -140,6 +142,7 @@ export function FileTree({
   onPinFile,
   onSetMainFile,
   editorTabs,
+  onCollapse,
 }: FileTreeProps) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -380,6 +383,18 @@ export function FileTree({
       className="flex min-h-0 flex-1 flex-col"
     >
       <div className="flex shrink-0 items-center gap-1 border-border border-b px-2 py-1.5">
+        {onCollapse ? (
+          <button
+            type="button"
+            data-testid="central-files-section"
+            aria-expanded={true}
+            aria-label={t("Collapse files")}
+            onClick={onCollapse}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ChevronDown className="size-3.5" aria-hidden />
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="file-tree-root"

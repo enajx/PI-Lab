@@ -100,6 +100,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  latexOutputDir: "build",
   showHiddenFiles: true,
   confirmFileDelete: true,
   confirmOverleafCommit: true,
@@ -244,6 +245,7 @@ function Harness({
   activatedSession,
   initialState,
   onPinFile,
+  leftColumn,
 }: {
   client: ReturnType<typeof createFakeTrpcClient>
   settings: EditorSettings
@@ -262,6 +264,7 @@ function Harness({
   }
   initialState?: CentralPanelRestoreState
   onPinFile?: (relPath: string) => void
+  leftColumn?: import("./CentralPanel").CentralPanelLeftColumn
 }) {
   const controller = useCentralPanel({
     client,
@@ -296,6 +299,7 @@ function Harness({
         filesPanelOpen={filesPanelOpen}
         onFilesPanelOpenChange={setFilesPanelOpen}
         onPinFile={onPinFile}
+        leftColumn={leftColumn}
       />
     </div>
   )
@@ -961,6 +965,56 @@ describe("CentralPanel — Cmd+W through the close-tab responder (fake bridge)",
     await screen.findByTestId("terminal")
     expect(pressCmdW()).toBe(false)
     expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("terminal")
+  })
+})
+
+describe("CentralPanel — LaTeX Editor left column", () => {
+  /** Stands in for the LaTeX Editor, which owns the Files section's collapsed state. */
+  function LeftColumnHarness({ client }: { client: ReturnType<typeof createFakeTrpcClient> }) {
+    const [filesOpen, setFilesOpen] = useState(true)
+    return (
+      <Harness
+        client={client}
+        settings={DEFAULT_SETTINGS}
+        onUpdate={() => {}}
+        leftColumn={{
+          top: <div data-testid="outline-stub">Outline</div>,
+          filesOpen,
+          onFilesOpenChange: setFilesOpen,
+        }}
+      />
+    )
+  }
+
+  test("shows the given content above the file tree, and the Files section collapses", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = createFakeTrpcClient(baseHandlers())
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        <LeftColumnHarness client={client} />
+      </AppProviders>,
+    )
+    fireEvent.click(screen.getByTestId("central-files-toggle"))
+    const column = screen.getByTestId("central-files-panel")
+    const outline = within(column).getByTestId("outline-stub")
+    const tree = await within(column).findByTestId("panel-files")
+    expect(outline.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // One "Files" header: the tree's own header carries the collapse chevron.
+    expect(within(column).getAllByText("Files")).toHaveLength(1)
+    const header = within(column).getByTestId("central-files-section")
+    expect(header.getAttribute("aria-expanded")).toBe("true")
+    fireEvent.click(header)
+    expect(within(column).getByTestId("central-files-section").getAttribute("aria-expanded")).toBe(
+      "false",
+    )
+    expect(within(column).queryByTestId("panel-files")).toBeNull()
+    expect(within(column).getByTestId("outline-stub")).toBeTruthy()
+  })
+
+  test("the project view's column has no Files section header", () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId("central-files-toggle"))
+    expect(screen.queryByTestId("central-files-section")).toBeNull()
   })
 })
 

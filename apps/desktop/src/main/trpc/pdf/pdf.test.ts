@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process"
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { promisify } from "node:util"
 import { afterEach, beforeAll, beforeEach, expect, test } from "vitest"
 import { liveAgentExecutableResolver } from "../../agents/executable"
 import { createHarness, type Harness } from "../testHarness"
@@ -143,3 +145,54 @@ test("rejects a missing PDF and a root-comment symlink escape", async () => {
     code: "FORBIDDEN",
   })
 })
+
+/** Installed latexmk and SyncTeX: builds and SyncTeX follow the configured output folder. */
+test("builds into the paper's output folder or the global default, and excludes it from the paper repo", async (context) => {
+  if (missingTools.length) context.skip(`Requires installed TeX tools: ${missingTools.join(", ")}`)
+  const doc =
+    "\\documentclass{article}\n\\begin{document}\nOutput folder sentence.\n\\end{document}\n"
+  // Outside a paper: the global default.
+  await h.caller.settings.updateEditor({ latexOutputDir: "pdfs" })
+  await writeFile(join(h.repoDir, "main.tex"), doc)
+  const plain = await h.caller.pdf.build({ workspaceId, relPath: "main.tex" })
+  expect(plain.success, plain.log).toBe(true)
+  expect(plain.relPath).toBe("pdfs/main.pdf")
+
+  // A linked paper (its own Git repo) with an override, then ".".
+  const paperDir = join(h.dataDir, "paper")
+  await mkdir(paperDir)
+  await promisify(execFile)("git", ["init", "-q", paperDir])
+  await writeFile(join(paperDir, "main.tex"), doc)
+  await writeFile(join(paperDir, "other.tex"), doc)
+  const projectId = (await h.caller.projects.list())[0]?.id ?? ""
+  const linked = await h.caller.paper.link({ projectId, dir: paperDir })
+  const paperWorkspace = linked.workspaceId ?? ""
+  await h.caller.paper.setOutputDir({ projectId, outputDir: "out/pdf" })
+  const built = await h.caller.pdf.build({ workspaceId: paperWorkspace, relPath: "main.tex" })
+  expect(built.success, built.log).toBe(true)
+  expect(built.relPath).toBe("out/pdf/main.pdf")
+  const forward = await h.caller.pdf.forwardSync({
+    workspaceId: paperWorkspace,
+    relPath: "main.tex",
+    line: 3,
+    column: 1,
+  })
+  expect(forward.relPath).toBe("out/pdf/main.pdf")
+
+  await h.caller.paper.setOutputDir({ projectId, outputDir: "." })
+  const beside = await h.caller.pdf.build({ workspaceId: paperWorkspace, relPath: "other.tex" })
+  expect(beside.success, beside.log).toBe(true)
+  expect(beside.relPath).toBe("other.pdf")
+  const nextTo = await h.caller.pdf.forwardSync({
+    workspaceId: paperWorkspace,
+    relPath: "other.tex",
+    line: 3,
+    column: 1,
+  })
+  expect(nextTo.relPath).toBe("other.pdf")
+  // The build excludes the outputs of the root it built, not only main.tex's.
+  const exclude = (await readFile(join(paperDir, ".git", "info", "exclude"), "utf8")).split("\n")
+  expect(exclude).toContain("**/out/pdf/")
+  expect(exclude).toContain("/other.pdf")
+  expect(exclude).toContain("*.synctex.gz")
+}, 60_000)

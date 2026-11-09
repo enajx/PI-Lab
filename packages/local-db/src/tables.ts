@@ -285,6 +285,11 @@ export interface ProjectPaper {
   remoteUrl: string | null
   /** When the last successful sync finished (epoch ms), or null before the first. */
   lastSyncAt: number | null
+  /**
+   * Build output folder for this paper, relative to its root .tex file's folder
+   * ("." means next to the .tex). Absent: the `latexOutputDir` editor setting.
+   */
+  outputDir?: string
 }
 
 export interface ProjectMetadata {

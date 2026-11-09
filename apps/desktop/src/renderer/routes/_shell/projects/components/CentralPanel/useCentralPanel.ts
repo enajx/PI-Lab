@@ -110,6 +110,8 @@ interface UseCentralPanelArgs {
   projectId: string
   settings: EditorSettings
   onSaved?: (relPath: string) => void
+  /** After a successful LaTeX build: the built PDF (as returned by `pdf.build`) and the saved source. */
+  onBuilt?: (pdfRelPath: string, sourceRelPath: string) => void
   /** A session launched immediately before navigating here (for example from Tasks). */
   initialSession?: Omit<SessionPane, "id"> | null
   /** State retained after temporarily navigating away from this project. */
@@ -134,6 +136,7 @@ export function useCentralPanel({
   projectId,
   settings,
   onSaved,
+  onBuilt,
   initialSession,
   initialState,
   onStateChange,
@@ -146,7 +149,7 @@ export function useCentralPanel({
     saved,
     status: latexBuildStatus,
     pdfBuildState,
-  } = useLatexBuild(client, workspaceId, onSaved)
+  } = useLatexBuild(client, workspaceId, onSaved, onBuilt)
   const editor = useEditorBuffers({
     client,
     workspaceId,

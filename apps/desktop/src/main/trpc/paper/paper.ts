@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { realpath, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, sep } from "node:path"
 import {
+  getSettingsOrDefaults,
   type PiLabDatabase,
   type Project,
   type ProjectPaper,
@@ -30,8 +31,14 @@ import {
   takeSide,
   unresolvedFiles,
 } from "../../git/remote"
-import { findRootTex, listPaperFiles, type PaperFile, readPaperText } from "../../paper/files"
+import { findRootTex, listPaperFiles, readPaperText } from "../../paper/files"
 import { buildOutline, type OutlineEntry } from "../../paper/outline"
+import {
+  effectiveOutputDir,
+  excludeEffectiveOutputs,
+  isOwnRepo,
+  outputDirOrBadRequest,
+} from "../../paper/outputs"
 import {
   displayRemoteUrl,
   isOverleafUrl,
@@ -63,6 +70,10 @@ export interface PaperView {
   remoteUrl: string | null
   lastSyncAt: number | null
   isOverleaf: boolean
+  /** This paper's own build output folder, or null when it uses the global default. */
+  outputDir: string | null
+  /** The build output folder its builds use (the override, else the global default). */
+  effectiveOutputDir: string
 }
 
 /** Result of `paper.get`, `paper.link` and `paper.addOverleaf`. */
@@ -124,12 +135,6 @@ function paperWorkspace(db: PiLabDatabase, projectId: string): Workspace | null 
   )
 }
 
-/** True when `dir` is the top folder of its own Git repository (not a subfolder of another repo). */
-async function isOwnRepo(dir: string): Promise<boolean> {
-  if (!(await isGitRepo(dir))) return false
-  return (await realpath(await repoRoot(dir))) === (await realpath(dir))
-}
-
 /** Current paper state for a project. */
 async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperState> {
   const paper = requireProject(db, projectId).metadata?.paper
@@ -141,14 +146,16 @@ async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperSt
       remoteUrl: paper.remoteUrl,
       lastSyncAt: paper.lastSyncAt,
       isOverleaf: paper.remoteUrl !== null && isOverleafUrl(paper.remoteUrl),
+      outputDir: paper.outputDir ?? null,
+      effectiveOutputDir: effectiveOutputDir(
+        paper,
+        getSettingsOrDefaults(db).editor.latexOutputDir,
+      ),
     },
     workspaceId: paperWorkspace(db, projectId)?.id ?? null,
     rootRelPath: await findRootTex(paper.dir, files),
   }
 }
-
-/** Build output from the PDF build, kept out of the paper repo's commits. */
-const BUILD_EXCLUDE = "build/"
 
 /** True when `dir` is `inner` or one of its parent folders. Both paths must be real paths. */
 function containsOrEquals(dir: string, inner: string): boolean {
@@ -161,8 +168,10 @@ function containsOrEquals(dir: string, inner: string): boolean {
  * link. The folder must exist and be a directory, and must not be the project
  * folder or a folder that contains it (Sync would then commit the project
  * repo). When the folder is the top of its own Git repository, its `origin`
- * URL is recorded without any embedded credentials, and `build/` is added to
- * that repo's local `.git/info/exclude` so PDF build output is never committed.
+ * URL is recorded without any embedded credentials, and the build output
+ * folder is added to that repo's local `.git/info/exclude` so PDF build output
+ * is never committed. The previous link's output folder override is kept when
+ * the same folder is linked again.
  */
 export async function linkPaper(
   db: PiLabDatabase,
@@ -182,7 +191,11 @@ export async function linkPaper(
     })
   }
   const ownRepo = await isOwnRepo(canonical)
-  if (ownRepo) await addLocalExclude(canonical, BUILD_EXCLUDE)
+  const previous = project.metadata?.paper
+  const outputDir = previous?.dir === canonical ? previous.outputDir : undefined
+  const paper: ProjectPaper = { dir: canonical, remoteUrl: null, lastSyncAt: null }
+  if (outputDir !== undefined) paper.outputDir = outputDir
+  await excludeEffectiveOutputs(paper, getSettingsOrDefaults(db).editor.latexOutputDir)
   const origin = ownRepo ? await remoteUrl(canonical) : null
   const url = origin === null ? null : displayRemoteUrl(origin)
   db.transaction(
@@ -196,7 +209,7 @@ export async function linkPaper(
     },
     { behavior: "immediate" },
   )
-  writePaper(db, projectId, { dir: canonical, remoteUrl: url, lastSyncAt: null })
+  writePaper(db, projectId, { ...paper, remoteUrl: url })
   return paperState(db, projectId)
 }
 
@@ -401,12 +414,6 @@ export const paperRouter = router({
     .input(projectIdInput)
     .query(({ ctx, input }): Promise<PaperState> => paperState(ctx.db, input.projectId)),
 
-  /** LaTeX sources and figures in the paper folder (skips build/ and hidden folders). */
-  files: publicProcedure.input(projectIdInput).query(({ ctx, input }): Promise<PaperFile[]> => {
-    const paper = requirePaper(requireProject(ctx.db, input.projectId))
-    return listPaperFiles(paper.dir)
-  }),
-
   /** Section outline of the paper, from its main .tex file through \input and \include. */
   outline: publicProcedure
     .input(projectIdInput)
@@ -445,6 +452,26 @@ export const paperRouter = router({
         })
       }
       return clonePaper(ctx.db, input.projectId, input.url, await remoteOptions(ctx, [input.url]))
+    }),
+
+  /**
+   * Set this paper's build output folder (relative to its root .tex file's
+   * folder, "." for next to it), or clear it with "" to use the global
+   * default. The new effective folder is added to the paper repo's local
+   * `.git/info/exclude` so Sync never commits the output.
+   */
+  setOutputDir: publicProcedure
+    .input(z.object({ projectId: z.string().min(1), outputDir: z.string().max(512) }))
+    .mutation(async ({ ctx, input }): Promise<PaperState> => {
+      const paper = requirePaper(requireProject(ctx.db, input.projectId))
+      const { outputDir: _old, ...rest } = paper
+      const next: ProjectPaper =
+        input.outputDir.trim() === ""
+          ? rest
+          : { ...rest, outputDir: outputDirOrBadRequest(input.outputDir) }
+      await excludeEffectiveOutputs(next, getSettingsOrDefaults(ctx.db).editor.latexOutputDir)
+      writePaper(ctx.db, input.projectId, next)
+      return paperState(ctx.db, input.projectId)
     }),
 
   /** Remove the link and the hidden paper workspace. Never deletes files. */

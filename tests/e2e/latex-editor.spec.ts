@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
@@ -104,7 +105,17 @@ async function close(app: ElectronApplication): Promise<void> {
   clearTimeout(forceExit)
 }
 
-/** Open LaTeX Editor from the project's dashboard card and link the paper folder. */
+/** Open LaTeX Editor from the project's dashboard card. */
+async function openLatexEditor(page: Page): Promise<void> {
+  await page.getByTestId("nav-dashboard").click()
+  await page.getByTestId("project-card").getByTestId("project-card-latex").click()
+  await expect(page.getByTestId("science-latex")).toBeVisible()
+}
+
+/**
+ * Open LaTeX Editor from the project's dashboard card and link the paper
+ * folder. The setup shows its two options side by side first.
+ */
 async function openAndLink(page: Page): Promise<void> {
   await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await page.getByTestId("nav-dashboard").click()
@@ -119,6 +130,12 @@ async function openAndLink(page: Page): Promise<void> {
   await page.getByTestId("project-card").getByTestId("project-card-latex").click()
   await expect(page.getByTestId("science-latex")).toBeVisible()
   await expect(page.getByTestId("latex-project-select")).toHaveValue(/.+/)
+  const overleaf = await page.getByTestId("paper-setup-overleaf").boundingBox()
+  const folder = await page.getByTestId("paper-setup-folder").boundingBox()
+  if (!overleaf || !folder) throw new Error("setup options are not visible")
+  expect(folder.x).toBeGreaterThanOrEqual(overleaf.x + overleaf.width)
+  expect(Math.abs(folder.y - overleaf.y)).toBeLessThan(1)
+  expect(Math.abs(folder.width - overleaf.width)).toBeLessThan(1)
   await page.getByTestId("paper-use-folder").click()
   await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
 }
@@ -153,10 +170,38 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     app = await launch(root, project, paper)
     const page = await app.firstWindow()
     await openAndLink(page)
+    await page.screenshot({ path: test.info().outputPath("latex-editor.png") })
 
-    // Outline, file list, and the main .tex open with LaTeX colouring.
+    // Outline above the paper's file tree in the editor's left column (open by
+    // default), and the main .tex open with LaTeX colouring.
+    const column = page.getByTestId("central-files-panel")
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
-    await expect(page.getByTestId("paper-file").filter({ hasText: "main.tex" })).toBeVisible()
+    await expect(column.getByTestId("file-tree-file").filter({ hasText: "main.tex" })).toBeVisible()
+    // The panel button hides and shows the column.
+    await page.getByTestId("central-files-toggle").click()
+    await expect(column).toHaveCount(0)
+    await page.getByTestId("central-files-toggle").click()
+    await expect(column.getByTestId("paper-outline")).toBeVisible()
+    // Outline and Files collapse, and stay collapsed after a reload.
+    await page.getByTestId("paper-outline-section").click()
+    await page.getByTestId("central-files-section").click()
+    await expect(column.getByTestId("paper-outline")).toHaveCount(0)
+    await expect(column.getByTestId("panel-files")).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByTestId("nav-dashboard")).toBeVisible({ timeout: 30_000 })
+    await openLatexEditor(page)
+    await expect(page.getByTestId("paper-outline-section")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
+    await expect(page.getByTestId("central-files-section")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
+    await expect(column.getByTestId("panel-files")).toHaveCount(0)
+    await page.getByTestId("paper-outline-section").click()
+    await page.getByTestId("central-files-section").click()
+    await expect(column.getByTestId("panel-files")).toBeVisible()
     const editor = page.getByTestId("editor-buffer")
     await expect(editor.locator(".cm-content")).toContainText("Shared first line.")
     await expect(editor.locator(".cm-line span").first()).toBeVisible()
@@ -230,13 +275,17 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
   }
 })
 
-/** Real build through bundled Tectonic: the PDF opens beside the source. */
+/**
+ * Real build through bundled Tectonic into a per-paper output folder: Cmd+S
+ * opens the PDF beside the source, a later save refreshes it, and Sync does not
+ * send the output folder.
+ */
 test("LaTeX Editor builds the paper and shows the PDF beside the source", async () => {
   // CI runners skip the large TeX bundle download to save credits.
   test.skip(Boolean(process.env.CI), "Downloads the TeX bundle; run locally")
   test.setTimeout(300_000)
   const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-editor-build-e2e-"))
-  const { project, paper } = await setUp(root)
+  const { project, paper, overleaf } = await setUp(root)
   await mkdir(PERSISTENT_CACHE, { recursive: true })
   await mkdir(join(root, "latex"))
   await symlink(PERSISTENT_CACHE, join(root, "latex", "cache"), "dir")
@@ -245,6 +294,16 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     app = await launch(root, project, paper)
     const page = await app.firstWindow()
     await openAndLink(page)
+
+    // This paper builds into its own folder.
+    const outputField = page.getByTestId("paper-output-dir")
+    await expect(outputField).toHaveAttribute("placeholder", "build")
+    await outputField.fill("pdfout")
+    await outputField.press("Enter")
+    await expect(outputField).toBeEnabled()
+    await expect(page.getByTestId("paper-sync-bar").getByRole("alert")).toHaveCount(0)
+
+    // Cmd+S builds and opens the PDF beside the source, without Show in PDF.
     const editor = page.getByTestId("editor-buffer")
     await editor.locator(".cm-content").click()
     await page.keyboard.press("ControlOrMeta+s")
@@ -252,12 +311,34 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
       /complete/i,
       { timeout: 200_000 },
     )
-    await page.getByTestId("latex-show-pdf").click()
     const viewer = page.getByTestId("pdf-viewer")
     await expect(viewer).toBeVisible({ timeout: 15_000 })
     const source = await editor.boundingBox()
     const pdf = await viewer.boundingBox()
     expect(source && pdf && pdf.x > source.x + source.width / 2).toBe(true)
+    expect(existsSync(join(paper, "pdfout", "main.pdf"))).toBe(true)
+    expect(existsSync(join(paper, "build"))).toBe(false)
+
+    // A later save rebuilds, and the open PDF shows the new text.
+    await editor.getByText("Method text.").click()
+    await page.keyboard.press("End")
+    await page.keyboard.type(" Zyxrefresh")
+    await page.keyboard.press("ControlOrMeta+s")
+    await expect(viewer).toContainText("Zyxrefresh", { timeout: 120_000 })
+    await expect(page.getByTestId("pdf-viewer")).toHaveCount(1)
+
+    // Sync sends the edit but not the build output.
+    await page.getByTestId("paper-sync").click()
+    const dialog = page.getByTestId("paper-commit-dialog")
+    await expect(dialog).toContainText("main.tex")
+    await expect(dialog).not.toContainText("pdfout")
+    await page.getByTestId("paper-commit-confirm").click()
+    await expect(page.getByTestId("paper-last-sync")).toContainText("Last Overleaf sync", {
+      timeout: 15_000,
+    })
+    await git(overleaf, "pull", "--no-rebase", "--no-edit")
+    expect(await readFile(join(overleaf, "main.tex"), "utf8")).toContain("Zyxrefresh")
+    expect((await git(overleaf, "ls-files")).split("\n")).toEqual(["main.tex", ""])
   } finally {
     if (app) await close(app)
     await rm(root, { recursive: true, force: true })

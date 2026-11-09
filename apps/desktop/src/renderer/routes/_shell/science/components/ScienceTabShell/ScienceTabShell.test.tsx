@@ -25,4 +25,20 @@ describe("ScienceTabShell", () => {
       true,
     )
   })
+
+  test("draws LaTeX in the title as the stylised logo", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders
+        client={createFakeTrpcClient({
+          "caffeine.status": () => ({ mode: "auto", scope: "system-only", held: true }),
+        })}
+        queryClient={queryClient}
+      >
+        <ScienceTabShell title="LaTeX Editor">Content</ScienceTabShell>
+      </AppProviders>,
+    )
+    const heading = await screen.findByRole("heading", { level: 1 })
+    expect(heading.querySelector('[data-testid="latex-logo"]')).not.toBeNull()
+  })
 })

@@ -1,6 +1,7 @@
-import { Button } from "@pi-lab/ui"
+import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
+import { Button, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../../trpc/react"
 import { OverleafSettings } from "./OverleafSettings"
 import { SelectField, SettingsSection } from "./SettingsControls"
@@ -28,6 +29,10 @@ export function LatexSection() {
       },
     }),
   )
+  const settings = useQuery(trpc.settings.get.queryOptions())
+  const savedOutputDir = (settings.data?.editor ?? DEFAULT_EDITOR_SETTINGS).latexOutputDir
+  // The typed folder, or null while it shows the saved value.
+  const [outputDraft, setOutputDraft] = useState<string | null>(null)
   const install = useMutation(trpc.latex.install.mutationOptions({ onSuccess: invalidateStatus }))
   const data = status.data
   const installation = data?.installation
@@ -74,6 +79,36 @@ export function LatexSection() {
               }}
             />
           </fieldset>
+          <div className="flex flex-col gap-2 px-4 py-3 text-sm">
+            <label htmlFor="settings-latex-output-dir">Build output folder</label>
+            <p className="text-muted-foreground text-xs">
+              Where builds write the PDF, relative to the main .tex file's folder. Use . to write
+              next to the .tex file. A paper can use its own folder in the LaTeX Editor.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                id="settings-latex-output-dir"
+                data-testid="settings-latex-output-dir"
+                value={outputDraft ?? savedOutputDir}
+                onChange={(event) => setOutputDraft(event.target.value)}
+              />
+              <Button
+                data-testid="settings-latex-output-dir-save"
+                variant="outline"
+                size="sm"
+                disabled={outputDraft === null || update.isPending}
+                onClick={() => {
+                  if (outputDraft === null) return
+                  update.mutate(
+                    { latexOutputDir: outputDraft },
+                    { onSuccess: () => setOutputDraft(null) },
+                  )
+                }}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
           <div className="space-y-1 px-4 py-3 text-sm">
             <h3 className="font-medium">Bundled Tectonic</h3>
             <p>{data.bundled.available ? "Available" : "Unavailable"}</p>

@@ -160,6 +160,18 @@ function useStringPref(key: string, fallback: string): [string, (next: string) =
 export const useLatexEditorProject = (): [string, (next: string) => void] =>
   useStringPref("pi-lab.latexEditor.project", "")
 
+/** Whether the LaTeX Editor shows its left column (Outline and Files); open by default. */
+export const useLatexEditorLeftColumn = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.latexEditor.leftColumn", true)
+
+/** Whether the LaTeX Editor's Outline section is expanded. */
+export const useLatexEditorOutlineOpen = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.latexEditor.outlineOpen", true)
+
+/** Whether the LaTeX Editor's Files section is expanded. */
+export const useLatexEditorFilesOpen = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.latexEditor.filesOpen", true)
+
 // --- Dashboard Digital Rain: global, renderer-only animation tuning --------
 // These settings deliberately don't belong to a project: every card uses the
 // same bounded rendering budget, while its character source remains project-owned.

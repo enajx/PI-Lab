@@ -38,11 +38,17 @@ interface BuildSnapshot {
   pdfBuildState: BuildState
 }
 
-/** Coordinate all roots in one workspace without discarding independent build failures. */
+/**
+ * Coordinate all roots in one workspace without discarding independent build failures.
+ *
+ * @param onBuilt called after each successful build with the PDF path the
+ *   server returned (it follows the configured output folder) and the saved source
+ */
 export function useLatexBuild(
   client: PiLabTrpcClient,
   workspaceId: string,
   onSaved: ((relPath: string) => void) | undefined,
+  onBuilt: ((pdfRelPath: string, sourceRelPath: string) => void) | undefined,
 ): {
   saved: (relPath: string) => void
   status: BuildStatus | null
@@ -106,6 +112,7 @@ export function useLatexBuild(
                 failure.output !== result.relPath &&
                 !(failure.output === null && failure.source === relPath),
             )
+            onBuilt?.(result.relPath, relPath)
             return
           }
           const failure: BuildFailure = { source: relPath, output: result.relPath, log: result.log }
@@ -138,7 +145,7 @@ export function useLatexBuild(
           publish()
         })
     },
-    [client, workspaceId, onSaved, scope],
+    [client, workspaceId, onSaved, onBuilt, scope],
   )
 
   return {

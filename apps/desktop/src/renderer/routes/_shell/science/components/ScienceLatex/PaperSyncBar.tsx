@@ -28,6 +28,10 @@ interface PaperSyncBarProps {
   hasRemote: boolean
   /** The `confirmOverleafCommit` editor setting. */
   confirmCommit: boolean
+  /** This paper's own build output folder, or null when it uses the global default. */
+  outputDir: string | null
+  /** The global default build output folder (Settings > LaTeX). */
+  defaultOutputDir: string
   /** Open the given paper files in the editor pane ("Open in editor"). */
   onOpenFiles: (files: string[]) => void
   /** Save every open paper file with unsaved edits; returns the files that could not be saved. */
@@ -45,6 +49,8 @@ export function PaperSyncBar({
   lastSyncAt,
   hasRemote,
   confirmCommit,
+  outputDir,
+  defaultOutputDir,
   onOpenFiles,
   saveOpenFiles,
 }: PaperSyncBarProps) {
@@ -65,10 +71,9 @@ export function PaperSyncBar({
     } else {
       setPrompt(null)
       setNotice(null)
-      // A pull can add sections and files.
+      // A pull can add sections.
       void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
       void queryClient.invalidateQueries({ queryKey: trpc.paper.outline.queryKey({ projectId }) })
-      void queryClient.invalidateQueries({ queryKey: trpc.paper.files.queryKey({ projectId }) })
     }
   }
   const onError = (cause: { message: string }): void =>
@@ -92,6 +97,17 @@ export function PaperSyncBar({
     }),
   )
   const busy = sync.isPending || resolve.isPending
+  // The typed output folder, or null while it shows the saved value.
+  const [outputDraft, setOutputDraft] = useState<string | null>(null)
+  const setOutputDir = useMutation(
+    trpc.paper.setOutputDir.mutationOptions({
+      onSuccess: () => {
+        setOutputDraft(null)
+        void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+      },
+      onError,
+    }),
+  )
 
   /** Save open edits so they are sent too, then sync; a failed save stops the sync. */
   const startSync = async (commit: boolean): Promise<void> => {
@@ -120,13 +136,32 @@ export function PaperSyncBar({
           {error}
         </span>
       ) : null}
+      <label className="ml-auto flex items-center gap-1.5 text-muted-foreground">
+        {t("Output folder")}
+        <input
+          data-testid="paper-output-dir"
+          value={outputDraft ?? outputDir ?? ""}
+          placeholder={defaultOutputDir}
+          title={t(
+            "Build output folder for this paper, relative to the main .tex file's folder (. for next to it). Leave empty to use the default from Settings > LaTeX. Press Enter to apply.",
+          )}
+          disabled={setOutputDir.isPending}
+          onChange={(event) => setOutputDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || outputDraft === null) return
+            setError(null)
+            setOutputDir.mutate({ projectId, outputDir: outputDraft })
+          }}
+          className="h-6 w-28 rounded border border-border bg-background px-1.5 text-foreground"
+        />
+      </label>
       <button
         type="button"
         data-testid="paper-sync"
         disabled={!hasRemote || busy}
         title={hasRemote ? t("Pull from and push to Overleaf") : t("No Git remote")}
         onClick={() => void startSync(!confirmCommit)}
-        className="ml-auto flex items-center gap-1.5 rounded border border-border px-2 py-1 hover:bg-accent disabled:opacity-50"
+        className="flex items-center gap-1.5 rounded border border-border px-2 py-1 hover:bg-accent disabled:opacity-50"
       >
         <RefreshCw className={busy ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
         {t("Sync")}
