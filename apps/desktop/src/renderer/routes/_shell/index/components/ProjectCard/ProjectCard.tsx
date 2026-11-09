@@ -8,13 +8,14 @@ import {
   Eye,
   EyeOff,
   ImagePlus,
+  ListTodo,
   Pencil,
   ScrollText,
   Sparkles,
   Telescope,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
+import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import {
   useDigitalRainDensity,
@@ -513,14 +514,26 @@ export function ProjectCard({ project }: ProjectCardProps) {
         >
           <ScrollText className="size-4 shrink-0" aria-hidden />
         </button>
-        <ProjectWorkflowControl
+        <button
+          type="button"
+          data-testid="project-card-tasks"
+          aria-label={`${t("Tasks")} ${project.name}`}
+          title={t("Tasks")}
+          data-feature-label={t("Tasks")}
+          data-feature-help={t("Open this project's tasks")}
+          className={CARD_ACTION_CLASS}
+          onClick={() => void navigate({ to: "/science/tasks", search: { projectId: project.id } })}
+        >
+          <ListTodo className="size-4 shrink-0" aria-hidden />
+        </button>
+        <ProjectStatusControl
           projectId={project.id}
           projectName={project.name}
-          task="summary"
+          lastOpenedAt={project.lastOpenedAt}
           variant="compact"
-          testId="project-card-summary"
-          disabled={!gitAvailable}
-          disabledReason={gitAvailable ? undefined : gitDisabledReason}
+          testId="project-card-status-button"
+          gitAvailable={gitAvailable}
+          gitDisabledReason={gitDisabledReason}
         />
       </div>
 

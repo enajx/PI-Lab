@@ -92,7 +92,7 @@ test("title bar agent status shows installed agents and current sessions", async
     agentBounds && caffeineBounds && agentBounds.x + agentBounds.width <= caffeineBounds.x,
   ).toBe(true)
   await control.click()
-  const panel = window.getByRole("dialog", { name: "Agent status" })
+  const panel = window.getByRole("dialog", { name: "Agents status" })
   await expect(panel).toBeVisible()
   await expect(panel).toContainText("Claude Code")
   await expect(panel).toContainText("Codex")
@@ -216,11 +216,14 @@ test("Project summary stays viewport-sized when opened from a hovered card", asy
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
 
   const card = window.getByTestId("project-card")
-  const summary = card.getByTestId("project-card-summary")
-  await expect(summary).toBeVisible({ timeout: 30_000 })
+  const status = card.getByTestId("project-card-status-button")
+  await expect(status).toBeVisible({ timeout: 30_000 })
 
-  await summary.hover()
-  await summary.click()
+  await status.hover()
+  await status.click()
+  await expect(window.getByTestId("project-status-update-summary")).toBeVisible()
+  await window.screenshot({ path: test.info().outputPath("project-status.png") })
+  await window.getByTestId("project-status-update-summary").click()
 
   const backdrop = window.getByTestId("workflow-result-backdrop")
   await expect(backdrop).toBeVisible()

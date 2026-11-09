@@ -1,11 +1,16 @@
 import type { Project } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, test, vi } from "vitest"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
-import { ScienceAnalysis } from "./ScienceAnalysis"
+
+// The router is a fake (mocked): the picker's address change is asserted as a call.
+const mocks = vi.hoisted(() => ({ navigate: vi.fn() }))
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => mocks.navigate }))
+
+const { ScienceAnalysis } = await import("./ScienceAnalysis")
 
 /**
  * Component test for the Analysis science tab. Renders plain DOM
@@ -65,6 +70,10 @@ function listing(files: Array<{ relPath: string; name: string; kind: string }>) 
 }
 
 describe("ScienceAnalysis", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    mocks.navigate.mockReset()
+  })
   afterEach(() => setInterfaceLanguage("en"))
 
   test("opens the project requested by its dashboard card", async () => {
@@ -617,7 +626,7 @@ describe("ScienceAnalysis", () => {
     expect(screen.queryByTestId("analysis-subkind-filters")).toBeNull()
   })
 
-  test("the project selector sits in the left column and switches the project", async () => {
+  test("the project picker sits in the top bar and switches and remembers the project", async () => {
     renderAnalysis({
       "projects.list": () => [
         project({ id: "p1", name: "alpha" }),
@@ -629,15 +638,64 @@ describe("ScienceAnalysis", () => {
           : listing([{ relPath: "b.json", name: "b.json", kind: "json" }]),
     })
 
-    const select = (await screen.findByTestId("analysis-project-select")) as HTMLSelectElement
+    const select = (await within(screen.getByRole("banner")).findByTestId(
+      "analysis-project-select",
+    )) as HTMLSelectElement
     await waitFor(() => {
       expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("a.csv")
     })
+    expect([...select.options].map((option) => option.value)).toEqual(["p1", "p2"])
 
     fireEvent.change(select, { target: { value: "p2" } })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/analysis",
+      search: { projectId: "p2" },
+      replace: true,
+    })
+    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p2")
     await waitFor(() => {
       expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("b.json")
     })
+  })
+
+  test("arriving with ?projectId remembers it; the picker then wins", async () => {
+    renderAnalysis(
+      {
+        "projects.list": () => [
+          project({ id: "p1", name: "alpha" }),
+          project({ id: "p2", name: "beta" }),
+        ],
+        "science.analysis.listFiles": () => listing([]),
+      },
+      "p2",
+    )
+    const select = (await screen.findByTestId("analysis-project-select")) as HTMLSelectElement
+    await waitFor(() => expect(select.value).toBe("p2"))
+    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p2")
+
+    fireEvent.change(select, { target: { value: "p1" } })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/analysis",
+      search: { projectId: "p1" },
+      replace: true,
+    })
+    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p1")
+  })
+
+  test("opens on the remembered project", async () => {
+    window.localStorage.setItem("pi-lab.analysis.project", "p2")
+    const listFiles = vi.fn(() => listing([]))
+    renderAnalysis({
+      "projects.list": () => [
+        project({ id: "p1", name: "alpha" }),
+        project({ id: "p2", name: "beta" }),
+      ],
+      "science.analysis.listFiles": listFiles,
+    })
+    const select = (await screen.findByTestId("analysis-project-select")) as HTMLSelectElement
+    await waitFor(() => expect(select.value).toBe("p2"))
+    expect(listFiles).toHaveBeenCalledWith({ projectId: "p2" })
+    expect(listFiles).not.toHaveBeenCalledWith({ projectId: "p1" })
   })
 
   test("shows the empty state when the project has no data files", async () => {

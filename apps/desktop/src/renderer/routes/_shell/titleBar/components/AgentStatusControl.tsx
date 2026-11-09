@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Bot } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useTranslate } from "../../../../i18n/language"
 import { useTRPC } from "../../../../trpc/react"
 import { useAgentStatus } from "../../-ProjectActivity"
 
@@ -20,6 +21,7 @@ const SESSION_LABELS = {
 
 /** Title bar view of local CLI sign-in and live agent sessions. */
 export function AgentStatusControl() {
+  const t = useTranslate()
   const trpc = useTRPC()
   const [open, setOpen] = useState(false)
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -27,6 +29,7 @@ export function AgentStatusControl() {
     trpc.setup.environment.queryOptions(undefined, { staleTime: 30_000, refetchInterval: 60_000 }),
   )
   const sessions = useAgentStatus()
+  const label = t("Agents status")
   const attention = Boolean(
     environment.isError ||
       environment.data?.harnesses.some((agent) => agent.state !== "authenticated") ||
@@ -53,11 +56,13 @@ export function AgentStatusControl() {
     <div ref={hostRef} className="app-no-drag relative shrink-0">
       <button
         type="button"
-        aria-label="Agent status"
+        aria-label={label}
         aria-expanded={open}
         data-testid="agent-status-control"
         data-attention={attention}
-        title="Agent status"
+        title={label}
+        data-feature-label={label}
+        data-feature-help={t("See which CLI agents are signed in and the current agent sessions")}
         onClick={() => setOpen((current) => !current)}
         className="app-no-drag relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
       >
@@ -69,7 +74,7 @@ export function AgentStatusControl() {
       {open ? (
         <div
           role="dialog"
-          aria-label="Agent status"
+          aria-label={label}
           data-testid="agent-status-panel"
           className="absolute top-10 right-0 z-50 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
         >

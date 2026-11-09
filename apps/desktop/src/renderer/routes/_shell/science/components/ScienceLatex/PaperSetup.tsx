@@ -12,7 +12,7 @@ const TOKEN_URL = "https://www.overleaf.com/user/settings"
 const DOCS_URL =
   "https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration"
 const cardClass =
-  "flex flex-col items-center justify-center gap-3 rounded-lg border border-border p-6 text-center"
+  "flex flex-col items-center justify-center gap-2 rounded-lg border border-border p-4 text-center"
 const linkClass = "text-muted-foreground underline underline-offset-2 hover:text-foreground"
 
 /**
@@ -21,8 +21,8 @@ const linkClass = "text-muted-foreground underline underline-offset-2 hover:text
  * one is used right away, and several are listed to pick one (with a note when
  * the search stopped early on a large project). With it off (the user cleared
  * the paper folder) it does not search. Then it offers the two
- * agreed ways to set a paper folder, side by side as two cards of the same height
- * (stacked when the page is too narrow), centred on the page, each with its
+ * agreed ways to set a paper folder, side by side as two narrow cards of the same height
+ * (stacked when the page is too narrow), at the top of the page and horizontally centred, each with its
  * content centred: clone an Overleaf project into `<project>/paper/` from its
  * Git URL, or open a folder the user already cloned. The one Overleaf token is
  * asked for only when none is available; the token and docs links are shown
@@ -107,10 +107,10 @@ export function PaperSetup({
     !busy && tokenStatus.isSuccess && url.trim() !== "" && (!needsToken || token.trim() !== "")
 
   return (
-    <div data-testid="paper-setup" className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
+    <div data-testid="paper-setup" className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
       <div
         data-testid="paper-setup-content"
-        className="m-auto flex w-full max-w-4xl flex-col gap-4"
+        className="mx-auto flex w-full max-w-3xl flex-col gap-3"
       >
         {autoLinking ? (
           <p data-testid="paper-detecting" className="text-center text-muted-foreground text-sm">
@@ -155,7 +155,7 @@ export function PaperSetup({
                 </div>
               </section>
             ) : null}
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(16rem,23rem))] justify-center gap-3">
               <section data-testid="paper-setup-overleaf" className={cardClass}>
                 <GitBranch className="size-5 text-muted-foreground" aria-hidden />
                 <h2 className="font-medium text-sm">{t("Add Overleaf project")}</h2>

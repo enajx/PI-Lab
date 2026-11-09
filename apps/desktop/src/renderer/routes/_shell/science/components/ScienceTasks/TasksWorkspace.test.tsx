@@ -81,6 +81,7 @@ function renderWorkspace(overrides: Partial<ComponentProps<typeof TasksWorkspace
       }),
     ],
     sources,
+    projectId: "",
     agents: [
       { id: "claude-code", label: "Claude Code" },
       { id: "codex", label: "Codex" },
@@ -103,7 +104,6 @@ describe("TasksWorkspace", () => {
   test("shows task controls in the selected interface language", () => {
     setInterfaceLanguage("es")
     renderWorkspace()
-    expect(screen.getByText("Todos los proyectos")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Nueva tarea" })).toBeTruthy()
   })
 

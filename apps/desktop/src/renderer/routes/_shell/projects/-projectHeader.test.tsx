@@ -1,4 +1,12 @@
 import { QueryClient } from "@tanstack/react-query"
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
@@ -42,7 +50,7 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
 describe("Project header", () => {
   afterEach(() => window.localStorage.clear())
 
-  test("header orders Auto research, Plan research, agents, and Caffeine and prevents duplicate launches", async () => {
+  test("header orders Tasks, Auto research, Plan research, Project status, agents, and Caffeine and prevents duplicate launches", async () => {
     const calls: unknown[] = []
     let rejectLaunch!: (error: Error) => void
     renderWorkspace({
@@ -58,9 +66,15 @@ describe("Project header", () => {
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
     const plan = screen.getByTestId("project-view-plan-research")
     expect(button.nextElementSibling).toBe(plan)
+    // Plan research → Project status → Agents status.
+    const status = screen.getByTestId("project-view-status")
+    expect(plan.nextElementSibling).toBe(status)
+    expect(status.textContent).toContain("Project status")
     expect(
-      plan.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
+      status.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
     ).toBeTruthy()
+    // Tasks opens first in the row of header actions.
+    expect(screen.getByTestId("project-view-tasks").nextElementSibling).toBe(button)
     const caffeine = screen.getByTestId("caffeine-control")
     expect(
       button.parentElement?.lastElementChild === caffeine ||
@@ -76,6 +90,51 @@ describe("Project header", () => {
       "Launch unavailable",
     )
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
+  })
+
+  test("the Tasks button opens Tasks with this project chosen", async () => {
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
+      "projects.touch": () => ({}),
+      "projects.capabilities": () => ({ git: true }),
+      "settings.get": () => ({}),
+      "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
+      "workspaces.ensureMain": () => new Promise(() => {}),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: Outlet })
+    const projectRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => <ProjectWorkspace projectId="p1" activation={{}} />,
+    })
+    const tasksRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/science/tasks",
+      validateSearch: (search: Record<string, unknown>) => ({
+        projectId: typeof search.projectId === "string" ? search.projectId : "",
+      }),
+      component: () => (
+        <div data-testid="on-tasks-route">
+          {(tasksRoute.useSearch() as { projectId: string }).projectId}
+        </div>
+      ),
+    })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([projectRoute, tasksRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </AppProviders>,
+    )
+    const tasks = await screen.findByTestId("project-view-tasks")
+    expect(tasks.getAttribute("title")).toBe("Tasks")
+    fireEvent.click(tasks)
+    expect((await screen.findByTestId("on-tasks-route")).textContent).toBe("p1")
   })
 
   test("records opening a project for the recent-project menu", async () => {

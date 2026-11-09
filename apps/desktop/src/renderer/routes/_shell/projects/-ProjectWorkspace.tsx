@@ -2,10 +2,12 @@ import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Telescope, X } from "lucide-react"
+import { useNavigate } from "@tanstack/react-router"
+import { ListTodo, Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
+import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
@@ -91,6 +93,7 @@ export function ProjectWorkspace({
     markOpened({ id: projectId })
   }, [markOpened, projectId])
 
+  const navigate = useNavigate()
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
   const capabilitiesQuery = useQuery(trpc.projects.capabilities.queryOptions({ id: projectId }))
   const initializeGit = useMutation(
@@ -396,6 +399,18 @@ export function ProjectWorkspace({
         <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
           <button
             type="button"
+            data-testid="project-view-tasks"
+            title={t("Tasks")}
+            data-feature-label={t("Tasks")}
+            data-feature-help={t("Open this project's tasks")}
+            onClick={() => void navigate({ to: "/science/tasks", search: { projectId } })}
+            className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60"
+          >
+            <ListTodo className="size-3.5 shrink-0" aria-hidden />
+            <span>{t("Tasks")}</span>
+          </button>
+          <button
+            type="button"
             data-testid="project-view-auto-research"
             aria-busy={startAutoResearch.isPending}
             title={!gitAvailable ? gitDisabledReason : t("Auto research")}
@@ -416,6 +431,15 @@ export function ProjectWorkspace({
             task="plan-research"
             variant="labeled"
             testId="project-view-plan-research"
+          />
+          <ProjectStatusControl
+            projectId={projectId}
+            projectName={project?.name ?? t("Project")}
+            lastOpenedAt={project?.lastOpenedAt ?? 0}
+            variant="labeled"
+            testId="project-view-status"
+            gitAvailable={gitAvailable}
+            gitDisabledReason={gitDisabledReason}
           />
           <AgentStatusControl />
           <CaffeineControl />

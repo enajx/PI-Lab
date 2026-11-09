@@ -10,15 +10,20 @@ import {
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { ChartArea, CloudDownload, FileCode2, FileText, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
 import { useTranslate } from "../../../../../i18n/language"
-import { useFetchExperimentsInstructions } from "../../../../../preferences/preferences"
+import {
+  useAnalysisProject,
+  useFetchExperimentsInstructions,
+} from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
+import { ProjectPicker } from "../ProjectPicker"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
 
@@ -35,9 +40,11 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  * selecting a category that spans more than one sub-format reveals a second row
  * of sub-format bubbles (e.g. CSV / NumPy under Data) to narrow further.
  *
- * The project defaults to the most-recently-opened (`projects.list` is ordered
- * that way), with a selector at the top of the left column. The two columns each
- * own their own scroll.
+ * A project picker in the top bar remembers the last project; `initialProjectId`
+ * (from `?projectId=`) selects one and becomes the remembered one, and the picker
+ * always wins afterwards. With no usable choice it falls back to the
+ * most-recently-opened project (`projects.list` is ordered that way). The two
+ * columns each own their own scroll.
  */
 export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: string }) {
   const t = useTranslate()
@@ -46,23 +53,21 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
 
-  // Default to the most-recently-opened project (first in the ordered list) and
-  // keep the selection valid as the project list loads / changes.
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    initialProjectId ?? null,
-  )
+  const [savedProjectId, setSavedProjectId] = useAnalysisProject()
+  const navigate = useNavigate()
+  // The picker remembers the choice and replaces the address.
+  const chooseProject = (projectId: string): void => {
+    setSavedProjectId(projectId)
+    void navigate({ to: "/science/analysis", search: { projectId }, replace: true })
+  }
+  // A project given in the address wins and becomes the remembered one.
   useEffect(() => {
-    if (projectsQuery.isPending) return
-    if (projects.length === 0) {
-      if (selectedProjectId !== null) setSelectedProjectId(null)
-      return
-    }
-    if (!selectedProjectId || !projects.some((p) => p.id === selectedProjectId)) {
-      setSelectedProjectId(projects[0]?.id ?? null)
-    }
-  }, [projects, selectedProjectId, projectsQuery.isPending])
-
-  const selectedProject = projects.find((project) => project.id === selectedProjectId)
+    if (initialProjectId) setSavedProjectId(initialProjectId)
+  }, [initialProjectId, setSavedProjectId])
+  const wanted = initialProjectId ?? savedProjectId
+  // An unknown or missing choice falls back to the most-recently-opened project.
+  const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
+  const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
   const capabilities = useQuery({
     ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
@@ -215,6 +220,15 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
       subtitle={t("Browse and preview the data files in a project's repo")}
       actions={
         <>
+          <ProjectPicker
+            testId="analysis-project-select"
+            label={t("Analysis project")}
+            help={t("Choose which project repository to scan for data files.")}
+            value={selectedProjectId ?? ""}
+            projects={projects}
+            allLabel={null}
+            onChange={chooseProject}
+          />
           <button
             type="button"
             data-testid="analysis-new-html-report"
@@ -260,26 +274,8 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          {/* Left column: project selector + search + category filter + file list. */}
+          {/* Left column: search + category filter + file list. */}
           <div className="flex w-80 shrink-0 flex-col border-border border-r">
-            <div className="flex shrink-0 items-center border-border border-b px-4 py-2">
-              <select
-                data-testid="analysis-project-select"
-                aria-label={t("Analysis project")}
-                data-feature-label={t("Analysis project")}
-                data-feature-help={t("Choose which project repository to scan for data files.")}
-                value={selectedProjectId ?? ""}
-                onChange={(event) => setSelectedProjectId(event.target.value)}
-                className="h-8 w-full rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
               <div className="relative">
                 <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />

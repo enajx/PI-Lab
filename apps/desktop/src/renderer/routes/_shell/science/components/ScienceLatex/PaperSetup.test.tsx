@@ -345,7 +345,7 @@ describe("PaperSetup (mocked server)", () => {
     expect(screen.queryByTestId("paper-overleaf-token-found")).toBeNull()
   })
 
-  test("the pair of cards is centred on the page and each card centres its content vertically", async () => {
+  test("the pair of cards sits at the top, horizontally centred, and each card centres its content vertically", async () => {
     renderSetup({
       "paper.token.status": () => ({ configured: false, source: null }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
@@ -355,10 +355,15 @@ describe("PaperSetup (mocked server)", () => {
     const page = screen.getByTestId("paper-setup")
     expect(page.className).toContain("flex-1")
     expect(page.className).toContain("overflow-y-auto")
-    // Auto margins centre the content both ways without clipping it when it overflows.
+    // The content sits at the top (no vertical auto margins) and is centred horizontally.
     const content = screen.getByTestId("paper-setup-content")
     expect(content.parentElement).toBe(page)
-    expect(content.className).toContain("m-auto")
+    expect(content.className).toContain("mx-auto")
+    expect(content.className).not.toMatch(/(^|\s)m-auto/)
+    expect(content.className).not.toMatch(/(^|\s)my-auto/)
+    // Narrow cards: a small overall width and tight padding.
+    expect(content.className).toContain("max-w-3xl")
+    expect(screen.getByTestId("paper-setup-overleaf").className).toContain("p-4")
     // Grid items stretch, so both cards have the same height.
     const grid = screen.getByTestId("paper-setup-overleaf").parentElement as HTMLElement
     expect(grid.className).toContain("grid")

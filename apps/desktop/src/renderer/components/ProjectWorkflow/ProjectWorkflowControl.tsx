@@ -168,6 +168,7 @@ export function ProjectWorkflowControl({
   instructions,
   disabled,
   disabledReason,
+  label,
 }: {
   projectId: string
   projectName: string
@@ -179,6 +180,8 @@ export function ProjectWorkflowControl({
   instructions?: string
   disabled?: boolean
   disabledReason?: string
+  /** Button text in place of the task's own label (e.g. "Update project summary"). */
+  label?: string
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -255,15 +258,16 @@ export function ProjectWorkflowControl({
 
   const meta = TASK_META[task]
   const Icon = meta.icon
+  const buttonLabel = label ?? t(meta.label)
 
   const ariaLabel =
     state === "running"
-      ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("working")}`
+      ? `${buttonLabel} ${t("for")} ${projectName} — ${t("working")}`
       : state === "done"
-        ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("done, view result")}`
+        ? `${buttonLabel} ${t("for")} ${projectName} — ${t("done, view result")}`
         : state === "error"
-          ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("failed, view error")}`
-          : `${t(meta.label)} ${t("for")} ${projectName}`
+          ? `${buttonLabel} ${t("for")} ${projectName} — ${t("failed, view error")}`
+          : `${buttonLabel} ${t("for")} ${projectName}`
 
   const compact =
     "relative inline-flex h-7 flex-1 items-center justify-center rounded-md border outline-none transition-colors focus-visible:bg-accent/60 disabled:cursor-not-allowed"
@@ -278,11 +282,11 @@ export function ProjectWorkflowControl({
         data-state={state}
         disabled={disabled}
         aria-label={ariaLabel}
-        title={disabledReason ?? t(meta.label)}
-        data-feature-label={t(meta.label)}
+        title={disabledReason ?? buttonLabel}
+        data-feature-label={buttonLabel}
         data-feature-help={
           disabledReason ??
-          `${t(meta.label)} ${t("for")} ${projectName} — ${t("Runs as a background task; click while running to watch its live output, or when done to view the result and re-check")}`
+          `${buttonLabel} ${t("for")} ${projectName} — ${t("Runs as a background task; click while running to watch its live output, or when done to view the result and re-check")}`
         }
         onClick={onClick}
         className={cn(variant === "compact" ? compact : labeled, STATE_TINT[state])}
@@ -298,7 +302,7 @@ export function ProjectWorkflowControl({
               className={cn("size-3.5 shrink-0", state === "running" && "opacity-70")}
               aria-hidden
             />
-            <span>{state === "running" ? t("Working") : t(meta.label)}</span>
+            <span>{state === "running" ? t("Working") : buttonLabel}</span>
           </>
         )}
         {/* A compositor-friendly moving underline — only while working. */}

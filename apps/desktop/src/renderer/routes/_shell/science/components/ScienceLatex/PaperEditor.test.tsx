@@ -157,24 +157,27 @@ describe("PaperEditor agents (mocked server)", () => {
 })
 
 describe("PaperEditor left column (mocked server)", () => {
-  test("Outline sits below Files; Files starts collapsed and Outline open", async () => {
-    window.localStorage.removeItem("pi-lab.latexEditor.filesOpen")
-    window.localStorage.removeItem("pi-lab.latexEditor.outlineOpen")
+  test("the column starts hidden; once opened, Files and Outline are both expanded, Outline below Files", async () => {
+    for (const key of ["leftColumn", "filesOpen", "outlineOpen"]) {
+      window.localStorage.removeItem(`pi-lab.latexEditor.${key}`)
+    }
     const client = createFakeTrpcClient(handlers())
     renderEditor(client, "p4", null)
+    const toggle = await screen.findByTestId("central-files-toggle")
+    expect(screen.queryByTestId("central-files-panel")).toBeNull()
+    fireEvent.click(toggle)
     const column = await screen.findByTestId("central-files-panel")
     const files = within(column).getByTestId("central-files-section")
     const outline = within(column).getByTestId("paper-outline-section")
-    expect(files.getAttribute("aria-expanded")).toBe("false")
+    expect(files.getAttribute("aria-expanded")).toBe("true")
     expect(outline.getAttribute("aria-expanded")).toBe("true")
     // Files comes first in the column, Outline after it.
     expect(files.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
-    // A saved open state still applies, and the order stays the same.
+    // A saved collapsed state still applies.
     fireEvent.click(files)
-    const tree = await within(column).findByTestId("panel-files")
-    expect(tree.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(window.localStorage.getItem("pi-lab.latexEditor.filesOpen")).toContain("true")
+    await waitFor(() => expect(within(column).queryByTestId("panel-files")).toBeNull())
+    expect(window.localStorage.getItem("pi-lab.latexEditor.filesOpen")).toContain("false")
     cleanup()
   })
 })

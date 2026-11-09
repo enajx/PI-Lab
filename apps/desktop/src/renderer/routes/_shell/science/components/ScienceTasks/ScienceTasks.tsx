@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { ProjectMarkdownChoice } from "../../../../../components/ProjectMarkdownChoice"
 import { useTranslate } from "../../../../../i18n/language"
-import { readDefaultAgentId } from "../../../../../preferences/preferences"
+import { readDefaultAgentId, useTasksProject } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
+import { ProjectPicker } from "../ProjectPicker"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type TaskDraft, type TaskRecord, type TaskStatus, TasksWorkspace } from "./TasksWorkspace"
 
@@ -13,12 +14,31 @@ function selectorFor(task: TaskRecord): { id: string } | { sourceStart: number }
   return task.id ? { id: task.id } : { sourceStart: task.source.start }
 }
 
-/** Global Tasks science tab. TODO Markdown remains the only task store. */
-export function ScienceTasks() {
+/**
+ * Global Tasks science tab. TODO Markdown remains the only task store. A project
+ * picker in the top bar shows All projects (the default) or one project; it
+ * remembers the last choice. `initialProjectId` (from `?projectId=`) selects a
+ * project and becomes the remembered one; the picker always wins afterwards.
+ */
+export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [savedProjectId, setSavedProjectId] = useTasksProject()
+  // The picker remembers the choice and replaces the address ("" = All projects).
+  const chooseProject = (projectId: string): void => {
+    setSavedProjectId(projectId)
+    void navigate({
+      to: "/science/tasks",
+      search: projectId ? { projectId } : {},
+      replace: true,
+    })
+  }
+  // A project given in the address wins and becomes the remembered one.
+  useEffect(() => {
+    if (initialProjectId) setSavedProjectId(initialProjectId)
+  }, [initialProjectId, setSavedProjectId])
 
   const listing = useQuery({
     ...trpc.science.tasks.list.queryOptions(),
@@ -42,6 +62,12 @@ export function ScienceTasks() {
 
   const tasks = (listing.data?.tasks ?? []) as TaskRecord[]
   const sources = listing.data?.sources ?? []
+  const wanted = initialProjectId ?? savedProjectId
+  // A project that is no longer listed falls back to All projects once the list loads.
+  const selectedProjectId =
+    listing.data === undefined || sources.some((source) => source.projectId === wanted)
+      ? wanted
+      : ""
   const busy =
     createTask.isPending ||
     updateTask.isPending ||
@@ -151,6 +177,17 @@ export function ScienceTasks() {
       testId="science-tasks"
       title={t("Tasks")}
       subtitle={t("Every project's TODO Markdown, in one place")}
+      actions={
+        <ProjectPicker
+          testId="tasks-project-select"
+          label={t("Project filter")}
+          help={t("Filter tasks by project")}
+          value={selectedProjectId}
+          projects={sources.map((source) => ({ id: source.projectId, name: source.projectName }))}
+          allLabel={t("All projects")}
+          onChange={chooseProject}
+        />
+      }
     >
       {listing.isLoading ? (
         <div className="grid min-h-0 flex-1 place-items-center text-muted-foreground text-sm">
@@ -159,7 +196,11 @@ export function ScienceTasks() {
       ) : (
         <>
           {sources
-            .filter((source) => source.state !== "ready")
+            .filter(
+              (source) =>
+                source.state !== "ready" &&
+                (!selectedProjectId || source.projectId === selectedProjectId),
+            )
             .map((source) => (
               <div
                 key={source.projectId}
@@ -179,6 +220,7 @@ export function ScienceTasks() {
           <TasksWorkspace
             tasks={tasks}
             sources={sources}
+            projectId={selectedProjectId}
             agents={agents.data ?? []}
             defaultAgentId={readDefaultAgentId()}
             busy={busy}

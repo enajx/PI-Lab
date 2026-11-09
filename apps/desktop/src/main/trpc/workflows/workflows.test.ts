@@ -537,6 +537,8 @@ describe("workflows.run — persistence + status", () => {
         result: "Photon drift on track.",
         inputHash: expectedHash,
         errorMessage: null,
+        // Which agent wrote the stored result, shown in the Project status card.
+        agentLabel: "Codex",
       })
       expect(status.fetchExperiments).toBeNull()
     } finally {
@@ -574,6 +576,7 @@ describe("workflows.run — failures surface as an error record", () => {
       const failed = await settle(harness, projectId, "summary")
       expect(failed.errorMessage).toMatch(/code 3.*model unavailable/i)
       expect(failed.result).toBe("")
+      expect(failed.agentLabel).toBeNull()
 
       // status reflects the error; the record is not treated as a valid cache, so
       // the next run re-executes despite the unchanged git state.

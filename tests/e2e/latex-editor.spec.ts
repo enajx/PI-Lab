@@ -159,7 +159,8 @@ function middleY(box: { y: number; height: number }): number {
 
 /**
  * The two setup cards have the same height, the shorter card's content sits in
- * its vertical middle, and the pair is centred in the area below the top bar.
+ * its vertical middle, and the pair sits at the top of the area below the top
+ * bar, horizontally centred.
  */
 async function expectCentredSetup(page: Page): Promise<void> {
   const overleaf = await page.getByTestId("paper-setup-overleaf").boundingBox()
@@ -174,8 +175,13 @@ async function expectCentredSetup(page: Page): Promise<void> {
   expect(Math.abs(folder.height - overleaf.height)).toBeLessThan(1)
   const contentMiddle = (icon.y + button.y + button.height) / 2
   expect(Math.abs(contentMiddle - middleY(folder))).toBeLessThan(2)
-  expect(Math.abs(middleY(content) - middleY(area))).toBeLessThan(2)
-  expect(Math.abs(content.x + content.width / 2 - (area.x + area.width / 2))).toBeLessThan(2)
+  // At the top: the cards start near the top edge of the page, not in its vertical middle.
+  expect(overleaf.y - area.y).toBeLessThan(40)
+  // Horizontally centred, with cards of at most 23rem (368px) each.
+  const pair = { left: overleaf.x, right: folder.x + folder.width }
+  expect(Math.abs((pair.left + pair.right) / 2 - (area.x + area.width / 2))).toBeLessThan(2)
+  expect(overleaf.width).toBeLessThanOrEqual(368 + 1)
+  expect(folder.width).toBeLessThanOrEqual(368 + 1)
 }
 
 /** Replace the line under \section{Introduction} (the line both sides edit). */
@@ -211,21 +217,21 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     await openAndLink(page, "test-merge")
     await page.screenshot({ path: test.info().outputPath("latex-editor.png") })
 
-    // The editor's left column: Files (collapsed by default) with the Outline
-    // below it (open by default), and the main .tex open with LaTeX colouring.
+    // The editor's left column: hidden by default. Once opened, Files and the
+    // Outline below it are both expanded, and the main .tex is open with LaTeX colouring.
     const column = page.getByTestId("central-files-panel")
     const filesHeader = page.getByTestId("central-files-section")
     const outlineHeader = page.getByTestId("paper-outline-section")
+    await expect(column).toHaveCount(0)
+    await page.getByTestId("central-files-toggle").click()
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
-    await expect(filesHeader).toHaveAttribute("aria-expanded", "false")
+    await expect(filesHeader).toHaveAttribute("aria-expanded", "true")
     await expect(outlineHeader).toHaveAttribute("aria-expanded", "true")
-    await expect(column.getByTestId("panel-files")).toHaveCount(0)
+    await expect(column.getByTestId("file-tree-file").filter({ hasText: "main.tex" })).toBeVisible()
     const filesBox = await filesHeader.boundingBox()
     const outlineBox = await outlineHeader.boundingBox()
     if (!filesBox || !outlineBox) throw new Error("left column sections are not visible")
     expect(outlineBox.y).toBeGreaterThan(filesBox.y)
-    await filesHeader.click()
-    await expect(column.getByTestId("file-tree-file").filter({ hasText: "main.tex" })).toBeVisible()
     // The panel button hides and shows the column.
     await page.getByTestId("central-files-toggle").click()
     await expect(column).toHaveCount(0)
@@ -473,6 +479,7 @@ test("LaTeX Editor links a project folder that is an Overleaf clone without the 
     await openLatexEditor(page)
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
     await expect(page.getByTestId("paper-setup-overleaf")).toHaveCount(0)
+    await page.getByTestId("central-files-toggle").click()
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
     // Sync is on: an edit is committed and pushed (to the local stand-in repo).
     await writeFile(join(project, "main.tex"), MAIN.replace("Method text.", "Root method text."))
@@ -528,6 +535,7 @@ test("LaTeX Editor asks before using a project folder that is not an Overleaf cl
     await expect(topBar.getByTestId("paper-sync-off")).toHaveText("Sync is off for this paper")
     await expect(page.getByTestId("paper-last-sync")).toHaveCount(0)
     await expect(page.getByTestId("paper-sync")).toHaveCount(0)
+    await page.getByTestId("central-files-toggle").click()
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
   } finally {
     if (app) await close(app)
@@ -568,6 +576,7 @@ test("LaTeX Editor changes and clears the paper folder from the footer, and Edit
       .getByTestId("paper-folder-choose")
       .click()
     await expect(item).toHaveText(outside, { timeout: 15_000 })
+    await page.getByTestId("central-files-toggle").click()
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
     await page.screenshot({ path: test.info().outputPath("latex-paper-folder-footer.png") })
 
@@ -648,6 +657,7 @@ test("LaTeX Editor lists the papers inside a chosen folder that is not a paper",
     await expect(
       page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder"),
     ).toHaveText(await realpath(second))
+    await page.getByTestId("central-files-toggle").click()
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
   } finally {
     if (app) await close(app)

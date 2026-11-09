@@ -257,6 +257,8 @@ export interface ProjectWorkflowRecord {
   lastCheckedAt: number
   /** Failure detail from the last run, or null on success / never-run. */
   errorMessage: string | null
+  /** Label of the agent that wrote `result` (e.g. "Claude Code"); null when unknown or on error. */
+  agentLabel: string | null
 }
 
 /** Result of {@link runProjectWorkflow}: the record plus whether it was cached. */
@@ -302,7 +304,13 @@ function upsertRow(
   db: PiLabDatabase,
   projectId: string,
   task: WorkflowTask,
-  values: { result: string; inputHash: string; lastCheckedAt: number; errorMessage: string | null },
+  values: {
+    result: string
+    inputHash: string
+    lastCheckedAt: number
+    errorMessage: string | null
+    agentLabel: string | null
+  },
 ): ProjectWorkflowRun {
   const now = Date.now()
   return db
@@ -324,7 +332,14 @@ function toRecord(row: ProjectWorkflowRun, running: boolean): ProjectWorkflowRec
     inputHash: row.inputHash,
     lastCheckedAt: row.lastCheckedAt,
     errorMessage: row.errorMessage,
+    agentLabel: row.agentLabel,
   }
+}
+
+/** A finished run's captured text and the label of the agent that produced it. */
+interface WorkflowOutput {
+  result: string
+  agentLabel: string
 }
 
 /**
@@ -340,7 +355,7 @@ async function executeWorkflow(
   stream: RunStream,
   inputHash: string,
   target: WorkflowTarget,
-): Promise<string> {
+): Promise<WorkflowOutput> {
   if (input.task === "fetch-experiments") await scaffoldFetchExperimentsSkill(project.repoPath)
 
   const prompt =
@@ -421,7 +436,7 @@ async function executeWorkflow(
   })
   stream.process = started
   const result = await started.completion
-  return workflowResult(agent.label, isClaude, result, parser)
+  return { result: workflowResult(agent.label, isClaude, result, parser), agentLabel: agent.label }
 }
 
 /** Decode the retained final output as well as live chunks, including after reconnect. */
@@ -483,10 +498,10 @@ async function persistWorkflow(
   currentHash: string,
   key: string,
   stream: RunStream,
-  completion: Promise<string>,
+  completion: Promise<WorkflowOutput>,
 ): Promise<void> {
   try {
-    const result = await completion
+    const { result, agentLabel } = await completion
     if (
       !ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).get()
     ) {
@@ -497,6 +512,7 @@ async function persistWorkflow(
       inputHash: currentHash,
       lastCheckedAt: Date.now(),
       errorMessage: null,
+      agentLabel,
     })
     finishStream(stream, { kind: "done", result })
   } catch (error) {
@@ -509,6 +525,7 @@ async function persistWorkflow(
         inputHash: currentHash,
         lastCheckedAt: Date.now(),
         errorMessage: message,
+        agentLabel: null,
       })
     }
     finishStream(stream, { kind: "error", message })
@@ -546,8 +563,16 @@ export function restoreProjectWorkflow(
     metadata.inputHash,
     key,
     stream,
-    process.completion.then((result) =>
-      workflowResult(metadata.agentLabel, metadata.agentId === "claude-code", result, null),
+    process.completion.then(
+      (result): WorkflowOutput => ({
+        result: workflowResult(
+          metadata.agentLabel,
+          metadata.agentId === "claude-code",
+          result,
+          null,
+        ),
+        agentLabel: metadata.agentLabel,
+      }),
     ),
   )
 }
@@ -631,6 +656,7 @@ export async function runProjectWorkflow(
     inputHash: currentHash,
     lastCheckedAt: stored?.lastCheckedAt ?? 0,
     errorMessage: null,
+    agentLabel: stored?.agentLabel ?? null,
   }
   // Idempotent: a click on an already-running control returns the running record
   // without starting a second process (or clobbering the live stream).
@@ -659,7 +685,14 @@ function readStatus(
   const row = readRow(ctx.db, projectId, task)
   if (!row)
     return running
-      ? { running, result: "", inputHash: "", lastCheckedAt: 0, errorMessage: null }
+      ? {
+          running,
+          result: "",
+          inputHash: "",
+          lastCheckedAt: 0,
+          errorMessage: null,
+          agentLabel: null,
+        }
       : null
   return toRecord(row, running)
 }

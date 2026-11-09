@@ -24,5 +24,5 @@ export const Route = createFileRoute("/_shell/science/analysis")({
 
 function AnalysisRoute() {
   const { projectId } = Route.useSearch()
-  return <ScienceAnalysis key={projectId ?? "default"} initialProjectId={projectId} />
+  return <ScienceAnalysis initialProjectId={projectId} />
 }

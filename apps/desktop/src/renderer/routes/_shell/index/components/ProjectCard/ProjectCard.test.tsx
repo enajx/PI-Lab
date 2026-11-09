@@ -58,6 +58,8 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
     "agents.projectChoice": () => ({ agentId: null }),
     "projects.capabilities": () => ({ git: true }),
     "workflows.status": () => IDLE_STATUS,
+    "sessions.projectAgents": () => [],
+    "workflows.onOutput": () => ({ kind: "start", command: "agent" }),
     "projects.thumbnail": () => ({ dataUrl: thumbnail, tooLarge: false }),
     ...handlers,
   })
@@ -100,8 +102,26 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
       </div>
     ),
   })
+  const tasksRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/science/tasks",
+    validateSearch: (search: Record<string, unknown>) => ({
+      projectId: typeof search.projectId === "string" ? search.projectId : "",
+    }),
+    component: () => (
+      <div data-testid="on-tasks-route">
+        {(tasksRoute.useSearch() as { projectId: string }).projectId}
+      </div>
+    ),
+  })
   const router = createRouter({
-    routeTree: rootRoute.addChildren([indexRoute, projectRoute, analysisRoute, latexRoute]),
+    routeTree: rootRoute.addChildren([
+      indexRoute,
+      projectRoute,
+      analysisRoute,
+      latexRoute,
+      tasksRoute,
+    ]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   })
 
@@ -318,27 +338,37 @@ describe("ProjectCard metadata", () => {
     expect(within(block).queryByTestId("project-card-links")).toBeNull()
   })
 
-  test("all three action buttons render, are compact (icon-only), and share one row", async () => {
+  test("the action buttons render, are compact (icon-only), and share one row", async () => {
     renderCard(project({ id: "pbtn", name: "Kappa", metadata: null }))
 
     const auto = await screen.findByTestId("project-card-auto-research")
     const analysis = screen.getByTestId("project-card-analysis")
-    const summary = screen.getByTestId("project-card-summary")
+    const latex = screen.getByTestId("project-card-latex")
+    const tasks = screen.getByTestId("project-card-tasks")
+    const status = screen.getByTestId("project-card-status-button")
 
-    // Icon-forward: no wrapping text labels, so the three fit on one row. Each still
+    // The Project summary button is replaced by the Project status button.
+    expect(screen.queryByTestId("project-card-summary")).toBeNull()
+
+    // Icon-forward: no wrapping text labels, so all fit on one row. Each still
     // carries an accessible name and the hover-help attributes for discoverability.
-    for (const button of [auto, analysis, summary]) {
+    for (const button of [auto, analysis, latex, tasks, status]) {
       expect(button.textContent?.trim()).toBe("")
       expect(button.getAttribute("aria-label")).toBeTruthy()
       expect(button.getAttribute("data-feature-help")).toBeTruthy()
     }
     expect(auto.getAttribute("aria-label")).toContain("Auto-research")
     expect(analysis.getAttribute("aria-label")).toContain("Analysis")
-    expect(summary.getAttribute("aria-label")).toContain("Project summary")
+    expect(tasks.getAttribute("aria-label")).toContain("Tasks")
+    expect(tasks.getAttribute("title")).toBe("Tasks")
+    expect(status.getAttribute("aria-label")).toContain("Project status")
+    expect(status.getAttribute("title")).toBe("Project status")
 
-    // The three action buttons live in one shared footer row.
-    expect(auto.parentElement).toBe(analysis.parentElement)
-    expect(analysis.parentElement).toBe(summary.parentElement)
+    // The action buttons live in one shared footer row; Tasks sits next to LaTeX Editor.
+    for (const button of [analysis, latex, tasks, status]) {
+      expect(button.parentElement).toBe(auto.parentElement)
+    }
+    expect(latex.nextElementSibling).toBe(tasks)
   })
 
   test("disables Git-only card actions with an Initialize Git explanation", async () => {
@@ -351,13 +381,18 @@ describe("ProjectCard metadata", () => {
 
     const auto = await screen.findByTestId("project-card-auto-research")
     const analysis = screen.getByTestId("project-card-analysis")
-    const summary = screen.getByTestId("project-card-summary")
+    const status = screen.getByTestId("project-card-status-button")
 
     expect((analysis as HTMLButtonElement).disabled).toBe(false)
+    // The Project status card opens without Git; only its summary update needs Git.
+    expect((status as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(status)
+    const summary = await screen.findByTestId("project-status-update-summary")
     for (const button of [auto, summary]) {
       expect((button as HTMLButtonElement).disabled).toBe(true)
       expect(button.getAttribute("data-feature-help")).toContain("Initialize Git")
     }
+    fireEvent.click(screen.getByTestId("project-status-close"))
 
     fireEvent.click(auto)
     expect(screen.queryByTestId("on-project-route")).toBeNull()
@@ -474,7 +509,13 @@ describe("ProjectCard metadata", () => {
   })
 })
 
-describe("ProjectCard background routine controls", () => {
+/** Open the card's Project status card and return its "Update project summary" control. */
+async function openSummaryControl(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByTestId("project-card-status-button"))
+  return screen.findByTestId("project-status-update-summary")
+}
+
+describe("ProjectCard Project status summary update", () => {
   test("an idle control triggers a background run on click (no navigation)", async () => {
     const calls: unknown[] = []
     renderCard(project({ id: "wf-idle", name: "Photon", metadata: null }), {
@@ -491,7 +532,7 @@ describe("ProjectCard background routine controls", () => {
       },
     })
 
-    const summary = await screen.findByTestId("project-card-summary")
+    const summary = await openSummaryControl()
     expect(summary.getAttribute("data-state")).toBe("idle")
 
     fireEvent.click(summary)
@@ -517,7 +558,7 @@ describe("ProjectCard background routine controls", () => {
       "workflows.onOutput": () => ({ kind: "chunk", stream: "stdout", text: "Reviewing commits…" }),
     })
 
-    const summary = await screen.findByTestId("project-card-summary")
+    const summary = await openSummaryControl()
     await waitFor(() => expect(summary.getAttribute("data-state")).toBe("running"))
     // A running control shows a transform-only moving underline, keeping the
     // workflow window stable while the agent streams activity updates.
@@ -564,7 +605,7 @@ describe("ProjectCard background routine controls", () => {
       },
     })
 
-    const summary = await screen.findByTestId("project-card-summary")
+    const summary = await openSummaryControl()
     await waitFor(() => expect(summary.getAttribute("data-state")).toBe("done"))
     // A done control is neutral — no green tint (the result lives in the window).
     expect(summary.className).not.toContain("emerald")
@@ -610,7 +651,7 @@ describe("ProjectCard background routine controls", () => {
       }),
     })
 
-    const summary = await screen.findByTestId("project-card-summary")
+    const summary = await openSummaryControl()
     await waitFor(() => expect(summary.getAttribute("data-state")).toBe("error"))
     expect(summary.className).not.toContain("red")
 
@@ -636,7 +677,7 @@ describe("ProjectCard background routine controls", () => {
       "workflows.onOutput": () => ({ kind: "start", command: "Claude Code · /usr/bin/claude" }),
     })
 
-    const summary = await screen.findByTestId("project-card-summary")
+    const summary = await openSummaryControl()
     expect(summary.getAttribute("data-state")).toBe("idle")
 
     // A single click both starts the run AND opens the window (no second click).
@@ -671,7 +712,7 @@ describe("ProjectCard background routine controls", () => {
       "workflows.onOutput": () => ({ kind: "start", command: "Claude" }),
     })
 
-    const summary = await screen.findByTestId("project-card-summary")
+    const summary = await openSummaryControl()
     await waitFor(() => expect(summary.getAttribute("data-state")).toBe("done"))
 
     fireEvent.click(summary)
@@ -689,6 +730,12 @@ test("Analysis opens the selected project without launching an agent", async () 
   renderCard(project({ id: "analysis-project", name: "Data" }))
   fireEvent.click(await screen.findByTestId("project-card-analysis"))
   expect((await screen.findByTestId("on-analysis-route")).textContent).toBe("analysis-project")
+})
+
+test("the Tasks button opens Tasks with this project chosen", async () => {
+  renderCard(project({ id: "tasks-project", name: "Tasks", metadata: null }))
+  fireEvent.click(await screen.findByTestId("project-card-tasks"))
+  expect((await screen.findByTestId("on-tasks-route")).textContent).toBe("tasks-project")
 })
 
 test("the LaTeX Editor button opens LaTeX Editor with this project chosen", async () => {

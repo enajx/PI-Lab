@@ -944,6 +944,8 @@ export const projectWorkflowRuns = sqliteTable(
       .$defaultFn(() => Date.now()),
     /** Failure detail when the last run errored/timed out; null on success. */
     errorMessage: text("error_message"),
+    /** Label of the agent that wrote `result` (e.g. "Claude Code"); null on error or for older rows. */
+    agentLabel: text("agent_label"),
     updatedAt: integer("updated_at")
       .notNull()
       .$defaultFn(() => Date.now()),
