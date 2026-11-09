@@ -88,8 +88,20 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
       </div>
     ),
   })
+  const latexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/science/latex",
+    validateSearch: (search: Record<string, unknown>) => ({
+      projectId: typeof search.projectId === "string" ? search.projectId : "",
+    }),
+    component: () => (
+      <div data-testid="on-latex-route">
+        {(latexRoute.useSearch() as { projectId: string }).projectId}
+      </div>
+    ),
+  })
   const router = createRouter({
-    routeTree: rootRoute.addChildren([indexRoute, projectRoute, analysisRoute]),
+    routeTree: rootRoute.addChildren([indexRoute, projectRoute, analysisRoute, latexRoute]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   })
 
@@ -675,4 +687,10 @@ test("Analysis opens the selected project without launching an agent", async () 
   renderCard(project({ id: "analysis-project", name: "Data" }))
   fireEvent.click(await screen.findByTestId("project-card-analysis"))
   expect((await screen.findByTestId("on-analysis-route")).textContent).toBe("analysis-project")
+})
+
+test("the LaTeX Editor button opens LaTeX Editor with this project chosen", async () => {
+  renderCard(project({ id: "paper-project", name: "Paper", metadata: null }))
+  fireEvent.click(await screen.findByTestId("project-card-latex"))
+  expect((await screen.findByTestId("on-latex-route")).textContent).toBe("paper-project")
 })

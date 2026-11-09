@@ -7,6 +7,7 @@ import {
   ChartArea,
   Eye,
   EyeOff,
+  FileType2,
   ImagePlus,
   Pencil,
   Sparkles,
@@ -500,6 +501,18 @@ export function ProjectCard({ project }: ProjectCardProps) {
             <ChartArea className="size-4 shrink-0" aria-hidden />
           </button>
         ) : null}
+        <button
+          type="button"
+          data-testid="project-card-latex"
+          aria-label={`${t("LaTeX Editor")} ${project.name}`}
+          title={t("LaTeX Editor")}
+          data-feature-label={t("LaTeX Editor")}
+          data-feature-help={t("Open this project's paper in the LaTeX Editor")}
+          className={CARD_ACTION_CLASS}
+          onClick={() => void navigate({ to: "/science/latex", search: { projectId: project.id } })}
+        >
+          <FileType2 className="size-4 shrink-0" aria-hidden />
+        </button>
         <ProjectWorkflowControl
           projectId={project.id}
           projectName={project.name}

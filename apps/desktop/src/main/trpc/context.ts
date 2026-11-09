@@ -164,12 +164,30 @@ export const TEST_PLAN_AGENT: TerminalAgent = {
 }
 
 /**
+ * A test-only merge agent for the LaTeX Editor "Ask agent to merge" E2E: in its
+ * working folder it replaces every Git conflict block in `.tex` files with both
+ * sides, mine first, so the review shows a real, deterministic merge.
+ */
+export const TEST_MERGE_AGENT: TerminalAgent = {
+  id: "test-merge",
+  label: "Test Merge",
+  command: process.execPath,
+  detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+  defaultArgs: ["-e", "process.stdout.write('MERGE-AGENT\\n')"],
+  oneShotArgs: [
+    "-e",
+    String.raw`const fs=require('fs');for(const f of fs.readdirSync('.',{recursive:true})){if(!String(f).endsWith('.tex'))continue;const t=fs.readFileSync(f,'utf8');const m=t.replace(/^<{7} .*\n([\s\S]*?)^={7}\n([\s\S]*?)^>{7} .*\n/gm,'$1$2');if(m!==t)fs.writeFileSync(f,m)}process.stdout.write('merged\n')`,
+  ],
+}
+
+/**
  * Build the launchable agent catalog for an app instance. In test mode the
  * deterministic {@link TEST_AGENT} is appended so the E2E has an assertable agent
  * to launch; in normal use it's just the built-ins.
  */
 export function buildAgentCatalog(testMode: boolean): readonly TerminalAgent[] {
   return testMode
-    ? [...BUILTIN_AGENTS, TEST_AGENT, TEST_ACTIVITY_AGENT, TEST_PLAN_AGENT]
+    ? [...BUILTIN_AGENTS, TEST_AGENT, TEST_ACTIVITY_AGENT, TEST_PLAN_AGENT, TEST_MERGE_AGENT]
     : BUILTIN_AGENTS
 }

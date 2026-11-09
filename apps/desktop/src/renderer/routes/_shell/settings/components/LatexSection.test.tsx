@@ -1,3 +1,4 @@
+import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
@@ -16,7 +17,14 @@ const initialStatus = {
 function renderSection(handlers: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
-    <AppProviders client={createFakeTrpcClient(handlers)} queryClient={queryClient}>
+    <AppProviders
+      client={createFakeTrpcClient({
+        "paper.token.status": () => ({ configured: false }),
+        "settings.get": () => ({ editor: DEFAULT_EDITOR_SETTINGS }),
+        ...handlers,
+      })}
+      queryClient={queryClient}
+    >
       <LatexSection />
     </AppProviders>,
   )

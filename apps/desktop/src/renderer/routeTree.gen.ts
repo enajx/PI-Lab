@@ -18,6 +18,7 @@ import { Route as ShellAutomationsRouteImport } from './routes/_shell/automation
 import { Route as ShellScienceTasksRouteImport } from './routes/_shell/science/tasks'
 import { Route as ShellScienceSkillsRouteImport } from './routes/_shell/science/skills'
 import { Route as ShellScienceLibraryRouteImport } from './routes/_shell/science/library'
+import { Route as ShellScienceLatexRouteImport } from './routes/_shell/science/latex'
 import { Route as ShellScienceClusterRouteImport } from './routes/_shell/science/cluster'
 import { Route as ShellScienceAnalysisRouteImport } from './routes/_shell/science/analysis'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell/projects/$projectId'
@@ -66,6 +67,11 @@ const ShellScienceLibraryRoute = ShellScienceLibraryRouteImport.update({
   path: '/science/library',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellScienceLatexRoute = ShellScienceLatexRouteImport.update({
+  id: '/science/latex',
+  path: '/science/latex',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellScienceClusterRoute = ShellScienceClusterRouteImport.update({
   id: '/science/cluster',
   path: '/science/cluster',
@@ -91,6 +97,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/science/analysis': typeof ShellScienceAnalysisRoute
   '/science/cluster': typeof ShellScienceClusterRoute
+  '/science/latex': typeof ShellScienceLatexRoute
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
   '/science/tasks': typeof ShellScienceTasksRoute
@@ -104,6 +111,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/science/analysis': typeof ShellScienceAnalysisRoute
   '/science/cluster': typeof ShellScienceClusterRoute
+  '/science/latex': typeof ShellScienceLatexRoute
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
   '/science/tasks': typeof ShellScienceTasksRoute
@@ -119,6 +127,7 @@ export interface FileRoutesById {
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/science/analysis': typeof ShellScienceAnalysisRoute
   '/_shell/science/cluster': typeof ShellScienceClusterRoute
+  '/_shell/science/latex': typeof ShellScienceLatexRoute
   '/_shell/science/library': typeof ShellScienceLibraryRoute
   '/_shell/science/skills': typeof ShellScienceSkillsRoute
   '/_shell/science/tasks': typeof ShellScienceTasksRoute
@@ -134,6 +143,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId'
     | '/science/analysis'
     | '/science/cluster'
+    | '/science/latex'
     | '/science/library'
     | '/science/skills'
     | '/science/tasks'
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId'
     | '/science/analysis'
     | '/science/cluster'
+    | '/science/latex'
     | '/science/library'
     | '/science/skills'
     | '/science/tasks'
@@ -161,6 +172,7 @@ export interface FileRouteTypes {
     | '/_shell/projects/$projectId'
     | '/_shell/science/analysis'
     | '/_shell/science/cluster'
+    | '/_shell/science/latex'
     | '/_shell/science/library'
     | '/_shell/science/skills'
     | '/_shell/science/tasks'
@@ -235,6 +247,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellScienceLibraryRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/science/latex': {
+      id: '/_shell/science/latex'
+      path: '/science/latex'
+      fullPath: '/science/latex'
+      preLoaderRoute: typeof ShellScienceLatexRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/science/cluster': {
       id: '/_shell/science/cluster'
       path: '/science/cluster'
@@ -268,6 +287,7 @@ interface ShellRouteChildren {
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellScienceAnalysisRoute: typeof ShellScienceAnalysisRoute
   ShellScienceClusterRoute: typeof ShellScienceClusterRoute
+  ShellScienceLatexRoute: typeof ShellScienceLatexRoute
   ShellScienceLibraryRoute: typeof ShellScienceLibraryRoute
   ShellScienceSkillsRoute: typeof ShellScienceSkillsRoute
   ShellScienceTasksRoute: typeof ShellScienceTasksRoute
@@ -282,6 +302,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellScienceAnalysisRoute: ShellScienceAnalysisRoute,
   ShellScienceClusterRoute: ShellScienceClusterRoute,
+  ShellScienceLatexRoute: ShellScienceLatexRoute,
   ShellScienceLibraryRoute: ShellScienceLibraryRoute,
   ShellScienceSkillsRoute: ShellScienceSkillsRoute,
   ShellScienceTasksRoute: ShellScienceTasksRoute,

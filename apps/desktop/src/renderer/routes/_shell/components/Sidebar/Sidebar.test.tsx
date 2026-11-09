@@ -324,6 +324,7 @@ describe("Sidebar", () => {
       "editor",
       "analysis",
       "tasks",
+      "latex",
       "library",
       "skills",
       "workflows",
@@ -352,6 +353,17 @@ describe("Sidebar", () => {
     expect(
       screen.getByTestId("nav-editor").nextElementSibling?.getAttribute("data-science-tab"),
     ).toBe("library")
+  })
+
+  test("adds LaTeX Editor below Tasks in an older saved nav order", async () => {
+    window.localStorage.setItem(
+      "pi-lab.sidebar.navOrder",
+      JSON.stringify(["library", "tasks", "analysis", "workflows", "editor"]),
+    )
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const order = [...nav.children].map((row) => row.getAttribute("data-science-tab"))
+    expect(order.indexOf("latex")).toBe(order.indexOf("tasks") + 1)
   })
 
   test("hides Cluster/Analysis nav rows when their section preference is off, restores when on", async () => {

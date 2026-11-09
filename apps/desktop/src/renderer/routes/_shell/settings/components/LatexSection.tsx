@@ -2,6 +2,7 @@ import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { useTRPC } from "../../../../trpc/react"
+import { OverleafSettings } from "./OverleafSettings"
 import { SelectField, SettingsSection } from "./SettingsControls"
 
 /** Global compiler preferences and an explicit, shared PDFLaTeX installation. */
@@ -137,6 +138,7 @@ export function LatexSection() {
           </div>
         </>
       ) : null}
+      <OverleafSettings />
       {update.error ? (
         <p role="alert" className="px-4 py-3 text-destructive text-sm">
           {update.error.message}

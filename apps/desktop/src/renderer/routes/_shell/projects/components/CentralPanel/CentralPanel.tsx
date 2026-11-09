@@ -41,6 +41,7 @@ import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../SplitDock/SplitDock"
 import { CloseFilePrompt, useCloseFilePrompt } from "./CloseFilePrompt"
+import { pdfBesideSource } from "./pdfBesideSource"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
 
 /** A new Run tab per run, so each run is placed below the split of the file that ran. */
@@ -83,6 +84,10 @@ interface CentralPanelProps {
   onPinFile?: (relPath: string) => void
   onSetMainFile?: (relPath: string) => void
   onSaveUntitled?: (relPath: string) => void
+  /** LaTeX Editor layout: open PDFs to the right of the LaTeX source. */
+  pdfBesideSource?: boolean
+  /** Open a source file at a position (the LaTeX Editor outline); a new nonce repeats the jump. */
+  sourceRequest?: (SourceLocation & { nonce: number }) | null
 }
 
 /**
@@ -110,6 +115,8 @@ export function CentralPanel({
   onPinFile,
   onSetMainFile,
   onSaveUntitled,
+  pdfBesideSource: placePdfBesideSource,
+  sourceRequest,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -228,6 +235,13 @@ export function CentralPanel({
     setSourceLocation(location)
     void editor.openFile(location.relPath).then(() => controller.selectFile(location.relPath))
   }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a jump runs once per request nonce, not when the editor API changes identity.
+  useEffect(() => {
+    if (!sourceRequest) return
+    const { nonce: _nonce, ...location } = sourceRequest
+    setSourceLocation(location)
+    void editor.openFile(location.relPath).then(() => controller.selectFile(location.relPath))
+  }, [sourceRequest?.nonce])
   const navigatePdf = (location: PdfLocation): void => {
     setPdfLocation(location)
     controller.openFile(location.relPath)
@@ -440,6 +454,13 @@ export function CentralPanel({
   }
   // Run output opens below the split showing the file that ran.
   const dockPlacement = (id: string): AddPanelPositionOptions | undefined => {
+    if (placePdfBesideSource) {
+      const placement = pdfBesideSource(
+        id,
+        editor.tabs.map((tab) => tab.relPath),
+      )
+      if (placement) return placement
+    }
     const ranFrom = belowEditorRun?.relPath
     if (
       !belowEditorRun ||

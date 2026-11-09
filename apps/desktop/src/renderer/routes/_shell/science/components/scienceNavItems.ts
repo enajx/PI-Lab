@@ -1,5 +1,5 @@
 import type { LinkProps } from "@tanstack/react-router"
-import { ChartArea, FlaskConical, Library, ListTodo, Server } from "lucide-react"
+import { ChartArea, FileType2, FlaskConical, Library, ListTodo, Server } from "lucide-react"
 import type { ComponentType } from "react"
 
 /**
@@ -33,6 +33,15 @@ export const scienceNavItems: ScienceNavItem[] = [
     icon: ListTodo,
     ready: true,
     to: "/science/tasks",
+  },
+  {
+    id: "latex",
+    label: "LaTeX Editor",
+    description:
+      "Write a project's paper in LaTeX with its PDF beside it, and sync it with Overleaf.",
+    icon: FileType2,
+    ready: true,
+    to: "/science/latex",
   },
   {
     id: "library",

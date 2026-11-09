@@ -70,6 +70,7 @@ const DEFAULT_NAV_ORDER = [
   "editor",
   "analysis",
   "tasks",
+  "latex",
   "library",
   "skills",
   "workflows",
@@ -858,9 +859,19 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
     navOrder.includes("editor") || workflowsIndex < 0
       ? navOrder
       : [...navOrder.slice(0, workflowsIndex + 1), "editor", ...navOrder.slice(workflowsIndex + 1)]
+  // Saved orders also predate LaTeX Editor: place it below Tasks once.
+  const tasksIndex = effectiveOrder.indexOf("tasks")
+  const orderWithLatex =
+    effectiveOrder.includes("latex") || tasksIndex < 0
+      ? effectiveOrder
+      : [
+          ...effectiveOrder.slice(0, tasksIndex + 1),
+          "latex",
+          ...effectiveOrder.slice(tasksIndex + 1),
+        ]
   const ordered = orderById(
     visibleItems,
-    effectiveOrder.length ? effectiveOrder : DEFAULT_NAV_ORDER,
+    orderWithLatex.length ? orderWithLatex : DEFAULT_NAV_ORDER,
   )
   const navRowProps = useDragReorder(
     ordered.map((item) => item.id),

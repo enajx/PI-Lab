@@ -156,6 +156,10 @@ function useStringPref(key: string, fallback: string): [string, (next: string) =
   return [value, set]
 }
 
+/** The project last chosen in the LaTeX Editor tab ("" when none yet). */
+export const useLatexEditorProject = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.latexEditor.project", "")
+
 // --- Dashboard Digital Rain: global, renderer-only animation tuning --------
 // These settings deliberately don't belong to a project: every card uses the
 // same bounded rendering budget, while its character source remains project-owned.
