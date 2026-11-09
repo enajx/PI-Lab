@@ -48,7 +48,7 @@ describe("Overleaf Settings (mocked RPC)", () => {
     )
   })
 
-  it("says when the token is found in the user's Git credentials and still offers to save one", async () => {
+  it("says Overleaf Git is detected when the user's Git has a credential, and still offers to save a token", async () => {
     const set = vi.fn()
     renderSettings({
       "paper.token.status": () => ({ configured: true, source: "git" }),
@@ -57,7 +57,7 @@ describe("Overleaf Settings (mocked RPC)", () => {
     })
     await waitFor(() =>
       expect(screen.getByTestId("settings-overleaf-token-state").textContent).toBe(
-        "Found in your Git credentials",
+        "Overleaf Git detected",
       ),
     )
     expect(screen.queryByTestId("settings-overleaf-token-remove")).toBeNull()

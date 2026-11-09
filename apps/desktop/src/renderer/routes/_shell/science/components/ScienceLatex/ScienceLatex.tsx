@@ -110,6 +110,7 @@ export function ScienceLatex({
           rootRelPath={paper.data.rootRelPath}
           lastSyncAt={paper.data.paper.lastSyncAt}
           hasRemote={paper.data.paper.remoteUrl !== null}
+          syncEnabled={paper.data.paper.syncEnabled}
           outputDir={paper.data.paper.outputDir}
           effectiveOutputDir={paper.data.paper.effectiveOutputDir}
           settings={settings}

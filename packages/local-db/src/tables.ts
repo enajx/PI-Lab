@@ -292,6 +292,11 @@ export interface ProjectPaper {
    * ("." means next to the .tex). Absent: the `latexOutputDir` editor setting.
    */
   outputDir?: string
+  /**
+   * False when the paper is the project folder linked for editing and building
+   * only: Sync then refuses to run. Absent: Sync is on.
+   */
+  syncEnabled?: boolean
 }
 
 export interface ProjectMetadata {

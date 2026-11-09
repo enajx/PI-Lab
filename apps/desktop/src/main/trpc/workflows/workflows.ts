@@ -24,6 +24,7 @@ import type {
 } from "../../automations/nonInteractiveRunner"
 import { computeGitStateHash, isGitRepo } from "../../git"
 import { conflictedFiles, isMerging } from "../../git/remote"
+import { requireSyncEnabled } from "../../paper/overleaf"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
@@ -553,18 +554,20 @@ export function restoreProjectWorkflow(
 
 /**
  * Resolve where a run works. latex-merge runs in the linked paper folder and
- * needs a merge in progress there with at least one conflicted file; other
- * tasks run in the project repo.
+ * needs Sync on for the paper and a merge in progress there with at least one
+ * conflicted file; other tasks run in the project repo.
  */
 async function workflowTarget(project: Project, task: WorkflowTask): Promise<WorkflowTarget> {
   if (task !== "latex-merge") return { cwd: project.repoPath, conflictedFiles: [] }
-  const dir = project.metadata?.paper?.dir
-  if (!dir) {
+  const paper = project.metadata?.paper
+  if (!paper) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
       message: "No paper folder is linked to this project",
     })
   }
+  requireSyncEnabled(paper.syncEnabled)
+  const dir = paper.dir
   const files = (await isGitRepo(dir)) && (await isMerging(dir)) ? await conflictedFiles(dir) : []
   if (files.length === 0) {
     throw new TRPCError({

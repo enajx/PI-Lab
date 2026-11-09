@@ -35,6 +35,8 @@ test("after arriving with a project in the address, the picker still switches pr
     ],
     "settings.get": () => ({}),
     "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+    "paper.detect": () => ({ clones: [], stoppedEarly: false }),
+    "paper.token.status": () => ({ configured: true, source: "saved" }),
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
@@ -59,7 +61,13 @@ test("after arriving with a project in the address, the picker still switches pr
 
 /** Mount the page for project p1 with the given `paper.get` answer. */
 function renderPage(paperGet: FakeHandlers[string]) {
+  return renderPageWith(paperGet, { "paper.detect": () => [] })
+}
+
+/** {@link renderPage} with extra fake procedures. */
+function renderPageWith(paperGet: FakeHandlers[string], extra: FakeHandlers) {
   const client = createFakeTrpcClient({
+    ...extra,
     "projects.list": () => [{ id: "p1", name: "One" }],
     "settings.get": () => ({}),
     "paper.get": paperGet,
@@ -92,6 +100,7 @@ test("with a paper linked, the Sync button is in the page top bar next to the pr
       remoteUrl: "https://git.overleaf.com/abc",
       outputDir: null,
       effectiveOutputDir: "build",
+      syncEnabled: true,
     },
     workspaceId: "paper-ws",
     rootRelPath: "main.tex",
@@ -106,4 +115,35 @@ test("without a paper there is no Sync button", async () => {
   renderPage(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
   await screen.findByTestId("paper-setup")
   expect(screen.queryByTestId("paper-sync")).toBeNull()
+})
+
+test("opening a project with one Overleaf clone links it and shows the editor, not the setup", async () => {
+  const linked = {
+    paper: {
+      dir: "/proj/paper",
+      lastSyncAt: null,
+      remoteUrl: "https://git.overleaf.com/abc",
+      isOverleaf: true,
+      outputDir: null,
+      effectiveOutputDir: "build",
+      syncEnabled: true,
+    },
+    workspaceId: "paper-ws",
+    rootRelPath: "main.tex",
+  }
+  let current: unknown = { paper: null, workspaceId: null, rootRelPath: null }
+  const link = vi.fn(() => {
+    current = linked
+    return linked
+  })
+  renderPageWith(() => current, {
+    "paper.detect": () => ({
+      clones: [{ dir: "/proj/paper", relPath: "paper" }],
+      stoppedEarly: false,
+    }),
+    "paper.link": link,
+  })
+  expect(await screen.findByTestId("paper-editor")).toBeTruthy()
+  expect(link).toHaveBeenCalledWith({ projectId: "p1", dir: "/proj/paper", rootChoice: null })
+  expect(screen.queryByTestId("paper-setup-overleaf")).toBeNull()
 })

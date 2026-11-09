@@ -58,7 +58,7 @@ export function OverleafSettings() {
               : source === "saved"
                 ? t("Saved")
                 : source === "git"
-                  ? t("Found in your Git credentials")
+                  ? t("Overleaf Git detected")
                   : t("Not saved")}
           </span>
         </div>

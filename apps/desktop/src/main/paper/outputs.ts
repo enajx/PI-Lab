@@ -47,11 +47,16 @@ export async function excludePaperOutputs(
   }
 }
 
-/** Exclude the effective output of one paper, using its main .tex as the root. */
+/**
+ * Exclude the effective output of one paper, using its main .tex as the root.
+ * Does nothing when Sync is off for the paper: nothing is pushed then, and the
+ * paper may be the project folder, whose own repo should not get these rules.
+ */
 export async function excludeEffectiveOutputs(
   paper: ProjectPaper,
   defaultOutputDir: string,
 ): Promise<void> {
+  if (paper.syncEnabled === false) return
   const root = await findRootTex(paper.dir, await listPaperFiles(paper.dir))
   await excludePaperOutputs(paper.dir, effectiveOutputDir(paper, defaultOutputDir), root)
 }

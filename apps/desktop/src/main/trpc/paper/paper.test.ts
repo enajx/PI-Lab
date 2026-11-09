@@ -6,7 +6,7 @@
 // accepts git.overleaf.com URLs (the host check itself is tested separately).
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { serviceCredentials } from "@pi-lab/local-db"
@@ -100,7 +100,7 @@ async function useTestCredentialHelper(): Promise<void> {
 async function linkOutsideClone(): Promise<string> {
   const dir = join(h.dataDir, "my-paper")
   await cloneRemote(dir)
-  await h.caller.paper.link({ projectId, dir })
+  await h.caller.paper.link({ projectId, dir, rootChoice: null })
   return dir
 }
 
@@ -175,6 +175,7 @@ describe("link, get, outline, unlink", () => {
       isOverleaf: false,
       outputDir: null,
       effectiveOutputDir: "build",
+      syncEnabled: true,
     })
     expect(result.rootRelPath).toBe("main.tex")
     const workspaceId = result.workspaceId
@@ -224,7 +225,7 @@ describe("link, get, outline, unlink", () => {
     await mkdir(dir)
     await writeFile(join(dir, "a.tex"), "% \\documentclass{x}\n")
     await writeFile(join(dir, "b.tex"), "\\documentclass{article}\n\\section{B}\n")
-    await h.caller.paper.link({ projectId, dir })
+    await h.caller.paper.link({ projectId, dir, rootChoice: null })
     const result = await h.caller.paper.get({ projectId })
     expect(result.paper?.remoteUrl).toBeNull()
     expect(result.rootRelPath).toBe("b.tex")
@@ -233,14 +234,48 @@ describe("link, get, outline, unlink", () => {
     expect((await git(h.repoDir, ["log", "--oneline"])).trim().split("\n")).toHaveLength(1)
   })
 
-  test("refuses the project folder itself or a folder that contains it", async () => {
-    await expect(h.caller.paper.link({ projectId, dir: h.repoDir })).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: expect.stringContaining("project folder"),
+  test("Keep my version (resolve) is refused when Sync is off", async () => {
+    await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "no-sync" })
+    await expect(h.caller.paper.resolve({ projectId, choice: "mine" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("Sync is off for this paper"),
     })
-    await expect(h.caller.paper.link({ projectId, dir: h.dataDir })).rejects.toMatchObject({
+  })
+
+  test("with Sync off, no build output rule is written to the project's exclude file", async () => {
+    const excludePath = join(h.repoDir, ".git", "info", "exclude")
+    const before = existsSync(excludePath) ? await readFile(excludePath, "utf8") : null
+    const after = async (): Promise<string | null> =>
+      existsSync(excludePath) ? readFile(excludePath, "utf8") : null
+    await writeFile(join(h.repoDir, "main.tex"), "\\documentclass{article}\n")
+    await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "no-sync" })
+    expect(await after()).toBe(before)
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "." })
+    expect(await after()).toBe(before)
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "" })
+    await h.caller.settings.updateEditor({ latexOutputDir: "pdfs" })
+    expect(await after()).toBe(before)
+  })
+
+  test("a project folder with no Git remote cannot be linked with Sync", async () => {
+    await expect(
+      h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "sync" }),
+    ).rejects.toMatchObject({
       code: "BAD_REQUEST",
+      message: expect.stringContaining("has no Git remote"),
     })
+    expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
+  })
+
+  test("refuses a folder that contains the project folder, even with a choice", async () => {
+    for (const rootChoice of [null, "sync", "no-sync"] as const) {
+      await expect(
+        h.caller.paper.link({ projectId, dir: h.dataDir, rootChoice }),
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: expect.stringContaining("contains the project folder"),
+      })
+    }
     expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
   })
 
@@ -253,7 +288,9 @@ describe("link, get, outline, unlink", () => {
     ]
     for (const [origin, shown] of cases) {
       await git(dir, ["remote", "set-url", "origin", origin])
-      expect((await h.caller.paper.link({ projectId, dir })).paper?.remoteUrl).toBe(shown)
+      expect(
+        (await h.caller.paper.link({ projectId, dir, rootChoice: null })).paper?.remoteUrl,
+      ).toBe(shown)
       expect((await h.caller.paper.get({ projectId })).paper?.remoteUrl).toBe(shown)
       expect(JSON.stringify(await h.caller.projects.get({ id: projectId }))).not.toContain("secret")
     }
@@ -261,11 +298,13 @@ describe("link, get, outline, unlink", () => {
 
   test("refuses a missing folder or a file", async () => {
     await expect(
-      h.caller.paper.link({ projectId, dir: join(h.dataDir, "nope") }),
+      h.caller.paper.link({ projectId, dir: join(h.dataDir, "nope"), rootChoice: null }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
     const file = join(h.dataDir, "file.tex")
     await writeFile(file, "x")
-    await expect(h.caller.paper.link({ projectId, dir: file })).rejects.toMatchObject({
+    await expect(
+      h.caller.paper.link({ projectId, dir: file, rootChoice: null }),
+    ).rejects.toMatchObject({
       code: "BAD_REQUEST",
     })
   })
@@ -575,5 +614,158 @@ describe("sync and resolve", { timeout: 30_000 }, () => {
     expect(restored).toContain("<<<<<<< ")
     expect(restored).toContain("from overleaf")
     expect(restored).toContain("from pi lab")
+  })
+})
+
+/** An Overleaf-looking origin URL. Only its host matters to PI Lab's Overleaf check. */
+const OVERLEAF_ORIGIN = "https://git@git.overleaf.com/6ae5e243374fe1802d83e27a"
+
+/** Clone the bare remote into `dir` and point its `origin` at `origin` (no network is used). */
+async function cloneWithOrigin(dir: string, origin: string): Promise<void> {
+  await cloneRemote(dir)
+  await git(dir, ["remote", "set-url", "origin", origin])
+}
+
+describe("detect Overleaf clones", () => {
+  test("finds nothing in a project with no Overleaf clone", async () => {
+    await cloneWithOrigin(join(h.repoDir, "code"), "https://github.com/u/p.git")
+    expect(await h.caller.paper.detect({ projectId })).toEqual({ clones: [], stoppedEarly: false })
+  })
+
+  test("finds the project folder itself when it is an Overleaf clone", async () => {
+    await git(h.repoDir, ["remote", "add", "origin", OVERLEAF_ORIGIN])
+    expect(await h.caller.paper.detect({ projectId })).toEqual({
+      clones: [{ dir: h.repoDir, relPath: "." }],
+      stoppedEarly: false,
+    })
+  })
+
+  test("finds one nested clone and skips hidden, node_modules, build and too-deep folders", async () => {
+    await cloneWithOrigin(join(h.repoDir, "writing", "paper"), OVERLEAF_ORIGIN)
+    await cloneWithOrigin(join(h.repoDir, "other"), "https://github.com/u/p.git")
+    for (const skipped of [
+      ".hidden/p",
+      ".worktrees/p",
+      "node_modules/p",
+      "build/p",
+      "dist/p",
+      "out/p",
+      "venv/p",
+      "__pycache__/p",
+      "a/b/c/d",
+    ]) {
+      await cloneWithOrigin(join(h.repoDir, skipped), OVERLEAF_ORIGIN)
+    }
+    expect(await h.caller.paper.detect({ projectId })).toEqual({
+      clones: [{ dir: join(h.repoDir, "writing", "paper"), relPath: "writing/paper" }],
+      stoppedEarly: false,
+    })
+  })
+
+  test("finds every nested clone, including one inside another, sorted by path", async () => {
+    await git(h.repoDir, ["remote", "add", "origin", OVERLEAF_ORIGIN])
+    await cloneWithOrigin(join(h.repoDir, "paper"), OVERLEAF_ORIGIN)
+    await cloneWithOrigin(join(h.repoDir, "paper", "appendix"), OVERLEAF_ORIGIN)
+    expect(await h.caller.paper.detect({ projectId })).toEqual({
+      clones: [
+        { dir: h.repoDir, relPath: "." },
+        { dir: join(h.repoDir, "paper"), relPath: "paper" },
+        { dir: join(h.repoDir, "paper", "appendix"), relPath: "paper/appendix" },
+      ],
+      stoppedEarly: false,
+    })
+  })
+
+  test("skips a folder it cannot read and still finds the others", async () => {
+    await cloneWithOrigin(join(h.repoDir, "paper"), OVERLEAF_ORIGIN)
+    const locked = join(h.repoDir, "locked")
+    await mkdir(locked)
+    await chmod(locked, 0o000)
+    try {
+      expect(await h.caller.paper.detect({ projectId })).toEqual({
+        clones: [{ dir: join(h.repoDir, "paper"), relPath: "paper" }],
+        stoppedEarly: false,
+      })
+    } finally {
+      await chmod(locked, 0o700)
+    }
+  })
+
+  test("stops after 5,000 folders and says so, keeping what it found", async () => {
+    await git(h.repoDir, ["remote", "add", "origin", OVERLEAF_ORIGIN])
+    const many = join(h.repoDir, "many")
+    await mkdir(many)
+    for (let index = 0; index < 5_000; index++) await mkdir(join(many, `d${index}`))
+    const result = await h.caller.paper.detect({ projectId })
+    expect(result.stoppedEarly).toBe(true)
+    expect(result.clones).toEqual([{ dir: h.repoDir, relPath: "." }])
+  })
+})
+
+describe("project folder as the paper folder", { timeout: 30_000 }, () => {
+  test("an Overleaf clone project folder links with no choice and keeps Sync on", async () => {
+    await git(h.repoDir, ["remote", "add", "origin", OVERLEAF_ORIGIN])
+    expect(await h.caller.paper.checkFolder({ projectId, dir: h.repoDir })).toEqual({
+      projectFolder: true,
+      overleaf: true,
+      remoteUrl: OVERLEAF_ORIGIN,
+    })
+    const state = await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: null })
+    expect(state.paper?.dir).toBe(h.repoDir)
+    expect(state.paper?.syncEnabled).toBe(true)
+  })
+
+  test("another project folder needs an explicit choice; the check reports its remote without credentials", async () => {
+    await git(h.repoDir, ["remote", "add", "origin", "https://user:secret@github.com/u/p.git"])
+    expect(await h.caller.paper.checkFolder({ projectId, dir: h.repoDir })).toEqual({
+      projectFolder: true,
+      overleaf: false,
+      remoteUrl: "https://github.com/u/p.git",
+    })
+    await expect(
+      h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: null }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("choose whether Sync is on"),
+    })
+    expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
+    const outside = join(h.dataDir, "elsewhere")
+    await mkdir(outside)
+    expect(await h.caller.paper.checkFolder({ projectId, dir: outside })).toEqual({
+      projectFolder: false,
+      overleaf: false,
+      remoteUrl: null,
+    })
+  })
+
+  test("no-sync links it for editing and building, and Sync refuses with a clear message", async () => {
+    const state = await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "no-sync" })
+    expect(state.paper?.syncEnabled).toBe(false)
+    expect((await h.caller.paper.get({ projectId })).paper?.syncEnabled).toBe(false)
+    await writeFile(join(h.repoDir, "README.md"), "edited\n")
+    await expect(h.caller.paper.sync({ projectId, commit: true })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("Sync is off for this paper"),
+    })
+    expect((await git(h.repoDir, ["log", "--oneline"])).trim().split("\n")).toHaveLength(1)
+  })
+
+  test("sync links it with Sync on, and Sync does not commit build output", async () => {
+    await git(h.repoDir, ["remote", "add", "origin", bare])
+    await git(h.repoDir, ["fetch", "origin"])
+    await git(h.repoDir, ["reset", "--hard", "origin/main"])
+    await git(h.repoDir, ["branch", "--set-upstream-to", "origin/main"])
+    const state = await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "sync" })
+    expect(state.paper?.syncEnabled).toBe(true)
+    await mkdir(join(h.repoDir, "build"), { recursive: true })
+    await writeFile(join(h.repoDir, "build", "main.aux"), "aux\n")
+    await writeFile(join(h.repoDir, "main.tex"), "\\documentclass{article}\nedited\n")
+    expect(await h.caller.paper.sync({ projectId, commit: false })).toEqual({
+      state: "needs-commit",
+      changedFiles: ["main.tex"],
+    })
+    expect((await h.caller.paper.sync({ projectId, commit: true })).state).toBe("synced")
+    expect(await remoteMainTex()).toContain("edited")
+    expect(await remoteFiles()).not.toContain("build/main.aux")
   })
 })

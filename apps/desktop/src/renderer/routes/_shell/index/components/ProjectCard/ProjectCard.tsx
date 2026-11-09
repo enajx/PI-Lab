@@ -7,9 +7,9 @@ import {
   ChartArea,
   Eye,
   EyeOff,
-  FileType2,
   ImagePlus,
   Pencil,
+  ScrollText,
   Sparkles,
   Telescope,
 } from "lucide-react"
@@ -511,7 +511,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           className={CARD_ACTION_CLASS}
           onClick={() => void navigate({ to: "/science/latex", search: { projectId: project.id } })}
         >
-          <FileType2 className="size-4 shrink-0" aria-hidden />
+          <ScrollText className="size-4 shrink-0" aria-hidden />
         </button>
         <ProjectWorkflowControl
           projectId={project.id}

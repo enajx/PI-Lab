@@ -736,7 +736,7 @@ describe("sessions.start — origin view and the paper folder", () => {
   test("a LaTeX Editor agent gets a paper folder outside the project as an extra folder", async () => {
     // The link stores the folder's real path (macOS temp folders live under /private).
     const paperDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-")))
-    await h.caller.paper.link({ projectId, dir: paperDir })
+    await h.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
     const result = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -748,7 +748,7 @@ describe("sessions.start — origin view and the paper folder", () => {
   test("a paper folder inside the project, or a Project view agent, gets no extra folder", async () => {
     const insideDir = join(h.repoDir, "paper")
     await mkdir(insideDir)
-    await h.caller.paper.link({ projectId, dir: insideDir })
+    await h.caller.paper.link({ projectId, dir: insideDir, rootChoice: null })
     const inside = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -758,7 +758,7 @@ describe("sessions.start — origin view and the paper folder", () => {
     await h.caller.terminal.kill({ sessionId: inside.sessionId })
 
     const outsideDir = await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-"))
-    await h.caller.paper.link({ projectId, dir: outsideDir })
+    await h.caller.paper.link({ projectId, dir: outsideDir, rootChoice: null })
     const fromProject = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -770,7 +770,7 @@ describe("sessions.start — origin view and the paper folder", () => {
   test("a LaTeX Editor agent in a worktree gets the paper folder inside the project as an extra folder", async () => {
     const insideDir = join(h.repoDir, "paper")
     await mkdir(insideDir)
-    await h.caller.paper.link({ projectId, dir: insideDir })
+    await h.caller.paper.link({ projectId, dir: insideDir, rootChoice: null })
     const result = await h.caller.sessions.start({
       projectId,
       agentId: ARGV_AGENT.id,
@@ -784,7 +784,7 @@ describe("sessions.start — origin view and the paper folder", () => {
 
   test("an agent without an extra-folder flag still starts, with a warning naming the paper folder", async () => {
     const paperDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-paper-outside-")))
-    await h.caller.paper.link({ projectId, dir: paperDir })
+    await h.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
     const result = await h.caller.sessions.start({
       projectId,
       agentId: LONG_FAKE_AGENT.id,

@@ -36,6 +36,8 @@ interface PaperEditorProps {
   rootRelPath: string | null
   lastSyncAt: number | null
   hasRemote: boolean
+  /** False when the paper is linked for editing and building only (no Sync). */
+  syncEnabled: boolean
   /** This paper's own build output folder, or null when it uses the global default. */
   outputDir: string | null
   /** The build output folder its builds use. */
@@ -100,6 +102,7 @@ export function PaperEditor({
   rootRelPath,
   lastSyncAt,
   hasRemote,
+  syncEnabled,
   outputDir,
   effectiveOutputDir,
   settings,
@@ -308,6 +311,7 @@ export function PaperEditor({
         syncSlot={syncSlot}
         lastSyncAt={lastSyncAt}
         hasRemote={hasRemote}
+        syncEnabled={syncEnabled}
         confirmCommit={settings.confirmOverleafCommit}
         outputDir={outputDir}
         defaultOutputDir={settings.latexOutputDir}

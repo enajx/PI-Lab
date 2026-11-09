@@ -165,7 +165,7 @@ test("builds into the paper's output folder or the global default, and excludes 
   await writeFile(join(paperDir, "main.tex"), doc)
   await writeFile(join(paperDir, "other.tex"), doc)
   const projectId = (await h.caller.projects.list())[0]?.id ?? ""
-  const linked = await h.caller.paper.link({ projectId, dir: paperDir })
+  const linked = await h.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
   const paperWorkspace = linked.workspaceId ?? ""
   await h.caller.paper.setOutputDir({ projectId, outputDir: "out/pdf" })
   const built = await h.caller.pdf.build({ workspaceId: paperWorkspace, relPath: "main.tex" })
@@ -197,6 +197,25 @@ test("builds into the paper's output folder or the global default, and excludes 
   expect(exclude).toContain("*.synctex.gz")
 }, 60_000)
 
+test("a build in the project folder linked with Sync off writes no exclude rule", async (context) => {
+  if (missingTools.length) context.skip(`Requires installed TeX tools: ${missingTools.join(", ")}`)
+  await promisify(execFile)("git", ["init", "-q", h.repoDir])
+  const excludePath = join(h.repoDir, ".git", "info", "exclude")
+  const before = await readFile(excludePath, "utf8")
+  await writeFile(
+    join(h.repoDir, "main.tex"),
+    "\\documentclass{article}\n\\begin{document}\nRoot paper.\n\\end{document}\n",
+  )
+  const projectId = (await h.caller.projects.list())[0]?.id ?? ""
+  const linked = await h.caller.paper.link({ projectId, dir: h.repoDir, rootChoice: "no-sync" })
+  const built = await h.caller.pdf.build({
+    workspaceId: linked.workspaceId ?? "",
+    relPath: "main.tex",
+  })
+  expect(built.success, built.log).toBe(true)
+  expect(await readFile(excludePath, "utf8")).toBe(before)
+}, 60_000)
+
 test("a Project view build of a paper inside the project uses the paper's output folder, and Sync sends no output", async (context) => {
   if (missingTools.length) context.skip(`Requires installed TeX tools: ${missingTools.join(", ")}`)
   const git = (dir: string, ...args: string[]) =>
@@ -222,7 +241,7 @@ test("a Project view build of a paper inside the project uses the paper's output
   await git(paperDir, "commit", "-q", "-m", "seed")
   await git(paperDir, "push", "-q", "origin", "HEAD:main")
   const projectId = (await h.caller.projects.list())[0]?.id ?? ""
-  await h.caller.paper.link({ projectId, dir: paperDir })
+  await h.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
   await h.caller.paper.setOutputDir({ projectId, outputDir: "out" })
 
   // Built from the Project view (the main workspace), not the LaTeX Editor.

@@ -16,6 +16,17 @@ function renderBar(
   onOpenFiles: (files: string[]) => void,
   saveOpenFiles: () => Promise<string[]>,
 ) {
+  return renderBarWithSync(handlers, confirmCommit, onOpenFiles, saveOpenFiles, true)
+}
+
+/** {@link renderBar} with Sync on or off for the paper. */
+function renderBarWithSync(
+  handlers: FakeHandlers,
+  confirmCommit: boolean,
+  onOpenFiles: (files: string[]) => void,
+  saveOpenFiles: () => Promise<string[]>,
+  syncEnabled: boolean,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient(handlers)
   // Stands in for the page top bar that holds the Sync button.
@@ -30,6 +41,7 @@ function renderBar(
         syncSlot={syncSlot}
         lastSyncAt={null}
         hasRemote={true}
+        syncEnabled={syncEnabled}
         confirmCommit={confirmCommit}
         outputDir={null}
         defaultOutputDir="build"
@@ -41,6 +53,24 @@ function renderBar(
 }
 
 describe("PaperSyncBar (mocked server)", () => {
+  test("with Sync off for the paper, the top bar says so instead of showing the Sync button", () => {
+    const sync = vi.fn(() => ({ state: "synced", lastSyncAt: 1 }))
+    renderBarWithSync(
+      { "paper.sync": sync },
+      false,
+      () => undefined,
+      async () => [],
+      false,
+    )
+    const slot = screen.getAllByTestId("top-bar-slot").at(-1) as HTMLElement
+    expect(within(slot).queryByTestId("paper-sync")).toBeNull()
+    expect(within(slot).queryByTestId("paper-last-sync")).toBeNull()
+    expect(within(slot).getByTestId("paper-sync-off").textContent).toBe(
+      "Sync is off for this paper",
+    )
+    expect(sync).not.toHaveBeenCalled()
+  })
+
   test("the Sync button and last sync time go in the top bar; the output folder and errors stay in the bar", async () => {
     renderBar(
       {

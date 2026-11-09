@@ -69,7 +69,11 @@ interface BuildTarget {
 interface SourceOutput {
   /** Output folder relative to the root .tex file's folder ("." means next to it). */
   outputDir: string
-  /** Real path of the linked paper folder holding the root, or null when it is not in one. */
+  /**
+   * Real path of the linked paper folder holding the root, whose repo gets the
+   * output exclude rules; null when the root is not in one, or when Sync is
+   * off for the paper (nothing is pushed then).
+   */
   paperDir: string | null
 }
 
@@ -111,7 +115,8 @@ async function sourceOutput(
   if (path === "" || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
     return { outputDir: defaultOutputDir, paperDir: null }
   }
-  return { outputDir: effectiveOutputDir(paper, defaultOutputDir), paperDir }
+  const outputDir = effectiveOutputDir(paper, defaultOutputDir)
+  return { outputDir, paperDir: paper.syncEnabled === false ? null : paperDir }
 }
 
 /** Reject lexical traversal and symlinks whose targets leave the workspace. */

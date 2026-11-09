@@ -29,6 +29,8 @@ interface PaperSyncBarProps {
   lastSyncAt: number | null
   /** False when the paper folder has no Git remote; Sync is then disabled. */
   hasRemote: boolean
+  /** False when the paper is linked for editing and building only; the Sync button is then hidden. */
+  syncEnabled: boolean
   /** The `confirmOverleafCommit` editor setting. */
   confirmCommit: boolean
   /** This paper's own build output folder, or null when it uses the global default. */
@@ -43,7 +45,8 @@ interface PaperSyncBarProps {
 
 /**
  * The LaTeX Editor Sync controls. The last Overleaf sync time and the Sync
- * button are placed in the page top bar (`syncSlot`); the bar below the editor
+ * button are placed in the page top bar (`syncSlot`), or a short note there
+ * when Sync is off for the paper; the bar below the editor
  * holds the output folder field and the Sync messages and errors. Also shows
  * the dialogs Sync can lead to: the commit question for edits not yet sent,
  * the conflict choices, and the review of an agent merge.
@@ -54,6 +57,7 @@ export function PaperSyncBar({
   syncSlot,
   lastSyncAt,
   hasRemote,
+  syncEnabled,
   confirmCommit,
   outputDir,
   defaultOutputDir,
@@ -131,7 +135,15 @@ export function PaperSyncBar({
       data-testid="paper-sync-bar"
       className="flex shrink-0 items-center gap-3 border-border border-t px-3 py-1.5 text-xs"
     >
-      {syncSlot
+      {syncSlot && !syncEnabled
+        ? createPortal(
+            <span data-testid="paper-sync-off" className="text-muted-foreground text-xs">
+              {t("Sync is off for this paper")}
+            </span>,
+            syncSlot,
+          )
+        : null}
+      {syncSlot && syncEnabled
         ? createPortal(
             <>
               <span data-testid="paper-last-sync" className="text-muted-foreground text-xs">

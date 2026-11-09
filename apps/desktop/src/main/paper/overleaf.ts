@@ -20,6 +20,17 @@ export const OVERLEAF_HOST = "git.overleaf.com"
 /** Environment variable the askpass script reads the token from. */
 export const OVERLEAF_TOKEN_ENV = "PI_LAB_OVERLEAF_TOKEN"
 
+/** Error message for Sync (or an agent merge) on a paper linked with Sync off. */
+export const SYNC_OFF_MESSAGE =
+  "Sync is off for this paper: it is the project folder, linked for editing and building only."
+
+/** Throw PRECONDITION_FAILED when `syncEnabled` is false (the paper was linked with Sync off). */
+export function requireSyncEnabled(syncEnabled: boolean | undefined): void {
+  if (syncEnabled === false) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: SYNC_OFF_MESSAGE })
+  }
+}
+
 /** Error message the renderer matches to ask the user for a token. */
 export const OVERLEAF_TOKEN_REQUIRED = "overleaf-token-required"
 

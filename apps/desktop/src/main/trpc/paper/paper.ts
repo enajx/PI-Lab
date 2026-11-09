@@ -31,6 +31,7 @@ import {
   takeSide,
   unresolvedFiles,
 } from "../../git/remote"
+import { findOverleafClones, isOverleafClone, type OverleafCloneSearch } from "../../paper/detect"
 import { findRootTex, listPaperFiles, readPaperText } from "../../paper/files"
 import { buildOutline, type OutlineEntry } from "../../paper/outline"
 import {
@@ -48,6 +49,7 @@ import {
   type OverleafAuth,
   type OverleafTokenStatus,
   remoteEnv,
+  requireSyncEnabled,
   writeAskpassScript,
 } from "../../paper/overleaf"
 import type { AppContext } from "../context"
@@ -58,8 +60,9 @@ import { publicProcedure, router } from "../trpc"
  * either an Overleaf project cloned into `<project>/paper/` or a folder the
  * user already has. The link lives in the project's `metadata.paper`, and a
  * hidden workspace of kind "paper" points at the folder so the files and pdf
- * routers work on it. Sync pulls and pushes inside the paper folder only; the
- * project's own repository is never committed to.
+ * routers work on it. Sync pulls and pushes inside the paper folder only. The
+ * paper folder may be the project folder itself: always when it is an Overleaf
+ * clone, otherwise only after the user chose whether Sync is on for it.
  */
 
 /** `service_credentials` key for the one Overleaf Git token. */
@@ -78,7 +81,33 @@ export interface PaperView {
   outputDir: string | null
   /** The build output folder its builds use (the override, else the global default). */
   effectiveOutputDir: string
+  /** False when the paper is linked for editing and building only; Sync then refuses to run. */
+  syncEnabled: boolean
 }
+
+/**
+ * The user's choice for linking a project folder that is not an Overleaf
+ * clone: "sync" links it normally, "no-sync" links it with Sync off.
+ */
+export type RootChoice = "sync" | "no-sync"
+
+/** Result of `paper.checkFolder`: what linking a folder would mean. */
+export interface FolderCheck {
+  /** True when the folder is the project folder itself. */
+  projectFolder: boolean
+  /** True when the folder is the top of its own repo with an Overleaf `origin`. */
+  overleaf: boolean
+  /** The folder's `origin` URL without credentials, or null when it has none (or is not its own repo). */
+  remoteUrl: string | null
+}
+
+/** Error message for a non-Overleaf project folder linked without a choice. */
+const ROOT_CHOICE_REQUIRED =
+  "This is the project folder and it is not an Overleaf clone. Sync would commit and push the whole project, so choose whether Sync is on for this paper."
+
+/** Error message for a project folder with no remote linked with Sync on. */
+const ROOT_SYNC_NO_REMOTE =
+  "The project folder has no Git remote, so Sync cannot run. Link it for editing and building only, or choose another folder."
 
 /** Result of `paper.get`, `paper.link` and `paper.addOverleaf`. */
 export interface PaperState {
@@ -155,6 +184,7 @@ async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperSt
         paper,
         getSettingsOrDefaults(db).editor.latexOutputDir,
       ),
+      syncEnabled: paper.syncEnabled !== false,
     },
     workspaceId: paperWorkspace(db, projectId)?.id ?? null,
     rootRelPath: await findRootTex(paper.dir, files),
@@ -167,40 +197,75 @@ function containsOrEquals(dir: string, inner: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
+/** The real path of an existing folder, or BAD_REQUEST when `dir` is missing or not a folder. */
+async function requireFolder(dir: string): Promise<string> {
+  if (!existsSync(dir) || !(await stat(dir)).isDirectory()) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Not a folder: ${dir}` })
+  }
+  return realpath(dir)
+}
+
+/** What linking `dir` as the paper folder would mean; see {@link FolderCheck}. */
+async function checkFolder(
+  db: PiLabDatabase,
+  projectId: string,
+  dir: string,
+): Promise<FolderCheck> {
+  const project = requireProject(db, projectId)
+  const canonical = await requireFolder(dir)
+  const origin = (await isOwnRepo(canonical)) ? await remoteUrl(canonical) : null
+  return {
+    projectFolder: canonical === (await realpath(project.repoPath)),
+    overleaf: await isOverleafClone(canonical),
+    remoteUrl: origin === null ? null : displayRemoteUrl(origin),
+  }
+}
+
 /**
  * Link an existing folder as the project's paper folder, replacing any earlier
- * link. The folder must exist and be a directory, and must not be the project
- * folder or a folder that contains it (Sync would then commit the project
- * repo). When the folder is the top of its own Git repository, its `origin`
- * URL is recorded without any embedded credentials, and the build output
- * folder is added to that repo's local `.git/info/exclude` so PDF build output
- * is never committed. The previous link's output folder override is kept when
+ * link. The folder must exist and be a directory. A folder that contains the
+ * project folder is refused. The project folder itself is accepted when it is
+ * an Overleaf clone; otherwise `rootChoice` must say whether Sync is on for it
+ * (Sync would commit and push the whole project): "sync" needs a Git remote,
+ * and "no-sync" stores Sync as off. When the folder is the top of its own Git
+ * repository, its `origin` URL is recorded without any embedded credentials,
+ * and (unless Sync is off) the build output folder is added to that repo's
+ * local `.git/info/exclude` so PDF build output is never committed. The previous link's output folder override is kept when
  * the same folder is linked again.
  */
 export async function linkPaper(
   db: PiLabDatabase,
   projectId: string,
   dir: string,
+  rootChoice: RootChoice | null,
 ): Promise<PaperState> {
   const project = requireProject(db, projectId)
-  if (!existsSync(dir) || !(await stat(dir)).isDirectory()) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: `Not a folder: ${dir}` })
-  }
-  const canonical = await realpath(dir)
-  if (containsOrEquals(canonical, await realpath(project.repoPath))) {
+  const canonical = await requireFolder(dir)
+  const projectDir = await realpath(project.repoPath)
+  const isProjectFolder = canonical === projectDir
+  if (!isProjectFolder && containsOrEquals(canonical, projectDir)) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message:
-        "The paper folder cannot be the project folder or a folder that contains it. Choose the paper's own folder.",
+        "The paper folder cannot be a folder that contains the project folder. Choose the paper's own folder or the project folder.",
     })
   }
   const ownRepo = await isOwnRepo(canonical)
+  const origin = ownRepo ? await remoteUrl(canonical) : null
+  const askRoot = isProjectFolder && !(await isOverleafClone(canonical))
+  if (askRoot && rootChoice === null) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: ROOT_CHOICE_REQUIRED })
+  }
+  if (askRoot && rootChoice === "sync" && origin === null) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: ROOT_SYNC_NO_REMOTE })
+  }
+  const syncOff = askRoot && rootChoice === "no-sync"
   const previous = project.metadata?.paper
   const outputDir = previous?.dir === canonical ? previous.outputDir : undefined
   const paper: ProjectPaper = { dir: canonical, remoteUrl: null, lastSyncAt: null }
   if (outputDir !== undefined) paper.outputDir = outputDir
+  if (syncOff) paper.syncEnabled = false
   await excludeEffectiveOutputs(paper, getSettingsOrDefaults(db).editor.latexOutputDir)
-  const origin = ownRepo ? await remoteUrl(canonical) : null
   const url = origin === null ? null : displayRemoteUrl(origin)
   db.transaction(
     (tx) => {
@@ -247,7 +312,7 @@ export async function clonePaper(
   }
   await clone(project.repoPath, url, target, options)
   if (await isGitRepo(project.repoPath)) await excludeFromProjectRepo(project.repoPath, target)
-  return linkPaper(db, projectId, target)
+  return linkPaper(db, projectId, target, null)
 }
 
 /** Decrypt the saved Overleaf token, or null when none is saved. */
@@ -333,12 +398,17 @@ async function finishMerge(
   return markSynced(db, projectId)
 }
 
-/** The paper folder and its remote, or null when it has no remote to sync with. */
+/**
+ * The paper folder and its remote, or null when it has no remote to sync with.
+ * Throws PRECONDITION_FAILED when Sync is off for the paper.
+ */
 async function syncTarget(
   db: PiLabDatabase,
   projectId: string,
 ): Promise<{ dir: string; url: string } | null> {
-  const dir = requirePaper(requireProject(db, projectId)).dir
+  const paper = requirePaper(requireProject(db, projectId))
+  requireSyncEnabled(paper.syncEnabled)
+  const dir = paper.dir
   if (!(await isOwnRepo(dir))) return null
   const url = await remoteUrl(dir)
   return url ? { dir, url } : null
@@ -448,11 +518,40 @@ export const paperRouter = router({
       return buildOutline(root, (relPath) => readPaperText(paper.dir, relPath))
     }),
 
-  /** Link a folder the user already has (inside or outside the project folder). */
-  link: publicProcedure
+  /**
+   * Overleaf clones in the project: the project folder itself and folders a few
+   * levels inside it, and whether the search stopped early. The LaTeX Editor
+   * links the paper from these when the project has none linked.
+   */
+  detect: publicProcedure
+    .input(projectIdInput)
+    .query(
+      async ({ ctx, input }): Promise<OverleafCloneSearch> =>
+        findOverleafClones(await realpath(requireProject(ctx.db, input.projectId).repoPath)),
+    ),
+
+  /** What linking a folder would mean (project folder, Overleaf clone, remote URL). */
+  checkFolder: publicProcedure
     .input(z.object({ projectId: z.string().min(1), dir: z.string().min(1) }))
+    .query(
+      ({ ctx, input }): Promise<FolderCheck> => checkFolder(ctx.db, input.projectId, input.dir),
+    ),
+
+  /**
+   * Link a folder the user already has (inside or outside the project folder,
+   * or the project folder itself; see {@link linkPaper} for `rootChoice`).
+   */
+  link: publicProcedure
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        dir: z.string().min(1),
+        rootChoice: z.enum(["sync", "no-sync"]).nullable(),
+      }),
+    )
     .mutation(
-      ({ ctx, input }): Promise<PaperState> => linkPaper(ctx.db, input.projectId, input.dir),
+      ({ ctx, input }): Promise<PaperState> =>
+        linkPaper(ctx.db, input.projectId, input.dir, input.rootChoice),
     ),
 
   /**

@@ -688,7 +688,7 @@ describe("LaTeX merge (latex-merge)", () => {
       const paperDir = join(harness.dataDir, "paper-outside")
       await mkdir(paperDir)
       conflictedPaperRepo(paperDir)
-      await harness.caller.paper.link({ projectId, dir: paperDir })
+      await harness.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
 
       await harness.caller.workflows.run({ projectId, task: "latex-merge" })
       expect((await settle(harness, projectId, "latex-merge")).result).toBe("Merged main.tex")
@@ -706,6 +706,23 @@ describe("LaTeX merge (latex-merge)", () => {
     }
   })
 
+  test("refuses when Sync is off for the paper", async () => {
+    const { calls, runner } = makeRunner(() => ok("must not run"))
+    const { harness, projectId } = await openProject(runner)
+    try {
+      await harness.caller.paper.link({ projectId, dir: harness.repoDir, rootChoice: "no-sync" })
+      await expect(
+        harness.caller.workflows.run({ projectId, task: "latex-merge" }),
+      ).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: expect.stringContaining("Sync is off for this paper"),
+      })
+      expect(calls).toHaveLength(0)
+    } finally {
+      await harness.dispose()
+    }
+  })
+
   test("refuses when the paper folder has no conflict", async () => {
     const { calls, runner } = makeRunner(() => ok("must not run"))
     const { harness, projectId } = await openProject(runner)
@@ -715,7 +732,7 @@ describe("LaTeX merge (latex-merge)", () => {
       ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
       const plainPaper = join(harness.repoDir, "paper")
       await mkdir(plainPaper)
-      await harness.caller.paper.link({ projectId, dir: plainPaper })
+      await harness.caller.paper.link({ projectId, dir: plainPaper, rootChoice: null })
       await expect(
         harness.caller.workflows.run({ projectId, task: "latex-merge" }),
       ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })

@@ -78,6 +78,7 @@ function renderEditor(
         rootRelPath="main.tex"
         lastSyncAt={null}
         hasRemote={false}
+        syncEnabled={true}
         outputDir={null}
         effectiveOutputDir="build"
         settings={DEFAULT_EDITOR_SETTINGS}
