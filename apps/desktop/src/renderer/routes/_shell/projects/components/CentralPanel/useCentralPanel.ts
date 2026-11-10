@@ -108,7 +108,7 @@ export interface CentralPanelController {
   pdfBuildState?: PdfBuildState | null
   /** Build a saved .tex file as Cmd+S does (status, log, and `onBuilt` after a successful build). */
   buildLatex: (relPath: string) => void
-  /** Show a build of a root .tex started elsewhere (e.g. by Create paper) as `buildLatex` shows its own. */
+  /** Show a build of a root .tex started elsewhere (e.g. by Start draft) as `buildLatex` shows its own. */
   showLatexBuild: (relPath: string, build: Promise<BuildResult>) => void
 }
 

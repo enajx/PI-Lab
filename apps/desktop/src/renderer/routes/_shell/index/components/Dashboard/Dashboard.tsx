@@ -19,7 +19,6 @@ import { cn } from "@pi-lab/ui"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { type ComponentProps, useCallback, useEffect, useRef, useState } from "react"
-import { CaffeineControl } from "../../../../../caffeine"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
 import { useTranslate } from "../../../../../i18n/language"
 import { useShowHiddenProjects, useSidebarCollapsed } from "../../../../../preferences/preferences"
@@ -28,7 +27,11 @@ import { useAddProjectController } from "../../../components/AddProjectControlle
 import { AddProjectMenu } from "../../../components/AddProjectMenu"
 import { ProjectVisibilityToggle } from "../../../components/ProjectVisibilityToggle"
 import { useProjectReorder } from "../../../components/useProjectReorder"
-import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
+import {
+  TitleBarSystemControls,
+  titleBarControlClass,
+  titleBarHeaderClass,
+} from "../../../titleBar"
 import { ProjectCard } from "../ProjectCard"
 
 type DashboardProject = ComponentProps<typeof ProjectCard>["project"]
@@ -158,8 +161,7 @@ export function Dashboard() {
             testId="dashboard-show-hidden-projects"
             onToggle={() => setShowHidden(!showHidden)}
           />
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
 

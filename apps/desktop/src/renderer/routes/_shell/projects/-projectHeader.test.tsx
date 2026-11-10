@@ -74,8 +74,11 @@ describe("Project header", () => {
     expect(status.getAttribute("title")).toBe("Project status")
     expect(status.getAttribute("aria-label")).toContain("Project status")
     expect(status.querySelector("svg")).toBeTruthy()
+    // A short divider sets the agents and caffeine buttons apart from the view's own.
+    const divider = status.nextElementSibling
+    expect(divider?.getAttribute("data-testid")).toBe("title-bar-controls-divider")
     expect(
-      status.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
+      divider?.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
     ).toBeTruthy()
     // The "+" shortcut menu, then Tasks, open the row of header actions.
     const shortcuts = screen.getByTestId("project-view-shortcuts")

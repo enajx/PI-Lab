@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { FolderGit2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslate } from "../../../i18n/language"
+import { useDisplayPath } from "../../../trpc/displayPath"
 import { useTRPC } from "../../../trpc/react"
 
 interface QuickOpenProps {
@@ -36,6 +37,7 @@ export function QuickOpen({
   filter,
 }: QuickOpenProps) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const trpc = useTRPC()
   const [query, setQuery] = useState("")
   const [debounced, setDebounced] = useState("")
@@ -213,7 +215,9 @@ export function QuickOpen({
                     <span className="min-w-0 flex-1 truncate font-medium text-foreground">
                       {project.name}
                     </span>
-                    <span className="truncate text-muted-foreground/70">{project.repoPath}</span>
+                    <span className="truncate text-muted-foreground/70">
+                      {toDisplayPath(project.repoPath)}
+                    </span>
                   </button>
                 </li>
               ))

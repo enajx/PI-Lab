@@ -5,6 +5,7 @@ import { FolderGit2 } from "lucide-react"
 import type { ComponentType } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslate } from "../i18n/language"
+import { useDisplayPath } from "../trpc/displayPath"
 import { useTRPC } from "../trpc/react"
 
 /** One row in a {@link QuickFind} list. */
@@ -53,6 +54,7 @@ export function QuickFind({
   allowGlobalSearch?: boolean
 }) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const [query, setQuery] = useState("")
   const [highlight, setHighlight] = useState(0)
   const [global, setGlobal] = useState(false)
@@ -65,10 +67,10 @@ export function QuickFind({
       projects.map((project) => ({
         id: project.id,
         label: project.name,
-        hint: project.repoPath,
+        hint: toDisplayPath(project.repoPath),
         icon: FolderGit2,
       })),
-    [projects],
+    [projects, toDisplayPath],
   )
   const activeItems = global ? globalItems : items
   const activeEmptyText = global

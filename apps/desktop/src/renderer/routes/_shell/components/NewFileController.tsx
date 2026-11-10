@@ -12,6 +12,7 @@ import {
 } from "react"
 import { translateKnownError } from "../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
+import { useDisplayPath } from "../../../trpc/displayPath"
 import { useTRPC } from "../../../trpc/react"
 
 export interface NewFileResult {
@@ -40,6 +41,7 @@ const NewFileControllerContext = createContext<NewFileController | null>(null)
  */
 export function NewFileControllerProvider({ children }: { children: ReactNode }) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
@@ -160,7 +162,8 @@ export function NewFileControllerProvider({ children }: { children: ReactNode })
                     {(projectsQuery.data ?? []).map((project) => (
                       <option key={project.id} value={project.id}>
                         {project.name}
-                        {project.archivedAt ? ` (${t("hidden")})` : ""} — {project.repoPath}
+                        {project.archivedAt ? ` (${t("hidden")})` : ""} —{" "}
+                        {toDisplayPath(project.repoPath)}
                       </option>
                     ))}
                   </select>

@@ -2,13 +2,12 @@ import { Button, cn } from "@pi-lab/ui"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
-import { CaffeineControl } from "../../../caffeine"
 import { useTranslate } from "../../../i18n/language"
 import { useSidebarFeatureHelp } from "../../../preferences/preferences"
 import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
 import { FeatureHelpPanel, FeatureHelpRestoreButton } from "../components/Sidebar"
-import { AgentStatusControl } from "../titleBar"
+import { TitleBarSystemControls } from "../titleBar"
 import { LatexSection } from "./components/LatexSection"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
 import { QuickEditorSection } from "./components/QuickEditorSection"
@@ -208,8 +207,7 @@ export function SettingsView() {
           {t("Back")}
         </Button>
         <div className="ms-auto flex items-center gap-2">
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
 

@@ -254,12 +254,12 @@ describe("PaperEditor left column (mocked server)", () => {
   })
 })
 
-describe("PaperEditor Create paper and Update paper (mocked server)", () => {
-  test("a just-created paper opens with the PDF its Create paper build made, without building again", async () => {
+describe("PaperEditor Start draft and Update paper (mocked server)", () => {
+  test("a just-created paper opens with the PDF its Start draft build made, without building again", async () => {
     const builds: unknown[] = []
     const client = createFakeTrpcClient({
       ...handlers(),
-      // Create paper built the PDF after main.tex was written.
+      // Start draft built the PDF after main.tex was written.
       "files.stat": (input) => statFiles(input, { "main.tex": 1, "build/main.pdf": 2 }),
       "pdf.build": (input) => {
         builds.push(input)
@@ -273,7 +273,7 @@ describe("PaperEditor Create paper and Update paper (mocked server)", () => {
     cleanup()
   })
 
-  test("a failed Create paper build opens main.tex with the build failure and its log", async () => {
+  test("a failed Start draft build opens main.tex with the build failure and its log", async () => {
     const client = createFakeTrpcClient({
       ...handlers(),
       "files.stat": (input) => statFiles(input, { "main.tex": 1 }),
@@ -294,7 +294,7 @@ describe("PaperEditor Create paper and Update paper (mocked server)", () => {
     cleanup()
   })
 
-  test("Create paper's build that could not run at all opens main.tex with the error", async () => {
+  test("Start draft's build that could not run at all opens main.tex with the error", async () => {
     const client = createFakeTrpcClient({
       ...handlers(),
       "files.stat": (input) => statFiles(input, { "main.tex": 1 }),

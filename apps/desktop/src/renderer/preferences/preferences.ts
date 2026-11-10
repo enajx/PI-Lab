@@ -239,6 +239,67 @@ const SHOW_EDITOR_SECTION_KEY = "pi-lab.sections.showEditor"
 export const useShowEditorSection = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_EDITOR_SECTION_KEY, false)
 
+// --- Sidebar view entries: shown or hidden -------------------------------------
+// One saved flag per sidebar view entry (by nav id). Cluster, Analysis and Editor
+// reuse the Sections flags above, so the Settings toggles and the sidebar's
+// right-click menu read and write the same values. Every entry is shown by
+// default except Editor.
+const NAV_ENTRY_SHOW_PREFS: Record<string, { key: string; fallback: boolean }> = {
+  tasks: { key: "pi-lab.sections.showTasks", fallback: true },
+  latex: { key: "pi-lab.sections.showLatex", fallback: true },
+  library: { key: "pi-lab.sections.showLibrary", fallback: true },
+  analysis: { key: SHOW_ANALYSIS_SECTION_KEY, fallback: true },
+  cluster: { key: SHOW_CLUSTER_SECTION_KEY, fallback: true },
+  skills: { key: "pi-lab.sections.showSkills", fallback: true },
+  workflows: { key: "pi-lab.sections.showRoutines", fallback: true },
+  editor: { key: SHOW_EDITOR_SECTION_KEY, fallback: false },
+}
+
+function navEntryShowPref(id: string): { key: string; fallback: boolean } {
+  const pref = NAV_ENTRY_SHOW_PREFS[id]
+  if (!pref) throw new Error(`Unknown sidebar view entry: ${id}`)
+  return pref
+}
+
+function subscribeNavEntries(callback: () => void): () => void {
+  const unsubscribes = Object.values(NAV_ENTRY_SHOW_PREFS).map(({ key }) =>
+    subscribePref(key, callback),
+  )
+  return () => {
+    for (const unsubscribe of unsubscribes) unsubscribe()
+  }
+}
+
+/** The shown ids as one string, so the snapshot is stable between writes. */
+function readShownNavEntriesKey(): string {
+  return Object.entries(NAV_ENTRY_SHOW_PREFS)
+    .filter(([, { key, fallback }]) => readBoolean(key, fallback))
+    .map(([id]) => id)
+    .join(",")
+}
+
+const DEFAULT_SHOWN_NAV_ENTRIES_KEY = Object.entries(NAV_ENTRY_SHOW_PREFS)
+  .filter(([, { fallback }]) => fallback)
+  .map(([id]) => id)
+  .join(",")
+
+/**
+ * Which sidebar view entries are shown (a set of nav ids) and a setter for one
+ * entry. Throws for an id that has no saved flag.
+ */
+export function useShownNavEntries(): [ReadonlySet<string>, (id: string, shown: boolean) => void] {
+  const key = useSyncExternalStore(
+    subscribeNavEntries,
+    readShownNavEntriesKey,
+    () => DEFAULT_SHOWN_NAV_ENTRIES_KEY,
+  )
+  const shown = useMemo(() => new Set(key === "" ? [] : key.split(",")), [key])
+  const set = useCallback((id: string, next: boolean) => {
+    writePref(navEntryShowPref(id).key, String(next))
+  }, [])
+  return [shown, set]
+}
+
 // --- Projects: one reveal state shared by Dashboard and sidebar ---------------
 // This controls only whether archived projects are temporarily visible; the
 // durable hidden state itself remains `projects.archivedAt` in the local DB.

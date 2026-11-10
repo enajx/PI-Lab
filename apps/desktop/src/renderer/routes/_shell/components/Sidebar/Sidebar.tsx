@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router"
 import {
   Bot,
+  Check,
   ChevronDown,
   Eye,
   EyeOff,
@@ -11,6 +12,7 @@ import {
   LayoutDashboard,
   PanelLeft,
   PanelLeftClose,
+  Pencil,
   Settings,
   Trash2,
   Waypoints,
@@ -26,10 +28,8 @@ import {
   SIDEBAR_MIN_WIDTH,
   useNavOrder,
   useRestoreProjectTabs,
-  useShowAnalysisSection,
-  useShowClusterSection,
-  useShowEditorSection,
   useShowHiddenProjects,
+  useShownNavEntries,
   useSidebarCollapsed,
   useSidebarFeatureHelp,
   useSidebarWidth,
@@ -38,11 +38,13 @@ import {
   readActiveQuickTarget,
   subscribeQuickEditor,
 } from "../../../../QuickEditor/quickEditorState"
+import { useDisplayPath } from "../../../../trpc/displayPath"
 import { useTRPC } from "../../../../trpc/react"
 import type { ProjectSummary } from "../../../../trpc/useProjectThumbnail"
 import { useProjectThumbnail } from "../../../../trpc/useProjectThumbnail"
 import { useProjectActivityStates } from "../../-ProjectActivity"
 import { rememberSettingsReturnRoute } from "../../-settingsReturnRoute"
+import { EditProjectDialog } from "../../index/components/ProjectCard/EditProjectDialog"
 import type { ProjectState } from "../../index/utils/deriveProjectState"
 import {
   type ProjectWorkspaceState,
@@ -389,6 +391,21 @@ export function Sidebar() {
     }),
   )
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
+  // The project whose Edit project dialog is open (the same dialog as the Dashboard card).
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const editingProject = projects.find((project) => project.id === editingProjectId) ?? null
+  const updateDetails = useMutation(
+    trpc.projects.updateDetails.mutationOptions({
+      onSuccess: (_project, input) => {
+        setEditingProjectId(null)
+        void invalidateProjects()
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.thumbnail.pathKey() })
+        void queryClient.invalidateQueries({
+          queryKey: trpc.agents.projectChoice.queryKey({ projectId: input.id }),
+        })
+      },
+    }),
+  )
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
   const [, setWorkspaceRevision] = useState(0)
 
@@ -535,6 +552,10 @@ export function Sidebar() {
       <ProjectContextMenu
         menu={projectMenu}
         onClose={() => setProjectMenu(null)}
+        onEdit={(id) => {
+          setEditingProjectId(id)
+          setProjectMenu(null)
+        }}
         onRemove={(id) => {
           removeProject.mutate({ id })
           setProjectMenu(null)
@@ -548,6 +569,17 @@ export function Sidebar() {
           setProjectMenu(null)
         }}
       />
+
+      {editingProject ? (
+        <EditProjectDialog
+          project={editingProject}
+          mode="edit"
+          pending={updateDetails.isPending}
+          error={updateDetails.error?.message ?? null}
+          onClose={() => setEditingProjectId(null)}
+          onSave={(details) => updateDetails.mutate({ id: editingProject.id, details })}
+        />
+      ) : null}
     </aside>
   )
 }
@@ -662,20 +694,23 @@ function CollapseToggle({
 
 /**
  * The right-click menu for a project row, rendered once at the sidebar root and
- * positioned at the cursor. Its only action removes the project from the app
- * (`projects.remove` — the DB row only; the folder on disk is left untouched).
+ * positioned at the cursor: Edit project… (the Dashboard card's dialog), Dismiss Git
+ * warning, Hide/Unhide, and Remove from PI Lab (`projects.remove`, the DB row only;
+ * the folder on disk is left untouched).
  * Closes on outside mousedown or Escape; clicks inside (the action) don't close it
  * early thanks to the `rootRef` containment check.
  */
 function ProjectContextMenu({
   menu,
   onClose,
+  onEdit,
   onRemove,
   onSetHidden,
   onDismissGitNotice,
 }: {
   menu: ProjectMenuState | null
   onClose: () => void
+  onEdit: (id: string) => void
   onRemove: (id: string) => void
   onSetHidden: (id: string, hidden: boolean) => void
   onDismissGitNotice: (id: string) => void
@@ -694,6 +729,16 @@ function ProjectContextMenu({
       className="fixed z-50 w-60 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
       style={{ left: menu.x, top: menu.y }}
     >
+      <button
+        type="button"
+        role="menuitem"
+        data-testid="project-edit"
+        onClick={() => onEdit(menu.id)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60"
+      >
+        <Pencil className="size-4 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{t("Edit project…")}</span>
+      </button>
       <button
         type="button"
         role="menuitem"
@@ -854,116 +899,208 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
   const { location } = useRouterState()
   const pathname = location.pathname
   const [navOrder, setNavOrder] = useNavOrder()
-  const [showCluster] = useShowClusterSection()
-  const [showAnalysis] = useShowAnalysisSection()
-  const [showEditorSetting] = useShowEditorSection()
+  const [shownEntries, setEntryShown] = useShownNavEntries()
+  const [entryMenu, setEntryMenu] = useState<NavEntryMenuState | null>(null)
   // A file outside every project is open in the Editor (project files open in
   // their project view instead, so only outside files reach the quick-edit state).
   const outsideFileOpen =
     useSyncExternalStore(subscribeQuickEditor, readActiveQuickTarget, readActiveQuickTarget) !==
     null
-  // Hide the optional sections whose Settings toggle is off (Cluster and Analysis
-  // stay route-guarded too, so a bookmarked URL can't reach a hidden section).
-  // Editor is only hidden from the list: /quick-edit stays reachable.
-  const visibleItems = navItems.filter((item) => {
-    if (item.id === "cluster") return showCluster
-    if (item.id === "analysis") return showAnalysis
-    if (item.id === "editor") return showEditorSetting || outsideFileOpen
-    return true
-  })
+  // Hide the entries turned off in the right-click menu or in Settings > Sections
+  // (Cluster and Analysis stay route-guarded too, so a bookmarked URL can't reach a
+  // hidden section; the other routes stay reachable). Editor also shows while a file
+  // outside every project is open.
+  const isShown = (item: ScienceNavItem): boolean =>
+    shownEntries.has(item.id) || (item.id === "editor" && outsideFileOpen)
   // Saved orders predate LaTeX Editor: place it below Tasks once.
   const tasksIndex = navOrder.indexOf("tasks")
   const orderWithLatex =
     navOrder.includes("latex") || tasksIndex < 0
       ? navOrder
       : [...navOrder.slice(0, tasksIndex + 1), "latex", ...navOrder.slice(tasksIndex + 1)]
-  const ordered = orderById(
-    visibleItems,
-    orderWithLatex.length ? orderWithLatex : DEFAULT_NAV_ORDER,
-  )
+  // Every entry in sidebar order (the menu's list); dragging reorders this full
+  // list, so a hidden entry keeps its place for when it is shown again.
+  const allOrdered = orderById(navItems, orderWithLatex.length ? orderWithLatex : DEFAULT_NAV_ORDER)
+  const ordered = allOrdered.filter(isShown)
   const navRowProps = useDragReorder(
-    ordered.map((item) => item.id),
+    allOrdered.map((item) => item.id),
     setNavOrder,
   )
+  const openEntryMenu = (item: ScienceNavItem) => (event: React.MouseEvent) => {
+    event.preventDefault()
+    setEntryMenu({ id: item.id, label: item.label, x: event.clientX, y: event.clientY })
+  }
 
   return (
-    <nav
-      aria-label={t("Workspace")}
-      data-testid="science-nav"
-      className="flex shrink-0 flex-col gap-0.5"
-    >
-      {ordered.map((item) => {
-        const Icon = item.icon
-        const testId =
-          item.id === "workflows"
-            ? "nav-automations"
-            : item.id === "editor"
-              ? "nav-editor"
-              : "science-nav-item"
-        const reorder = collapsed ? null : navRowProps(item.id)
-        if (!item.ready || !item.to) {
+    <>
+      <nav
+        aria-label={t("Workspace")}
+        data-testid="science-nav"
+        className="flex shrink-0 flex-col gap-0.5"
+      >
+        {ordered.map((item) => {
+          const Icon = item.icon
+          const testId =
+            item.id === "workflows"
+              ? "nav-automations"
+              : item.id === "editor"
+                ? "nav-editor"
+                : "science-nav-item"
+          const reorder = collapsed ? null : navRowProps(item.id)
+          if (!item.ready || !item.to) {
+            return (
+              <span
+                key={item.id}
+                data-testid={testId}
+                data-science-tab={item.id}
+                data-ready={false}
+                aria-disabled
+                title={collapsed ? `${t(item.label)} (${t("soon")})` : undefined}
+                data-feature-label={t(item.label)}
+                data-feature-help={t(item.description)}
+                className={cn(
+                  navRowClass,
+                  "text-muted-foreground/50",
+                  "cursor-default",
+                  collapsed && "justify-center",
+                  reorder?.dropClass,
+                )}
+                {...reorder?.dragProps}
+              >
+                <Icon className="size-4" aria-hidden />
+                {collapsed ? null : (
+                  <>
+                    <span className="flex-1 truncate">
+                      <LatexText text={t(item.label)} />
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide">{t("soon")}</span>
+                  </>
+                )}
+              </span>
+            )
+          }
+          const isActive = pathname.startsWith(item.to)
           return (
-            <span
+            <Link
               key={item.id}
+              to={item.to}
+              search={item.id === "editor" ? { target: readActiveQuickTarget()?.id } : undefined}
               data-testid={testId}
               data-science-tab={item.id}
-              data-ready={false}
-              aria-disabled
-              title={collapsed ? `${t(item.label)} (${t("soon")})` : undefined}
+              data-ready={true}
+              data-active={isActive}
+              title={collapsed ? t(item.label) : undefined}
               data-feature-label={t(item.label)}
               data-feature-help={t(item.description)}
+              onContextMenu={openEntryMenu(item)}
               className={cn(
                 navRowClass,
-                "text-muted-foreground/50",
-                "cursor-default",
                 collapsed && "justify-center",
+                navStateClass(isActive),
                 reorder?.dropClass,
               )}
               {...reorder?.dragProps}
             >
               <Icon className="size-4" aria-hidden />
               {collapsed ? null : (
-                <>
-                  <span className="flex-1 truncate">
-                    <LatexText text={t(item.label)} />
-                  </span>
-                  <span className="text-[10px] uppercase tracking-wide">{t("soon")}</span>
-                </>
+                <span className="flex-1 truncate">
+                  <LatexText text={t(item.label)} />
+                </span>
               )}
-            </span>
+            </Link>
           )
-        }
-        const isActive = pathname.startsWith(item.to)
+        })}
+      </nav>
+      <NavEntryMenu
+        menu={entryMenu}
+        entries={allOrdered}
+        shown={shownEntries}
+        onClose={() => setEntryMenu(null)}
+        onSetShown={(id, shown) => {
+          setEntryShown(id, shown)
+          setEntryMenu(null)
+        }}
+      />
+    </>
+  )
+}
+
+/** A right-click target on a view entry of the workspace nav. */
+interface NavEntryMenuState {
+  id: string
+  label: string
+  x: number
+  y: number
+}
+
+const navEntryMenuItemClass =
+  "flex h-6 w-full shrink-0 items-center gap-1.5 rounded px-1.5 text-start text-foreground text-xs outline-none hover:bg-accent focus-visible:bg-accent"
+
+/**
+ * The right-click menu of the workspace nav, at the click point: "Hide '<entry>'",
+ * a separator, then every view entry with a check mark on the shown ones (clicking
+ * one shows or hides it). Projects Dashboard is always shown and not listed. Hiding
+ * the current page's entry only removes it from the sidebar. Escape and an outside
+ * click close it.
+ */
+function NavEntryMenu({
+  menu,
+  entries,
+  shown,
+  onClose,
+  onSetShown,
+}: {
+  menu: NavEntryMenuState | null
+  entries: ScienceNavItem[]
+  shown: ReadonlySet<string>
+  onClose: () => void
+  onSetShown: (id: string, shown: boolean) => void
+}) {
+  const t = useTranslate()
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  usePopupDismiss(menu !== null, [rootRef], onClose)
+
+  if (!menu) return null
+  return (
+    <div
+      ref={rootRef}
+      data-testid="sidebar-view-menu"
+      role="menu"
+      aria-label={t("Sidebar views")}
+      className="fixed z-50 flex w-48 flex-col rounded-md border border-border bg-popover p-1 text-popover-foreground text-xs shadow-lg"
+      style={{ left: menu.x, top: menu.y }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        data-testid="sidebar-view-menu-hide"
+        onClick={() => onSetShown(menu.id, false)}
+        className={navEntryMenuItemClass}
+      >
+        <span className="size-3 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{`${t("Hide")} '${t(menu.label)}'`}</span>
+      </button>
+      <div className="my-1 shrink-0 border-border border-t" />
+      {entries.map((entry) => {
+        const isShown = shown.has(entry.id)
         return (
-          <Link
-            key={item.id}
-            to={item.to}
-            search={item.id === "editor" ? { target: readActiveQuickTarget()?.id } : undefined}
-            data-testid={testId}
-            data-science-tab={item.id}
-            data-ready={true}
-            data-active={isActive}
-            title={collapsed ? t(item.label) : undefined}
-            data-feature-label={t(item.label)}
-            data-feature-help={t(item.description)}
-            className={cn(
-              navRowClass,
-              collapsed && "justify-center",
-              navStateClass(isActive),
-              reorder?.dropClass,
-            )}
-            {...reorder?.dragProps}
+          <button
+            key={entry.id}
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={isShown}
+            data-testid="sidebar-view-menu-entry"
+            data-science-tab={entry.id}
+            onClick={() => onSetShown(entry.id, !isShown)}
+            className={navEntryMenuItemClass}
           >
-            <Icon className="size-4" aria-hidden />
-            {collapsed ? null : (
-              <span className="flex-1 truncate">
-                <LatexText text={t(item.label)} />
-              </span>
-            )}
-          </Link>
+            <Check className={cn("size-3 shrink-0", isShown ? "" : "invisible")} aria-hidden />
+            <span className="min-w-0 truncate">{t(entry.label)}</span>
+          </button>
         )
       })}
-    </nav>
+    </div>
   )
 }
 
@@ -1019,6 +1156,7 @@ function ProjectItem({
   onContextMenu: (event: React.MouseEvent) => void
 }) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const params = useParams({ strict: false }) as { projectId?: string }
   const isActive = params.projectId === project.id
   const navigate = useNavigate()
@@ -1115,7 +1253,7 @@ function ProjectItem({
           )}
           title={project.repoPath}
           data-feature-label={project.name}
-          data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace at ")}${project.repoPath}`}
+          data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace at ")}${toDisplayPath(project.repoPath)}`}
         >
           {project.name}
         </Link>

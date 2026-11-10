@@ -916,16 +916,37 @@ async function blankOverleafProject(): Promise<string> {
 }
 
 describe("create paper", () => {
-  test("the default folder is <project>/paper, available until it has files", async () => {
+  test("the default folder is <project>/paper, else the next free one: paper-2/, paper-3/, …", async () => {
     expect(await h.caller.paper.createTarget({ projectId })).toEqual({
       dir: join(h.repoDir, "paper"),
       displayDir: "paper",
-      available: true,
     })
+    // An empty paper/ is still used.
     await mkdir(join(h.repoDir, "paper"))
-    expect((await h.caller.paper.createTarget({ projectId })).available).toBe(true)
-    await writeFile(join(h.repoDir, "paper", "notes.txt"), "x")
-    expect((await h.caller.paper.createTarget({ projectId })).available).toBe(false)
+    expect((await h.caller.paper.createTarget({ projectId })).displayDir).toBe("paper")
+    await writeFile(join(h.repoDir, "paper", "main.tex"), "x")
+    expect(await h.caller.paper.createTarget({ projectId })).toEqual({
+      dir: join(h.repoDir, "paper-2"),
+      displayDir: "paper-2",
+    })
+    // An empty paper-2/ is used; once it has files, paper-3/ is proposed.
+    await mkdir(join(h.repoDir, "paper-2"))
+    expect((await h.caller.paper.createTarget({ projectId })).displayDir).toBe("paper-2")
+    await writeFile(join(h.repoDir, "paper-2", "notes.txt"), "x")
+    expect(await h.caller.paper.createTarget({ projectId })).toEqual({
+      dir: join(h.repoDir, "paper-3"),
+      displayDir: "paper-3",
+    })
+  })
+
+  test("canCreateIn: true for an empty folder or a missing one whose parent exists, false for a folder with files", async () => {
+    const empty = join(h.dataDir, "empty")
+    await mkdir(empty)
+    expect(await h.caller.paper.canCreateIn({ dir: empty })).toBe(true)
+    expect(await h.caller.paper.canCreateIn({ dir: join(h.dataDir, "new") })).toBe(true)
+    await writeFile(join(empty, "notes.txt"), "x")
+    expect(await h.caller.paper.canCreateIn({ dir: empty })).toBe(false)
+    expect(await h.caller.paper.canCreateIn({ dir: join(h.dataDir, "missing", "x") })).toBe(false)
   })
 
   test("creates the paper from the built-in template, with its own Git repo, hidden from the project repo", async () => {

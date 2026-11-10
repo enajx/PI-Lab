@@ -6,13 +6,14 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { closeQuickBuffer, writeQuickBuffer } from "../../../../QuickEditor/quickEditorState"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
 import { ProjectActivityProvider } from "../../-ProjectActivity"
 import { writeProjectWorkspaceState } from "../../projects/-workspaceState"
+import { SectionsSection } from "../../settings/components/SettingsSections"
 import { FEATURE_HELP_CONTROLS, FeatureHelpPanel, Sidebar, sameHelpText } from "./Sidebar"
 
 describe("sameHelpText", () => {
@@ -925,5 +926,179 @@ describe("Sidebar", () => {
     await waitFor(() => expect(removeInput).toEqual({ id: "a" }))
     // Removing closes the menu.
     expect(screen.queryByTestId("project-context-menu")).toBeNull()
+  })
+})
+
+/** The workspace nav row for view entry `id`. */
+function navRow(id: string): HTMLElement | undefined {
+  const nav = screen.queryByTestId("science-nav")
+  if (!nav) return undefined
+  return [...nav.children].find((row) => row.getAttribute("data-science-tab") === id) as
+    | HTMLElement
+    | undefined
+}
+
+/** The labels and check states of the view-entry menu's list, in order. */
+function menuEntries(): Array<{ label: string; checked: string | null }> {
+  const menu = screen.getByTestId("sidebar-view-menu")
+  return within(menu)
+    .getAllByRole("menuitemcheckbox")
+    .map((item) => ({
+      label: item.textContent ?? "",
+      checked: item.getAttribute("aria-checked"),
+    }))
+}
+
+describe("Sidebar view-entry menu", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  test("right-clicking a view entry opens a menu with Hide and every entry checked", async () => {
+    renderSidebar()
+    await screen.findByTestId("science-nav")
+    expect(screen.queryByTestId("sidebar-view-menu")).toBeNull()
+
+    fireEvent.contextMenu(navRow("library") as HTMLElement, { clientX: 40, clientY: 120 })
+    const menu = screen.getByTestId("sidebar-view-menu")
+    expect(menu.style.left).toBe("40px")
+    expect(menu.style.top).toBe("120px")
+    expect(within(menu).getByTestId("sidebar-view-menu-hide").textContent).toBe("Hide 'Library'")
+    expect(menuEntries()).toEqual([
+      { label: "Tasks", checked: "true" },
+      { label: "Library", checked: "true" },
+      { label: "Analysis", checked: "true" },
+      { label: "LaTeX Editor", checked: "true" },
+      { label: "Skills", checked: "true" },
+      { label: "Routines", checked: "true" },
+      { label: "Cluster", checked: "true" },
+      { label: "Editor", checked: "false" },
+    ])
+    // Projects Dashboard is always shown, so it is not in the list.
+    expect(menu.textContent).not.toContain("Dashboard")
+
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.queryByTestId("sidebar-view-menu")).toBeNull()
+  })
+
+  test("Hide removes the entry, it stays hidden after remount, and the list shows it again", async () => {
+    const first = renderSidebar()
+    await screen.findByTestId("science-nav")
+    fireEvent.contextMenu(navRow("library") as HTMLElement)
+    fireEvent.click(screen.getByTestId("sidebar-view-menu-hide"))
+    expect(screen.queryByTestId("sidebar-view-menu")).toBeNull()
+    expect(navRow("library")).toBeUndefined()
+    first.unmount()
+
+    renderSidebar()
+    await screen.findByTestId("science-nav")
+    expect(navRow("library")).toBeUndefined()
+
+    fireEvent.contextMenu(navRow("tasks") as HTMLElement)
+    expect(menuEntries().find((entry) => entry.label === "Library")?.checked).toBe("false")
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Library" }))
+    expect(navRow("library")).toBeTruthy()
+    // The saved order is kept: Library is back in its place.
+    const nav = screen.getByTestId("science-nav")
+    expect(nav.children[1]?.getAttribute("data-science-tab")).toBe("library")
+  })
+
+  test("hiding the entry you are on keeps you on that page", async () => {
+    const { router } = renderSidebar()
+    await screen.findByTestId("science-nav")
+    fireEvent.click(navRow("library")?.closest("a") ?? (navRow("library") as HTMLElement))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/science/library"))
+    fireEvent.contextMenu(navRow("library") as HTMLElement)
+    fireEvent.click(screen.getByTestId("sidebar-view-menu-hide"))
+    expect(navRow("library")).toBeUndefined()
+    expect(router.state.location.pathname).toBe("/science/library")
+  })
+
+  test("Settings section toggles and the menu agree", async () => {
+    renderSidebar()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders client={createFakeTrpcClient({})} queryClient={queryClient}>
+        <SectionsSection />
+      </AppProviders>,
+    )
+    await screen.findByTestId("science-nav")
+    const analysisToggle = screen.getByTestId("settings-show-analysis-section")
+
+    // Menu to Settings.
+    fireEvent.contextMenu(navRow("analysis") as HTMLElement)
+    fireEvent.click(screen.getByTestId("sidebar-view-menu-hide"))
+    expect(analysisToggle.getAttribute("aria-checked")).toBe("false")
+
+    // Settings to menu.
+    fireEvent.click(analysisToggle)
+    expect(navRow("analysis")).toBeTruthy()
+    fireEvent.contextMenu(navRow("tasks") as HTMLElement)
+    expect(menuEntries().find((entry) => entry.label === "Analysis")?.checked).toBe("true")
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Editor" }))
+    expect(screen.getByTestId("settings-show-editor-section").getAttribute("aria-checked")).toBe(
+      "true",
+    )
+  })
+})
+
+describe("Sidebar project menu: Edit project…", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  test("opens the Edit project dialog with the project's details and saves through updateDetails", async () => {
+    const alpha = {
+      id: "a",
+      name: "Alpha",
+      repoPath: "/a",
+      typeId: "software",
+      metadata: { deadline: "2027-01-02", emojiTags: [], textTags: [] },
+      agentConfig: null,
+      archivedAt: null,
+      hasThumbnail: false,
+    }
+    const calls: unknown[] = []
+    const { queryClient } = renderSidebar({
+      "projects.list": () => [alpha],
+      "agents.projectChoice": () => ({ agentId: null }),
+      "paper.get": () => ({ paper: null }),
+      "projects.updateDetails": (input) => {
+        calls.push(input)
+        return alpha
+      },
+    })
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+    fireEvent.contextMenu(await screen.findByTestId("project-item"))
+    const menu = screen.getByTestId("project-context-menu")
+    const items = within(menu).getAllByRole("menuitem")
+    expect(items[0]?.getAttribute("data-testid")).toBe("project-edit")
+    expect(items[0]?.textContent).toBe("Edit project…")
+    fireEvent.click(items[0] as HTMLElement)
+    expect(screen.queryByTestId("project-context-menu")).toBeNull()
+
+    const dialog = screen.getByTestId("edit-project-dialog")
+    expect((within(dialog).getByTestId("edit-project-name") as HTMLInputElement).value).toBe(
+      "Alpha",
+    )
+    expect((within(dialog).getByTestId("edit-project-type") as HTMLSelectElement).value).toBe(
+      "software",
+    )
+    fireEvent.change(within(dialog).getByTestId("edit-project-name"), {
+      target: { value: "Beta" },
+    })
+    await waitFor(() =>
+      expect((within(dialog).getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    )
+    fireEvent.click(within(dialog).getByTestId("edit-project-save"))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toMatchObject({ id: "a", details: { name: "Beta", typeId: "software" } })
+    await waitFor(() => expect(screen.queryByTestId("edit-project-dialog")).toBeNull())
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey))
+    expect(keys.some((key) => key.includes("list"))).toBe(true)
+    expect(keys.some((key) => key.includes("thumbnail"))).toBe(true)
+    expect(keys.some((key) => key.includes("projectChoice"))).toBe(true)
   })
 })

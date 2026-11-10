@@ -1,3 +1,4 @@
+import { homedir } from "node:os"
 import { BrowserWindow, dialog, type OpenDialogOptions } from "electron"
 import { z } from "zod"
 import { createMenuBarIconService, type MenuBarIconService } from "../../background/trayVisibility"
@@ -30,6 +31,8 @@ export function createSystemRouter(
 ) {
   const detectSystemFontsOnce = cacheSystemFontDetector(detectSystemFonts)
   return router({
+    /** The user's home folder, so the renderer can show paths as `~/…` (display only). */
+    homeDir: publicProcedure.query(() => homedir()),
     /** System-installed font families for the global editor typography picker. */
     fonts: publicProcedure.query(() => detectSystemFontsOnce()),
     /** The OS login item is separate from the window-close setting in SQLite. */

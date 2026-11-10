@@ -5,7 +5,7 @@ import { useTRPC } from "../../../../trpc/react"
 
 /**
  * The "LaTeX template" row of the LaTeX settings: which template the LaTeX
- * Editor's Create paper uses. "Set new LaTeX template…" picks a folder whose
+ * Editor's Start draft uses. "Set new LaTeX template…" picks a folder whose
  * files are copied into PI Lab (so later changes to that folder do not change
  * the template); "Use built-in template" goes back to the one PI Lab ships.
  */
@@ -48,7 +48,7 @@ export function LatexTemplateSettings() {
       </div>
       <p className="text-muted-foreground text-xs">
         {t(
-          "Used by Create paper in the LaTeX Editor. A new template's files are copied into PI Lab.",
+          "Used by Start draft in the LaTeX Editor. A new template's files are copied into PI Lab.",
         )}
       </p>
       <div className="flex items-center gap-2">

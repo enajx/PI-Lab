@@ -1,7 +1,7 @@
 import type { NotificationSound } from "@pi-lab/local-db"
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, CircleAlert, CircleHelp, RefreshCw } from "lucide-react"
+import { CheckCircle2, CircleAlert, CircleHelp, Loader2, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import {
   type InterfaceLanguage,
@@ -18,6 +18,11 @@ interface FirstRunSetupProps {
   onClose: () => void
 }
 
+const PLACEHOLDER_HARNESSES: HarnessStatus[] = [
+  { id: "claude-code", label: "Claude Code", executable: "claude", state: "missing" },
+  { id: "codex", label: "Codex", executable: "codex", state: "missing" },
+]
+
 type HarnessStatus = {
   id: "claude-code" | "codex"
   label: string
@@ -31,6 +36,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const environment = useQuery(trpc.setup.environment.queryOptions(undefined, { staleTime: 0 }))
+  const checking = environment.isFetching
   const settings = useQuery(trpc.settings.get.queryOptions())
   const startAtLogin = useQuery(trpc.system.startAtLogin.queryOptions())
   const appChannel = useQuery({
@@ -312,38 +318,31 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 {t("Recheck")}
               </Button>
             </div>
-            {environment.isPending ? (
-              <p className="text-muted-foreground text-xs">
-                {t("Checking your local environment…")}
-              </p>
-            ) : (
-              <>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {(environment.data?.harnesses ?? []).map((harness) => (
-                    <HarnessCard
-                      key={harness.id}
-                      harness={harness}
-                      selected={selectedAgent === harness.id}
-                      apiConfigured={environment.data?.apiConfigured[harness.id] ?? false}
-                      apiOpen={apiOpenFor === harness.id}
-                      apiKey={apiOpenFor === harness.id ? apiKey : ""}
-                      saving={saveApiKey.isPending}
-                      onSelect={() => chooseAgent(harness.id)}
-                      onOpenApi={() => {
-                        setApiOpenFor(harness.id)
-                        setApiKey("")
-                      }}
-                      onApiKeyChange={setApiKey}
-                      onSaveApi={() => saveApiKey.mutate({ agentId: harness.id, apiKey })}
-                      onRetry={() => void environment.refetch()}
-                    />
-                  ))}
-                </div>
-                {selectedAgent === null ? (
-                  <p className="mt-2 text-muted-foreground text-xs">{t("No default selected.")}</p>
-                ) : null}
-              </>
-            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(environment.data?.harnesses ?? PLACEHOLDER_HARNESSES).map((harness) => (
+                <HarnessCard
+                  key={harness.id}
+                  harness={harness}
+                  checking={checking}
+                  selected={selectedAgent === harness.id}
+                  apiConfigured={environment.data?.apiConfigured[harness.id] ?? false}
+                  apiOpen={apiOpenFor === harness.id}
+                  apiKey={apiOpenFor === harness.id ? apiKey : ""}
+                  saving={saveApiKey.isPending}
+                  onSelect={() => chooseAgent(harness.id)}
+                  onOpenApi={() => {
+                    setApiOpenFor(harness.id)
+                    setApiKey("")
+                  }}
+                  onApiKeyChange={setApiKey}
+                  onSaveApi={() => saveApiKey.mutate({ agentId: harness.id, apiKey })}
+                  onRetry={() => void environment.refetch()}
+                />
+              ))}
+            </div>
+            {selectedAgent === null && !checking ? (
+              <p className="mt-2 text-muted-foreground text-xs">{t("No default selected.")}</p>
+            ) : null}
           </section>
 
           <section className="rounded-lg border border-border bg-card p-4">
@@ -351,6 +350,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <IntegrationCard
                 title="GitHub"
+                checking={checking}
                 detail={
                   environment.data?.github.account ?? compactState(environment.data?.github.state)
                 }
@@ -359,6 +359,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
               />
               <IntegrationCard
                 title="Zotero"
+                checking={checking}
                 detail={
                   environment.data?.zotero === "running"
                     ? t("Detected")
@@ -419,8 +420,19 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   )
 }
 
+function CheckingLabel() {
+  const t = useTranslate()
+  return (
+    <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
+      <Loader2 className="size-3 animate-spin" aria-hidden />
+      {t("Checking…")}
+    </span>
+  )
+}
+
 function HarnessCard({
   harness,
+  checking,
   selected,
   apiConfigured,
   apiOpen,
@@ -433,6 +445,7 @@ function HarnessCard({
   onRetry,
 }: {
   harness: HarnessStatus
+  checking: boolean
   selected: boolean
   apiConfigured: boolean
   apiOpen: boolean
@@ -444,7 +457,7 @@ function HarnessCard({
   onSaveApi: () => void
   onRetry: () => void
 }) {
-  const detected = harness.state === "authenticated"
+  const detected = !checking && harness.state === "authenticated"
   const t = useTranslate()
   return (
     <div
@@ -462,19 +475,23 @@ function HarnessCard({
         >
           <span className="flex items-center gap-2 font-medium text-sm">
             {harness.label}
-            <StateIcon state={harness.state} />
-            <span
-              className={cn(
-                "font-normal text-xs",
-                detected ? "text-emerald-600" : "text-muted-foreground",
-              )}
-            >
-              {detected
-                ? t("Detected")
-                : harness.state === "missing"
-                  ? t("Not detected")
-                  : (harness.message ?? t("Not detected"))}
-            </span>
+            {checking ? null : <StateIcon state={harness.state} />}
+            {checking ? (
+              <CheckingLabel />
+            ) : (
+              <span
+                className={cn(
+                  "font-normal text-xs",
+                  detected ? "text-emerald-600" : "text-muted-foreground",
+                )}
+              >
+                {detected
+                  ? t("Detected")
+                  : harness.state === "missing"
+                    ? t("Not detected")
+                    : (harness.message ?? t("Not detected"))}
+              </span>
+            )}
           </span>
           {detected ? (
             <span className="mt-0.5 block text-[11px] text-muted-foreground">
@@ -492,7 +509,7 @@ function HarnessCard({
           </button>
         )}
       </div>
-      {harness.state === "error" ? (
+      {!checking && harness.state === "error" ? (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-muted/60 p-2 text-xs">
           <p className="min-w-0 flex-1 text-muted-foreground">
             {t("Run")}{" "}
@@ -537,8 +554,10 @@ function IntegrationCard({
   detail,
   description,
   state,
+  checking,
 }: {
   title: string
+  checking: boolean
   detail: string
   description: string
   state: HarnessStatus["state"]
@@ -548,15 +567,21 @@ function IntegrationCard({
     <div className="rounded-lg border border-border p-3">
       <div className="flex items-center gap-2">
         <span className="font-medium text-sm">{title}</span>
-        <StateIcon state={state} />
-        <span
-          className={cn(
-            "ms-auto text-xs",
-            state === "authenticated" ? "text-emerald-600" : "text-muted-foreground",
-          )}
-        >
-          {detail}
-        </span>
+        {checking ? null : <StateIcon state={state} />}
+        {checking ? (
+          <span className="ms-auto">
+            <CheckingLabel />
+          </span>
+        ) : (
+          <span
+            className={cn(
+              "ms-auto text-xs",
+              state === "authenticated" ? "text-emerald-600" : "text-muted-foreground",
+            )}
+          >
+            {detail}
+          </span>
+        )}
       </div>
       <p className="mt-0.5 text-muted-foreground text-xs">{t(description)}</p>
     </div>

@@ -159,7 +159,7 @@ export function useLatexBuild(
 
   /**
    * Show one build of the root `relPath` (one this hook started, or one started
-   * elsewhere such as Create paper's): status and log while it runs and after,
+   * elsewhere such as Start draft's): status and log while it runs and after,
    * and `onBuilt` when it succeeds.
    */
   const track = useCallback(

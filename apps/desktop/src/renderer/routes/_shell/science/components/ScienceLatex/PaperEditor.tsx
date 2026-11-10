@@ -60,7 +60,7 @@ interface PaperEditorProps {
   /** The page top bar's element that holds the Update paper and Sync buttons, or null before it mounts. */
   syncSlot: HTMLElement | null
   /**
-   * Right after Create paper: the build of the main .tex it ran before the
+   * Right after Start draft: the build of the main .tex it ran before the
    * editor opened (its PDF then opens beside the source), else null.
    */
   createdBuild: Promise<BuildResult> | null
@@ -233,7 +233,7 @@ export function PaperEditor({
 
   // Once per paper: open the main .tex (unless tabs from an earlier visit were
   // restored) and show its PDF beside it. A just-created paper shows the build
-  // Create paper ran. Otherwise a missing PDF, or one older than the .tex, is
+  // Start draft ran. Otherwise a missing PDF, or one older than the .tex, is
   // built first; `onBuilt` then opens it beside the source. A failed build
   // shows "LaTeX build failed" and its log in the footer.
   const restoredTabs = useRef(hasRestoredTabs(restoredState)).current

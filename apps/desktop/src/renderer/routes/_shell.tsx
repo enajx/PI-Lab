@@ -16,6 +16,7 @@ import { quickEditorRevision, subscribeQuickEditor } from "../QuickEditor/quickE
 import { QuickFind, type QuickFindItem } from "../QuickFind"
 import { readSetupGateMode, shouldRedirectToSetup } from "../setup/firstRunRoute"
 import { eventMatchesShortcut } from "../shortcuts/shortcuts"
+import { useDisplayPath } from "../trpc/displayPath"
 import { useTRPC, useTRPCClient } from "../trpc/react"
 import { AgentShortcuts } from "./_shell/-agentShortcuts"
 import { useGlobalShortcuts } from "./_shell/-globalShortcuts"
@@ -196,13 +197,14 @@ function ShellLayout() {
 /** ⌘F outside a project/Library: fuzzy-find an opened project and jump to it. */
 function ProjectsFind({ onClose }: { onClose: () => void }) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const navigate = useNavigate()
   const trpc = useTRPC()
   const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
   const items: QuickFindItem[] = projects.map((project) => ({
     id: project.id,
     label: project.name,
-    hint: project.repoPath,
+    hint: toDisplayPath(project.repoPath),
     icon: FolderGit2,
   }))
   return (

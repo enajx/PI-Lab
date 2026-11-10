@@ -214,7 +214,7 @@ test("the footer shows the paper folder; Clear paper folder shows the setup page
   expect(detect).toHaveBeenCalledTimes(1)
 })
 
-test("Create paper keeps the setup shown while the PDF builds, then opens main.tex with the built PDF beside it", async () => {
+test("Start draft keeps the setup shown while the PDF builds, then opens main.tex with the built PDF beside it", async () => {
   const created = {
     paper: {
       dir: "/proj/paper",
@@ -240,7 +240,7 @@ test("Create paper keeps the setup shown while the PDF builds, then opens main.t
   }
   renderPageWith(paperGet, {
     "paper.detect": () => ({ clones: [], stoppedEarly: false }),
-    "paper.createTarget": () => ({ dir: "/proj/paper", displayDir: "paper", available: true }),
+    "paper.createTarget": () => ({ dir: "/proj/paper", displayDir: "paper" }),
     "paper.create": () => {
       current = created
       return created

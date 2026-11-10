@@ -1,9 +1,12 @@
 import { cn } from "@pi-lab/ui"
 import type { ReactNode } from "react"
-import { CaffeineControl } from "../../../../../caffeine"
 import { LatexText } from "../../../../../components/LatexText"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
-import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
+import {
+  TitleBarSystemControls,
+  titleBarControlClass,
+  titleBarHeaderClass,
+} from "../../../titleBar"
 
 interface ScienceTabShellProps {
   /** Tab title, rendered in the fixed header. */
@@ -49,8 +52,7 @@ export function ScienceTabShell({
         </div>
         <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
           {actions}
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>

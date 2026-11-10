@@ -55,10 +55,10 @@ export function ScienceLatex({
       },
     }),
   )
-  // The project whose Create paper is running: its setup stays shown until the
+  // The project whose Start draft is running: its setup stays shown until the
   // PDF is built, even if the paper state already has the new paper.
   const [creatingFor, setCreatingFor] = useState<string | null>(null)
-  // The paper Create paper just made; its editor shows that build's PDF or failure.
+  // The paper Start draft just made; its editor shows that build's PDF or failure.
   const [created, setCreated] = useState<CreatedPaper | null>(null)
   // The top bar element the paper workspace puts its Update paper and Sync buttons in.
   const [syncSlot, setSyncSlot] = useState<HTMLElement | null>(null)

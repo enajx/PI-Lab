@@ -736,7 +736,45 @@ test("LaTeX Editor lists the papers inside a chosen folder that is not a paper",
 })
 
 /**
- * Create paper and Connect to Overleaf, through the real app. The paper is
+ * Start draft when `<project>/paper/` already has files: the card proposes
+ * `paper-2/` and can start right away, and choosing a folder with files in it
+ * (the fixed folder picker returns `paper/`) says why it cannot be used.
+ */
+test("LaTeX Editor Start draft proposes paper-2/ when paper/ has files", async () => {
+  test.setTimeout(120_000)
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-latex-draft-e2e-")))
+  const project = join(root, "project")
+  const existing = join(project, "paper")
+  await mkdir(existing, { recursive: true })
+  await execFileAsync("git", ["init", project])
+  await writeFile(join(existing, "main.tex"), MAIN)
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, existing, {})
+    const page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await openLatexEditor(page)
+    const card = page.getByTestId("paper-setup-create")
+    await expect(card.getByRole("heading", { level: 3 })).toHaveText("Start draft")
+    await expect(page.getByTestId("paper-create")).toHaveText("Start draft")
+    await expect(page.getByTestId("paper-create-folder")).toHaveText("paper-2/")
+    await expect(page.getByTestId("paper-create")).toBeEnabled()
+    await expect(card).not.toContainText("has files in it")
+    await page.getByTestId("paper-create-change").click()
+    await expect(page.getByRole("alert")).toHaveText(
+      "That folder already has files. Choose an empty folder, or use 'Use an existing folder' to open it as a paper.",
+    )
+    await expect(page.getByTestId("paper-create-folder")).toHaveText("paper-2/")
+    await expect(page.getByTestId("paper-create")).toBeEnabled()
+    await page.screenshot({ path: test.info().outputPath("latex-start-draft-paper-2.png") })
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Start draft and Connect to Overleaf, through the real app. The paper is
  * made from a template set in Settings > LaTeX (the fixed folder picker
  * returns the template folder). The "Overleaf" Blank project is a LOCAL bare
  * repo (a stand-in: no network, no Overleaf account): a test global Git config
@@ -763,7 +801,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
   await git(seed, "commit", "-m", "blank")
   await git(seed, "push", blank, "master")
   const overleafUrl = "https://git@git.overleaf.com/0123456789abcdef01234567"
-  // Create paper builds the PDF. With no system LaTeX, Auto uses Tectonic and the shared cache.
+  // Start draft builds the PDF. With no system LaTeX, Auto uses Tectonic and the shared cache.
   await mkdir(PERSISTENT_CACHE, { recursive: true })
   await mkdir(join(root, "data", "latex"), { recursive: true })
   await symlink(PERSISTENT_CACHE, join(root, "data", "latex", "cache"), "dir")
@@ -798,7 +836,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     await expect(page.getByTestId("paper-create-folder")).toHaveText("paper/")
     await page.screenshot({ path: test.info().outputPath("latex-setup-create.png") })
     await page.getByTestId("paper-create").click()
-    // Create paper builds main.tex before the editor opens.
+    // Start draft builds main.tex before the editor opens.
     await expect(page.getByTestId("paper-create")).toHaveText("Building PDF…", {
       timeout: 15_000,
     })

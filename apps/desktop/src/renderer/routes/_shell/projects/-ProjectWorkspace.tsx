@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ListTodo, ScrollText, Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
 import { HeaderShortcuts } from "../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectStageRow } from "../../../components/ProjectStage"
@@ -26,9 +25,10 @@ import {
   useSidebarCollapsed,
 } from "../../../preferences/preferences"
 import { stripOuterQuery } from "../../../QuickEditor/routeTarget"
+import { useDisplayPath } from "../../../trpc/displayPath"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { useOptionalNewFileController } from "../components/NewFileController"
-import { AgentStatusControl, titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
+import { TitleBarSystemControls, titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
 import { clearPendingLaunch, readPendingLaunch } from "./-pendingLaunch"
 import { clearPendingOpenFile, usePendingOpenFile } from "./-pendingOpenFile"
 import { clearPendingTaskSession, readPendingTaskSession } from "./-pendingTaskSession"
@@ -64,6 +64,7 @@ export function ProjectWorkspace({
   activation: ProjectNotificationSearch
 }) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const newFileController = useOptionalNewFileController()
@@ -399,8 +400,11 @@ export function ProjectWorkspace({
               {project?.name ?? t("Loading…")}
             </h1>
             {project ? (
-              <p className="cursor-text select-text truncate text-muted-foreground text-xs">
-                {project.repoPath}
+              <p
+                title={project.repoPath}
+                className="cursor-text select-text truncate text-muted-foreground text-xs"
+              >
+                {toDisplayPath(project.repoPath)}
               </p>
             ) : null}
           </div>
@@ -516,8 +520,7 @@ export function ProjectWorkspace({
               },
             ]}
           />
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
 

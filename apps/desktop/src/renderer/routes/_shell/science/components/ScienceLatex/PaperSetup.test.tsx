@@ -11,7 +11,7 @@ import { type CreatedPaper, PaperSetup } from "./PaperSetup"
  * (mocked); cloning and linking for real are covered by the `paper` router tests
  * and the e2e test.
  */
-/** What PaperSetup reported about Create paper, in order: "start", then the created paper or null. */
+/** What PaperSetup reported about Start draft, in order: "start", then the created paper or null. */
 let created: ("start" | CreatedPaper | null)[] = []
 
 function renderSetup(handlers: FakeHandlers) {
@@ -23,7 +23,7 @@ function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "paper.detect": () => ({ clones: [], stoppedEarly: false }),
-    "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper", available: true }),
+    "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper" }),
     ...handlers,
   })
   return render(
@@ -418,10 +418,13 @@ describe("PaperSetup (mocked server)", () => {
     renderSetup({
       "paper.token.status": () => ({ configured: false, source: null }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
-      "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper", available: false }),
+      "paper.createTarget": () => ({
+        dir: "/p/a-long-folder-name-for-the-new-paper",
+        displayDir: "a-long-folder-name-for-the-new-paper",
+      }),
     })
     const folder = await screen.findByTestId("paper-create-folder")
-    await waitFor(() => expect(folder.textContent).toBe("paper/ has files in it, choose a folder"))
+    await waitFor(() => expect(folder.textContent).toBe("a-long-folder-name-for-the-new-paper/"))
     for (const name of ["truncate", "overflow-hidden", "whitespace-nowrap", "text-ellipsis"]) {
       expect(folder.className.split(" ")).not.toContain(name)
     }
@@ -475,7 +478,7 @@ describe("PaperSetup (mocked server)", () => {
     )
   })
 
-  test("Create paper creates the paper in <project>/paper, or in the folder the user chose", async () => {
+  test("Start draft creates the paper in <project>/paper, or in the folder the user chose", async () => {
     created = []
     const create = vi.fn(() => ({
       paper: null,
@@ -489,6 +492,7 @@ describe("PaperSetup (mocked server)", () => {
       "paper.create": create,
       "pdf.build": () => ({ relPath: "build/main.pdf", success: true, log: "" }),
       "system.pickDirectory": () => "/elsewhere/new-paper",
+      "paper.canCreateIn": () => true,
     })
     expect((await screen.findByTestId("paper-create-folder")).textContent).toBe("paper/")
     await waitFor(() =>
@@ -509,7 +513,7 @@ describe("PaperSetup (mocked server)", () => {
     )
   })
 
-  test("Create paper builds main.tex before the editor opens, showing Building PDF… meanwhile", async () => {
+  test("Start draft builds main.tex before the editor opens, showing Building PDF… meanwhile", async () => {
     created = []
     const builds: unknown[] = []
     let finishBuild: (result: unknown) => void = () => undefined
@@ -547,7 +551,7 @@ describe("PaperSetup (mocked server)", () => {
     })
   })
 
-  test("Create paper's build that cannot run still opens the paper, with the error for the editor to show", async () => {
+  test("Start draft's build that cannot run still opens the paper, with the error for the editor to show", async () => {
     created = []
     renderSetup({
       "paper.token.status": () => ({ configured: true, source: "saved" }),
@@ -569,7 +573,7 @@ describe("PaperSetup (mocked server)", () => {
     await expect((created[1] as CreatedPaper).build).rejects.toThrow("No LaTeX engine found")
   })
 
-  test("when Create paper fails, the page is told and the error is shown", async () => {
+  test("when Start draft fails, the page is told and the error is shown", async () => {
     created = []
     renderSetup({
       "paper.token.status": () => ({ configured: true, source: "saved" }),
@@ -585,17 +589,65 @@ describe("PaperSetup (mocked server)", () => {
     expect(created).toEqual(["start", null])
   })
 
-  test("when paper/ has files in it, Create paper waits for a chosen folder", async () => {
+  test("the card and its button are called Start draft", async () => {
     renderSetup({
       "paper.token.status": () => ({ configured: true, source: "saved" }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
-      "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper", available: false }),
+    })
+    const card = await screen.findByTestId("paper-setup-create")
+    expect(within(card).getByRole("heading", { level: 3 }).textContent).toBe("Start draft")
+    expect(card.textContent).toContain("Start a new paper from your LaTeX template.")
+    expect(screen.getByTestId("paper-create").textContent).toBe("Start draft")
+    expect(screen.getByTestId("paper-setup").textContent).not.toContain("Create paper")
+  })
+
+  test("when paper/ has files in it, Start draft proposes paper-2/ and can start right away", async () => {
+    const create = vi.fn(() => ({
+      paper: null,
+      workspaceId: "new-paper-ws",
+      rootRelPath: null,
+      autoDetect: true,
+    }))
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.createTarget": () => ({ dir: "/p/paper-2", displayDir: "paper-2" }),
+      "paper.create": create,
     })
     await waitFor(() =>
-      expect(screen.getByTestId("paper-create-folder").textContent).toBe(
-        "paper/ has files in it, choose a folder",
-      ),
+      expect(screen.getByTestId("paper-create-folder").textContent).toBe("paper-2/"),
     )
-    expect((screen.getByTestId("paper-create") as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId("paper-setup").textContent).not.toContain("has files in it")
+    const button = screen.getByTestId("paper-create") as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    fireEvent.click(button)
+    await waitFor(() => expect(create).toHaveBeenCalledWith({ projectId: "p1", dir: "/p/paper-2" }))
+  })
+
+  test("choosing a folder with files in it says why it cannot be used and keeps the previous folder", async () => {
+    const create = vi.fn(() => ({
+      paper: null,
+      workspaceId: "new-paper-ws",
+      rootRelPath: null,
+      autoDetect: true,
+    }))
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.createTarget": () => ({ dir: "/p/paper-2", displayDir: "paper-2" }),
+      "paper.canCreateIn": (input) => (input as { dir: string }).dir !== "/Users/me/full",
+      "paper.create": create,
+      "system.pickDirectory": () => "/Users/me/full",
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("paper-create-folder").textContent).toBe("paper-2/"),
+    )
+    fireEvent.click(screen.getByTestId("paper-create-change"))
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "That folder already has files. Choose an empty folder, or use 'Use an existing folder' to open it as a paper.",
+    )
+    expect(screen.getByTestId("paper-create-folder").textContent).toBe("paper-2/")
+    fireEvent.click(screen.getByTestId("paper-create"))
+    await waitFor(() => expect(create).toHaveBeenCalledWith({ projectId: "p1", dir: "/p/paper-2" }))
   })
 })

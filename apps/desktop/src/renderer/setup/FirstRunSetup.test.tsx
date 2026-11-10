@@ -135,6 +135,45 @@ describe("FirstRunSetup", () => {
     expect(screen.queryByText(/Log in/u)).toBeNull()
   })
 
+  test("shows Checking… instead of Not detected until the environment check finishes", async () => {
+    let resolveEnvironment: (value: typeof ENVIRONMENT) => void = () => undefined
+    const pending = new Promise<typeof ENVIRONMENT>((resolve) => {
+      resolveEnvironment = resolve
+    })
+    renderSetup({ "setup.environment": () => pending })
+
+    expect((await screen.findAllByText("Checking…")).length).toBe(4)
+    expect(screen.queryByText("Not detected")).toBeNull()
+    expect(screen.queryByText("Detected")).toBeNull()
+    expect(screen.queryByText("Not found")).toBeNull()
+
+    resolveEnvironment(ENVIRONMENT)
+    expect(await screen.findByText("Detected")).toBeTruthy()
+    expect(screen.getByText("Not detected")).toBeTruthy()
+    expect(screen.getByText("octo")).toBeTruthy()
+    expect(screen.queryByText("Checking…")).toBeNull()
+  })
+
+  test("shows Checking… again while Recheck runs", async () => {
+    let calls = 0
+    let resolveSecond: (value: typeof ENVIRONMENT) => void = () => undefined
+    const second = new Promise<typeof ENVIRONMENT>((resolve) => {
+      resolveSecond = resolve
+    })
+    renderSetup({
+      "setup.environment": () => {
+        calls += 1
+        return calls === 1 ? ENVIRONMENT : second
+      },
+    })
+    expect(await screen.findByText("Detected")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Recheck" }))
+    expect((await screen.findAllByText("Checking…")).length).toBe(4)
+    resolveSecond(ENVIRONMENT)
+    await waitFor(() => expect(screen.queryByText("Checking…")).toBeNull())
+    expect(screen.getByText("Not detected")).toBeTruthy()
+  })
+
   test("renders local integrations as cards and makes a failed Codex check retryable", async () => {
     const environment = vi.fn(() => ({
       ...ENVIRONMENT,

@@ -13,7 +13,7 @@ const linkClass = "text-muted-foreground underline underline-offset-2 hover:text
 
 /**
  * The "Connect to Overleaf" dialog for a paper folder with no Git remote (for
- * example one made with Create paper). Overleaf has no API to create projects,
+ * example one made with Start draft). Overleaf has no API to create projects,
  * so it tells the user to create a Blank project on Overleaf and paste its Git
  * URL. PI Lab then merges that project in, keeps the local files over
  * Overleaf's default ones, and pushes (`paper.connectOverleaf`). The Overleaf

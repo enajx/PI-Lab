@@ -97,14 +97,12 @@ const CREATE_COMMIT_MESSAGE = "Create paper from template"
 /** Commit message for merging a Blank Overleaf project into a local paper. */
 const CONNECT_COMMIT_MESSAGE = "Connect to Overleaf"
 
-/** Result of `paper.createTarget`: where "Create paper" puts the paper unless the user chooses. */
+/** Result of `paper.createTarget`: where "Start draft" puts the paper unless the user chooses. */
 export interface CreateTarget {
-  /** `<project>/paper`. */
+  /** `<project>/paper`, or the first of `<project>/paper-2`, `paper-3`, … that can be used. */
   dir: string
   /** The folder as shown to the user; see {@link displayPaperDir}. */
   displayDir: string
-  /** False when the folder already has files in it, so another folder must be chosen. */
-  available: boolean
 }
 
 /** The linked paper folder as the renderer sees it. */
@@ -417,16 +415,31 @@ async function isEmptyFolder(dir: string): Promise<boolean> {
   return (await readdir(dir)).every((name) => name === ".DS_Store")
 }
 
-/** Where "Create paper" puts the paper by default; see {@link CreateTarget}. */
+/**
+ * True when a new paper can be made in `dir`: an empty folder, or a missing
+ * folder whose parent folder exists.
+ */
+async function canCreateIn(dir: string): Promise<boolean> {
+  if (!existsSync(dir)) return existsSync(dirname(dir))
+  return (await stat(dir)).isDirectory() && (await isEmptyFolder(dir))
+}
+
+/**
+ * Where "Start draft" puts the paper by default: `<project>/paper`, or when
+ * that cannot be used (it has files in it), the first of `paper-2`, `paper-3`,
+ * … that is missing or empty. See {@link CreateTarget}.
+ */
 async function createTarget(db: PiLabDatabase, projectId: string): Promise<CreateTarget> {
   const project = requireProject(db, projectId)
-  const dir = join(project.repoPath, "paper")
-  const exists = existsSync(dir)
-  const available = !exists || ((await stat(dir)).isDirectory() && (await isEmptyFolder(dir)))
+  let name = "paper"
+  for (let n = 2; !(await canCreateIn(join(project.repoPath, name))); n++) name = `paper-${n}`
   const projectDir = existsSync(project.repoPath)
     ? await realpath(project.repoPath)
     : project.repoPath
-  return { dir, displayDir: await displayDirFor(project, join(projectDir, "paper")), available }
+  return {
+    dir: join(project.repoPath, name),
+    displayDir: await displayDirFor(project, join(projectDir, name)),
+  }
 }
 
 /**
@@ -445,19 +458,15 @@ export async function createPaper(
   dataDir: string,
 ): Promise<PaperState> {
   const project = requireProject(db, projectId)
-  if (existsSync(dir)) {
-    if (!(await stat(dir)).isDirectory() || !(await isEmptyFolder(dir))) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `Choose an empty folder for the new paper: ${dir} has files in it.`,
-      })
-    }
-  } else {
-    if (!existsSync(dirname(dir))) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: `Not a folder: ${dirname(dir)}` })
-    }
-    await mkdir(dir)
+  if (!(await canCreateIn(dir))) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: existsSync(dir)
+        ? `Choose an empty folder for the new paper: ${dir} has files in it.`
+        : `Not a folder: ${dirname(dir)}`,
+    })
   }
+  if (!existsSync(dir)) await mkdir(dir)
   const target = await realpath(dir)
   await writeTemplate(dataDir, target)
   await runGit(target, ["init"], {})
@@ -711,7 +720,7 @@ const tokenRouter = router({
 })
 
 const templateRouter = router({
-  /** Which LaTeX template "Create paper" uses: the built-in one or the user's. */
+  /** Which LaTeX template "Start draft" uses: the built-in one or the user's. */
   status: publicProcedure.query((): Promise<TemplateStatus> => templateStatus(resolveDataDir())),
 
   /** Use the user's folder as the LaTeX template from now on (its files are copied). */
@@ -847,10 +856,15 @@ export const paperRouter = router({
 
   template: templateRouter,
 
-  /** Where "Create paper" puts the paper unless the user chooses another folder. */
+  /** Where "Start draft" puts the paper unless the user chooses another folder. */
   createTarget: publicProcedure
     .input(projectIdInput)
     .query(({ ctx, input }): Promise<CreateTarget> => createTarget(ctx.db, input.projectId)),
+
+  /** Whether "Start draft" can use a folder the user chose; see {@link canCreateIn}. */
+  canCreateIn: publicProcedure
+    .input(z.object({ dir: z.string().min(1) }))
+    .query(({ input }): Promise<boolean> => canCreateIn(input.dir)),
 
   /** The Update paper button: start an agent with the write-research skill; see {@link startUpdatePaper}. */
   startUpdate: publicProcedure

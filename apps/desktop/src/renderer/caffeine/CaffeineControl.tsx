@@ -36,7 +36,7 @@ export function CaffeineControl({ className }: { className?: string }) {
       disabled={isChanging}
       onClick={() => setMode(nextMode)}
       className={cn(
-        "caffeine-control app-no-drag inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors disabled:opacity-60",
+        "caffeine-control app-no-drag inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors disabled:opacity-60",
         status.mode === "off" && "border-border text-muted-foreground hover:text-foreground",
         status.mode === "on" && "border-border bg-muted/50 text-foreground hover:bg-muted",
         status.mode === "auto" && "border-border bg-muted/50 text-foreground hover:bg-muted",

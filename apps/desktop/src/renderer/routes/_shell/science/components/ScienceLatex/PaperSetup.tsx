@@ -18,7 +18,7 @@ const cardTitleClass = "font-medium text-foreground text-sm"
 const cardTextClass = "text-muted-foreground text-xs leading-relaxed"
 const linkClass = "text-muted-foreground underline underline-offset-2 hover:text-foreground"
 
-/** A paper Create paper just made: its workspace and the build of its main .tex (null when none ran). */
+/** A paper Start draft just made: its workspace and the build of its main .tex (null when none ran). */
 export interface CreatedPaper {
   workspaceId: string | null
   /** Settled before the page is told; it rejects when the build could not run. */
@@ -33,9 +33,10 @@ export interface CreatedPaper {
  * the paper folder) it does not search. Then it offers the three
  * agreed ways to set a paper folder as three cards of the same height, laid out like the
  * Library's source chooser (same width, padding, card style, text sizes and buttons): clone an Overleaf project into `<project>/paper/` from its
- * Git URL, open a folder the user already cloned, or create a new paper from
- * the LaTeX template (in `<project>/paper/`, or a folder the user chooses;
- * see `paper.create`). The one Overleaf token is
+ * Git URL, open a folder the user already cloned, or start a draft: a new
+ * paper from the LaTeX template (in `<project>/paper/`, or the next free
+ * `paper-2/`, `paper-3/`, … when it has files, or an empty folder the user
+ * chooses; see `paper.createTarget` and `paper.create`). The one Overleaf token is
  * asked for only when none is available; the token and docs links are shown
  * only then. Choosing the project folder when it is not an Overleaf clone asks
  * first whether Sync stays on (Sync would commit and push the whole project).
@@ -49,9 +50,9 @@ export function PaperSetup({
   projectId: string
   /** False after the user cleared the paper folder: no search for Overleaf clones. */
   autoDetect: boolean
-  /** Create paper started; the page keeps the setup shown until `onCreated`. */
+  /** Start draft started; the page keeps the setup shown until `onCreated`. */
   onCreateStart: () => void
-  /** Create paper finished: the new paper with its PDF build, or null when creating it failed. */
+  /** Start draft finished: the new paper with its PDF build, or null when creating it failed. */
   onCreated: (paper: CreatedPaper | null) => void
 }) {
   const t = useTranslate()
@@ -85,17 +86,26 @@ export function PaperSetup({
     onError,
   )
   const createTarget = useQuery(trpc.paper.createTarget.queryOptions({ projectId }))
-  // The folder the user chose for Create paper, or null for the default (<project>/paper).
+  // The folder the user chose for Start draft, or null for the default from `paper.createTarget`.
   const [createDir, setCreateDir] = useState<string | null>(null)
-  const pickCreateDir = useMutation(
-    trpc.system.pickDirectory.mutationOptions({
-      onSuccess: (dir) => {
-        if (dir) setCreateDir(dir)
-      },
-      onError,
-    }),
-  )
-  // Create paper also builds the main .tex, so the editor opens with its PDF beside it.
+  // A chosen folder with files in it is not used: the previous choice stays and the user is told why.
+  const pickCreateDir = useMutation({
+    mutationFn: async (): Promise<void> => {
+      const dir = await client.system.pickDirectory.mutate()
+      if (!dir) return
+      if (await client.paper.canCreateIn.query({ dir })) {
+        setCreateDir(dir)
+        return
+      }
+      setError(
+        t(
+          "That folder already has files. Choose an empty folder, or use 'Use an existing folder' to open it as a paper.",
+        ),
+      )
+    },
+    onError,
+  })
+  // Start draft also builds the main .tex, so the editor opens with its PDF beside it.
   const [createStep, setCreateStep] = useState<"creating" | "building">("creating")
   const create = useMutation({
     mutationFn: async (input: { projectId: string; dir: string }): Promise<CreatedPaper> => {
@@ -126,7 +136,7 @@ export function PaperSetup({
       onError(cause)
     },
   })
-  const createInto = createDir ?? (createTarget.data?.available ? createTarget.data.dir : null)
+  const createInto = createDir ?? createTarget.data?.dir ?? null
   const busy =
     addOverleaf.isPending ||
     link.isPending ||
@@ -301,7 +311,7 @@ export function PaperSetup({
               <section data-testid="paper-setup-create" className={cardClass}>
                 <div className="flex items-center gap-2">
                   <FilePlus className="size-4 text-muted-foreground" aria-hidden />
-                  <h3 className={cardTitleClass}>{t("Create paper")}</h3>
+                  <h3 className={cardTitleClass}>{t("Start draft")}</h3>
                 </div>
                 <p className={cardTextClass}>{t("Start a new paper from your LaTeX template.")}</p>
                 {/* The folder wraps onto more lines when it is long; it is never cut. */}
@@ -311,12 +321,7 @@ export function PaperSetup({
                     title={createDir ?? createTarget.data?.dir}
                     className="min-w-0 font-mono wrap-anywhere"
                   >
-                    {createDir ??
-                      (createTarget.data
-                        ? createTarget.data.available
-                          ? `${createTarget.data.displayDir}/`
-                          : t("paper/ has files in it, choose a folder")
-                        : "")}
+                    {createDir ?? (createTarget.data ? `${createTarget.data.displayDir}/` : "")}
                   </span>
                   <button
                     type="button"
@@ -346,8 +351,8 @@ export function PaperSetup({
                     {create.isPending
                       ? createStep === "building"
                         ? t("Building PDF…")
-                        : t("Creating…")
-                      : t("Create paper")}
+                        : t("Starting…")
+                      : t("Start draft")}
                   </Button>
                 </div>
               </section>
