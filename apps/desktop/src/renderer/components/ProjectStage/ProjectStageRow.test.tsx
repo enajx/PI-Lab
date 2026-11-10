@@ -62,7 +62,7 @@ describe("Project stage row", () => {
     const planning = await screen.findByTestId("stage-step-planning")
     expect(stepStates()).toEqual(["empty", "empty", "empty", "empty"])
     expect(screen.getByTestId("stage").getAttribute("title")).toBe("Project status")
-    expect(planning.getAttribute("title")).toBeNull()
+    expect(planning.getAttribute("title")).toBe("Planning")
     expect(planning.getAttribute("aria-label")).toBe("Planning step")
     expect(screen.getByTestId("stage-step-paperWriting").getAttribute("aria-label")).toBe(
       "Paper writing step",
@@ -80,23 +80,29 @@ describe("Project stage row", () => {
     expect(lines).toEqual(["true", "true", "false"])
   })
 
-  test("the What's this? card shows Project status and the current stage when a step is hovered", async () => {
+  test("hovering a step names that step, what a click does, and the current stage", async () => {
     const state = renderStage(null)
     render(<FeatureHelpPanel onHide={() => {}} />)
-    fireEvent.pointerOver(await screen.findByTestId("stage-step-experiments"))
+    const experiments = await screen.findByTestId("stage-step-experiments")
+    expect(experiments.getAttribute("title")).toBe("Experiments")
+    fireEvent.pointerOver(experiments)
     expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe("Project status")
     expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
-      "Not started. Click a step to set it.",
+      "Experiments: click to set. Not started yet.",
     )
     fireEvent.click(screen.getByTestId("stage-step-experiments"))
     await waitFor(() => expect(state.stage).toBe("experiments"))
     await waitFor(() =>
       expect(screen.getByTestId("stage-step-planning").dataset.filled).toBe("true"),
     )
-    fireEvent.pointerOver(screen.getByTestId("stage-step-planning"))
+    fireEvent.pointerOver(screen.getByTestId("stage-step-paperWriting"))
     expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe("Project status")
     expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
-      "Current: Experiments. Click a step to set it.",
+      "Paper writing: click to set. Current: Experiments.",
+    )
+    fireEvent.pointerOver(screen.getByTestId("stage-step-experiments"))
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Experiments: the current stage. Click to go back to Planning.",
     )
   })
 

@@ -17,7 +17,8 @@ const WorkflowResultDialog = lazy(() =>
 /**
  * The stateful control for a background project workflow ("Project summary" /
  * "Fetch remote experiments"), used on both the Dashboard card (compact,
- * icon-only) and the project-view header (labeled). It is driven entirely by
+ * icon-only), the project-view header (icon: a square icon-only button) and
+ * the Analysis top bar (labeled). It is driven entirely by
  * `workflows.status`, so both surfaces reflect the same live state and a run
  * started on one shows as running on the other.
  *
@@ -173,7 +174,7 @@ export function ProjectWorkflowControl({
   projectId: string
   projectName: string
   task: WorkflowTask
-  variant: "compact" | "labeled"
+  variant: "compact" | "icon" | "labeled"
   /** Stable data-testid for the control (e.g. `project-card-summary`). */
   testId: string
   /** Extra prompt instructions for the fetch task (from Settings); ignored otherwise. */
@@ -271,6 +272,8 @@ export function ProjectWorkflowControl({
 
   const compact =
     "relative inline-flex h-7 flex-1 items-center justify-center rounded-md border outline-none transition-colors focus-visible:bg-accent/60 disabled:cursor-not-allowed"
+  const icon =
+    "relative flex size-7 items-center justify-center rounded-md border outline-none transition-colors focus-visible:bg-accent/60 disabled:cursor-not-allowed"
   const labeled =
     "relative flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs outline-none transition-colors disabled:cursor-not-allowed"
 
@@ -289,11 +292,19 @@ export function ProjectWorkflowControl({
           `${buttonLabel} ${t("for")} ${projectName} — ${t("Runs as a background task; click while running to watch its live output, or when done to view the result and re-check")}`
         }
         onClick={onClick}
-        className={cn(variant === "compact" ? compact : labeled, STATE_TINT[state])}
+        className={cn(
+          variant === "compact" ? compact : variant === "icon" ? icon : labeled,
+          STATE_TINT[state],
+        )}
       >
         {variant === "compact" ? (
           <Icon
             className={cn("size-4 shrink-0", state === "running" && "opacity-70")}
+            aria-hidden
+          />
+        ) : variant === "icon" ? (
+          <Icon
+            className={cn("size-3.5 shrink-0", state === "running" && "opacity-70")}
             aria-hidden
           />
         ) : (

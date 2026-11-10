@@ -95,7 +95,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     props.onAdded(project)
   }
   const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
-  const openProject = useMutation(trpc.projects.open.mutationOptions({ onSuccess }))
+  const openProject = useMutation(trpc.projects.add.mutationOptions({ onSuccess }))
   const cloneProject = useMutation(trpc.projects.clone.mutationOptions({ onSuccess }))
   const pickFile = useMutation(trpc.system.pickFile.mutationOptions())
   const templateProject = useMutation(

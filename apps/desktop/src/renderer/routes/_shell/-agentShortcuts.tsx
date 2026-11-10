@@ -4,12 +4,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { LiveAgentStatus } from "../../../shared/agentStatus"
 import { useTranslate } from "../../i18n/language"
 import { navigateToAgent } from "../../notifications/agentNavigation"
-import { useProjectOrder } from "../../preferences/preferences"
 import { overlayIsOpen } from "../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../shortcuts/shortcuts"
 import { useTRPC } from "../../trpc/react"
 import { useAgentStatus } from "./-ProjectActivity"
-import { orderById } from "./components/Sidebar"
 
 /** How long the "nothing to go to" notice stays on screen (ms). */
 const NOTICE_MS = 2_500
@@ -89,11 +87,11 @@ export function AgentShortcuts({ pathname, search }: { pathname: string; search:
   const navigate = useNavigate()
   const trpc = useTRPC()
   const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
-  const [projectOrder] = useProjectOrder()
   const { data: statuses } = useAgentStatus()
   const [notice, setNotice] = useState<string | null>(null)
 
-  const projectIds = orderById(projects, projectOrder).map((project) => project.id)
+  // The saved project order, as in the sidebar and on the Dashboard.
+  const projectIds = projects.map((project) => project.id)
   const stateRef = useRef({ projectIds, statuses: statuses ?? [], pathname, search })
   stateRef.current = { projectIds, statuses: statuses ?? [], pathname, search }
   const lastSessionId = useRef<string | null>(null)

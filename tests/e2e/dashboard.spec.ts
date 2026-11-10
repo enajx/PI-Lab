@@ -676,7 +676,7 @@ test("the card title has its own line with the agent status below it", async () 
   const title = card.getByTestId("project-card-title")
   const status = card.getByTestId("project-card-status")
   await expect(status).toHaveText("No active agents")
-  await expect(card.getByTestId("project-card-stage")).toHaveCount(0)
+  await expect(card.getByTestId("project-card-stage")).toBeVisible()
   const open = await card.getByTestId("project-card-open").boundingBox()
   const titleBox = await title.boundingBox()
   const statusBox = await status.boundingBox()
@@ -723,14 +723,16 @@ test("the project stage set in Edit project shows in the project view and surviv
     "step",
   )
 
-  // Hovering the row: the tooltip is "Project status", and the What's this? card
-  // shows "Project status" with the current stage, not the step's name again.
+  // Hovering a step: its tooltip is the step's name, and the What's this? card shows
+  // "Project status" with that step, what a click does, and the current stage.
   await expect(viewStage).toHaveAttribute("title", "Project status")
-  await viewStage.getByTestId("project-view-stage-step-planning").hover()
+  const planning = viewStage.getByTestId("project-view-stage-step-planning")
+  await expect(planning).toHaveAttribute("title", "Planning")
+  await planning.hover()
   const help = window.getByTestId("sidebar-feature-help")
   await expect(help.getByTestId("sidebar-feature-help-label")).toHaveText("Project status")
   await expect(help.getByTestId("sidebar-feature-help-description")).toHaveText(
-    "Current: Experiments. Click a step to set it.",
+    "Planning: click to set. Current: Experiments.",
   )
   await window.screenshot({ path: resolve(".cache", "screens", "stage-hint.png") })
 
@@ -752,4 +754,72 @@ test("the project stage set in Edit project shows in the project view and surviv
   await expect(
     window.getByTestId("project-view-stage").getByTestId("project-view-stage-step-planning"),
   ).toHaveAttribute("aria-current", "step", { timeout: 30_000 })
+})
+
+test("dragging a project card moves it on the Dashboard and in the sidebar, and the order survives a restart", async () => {
+  // Add two more projects by launching with each one in turn: a new project goes first.
+  for (const [index, name] of ["repo", "beta", "gamma"].entries()) {
+    if (index > 0) {
+      await closeApp()
+      repoDir = join(dataDir, name)
+      await initRepo(repoDir)
+      await launchApp()
+    }
+    // Wait until the seam has opened this project before going on.
+    await expect((await app.firstWindow()).getByTestId("project-card")).toHaveCount(index + 1, {
+      timeout: 30_000,
+    })
+  }
+  let window = await app.firstWindow()
+  await window.setViewportSize({ width: 1200, height: 800 })
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const cardTitles = window.getByTestId("project-card-title")
+  await expect(cardTitles).toHaveText(["gamma", "beta", "repo"], { timeout: 30_000 })
+  const sidebarOrder = () =>
+    window
+      .getByTestId("project-item")
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-project-id")))
+  const cardOrder = () =>
+    window
+      .getByTestId("project-card")
+      .evaluateAll((cards) => cards.map((card) => card.getAttribute("data-project-id")))
+  await expect.poll(sidebarOrder).toEqual(await cardOrder())
+
+  // Drag the first card's thumbnail onto the second card with the mouse.
+  const images = window.getByTestId("project-card-image")
+  const from = await images.nth(0).boundingBox()
+  const to = await images.nth(1).boundingBox()
+  if (!from || !to) throw new Error("Expected measurable project cards")
+  const start = { x: from.x + from.width / 2, y: from.y + from.height / 2 }
+  const end = { x: to.x + to.width / 2, y: to.y + to.height / 2 }
+  await window.mouse.move(start.x, start.y)
+  await window.mouse.down()
+  await window.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 8 })
+  await window.mouse.move(end.x, end.y, { steps: 8 })
+  await expect(
+    window.locator('[data-testid="project-card-grid-item"][data-dragging="true"]'),
+  ).toHaveCount(1)
+  await window.screenshot({ path: resolve(".cache", "screens", "card-drag.png") })
+  await window.mouse.up()
+
+  // The drop moved the card and did not open the project.
+  await expect(cardTitles).toHaveText(["beta", "gamma", "repo"])
+  await expect(window.getByTestId("dashboard")).toBeVisible()
+  await expect.poll(sidebarOrder).toEqual(await cardOrder())
+
+  // A plain click still opens a project.
+  await images.nth(0).click()
+  await expect(window.getByTestId("project-view")).toBeVisible()
+  await window.getByTestId("nav-dashboard").click()
+  await expect(cardTitles).toHaveText(["beta", "gamma", "repo"])
+
+  // The restart also opens "gamma" again through the test seam; opening keeps the order.
+  await closeApp()
+  await launchApp()
+  window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-card-title")).toHaveText(["beta", "gamma", "repo"], {
+    timeout: 30_000,
+  })
+  await expect.poll(sidebarOrder).toEqual(await cardOrder())
 })

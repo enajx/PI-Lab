@@ -631,13 +631,14 @@ describe("Sidebar", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/sessions-project"))
   })
 
-  test("projects render in the persisted order, with new ids appended", async () => {
-    window.localStorage.setItem("pi-lab.sidebar.projectOrder", JSON.stringify(["c", "a"]))
+  test("projects render in the saved project order that the Dashboard also uses", async () => {
+    // An old sidebar-only order left in local storage is ignored.
+    window.localStorage.setItem("pi-lab.sidebar.projectOrder", JSON.stringify(["a", "b"]))
     renderSidebar({
       "projects.list": () => [
+        { id: "c", name: "Gamma", repoPath: "/c" },
         { id: "a", name: "Alpha", repoPath: "/a" },
         { id: "b", name: "Beta", repoPath: "/b" },
-        { id: "c", name: "Gamma", repoPath: "/c" },
       ],
     })
     await waitFor(() => expect(screen.getAllByTestId("project-item").length).toBe(3))
@@ -645,8 +646,40 @@ describe("Sidebar", () => {
     const ids = screen
       .getAllByTestId("project-item")
       .map((el) => el.getAttribute("data-project-id"))
-    // Stored ids first (c, a), then the not-yet-stored id (b) in natural order.
     expect(ids).toEqual(["c", "a", "b"])
+  })
+
+  test("dragging a project row saves the new order for every project, hidden ones included", async () => {
+    let projects = [
+      { id: "a", name: "Alpha", repoPath: "/a", archivedAt: null },
+      { id: "h", name: "Hidden", repoPath: "/h", archivedAt: 1 },
+      { id: "b", name: "Beta", repoPath: "/b", archivedAt: null },
+    ]
+    const reorderCalls: unknown[] = []
+    renderSidebar({
+      "projects.list": () => projects,
+      "projects.reorder": (input) => {
+        reorderCalls.push(input)
+        const { ids } = input as { ids: string[] }
+        projects = ids.flatMap((id) => projects.filter((row) => row.id === id))
+        return undefined
+      },
+    })
+    await waitFor(() => expect(screen.getAllByTestId("project-item").length).toBe(2))
+    const alpha = screen.getByText("Alpha")
+    const beta = screen.getByText("Beta")
+    const dataTransfer = { effectAllowed: "", dropEffect: "" }
+    // Drop Beta on the top half of Alpha: Beta goes before it.
+    fireEvent.dragStart(beta, { dataTransfer })
+    fireEvent.dragOver(alpha, { dataTransfer })
+    fireEvent.drop(alpha, { dataTransfer })
+
+    await waitFor(() => expect(reorderCalls).toEqual([{ ids: ["b", "h", "a"] }]))
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId("project-item").map((el) => el.getAttribute("data-project-id")),
+      ).toEqual(["b", "a"]),
+    )
   })
 
   test("hides archived projects in both sidebar layouts and can reveal and restore them", async () => {

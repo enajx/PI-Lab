@@ -93,6 +93,7 @@ function project(id: string, name: string): Project {
     typeId: "general",
     agentConfig: null,
     sortIndex: 0,
+    sortOrder: null,
     archivedAt: null,
     createdAt: 0,
     updatedAt: 0,

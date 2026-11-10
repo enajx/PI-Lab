@@ -181,10 +181,8 @@ export function PaperSetup({
       >
         <div className="flex flex-col items-center gap-1 text-center">
           <h2 className="font-semibold text-foreground text-sm">{t("Choose a paper folder")}</h2>
-          <p className="max-w-md text-muted-foreground text-xs leading-relaxed">
-            {t(
-              "Clone an Overleaf project, open a folder you already cloned, or start a new paper.",
-            )}
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            {t("Clone from Overleaf, open a folder, or start a new paper.")}
           </p>
         </div>
         {autoLinking ? (

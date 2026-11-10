@@ -505,6 +505,12 @@ export const projects = sqliteTable(
     agentConfig: text("agent_config", { mode: "json" }).$type<ProjectAgentConfig>(),
     /** Manual ordering in the sidebar; lower sorts first. */
     sortIndex: integer("sort_index").notNull().default(0),
+    /**
+     * Saved order of the Dashboard cards and the sidebar's project list; lower sorts
+     * first. Set by dragging a card; a new project gets one below all others. Null only
+     * for a row written without it, which `projects.list` puts last, most recently opened first.
+     */
+    sortOrder: integer("sort_order"),
     /** Archived projects are hidden from the active list but never deleted. */
     archivedAt: integer("archived_at"),
     createdAt: createdNow(),

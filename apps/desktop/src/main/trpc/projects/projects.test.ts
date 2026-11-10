@@ -98,6 +98,43 @@ afterEach(async () => {
   await h.dispose()
 })
 
+describe("projects.add", () => {
+  test("adds a new folder, and refuses a folder that is already a project without changing it", async () => {
+    const path = join(h.repoDir, "already-here")
+    await mkdir(path)
+    const details = {
+      name: "already-here",
+      typeId: "general" as const,
+      deadline: null,
+      agentId: null,
+    }
+    const added = await h.caller.projects.add({ path, details })
+    const before = (await h.caller.projects.list()).find((project) => project.id === added.id)
+    await expect(h.caller.projects.add({ path, details })).rejects.toThrow(
+      '"already-here" is already in PI Lab.',
+    )
+    const after = (await h.caller.projects.list()).find((project) => project.id === added.id)
+    expect(after).toEqual(before)
+    expect(await h.caller.projects.list()).toHaveLength(1)
+  })
+
+  test("a hidden project says so, and how to bring it back", async () => {
+    const path = join(h.repoDir, "hidden-one")
+    await mkdir(path)
+    const details = {
+      name: "hidden-one",
+      typeId: "general" as const,
+      deadline: null,
+      agentId: null,
+    }
+    const added = await h.caller.projects.add({ path, details })
+    await h.caller.projects.setArchived({ id: added.id, archived: true })
+    await expect(h.caller.projects.add({ path, details })).rejects.toThrow(
+      '"hidden-one" is already in PI Lab, hidden. Use Show hidden on the Projects Dashboard to restore it.',
+    )
+  })
+})
+
 describe("projects.open", () => {
   test("selected sibling folders in one Git repo remain distinct projects and reopen without changing details", async () => {
     const names = ["paper-latex", "python-research", "cpp-research"] as const
@@ -616,6 +653,67 @@ describe("projects.list / get / touch / remove", () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     await h.caller.projects.remove({ id: project.id })
     expect(await h.caller.projects.list()).toHaveLength(0)
+  })
+})
+
+describe("project order", () => {
+  /** Open sub-folders of the harness repo as projects, in the given order. */
+  async function openProjects(names: string[]): Promise<(name: string) => string> {
+    const ids = new Map<string, string>()
+    for (const name of names) {
+      const path = join(h.repoDir, name)
+      await mkdir(path)
+      ids.set(name, (await h.caller.projects.open({ path })).id)
+    }
+    return (name) => {
+      const id = ids.get(name)
+      if (id === undefined) throw new Error(`No test project ${name}`)
+      return id
+    }
+  }
+
+  async function listedNames(): Promise<string[]> {
+    return (await h.caller.projects.list()).map((project) => project.name)
+  }
+
+  test("a new project goes first", async () => {
+    await openProjects(["alpha", "beta", "gamma"])
+    expect(await listedNames()).toEqual(["gamma", "beta", "alpha"])
+  })
+
+  test("reorder saves the order that list returns", async () => {
+    const id = await openProjects(["alpha", "beta", "gamma"])
+    await h.caller.projects.reorder({ ids: [id("alpha"), id("gamma"), id("beta")] })
+    expect(await listedNames()).toEqual(["alpha", "gamma", "beta"])
+  })
+
+  test("opening or touching a project keeps the saved order", async () => {
+    const id = await openProjects(["alpha", "beta", "gamma"])
+    await h.caller.projects.reorder({ ids: [id("alpha"), id("beta"), id("gamma")] })
+    await h.caller.projects.open({ path: join(h.repoDir, "gamma") })
+    await h.caller.projects.touch({ id: id("beta") })
+    expect(await listedNames()).toEqual(["alpha", "beta", "gamma"])
+  })
+
+  test("a project added after a reorder goes before all others", async () => {
+    const id = await openProjects(["alpha", "beta"])
+    await h.caller.projects.reorder({ ids: [id("alpha"), id("beta")] })
+    await openProjects(["gamma"])
+    expect(await listedNames()).toEqual(["gamma", "alpha", "beta"])
+  })
+
+  test("projects left out of a reorder follow it in their current order", async () => {
+    const id = await openProjects(["alpha", "beta", "gamma"])
+    await h.caller.projects.reorder({ ids: [id("alpha")] })
+    expect(await listedNames()).toEqual(["alpha", "gamma", "beta"])
+  })
+
+  test("reorder refuses an unknown project and changes nothing", async () => {
+    const id = await openProjects(["alpha", "beta"])
+    await expect(h.caller.projects.reorder({ ids: [id("alpha"), "missing"] })).rejects.toThrow(
+      "No project missing",
+    )
+    expect(await listedNames()).toEqual(["beta", "alpha"])
   })
 })
 

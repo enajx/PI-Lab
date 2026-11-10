@@ -14,7 +14,7 @@ import {
   projects,
 } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
-import { and, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { writeProjectAgentConfig } from "../../agents/projectConfig"
 import { GitError, isGitRepo, resolveDefaultBranch, runGit } from "../../git"
@@ -84,6 +84,18 @@ const openInput = z.object({
 })
 
 const idInput = z.object({ id: z.string().min(1) })
+
+const reorderInput = z.object({ ids: z.array(z.string().min(1)) })
+
+/**
+ * The saved project order: `sortOrder` ascending; rows without one go last, most
+ * recently opened first.
+ */
+const PROJECT_ORDER = [
+  sql`${projects.sortOrder} IS NULL`,
+  asc(projects.sortOrder),
+  desc(projects.lastOpenedAt),
+]
 
 const setArchivedInput = z.object({
   id: z.string().min(1),
@@ -310,6 +322,11 @@ async function upsertProjectFromDirectory(
     ? await saveDetailsAgent(ctx, { id: "", repoPath: root, agentConfig: null }, details)
     : {}
   const editedValues = details ? detailsValues(undefined, details) : {}
+  // A new project goes before all others in the saved order.
+  const first = db
+    .select({ value: sql<number | null>`MIN(${projects.sortOrder})` })
+    .from(projects)
+    .get()
   return db
     .insert(projects)
     .values({
@@ -318,6 +335,7 @@ async function upsertProjectFromDirectory(
       defaultBranch,
       taskRelPath: discoveredTaskPath,
       typeId: detectedType ?? "general",
+      sortOrder: first?.value == null ? 0 : first.value - 1,
       ...editedValues,
       ...agentValues,
     })
@@ -438,6 +456,28 @@ async function sampleDigitalRainCharacters(repoPath: string): Promise<string> {
 
 export const projectsRouter = router({
   ...planningProcedures,
+  /**
+   * Add a folder from the Add project menu. A folder that is already a project is
+   * refused (CONFLICT) and left as it is; `open` is the call that reopens one.
+   */
+  add: publicProcedure.input(openInput).mutation(async ({ ctx, input }): Promise<Project> => {
+    const requested = resolve(input.path)
+    const directory = await statOrNull(requested)
+    if (directory?.isDirectory()) {
+      const root = await realpath(requested)
+      const existing = ctx.db.select().from(projects).where(eq(projects.repoPath, root)).get()
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: existing.archivedAt
+            ? `"${existing.name}" is already in PI Lab, hidden. Use Show hidden on the Projects Dashboard to restore it.`
+            : `"${existing.name}" is already in PI Lab.`,
+        })
+      }
+    }
+    return upsertProjectFromDirectory(ctx, requested, true, input.details)
+  }),
+
   /**
    * Open a Git repository or ordinary local folder as a project.
    */
@@ -641,8 +681,8 @@ export const projectsRouter = router({
     }),
 
   /**
-   * Every opened project, most-recently-opened first. Archived rows remain in
-   * this public list so project-aware surfaces and direct routes keep working;
+   * Every opened project, in the saved order (`reorder`; a new project goes first).
+   * Archived rows remain in this public list so project-aware surfaces and direct routes keep working;
    * Dashboard and sidebar apply their own presentational visibility filter.
    */
   list: publicProcedure.query(({ ctx }): ProjectSummary[] => {
@@ -662,13 +702,14 @@ export const projectsRouter = router({
         typeId: projects.typeId,
         agentConfig: projects.agentConfig,
         sortIndex: projects.sortIndex,
+        sortOrder: projects.sortOrder,
         archivedAt: projects.archivedAt,
         createdAt: projects.createdAt,
         updatedAt: projects.updatedAt,
         lastOpenedAt: projects.lastOpenedAt,
       })
       .from(projects)
-      .orderBy(desc(projects.lastOpenedAt))
+      .orderBy(...PROJECT_ORDER)
       .all()
     return rows.map(({ hasThumbnail, ...fields }) => ({
       ...fields,
@@ -969,7 +1010,32 @@ export const projectsRouter = router({
         .get()
     }),
 
-  /** Bump `lastOpenedAt` so the project rises in "recent" ordering. */
+  /**
+   * Save the project order from a Dashboard card drag. `ids` come first in the given
+   * order; projects left out follow in their current order. An unknown id is refused
+   * and nothing changes.
+   */
+  reorder: publicProcedure.input(reorderInput).mutation(({ ctx, input }): void => {
+    ctx.db.transaction((tx) => {
+      const current = tx
+        .select({ id: projects.id })
+        .from(projects)
+        .orderBy(...PROJECT_ORDER)
+        .all()
+      const known = new Set(current.map((row) => row.id))
+      const missing = input.ids.find((id) => !known.has(id))
+      if (missing !== undefined) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No project ${missing}` })
+      }
+      const listed = new Set(input.ids)
+      const order = [...input.ids, ...current.map((row) => row.id).filter((id) => !listed.has(id))]
+      order.forEach((id, index) => {
+        tx.update(projects).set({ sortOrder: index }).where(eq(projects.id, id)).run()
+      })
+    })
+  }),
+
+  /** Record when the project was last opened. This does not change the saved project order. */
   touch: publicProcedure.input(idInput).mutation(({ ctx, input }): Project => {
     const row = ctx.db
       .update(projects)

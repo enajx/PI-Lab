@@ -85,6 +85,18 @@ export function ProjectStageRow({
           const filled = index <= currentIndex
           const isCurrent = index === currentIndex
           const label = `${t(step.label)} ${t("step")}`
+          const stepName = t(step.label)
+          const before = STEPS[index - 1]
+          // What hovering this step tells: the step, what a click does, and the current stage.
+          const stepHelp = isCurrent
+            ? `${stepName}: ${t("the current stage.")} ${
+                before
+                  ? `${t("Click to go back to")} ${t(before.label)}.`
+                  : t("Click to clear the stage.")
+              }`
+            : `${stepName}: ${t("click to set.")} ${
+                current ? `${t("Current:")} ${t(current.label)}.` : t("Not started yet.")
+              }`
           return (
             <Fragment key={step.id}>
               {index > 0 ? (
@@ -101,8 +113,9 @@ export function ProjectStageRow({
                 data-filled={filled}
                 aria-current={isCurrent ? "step" : undefined}
                 aria-label={isCurrent ? `${label} ${t("(current)")}` : label}
+                title={stepName}
                 data-feature-label={name}
-                data-feature-help={help}
+                data-feature-help={stepHelp}
                 onClick={(event) => {
                   event.stopPropagation()
                   // The second click of a double-click is not a second choice.

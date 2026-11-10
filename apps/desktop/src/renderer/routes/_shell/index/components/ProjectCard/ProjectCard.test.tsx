@@ -39,6 +39,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     typeId: "research",
     agentConfig: null,
     sortIndex: 0,
+    sortOrder: null,
     archivedAt: null,
     createdAt: 0,
     updatedAt: 0,
@@ -180,7 +181,7 @@ describe("ProjectCard thumbnail", () => {
     expect(tallHeight).toBe(Math.round(baseHeight * 1.5))
   })
 
-  test("the title has its own full-width line, the agent status is on the line below, and there is no stage row", async () => {
+  test("the title has its own full-width line, the agent status is on the line below, and the stage row is below the buttons", async () => {
     renderCard(project({ id: "p1", name: "cpp-research", metadata: { stage: "experiments" } }))
     const title = await screen.findByTestId("project-card-title")
     const status = screen.getByTestId("project-card-status")
@@ -189,7 +190,11 @@ describe("ProjectCard thumbnail", () => {
     expect(title.nextElementSibling).toBe(status)
     expect(title.className).toContain("w-full")
     expect(status.textContent).toBe("No active agents")
-    expect(screen.queryByTestId("project-card-stage")).toBeNull()
+    const stage = screen.getByTestId("project-card-stage")
+    expect(screen.getByTestId("project-card-actions").nextElementSibling).toBe(stage)
+    expect(
+      within(stage).getByTestId("project-card-stage-step-experiments").getAttribute("aria-current"),
+    ).toBe("step")
   })
 
   test("does not expose the removed card type dropdown or fetch control", async () => {

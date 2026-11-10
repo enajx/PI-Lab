@@ -424,9 +424,6 @@ function useOrderPref(key: string, fallback: string[]): [string[], (next: string
 /** Persisted drag order for the sidebar science/Workflows nav (by item id). */
 export const useNavOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.sidebar.navOrder", EMPTY_ORDER)
-/** Persisted drag order for the sidebar project list (by project id). */
-export const useProjectOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("pi-lab.sidebar.projectOrder", EMPTY_ORDER)
 /** Persisted drag order for the cluster machine list (by machine id). */
 export const useClusterOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.cluster.machineOrder", EMPTY_ORDER)
@@ -439,14 +436,14 @@ export const useRightSidebarTabOrder = (): [string[], (next: string[]) => void] 
 export type HeaderShortcutsView = "project" | "latex" | "tasks" | "analysis"
 /**
  * Default top bar shortcuts per view, in top bar order. Built-in ids are the
- * view's own buttons (Project view: `tasks`, `auto-research`, `plan-research`,
- * `project-status`; LaTeX Editor: `update-paper`, `sync`; Analysis:
+ * view's own buttons (Project view: `tasks`, `paper`, `auto-research`,
+ * `plan-research`, `project-status`; LaTeX Editor: `update-paper`, `sync`; Analysis:
  * `analyze-experiments`, `html-report`, `fetch-experiments`; Tasks has none);
  * added skills and routines are stored as `skill:<slug>` and
  * `routine:<automation id>`.
  */
 export const DEFAULT_HEADER_SHORTCUTS: Record<HeaderShortcutsView, string[]> = {
-  project: ["tasks", "auto-research", "plan-research", "project-status"],
+  project: ["tasks", "paper", "auto-research", "plan-research", "project-status"],
   latex: ["update-paper", "sync"],
   tasks: [],
   analysis: ["analyze-experiments", "html-report", "fetch-experiments"],
@@ -458,17 +455,24 @@ const HEADER_SHORTCUTS_KEYS: Record<HeaderShortcutsView, string> = {
   analysis: "pi-lab.analysis.headerShortcuts",
 }
 /**
- * Built-in ids that became listable in version 2 of the saved lists. A list
- * saved before then (no `<key>Version` of "2") gets them added at their
- * default positions; any write saves version "2", so a later removal stays.
+ * Built-in ids that became listable in each version of the saved lists. A list
+ * saved at an older `<key>Version` (none means "1") gets the ids of every later
+ * version added at their default positions; any write saves the current
+ * version, so a later removal stays.
  */
-const HEADER_SHORTCUTS_ADDED_IN_V2: Record<HeaderShortcutsView, string[]> = {
-  project: [],
-  latex: ["sync"],
-  tasks: [],
-  analysis: ["html-report", "fetch-experiments"],
-}
-const HEADER_SHORTCUTS_VERSION = "2"
+const HEADER_SHORTCUTS_ADDED: { version: number; ids: Record<HeaderShortcutsView, string[]> }[] = [
+  {
+    version: 2,
+    ids: {
+      project: [],
+      latex: ["sync"],
+      tasks: [],
+      analysis: ["html-report", "fetch-experiments"],
+    },
+  },
+  { version: 3, ids: { project: ["paper"], latex: [], tasks: [], analysis: [] } },
+]
+const HEADER_SHORTCUTS_VERSION = "3"
 /** `saved` with each id of `added` that it lacks put after its nearest default predecessor. */
 function withAddedShortcuts(saved: string[], defaults: string[], added: string[]): string[] {
   const next = [...saved]
@@ -489,13 +493,13 @@ export const useHeaderShortcuts = (
   const [version, setVersion] = useStringPref(`${key}Version`, "1")
   const value = useMemo(
     () =>
-      version === HEADER_SHORTCUTS_VERSION
-        ? saved
-        : withAddedShortcuts(
-            saved,
-            DEFAULT_HEADER_SHORTCUTS[view],
-            HEADER_SHORTCUTS_ADDED_IN_V2[view],
-          ),
+      withAddedShortcuts(
+        saved,
+        DEFAULT_HEADER_SHORTCUTS[view],
+        HEADER_SHORTCUTS_ADDED.filter((entry) => entry.version > Number(version)).flatMap(
+          (entry) => entry.ids[view],
+        ),
+      ),
     [saved, version, view],
   )
   const set = useCallback(

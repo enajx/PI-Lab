@@ -16,6 +16,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useCardGridHeightScale } from "../../../../../components/CardGrid"
+import { ProjectStageRow } from "../../../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
@@ -546,6 +547,13 @@ export function ProjectCard({ project }: ProjectCardProps) {
           <Telescope className="size-4 shrink-0" aria-hidden />
         </button>
       </div>
+
+      <ProjectStageRow
+        projectId={project.id}
+        stage={project.metadata?.stage ?? null}
+        testId="project-card-stage"
+        className="justify-center px-2.5 pb-1.5"
+      />
 
       <ProjectCardMenu
         menu={menu}

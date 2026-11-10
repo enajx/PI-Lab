@@ -50,7 +50,7 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
 describe("Project header", () => {
   afterEach(() => window.localStorage.clear())
 
-  test("header orders Tasks, Auto research, Plan research, Project status, agents, and Caffeine and prevents duplicate launches", async () => {
+  test("header orders Tasks, Paper, Auto research, Plan research, Project status, agents, and Caffeine and prevents duplicate launches", async () => {
     const calls: unknown[] = []
     let rejectLaunch!: (error: Error) => void
     renderWorkspace({
@@ -81,7 +81,9 @@ describe("Project header", () => {
     const shortcuts = screen.getByTestId("project-view-shortcuts")
     expect(shortcuts.parentElement?.firstElementChild).toBe(shortcuts)
     expect(shortcuts.nextElementSibling).toBe(screen.getByTestId("project-view-tasks"))
-    expect(screen.getByTestId("project-view-tasks").nextElementSibling).toBe(button)
+    const paper = screen.getByTestId("project-header-paper")
+    expect(screen.getByTestId("project-view-tasks").nextElementSibling).toBe(paper)
+    expect(paper.nextElementSibling).toBe(button)
     const caffeine = screen.getByTestId("caffeine-control")
     expect(
       button.parentElement?.lastElementChild === caffeine ||
@@ -142,6 +144,77 @@ describe("Project header", () => {
     expect(tasks.getAttribute("title")).toBe("Tasks")
     fireEvent.click(tasks)
     expect((await screen.findByTestId("on-tasks-route")).textContent).toBe("p1")
+  })
+
+  test("Tasks, Paper, Auto research and Plan research show only their icon, named in aria-label, title and helper text", async () => {
+    renderWorkspace({ "workspaces.ensureMain": () => ({ id: "w1" }) })
+    const autoResearch = await screen.findByTestId("project-view-auto-research")
+    await waitFor(() => expect(autoResearch.hasAttribute("disabled")).toBe(false))
+    const status = screen.getByTestId("project-view-status")
+    const iconButtons: [string, string][] = [
+      ["project-view-tasks", "Tasks"],
+      ["project-header-paper", "Paper"],
+      ["project-view-auto-research", "Auto research"],
+      ["project-view-plan-research", "Plan research"],
+    ]
+    for (const [testId, name] of iconButtons) {
+      const button = screen.getByTestId(testId)
+      expect(button.textContent, testId).toBe("")
+      expect(button.querySelector("svg"), testId).toBeTruthy()
+      expect(button.getAttribute("aria-label"), testId).toContain(name)
+      expect(button.getAttribute("title"), testId).toBe(name)
+      expect(button.getAttribute("data-feature-label"), testId).toBe(name)
+      const help = button.getAttribute("data-feature-help") ?? ""
+      expect(help, testId).not.toBe("")
+      expect(help, testId).not.toBe(name)
+      // Same square size and style as the Project status button.
+      expect(button.className, testId).toContain("size-7")
+      expect(button.className, testId).not.toContain("px-2")
+    }
+    expect(status.className).toContain("size-7")
+  })
+
+  test("the Paper button opens the LaTeX Editor with this project chosen", async () => {
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
+      "projects.touch": () => ({}),
+      "projects.capabilities": () => ({ git: true }),
+      "settings.get": () => ({}),
+      "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
+      "workspaces.ensureMain": () => new Promise(() => {}),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: Outlet })
+    const projectRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => <ProjectWorkspace projectId="p1" activation={{}} />,
+    })
+    const latexRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/science/latex",
+      validateSearch: (search: Record<string, unknown>) => ({
+        projectId: typeof search.projectId === "string" ? search.projectId : "",
+      }),
+      component: () => (
+        <div data-testid="on-latex-route">
+          {(latexRoute.useSearch() as { projectId: string }).projectId}
+        </div>
+      ),
+    })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([projectRoute, latexRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </AppProviders>,
+    )
+    fireEvent.click(await screen.findByTestId("project-header-paper"))
+    expect((await screen.findByTestId("on-latex-route")).textContent).toBe("p1")
   })
 
   test("records opening a project for the recent-project menu", async () => {
@@ -339,7 +412,10 @@ function headerShortcutIds(): string[] {
   const shortcuts = screen.getByTestId("project-view-shortcuts")
   const ids: string[] = []
   let next = shortcuts.nextElementSibling
-  while (next?.getAttribute("data-testid")?.startsWith("project-view-")) {
+  while (
+    next?.getAttribute("data-testid")?.startsWith("project-view-") ||
+    next?.getAttribute("data-testid") === "project-header-paper"
+  ) {
     ids.push(next.getAttribute("data-testid") ?? "")
     next = next.nextElementSibling
   }
@@ -369,19 +445,22 @@ describe("Project header shortcuts menu", () => {
     await screen.findByTestId("project-view-tasks")
     expect(headerShortcutIds()).toEqual([
       "project-view-tasks",
+      "project-header-paper",
       "project-view-auto-research",
       "project-view-plan-research",
       "project-view-status",
     ])
     const menu = await openShortcutMenu()
-    const items = within(menu).getAllByRole("menuitemcheckbox").slice(0, 4)
+    const items = within(menu).getAllByRole("menuitemcheckbox").slice(0, 5)
     expect(items.map((item) => item.textContent)).toEqual([
       "Tasks",
+      "Paper",
       "Auto research",
       "Plan research",
       "Project status",
     ])
     expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual([
+      "true",
       "true",
       "true",
       "true",
@@ -399,7 +478,36 @@ describe("Project header shortcuts menu", () => {
     ).toBe("false")
     expect(
       JSON.parse(window.localStorage.getItem("pi-lab.projectView.headerShortcuts") ?? ""),
-    ).toEqual(["tasks", "auto-research", "project-status"])
+    ).toEqual(["tasks", "paper", "auto-research", "project-status"])
+  })
+
+  test("a list saved before the Paper button gets Paper at its default place, and a removed Paper stays removed", async () => {
+    window.localStorage.setItem(
+      "pi-lab.projectView.headerShortcuts",
+      JSON.stringify(["tasks", "auto-research", "skill:review-notes"]),
+    )
+    window.localStorage.setItem("pi-lab.projectView.headerShortcutsVersion", "2")
+    const view = renderWorkspace({
+      "science.skills.list": skillsCatalog,
+      "automations.list": () => [],
+    })
+    await screen.findByTestId("project-header-paper")
+    expect(headerShortcutIds()).toEqual([
+      "project-view-tasks",
+      "project-header-paper",
+      "project-view-auto-research",
+      "project-view-shortcut-skill-review-notes",
+    ])
+    const menu = await openShortcutMenu()
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Paper" }))
+    await waitFor(() => expect(screen.queryByTestId("project-header-paper")).toBeNull())
+    expect(
+      JSON.parse(window.localStorage.getItem("pi-lab.projectView.headerShortcuts") ?? ""),
+    ).toEqual(["tasks", "auto-research", "skill:review-notes"])
+    view.unmount()
+    renderWorkspace({ "science.skills.list": skillsCatalog, "automations.list": () => [] })
+    await screen.findByTestId("project-view-tasks")
+    expect(screen.queryByTestId("project-header-paper")).toBeNull()
   })
 
   test("adding a skill puts a button in the header that starts an agent with that skill", async () => {

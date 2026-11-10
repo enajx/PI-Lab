@@ -22,6 +22,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     typeId: "research",
     agentConfig: null,
     sortIndex: 0,
+    sortOrder: null,
     archivedAt: null,
     createdAt: 0,
     updatedAt: 0,

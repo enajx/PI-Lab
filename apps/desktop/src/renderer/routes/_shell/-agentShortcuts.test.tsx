@@ -113,10 +113,13 @@ function renderShell(initialPath: string, statuses: LiveAgentStatus[]) {
         observer.next(statuses)
         return () => {}
       }),
-    "projects.list": () => [
-      { id: "alpha", name: "Alpha", repoPath: "/alpha", archivedAt: null },
-      { id: "beta", name: "Beta", repoPath: "/beta", archivedAt: null },
-    ],
+    "projects.list": () =>
+      listedProjectIds.map((id) => ({
+        id,
+        name: id === "alpha" ? "Alpha" : "Beta",
+        repoPath: `/${id}`,
+        archivedAt: null,
+      })),
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const rootRoute = createRootRoute({
@@ -159,8 +162,12 @@ function location(): { path: string | null; search: Record<string, string> } {
   return { path: node.getAttribute("data-path"), search: JSON.parse(node.textContent ?? "{}") }
 }
 
+/** The saved project order that the fake `projects.list` returns. */
+let listedProjectIds: string[] = []
+
 beforeEach(() => {
   window.localStorage.clear()
+  listedProjectIds = ["alpha", "beta"]
 })
 
 describe("AgentShortcuts", () => {
@@ -171,7 +178,9 @@ describe("AgentShortcuts", () => {
   ]
 
   test("⌥Tab opens each waiting agent in turn across projects, by origin", async () => {
-    window.localStorage.setItem("pi-lab.sidebar.projectOrder", JSON.stringify(["beta", "alpha"]))
+    listedProjectIds = ["beta", "alpha"]
+    // An old sidebar-only order left in local storage is ignored.
+    window.localStorage.setItem("pi-lab.sidebar.projectOrder", JSON.stringify(["alpha", "beta"]))
     renderShell("/", statuses)
     await settle()
 

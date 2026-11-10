@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  type Ref,
   useContext,
   useEffect,
   useMemo,
@@ -196,6 +197,8 @@ export function CardGrid({
 }
 
 interface ResizableCardGridItemProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
+  /** The grid item element, e.g. for a sortable list that moves the card. */
+  ref?: Ref<HTMLDivElement & HTMLLIElement>
   cardId: string
   label: string
   children: ReactNode
@@ -215,6 +218,7 @@ function sizeLabel(label: string, size: CardGridSize, t: (english: string) => st
  * steps of the base size, so the corner follows the pointer in visible steps.
  */
 export function ResizableCardGridItem({
+  ref,
   cardId,
   label,
   children,
@@ -299,6 +303,7 @@ export function ResizableCardGridItem({
   return (
     <Element
       {...elementProps}
+      ref={ref}
       data-testid={testId}
       data-card-grid-item={cardId}
       data-card-span="1x1"

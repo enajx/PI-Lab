@@ -25,7 +25,6 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   useNavOrder,
-  useProjectOrder,
   useRestoreProjectTabs,
   useShowAnalysisSection,
   useShowClusterSection,
@@ -56,6 +55,7 @@ import { type ScienceNavItem, scienceNavItems } from "../../science/components/s
 import { readOpenProjectOverride } from "../../utils/openProjectOverride"
 import { AddProjectMenu } from "../AddProjectMenu"
 import { ProjectVisibilityToggle } from "../ProjectVisibilityToggle"
+import { useProjectReorder } from "../useProjectReorder"
 
 /**
  * Shared layout/typography for every sidebar nav row (Dashboard, Science tabs,
@@ -217,7 +217,7 @@ interface RowReorder {
  * order), then any ids not yet stored, in their natural order — so freshly-added
  * entries still appear. Stable for both the nav list and the project list.
  */
-export function orderById<T extends { id: string }>(items: T[], order: string[]): T[] {
+function orderById<T extends { id: string }>(items: T[], order: string[]): T[] {
   const byId = new Map(items.map((item) => [item.id, item]))
   const seen = new Set<string>()
   const result: T[] = []
@@ -322,7 +322,7 @@ interface ProjectMenuState {
  * single `gap-0.5` list, a divider-topped "Projects" label + the opened projects (the
  * scroll region), then a tight bottom cluster of "Add project" + Settings under a single
  * divider. Both the workspace nav and the project list are drag-reorderable within
- * themselves (`useNavOrder` / `useProjectOrder`); reordering never crosses between the
+ * themselves (`useNavOrder` / the saved project order, `useProjectReorder`); reordering never crosses between the
  * two, shows a move cursor (not a copy "+"), and marks the drop slot with a line.
  * Right-clicking a project offers "Remove from PI Lab" (removes the row only, never the
  * files on disk).
@@ -401,13 +401,12 @@ export function Sidebar() {
     void openProject.mutateAsync({ path })
   })
 
-  const [projectOrder, setProjectOrder] = useProjectOrder()
-  const orderedProjects = orderById(projects, projectOrder).filter(
-    (project) => showHidden || !project.archivedAt,
-  )
+  // `projects.list` returns the saved project order, the one the Dashboard cards use too.
+  const reorderProjects = useProjectReorder((message) => setActionError(message))
+  const orderedProjects = projects.filter((project) => showHidden || !project.archivedAt)
   const projectRowProps = useDragReorder(
     orderedProjects.map((project) => project.id),
-    setProjectOrder,
+    reorderProjects,
   )
 
   return (

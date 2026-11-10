@@ -319,3 +319,92 @@ test("a click on the top bar closes the + menu, and the project picker switches 
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+/**
+ * Real app and router: the Project view header shows Tasks, Paper, Auto
+ * research and Plan research as icon-only buttons named in their title, and
+ * the Paper button opens the LaTeX Editor with that project chosen.
+ */
+test("the project view Paper button opens the LaTeX Editor with the project chosen", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-lab-project-paper-"))
+  const repos = { alpha: join(dir, "alpha"), beta: join(dir, "beta") }
+  for (const repo of Object.values(repos)) {
+    await mkdir(repo, { recursive: true })
+    await writeFile(join(repo, "PROJECT.md"), "# Fixture project\n")
+    await execFileAsync("git", ["init", "-b", "main", repo])
+    await execFileAsync("git", ["-C", repo, "add", "."])
+    await execFileAsync("git", [
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "Fixture",
+    ])
+  }
+  const desktop = join(process.cwd(), "apps/desktop")
+  // biome-ignore lint/suspicious/noUndeclaredEnvVars: Optional packaged app verification.
+  const binary = process.env.PI_LAB_PACKAGED_BINARY
+  // Each launch opens one more project into the same data folder.
+  const launch = (repo: string) =>
+    electron.launch({
+      executablePath: binary ?? createRequire(join(desktop, "package.json"))("electron"),
+      args: binary ? [] : [join(desktop, "out/main/index.js")],
+      env: {
+        ...process.env,
+        PI_LAB_TEST_MODE: "1",
+        PI_LAB_DATA_DIR: join(dir, "data"),
+        PI_LAB_SOCKET_PATH: join(dir, "daemon.sock"),
+        PI_LAB_TEST_OPEN_PROJECT: repo,
+      },
+    })
+  let app = await launch(repos.beta)
+  try {
+    let page = await app.firstWindow()
+    await expect(page.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+    await app.close()
+    app = await launch(repos.alpha)
+    page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId("project-item")).toHaveCount(2)
+
+    await page.getByTestId("project-item").filter({ hasText: "alpha" }).click()
+    const paper = page.getByTestId("project-header-paper")
+    await expect(paper).toBeVisible()
+    for (const [testId, name] of [
+      ["project-view-tasks", "Tasks"],
+      ["project-header-paper", "Paper"],
+      ["project-view-auto-research", "Auto research"],
+      ["project-view-plan-research", "Plan research"],
+    ]) {
+      const button = page.getByTestId(testId)
+      await expect(button).toHaveText("")
+      await expect(button).toHaveAttribute("title", name)
+    }
+    await page.screenshot({ path: resolve(".cache", "screens", "project-header.png") })
+    await page.getByTestId("project-view-shortcuts-add").click()
+    const menu = page.getByRole("menu", { name: "Header shortcuts" })
+    await expect(menu.getByRole("menuitemcheckbox", { name: "Paper" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    await page.keyboard.press("Escape")
+
+    await paper.click()
+    await expect(page.getByTestId("science-latex")).toBeVisible()
+    await expect(page.getByTestId("latex-project-select")).toHaveText("alpha")
+
+    // From another project's view, Paper switches the LaTeX Editor to that project.
+    await page.getByTestId("project-item").filter({ hasText: "beta" }).click()
+    await page.getByTestId("project-header-paper").click()
+    await expect(page.getByTestId("science-latex")).toBeVisible()
+    await expect(page.getByTestId("latex-project-select")).toHaveText("beta")
+  } finally {
+    // The test-mode dialog responder answers the quit confirmation with Quit.
+    await app.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})

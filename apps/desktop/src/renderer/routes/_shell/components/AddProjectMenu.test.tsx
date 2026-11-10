@@ -93,7 +93,7 @@ describe("AddProjectMenu open from folder", () => {
         new Promise<string>((resolve) => {
           finishPick = resolve
         }),
-      "projects.open": (input) => {
+      "projects.add": (input) => {
         opened.push(input)
         return { id: "p1", name: "my-project" }
       },
@@ -111,5 +111,28 @@ describe("AddProjectMenu open from folder", () => {
     finishPick("/tmp/my-project")
     await vi.waitFor(() => expect(opened).toHaveLength(1))
     expect((opened[0] as { path: string }).path).toBe("/tmp/my-project")
+  })
+})
+
+describe("AddProjectMenu with a folder that is already a project", () => {
+  test("says the project is already in PI Lab and keeps the menu open", async () => {
+    const client = createFakeTrpcClient({
+      "system.pickDirectory": () => "/tmp/cpp-research",
+      "projects.add": () => {
+        throw new Error('"cpp-research" is already in PI Lab.')
+      },
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        <AddProjectMenu variant="dashboard-card" onAdded={vi.fn()} />
+      </AppProviders>,
+    )
+    fireEvent.click(screen.getByTestId("dashboard-add-project"), { detail: 0 })
+    fireEvent.click(screen.getByTestId("add-project-folder"))
+    expect((await screen.findByTestId("add-project-error")).textContent).toContain(
+      '"cpp-research" is already in PI Lab.',
+    )
+    expect(screen.getByTestId("add-project-menu")).toBeTruthy()
   })
 })
