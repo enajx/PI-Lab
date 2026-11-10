@@ -192,8 +192,8 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     }
   }, [])
 
-  // The plain menu also closes on window blur and takes title bar clicks; the clone
-  // and template forms stay open on blur so typed input is not lost.
+  // The plain menu also takes title bar clicks. It stays open on window blur, since the
+  // native folder picker it opens takes the focus.
   usePopupDismiss(open && !setup && mode === "menu", [rootRef, menuRef], () => setOpen(false))
 
   useEffect(() => {

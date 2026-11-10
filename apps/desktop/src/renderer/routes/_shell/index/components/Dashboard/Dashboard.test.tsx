@@ -110,7 +110,6 @@ describe("Dashboard", () => {
     renderDashboard({ "projects.list": () => [] })
 
     expect(await screen.findByRole("heading", { name: "Prosjektoversikt" })).toBeTruthy()
-    expect(screen.getByTestId("dashboard-empty").textContent).toBe("Ingen prosjekter ennå.")
   })
 
   test("renders a card per project with its name and a status badge", async () => {
@@ -394,12 +393,11 @@ describe("Dashboard", () => {
     expect(router.state.location.pathname).toBe("/")
   })
 
-  test("shows the empty state when there are no projects", async () => {
+  test("with no projects it shows only the New project card, with no empty-state text", async () => {
     renderDashboard({ "projects.list": () => [] })
 
-    await waitFor(() => {
-      expect(screen.getByTestId("dashboard-empty")).toBeTruthy()
-    })
+    expect(await screen.findByRole("button", { name: "New project" })).toBeTruthy()
+    expect(screen.queryByTestId("dashboard-empty")).toBeNull()
     expect(screen.queryByTestId("project-card")).toBeNull()
     expect(screen.getByRole("button", { name: "New project" })).toBeTruthy()
     expect(screen.getByTestId("dashboard-grid").hidden).toBe(false)
@@ -469,7 +467,8 @@ describe("Dashboard", () => {
     projects = []
     await queryClient.invalidateQueries()
 
-    await screen.findByTestId("dashboard-empty")
+    await waitFor(() => expect(screen.queryByTestId("project-card")).toBeNull())
+    expect(screen.queryByTestId("dashboard-empty")).toBeNull()
     expect(screen.getByTestId("dashboard-grid").hidden).toBe(false)
     expect(screen.getByRole("button", { name: "New project" })).toBeTruthy()
     await waitFor(() => {

@@ -82,14 +82,8 @@ export function Dashboard() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-12 pb-6">
-        {projects.length === 0 ? (
-          <p
-            data-testid="dashboard-empty"
-            className="text-muted-foreground text-sm leading-relaxed"
-          >
-            {t("No projects yet.")}
-          </p>
-        ) : visibleProjects.length === 0 ? (
+        {/* With no projects the New project card alone is shown, with no text above it. */}
+        {projects.length > 0 && visibleProjects.length === 0 ? (
           <p
             data-testid="dashboard-empty"
             className="text-muted-foreground text-sm leading-relaxed"

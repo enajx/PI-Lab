@@ -6,7 +6,9 @@ let openCount = 0
 /**
  * Close a popup menu or popover (`open`) on a pointerdown or mousedown outside
  * every element in `refs` (both, since a pointerdown handler that calls
- * `preventDefault` stops the mousedown), on Escape, and when the window loses focus. While it is open the page
+ * `preventDefault` stops the mousedown) and on Escape. It stays open when the window
+ * loses focus, because a native dialog the popup opened (a folder picker) takes the
+ * focus and the popup's flow must go on. While it is open the page
  * root carries `data-popup-open`, which turns the window drag regions
  * (`.app-drag`, see globals.css) into normal page areas: Electron does not send
  * mouse events from a drag region to the page, so without this a click on the
@@ -34,16 +36,13 @@ export function usePopupDismiss(
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") latest.current.onClose()
     }
-    const onBlur = () => latest.current.onClose()
     window.addEventListener("pointerdown", onPress)
     window.addEventListener("mousedown", onPress)
     window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("blur", onBlur)
     return () => {
       window.removeEventListener("pointerdown", onPress)
       window.removeEventListener("mousedown", onPress)
       window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("blur", onBlur)
       openCount -= 1
       if (openCount === 0) root.removeAttribute("data-popup-open")
     }

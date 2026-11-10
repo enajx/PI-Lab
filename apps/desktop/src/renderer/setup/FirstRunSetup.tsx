@@ -141,6 +141,8 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     complete.error ??
     skip.error
 
+  const selectClass = "w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+
   return (
     <div
       data-testid="first-run-setup"
@@ -149,8 +151,8 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
       aria-labelledby="first-run-setup-title"
       className="fixed inset-0 z-[100] flex flex-col overflow-hidden bg-background text-foreground"
     >
-      <header className="app-drag flex h-14 shrink-0 items-center border-border border-b pr-6 pl-24">
-        <h1 id="first-run-setup-title" className="font-semibold text-base">
+      <header className="app-drag flex h-12 shrink-0 items-center border-border border-b pr-6 pl-24">
+        <h1 id="first-run-setup-title" className="font-semibold text-sm">
           {t("Set up PI Lab")}
         </h1>
         <span className="ms-3 text-muted-foreground text-xs">
@@ -168,98 +170,132 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
         </Button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-6 py-8">
-          <section className="rounded-xl border border-border bg-card p-5">
-            <label className="flex flex-col gap-1.5 text-xs">
-              <span>{t("Language")}</span>
-              <select
-                aria-label={t("Language")}
-                value={language}
-                onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
-                className="rounded-md border border-border bg-background px-2 py-2"
-              >
-                {LANGUAGES.map((item) => (
-                  <option key={item.code} value={item.code}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
-          {appChannel.data && appChannel.data !== "alpha" ? (
-            <section className="rounded-xl border border-border bg-card p-5">
-              <label className="flex flex-col gap-1.5 text-xs">
-                <span>{t("Update channel")}</span>
+      <div data-testid="first-run-setup-scroll" className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-6 py-4">
+          <section className="rounded-lg border border-border bg-card p-4">
+            <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
+            <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <label className="flex flex-col gap-1 text-xs">
+                <span>{t("Language")}</span>
                 <select
-                  aria-label={t("Update channel")}
-                  value={settings.data?.publicUpdateChannel ?? "stable"}
-                  disabled={!settings.data || updateGeneral.isPending}
-                  onChange={(event) =>
-                    updateGeneral.mutate({
-                      publicUpdateChannel: event.target.value as "stable" | "beta",
-                    })
-                  }
-                  className="rounded-md border border-border bg-background px-2 py-2"
+                  aria-label={t("Language")}
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
+                  className={selectClass}
                 >
-                  <option value="stable">{t("Stable")}</option>
-                  <option value="beta">{t("Beta")}</option>
+                  {LANGUAGES.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
                 </select>
               </label>
-              <p className="mt-2 text-muted-foreground text-xs">
-                {t(
-                  "Stable for everyday work; Beta for trying new features. Both use your projects and settings.",
-                )}
-              </p>
-              <p className="mt-1 text-muted-foreground text-xs">
-                {t(
-                  "This selects future updates. Switching to Stable will not install an older version. You can change this later in Settings.",
-                )}
-              </p>
-            </section>
-          ) : null}
-          <section className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="font-medium text-sm">{t("Start at login")}</h2>
-                <p className="mt-1 text-muted-foreground text-xs">
-                  {t("Launch PI Lab in the background when you sign in.")}
-                </p>
+              <label className="flex flex-col gap-1 text-xs">
+                <span>{t("Theme")}</span>
+                <select
+                  aria-label={t("Theme mode")}
+                  value={mode === "system" ? "dark" : mode}
+                  onChange={(event) => setMode(event.target.value as ThemeMode)}
+                  className={selectClass}
+                >
+                  <option value="light">{t("Light")}</option>
+                  <option value="dark">{t("Dark")}</option>
+                </select>
+              </label>
+              <div className="flex flex-col gap-1 text-xs">
+                <span>{t("Completion sound")}</span>
+                <div className="flex items-center gap-2">
+                  <select
+                    aria-label={t("Completion sound")}
+                    value={completionSound}
+                    onChange={(event) =>
+                      setCompletionSound(event.target.value as NotificationSound)
+                    }
+                    className={cn(selectClass, "min-w-0 flex-1")}
+                  >
+                    {NOTIFICATION_SOUND_OPTIONS.map((sound) => (
+                      <option key={sound.id} value={sound.id}>
+                        {t(sound.label)}
+                      </option>
+                    ))}
+                  </select>
+                  <Button type="button" variant="outline" size="sm" onClick={previewSound}>
+                    {t("Preview sound")}
+                  </Button>
+                </div>
+                <span aria-live="polite" className="min-h-4 text-[11px] text-muted-foreground">
+                  {soundPreview}
+                </span>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-label={t("Start at login")}
-                aria-checked={startAtLogin.data?.enabled ?? false}
-                data-testid="setup-start-at-login"
-                disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
-                onClick={() =>
-                  setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
-                }
-                className={cn(
-                  "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
-                  startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
-                )}
-              >
-                <span
-                  className={cn(
-                    "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
-                    startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
-                  )}
-                />
-              </button>
+              <div className="flex flex-col gap-1 text-xs">
+                <span>{t("Start at login")}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label={t("Start at login")}
+                    aria-checked={startAtLogin.data?.enabled ?? false}
+                    data-testid="setup-start-at-login"
+                    disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
+                    onClick={() =>
+                      setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
+                    }
+                    className={cn(
+                      "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
+                      startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
+                        startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
+                      )}
+                    />
+                  </button>
+                  <span className="text-[11px] text-muted-foreground">
+                    {startAtLogin.data?.available === false
+                      ? t("Start at login is available in packaged desktop builds.")
+                      : t("Launch PI Lab in the background when you sign in.")}
+                  </span>
+                </div>
+              </div>
+              {appChannel.data && appChannel.data !== "alpha" ? (
+                <div className="col-span-2 flex flex-col gap-1 text-xs lg:col-span-4">
+                  <label className="flex items-center gap-2">
+                    <span className="shrink-0">{t("Update channel")}</span>
+                    <select
+                      aria-label={t("Update channel")}
+                      value={settings.data?.publicUpdateChannel ?? "stable"}
+                      disabled={!settings.data || updateGeneral.isPending}
+                      onChange={(event) =>
+                        updateGeneral.mutate({
+                          publicUpdateChannel: event.target.value as "stable" | "beta",
+                        })
+                      }
+                      className={cn(selectClass, "w-40")}
+                    >
+                      <option value="stable">{t("Stable")}</option>
+                      <option value="beta">{t("Beta")}</option>
+                    </select>
+                  </label>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t(
+                      "Stable for everyday work; Beta for trying new features. Both use your projects and settings.",
+                    )}{" "}
+                    {t(
+                      "This selects future updates. Switching to Stable will not install an older version. You can change this later in Settings.",
+                    )}
+                  </p>
+                </div>
+              ) : null}
             </div>
-            {startAtLogin.data?.available === false ? (
-              <p className="mt-2 text-muted-foreground text-xs">
-                {t("Start at login is available in packaged desktop builds.")}
-              </p>
-            ) : null}
           </section>
-          <section className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="font-medium text-sm">{t("Coding agents")}</h2>
-                <p className="mt-1 text-muted-foreground text-xs">
+
+          <section className="rounded-lg border border-border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-baseline gap-3">
+                <h2 className="shrink-0 font-medium text-sm">{t("Coding agents")}</h2>
+                <p className="truncate text-muted-foreground text-xs">
                   {t(
                     "Detected CLI subscriptions are ready to use. Choose a default only if you want one.",
                   )}
@@ -277,7 +313,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
               </Button>
             </div>
             {environment.isPending ? (
-              <p className="text-muted-foreground text-sm">
+              <p className="text-muted-foreground text-xs">
                 {t("Checking your local environment…")}
               </p>
             ) : (
@@ -304,54 +340,15 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                   ))}
                 </div>
                 {selectedAgent === null ? (
-                  <p className="mt-3 text-muted-foreground text-xs">{t("No default selected.")}</p>
+                  <p className="mt-2 text-muted-foreground text-xs">{t("No default selected.")}</p>
                 ) : null}
               </>
             )}
           </section>
 
-          <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5 text-xs">
-                <span>{t("Theme")}</span>
-                <select
-                  aria-label={t("Theme mode")}
-                  value={mode === "system" ? "dark" : mode}
-                  onChange={(event) => setMode(event.target.value as ThemeMode)}
-                  className="rounded-md border border-border bg-background px-2 py-2"
-                >
-                  <option value="light">{t("Light")}</option>
-                  <option value="dark">{t("Dark")}</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5 text-xs">
-                <span>{t("How do you want PI Lab to let you know it’s ready?")}</span>
-                <select
-                  aria-label={t("Completion sound")}
-                  value={completionSound}
-                  onChange={(event) => setCompletionSound(event.target.value as NotificationSound)}
-                  className="rounded-md border border-border bg-background px-2 py-2"
-                >
-                  {NOTIFICATION_SOUND_OPTIONS.map((sound) => (
-                    <option key={sound.id} value={sound.id}>
-                      {t(sound.label)}
-                    </option>
-                  ))}
-                </select>
-                <Button type="button" variant="outline" size="sm" onClick={previewSound}>
-                  {t("Preview sound")}
-                </Button>
-                <span aria-live="polite" className="min-h-4 text-muted-foreground">
-                  {soundPreview}
-                </span>
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-border bg-card p-5">
+          <section className="rounded-lg border border-border bg-card p-4">
             <h2 className="font-medium text-sm">{t("Local integrations")}</h2>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <IntegrationCard
                 title="GitHub"
                 detail={
@@ -390,10 +387,11 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             </p>
           ) : null}
 
-          <footer className="flex items-center justify-end gap-2 pb-2">
+          <footer className="flex items-center justify-end gap-2">
             <Button
               type="button"
               variant="ghost"
+              size="sm"
               onClick={skipSetup}
               disabled={skip.isPending || setStartAtLogin.isPending || updateGeneral.isPending}
             >
@@ -401,6 +399,8 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             </Button>
             <Button
               type="button"
+              size="sm"
+              data-testid="first-run-setup-finish"
               onClick={finish}
               disabled={
                 defaultAgentPending ||
@@ -449,62 +449,73 @@ function HarnessCard({
   return (
     <div
       className={cn(
-        "rounded-lg border p-4",
+        "rounded-lg border p-3",
         selected ? "border-primary bg-primary/5" : "border-border",
       )}
     >
-      <button
-        type="button"
-        className="w-full text-start"
-        onClick={detected ? onSelect : undefined}
-        disabled={!detected}
-      >
-        <span className="flex items-center justify-between gap-3 font-medium text-sm">
-          {harness.label}
-          <StateIcon state={harness.state} />
-        </span>
-        <span
-          className={cn(
-            "mt-1 block text-xs",
-            detected ? "text-emerald-600" : "text-muted-foreground",
-          )}
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-start"
+          onClick={detected ? onSelect : undefined}
+          disabled={!detected}
         >
-          {detected
-            ? t("Detected")
-            : harness.state === "missing"
-              ? t("Not detected")
-              : (harness.message ?? t("Not detected"))}
-        </span>
-        {detected ? (
-          <span className="mt-3 block text-muted-foreground text-[11px]">
-            {selected ? t("Default agent") : t("Click to set as default")}
+          <span className="flex items-center gap-2 font-medium text-sm">
+            {harness.label}
+            <StateIcon state={harness.state} />
+            <span
+              className={cn(
+                "font-normal text-xs",
+                detected ? "text-emerald-600" : "text-muted-foreground",
+              )}
+            >
+              {detected
+                ? t("Detected")
+                : harness.state === "missing"
+                  ? t("Not detected")
+                  : (harness.message ?? t("Not detected"))}
+            </span>
           </span>
-        ) : null}
-      </button>
+          {detected ? (
+            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+              {selected ? t("Default agent") : t("Click to set as default")}
+            </span>
+          ) : null}
+        </button>
+        {apiOpen ? null : (
+          <button
+            type="button"
+            className="shrink-0 text-[11px] text-muted-foreground underline underline-offset-4"
+            onClick={onOpenApi}
+          >
+            {apiConfigured ? t("API key saved · replace") : t("Use API instead")}
+          </button>
+        )}
+      </div>
       {harness.state === "error" ? (
-        <div className="mt-3 rounded-md bg-muted/60 p-2.5 text-xs">
-          <p className="text-muted-foreground">
+        <div className="mt-2 flex items-center gap-2 rounded-md bg-muted/60 p-2 text-xs">
+          <p className="min-w-0 flex-1 text-muted-foreground">
             {t("Run")}{" "}
             <code className="font-mono text-foreground" dir="ltr">
               {harness.executable} login status
             </code>{" "}
             {t("in a terminal to inspect the CLI result, then try again.")}
           </p>
-          <Button type="button" variant="outline" size="sm" className="mt-2" onClick={onRetry}>
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
             <RefreshCw className="size-3.5" aria-hidden />
             {t("Retry detection")}
           </Button>
         </div>
       ) : null}
       {apiOpen ? (
-        <div className="mt-3 flex gap-2">
+        <div className="mt-2 flex gap-2">
           <input
             aria-label={`${harness.label} ${t("API key")}`}
             type="password"
             autoComplete="off"
             value={apiKey}
             onChange={(event) => onApiKeyChange(event.target.value)}
-            className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1.5 text-xs"
+            className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs"
             placeholder={t("API key")}
           />
           <Button
@@ -516,15 +527,7 @@ function HarnessCard({
             {t("Save")}
           </Button>
         </div>
-      ) : (
-        <button
-          type="button"
-          className="mt-3 text-muted-foreground text-[11px] underline underline-offset-4"
-          onClick={onOpenApi}
-        >
-          {apiConfigured ? t("API key saved · replace") : t("Use API instead")}
-        </button>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -542,17 +545,20 @@ function IntegrationCard({
 }) {
   const t = useTranslate()
   return (
-    <div className="rounded-lg border border-border p-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-center gap-2">
         <span className="font-medium text-sm">{title}</span>
         <StateIcon state={state} />
-      </div>
-      <p className="mt-1 text-muted-foreground text-xs">{t(description)}</p>
-      <p className="mt-3 text-xs">
-        <span className={state === "authenticated" ? "text-emerald-600" : "text-muted-foreground"}>
+        <span
+          className={cn(
+            "ms-auto text-xs",
+            state === "authenticated" ? "text-emerald-600" : "text-muted-foreground",
+          )}
+        >
           {detail}
         </span>
-      </p>
+      </div>
+      <p className="mt-0.5 text-muted-foreground text-xs">{t(description)}</p>
     </div>
   )
 }

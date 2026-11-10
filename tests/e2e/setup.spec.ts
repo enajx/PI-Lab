@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
   type ElectronApplication,
@@ -71,6 +71,28 @@ test("first launch finishes with Silent, stays complete after restart, and can r
   await expect(command).toBeVisible()
   await command.click()
   await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+})
+
+test("first-run setup wizard fits the default window without scrolling", async () => {
+  if (!app) throw new Error("Electron app did not launch")
+  const window = await app.firstWindow()
+
+  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByText("Checking your local environment…")).toHaveCount(0, {
+    timeout: 30_000,
+  })
+  const size = await window.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+  expect(size.width).toBeGreaterThanOrEqual(1270)
+  expect(size.height).toBeGreaterThanOrEqual(760)
+  const scroll = window.getByTestId("first-run-setup-scroll")
+  const metrics = await scroll.evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  }))
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight)
+  const finish = window.getByTestId("first-run-setup-finish")
+  await expect(finish).toBeInViewport({ ratio: 1 })
+  await window.screenshot({ path: resolve(".cache", "screens", "setup-wizard.png") })
 })
 
 test("first-launch setup is skippable", async () => {

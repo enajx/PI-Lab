@@ -380,7 +380,7 @@ test("the final New project card opens the shared chooser and remains when the D
   await window.getByTestId("project-item").click({ button: "right" })
   await window.getByTestId("project-remove").click()
   await expect(window.getByTestId("project-card")).toHaveCount(0)
-  await expect(window.getByTestId("dashboard-empty")).toHaveText("No projects yet.")
+  await expect(window.getByTestId("dashboard-empty")).toHaveCount(0)
   await expect(newProjectCard).toBeVisible()
   expect(
     await grid.evaluate((element) => element.lastElementChild?.getAttribute("data-testid")),

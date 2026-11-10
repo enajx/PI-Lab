@@ -13,7 +13,7 @@ function Popup({ open, onClose, testId }: { open: boolean; onClose: () => void; 
   )
 }
 
-test("an open popup closes on an outside mousedown or pointerdown, Escape and window blur, not inside", () => {
+test("an open popup closes on an outside mousedown or pointerdown and Escape, not inside, and stays open on window blur", () => {
   const onClose = vi.fn()
   render(
     <>
@@ -29,8 +29,10 @@ test("an open popup closes on an outside mousedown or pointerdown, Escape and wi
   expect(onClose).toHaveBeenCalledTimes(2)
   fireEvent.keyDown(window, { key: "Escape" })
   expect(onClose).toHaveBeenCalledTimes(3)
+  // A native dialog the popup opened (a folder picker) takes the focus; the popup's
+  // flow must go on.
   fireEvent.blur(window)
-  expect(onClose).toHaveBeenCalledTimes(4)
+  expect(onClose).toHaveBeenCalledTimes(3)
 })
 
 test("a closed popup ignores outside clicks, Escape and blur", () => {
