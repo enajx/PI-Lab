@@ -25,6 +25,7 @@ import {
 } from "../../../projects/components/CentralPanel"
 import { CollapsibleSection } from "../../../projects/components/CentralPanel/CollapsibleSection"
 import type { CentralPanelRestoreState } from "../../../projects/components/CentralPanel/useCentralPanel"
+import { ConnectOverleafDialog } from "./ConnectOverleaf"
 import { PaperFolderStatusItem } from "./PaperFolder"
 import { PaperSyncBar } from "./PaperSyncBar"
 
@@ -130,6 +131,7 @@ export function PaperEditor({
   const [openError, setOpenError] = useState<string | null>(null)
   // The editor footer element the Sync controls put their footer items in.
   const [footerSlot, setFooterSlot] = useState<HTMLElement | null>(null)
+  const [connectOpen, setConnectOpen] = useState(false)
   const onSaved = useCallback(
     (relPath: string): void => {
       if (!/\.(tex|bib)$/i.test(relPath)) return
@@ -317,6 +319,17 @@ export function PaperEditor({
           paperFolderItem={
             <>
               <div ref={setFooterSlot} data-testid="paper-footer-slot" className="contents" />
+              {syncEnabled && !hasRemote ? (
+                <button
+                  type="button"
+                  data-testid="paper-connect-overleaf"
+                  title={t("Send this paper to a new Overleaf project")}
+                  onClick={() => setConnectOpen(true)}
+                  className="shrink-0 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  {t("Connect to Overleaf…")}
+                </button>
+              ) : null}
               <PaperFolderStatusItem projectId={projectId} dir={paperDir} displayDir={displayDir} />
             </>
           }
@@ -345,6 +358,9 @@ export function PaperEditor({
           for (const relPath of paths) controller.openFile(relPath)
         }}
       />
+      {connectOpen ? (
+        <ConnectOverleafDialog projectId={projectId} onClose={() => setConnectOpen(false)} />
+      ) : null}
     </div>
   )
 }

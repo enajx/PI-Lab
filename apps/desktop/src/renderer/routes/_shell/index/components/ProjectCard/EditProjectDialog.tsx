@@ -7,6 +7,7 @@ import { createPortal } from "react-dom"
 import { useTranslate } from "../../../../../i18n/language"
 import { useEmojiTagPalette } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { ConnectOverleafDialog } from "../../../science/components/ScienceLatex/ConnectOverleaf"
 import {
   type ChosenPaperFolder,
   paperFolderLabel,
@@ -77,6 +78,8 @@ type PaperFolderDraft = { kind: "keep" } | ({ kind: "set" } & ChosenPaperFolder)
  * another one (same checks as the LaTeX Editor) or clear it. Like the other
  * fields, the change is applied only when the dialog is saved, before the
  * other details; if it fails, the error is shown and nothing else is saved.
+ * A saved paper folder with no Git remote also gets "Connect to Overleaf…",
+ * which acts at once (it opens the Connect to Overleaf dialog).
  */
 export function EditProjectDialog({
   project,
@@ -143,6 +146,13 @@ export function EditProjectDialog({
   })
   const [paperDraft, setPaperDraft] = useState<PaperFolderDraft>({ kind: "keep" })
   const [paperError, setPaperError] = useState<string | null>(null)
+  const [connectOpen, setConnectOpen] = useState(false)
+  const savedPaper = paperState.data?.paper ?? null
+  const canConnect =
+    paperDraft.kind === "keep" &&
+    savedPaper !== null &&
+    savedPaper.remoteUrl === null &&
+    savedPaper.syncEnabled
   const onPaperError = (cause: { message: string }): void => setPaperError(cause.message)
   const paperPicker = usePaperFolderPicker(
     projectId,
@@ -443,6 +453,20 @@ export function EditProjectDialog({
                 >
                   {t("Choose…")}
                 </button>
+                {canConnect ? (
+                  <button
+                    type="button"
+                    data-testid="edit-project-paper-connect"
+                    title={t("Send this paper to a new Overleaf project")}
+                    onClick={() => {
+                      setPaperError(null)
+                      setConnectOpen(true)
+                    }}
+                    className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60"
+                  >
+                    {t("Connect to Overleaf…")}
+                  </button>
+                ) : null}
                 {shownPaperDir !== null ? (
                   <button
                     type="button"
@@ -511,6 +535,9 @@ export function EditProjectDialog({
       </div>
 
       {paperPicker.dialog}
+      {connectOpen ? (
+        <ConnectOverleafDialog projectId={projectId} onClose={() => setConnectOpen(false)} />
+      ) : null}
       {emojiPickerOpen ? (
         // biome-ignore lint/a11y/noStaticElementInteractions: this is the picker backdrop; its visible dialog contains the keyboard-accessible choices, and Escape closes it.
         // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled at dialog level and provides the keyboard dismissal path.

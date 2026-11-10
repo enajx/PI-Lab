@@ -20,6 +20,7 @@ function renderSection(handlers: FakeHandlers) {
     <AppProviders
       client={createFakeTrpcClient({
         "paper.token.status": () => ({ configured: false }),
+        "paper.template.status": () => ({ custom: null }),
         "settings.get": () => ({ editor: DEFAULT_EDITOR_SETTINGS }),
         ...handlers,
       })}

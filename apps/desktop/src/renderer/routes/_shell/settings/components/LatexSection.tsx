@@ -3,6 +3,7 @@ import { Button, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../../trpc/react"
+import { LatexTemplateSettings } from "./LatexTemplateSettings"
 import { OverleafSettings } from "./OverleafSettings"
 import { SelectField, SettingsSection } from "./SettingsControls"
 
@@ -173,6 +174,7 @@ export function LatexSection() {
           </div>
         </>
       ) : null}
+      <LatexTemplateSettings />
       <OverleafSettings />
       {update.error ? (
         <p role="alert" className="px-4 py-3 text-destructive text-sm">

@@ -1,6 +1,6 @@
 import { Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FolderOpen, GitBranch } from "lucide-react"
+import { FilePlus, FolderOpen, GitBranch } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
@@ -20,11 +20,13 @@ const linkClass = "text-muted-foreground underline underline-offset-2 hover:text
  * it first looks for Overleaf clones in the project (`paper.detect`): exactly
  * one is used right away, and several are listed to pick one (with a note when
  * the search stopped early on a large project). With it off (the user cleared
- * the paper folder) it does not search. Then it offers the two
- * agreed ways to set a paper folder, side by side as two narrow cards of the same height
+ * the paper folder) it does not search. Then it offers the three
+ * agreed ways to set a paper folder, side by side as narrow cards of the same height
  * (stacked when the page is too narrow), at the top of the page and horizontally centred, each with its
  * content centred: clone an Overleaf project into `<project>/paper/` from its
- * Git URL, or open a folder the user already cloned. The one Overleaf token is
+ * Git URL, open a folder the user already cloned, or create a new paper from
+ * the LaTeX template (in `<project>/paper/`, or a folder the user chooses;
+ * see `paper.create`). The one Overleaf token is
  * asked for only when none is available; the token and docs links are shown
  * only then. Choosing the project folder when it is not an Overleaf clone asks
  * first whether Sync stays on (Sync would commit and push the whole project).
@@ -66,7 +68,26 @@ export function PaperSetup({
     (chosen) => link.mutate({ projectId, dir: chosen.dir, rootChoice: chosen.rootChoice }),
     onError,
   )
-  const busy = addOverleaf.isPending || link.isPending || setTokenMutation.isPending || picker.busy
+  const createTarget = useQuery(trpc.paper.createTarget.queryOptions({ projectId }))
+  // The folder the user chose for Create paper, or null for the default (<project>/paper).
+  const [createDir, setCreateDir] = useState<string | null>(null)
+  const pickCreateDir = useMutation(
+    trpc.system.pickDirectory.mutationOptions({
+      onSuccess: (dir) => {
+        if (dir) setCreateDir(dir)
+      },
+      onError,
+    }),
+  )
+  const create = useMutation(trpc.paper.create.mutationOptions({ onSuccess: linked, onError }))
+  const createInto = createDir ?? (createTarget.data?.available ? createTarget.data.dir : null)
+  const busy =
+    addOverleaf.isPending ||
+    link.isPending ||
+    setTokenMutation.isPending ||
+    picker.busy ||
+    create.isPending ||
+    pickCreateDir.isPending
 
   // Exactly one Overleaf clone in the project: link it once, without asking.
   // A disabled query still returns cached data (from a visit before the folder
@@ -110,7 +131,7 @@ export function PaperSetup({
     <div data-testid="paper-setup" className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
       <div
         data-testid="paper-setup-content"
-        className="mx-auto flex w-full max-w-3xl flex-col gap-3"
+        className="mx-auto flex w-full max-w-5xl flex-col gap-3"
       >
         {autoLinking ? (
           <p data-testid="paper-detecting" className="text-center text-muted-foreground text-sm">
@@ -155,7 +176,7 @@ export function PaperSetup({
                 </div>
               </section>
             ) : null}
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(16rem,23rem))] justify-center gap-3">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(16rem,20rem))] justify-center gap-3">
               <section data-testid="paper-setup-overleaf" className={cardClass}>
                 <GitBranch className="size-5 text-muted-foreground" aria-hidden />
                 <h2 className="font-medium text-sm">{t("Add Overleaf project")}</h2>
@@ -224,6 +245,55 @@ export function PaperSetup({
                   className="rounded border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
                 >
                   {t("Choose folder…")}
+                </button>
+              </section>
+
+              <section data-testid="paper-setup-create" className={cardClass}>
+                <FilePlus className="size-5 text-muted-foreground" aria-hidden />
+                <h2 className="font-medium text-sm">{t("Create paper")}</h2>
+                <p className="text-muted-foreground text-xs">
+                  {t("Start a new paper from your LaTeX template.")}
+                </p>
+                <div className="flex max-w-full items-center gap-2 text-xs">
+                  <span
+                    data-testid="paper-create-folder"
+                    title={createDir ?? createTarget.data?.dir}
+                    className="min-w-0 truncate font-mono [direction:rtl]"
+                  >
+                    <bdi>
+                      {createDir ??
+                        (createTarget.data
+                          ? createTarget.data.available
+                            ? `${createTarget.data.displayDir}/`
+                            : t("paper/ has files in it, choose a folder")
+                          : "")}
+                    </bdi>
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="paper-create-change"
+                    disabled={busy}
+                    onClick={() => {
+                      setError(null)
+                      pickCreateDir.mutate()
+                    }}
+                    className={`${linkClass} shrink-0 disabled:opacity-50`}
+                  >
+                    {t("Change…")}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  data-testid="paper-create"
+                  disabled={busy || createInto === null}
+                  onClick={() => {
+                    if (createInto === null) return
+                    setError(null)
+                    create.mutate({ projectId, dir: createInto })
+                  }}
+                  className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {create.isPending ? t("Creating…") : t("Create paper")}
                 </button>
               </section>
             </div>

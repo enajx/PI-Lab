@@ -66,11 +66,15 @@ async function setUp(root: string): Promise<{ project: string; paper: string; ov
   return { project, paper, overleaf }
 }
 
-/** Start the real desktop build with isolated data, the project open, and a fixed folder picker. */
+/**
+ * Start the real desktop build with isolated data, the project open, and a
+ * fixed folder picker. `extraEnv` is added to the app's environment.
+ */
 async function launch(
   root: string,
   project: string,
   pickDir: string,
+  extraEnv: Record<string, string>,
 ): Promise<ElectronApplication> {
   const desktop = resolve("apps/desktop")
   // biome-ignore lint/suspicious/noUndeclaredEnvVars: Optional packaged target for direct Playwright runs.
@@ -88,6 +92,7 @@ async function launch(
       PI_LAB_TEST_OPEN_PROJECT: project,
       PI_LAB_TEST_PICK_DIRECTORY: pickDir,
       PI_LAB_TEST_AGENT_ID: "test-echo",
+      ...extraEnv,
     },
   })
 }
@@ -115,7 +120,7 @@ async function openLatexEditor(page: Page): Promise<void> {
 /**
  * Choose the project's agent (a deterministic test agent), open LaTeX Editor
  * from the project's dashboard card and link the paper folder. The setup shows
- * its two options side by side first.
+ * its three options side by side first.
  */
 async function openAndLink(page: Page, agentId: string): Promise<void> {
   await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
@@ -130,26 +135,39 @@ async function openAndLink(page: Page, agentId: string): Promise<void> {
   await page.getByTestId("project-card").getByTestId("project-card-latex").click()
   await expect(page.getByTestId("science-latex")).toBeVisible()
   await expect(page.getByTestId("latex-project-select")).toHaveValue(/.+/)
-  // The token status loads after the cards appear and can change their height for a moment,
-  // so wait for the settled layout: two equal cards side by side on one row.
-  await expect
-    .poll(async () => {
-      const overleaf = await page.getByTestId("paper-setup-overleaf").boundingBox()
-      const folder = await page.getByTestId("paper-setup-folder").boundingBox()
-      if (!overleaf || !folder) return "setup options are not visible"
-      if (folder.x < overleaf.x + overleaf.width) return "cards are not side by side"
-      if (Math.abs(folder.y - overleaf.y) >= 1) return `cards are ${folder.y - overleaf.y}px apart`
-      if (Math.abs(folder.width - overleaf.width) >= 1) return "cards differ in width"
-      if (Math.abs(folder.height - overleaf.height) >= 1) return "cards differ in height"
-      return "ok"
-    })
-    .toBe("ok")
-  await expect(() => expectCentredSetup(page)).toPass({ timeout: 5_000 })
+  await expectSetupCards(page)
   await page.screenshot({ path: test.info().outputPath("latex-setup.png") })
   // No Sync button before a paper is linked.
   await expect(page.getByTestId("paper-sync")).toHaveCount(0)
   await page.getByTestId("paper-use-folder").click()
   await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+}
+
+/** The setup cards, left to right. */
+const SETUP_CARDS = ["paper-setup-overleaf", "paper-setup-folder", "paper-setup-create"]
+
+/**
+ * The token status loads after the cards appear and can change their height
+ * for a moment, so wait for the settled layout: three equal cards side by side
+ * on one row, at the top of the page and centred.
+ */
+async function expectSetupCards(page: Page): Promise<void> {
+  await expect
+    .poll(async () => {
+      const boxes = await Promise.all(SETUP_CARDS.map((id) => page.getByTestId(id).boundingBox()))
+      for (const [index, box] of boxes.entries()) {
+        const previous = index > 0 ? boxes[index - 1] : null
+        if (!box || (index > 0 && !previous)) return "setup options are not visible"
+        if (!previous) continue
+        if (box.x < previous.x + previous.width) return "cards are not side by side"
+        if (Math.abs(box.y - previous.y) >= 1) return `cards are ${box.y - previous.y}px apart`
+        if (Math.abs(box.width - previous.width) >= 1) return "cards differ in width"
+        if (Math.abs(box.height - previous.height) >= 1) return "cards differ in height"
+      }
+      return "ok"
+    })
+    .toBe("ok")
+  await expect(() => expectCentredSetup(page)).toPass({ timeout: 5_000 })
 }
 
 /** Vertical middle of a box. */
@@ -158,18 +176,19 @@ function middleY(box: { y: number; height: number }): number {
 }
 
 /**
- * The two setup cards have the same height, the shorter card's content sits in
- * its vertical middle, and the pair sits at the top of the area below the top
- * bar, horizontally centred.
+ * The setup cards have the same height, the shorter card's content sits in its
+ * vertical middle, and the row sits at the top of the area below the top bar,
+ * horizontally centred.
  */
 async function expectCentredSetup(page: Page): Promise<void> {
   const overleaf = await page.getByTestId("paper-setup-overleaf").boundingBox()
   const folder = await page.getByTestId("paper-setup-folder").boundingBox()
+  const create = await page.getByTestId("paper-setup-create").boundingBox()
   const icon = await page.getByTestId("paper-setup-folder").locator("svg").first().boundingBox()
   const button = await page.getByTestId("paper-use-folder").boundingBox()
   const area = await page.getByTestId("paper-setup").boundingBox()
   const content = await page.getByTestId("paper-setup-content").boundingBox()
-  if (!overleaf || !folder || !icon || !button || !area || !content) {
+  if (!overleaf || !folder || !create || !icon || !button || !area || !content) {
     throw new Error("setup layout is not visible")
   }
   expect(Math.abs(folder.height - overleaf.height)).toBeLessThan(1)
@@ -177,11 +196,10 @@ async function expectCentredSetup(page: Page): Promise<void> {
   expect(Math.abs(contentMiddle - middleY(folder))).toBeLessThan(2)
   // At the top: the cards start near the top edge of the page, not in its vertical middle.
   expect(overleaf.y - area.y).toBeLessThan(40)
-  // Horizontally centred, with cards of at most 23rem (368px) each.
-  const pair = { left: overleaf.x, right: folder.x + folder.width }
-  expect(Math.abs((pair.left + pair.right) / 2 - (area.x + area.width / 2))).toBeLessThan(2)
-  expect(overleaf.width).toBeLessThanOrEqual(368 + 1)
-  expect(folder.width).toBeLessThanOrEqual(368 + 1)
+  // Horizontally centred, with cards of at most 20rem (320px) each.
+  const row = { left: overleaf.x, right: create.x + create.width }
+  expect(Math.abs((row.left + row.right) / 2 - (area.x + area.width / 2))).toBeLessThan(2)
+  for (const card of [overleaf, folder, create]) expect(card.width).toBeLessThanOrEqual(320 + 1)
 }
 
 /** Replace the line under \section{Introduction} (the line both sides edit). */
@@ -211,7 +229,7 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
   const { project, paper, overleaf } = await setUp(root)
   let app: ElectronApplication | null = null
   try {
-    app = await launch(root, project, paper)
+    app = await launch(root, project, paper, {})
     const page = await app.firstWindow()
     // Background agent work (Ask agent to merge) uses the deterministic test merge agent.
     await openAndLink(page, "test-merge")
@@ -347,7 +365,7 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
   await symlink(PERSISTENT_CACHE, join(root, "latex", "cache"), "dir")
   let app: ElectronApplication | null = null
   try {
-    app = await launch(root, project, paper)
+    app = await launch(root, project, paper, {})
     const page = await app.firstWindow()
     // Background agent work (Ask agent to merge) uses the deterministic test merge agent.
     await openAndLink(page, "test-merge")
@@ -414,7 +432,7 @@ test("LaTeX Editor agents stay in the LaTeX Editor and show in the Project view'
   const { project, paper } = await setUp(root)
   let app: ElectronApplication | null = null
   try {
-    app = await launch(root, project, paper)
+    app = await launch(root, project, paper, {})
     const page = await app.firstWindow()
     // test-activity keeps printing, so it stays a live, working agent (no real agent CLI).
     await openAndLink(page, "test-activity")
@@ -473,7 +491,7 @@ test("LaTeX Editor links a project folder that is an Overleaf clone without the 
   await git(project, "config", `url.${join(root, "remote.git")}.insteadOf`, overleafUrl)
   let app: ElectronApplication | null = null
   try {
-    app = await launch(root, project, project)
+    app = await launch(root, project, project, {})
     const page = await app.firstWindow()
     await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await openLatexEditor(page)
@@ -517,7 +535,7 @@ test("LaTeX Editor asks before using a project folder that is not an Overleaf cl
   )
   let app: ElectronApplication | null = null
   try {
-    app = await launch(root, project, project)
+    app = await launch(root, project, project, {})
     const page = await app.firstWindow()
     await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await openLatexEditor(page)
@@ -560,7 +578,7 @@ test("LaTeX Editor changes and clears the paper folder from the footer, and Edit
   const outside = await realpath(paper)
   let app: ElectronApplication | null = null
   try {
-    app = await launch(root, project, paper)
+    app = await launch(root, project, paper, {})
     const page = await app.firstWindow()
     await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await openLatexEditor(page)
@@ -641,7 +659,7 @@ test("LaTeX Editor lists the papers inside a chosen folder that is not a paper",
   await git(second, "remote", "set-url", "origin", "https://git@git.overleaf.com/0123abcd")
   let app: ElectronApplication | null = null
   try {
-    app = await launch(root, project, parent)
+    app = await launch(root, project, parent, {})
     const page = await app.firstWindow()
     await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await openLatexEditor(page)
@@ -659,6 +677,94 @@ test("LaTeX Editor lists the papers inside a chosen folder that is not a paper",
     ).toHaveText(await realpath(second))
     await page.getByTestId("central-files-toggle").click()
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Create paper and Connect to Overleaf, through the real app. The paper is
+ * made from a template set in Settings > LaTeX (the fixed folder picker
+ * returns the template folder). The "Overleaf" Blank project is a LOCAL bare
+ * repo (a stand-in: no network, no Overleaf account): a test global Git config
+ * holds a `url.<bare repo>.insteadOf` rule for the Overleaf URL, so PI Lab's
+ * Overleaf checks see an Overleaf URL while git talks to the local repo.
+ */
+test("LaTeX Editor creates a paper from the template and connects it to a blank Overleaf project", async () => {
+  test.setTimeout(120_000)
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-latex-create-e2e-")))
+  const project = join(root, "project")
+  await mkdir(project)
+  await execFileAsync("git", ["init", project])
+  const template = join(root, "my-template")
+  await mkdir(template)
+  await writeFile(join(template, "main.tex"), MAIN)
+  await writeFile(join(template, "refs.bib"), "@misc{a}\n")
+  // The Blank Overleaf project: Overleaf's default main.tex on master.
+  const blank = join(root, "blank.git")
+  await execFileAsync("git", ["init", "--bare", "-b", "master", blank])
+  const seed = join(root, "blank-seed")
+  await execFileAsync("git", ["init", "-b", "master", seed])
+  await writeFile(join(seed, "main.tex"), "\\documentclass{article}\n% Overleaf blank\n")
+  await git(seed, "add", ".")
+  await git(seed, "commit", "-m", "blank")
+  await git(seed, "push", blank, "master")
+  const overleafUrl = "https://git@git.overleaf.com/0123456789abcdef01234567"
+  const gitConfig = join(root, "gitconfig")
+  await writeFile(
+    gitConfig,
+    `[user]\n\tname = PI Lab Test\n\temail = test@example.invalid\n[url "${blank}"]\n\tinsteadOf = ${overleafUrl}\n`,
+  )
+  let app: ElectronApplication | null = null
+  try {
+    // Only the test Git config, and no system config, so a real Overleaf credential in the
+    // keychain is not seen.
+    app = await launch(root, project, template, {
+      GIT_CONFIG_GLOBAL: gitConfig,
+      GIT_CONFIG_NOSYSTEM: "1",
+    })
+    const page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    // Settings > LaTeX: set the user's folder as the template.
+    await page.getByTestId("nav-settings").click()
+    await page.getByTestId("settings-nav-latex").click()
+    await expect(page.getByTestId("settings-latex-template-state")).toHaveText("Built-in template")
+    await page.getByTestId("settings-latex-template-set").click()
+    await expect(page.getByTestId("settings-latex-template-state")).toHaveText(
+      `Copied from ${template}`,
+    )
+    await expect(page.getByTestId("settings-latex-template-clear")).toBeVisible()
+    await page.getByTestId("settings-back").click()
+
+    await openLatexEditor(page)
+    await expectSetupCards(page)
+    await expect(page.getByTestId("paper-create-folder")).toHaveText("paper/")
+    await page.screenshot({ path: test.info().outputPath("latex-setup-create.png") })
+    await page.getByTestId("paper-create").click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    const paper = join(project, "paper")
+    expect(await readFile(join(paper, "refs.bib"), "utf8")).toBe("@misc{a}\n")
+    expect((await git(paper, "ls-files")).trim().split("\n")).toEqual(["main.tex", "refs.bib"])
+    // The project repo does not see the paper folder.
+    expect((await git(project, "status", "--porcelain")).trim()).toBe("")
+
+    // No remote yet: Sync is disabled and the footer offers Connect to Overleaf.
+    await expect(page.getByTestId("paper-sync")).toBeDisabled()
+    await page.getByTestId("paper-connect-overleaf").click()
+    const dialog = page.getByTestId("paper-connect-dialog")
+    await expect(dialog).toContainText("create a Blank project")
+    await page.screenshot({ path: test.info().outputPath("latex-connect.png") })
+    await page.getByTestId("paper-connect-url").fill(overleafUrl)
+    await page.getByTestId("paper-connect-token").fill("olp_e2e_token")
+    await page.getByTestId("paper-connect-submit").click()
+    await expect(dialog).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByTestId("paper-last-sync")).toHaveText("Synced just now")
+    await expect(page.getByTestId("paper-connect-overleaf")).toHaveCount(0)
+    await expect(page.getByTestId("paper-sync")).toBeEnabled()
+    // The local main.tex replaced Overleaf's default one on the remote.
+    expect(await git(blank, "show", "master:main.tex")).toBe(MAIN)
+    expect(await git(blank, "show", "master:refs.bib")).toBe("@misc{a}\n")
   } finally {
     if (app) await close(app)
     await rm(root, { recursive: true, force: true })

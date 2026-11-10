@@ -12,7 +12,7 @@ import { promisify } from "node:util"
 import { serviceCredentials } from "@pi-lab/local-db"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { createHarness, type Harness } from "../testHarness"
-import { clonePaper, displayPaperDir } from "./paper"
+import { clonePaper, connectRemote, displayPaperDir } from "./paper"
 
 const execFileAsync = promisify(execFile)
 
@@ -893,5 +893,159 @@ describe("a folder that is not a paper", { timeout: 30_000 }, () => {
         message: expect.stringContaining("not a paper folder"),
       })
     }
+  })
+})
+
+/** Give the tests' global Git config a commit identity (creating a paper commits). */
+async function useCommitIdentity(): Promise<void> {
+  await execFileAsync("git", ["config", "--global", "user.email", "test@pi-lab.local"])
+  await execFileAsync("git", ["config", "--global", "user.name", "PI Lab Test"])
+}
+
+/** A bare repo standing in for a Blank Overleaf project: one default main.tex on `master`. */
+async function blankOverleafProject(): Promise<string> {
+  const remote = join(h.dataDir, "blank.git")
+  await execFileAsync("git", ["init", "--bare", "-b", "master", remote])
+  const seed = join(h.dataDir, "blank-seed")
+  await execFileAsync("git", ["init", "-b", "master", seed])
+  await writeFile(join(seed, "main.tex"), "\\documentclass{article}\n% Overleaf blank\n")
+  await git(seed, ["add", "."])
+  await git(seed, ["commit", "-m", "blank"])
+  await git(seed, ["push", remote, "master"])
+  return remote
+}
+
+describe("create paper", () => {
+  test("the default folder is <project>/paper, available until it has files", async () => {
+    expect(await h.caller.paper.createTarget({ projectId })).toEqual({
+      dir: join(h.repoDir, "paper"),
+      displayDir: "paper",
+      available: true,
+    })
+    await mkdir(join(h.repoDir, "paper"))
+    expect((await h.caller.paper.createTarget({ projectId })).available).toBe(true)
+    await writeFile(join(h.repoDir, "paper", "notes.txt"), "x")
+    expect((await h.caller.paper.createTarget({ projectId })).available).toBe(false)
+  })
+
+  test("creates the paper from the built-in template, with its own Git repo, hidden from the project repo", async () => {
+    await useCommitIdentity()
+    const dir = join(h.repoDir, "paper")
+    const state = await h.caller.paper.create({ projectId, dir })
+    expect(state.paper?.displayDir).toBe("paper")
+    expect(state.paper?.remoteUrl).toBeNull()
+    expect(state.rootRelPath).toBe("main.tex")
+    expect(await readFile(join(dir, "main.tex"), "utf8")).toContain("\\usepackage{style}")
+    expect((await git(dir, ["rev-parse", "--show-toplevel"])).trim()).toBe(dir)
+    expect((await git(dir, ["ls-files"])).trim().split("\n").sort()).toEqual([
+      "main.tex",
+      "references.bib",
+      "style.sty",
+    ])
+    expect((await git(dir, ["status", "--porcelain"])).trim()).toBe("")
+    expect((await git(h.repoDir, ["status", "--porcelain"])).trim()).toBe("")
+    // Sync has nothing to sync with until it is connected to Overleaf.
+    expect(await h.caller.paper.sync({ projectId, commit: true })).toEqual({ state: "no-remote" })
+  })
+
+  test("uses the template set in Settings, and works in a folder outside the project", async () => {
+    await useCommitIdentity()
+    const source = join(h.dataDir, "my-template")
+    await mkdir(source)
+    await writeFile(join(source, "thesis.tex"), "\\documentclass{report}\n")
+    expect((await h.caller.paper.template.set({ dir: source })).custom?.files).toEqual([
+      "thesis.tex",
+    ])
+    const dir = join(h.dataDir, "new-paper")
+    const state = await h.caller.paper.create({ projectId, dir })
+    expect(state.rootRelPath).toBe("thesis.tex")
+    expect(existsSync(join(dir, "main.tex"))).toBe(false)
+    expect((await h.caller.paper.template.clear()).custom).toBeNull()
+  })
+
+  test("refuses a folder with files in it, or whose parent folder is missing", async () => {
+    const full = join(h.dataDir, "full")
+    await mkdir(full)
+    await writeFile(join(full, "notes.txt"), "x")
+    await expect(h.caller.paper.create({ projectId, dir: full })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: `Choose an empty folder for the new paper: ${full} has files in it.`,
+    })
+    await expect(
+      h.caller.paper.create({ projectId, dir: join(h.dataDir, "missing", "paper") }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
+  })
+})
+
+describe("connect to Overleaf", { timeout: 30_000 }, () => {
+  test("accepts only git.overleaf.com URLs, and refuses a paper that already has a remote", async () => {
+    await expect(
+      h.caller.paper.connectOverleaf({ projectId, url: "https://github.com/u/p.git" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await linkOutsideClone()
+    await h.caller.paper.token.set({ token: "olp_secret" })
+    await expect(
+      h.caller.paper.connectOverleaf({ projectId, url: "https://git@git.overleaf.com/abc" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+  })
+
+  test("merges a blank Overleaf project, keeps the local files, pushes, and Sync works after", async () => {
+    await useCommitIdentity()
+    const dir = join(h.repoDir, "paper")
+    await h.caller.paper.create({ projectId, dir })
+    // An edit not committed yet is sent too.
+    const local = `${await readFile(join(dir, "main.tex"), "utf8")}% my edit\n`
+    await writeFile(join(dir, "main.tex"), local)
+    const blank = await blankOverleafProject()
+    const result = await connectRemote(h.db, projectId, blank, { env: null })
+    expect(result.state).toBe("synced")
+    expect(await git(blank, ["show", "master:main.tex"])).toBe(local)
+    expect((await git(blank, ["ls-tree", "--name-only", "master"])).trim().split("\n")).toEqual([
+      "main.tex",
+      "references.bib",
+      "style.sty",
+    ])
+    expect((await h.caller.paper.get({ projectId })).paper?.remoteUrl).toBe(blank)
+    await writeFile(join(dir, "references.bib"), "@misc{b}\n")
+    expect((await h.caller.paper.sync({ projectId, commit: true })).state).toBe("synced")
+    expect(await git(blank, ["show", "master:references.bib"])).toBe("@misc{b}\n")
+  })
+
+  test("an empty remote with no branch gets the local branch", async () => {
+    await useCommitIdentity()
+    const dir = join(h.dataDir, "fresh-paper")
+    await h.caller.paper.create({ projectId, dir })
+    const empty = join(h.dataDir, "empty.git")
+    await execFileAsync("git", ["init", "--bare", empty])
+    const branch = (await git(dir, ["symbolic-ref", "--short", "HEAD"])).trim()
+    expect((await connectRemote(h.db, projectId, empty, { env: null })).state).toBe("synced")
+    expect(await git(empty, ["show", `${branch}:main.tex`])).toContain("\\usepackage{style}")
+  })
+
+  test("only the local files end up on Overleaf, even when the local root is not main.tex", async () => {
+    await useCommitIdentity()
+    const source = join(h.dataDir, "my-template")
+    await mkdir(source)
+    await writeFile(join(source, "thesis.tex"), "\\documentclass{report}\n")
+    await h.caller.paper.template.set({ dir: source })
+    await h.caller.paper.create({ projectId, dir: join(h.repoDir, "paper") })
+    const blank = await blankOverleafProject()
+    expect((await connectRemote(h.db, projectId, blank, { env: null })).state).toBe("synced")
+    expect((await git(blank, ["ls-tree", "--name-only", "master"])).trim()).toBe("thesis.tex")
+  })
+
+  test("a rejected push leaves the paper unconnected, so Connect can be tried again", async () => {
+    await useCommitIdentity()
+    await h.caller.paper.create({ projectId, dir: join(h.repoDir, "paper") })
+    const blank = await blankOverleafProject()
+    const hook = join(blank, "hooks", "pre-receive")
+    await writeFile(hook, "#!/bin/sh\necho rejected by test >&2\nexit 1\n")
+    await chmod(hook, 0o755)
+    await expect(connectRemote(h.db, projectId, blank, { env: null })).rejects.toThrow()
+    expect((await h.caller.paper.get({ projectId })).paper?.remoteUrl).toBeNull()
+    expect((await git(join(h.repoDir, "paper"), ["remote"])).trim()).toBe("")
+    await rm(hook)
+    expect((await connectRemote(h.db, projectId, blank, { env: null })).state).toBe("synced")
   })
 })

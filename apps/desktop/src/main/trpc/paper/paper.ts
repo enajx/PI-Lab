@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
-import { realpath, stat } from "node:fs/promises"
+import { mkdir, readdir, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { isAbsolute, join, relative, sep } from "node:path"
+import { dirname, isAbsolute, join, relative, sep } from "node:path"
 import {
   getSettingsOrDefaults,
   type PiLabDatabase,
@@ -23,11 +23,15 @@ import {
   commitAll,
   conflictedFiles,
   conflictStages,
+  currentBranch,
   isMerging,
+  mergeUnrelatedKeepingOurs,
   pull,
   push,
+  pushSetUpstream,
   pushUrl,
   type RemoteCallOptions,
+  remoteDefaultBranch,
   remoteUrl,
   takeSide,
   unresolvedFiles,
@@ -60,6 +64,13 @@ import {
   requireSyncEnabled,
   writeAskpassScript,
 } from "../../paper/overleaf"
+import {
+  clearCustomTemplate,
+  setCustomTemplate,
+  type TemplateStatus,
+  templateStatus,
+  writeTemplate,
+} from "../../paper/template"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 
@@ -78,6 +89,22 @@ const OVERLEAF_SERVICE = "overleaf"
 
 /** Commit message for unsent edits committed by Sync. */
 const SYNC_COMMIT_MESSAGE = "Sync from PI Lab"
+
+/** Commit message for a paper created from the LaTeX template. */
+const CREATE_COMMIT_MESSAGE = "Create paper from template"
+
+/** Commit message for merging a Blank Overleaf project into a local paper. */
+const CONNECT_COMMIT_MESSAGE = "Connect to Overleaf"
+
+/** Result of `paper.createTarget`: where "Create paper" puts the paper unless the user chooses. */
+export interface CreateTarget {
+  /** `<project>/paper`. */
+  dir: string
+  /** The folder as shown to the user; see {@link displayPaperDir}. */
+  displayDir: string
+  /** False when the folder already has files in it, so another folder must be chosen. */
+  available: boolean
+}
 
 /** The linked paper folder as the renderer sees it. */
 export interface PaperView {
@@ -384,6 +411,117 @@ export async function clonePaper(
   return linkPaper(db, projectId, target, null)
 }
 
+/** True when `dir` holds nothing but a `.DS_Store` file. */
+async function isEmptyFolder(dir: string): Promise<boolean> {
+  return (await readdir(dir)).every((name) => name === ".DS_Store")
+}
+
+/** Where "Create paper" puts the paper by default; see {@link CreateTarget}. */
+async function createTarget(db: PiLabDatabase, projectId: string): Promise<CreateTarget> {
+  const project = requireProject(db, projectId)
+  const dir = join(project.repoPath, "paper")
+  const exists = existsSync(dir)
+  const available = !exists || ((await stat(dir)).isDirectory() && (await isEmptyFolder(dir)))
+  const projectDir = existsSync(project.repoPath)
+    ? await realpath(project.repoPath)
+    : project.repoPath
+  return { dir, displayDir: await displayDirFor(project, join(projectDir, "paper")), available }
+}
+
+/**
+ * Create a new paper in `dir` from the LaTeX template in use (see
+ * `paper/template.ts`) and make it the project's paper folder. `dir` must be
+ * an empty folder, or a missing folder whose parent exists. The paper gets its
+ * own Git repository (`git init`) with the template committed, and, when it
+ * is inside the project's Git repo, is hidden from it through
+ * `.git/info/exclude`, as an Overleaf clone is. It has no remote until it is
+ * connected to Overleaf (see {@link connectRemote}).
+ */
+export async function createPaper(
+  db: PiLabDatabase,
+  projectId: string,
+  dir: string,
+  dataDir: string,
+): Promise<PaperState> {
+  const project = requireProject(db, projectId)
+  if (existsSync(dir)) {
+    if (!(await stat(dir)).isDirectory() || !(await isEmptyFolder(dir))) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Choose an empty folder for the new paper: ${dir} has files in it.`,
+      })
+    }
+  } else {
+    if (!existsSync(dirname(dir))) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `Not a folder: ${dirname(dir)}` })
+    }
+    await mkdir(dir)
+  }
+  const target = await realpath(dir)
+  await writeTemplate(dataDir, target)
+  await runGit(target, ["init"], {})
+  if (await isGitRepo(project.repoPath)) {
+    const projectRoot = await realpath(await repoRoot(project.repoPath))
+    if (containsOrEquals(projectRoot, dirname(target))) {
+      await excludeFromProjectRepo(project.repoPath, target)
+    }
+  }
+  // Linking first writes the build output rules, so the commit never holds build output.
+  const state = await linkPaper(db, projectId, target, null)
+  await commitAll(target, CREATE_COMMIT_MESSAGE)
+  return state
+}
+
+/**
+ * Connect a paper folder with no remote to `url`, a Blank Overleaf project
+ * (Overleaf has no API to create projects, so the user creates it on
+ * overleaf.com). Edits not committed yet are committed first. The project's
+ * branch is merged in although the histories are unrelated, keeping exactly
+ * the local files (Overleaf's default files are dropped), and the local branch
+ * takes the project's branch name, because Overleaf has only one branch. Then
+ * `origin` is set to `url` and the result is pushed; if the push fails,
+ * `origin` is removed again and the paper stays unconnected.
+ */
+export async function connectRemote(
+  db: PiLabDatabase,
+  projectId: string,
+  url: string,
+  options: RemoteCallOptions,
+): Promise<SyncResult> {
+  const paper = requirePaper(requireProject(db, projectId))
+  requireSyncEnabled(paper.syncEnabled)
+  const dir = paper.dir
+  if (!(await isOwnRepo(dir))) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `The paper folder is not its own Git repository, so it cannot be connected to Overleaf: ${dir}`,
+    })
+  }
+  if ((await remoteUrl(dir)) !== null) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "This paper folder already has a Git remote. Use Sync instead.",
+    })
+  }
+  if ((await status(dir)).length > 0) await commitAll(dir, SYNC_COMMIT_MESSAGE)
+  const branch = await remoteDefaultBranch(dir, url, options)
+  if (branch !== null) {
+    await mergeUnrelatedKeepingOurs(dir, url, branch, CONNECT_COMMIT_MESSAGE, options)
+    await runGit(dir, ["branch", "-M", branch], {})
+  }
+  await runGit(dir, ["remote", "add", "origin", url], {})
+  // A failed push removes `origin` again, so the paper stays unconnected and Connect can be retried.
+  await pushSetUpstream(dir, branch ?? (await currentBranch(dir)), options).then(
+    undefined,
+    async (error: unknown) => {
+      await runGit(dir, ["remote", "remove", "origin"], {})
+      throw error
+    },
+  )
+  writePaper(db, projectId, { ...paper, remoteUrl: displayRemoteUrl(url) })
+  return markSynced(db, projectId)
+}
+
 /** Decrypt the saved Overleaf token, or null when none is saved. */
 function readToken(ctx: AppContext): string | null {
   const row = ctx.db
@@ -571,6 +709,23 @@ const tokenRouter = router({
   }),
 })
 
+const templateRouter = router({
+  /** Which LaTeX template "Create paper" uses: the built-in one or the user's. */
+  status: publicProcedure.query((): Promise<TemplateStatus> => templateStatus(resolveDataDir())),
+
+  /** Use the user's folder as the LaTeX template from now on (its files are copied). */
+  set: publicProcedure
+    .input(z.object({ dir: z.string().min(1) }))
+    .mutation(
+      ({ input }): Promise<TemplateStatus> => setCustomTemplate(resolveDataDir(), input.dir),
+    ),
+
+  /** Go back to the built-in LaTeX template. */
+  clear: publicProcedure.mutation(
+    (): Promise<TemplateStatus> => clearCustomTemplate(resolveDataDir()),
+  ),
+})
+
 export const paperRouter = router({
   /** The project's linked paper folder, its hidden workspace id, and its main .tex file. */
   get: publicProcedure
@@ -688,6 +843,52 @@ export const paperRouter = router({
   }),
 
   token: tokenRouter,
+
+  template: templateRouter,
+
+  /** Where "Create paper" puts the paper unless the user chooses another folder. */
+  createTarget: publicProcedure
+    .input(projectIdInput)
+    .query(({ ctx, input }): Promise<CreateTarget> => createTarget(ctx.db, input.projectId)),
+
+  /** Create a new paper from the LaTeX template; see {@link createPaper}. */
+  create: publicProcedure
+    .input(z.object({ projectId: z.string().min(1), dir: z.string().min(1) }))
+    .mutation(
+      ({ ctx, input }): Promise<PaperState> =>
+        createPaper(ctx.db, input.projectId, input.dir, resolveDataDir()),
+    ),
+
+  /**
+   * Connect a paper with no remote to a Blank Overleaf project's Git URL, with
+   * the saved token (or the user's Git credential); see {@link connectRemote}.
+   */
+  connectOverleaf: publicProcedure
+    .input(z.object({ projectId: z.string().min(1), url: z.string().trim().min(1) }))
+    .mutation(async ({ ctx, input }): Promise<SyncResult> => {
+      if (!isOverleafUrl(input.url)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Enter an Overleaf Git URL (https://git.overleaf.com/…)",
+        })
+      }
+      const paper = requirePaper(requireProject(ctx.db, input.projectId))
+      if ((await isOwnRepo(paper.dir)) && (await remoteUrl(paper.dir)) !== null) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "This paper folder already has a Git remote. Use Sync instead.",
+        })
+      }
+      if (!(await tokenStatus(ctx.db)).configured) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: OVERLEAF_TOKEN_REQUIRED })
+      }
+      return connectRemote(
+        ctx.db,
+        input.projectId,
+        input.url,
+        await remoteOptions(ctx, [input.url]),
+      )
+    }),
 
   /** Pull and push the paper folder; see {@link syncPaper}. */
   sync: publicProcedure

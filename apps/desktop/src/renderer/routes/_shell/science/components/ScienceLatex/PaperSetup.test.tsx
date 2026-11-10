@@ -19,6 +19,7 @@ function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
     "paper.detect": () => ({ clones: [], stoppedEarly: false }),
+    "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper", available: true }),
     ...handlers,
   })
   return render(
@@ -345,7 +346,7 @@ describe("PaperSetup (mocked server)", () => {
     expect(screen.queryByTestId("paper-overleaf-token-found")).toBeNull()
   })
 
-  test("the pair of cards sits at the top, horizontally centred, and each card centres its content vertically", async () => {
+  test("the cards sit at the top, horizontally centred, and each card centres its content vertically", async () => {
     renderSetup({
       "paper.token.status": () => ({ configured: false, source: null }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
@@ -362,15 +363,16 @@ describe("PaperSetup (mocked server)", () => {
     expect(content.className).not.toMatch(/(^|\s)m-auto/)
     expect(content.className).not.toMatch(/(^|\s)my-auto/)
     // Narrow cards: a small overall width and tight padding.
-    expect(content.className).toContain("max-w-3xl")
+    expect(content.className).toContain("max-w-5xl")
     expect(screen.getByTestId("paper-setup-overleaf").className).toContain("p-4")
-    // Grid items stretch, so both cards have the same height.
+    // Grid items stretch, so all cards have the same height.
     const grid = screen.getByTestId("paper-setup-overleaf").parentElement as HTMLElement
     expect(grid.className).toContain("grid")
     expect(grid.className).not.toMatch(/items-(start|center|end)/)
     for (const card of [
       screen.getByTestId("paper-setup-overleaf"),
       screen.getByTestId("paper-setup-folder"),
+      screen.getByTestId("paper-setup-create"),
     ]) {
       expect(card.className).toContain("justify-center")
     }
@@ -433,5 +435,43 @@ describe("PaperSetup (mocked server)", () => {
     await waitFor(() =>
       expect(addOverleaf).toHaveBeenCalledWith({ projectId: "p1", url: OVERLEAF_URL }),
     )
+  })
+
+  test("Create paper creates the paper in <project>/paper, or in the folder the user chose", async () => {
+    const create = vi.fn(() => undefined)
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.create": create,
+      "system.pickDirectory": () => "/elsewhere/new-paper",
+    })
+    expect((await screen.findByTestId("paper-create-folder")).textContent).toBe("paper/")
+    await waitFor(() =>
+      expect((screen.getByTestId("paper-create") as HTMLButtonElement).disabled).toBe(false),
+    )
+    fireEvent.click(screen.getByTestId("paper-create"))
+    await waitFor(() => expect(create).toHaveBeenCalledWith({ projectId: "p1", dir: "/p/paper" }))
+    fireEvent.click(screen.getByTestId("paper-create-change"))
+    await waitFor(() =>
+      expect(screen.getByTestId("paper-create-folder").textContent).toBe("/elsewhere/new-paper"),
+    )
+    fireEvent.click(screen.getByTestId("paper-create"))
+    await waitFor(() =>
+      expect(create).toHaveBeenLastCalledWith({ projectId: "p1", dir: "/elsewhere/new-paper" }),
+    )
+  })
+
+  test("when paper/ has files in it, Create paper waits for a chosen folder", async () => {
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper", available: false }),
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("paper-create-folder").textContent).toBe(
+        "paper/ has files in it, choose a folder",
+      ),
+    )
+    expect((screen.getByTestId("paper-create") as HTMLButtonElement).disabled).toBe(true)
   })
 })

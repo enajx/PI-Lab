@@ -14,6 +14,7 @@ import {
   pull,
   push,
   pushUrl,
+  remoteDefaultBranch,
   remoteUrl,
   unresolvedFiles,
 } from "./remote"
@@ -108,5 +109,20 @@ describe("remote helpers", () => {
   test("remoteUrl is null without an origin remote", async () => {
     await runGit(mine, ["remote", "remove", "origin"], {})
     expect(await remoteUrl(mine)).toBeNull()
+  })
+})
+
+describe("remoteDefaultBranch", () => {
+  test("uses HEAD's branch, else the only branch, else null; refuses several branches with no HEAD", async () => {
+    const branch = (await git(bare, ["symbolic-ref", "--short", "HEAD"])).trim()
+    expect(await remoteDefaultBranch(mine, bare, NO_ENV)).toBe(branch)
+    // HEAD points at a branch that does not exist, so the server reports no HEAD.
+    await git(bare, ["symbolic-ref", "HEAD", "refs/heads/missing"])
+    expect(await remoteDefaultBranch(mine, bare, NO_ENV)).toBe(branch)
+    await git(bare, ["branch", "second", branch])
+    await expect(remoteDefaultBranch(mine, bare, NO_ENV)).rejects.toThrow("several branches")
+    const empty = join(root, "empty.git")
+    await execFileAsync("git", ["init", "--bare", empty])
+    expect(await remoteDefaultBranch(mine, empty, NO_ENV)).toBeNull()
   })
 })

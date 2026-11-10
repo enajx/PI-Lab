@@ -180,3 +180,74 @@ export async function clone(
 ): Promise<void> {
   await runGit(parentDir, ["clone", url, targetDir], remoteRunOptions(options))
 }
+
+/**
+ * The branch to connect to on `url`: the one its HEAD points at
+ * (`git ls-remote --symref`), else its only branch when the server does not
+ * say where HEAD points, or null when it has no branch yet. A remote with
+ * several branches and no HEAD is refused, so PI Lab never guesses.
+ */
+export async function remoteDefaultBranch(
+  dir: string,
+  url: string,
+  options: RemoteCallOptions,
+): Promise<string | null> {
+  const symref = await runGit(
+    dir,
+    ["ls-remote", "--symref", url, "HEAD"],
+    remoteRunOptions(options),
+  )
+  const head = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(symref.stdout)?.[1]
+  if (head) return head
+  const heads = await runGit(dir, ["ls-remote", "--heads", url], remoteRunOptions(options))
+  const branches = [...heads.stdout.matchAll(/\trefs\/heads\/(\S+)$/gm)].map((m) => m[1] ?? "")
+  if (branches.length <= 1) return branches[0] ?? null
+  throw new Error(
+    `The remote has several branches and does not say which one is its main branch: ${branches.join(", ")}`,
+  )
+}
+
+/**
+ * Fetch `branch` from `url` and record it as merged into the current branch
+ * although the histories are unrelated, keeping the local files exactly as
+ * they are (`-s ours`): none of the remote's files are taken. Used to send a
+ * local paper to a Blank Overleaf project, whose default files are replaced.
+ */
+export async function mergeUnrelatedKeepingOurs(
+  dir: string,
+  url: string,
+  branch: string,
+  message: string,
+  options: RemoteCallOptions,
+): Promise<void> {
+  await runGit(dir, ["fetch", url, `refs/heads/${branch}`], remoteRunOptions(options))
+  await runGit(
+    dir,
+    [
+      "merge",
+      "--allow-unrelated-histories",
+      "--no-edit",
+      "-s",
+      "ours",
+      "-m",
+      message,
+      "FETCH_HEAD",
+    ],
+    {},
+  )
+}
+
+/** Name of the current branch. */
+export async function currentBranch(dir: string): Promise<string> {
+  const { stdout } = await runGit(dir, ["symbolic-ref", "--short", "HEAD"], {})
+  return stdout.trim()
+}
+
+/** Push the current branch to `branch` on `origin` and make it the upstream. */
+export async function pushSetUpstream(
+  dir: string,
+  branch: string,
+  options: RemoteCallOptions,
+): Promise<void> {
+  await runGit(dir, ["push", "-u", "origin", `HEAD:${branch}`], remoteRunOptions(options))
+}
