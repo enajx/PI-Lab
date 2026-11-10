@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, readdir, realpath, stat } from "node:fs/promises"
+import { mkdir, readdir, realpath, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, sep } from "node:path"
 import {
@@ -19,9 +19,11 @@ import { z } from "zod"
 import { isGitRepo, repoRoot, runGit, status } from "../../git"
 import {
   addLocalExclude,
+  type ConflictKind,
   clone,
   commitAll,
   conflictedFiles,
+  conflictKinds,
   conflictStages,
   currentBranch,
   isMerging,
@@ -34,6 +36,7 @@ import {
   remoteDefaultBranch,
   remoteUrl,
   takeSide,
+  takeSideOf,
   unresolvedFiles,
 } from "../../git/remote"
 import {
@@ -60,6 +63,7 @@ import {
   OVERLEAF_TOKEN_REQUIRED,
   type OverleafAuth,
   type OverleafTokenStatus,
+  overleafUrlProblem,
   remoteEnv,
   requireSyncEnabled,
   writeAskpassScript,
@@ -119,6 +123,8 @@ export interface PaperView {
   effectiveOutputDir: string
   /** False when the paper is linked for editing and building only; Sync then refuses to run. */
   syncEnabled: boolean
+  /** True when the saved folder no longer exists (moved, renamed or deleted). */
+  missing: boolean
 }
 
 /**
@@ -166,6 +172,8 @@ export interface PaperState {
   rootRelPath: string | null
   /** False after the user cleared the paper folder: the LaTeX Editor then does not look for Overleaf clones. */
   autoDetect: boolean
+  /** Subfolders of the paper folder that could not be read and were skipped. */
+  skippedFolders: string[]
 }
 
 /** Result of `paper.sync` and `paper.resolve`. */
@@ -249,15 +257,23 @@ async function displayDirFor(project: Project, dir: string): Promise<string> {
   return displayPaperDir(dir, projectDir, home)
 }
 
-/** Current paper state for a project. */
+/**
+ * Current paper state for a project. A saved paper folder that no longer
+ * exists is reported with `missing: true` (and no root .tex), so the LaTeX
+ * Editor can ask for another folder instead of failing.
+ */
 async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperState> {
   const project = requireProject(db, projectId)
   const paper = project.metadata?.paper
   const autoDetect = project.metadata?.paperAutoDetect !== false
-  if (!paper) return { paper: null, workspaceId: null, rootRelPath: null, autoDetect }
-  const files = await listPaperFiles(paper.dir)
+  if (!paper) {
+    return { paper: null, workspaceId: null, rootRelPath: null, autoDetect, skippedFolders: [] }
+  }
+  const missing = !existsSync(paper.dir)
+  const listed = missing ? { files: [], unreadable: [] } : await listPaperFiles(paper.dir)
   return {
     autoDetect,
+    skippedFolders: listed.unreadable,
     paper: {
       dir: paper.dir,
       displayDir: await displayDirFor(project, paper.dir),
@@ -270,9 +286,10 @@ async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperSt
         getSettingsOrDefaults(db).editor.latexOutputDir,
       ),
       syncEnabled: paper.syncEnabled !== false,
+      missing,
     },
     workspaceId: paperWorkspace(db, projectId)?.id ?? null,
-    rootRelPath: await findRootTex(paper.dir, files),
+    rootRelPath: missing ? null : await findRootTex(paper.dir, listed.files),
   }
 }
 
@@ -466,8 +483,54 @@ export async function createPaper(
         : `Not a folder: ${dirname(dir)}`,
     })
   }
-  if (!existsSync(dir)) await mkdir(dir)
+  await requireCommitIdentity()
+  const madeFolder = !existsSync(dir)
+  if (madeFolder) await mkdir(dir)
   const target = await realpath(dir)
+  // A failed step removes the folder made here (never a folder that was there
+  // before), so nothing half made is left; the paper is linked only at the end.
+  await fillPaper(project, target, dataDir, getSettingsOrDefaults(db).editor.latexOutputDir).then(
+    undefined,
+    async (error: unknown) => {
+      if (madeFolder) await rm(target, { recursive: true, force: true })
+      throw error
+    },
+  )
+  return linkPaper(db, projectId, target, null)
+}
+
+/** Error message when Git has no name and email to commit with. */
+const COMMIT_IDENTITY_REQUIRED =
+  'Set your Git name and email first: git config --global user.name "Your Name" and git config --global user.email "you@example.com"'
+
+/**
+ * Throw PRECONDITION_FAILED when Git cannot commit for lack of a name and
+ * email. `git var` checks them as `git commit` does; GIT_DIR points at no
+ * repository, so only the settings a new repository would get are read.
+ */
+async function requireCommitIdentity(): Promise<void> {
+  for (const ident of ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"]) {
+    const result = await runGit(homedir(), ["var", ident], {
+      allowFailure: true,
+      env: { GIT_DIR: "/dev/null" },
+    })
+    if (result.stdout.trim() === "") {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: COMMIT_IDENTITY_REQUIRED })
+    }
+  }
+}
+
+/**
+ * The steps of {@link createPaper} before linking: copy the template into
+ * `target`, `git init`, hide it from the project repo, exclude the build output
+ * folder (so the commit never holds build output), and commit.
+ */
+async function fillPaper(
+  project: Project,
+  target: string,
+  dataDir: string,
+  defaultOutputDir: string,
+): Promise<void> {
   await writeTemplate(dataDir, target)
   await runGit(target, ["init"], {})
   if (await isGitRepo(project.repoPath)) {
@@ -476,10 +539,11 @@ export async function createPaper(
       await excludeFromProjectRepo(project.repoPath, target)
     }
   }
-  // Linking first writes the build output rules, so the commit never holds build output.
-  const state = await linkPaper(db, projectId, target, null)
+  await excludeEffectiveOutputs(
+    { dir: target, remoteUrl: null, lastSyncAt: null },
+    defaultOutputDir,
+  )
   await commitAll(target, CREATE_COMMIT_MESSAGE)
-  return state
 }
 
 /**
@@ -528,8 +592,14 @@ export async function connectRemote(
       throw error
     },
   )
-  writePaper(db, projectId, { ...paper, remoteUrl: displayRemoteUrl(url) })
+  changePaper(db, projectId, (current) => ({ ...current, remoteUrl: displayRemoteUrl(url) }))
   return markSynced(db, projectId)
+}
+
+/** Throw BAD_REQUEST when `url` cannot be used as an Overleaf Git URL; see {@link overleafUrlProblem}. */
+function requireOverleafUrl(url: string): void {
+  const problem = overleafUrlProblem(url)
+  if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem })
 }
 
 /** Decrypt the saved Overleaf token, or null when none is saved. */
@@ -576,7 +646,11 @@ async function remoteOptions(ctx: AppContext, urls: string[]): Promise<RemoteCal
 
 /** How Overleaf git calls authenticate now; see {@link OverleafAuth}. */
 async function overleafAuth(ctx: AppContext): Promise<OverleafAuth> {
-  const token = readToken(ctx)
+  return tokenAuth(readToken(ctx))
+}
+
+/** Auth with `token` when given (askpass script), else the user's Git credential, else null. */
+async function tokenAuth(token: string | null): Promise<OverleafAuth> {
   if (token) {
     const askpassPath = await writeAskpassScript(join(resolveDataDir(), "git"))
     return { source: "saved", token, askpassPath }
@@ -593,11 +667,24 @@ async function originOptions(
   return remoteOptions(ctx, [fetchUrl, await pushUrl(dir)])
 }
 
+/**
+ * Change the project's saved paper link with `change`, applied to the link as
+ * it is stored now. Callers that awaited (network or git calls) since they
+ * read the link use this, so a change saved meanwhile (an output folder, a
+ * sync time) is kept. Throws PRECONDITION_FAILED when no paper is linked.
+ */
+function changePaper(
+  db: PiLabDatabase,
+  projectId: string,
+  change: (paper: ProjectPaper) => ProjectPaper,
+): void {
+  writePaper(db, projectId, change(requirePaper(requireProject(db, projectId))))
+}
+
 /** Record a successful sync and return the synced result. */
 function markSynced(db: PiLabDatabase, projectId: string): SyncResult {
-  const paper = requirePaper(requireProject(db, projectId))
   const lastSyncAt = Date.now()
-  writePaper(db, projectId, { ...paper, lastSyncAt })
+  changePaper(db, projectId, (current) => ({ ...current, lastSyncAt }))
   return { state: "synced", lastSyncAt }
 }
 
@@ -688,6 +775,83 @@ async function resolvePaper(
   return finishMerge(ctx.db, projectId, dir, [], options)
 }
 
+/** One conflicted file of the paper's merge and its kind (from `paper.conflicts`). */
+export interface PaperConflict {
+  /** Path relative to the paper folder. */
+  relPath: string
+  kind: ConflictKind
+}
+
+/** The paper folder of a merge in progress, or PRECONDITION_FAILED when there is none. */
+async function mergingDir(db: PiLabDatabase, projectId: string): Promise<string> {
+  const target = await syncTarget(db, projectId)
+  if (!target || !(await isMerging(target.dir))) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No merge is in progress" })
+  }
+  return target.dir
+}
+
+/**
+ * Settle one conflicted file with "mine" or "overleaf" (deleting it when that
+ * side deleted it), as `paper.resolve` does for every file. The merge stays
+ * open: Sync finishes it once no conflict is left.
+ */
+async function resolvePaperFile(
+  db: PiLabDatabase,
+  projectId: string,
+  relPath: string,
+  choice: "mine" | "overleaf",
+): Promise<PaperConflict[]> {
+  const dir = await mergingDir(db, projectId)
+  const sides = (await conflictStages(dir)).get(relPath)
+  if (!sides) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `${relPath} is not in conflict` })
+  }
+  await takeSideOf(dir, choice === "mine" ? "ours" : "theirs", relPath, sides)
+  return conflictKinds(dir)
+}
+
+/** Save (or replace) the Overleaf Git token, encrypted with the OS keychain. */
+function saveToken(ctx: AppContext, token: string): void {
+  const encryptedValue = ctx.credentialCipher.encrypt(token)
+  const updatedAt = Date.now()
+  ctx.db
+    .insert(serviceCredentials)
+    .values({ service: OVERLEAF_SERVICE, encryptedValue, updatedAt })
+    .onConflictDoUpdate({
+      target: serviceCredentials.service,
+      set: { encryptedValue, updatedAt },
+    })
+    .run()
+}
+
+/** A new Overleaf Git token, as typed by the user. */
+const tokenInput = z.string().trim().min(1).max(4096)
+
+/**
+ * Run an Overleaf call to `url` (`run` gets its Git env). With `token` (typed
+ * by the user for this attempt) the call uses it, and it is saved only when the
+ * call succeeds, so a wrong token is never kept. Without one, the saved token
+ * or the user's Git credential is used, and PRECONDITION_FAILED
+ * "overleaf-token-required" is thrown when there is neither.
+ */
+async function withOverleafAuth<T>(
+  ctx: AppContext,
+  url: string,
+  token: string | undefined,
+  run: (options: RemoteCallOptions) => Promise<T>,
+): Promise<T> {
+  if (token === undefined) {
+    if (!(await tokenStatus(ctx.db)).configured) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: OVERLEAF_TOKEN_REQUIRED })
+    }
+    return run(await remoteOptions(ctx, [url]))
+  }
+  const result = await run({ env: remoteEnv([url], await tokenAuth(token)) })
+  saveToken(ctx, token)
+  return result
+}
+
 const tokenRouter = router({
   /**
    * Whether an Overleaf credential is available and where it comes from (a
@@ -697,18 +861,9 @@ const tokenRouter = router({
 
   /** Save (or replace) the Overleaf Git token, encrypted with the OS keychain. */
   set: publicProcedure
-    .input(z.object({ token: z.string().trim().min(1).max(4096) }))
+    .input(z.object({ token: tokenInput }))
     .mutation(({ ctx, input }): OverleafTokenStatus => {
-      const encryptedValue = ctx.credentialCipher.encrypt(input.token)
-      const updatedAt = Date.now()
-      ctx.db
-        .insert(serviceCredentials)
-        .values({ service: OVERLEAF_SERVICE, encryptedValue, updatedAt })
-        .onConflictDoUpdate({
-          target: serviceCredentials.service,
-          set: { encryptedValue, updatedAt },
-        })
-        .run()
+      saveToken(ctx, input.token)
       return { configured: true, source: "saved" }
     }),
 
@@ -747,7 +902,7 @@ export const paperRouter = router({
     .input(projectIdInput)
     .query(async ({ ctx, input }): Promise<OutlineEntry[]> => {
       const paper = requirePaper(requireProject(ctx.db, input.projectId))
-      const root = await findRootTex(paper.dir, await listPaperFiles(paper.dir))
+      const root = await findRootTex(paper.dir, (await listPaperFiles(paper.dir)).files)
       if (!root) return []
       return buildOutline(root, (relPath) => readPaperText(paper.dir, relPath))
     }),
@@ -792,21 +947,20 @@ export const paperRouter = router({
     ),
 
   /**
-   * Clone an Overleaf project into `<project>/paper` with the saved token (or
-   * the user's Git credential when no token is saved), then link it.
+   * Clone an Overleaf project into `<project>/paper`, then link it. Uses the
+   * token typed for this attempt (saved once the clone works), else the saved
+   * token or the user's Git credential; see {@link withOverleafAuth}.
    */
   addOverleaf: publicProcedure
-    .input(z.object({ projectId: z.string().min(1), url: z.string().trim().min(1) }))
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        url: z.string().trim().min(1),
+        token: tokenInput.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }): Promise<PaperState> => {
-      if (!isOverleafUrl(input.url)) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Enter an Overleaf Git URL (https://git.overleaf.com/…)",
-        })
-      }
-      if (!(await tokenStatus(ctx.db)).configured) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: OVERLEAF_TOKEN_REQUIRED })
-      }
+      requireOverleafUrl(input.url)
       const project = requireProject(ctx.db, input.projectId)
       if (existsSync(join(project.repoPath, "paper"))) {
         throw new TRPCError({
@@ -814,7 +968,9 @@ export const paperRouter = router({
           message: `${join(project.repoPath, "paper")} already exists. Use the existing folder or move it first.`,
         })
       }
-      return clonePaper(ctx.db, input.projectId, input.url, await remoteOptions(ctx, [input.url]))
+      return withOverleafAuth(ctx, input.url, input.token, (options) =>
+        clonePaper(ctx.db, input.projectId, input.url, options),
+      )
     }),
 
   /**
@@ -834,7 +990,11 @@ export const paperRouter = router({
           : { ...rest, outputDir: outputDirOrBadRequest(input.outputDir) }
       if (next.outputDir !== undefined) await requireUntrackedOutputDir(next.dir, next.outputDir)
       await excludeEffectiveOutputs(next, getSettingsOrDefaults(ctx.db).editor.latexOutputDir)
-      writePaper(ctx.db, input.projectId, next)
+      // Only the output folder changes: a sync saved during the awaits is kept.
+      changePaper(ctx.db, input.projectId, (current) => {
+        const { outputDir: _current, ...others } = current
+        return next.outputDir === undefined ? others : { ...others, outputDir: next.outputDir }
+      })
       return paperState(ctx.db, input.projectId)
     }),
 
@@ -882,18 +1042,20 @@ export const paperRouter = router({
     ),
 
   /**
-   * Connect a paper with no remote to a Blank Overleaf project's Git URL, with
-   * the saved token (or the user's Git credential); see {@link connectRemote}.
+   * Connect a paper with no remote to a Blank Overleaf project's Git URL (see
+   * {@link connectRemote}), with the token typed for this attempt (saved once
+   * the connect works), else the saved token or the user's Git credential.
    */
   connectOverleaf: publicProcedure
-    .input(z.object({ projectId: z.string().min(1), url: z.string().trim().min(1) }))
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        url: z.string().trim().min(1),
+        token: tokenInput.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }): Promise<SyncResult> => {
-      if (!isOverleafUrl(input.url)) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Enter an Overleaf Git URL (https://git.overleaf.com/…)",
-        })
-      }
+      requireOverleafUrl(input.url)
       const paper = requirePaper(requireProject(ctx.db, input.projectId))
       if ((await isOwnRepo(paper.dir)) && (await remoteUrl(paper.dir)) !== null) {
         throw new TRPCError({
@@ -901,14 +1063,8 @@ export const paperRouter = router({
           message: "This paper folder already has a Git remote. Use Sync instead.",
         })
       }
-      if (!(await tokenStatus(ctx.db)).configured) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: OVERLEAF_TOKEN_REQUIRED })
-      }
-      return connectRemote(
-        ctx.db,
-        input.projectId,
-        input.url,
-        await remoteOptions(ctx, [input.url]),
+      return withOverleafAuth(ctx, input.url, input.token, (options) =>
+        connectRemote(ctx.db, input.projectId, input.url, options),
       )
     }),
 
@@ -917,6 +1073,31 @@ export const paperRouter = router({
     .input(z.object({ projectId: z.string().min(1), commit: z.boolean() }))
     .mutation(
       ({ ctx, input }): Promise<SyncResult> => syncPaper(ctx, input.projectId, input.commit),
+    ),
+
+  /**
+   * The conflicted files of the paper's merge with their kind, so only text
+   * files go to the agent and the others get a per-file choice.
+   */
+  conflicts: publicProcedure
+    .input(projectIdInput)
+    .query(
+      async ({ ctx, input }): Promise<PaperConflict[]> =>
+        conflictKinds(await mergingDir(ctx.db, input.projectId)),
+    ),
+
+  /** Settle one conflicted file; see {@link resolvePaperFile}. Returns the conflicts left. */
+  resolveFile: publicProcedure
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        relPath: z.string().min(1),
+        choice: z.enum(["mine", "overleaf"]),
+      }),
+    )
+    .mutation(
+      ({ ctx, input }): Promise<PaperConflict[]> =>
+        resolvePaperFile(ctx.db, input.projectId, input.relPath, input.choice),
     ),
 
   /** Settle a merge conflict; see {@link resolvePaper}. */

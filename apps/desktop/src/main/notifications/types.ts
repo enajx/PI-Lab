@@ -21,7 +21,7 @@ export const notificationActivationSchema = z.discriminatedUnion("type", [
     sessionId: z.string().min(1),
     agentId: z.string().min(1),
     /** The view the agent was started from; a click opens that view. */
-    origin: z.enum(["project", "latex", "analysis"]),
+    origin: z.enum(["project", "latex", "analysis", "tasks", "routine"]),
     label: z.string().min(1).optional(),
   }),
   z.object({

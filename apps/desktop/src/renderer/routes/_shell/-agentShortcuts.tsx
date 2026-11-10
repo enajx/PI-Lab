@@ -3,7 +3,12 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { LiveAgentStatus } from "../../../shared/agentStatus"
 import { useTranslate } from "../../i18n/language"
-import { navigateToAgent } from "../../notifications/agentNavigation"
+import { agentCanOpen, navigateToAgent } from "../../notifications/agentNavigation"
+import {
+  useAnalysisProject,
+  useLatexEditorProject,
+  useTasksProject,
+} from "../../preferences/preferences"
 import { overlayIsOpen } from "../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../shortcuts/shortcuts"
 import { useTRPC } from "../../trpc/react"
@@ -15,8 +20,8 @@ const NOTICE_MS = 2_500
 /**
  * The agents waiting for input that a view can open, ordered by the sidebar's
  * project order, then by the agents' start order (the order of `statuses`).
- * With `scopeProjectId`, only that project's agents. A project-view agent with
- * no workspace is left out: the project view cannot attach it.
+ * With `scopeProjectId`, only that project's agents. An agent that opens in the
+ * project view but has no workspace is left out: the project view cannot attach it.
  */
 export function orderWaitingAgents(
   statuses: readonly LiveAgentStatus[],
@@ -31,7 +36,7 @@ export function orderWaitingAgents(
     .filter(
       (status) =>
         status.state === "waiting" &&
-        (status.origin === "latex" || status.workspaceId !== null) &&
+        agentCanOpen(status) &&
         (scopeProjectId === null || status.projectId === scopeProjectId),
     )
     .map((status, index) => ({ status, index }))
@@ -55,19 +60,37 @@ export function nextAgent(
   return ordered[(index + 1) % ordered.length] ?? null
 }
 
+/** The project last picked in each science view's top bar picker ("" for none). */
+export interface PickedProjects {
+  latex: string
+  analysis: string
+  tasks: string
+}
+
 /**
- * The project of the current view: the project view's id, or the project the
- * LaTeX Editor was opened on (its `projectId` search value). Null elsewhere,
- * including a LaTeX Editor opened without a project in its address.
+ * The project the current view shows, the way each view picks it: the project
+ * view's id; for the LaTeX Editor and Analysis, the address's `projectId`, else the
+ * picked project, else the first project (`projectIds` in sidebar order); for
+ * Tasks, the address's or picked project, and null on All projects. Null
+ * elsewhere, and while no listed project matches.
  */
-export function currentProjectId(pathname: string, search: unknown): string | null {
+export function currentProjectId(
+  pathname: string,
+  search: unknown,
+  picked: PickedProjects,
+  projectIds: readonly string[],
+): string | null {
   const project = /^\/projects\/([^/]+)/.exec(pathname)
   if (project?.[1]) return decodeURIComponent(project[1])
-  if (pathname.startsWith("/science/latex") && typeof search === "object" && search !== null) {
-    const projectId = (search as Record<string, unknown>).projectId
-    if (typeof projectId === "string" && projectId) return projectId
-  }
-  return null
+  const view = /^\/science\/(latex|analysis|tasks)(?:\/|$)/.exec(pathname)?.[1]
+  if (view !== "latex" && view !== "analysis" && view !== "tasks") return null
+  const fromAddress =
+    typeof search === "object" && search !== null
+      ? (search as Record<string, unknown>).projectId
+      : undefined
+  const wanted = typeof fromAddress === "string" && fromAddress ? fromAddress : picked[view]
+  if (projectIds.includes(wanted)) return wanted
+  return view === "tasks" ? null : (projectIds[0] ?? null)
 }
 
 /**
@@ -89,11 +112,19 @@ export function AgentShortcuts({ pathname, search }: { pathname: string; search:
   const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
   const { data: statuses } = useAgentStatus()
   const [notice, setNotice] = useState<string | null>(null)
+  const [latexProject] = useLatexEditorProject()
+  const [analysisProject] = useAnalysisProject()
+  const [tasksProject] = useTasksProject()
+  const picked: PickedProjects = {
+    latex: latexProject,
+    analysis: analysisProject,
+    tasks: tasksProject,
+  }
 
   // The saved project order, as in the sidebar and on the Dashboard.
   const projectIds = projects.map((project) => project.id)
-  const stateRef = useRef({ projectIds, statuses: statuses ?? [], pathname, search })
-  stateRef.current = { projectIds, statuses: statuses ?? [], pathname, search }
+  const stateRef = useRef({ projectIds, statuses: statuses ?? [], pathname, search, picked })
+  stateRef.current = { projectIds, statuses: statuses ?? [], pathname, search, picked }
   const lastSessionId = useRef<string | null>(null)
   const requests = useRef(0)
 
@@ -106,7 +137,9 @@ export function AgentShortcuts({ pathname, search }: { pathname: string; search:
       event.preventDefault()
       event.stopPropagation()
       const state = stateRef.current
-      const scope = inProject ? currentProjectId(state.pathname, state.search) : null
+      const scope = inProject
+        ? currentProjectId(state.pathname, state.search, state.picked, state.projectIds)
+        : null
       if (inProject && scope === null) {
         setNotice("Open a project first")
         return

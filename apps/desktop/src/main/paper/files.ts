@@ -29,14 +29,34 @@ const KIND_BY_EXTENSION: Record<string, PaperFileKind> = {
 /** Folders never listed: LaTeX build output. Hidden folders (including `.git`) are skipped too. */
 const SKIPPED_DIRS = new Set(["build"])
 
+/** Result of {@link listPaperFiles}. */
+export interface PaperFileList {
+  files: PaperFile[]
+  /** Subfolders that could not be read (no permission), relative to the paper folder, sorted. */
+  unreadable: string[]
+}
+
 /**
  * List the LaTeX sources (.tex, .bib, .sty, .cls) and figures (png, jpg, jpeg,
  * pdf, eps, svg) in `dir`, sorted by path. Skips `build/` and hidden folders.
+ * A subfolder that cannot be read (EACCES or EPERM) is skipped and listed in
+ * `unreadable`; any other error, or an unreadable `dir` itself, is thrown.
  */
-export async function listPaperFiles(dir: string): Promise<PaperFile[]> {
+export async function listPaperFiles(dir: string): Promise<PaperFileList> {
   const files: PaperFile[] = []
+  const unreadable: string[] = []
   const walk = async (relDir: string): Promise<void> => {
-    const entries = await readdir(join(dir, relDir), { withFileTypes: true })
+    const entries = await readdir(join(dir, relDir), { withFileTypes: true }).then(
+      (found) => found,
+      (error: NodeJS.ErrnoException) => {
+        if (relDir !== "" && (error.code === "EACCES" || error.code === "EPERM")) return null
+        throw error
+      },
+    )
+    if (entries === null) {
+      unreadable.push(relDir)
+      return
+    }
     for (const entry of entries) {
       const relPath = relDir ? `${relDir}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
@@ -48,7 +68,10 @@ export async function listPaperFiles(dir: string): Promise<PaperFile[]> {
     }
   }
   await walk("")
-  return files.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0))
+  return {
+    files: files.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0)),
+    unreadable: unreadable.sort(),
+  }
 }
 
 /**

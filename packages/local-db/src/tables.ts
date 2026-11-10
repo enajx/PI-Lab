@@ -52,8 +52,11 @@ export type AutomationExecutionMode = "interactive" | "noninteractive"
 
 /** Current lifecycle classification for a durable interactive agent session. */
 export type AgentSessionState = "working" | "waiting" | "exited"
-/** The app view an interactive agent was started from; each view shows only its own agents. */
-export type AgentSessionOrigin = "project" | "latex" | "analysis"
+/**
+ * Where an interactive agent was started: an app view (each view shows only its own
+ * agents) or a routine run ("routine", shown in the Project view).
+ */
+export type AgentSessionOrigin = "project" | "latex" | "analysis" | "tasks" | "routine"
 
 /** Why a live interactive agent is waiting for the user. */
 export type AgentSessionWaitingReason =
@@ -655,11 +658,11 @@ export const settings = sqliteTable("settings", {
     .notNull()
     .default(true),
   /**
-   * The Quit dialog's "Remember my choice": "ask" shows the dialog, "background"
-   * moves PI Lab to the background and "quit" quits and stops agents, both
-   * without asking. Settings resets it to "ask".
+   * The Quit dialog's "Remember Move to background": "ask" shows the dialog,
+   * "background" moves PI Lab to the background without asking. Quit cannot be
+   * remembered (0034 moved a saved "quit" to "ask"). Settings resets it to "ask".
    */
-  quitChoice: text("quit_choice", { enum: ["ask", "background", "quit"] })
+  quitChoice: text("quit_choice", { enum: ["ask", "background"] })
     .notNull()
     .default("ask"),
   /** Public update stream for the single installed PI Lab app. */
@@ -1008,7 +1011,7 @@ export const agentSessions = sqliteTable(
     workflowRunId: text("workflow_run_id").references(() => automationRuns.id, {
       onDelete: "set null",
     }),
-    /** The view the agent was started from (Project view, LaTeX Editor, Analysis). */
+    /** Where the agent was started (Project view, LaTeX Editor, Analysis, Tasks, a routine). */
     origin: text("origin").notNull().$type<AgentSessionOrigin>().default("project"),
     state: text("state").notNull().$type<AgentSessionState>().default("working"),
     /**

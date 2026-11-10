@@ -262,3 +262,60 @@ test("⌘T in Analysis opens a terminal in the session panel, kept after leaving
     ),
   ).toBeVisible({ timeout: 30_000 })
 })
+
+test("an Analysis agent shows in the Project Agents box and opens back in Analysis, also from ⌥Tab", async () => {
+  test.setTimeout(120_000)
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const analysisNav = window.locator(
+    '[data-testid="science-nav-item"][data-science-tab="analysis"]',
+  )
+  await analysisNav.click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  const panel = window.getByTestId("science-sessions")
+  await panel.getByTestId("science-sessions-expand").click()
+  await panel.getByTestId("central-add-menu").click()
+  await window.getByTestId("central-add-agent").click()
+  const chooser = window.getByTestId("new-agent-dialog")
+  await chooser.locator("label", { hasText: "Test Waiting" }).click()
+  await chooser.getByRole("button", { name: "Start agent" }).click()
+  const agentTerminal = panel.locator('[data-testid="terminal"][data-input-kind="agent"]')
+  await expect(agentTerminal).toContainText("Do you want to proceed?", { timeout: 30_000 })
+  const sessionId = await agentTerminal.getAttribute("data-session-id")
+  expect(sessionId).toBeTruthy()
+  const focusedAgent = panel.locator(`[data-testid="terminal"][data-session-id="${sessionId}"]`)
+
+  // The Project view lists it in Project Agents and does not show it as a tab.
+  // (Not `openProject`: its `app-ready` gate only renders on the Dashboard.)
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  const row = window
+    .getByTestId("project-agents-box")
+    .locator('[data-testid="project-agent-row"][data-origin="analysis"]')
+  await expect(row).toContainText("Test Waiting", { timeout: 30_000 })
+  await expect(
+    window.locator(`[data-testid="terminal"][data-session-id="${sessionId}"]`),
+  ).toHaveCount(0)
+
+  // Clicking the row opens Analysis with the agent's tab focused.
+  await row.click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(panel.locator('[data-testid="central-tab"][data-active="true"]')).toHaveAttribute(
+    "data-tab-kind",
+    "agent",
+  )
+  await expect(focusedAgent).toBeVisible()
+
+  // ⌥Tab from the Dashboard opens the waiting agent in Analysis, not the Project view.
+  await expect(window.getByTestId("project-agent-status")).toHaveAttribute(
+    "data-status",
+    "paused",
+    { timeout: 30_000 },
+  )
+  await window.getByTestId("nav-dashboard").click()
+  await expect(window.getByTestId("dashboard")).toBeVisible()
+  await window.keyboard.press("Alt+Tab")
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(focusedAgent).toBeVisible()
+  await expect(window.getByTestId("project-view")).toHaveCount(0)
+})

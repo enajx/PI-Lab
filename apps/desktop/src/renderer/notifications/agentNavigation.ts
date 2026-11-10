@@ -7,7 +7,7 @@ export type Navigate = ReturnType<typeof useNavigate>
 /** A live agent to open with its tab focused. */
 export interface AgentTarget {
   projectId: string
-  /** Required for an agent that opens in the project view. */
+  /** Required for an agent that opens in the project view (origin "project" or "routine"). */
   workspaceId: string | null
   sessionId: string
   agentId: string
@@ -17,17 +17,26 @@ export interface AgentTarget {
   label?: string
 }
 
+/** The views with their own agent tabs, by the origin of the agents they show. */
+const VIEW_FOR_ORIGIN = {
+  latex: "/science/latex",
+  analysis: "/science/analysis",
+  tasks: "/science/tasks",
+} as const
+
 /**
- * Open the view that owns an agent with that agent's tab focused. A LaTeX Editor
- * agent opens the LaTeX Editor; any other agent opens its project view, which
- * attaches the session once per `requestId` (a new id per request, so a repeated
- * request for the same agent focuses it again). Throws for a project-view agent
- * without a workspace, which the project view cannot attach.
+ * Open the view an agent was started from with that agent's tab focused. A LaTeX
+ * Editor, Analysis or Tasks agent opens that view on the agent's project, with the
+ * tab in its session panel. A Project view agent, and a routine's agent (the
+ * Routines page has no agent tabs), open the project view, which attaches the
+ * session once per `requestId` (a new id per request, so a repeated request for
+ * the same agent focuses it again). Throws for a project view agent without a
+ * workspace, which the project view cannot attach.
  */
 export function navigateToAgent(navigate: Navigate, target: AgentTarget, requestId: string): void {
-  if (target.origin === "latex") {
+  if (target.origin === "latex" || target.origin === "analysis" || target.origin === "tasks") {
     void navigate({
-      to: "/science/latex",
+      to: VIEW_FOR_ORIGIN[target.origin],
       search: {
         projectId: target.projectId,
         sessionId: target.sessionId,
@@ -52,4 +61,9 @@ export function navigateToAgent(navigate: Navigate, target: AgentTarget, request
       notificationLabel: target.label,
     },
   })
+}
+
+/** Whether the view an agent opens in can show it: only the project view needs a workspace. */
+export function agentCanOpen(target: Pick<AgentTarget, "origin" | "workspaceId">): boolean {
+  return (target.origin !== "project" && target.origin !== "routine") || target.workspaceId !== null
 }

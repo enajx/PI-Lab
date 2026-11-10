@@ -10,6 +10,7 @@ import {
   displayRemoteUrl,
   gitHasOverleafCredential,
   isOverleafUrl,
+  overleafUrlProblem,
   remoteEnv,
   writeAskpassScript,
 } from "./overleaf"
@@ -155,4 +156,39 @@ test("gitHasOverleafCredential never prompts when no helper answers", async () =
   expect(await gitHasOverleafCredential({ ...isolatedGitEnv(), GIT_ASKPASS: answering })).toBe(
     false,
   )
+})
+
+test("overleafUrlProblem refuses a URL with a token or a user other than git", () => {
+  const message = "Paste the Git URL without the token; enter the token in the token field."
+  expect(overleafUrlProblem("https://git:olp_x@git.overleaf.com/abc")).toBe(message)
+  expect(overleafUrlProblem("https://olp_x@git.overleaf.com/abc")).toBe(message)
+  expect(overleafUrlProblem("https://git@git.overleaf.com/abc")).toBeNull()
+  expect(overleafUrlProblem("https://git.overleaf.com/abc")).toBeNull()
+  expect(overleafUrlProblem("https://github.com/u/p.git")).toBe(
+    "Enter an Overleaf Git URL (https://git.overleaf.com/…)",
+  )
+})
+
+test("gitHasOverleafCredential runs Git Credential Manager non-interactively", async () => {
+  await writeFile(join(dir, "gitconfig"), "")
+  // A helper that answers only when told it must not show a sign-in window.
+  const helper = join(dir, "gcm-like-helper.sh")
+  await writeFile(
+    helper,
+    `#!/bin/sh
+[ "$1" = get ] || exit 0
+[ "$GCM_INTERACTIVE" = never ] || exit 0
+[ "$GIT_TERMINAL_PROMPT" = 0 ] || exit 0
+printf 'username=git\npassword=helper-secret\n'
+`,
+    { mode: 0o700 },
+  )
+  await execFileAsync("git", [
+    "config",
+    "--file",
+    join(dir, "gitconfig"),
+    "credential.helper",
+    helper,
+  ])
+  expect(await gitHasOverleafCredential(isolatedGitEnv())).toBe(true)
 })

@@ -239,7 +239,6 @@ export function PaperSyncBar({
         <AgentMergeReview
           projectId={projectId}
           workspaceId={workspaceId}
-          files={prompt.files}
           pending={busy}
           error={error}
           onAccept={() => void startSync(true)}

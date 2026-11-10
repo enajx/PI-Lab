@@ -41,7 +41,7 @@ function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
 const OVERLEAF_URL = "https://git@git.overleaf.com/6ae5e243374fe1802d83e27a"
 
 describe("PaperSetup (mocked server)", () => {
-  test("asks for the Overleaf token when none is saved, then clones", async () => {
+  test("asks for the Overleaf token when none is saved, and sends it with the clone (not saved first)", async () => {
     const setToken = vi.fn(() => undefined)
     const addOverleaf = vi.fn(() => undefined)
     renderSetup({
@@ -57,9 +57,32 @@ describe("PaperSetup (mocked server)", () => {
     fireEvent.change(token, { target: { value: "olp_secret" } })
     fireEvent.click(screen.getByTestId("paper-overleaf-add"))
     await waitFor(() =>
-      expect(addOverleaf).toHaveBeenCalledWith({ projectId: "p1", url: OVERLEAF_URL }),
+      expect(addOverleaf).toHaveBeenCalledWith({
+        projectId: "p1",
+        url: OVERLEAF_URL,
+        token: "olp_secret",
+      }),
     )
-    expect(setToken).toHaveBeenCalledWith({ token: "olp_secret" })
+    expect(setToken).not.toHaveBeenCalled()
+  })
+
+  test("after a failed clone with a typed token, the error and the token field stay", async () => {
+    renderSetup({
+      "paper.token.status": () => ({ configured: false, source: null }),
+      "paper.addOverleaf": () => {
+        throw new Error("Authentication failed")
+      },
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+    })
+    fireEvent.change(await screen.findByTestId("paper-overleaf-url"), {
+      target: { value: OVERLEAF_URL },
+    })
+    fireEvent.change(await screen.findByTestId("paper-overleaf-token"), {
+      target: { value: "olp_wrong" },
+    })
+    fireEvent.click(screen.getByTestId("paper-overleaf-add"))
+    expect((await screen.findByRole("alert")).textContent).toContain("Authentication failed")
+    expect(screen.getByTestId("paper-overleaf-token")).toBeTruthy()
   })
 
   test("does not ask for the token again once it is saved", async () => {

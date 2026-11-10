@@ -129,7 +129,7 @@ describe("Tasks top bar shortcuts", () => {
       "pi-lab.tasks.headerShortcuts",
       JSON.stringify(["skill:review-notes"]),
     )
-    mount(<ScienceTasks initialProjectId={undefined} />, tasksHandlers([]))
+    mount(<ScienceTasks initialProjectId={undefined} focusSession={null} />, tasksHandlers([]))
     const banner = screen.getByRole("banner")
     const button = await within(banner).findByTestId("tasks-shortcut-skill-review-notes")
     expect(button.hasAttribute("disabled")).toBe(true)
@@ -148,13 +148,13 @@ describe("Tasks top bar shortcuts", () => {
       JSON.stringify(["skill:review-notes"]),
     )
     const started: unknown[] = []
-    mount(<ScienceTasks initialProjectId="p1" />, tasksHandlers(started))
+    mount(<ScienceTasks initialProjectId="p1" focusSession={null} />, tasksHandlers(started))
     const button = await screen.findByTestId("tasks-shortcut-skill-review-notes")
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
     fireEvent.click(button)
 
     await waitFor(() =>
-      expect(started).toEqual([{ projectId: "p1", skillSlug: "review-notes", origin: "project" }]),
+      expect(started).toEqual([{ projectId: "p1", skillSlug: "review-notes", origin: "tasks" }]),
     )
     const panel = screen.getByTestId("science-sessions")
     expect((await within(panel).findByTestId("terminal")).getAttribute("data-session-id")).toBe(
@@ -170,7 +170,7 @@ describe("Tasks top bar shortcuts", () => {
 describe("Analysis top bar shortcuts", () => {
   test("Analyze experiments is in the top bar by default and opens its agent in the Analysis session panel", async () => {
     const started: unknown[] = []
-    mount(<ScienceAnalysis initialProjectId={undefined} />, {
+    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, {
       ...sessionHandlers(),
       "projects.list": () => [project("p1", "alpha")],
       "projects.capabilities": () => ({ git: true }),
@@ -231,7 +231,7 @@ describe("Analysis top bar shortcuts", () => {
       .map((item) => [item.textContent, item.getAttribute("aria-checked")])
 
   test("the menu lists Analyze experiments, HTML report and Fetch experiments, all checked; HTML report can be removed and added back", async () => {
-    mount(<ScienceAnalysis initialProjectId={undefined} />, analysisHandlers())
+    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
     const banner = screen.getByRole("banner")
     await within(banner).findByTestId("analysis-analyze-experiments")
     expect(within(banner).getByTestId("analysis-new-html-report")).toBeTruthy()
@@ -259,7 +259,7 @@ describe("Analysis top bar shortcuts", () => {
       "pi-lab.analysis.headerShortcuts",
       JSON.stringify(["analyze-experiments", "skill:review-notes"]),
     )
-    mount(<ScienceAnalysis initialProjectId={undefined} />, analysisHandlers())
+    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
     const banner = screen.getByRole("banner")
     await within(banner).findByTestId("analysis-new-html-report")
     expect(within(banner).getByTestId("analysis-fetch-experiments")).toBeTruthy()
@@ -277,7 +277,7 @@ describe("Analysis top bar shortcuts", () => {
     ).toEqual(["analyze-experiments", "fetch-experiments", "skill:review-notes"])
 
     cleanup()
-    mount(<ScienceAnalysis initialProjectId={undefined} />, analysisHandlers())
+    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
     const again = screen.getByRole("banner")
     await within(again).findByTestId("analysis-analyze-experiments")
     expect(within(again).queryByTestId("analysis-new-html-report")).toBeNull()

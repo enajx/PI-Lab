@@ -35,8 +35,17 @@ type HarnessStatus = {
 export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const environment = useQuery(trpc.setup.environment.queryOptions(undefined, { staleTime: 0 }))
-  const checking = environment.isFetching
+  // Each row has its own check, so a fast row shows its result while a slow one
+  // still says Checking….
+  const harnessCheck = useQuery(trpc.setup.harnesses.queryOptions(undefined, { staleTime: 0 }))
+  const githubCheck = useQuery(trpc.setup.github.queryOptions(undefined, { staleTime: 0 }))
+  const zoteroCheck = useQuery(trpc.setup.zotero.queryOptions(undefined, { staleTime: 0 }))
+  const checkingHarnesses = harnessCheck.isFetching
+  const recheckAll = () => {
+    void harnessCheck.refetch()
+    void githubCheck.refetch()
+    void zoteroCheck.refetch()
+  }
   const settings = useQuery(trpc.settings.get.queryOptions())
   const startAtLogin = useQuery(trpc.system.startAtLogin.queryOptions())
   const appChannel = useQuery({
@@ -70,18 +79,19 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
 
   useEffect(() => {
     if (selectionTouched) return
-    const detected = (environment.data?.harnesses ?? []).filter(
+    const detected = (harnessCheck.data?.harnesses ?? []).filter(
       (harness) => harness.state === "authenticated",
     )
     if (detected.length === 1) setSelectedAgent(detected[0]?.id ?? null)
     if (detected.length !== 1) setSelectedAgent(null)
-  }, [environment.data?.harnesses, selectionTouched])
+  }, [harnessCheck.data?.harnesses, selectionTouched])
 
   const saveApiKey = useMutation(
     trpc.setup.saveApiKey.mutationOptions({
       onSuccess: async () => {
         setApiKey("")
         setApiOpenFor(null)
+        await queryClient.invalidateQueries({ queryKey: trpc.setup.harnesses.queryKey() })
         await queryClient.invalidateQueries({ queryKey: trpc.setup.environment.queryKey() })
       },
     }),
@@ -136,7 +146,9 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   }
 
   const error =
-    environment.error ??
+    harnessCheck.error ??
+    githubCheck.error ??
+    zoteroCheck.error ??
     settings.error ??
     appChannel.error ??
     updateGeneral.error ??
@@ -311,21 +323,23 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void environment.refetch()}
-                disabled={environment.isFetching}
+                onClick={recheckAll}
+                disabled={
+                  harnessCheck.isFetching || githubCheck.isFetching || zoteroCheck.isFetching
+                }
               >
                 <RefreshCw className="size-3.5" aria-hidden />
                 {t("Recheck")}
               </Button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              {(environment.data?.harnesses ?? PLACEHOLDER_HARNESSES).map((harness) => (
+              {(harnessCheck.data?.harnesses ?? PLACEHOLDER_HARNESSES).map((harness) => (
                 <HarnessCard
                   key={harness.id}
                   harness={harness}
-                  checking={checking}
+                  checking={checkingHarnesses}
                   selected={selectedAgent === harness.id}
-                  apiConfigured={environment.data?.apiConfigured[harness.id] ?? false}
+                  apiConfigured={harnessCheck.data?.apiConfigured[harness.id] ?? false}
                   apiOpen={apiOpenFor === harness.id}
                   apiKey={apiOpenFor === harness.id ? apiKey : ""}
                   saving={saveApiKey.isPending}
@@ -336,11 +350,11 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                   }}
                   onApiKeyChange={setApiKey}
                   onSaveApi={() => saveApiKey.mutate({ agentId: harness.id, apiKey })}
-                  onRetry={() => void environment.refetch()}
+                  onRetry={() => void harnessCheck.refetch()}
                 />
               ))}
             </div>
-            {selectedAgent === null && !checking ? (
+            {selectedAgent === null && !checkingHarnesses ? (
               <p className="mt-2 text-muted-foreground text-xs">{t("No default selected.")}</p>
             ) : null}
           </section>
@@ -350,28 +364,26 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <IntegrationCard
                 title="GitHub"
-                checking={checking}
-                detail={
-                  environment.data?.github.account ?? compactState(environment.data?.github.state)
-                }
+                checking={githubCheck.isFetching}
+                detail={githubCheck.data?.account ?? compactState(githubCheck.data?.state)}
                 description="Clone, push, and create pull requests."
-                state={environment.data?.github.state ?? "error"}
+                state={githubCheck.data?.state ?? "error"}
               />
               <IntegrationCard
                 title="Zotero"
-                checking={checking}
+                checking={zoteroCheck.isFetching}
                 detail={
-                  environment.data?.zotero === "running"
+                  zoteroCheck.data === "running"
                     ? t("Detected")
-                    : environment.data?.zotero === "installed"
+                    : zoteroCheck.data === "installed"
                       ? t("Installed")
                       : t("Not found")
                 }
                 description="Use your local library as a research source."
                 state={
-                  environment.data?.zotero === "running"
+                  zoteroCheck.data === "running"
                     ? "authenticated"
-                    : environment.data?.zotero === "installed"
+                    : zoteroCheck.data === "installed"
                       ? "unauthenticated"
                       : "missing"
                 }

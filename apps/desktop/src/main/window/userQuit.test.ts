@@ -8,7 +8,7 @@ import {
 
 const idle: QuitWork = { agents: 0, terminals: [] }
 const agents = (count: number): QuitWork => ({ agents: count, terminals: [] })
-/** A first-dialog answer without "Remember my choice" ticked. */
+/** A first-dialog answer without "Remember Move to background" ticked. */
 const pick = <C extends "quit" | "background" | "cancel">(choice: C) => ({
   choice,
   remember: false,
@@ -16,7 +16,7 @@ const pick = <C extends "quit" | "background" | "cancel">(choice: C) => ({
 
 /** Quit action with a remembered choice; every other dependency is a spy. */
 function rememberHarness(
-  remembered: "ask" | "background" | "quit",
+  remembered: "ask" | "background",
   answer: { choice: "quit" | "background" | "cancel"; remember: boolean },
   running: "quit" | "background" | "cancel",
   work: QuitWork,
@@ -47,26 +47,22 @@ test("a remembered Move to background skips the dialog and moves to the backgrou
   expect(h.quit).not.toHaveBeenCalled()
 })
 
-test("a remembered Quit stops running agents without asking", async () => {
-  const h = rememberHarness("quit", pick("cancel"), "cancel", agents(2))
-  await h.request()
-  expect(h.choose).not.toHaveBeenCalled()
-  expect(h.confirmRunning).not.toHaveBeenCalled()
-  expect(h.quit).toHaveBeenCalledOnce()
-})
-
-test("ticking Remember my choice with Move to background saves it", async () => {
+test("ticking Remember Move to background with Move to background saves it", async () => {
   const h = rememberHarness("ask", { choice: "background", remember: true }, "cancel", agents(1))
   await h.request()
   expect(h.remember).toHaveBeenCalledExactlyOnceWith("background")
   expect(h.background).toHaveBeenCalledOnce()
 })
 
-test("ticking Remember my choice with Quit saves it once the quit goes ahead", async () => {
-  const h = rememberHarness("ask", { choice: "quit", remember: true }, "quit", agents(1))
-  await h.request()
-  expect(h.remember).toHaveBeenCalledExactlyOnceWith("quit")
-  expect(h.quit).toHaveBeenCalledOnce()
+test("Quit with the box ticked quits but saves nothing", async () => {
+  const running = rememberHarness("ask", { choice: "quit", remember: true }, "quit", agents(1))
+  await running.request()
+  expect(running.quit).toHaveBeenCalledOnce()
+  expect(running.remember).not.toHaveBeenCalled()
+  const idleQuit = rememberHarness("ask", { choice: "quit", remember: true }, "quit", idle)
+  await idleQuit.request()
+  expect(idleQuit.quit).toHaveBeenCalledOnce()
+  expect(idleQuit.remember).not.toHaveBeenCalled()
 })
 
 test("Cancel never saves, in the first dialog or the running-work dialog", async () => {

@@ -69,22 +69,26 @@ export function normalizeOutputDir(value: string): string {
 }
 
 /**
- * Lines for the paper repo's `.git/info/exclude` that keep build output out of
- * commits. A folder is excluded wherever it sits (every root .tex builds into
- * its own `<folder>`). For "." the root's PDF is excluded by name (other PDFs
- * can be figures) and build-only files (.aux, .log, ...) anywhere.
+ * Lines for the paper repo's `.git/info/exclude` that keep the build output of
+ * one root .tex out of commits. The paper folder is the top of that repo, so
+ * every line starts with `/` and matches only below the root's own folder: an
+ * output folder is excluded only where this root builds into it (not every
+ * folder with that name), and for "." the root's own output files are
+ * excluded by name (`/main.log`, not `*.log`), plus `.aux` files below the
+ * root's folder, which \include'd chapters write next to themselves. Other
+ * files with these extensions (such as SLURM `*.out` logs or PDF figures) are
+ * never hidden. Each build adds the lines for the root it builds.
  *
  * @param outputDir a value returned by {@link normalizeOutputDir}
- * @param rootRelPath the root .tex relative to the paper folder, or null
+ * @param rootRelPath the root .tex relative to the paper folder, or null when
+ *   it is not known (then a folder is taken next to the paper folder's top,
+ *   and "." has nothing to exclude yet)
  */
 export function outputExcludePatterns(outputDir: string, rootRelPath: string | null): string[] {
-  if (outputDir !== ".") return [outputDir.includes("/") ? `**/${outputDir}/` : `${outputDir}/`]
-  // Build-only files are excluded anywhere (chapters pulled in with \include write
-  // their own .aux next to them); a PDF can be a source figure, so only the root's
-  // PDF is excluded, by name.
-  const buildOnly = GENERATED_EXTENSIONS.filter((extension) => extension !== ".pdf").map(
-    (extension) => `*${extension}`,
-  )
-  if (rootRelPath === null) return buildOnly
-  return [`/${rootRelPath.replace(/\.tex$/i, "")}.pdf`, ...buildOnly]
+  const rootDir = rootRelPath === null ? "." : posix.dirname(rootRelPath)
+  const base = rootDir === "." ? "/" : `/${rootDir}/`
+  if (outputDir !== ".") return [`${base}${outputDir}/`]
+  if (rootRelPath === null) return []
+  const stem = `/${rootRelPath.replace(/\.tex$/i, "")}`
+  return [...GENERATED_EXTENSIONS.map((extension) => `${stem}${extension}`), `${base}**/*.aux`]
 }

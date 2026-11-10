@@ -42,6 +42,7 @@ describe("ProjectAgentsBox (mocked server)", () => {
           kind: "agent",
           sessionId: "s1",
           agentId: "claude-code",
+          workspaceId: null,
           origin: "latex",
           name: "Claude Code",
           status: "working",
@@ -51,6 +52,7 @@ describe("ProjectAgentsBox (mocked server)", () => {
           kind: "agent",
           sessionId: "s2",
           agentId: "codex",
+          workspaceId: null,
           origin: "latex",
           name: "Codex",
           status: "waiting",
@@ -73,6 +75,58 @@ describe("ProjectAgentsBox (mocked server)", () => {
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/science/latex",
       search: { projectId: "p1", sessionId: "s2", agentId: "codex", agentLabel: "Codex" },
+    })
+  })
+
+  test("an Analysis, Tasks or Routine agent opens in its own view with its project and tab focused", async () => {
+    const agent = (
+      sessionId: string,
+      origin: "analysis" | "tasks" | "routine",
+      workspaceId: string | null,
+    ): ProjectAgentRow => ({
+      kind: "agent",
+      sessionId,
+      agentId: "codex",
+      workspaceId,
+      origin,
+      name: "Codex",
+      status: "waiting",
+      lastActiveAt: Date.now(),
+    })
+    renderBox(
+      [agent("s1", "analysis", null), agent("s2", "tasks", null), agent("s3", "routine", "ws-1")],
+      {},
+    )
+    const rows = await screen.findAllByTestId("project-agent-row")
+    expect(rows.map((row) => row.getAttribute("data-origin"))).toEqual([
+      "analysis",
+      "tasks",
+      "routine",
+    ])
+
+    mocks.navigate.mockClear()
+    fireEvent.click(rows[0] as HTMLElement)
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/analysis",
+      search: { projectId: "p1", sessionId: "s1", agentId: "codex", agentLabel: "Codex" },
+    })
+    fireEvent.click(rows[1] as HTMLElement)
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/tasks",
+      search: { projectId: "p1", sessionId: "s2", agentId: "codex", agentLabel: "Codex" },
+    })
+    // A routine's agent has no view of its own; it opens as a Project view tab.
+    fireEvent.click(rows[2] as HTMLElement)
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/projects/$projectId",
+      params: { projectId: "p1" },
+      search: expect.objectContaining({
+        notificationKind: "agent",
+        notificationSessionId: "s3",
+        notificationWorkspaceId: "ws-1",
+        notificationAgentId: "codex",
+        notificationLabel: "Codex",
+      }),
     })
   })
 

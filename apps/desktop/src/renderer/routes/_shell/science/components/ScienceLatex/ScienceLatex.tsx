@@ -8,13 +8,16 @@ import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type FocusSessionRequest, PaperEditor } from "./PaperEditor"
+import { MissingPaperFolder } from "./PaperFolder"
 import { type CreatedPaper, PaperSetup } from "./PaperSetup"
 
 /**
  * LaTeX Editor science tab: a project picker at the top (remembers the last
  * project; a project card can open it with a project chosen), then either the
  * setup to choose the project's paper folder or the paper workspace. With a
- * paper folder set, the workspace puts its Sync button next to the picker. `focusSession`
+ * paper folder set, the workspace puts its Sync button next to the picker. A
+ * saved paper folder that was moved or deleted shows a message with buttons to
+ * choose it again or clear it instead. `focusSession`
  * focuses one agent tab of the initial project (see the Project Agents box).
  */
 export function ScienceLatex({
@@ -103,30 +106,40 @@ export function ScienceLatex({
         <p role="alert" className="cursor-text select-text p-6 text-destructive text-sm">
           {paper.error.message}
         </p>
-      ) : paper.data === undefined ? null : paper.data.paper &&
-        paper.data.workspaceId &&
-        creatingFor !== selected.id ? (
-        <PaperEditor
-          key={paper.data.workspaceId}
-          projectId={selected.id}
-          projectName={selected.name}
-          workspaceId={paper.data.workspaceId}
-          paperDir={paper.data.paper.dir}
-          displayDir={paper.data.paper.displayDir}
-          rootRelPath={paper.data.rootRelPath}
-          lastSyncAt={paper.data.paper.lastSyncAt}
-          hasRemote={paper.data.paper.remoteUrl !== null}
-          syncEnabled={paper.data.paper.syncEnabled}
-          outputDir={paper.data.paper.outputDir}
-          effectiveOutputDir={paper.data.paper.effectiveOutputDir}
-          settings={settings}
-          onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
-          focusSession={selected.id === initialProjectId ? focusSession : null}
-          syncSlot={syncSlot}
-          createdBuild={
-            created && created.workspaceId === paper.data.workspaceId ? created.build : null
-          }
-        />
+      ) : paper.data === undefined ? null : paper.data.paper?.missing ? (
+        <MissingPaperFolder key={selected.id} projectId={selected.id} dir={paper.data.paper.dir} />
+      ) : paper.data.paper && paper.data.workspaceId && creatingFor !== selected.id ? (
+        <>
+          {paper.data.skippedFolders && paper.data.skippedFolders.length > 0 ? (
+            <p
+              data-testid="paper-skipped-folders"
+              className="cursor-text select-text px-6 pt-2 text-muted-foreground text-xs"
+            >
+              {t("Skipped folders that could not be read:")} {paper.data.skippedFolders.join(", ")}
+            </p>
+          ) : null}
+          <PaperEditor
+            key={paper.data.workspaceId}
+            projectId={selected.id}
+            projectName={selected.name}
+            workspaceId={paper.data.workspaceId}
+            paperDir={paper.data.paper.dir}
+            displayDir={paper.data.paper.displayDir}
+            rootRelPath={paper.data.rootRelPath}
+            lastSyncAt={paper.data.paper.lastSyncAt}
+            hasRemote={paper.data.paper.remoteUrl !== null}
+            syncEnabled={paper.data.paper.syncEnabled}
+            outputDir={paper.data.paper.outputDir}
+            effectiveOutputDir={paper.data.paper.effectiveOutputDir}
+            settings={settings}
+            onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
+            focusSession={selected.id === initialProjectId ? focusSession : null}
+            syncSlot={syncSlot}
+            createdBuild={
+              created && created.workspaceId === paper.data.workspaceId ? created.build : null
+            }
+          />
+        </>
       ) : (
         <PaperSetup
           key={selected.id}

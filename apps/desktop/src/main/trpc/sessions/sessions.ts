@@ -45,7 +45,7 @@ import { createWorkspace, workspaceWorkingDir } from "../workspaces"
  */
 
 /** The views an agent can be started from. */
-const originSchema = z.enum(["project", "latex", "analysis"])
+const originSchema = z.enum(["project", "latex", "analysis", "tasks", "routine"])
 
 const startInput = z.object({
   projectId: z.string().min(1),
@@ -466,7 +466,7 @@ export async function startAnalyzeExperiments(
 
 /**
  * The rows of a project's "Project Agents" box: its live agents started outside
- * the Project view (LaTeX Editor, Analysis) and its running background workflow
+ * the Project view (LaTeX Editor, Analysis, Tasks, routines) and its running background workflow
  * runs. An agent waiting after a finished turn reads "done"; any other wait reads
  * "waiting". Exited agents are not live and are left out.
  */
@@ -479,6 +479,7 @@ export function listProjectAgents(ctx: AppContext, projectId: string): ProjectAg
         kind: "agent",
         sessionId: session.sessionId,
         agentId: session.agentId,
+        workspaceId: session.workspaceId,
         origin: session.origin,
         name: getAgent(session.agentId, ctx.agentCatalog)?.label ?? session.agentId,
         status:

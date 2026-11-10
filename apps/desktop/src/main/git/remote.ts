@@ -115,14 +115,58 @@ export async function conflictStages(
 
 /** Settle every unmerged file with one side's version, deleting files that side does not have. */
 export async function takeSide(dir: string, side: "ours" | "theirs"): Promise<void> {
-  for (const [path, sides] of await conflictStages(dir)) {
-    if (sides[side]) {
-      await runGit(dir, ["checkout", `--${side}`, "--", path], {})
-      await runGit(dir, ["add", "--", path], {})
-    } else {
-      await runGit(dir, ["rm", "--quiet", "--", path], {})
-    }
+  for (const [path, sides] of await conflictStages(dir)) await takeSideOf(dir, side, path, sides)
+}
+
+/**
+ * Settle one unmerged file `path` with one side's version, or delete it when
+ * that side does not have it. `sides` is its entry from {@link conflictStages}.
+ */
+export async function takeSideOf(
+  dir: string,
+  side: "ours" | "theirs",
+  path: string,
+  sides: { ours: boolean; theirs: boolean },
+): Promise<void> {
+  if (sides[side]) {
+    await runGit(dir, ["checkout", `--${side}`, "--", path], {})
+    await runGit(dir, ["add", "--", path], {})
+  } else {
+    await runGit(dir, ["rm", "--quiet", "--", path], {})
   }
+}
+
+/**
+ * What kind of conflict an unmerged file has: "text" when both sides have it
+ * and it is a text file (the only kind an agent or the editor can merge),
+ * "binary" when both sides have it but the file in the folder is binary (a
+ * figure) or not there, and
+ * "deleted-mine" / "deleted-overleaf" for a modify/delete conflict, by the
+ * side ("ours" is mine) that deleted it.
+ */
+export type ConflictKind = "text" | "binary" | "deleted-mine" | "deleted-overleaf"
+
+/** Every unmerged file in `dir` with its {@link ConflictKind}, sorted by path. */
+export async function conflictKinds(
+  dir: string,
+): Promise<Array<{ relPath: string; kind: ConflictKind }>> {
+  const result: Array<{ relPath: string; kind: ConflictKind }> = []
+  for (const [relPath, sides] of await conflictStages(dir)) {
+    result.push({ relPath, kind: await conflictKind(join(dir, relPath), sides) })
+  }
+  return result.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0))
+}
+
+/** The {@link ConflictKind} of the unmerged file at `path` with merge `sides`. */
+async function conflictKind(
+  path: string,
+  sides: { ours: boolean; theirs: boolean },
+): Promise<ConflictKind> {
+  if (!sides.ours) return "deleted-mine"
+  if (!sides.theirs) return "deleted-overleaf"
+  if (!existsSync(path) || !(await stat(path)).isFile()) return "binary"
+  const bytes = await readFile(path)
+  return bytes.subarray(0, BINARY_CHECK_BYTES).includes(0) ? "binary" : "text"
 }
 
 /**

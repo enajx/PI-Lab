@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
@@ -11,16 +11,26 @@ import { AgentMergeReview } from "./AgentMergeReview"
  * the run to finish before reading the merged files.
  */
 function renderReview(handlers: FakeHandlers) {
+  return renderReviewWith(handlers, () => undefined)
+}
+
+/** {@link renderReview} with an Accept callback. `paper.conflicts` defaults to main.tex (text). */
+function renderReviewWith(handlers: FakeHandlers, onAccept: () => void) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <AppProviders client={createFakeTrpcClient(handlers)} queryClient={queryClient}>
+    <AppProviders
+      client={createFakeTrpcClient({
+        "paper.conflicts": () => [{ relPath: "main.tex", kind: "text" }],
+        ...handlers,
+      })}
+      queryClient={queryClient}
+    >
       <AgentMergeReview
         projectId="p1"
         workspaceId="w1"
-        files={["main.tex"]}
         pending={false}
         error={null}
-        onAccept={() => undefined}
+        onAccept={onAccept}
         onReject={() => undefined}
       />
     </AppProviders>,
@@ -78,6 +88,7 @@ describe("AgentMergeReview (mocked server)", () => {
     render(
       <AppProviders
         client={createFakeTrpcClient({
+          "paper.conflicts": () => [{ relPath: "main.tex", kind: "text" }],
           "files.read": () => ({ status: "text", exists: true, content: CONFLICT, baseline: {} }),
           "workflows.run": () => ({ cached: false, ...record(true, 0, null) }),
           "workflows.status": () => ({ latexMerge: record(true, 0, null) }),
@@ -87,7 +98,6 @@ describe("AgentMergeReview (mocked server)", () => {
         <AgentMergeReview
           projectId="p1"
           workspaceId="w1"
-          files={["main.tex"]}
           pending={false}
           error={null}
           onAccept={() => undefined}
@@ -98,5 +108,81 @@ describe("AgentMergeReview (mocked server)", () => {
     await screen.findByRole("status")
     fireEvent.keyDown(window, { key: "Escape" })
     expect(onReject).not.toHaveBeenCalled()
+  })
+
+  test("a figure and a deleted file get Keep mine / Keep Overleaf; only text goes to the agent", async () => {
+    const reads: unknown[] = []
+    const resolveFile = vi.fn(() => [])
+    const onAccept = vi.fn()
+    let content = CONFLICT
+    renderReviewWith(
+      {
+        "paper.conflicts": () => [
+          { relPath: "figures/plot.png", kind: "binary" },
+          { relPath: "main.tex", kind: "text" },
+          { relPath: "refs.bib", kind: "deleted-overleaf" },
+        ],
+        "files.read": (input) => {
+          reads.push(input)
+          return { status: "text", exists: true, content, baseline: {} }
+        },
+        "workflows.run": () => {
+          content = MERGED
+          return { cached: false, ...record(false, 5, null) }
+        },
+        "paper.resolveFile": resolveFile,
+      },
+      onAccept,
+    )
+    const figure = await screen.findByTestId("paper-agent-merge-file-figures/plot.png", undefined, {
+      timeout: 5_000,
+    })
+    expect(reads).toEqual([
+      { workspaceId: "w1", relPath: "main.tex" },
+      { workspaceId: "w1", relPath: "main.tex" },
+    ])
+    const accept = screen.getByTestId("paper-agent-merge-accept")
+    expect(accept).toHaveProperty("disabled", true)
+    fireEvent.click(within(figure).getByRole("button", { name: "Keep Overleaf" }))
+    expect(accept).toHaveProperty("disabled", true)
+    const deleted = screen.getByTestId("paper-agent-merge-file-refs.bib")
+    expect(deleted.textContent).toContain("Deleted on Overleaf, changed here")
+    fireEvent.click(within(deleted).getByRole("button", { name: "Keep mine" }))
+    expect(accept).toHaveProperty("disabled", false)
+    // Nothing is settled before Accept, so Reject leaves every file in conflict.
+    expect(resolveFile).not.toHaveBeenCalled()
+    fireEvent.click(accept)
+    await waitFor(() => expect(onAccept).toHaveBeenCalled())
+    expect(resolveFile).toHaveBeenCalledWith({
+      projectId: "p1",
+      relPath: "figures/plot.png",
+      choice: "overleaf",
+    })
+    expect(resolveFile).toHaveBeenCalledWith({
+      projectId: "p1",
+      relPath: "refs.bib",
+      choice: "mine",
+    })
+  })
+
+  test("with no text file in conflict, the agent is not run", async () => {
+    const run = vi.fn()
+    renderReview({
+      "paper.conflicts": () => [{ relPath: "figures/plot.png", kind: "binary" }],
+      "workflows.run": run,
+    })
+    expect(await screen.findByTestId("paper-agent-merge-file-figures/plot.png")).toBeTruthy()
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  test("a run with no status record is shown as failed instead of waiting forever", async () => {
+    renderReview({
+      "files.read": () => ({ status: "text", exists: true, content: CONFLICT, baseline: {} }),
+      "workflows.run": () => ({ cached: false, ...record(true, 0, null) }),
+      "workflows.status": () => ({ latexMerge: null }),
+    })
+    expect((await screen.findByRole("alert", undefined, { timeout: 5_000 })).textContent).toContain(
+      "The merge agent stopped without a result",
+    )
   })
 })

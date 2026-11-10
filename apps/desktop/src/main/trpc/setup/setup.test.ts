@@ -90,6 +90,16 @@ describe("setup router", () => {
     expect(JSON.stringify(environment)).not.toContain("must-not-cross")
   })
 
+  test("reports each setup row from its own check, so rows can finish one by one", async () => {
+    const environment = await harness.caller.setup.environment()
+    expect(await harness.caller.setup.harnesses()).toEqual({
+      harnesses: environment.harnesses,
+      apiConfigured: environment.apiConfigured,
+    })
+    expect(await harness.caller.setup.github()).toEqual(environment.github)
+    expect(await harness.caller.setup.zotero()).toBe("running")
+  })
+
   test("encrypts API keys before storing them and surfaces only configured presence", async () => {
     await harness.caller.setup.saveApiKey({ agentId: "codex", apiKey: "sk-local-secret" })
 

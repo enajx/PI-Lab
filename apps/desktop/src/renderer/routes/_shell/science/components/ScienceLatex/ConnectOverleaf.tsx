@@ -17,7 +17,8 @@ const linkClass = "text-muted-foreground underline underline-offset-2 hover:text
  * so it tells the user to create a Blank project on Overleaf and paste its Git
  * URL. PI Lab then merges that project in, keeps the local files over
  * Overleaf's default ones, and pushes (`paper.connectOverleaf`). The Overleaf
- * token is asked for only when none is available.
+ * token is asked for only when none is available; it is sent with the connect
+ * and saved only when the connect works.
  */
 export function ConnectOverleafDialog({
   projectId,
@@ -34,7 +35,6 @@ export function ConnectOverleafDialog({
   const [error, setError] = useState<string | null>(null)
   const tokenStatus = useQuery(trpc.paper.token.status.queryOptions())
   const needsToken = tokenStatus.data?.configured === false
-  const setTokenMutation = useMutation(trpc.paper.token.set.mutationOptions())
   const connect = useMutation(
     trpc.paper.connectOverleaf.mutationOptions({
       onSuccess: () => {
@@ -45,21 +45,12 @@ export function ConnectOverleafDialog({
       onError: (cause) => setError(cause.message),
     }),
   )
-  const busy = connect.isPending || setTokenMutation.isPending
+  const busy = connect.isPending
 
-  const submit = async (): Promise<void> => {
+  // A typed token is used for this connect and saved by the server only when it works.
+  const submit = (): void => {
     setError(null)
-    if (needsToken) {
-      const saved = await setTokenMutation.mutateAsync({ token: token.trim() }).then(
-        () => true,
-        (cause: { message: string }) => {
-          setError(cause.message)
-          return false
-        },
-      )
-      if (!saved) return
-    }
-    connect.mutate({ projectId, url: url.trim() })
+    connect.mutate({ projectId, url: url.trim(), ...(needsToken ? { token: token.trim() } : {}) })
   }
   const canSubmit =
     !busy && tokenStatus.isSuccess && url.trim() !== "" && (!needsToken || token.trim() !== "")
@@ -120,7 +111,7 @@ export function ConnectOverleafDialog({
           type="button"
           data-testid="paper-connect-submit"
           disabled={!canSubmit}
-          onClick={() => void submit()}
+          onClick={submit}
           className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-xs hover:bg-primary/90 disabled:opacity-50"
         >
           {connect.isPending ? t("Connecting…") : t("Connect")}

@@ -12,7 +12,9 @@ export type ProjectAgentRow =
       kind: "agent"
       sessionId: string
       agentId: string
-      /** The view the agent was started from (never "project"). */
+      /** The workspace the agent runs in, or null; a routine's agent opens in the Project view with it. */
+      workspaceId: string | null
+      /** Where the agent was started (never "project"). */
       origin: Exclude<AgentSessionOrigin, "project">
       /** The agent's catalog label, e.g. "Claude Code". */
       name: string

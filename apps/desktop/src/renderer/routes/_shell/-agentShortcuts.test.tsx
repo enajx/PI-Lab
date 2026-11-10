@@ -83,11 +83,33 @@ describe("nextAgent", () => {
 })
 
 describe("currentProjectId", () => {
-  test("reads the project view path and the LaTeX Editor search", () => {
-    expect(currentProjectId("/projects/p%201", {})).toBe("p 1")
-    expect(currentProjectId("/science/latex", { projectId: "p2" })).toBe("p2")
-    expect(currentProjectId("/science/latex", {})).toBeNull()
-    expect(currentProjectId("/", {})).toBeNull()
+  const ids = ["p1", "p2", "p3"]
+  const noPicks = { latex: "", analysis: "", tasks: "" }
+
+  test("reads the project view path, and nothing elsewhere", () => {
+    expect(currentProjectId("/projects/p%201", {}, noPicks, ids)).toBe("p 1")
+    expect(currentProjectId("/", {}, noPicks, ids)).toBeNull()
+    expect(currentProjectId("/settings", {}, { ...noPicks, analysis: "p2" }, ids)).toBeNull()
+  })
+
+  test("the LaTeX Editor and Analysis show the address project, else the picked one, else the first", () => {
+    for (const [path, view] of [
+      ["/science/latex", "latex"],
+      ["/science/analysis", "analysis"],
+    ] as const) {
+      expect(currentProjectId(path, { projectId: "p2" }, noPicks, ids)).toBe("p2")
+      expect(currentProjectId(path, {}, { ...noPicks, [view]: "p3" }, ids)).toBe("p3")
+      expect(currentProjectId(path, {}, { ...noPicks, [view]: "gone" }, ids)).toBe("p1")
+      expect(currentProjectId(path, {}, noPicks, ids)).toBe("p1")
+      expect(currentProjectId(path, {}, noPicks, [])).toBeNull()
+    }
+  })
+
+  test("Tasks has a project only when one is chosen", () => {
+    expect(currentProjectId("/science/tasks", { projectId: "p2" }, noPicks, ids)).toBe("p2")
+    expect(currentProjectId("/science/tasks", {}, { ...noPicks, tasks: "p3" }, ids)).toBe("p3")
+    expect(currentProjectId("/science/tasks", {}, noPicks, ids)).toBeNull()
+    expect(currentProjectId("/science/tasks", {}, { ...noPicks, tasks: "gone" }, ids)).toBeNull()
   })
 })
 
@@ -134,9 +156,13 @@ function renderShell(initialPath: string, statuses: LiveAgentStatus[]) {
       )
     },
   })
-  const routes = ["/", "/projects/$projectId", "/science/latex"].map((path) =>
-    createRoute({ getParentRoute: () => rootRoute, path, component: () => null }),
-  )
+  const routes = [
+    "/",
+    "/projects/$projectId",
+    "/science/latex",
+    "/science/analysis",
+    "/science/tasks",
+  ].map((path) => createRoute({ getParentRoute: () => rootRoute, path, component: () => null }))
   const router = createRouter({
     routeTree: rootRoute.addChildren(routes),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
@@ -231,6 +257,35 @@ describe("AgentShortcuts", () => {
     fireEvent.keyDown(document.body, { key: "Tab", altKey: true, shiftKey: true })
     await waitFor(() => expect(location().path).toBe("/science/latex"))
     expect(location().search).toMatchObject({ sessionId: "b1" })
+  })
+
+  test("⌥⇧Tab in Analysis uses its picked project and opens an Analysis agent in Analysis", async () => {
+    window.localStorage.setItem("pi-lab.analysis.project", "beta")
+    const analysisAgent = { ...agent("b3", "beta", "waiting", "analysis"), workspaceId: null }
+    renderShell("/science/analysis", [...statuses, analysisAgent])
+    await settle()
+    fireEvent.keyDown(document.body, { key: "Tab", altKey: true, shiftKey: true })
+    await waitFor(() => expect(location().search).toMatchObject({ sessionId: "b1" }))
+    fireEvent.keyDown(document.body, { key: "Tab", altKey: true, shiftKey: true })
+    await waitFor(() => expect(location().path).toBe("/science/analysis"))
+    expect(location().search).toMatchObject({
+      projectId: "beta",
+      sessionId: "b3",
+      agentId: "claude",
+    })
+  })
+
+  test("⌥⇧Tab in Tasks with a project chosen stays in that project", async () => {
+    renderShell("/science/tasks?projectId=alpha", [
+      ...statuses,
+      agent("a4", "alpha", "waiting", "tasks"),
+    ])
+    await settle()
+    fireEvent.keyDown(document.body, { key: "Tab", altKey: true, shiftKey: true })
+    await waitFor(() => expect(location().path).toBe("/projects/alpha"))
+    fireEvent.keyDown(document.body, { key: "Tab", altKey: true, shiftKey: true })
+    await waitFor(() => expect(location().path).toBe("/science/tasks"))
+    expect(location().search).toMatchObject({ projectId: "alpha", sessionId: "a4" })
   })
 
   test("shows a notice and stays put when no agent is waiting", async () => {

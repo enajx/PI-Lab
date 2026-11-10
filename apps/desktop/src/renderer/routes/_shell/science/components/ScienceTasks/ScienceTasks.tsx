@@ -8,7 +8,12 @@ import { readDefaultAgentId, useTasksProject } from "../../../../../preferences/
 import { useTRPC } from "../../../../../trpc/react"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
 import { ProjectPicker } from "../ProjectPicker"
-import { ScienceSessionPanel, type ScienceSessionRequest } from "../ScienceSessionPanel"
+import {
+  type FocusSessionRequest,
+  ScienceSessionPanel,
+  type ScienceSessionRequest,
+  useFocusSessionRequest,
+} from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type TaskDraft, type TaskRecord, type TaskStatus, TasksWorkspace } from "./TasksWorkspace"
 
@@ -22,7 +27,14 @@ function selectorFor(task: TaskRecord): { id: string } | { sourceStart: number }
  * remembers the last choice. `initialProjectId` (from `?projectId=`) selects a
  * project and becomes the remembered one; the picker always wins afterwards.
  */
-export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }) {
+export function ScienceTasks({
+  initialProjectId,
+  focusSession,
+}: {
+  initialProjectId?: string
+  /** An agent session of the initial project to open and focus in the session panel, or null. */
+  focusSession: FocusSessionRequest | null
+}) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -64,6 +76,7 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
   // A skill session a top bar button started, until the session panel opens it.
   const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
   const clearSessionRequest = useCallback(() => setSessionRequest(null), [])
+  useFocusSessionRequest(initialProjectId, focusSession, setSessionRequest)
   const [shortcutError, setShortcutError] = useState<string | null>(null)
 
   const tasks = (listing.data?.tasks ?? []) as TaskRecord[]

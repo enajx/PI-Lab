@@ -368,3 +368,68 @@ export function PaperFolderStatusItem({
     </div>
   )
 }
+
+/**
+ * Shown instead of the editor when the saved paper folder no longer exists
+ * (moved, renamed or deleted): says so, and offers to choose the folder again
+ * (same checks as the setup page) or to clear it (the page then shows the
+ * setup). Errors are shown below the buttons.
+ */
+export function MissingPaperFolder({ projectId, dir }: { projectId: string; dir: string }) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const onError = (cause: { message: string }): void => setError(cause.message)
+  const changed = (): void => {
+    void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+  }
+  const link = useMutation(trpc.paper.link.mutationOptions({ onSuccess: changed, onError }))
+  const unlink = useMutation(trpc.paper.unlink.mutationOptions({ onSuccess: changed, onError }))
+  const picker = usePaperFolderPicker(
+    projectId,
+    (chosen) => link.mutate({ projectId, dir: chosen.dir, rootChoice: chosen.rootChoice }),
+    onError,
+  )
+  const busy = picker.busy || link.isPending || unlink.isPending
+  return (
+    <div data-testid="paper-folder-missing" className="flex flex-col gap-3 p-6 text-sm">
+      <p role="alert" className="cursor-text select-text">
+        {t("The paper folder")} <bdi className="font-mono">{dir}</bdi> {t("was moved or deleted.")}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setError(null)
+            picker.choose()
+          }}
+          className="flex items-center gap-1.5 rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50"
+        >
+          <FolderOpen className="size-4" aria-hidden />
+          {t("Choose paper folder…")}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title={t("Forget this folder. No files are deleted.")}
+          onClick={() => {
+            setError(null)
+            unlink.mutate({ projectId })
+          }}
+          className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+        >
+          <X className="size-4" aria-hidden />
+          {t("Clear paper folder")}
+        </button>
+      </div>
+      {error ? (
+        <p role="alert" className="cursor-text select-text text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {picker.dialog}
+    </div>
+  )
+}

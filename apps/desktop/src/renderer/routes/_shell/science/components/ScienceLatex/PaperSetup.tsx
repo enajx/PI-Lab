@@ -37,8 +37,8 @@ export interface CreatedPaper {
  * paper from the LaTeX template (in `<project>/paper/`, or the next free
  * `paper-2/`, `paper-3/`, … when it has files, or an empty folder the user
  * chooses; see `paper.createTarget` and `paper.create`). The one Overleaf token is
- * asked for only when none is available; the token and docs links are shown
- * only then. Choosing the project folder when it is not an Overleaf clone asks
+ * asked for only when none is available (it is sent with the clone and saved
+ * only when the clone works); the token and docs links are shown only then. Choosing the project folder when it is not an Overleaf clone asks
  * first whether Sync stays on (Sync would commit and push the whole project).
  */
 export function PaperSetup({
@@ -75,7 +75,6 @@ export function PaperSetup({
     void queryClient.invalidateQueries({ queryKey: trpc.paper.token.status.queryKey() })
   }
   const onError = (cause: { message: string }): void => setError(cause.message)
-  const setTokenMutation = useMutation(trpc.paper.token.set.mutationOptions())
   const addOverleaf = useMutation(
     trpc.paper.addOverleaf.mutationOptions({ onSuccess: linked, onError }),
   )
@@ -140,7 +139,6 @@ export function PaperSetup({
   const busy =
     addOverleaf.isPending ||
     link.isPending ||
-    setTokenMutation.isPending ||
     picker.busy ||
     create.isPending ||
     pickCreateDir.isPending
@@ -166,19 +164,14 @@ export function PaperSetup({
     picker.choose()
   }
 
-  const submit = async (): Promise<void> => {
+  // A typed token is used for this clone and saved by the server only when it works.
+  const submit = (): void => {
     setError(null)
-    if (needsToken) {
-      const saved = await setTokenMutation.mutateAsync({ token: token.trim() }).then(
-        () => true,
-        (cause: { message: string }) => {
-          setError(cause.message)
-          return false
-        },
-      )
-      if (!saved) return
-    }
-    addOverleaf.mutate({ projectId, url: url.trim() })
+    addOverleaf.mutate({
+      projectId,
+      url: url.trim(),
+      ...(needsToken ? { token: token.trim() } : {}),
+    })
   }
   const canSubmit =
     !busy && tokenStatus.isSuccess && url.trim() !== "" && (!needsToken || token.trim() !== "")
@@ -282,7 +275,7 @@ export function PaperSetup({
                     size="sm"
                     data-testid="paper-overleaf-add"
                     disabled={!canSubmit}
-                    onClick={() => void submit()}
+                    onClick={submit}
                   >
                     {addOverleaf.isPending ? t("Cloning…") : t("Add Overleaf project")}
                   </Button>

@@ -282,3 +282,62 @@ test("Start draft keeps the setup shown while the PDF builds, then opens main.te
   )
   expect(builds).toEqual([{ workspaceId: "paper-ws", relPath: "main.tex" }])
 })
+
+test("a moved paper folder shows a clear message with Choose paper folder… and Clear paper folder", async () => {
+  const unlink = vi.fn(() => ({ ok: true }))
+  const pickDirectory = vi.fn(() => null)
+  renderPageWith(
+    () => ({
+      paper: {
+        dir: "/Users/me/old-paper",
+        displayDir: "~/old-paper",
+        lastSyncAt: null,
+        remoteUrl: null,
+        outputDir: null,
+        effectiveOutputDir: "build",
+        syncEnabled: true,
+        missing: true,
+      },
+      workspaceId: "paper-ws",
+      rootRelPath: null,
+      autoDetect: true,
+      skippedFolders: [],
+    }),
+    {
+      "paper.detect": () => [],
+      "paper.unlink": unlink,
+      "system.pickDirectory": pickDirectory,
+    },
+  )
+  const missing = await screen.findByTestId("paper-folder-missing")
+  expect(missing.textContent).toContain(
+    "The paper folder /Users/me/old-paper was moved or deleted.",
+  )
+  expect(screen.queryByTestId("editor-status-bar")).toBeNull()
+  fireEvent.click(within(missing).getByRole("button", { name: "Choose paper folder…" }))
+  await waitFor(() => expect(pickDirectory).toHaveBeenCalled())
+  fireEvent.click(within(missing).getByRole("button", { name: "Clear paper folder" }))
+  await waitFor(() => expect(unlink).toHaveBeenCalledWith({ projectId: "p1" }))
+})
+
+test("subfolders that could not be read are listed as skipped", async () => {
+  renderPage(() => ({
+    paper: {
+      dir: "/p/paper",
+      displayDir: "paper",
+      lastSyncAt: null,
+      remoteUrl: null,
+      outputDir: null,
+      effectiveOutputDir: "build",
+      syncEnabled: true,
+      missing: false,
+    },
+    workspaceId: "paper-ws",
+    rootRelPath: "main.tex",
+    autoDetect: true,
+    skippedFolders: ["locked", "private/data"],
+  }))
+  expect((await screen.findByTestId("paper-skipped-folders")).textContent).toBe(
+    "Skipped folders that could not be read: locked, private/data",
+  )
+})

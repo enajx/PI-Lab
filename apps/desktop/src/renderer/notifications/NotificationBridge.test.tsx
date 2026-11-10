@@ -110,6 +110,52 @@ describe("NotificationBridge", () => {
     })
   })
 
+  test.each([
+    ["analysis", "/science/analysis"],
+    ["tasks", "/science/tasks"],
+  ])("routes a %s agent to its own view with its project and tab focused", async (origin, to) => {
+    render(<NotificationBridge />)
+    mocks.activation.emit({
+      type: "agent",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      agentId: "codex",
+      origin,
+    })
+
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledOnce())
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to,
+      search: {
+        projectId: "project-1",
+        sessionId: "session-1",
+        agentId: "codex",
+        agentLabel: "codex",
+      },
+    })
+  })
+
+  test("routes a routine's agent to the Project view, which can show its tab", async () => {
+    render(<NotificationBridge />)
+    mocks.activation.emit({
+      type: "agent",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      agentId: "codex",
+      origin: "routine",
+    })
+
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledOnce())
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "/projects/$projectId",
+        params: { projectId: "project-1" },
+      }),
+    )
+  })
+
   test("routes a terminal completion to the exact project session", async () => {
     render(<NotificationBridge />)
     mocks.activation.emit({

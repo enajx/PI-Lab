@@ -309,8 +309,9 @@ describe("settings.updateGeneral", () => {
     expect(updated.quitChoice).toBe("background")
     await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
     expect((await harness.caller.settings.get()).quitChoice).toBe("background")
-    await harness.caller.settings.updateGeneral({ quitChoice: "quit" })
-    expect((await harness.caller.settings.get()).quitChoice).toBe("quit")
+    await expect(
+      harness.caller.settings.updateGeneral({ quitChoice: "quit" as "ask" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
     await harness.caller.settings.updateGeneral({ quitChoice: "ask" })
     expect((await harness.caller.settings.get()).quitChoice).toBe("ask")
     await expect(

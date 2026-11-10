@@ -322,11 +322,13 @@ describe("Settings sections", () => {
     expect(screen.queryByTestId("settings-quit-choice-reset")).toBeNull()
   })
 
-  test("General shows a remembered Quit as quitting and stopping all agents", async () => {
+  test("General shows only Move to background or Ask every time, never a remembered Quit", async () => {
+    // "quit" is a value saved before Quit stopped being rememberable.
     renderSection(<GeneralSection />, { "settings.get": () => ({ quitChoice: "quit" }) })
     const choice = await screen.findByTestId("settings-quit-choice")
-    await waitFor(() => expect(choice.textContent).toContain("Quit and stop all agents"))
-    expect(screen.getByTestId("settings-quit-choice-reset")).toBeTruthy()
+    await waitFor(() => expect(choice.textContent).toBe("Ask every time"))
+    expect(document.body.textContent).not.toContain("Remembered: Quit")
+    expect(screen.queryByTestId("settings-quit-choice-reset")).toBeNull()
   })
 
   test("General does not offer a switch to hide the always-visible menu-bar icon", async () => {

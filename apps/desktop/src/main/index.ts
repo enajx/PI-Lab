@@ -407,7 +407,7 @@ const requestUserQuit = createUserQuitAction({
       message: `Quit ${app.getName()}?`,
       detail: "Move to background keeps PI Lab and its work running.",
       buttons: ["Cancel", "Move to background", count > 0 ? "Quit and stop all agents" : "Quit"],
-      checkboxLabel: "Remember my choice",
+      checkboxLabel: "Remember Move to background",
       checkboxChecked: false,
       defaultId: 0,
       cancelId: 0,

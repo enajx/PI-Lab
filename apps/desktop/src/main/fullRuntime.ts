@@ -341,13 +341,13 @@ export class FullRuntime {
     return getSettingsOrDefaults(getDb()).keepRunningAfterClose
   }
 
-  /** The Quit dialog choice saved with "Remember my choice" ("ask" when none is). */
+  /** The Quit dialog choice saved with "Remember Move to background" ("ask" when none is). */
   quitChoice(): RememberedQuitChoice {
     return getSettingsOrDefaults(getDb()).quitChoice
   }
 
   /** Save a ticked Quit dialog choice; Settings resets it to "ask". */
-  rememberQuitChoice(choice: "background" | "quit"): void {
+  rememberQuitChoice(choice: "background"): void {
     writeGeneralSettings(getDb(), { quitChoice: choice })
   }
 

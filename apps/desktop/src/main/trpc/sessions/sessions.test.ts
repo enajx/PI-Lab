@@ -938,6 +938,7 @@ describe("sessions.projectAgents", () => {
         kind: "agent",
         sessionId: "latex-session",
         agentId: LONG_FAKE_AGENT.id,
+        workspaceId: null,
         origin: "latex",
         name: LONG_FAKE_AGENT.label,
         status: "working",
@@ -947,5 +948,31 @@ describe("sessions.projectAgents", () => {
     expect(
       rows.some((row) => row.kind === "agent" && row.sessionId === fromProject.sessionId),
     ).toBe(false)
+  })
+
+  test("lists agents started from Tasks and by a routine, with their workspace", async () => {
+    const fromTasks = await h.caller.sessions.start({
+      projectId,
+      agentId: LONG_FAKE_AGENT.id,
+      origin: "tasks",
+    })
+    h.activityRegistry.register({
+      sessionId: "routine-session",
+      projectId,
+      workspaceId: fromTasks.workspaceId,
+      agentId: LONG_FAKE_AGENT.id,
+      workflowRunId: null,
+      origin: "routine",
+      turnArmed: true,
+    })
+    const rows = await h.caller.sessions.projectAgents({ projectId })
+    expect(
+      rows.map((row) =>
+        row.kind === "agent" ? [row.sessionId, row.origin, row.workspaceId] : [row.kind],
+      ),
+    ).toEqual([
+      [fromTasks.sessionId, "tasks", fromTasks.workspaceId],
+      ["routine-session", "routine", fromTasks.workspaceId],
+    ])
   })
 })

@@ -38,11 +38,11 @@ const TEST_ID_PREFIX: Record<HeaderShortcutsView, string> = {
   analysis: "analysis",
 }
 
-/** What each view records as the origin of the skill agents it starts. Tasks has none of its own. */
+/** What each view records as the origin of the skill agents it starts. */
 const SKILL_ORIGIN: Record<HeaderShortcutsView, AgentSessionOrigin> = {
   project: "project",
   latex: "latex",
-  tasks: "project",
+  tasks: "tasks",
   analysis: "analysis",
 }
 

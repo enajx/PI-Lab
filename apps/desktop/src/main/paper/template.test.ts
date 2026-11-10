@@ -1,11 +1,12 @@
 // Tests for the LaTeX template used by "Create paper": the built-in template
 // shipped with PI Lab and the user's own template set in Settings > LaTeX.
-// They run on real temp folders.
+// They run on real temp folders. One test injects a failing `rename` (mocked).
 import { existsSync } from "node:fs"
+import * as fsPromises from "node:fs/promises"
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import {
   BUILT_IN_TEMPLATE,
   clearCustomTemplate,
@@ -13,6 +14,12 @@ import {
   templateStatus,
   writeTemplate,
 } from "./template"
+
+// `rename` is the real one unless a test replaces it (see "a failed swap ...").
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>()
+  return { ...actual, rename: vi.fn(actual.rename) }
+})
 
 let root: string
 let dataDir: string
@@ -24,6 +31,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.mocked(fsPromises.rename).mockRestore()
   await rm(root, { recursive: true, force: true })
 })
 
@@ -84,6 +92,25 @@ describe("LaTeX template", () => {
     await writeTemplate(dataDir, target)
     expect(existsSync(join(target, "main.tex"))).toBe(true)
     expect(existsSync(join(target, "thesis.tex"))).toBe(false)
+  })
+
+  test("a failed swap (injected rename error) keeps the old template in use and reports the error", async () => {
+    const first = await userTemplate()
+    await setCustomTemplate(dataDir, first)
+    const second = join(root, "second")
+    await mkdir(second)
+    await writeFile(join(second, "thesis.tex"), "thesis\n")
+    const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")
+    vi.mocked(fsPromises.rename).mockImplementation(async (from, to) => {
+      if (String(from).endsWith("latex-template.new")) throw new Error("injected rename failure")
+      return actual.rename(from, to)
+    })
+    await expect(setCustomTemplate(dataDir, second)).rejects.toThrow("injected rename failure")
+    vi.mocked(fsPromises.rename).mockImplementation(actual.rename)
+    const status = await templateStatus(dataDir)
+    expect(status.custom?.source).toBe(first)
+    expect(status.custom?.files).toEqual(["figures/logo.png", "paper.tex"])
+    expect(existsSync(join(dataDir, "latex-template.old"))).toBe(false)
   })
 
   test("refuses a folder with no .tex file at its top level, or with a symbolic link", async () => {

@@ -42,7 +42,7 @@ export async function startUpdatePaper(
     ctx.skillsHomeDir,
     ctx.bundledSkillsDir,
   )
-  const root = await findRootTex(paper.dir, await listPaperFiles(paper.dir))
+  const root = await findRootTex(paper.dir, (await listPaperFiles(paper.dir)).files)
   const agentSettings = getAgentSettingsOrDefaults(ctx.db)
   const config = await readProjectAgentConfig(project, agentSettings.projectConfigStorage)
   const agentId = config.agentId ?? agentSettings.defaultAgentId ?? DEFAULT_AGENT_ID

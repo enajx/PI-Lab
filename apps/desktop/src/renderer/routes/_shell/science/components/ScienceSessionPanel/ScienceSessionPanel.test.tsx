@@ -98,7 +98,7 @@ describe("ScienceSessionPanel", () => {
     await agentReady()
     fireEvent.keyDown(window, { key: "t", metaKey: true })
     await screen.findByTestId("terminal")
-    expect(started[0]?.origin).toBe("project")
+    expect(started[0]?.origin).toBe("tasks")
     first.unmount()
 
     // The agent's PTY is still alive, so the restored tab reattaches to it.

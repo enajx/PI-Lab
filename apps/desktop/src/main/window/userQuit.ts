@@ -8,19 +8,22 @@ export interface QuitWork {
 
 type QuitChoice = "quit" | "background" | "cancel"
 
-/** The Quit dialog choice saved with "Remember my choice", or "ask" (the default). */
-export type RememberedQuitChoice = "ask" | "background" | "quit"
+/**
+ * The Quit dialog choice saved with "Remember Move to background", or "ask" (the
+ * default). Quit is never remembered.
+ */
+export type RememberedQuitChoice = "ask" | "background"
 
 interface UserQuitDependencies {
   pending(): boolean
   work(): Promise<QuitWork>
   /** Read after `work()`, which starts the full runtime that holds the setting. */
   remembered(): RememberedQuitChoice
-  /** The first Quit dialog: the chosen button and whether "Remember my choice" is ticked. */
+  /** The first Quit dialog: the chosen button and whether "Remember Move to background" is ticked. */
   choose(work: QuitWork): Promise<{ choice: QuitChoice; remember: boolean }>
   confirmRunning(work: QuitWork): Promise<QuitChoice>
-  /** Save a ticked choice so later quits skip the dialogs. */
-  remember(choice: "background" | "quit"): void
+  /** Save a ticked Move to background so later quits skip the dialogs. */
+  remember(choice: "background"): void
   quit(): void
   background(): void
   error(error: unknown): void
@@ -31,10 +34,10 @@ interface UserQuitDependencies {
  * (agents, fetching, or terminals running a command); idle shells are stopped
  * without a second prompt. Programmatic shutdown uses its existing guard.
  *
- * A remembered choice skips both dialogs: "background" moves PI Lab to the
- * background, "quit" quits and stops running work. A ticked "Remember my
- * choice" is saved only when that choice goes ahead: Cancel (in either dialog)
- * never saves, and a ticked Quit is saved only if the quit happens.
+ * A remembered "background" skips both dialogs and moves PI Lab to the
+ * background. Only Move to background can be remembered: a ticked box is
+ * saved only when the user picks Move to background in the first dialog;
+ * Quit and Cancel never save.
  */
 export function createUserQuitAction(dependencies: UserQuitDependencies): () => Promise<void> {
   let choosing = false
@@ -50,12 +53,9 @@ export function createUserQuitAction(dependencies: UserQuitDependencies): () => 
       return choice
     }
     const latest = await dependencies.work()
-    const final =
-      latest.agents > 0 || latest.terminals.length > 0
-        ? await dependencies.confirmRunning(latest)
-        : "quit"
-    if (final === "quit" && remember) dependencies.remember("quit")
-    return final
+    return latest.agents > 0 || latest.terminals.length > 0
+      ? await dependencies.confirmRunning(latest)
+      : "quit"
   }
 
   return async () => {

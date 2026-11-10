@@ -26,12 +26,39 @@ import type {
   CentralPanelRestoreState,
   SessionPane,
 } from "../../../projects/components/CentralPanel/useCentralPanel"
+import type { FocusSessionRequest } from "./sessionViewSearch"
 
 /** A session started outside the panel (a top bar button) for the panel to open as a tab. */
 export interface ScienceSessionRequest {
   /** The project it was started in; the panel opens it only while showing that project. */
   projectId: string
   pane: Omit<SessionPane, "id">
+}
+
+/**
+ * Turn an agent to focus into a session request for the panel, once per session:
+ * `setRequest` gets it when `focus` names a new session of `projectId`.
+ */
+export function useFocusSessionRequest(
+  projectId: string | undefined,
+  focus: FocusSessionRequest | null,
+  setRequest: (request: ScienceSessionRequest) => void,
+): void {
+  const sessionId = focus?.sessionId
+  const agentId = focus?.agentId
+  const agentLabel = focus?.agentLabel
+  useEffect(() => {
+    if (!projectId || !sessionId || !agentId || !agentLabel) return
+    setRequest({
+      projectId,
+      pane: {
+        kind: "agent",
+        sessionId,
+        label: agentLabel,
+        launch: { type: "agent", agentId, workspaceMode: "policy" },
+      },
+    })
+  }, [agentId, agentLabel, projectId, sessionId, setRequest])
 }
 
 interface ScienceSessionPanelProps {
@@ -295,9 +322,9 @@ function SessionsBody({
   )
 }
 
-/** Agents started here record where they came from; Tasks has no origin of its own yet. */
+/** Agents started here record the view they came from. */
 function originFor(view: SessionPanelView): AgentSessionOrigin {
-  return view === "analysis" ? "analysis" : "project"
+  return view
 }
 
 /** The saved panel state, only when it belongs to this workspace. */

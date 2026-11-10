@@ -2,13 +2,14 @@ import type { WorkflowTask } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { ChartArea, Waypoints } from "lucide-react"
-import { useState } from "react"
+import { ChartArea, ListTodo, Repeat, Waypoints } from "lucide-react"
+import { useRef, useState } from "react"
 import type { ProjectAgentRow, ProjectAgentStatus } from "../../../../../../shared/projectAgents"
 import { elapsedSince } from "../../../../../components/elapsed"
 import { LatexLogo } from "../../../../../components/LatexText"
 import { ProjectWorkflowDialog, workflowTaskLabel } from "../../../../../components/ProjectWorkflow"
 import { useTranslate } from "../../../../../i18n/language"
+import { navigateToAgent } from "../../../../../notifications/agentNavigation"
 import { useTRPC } from "../../../../../trpc/react"
 
 /** How often the box re-reads the project's agents (ms). */
@@ -35,9 +36,10 @@ export function formatLastActive(lastActiveAt: number, now: number): string {
 
 /**
  * The Project view's "Project Agents" box: the project's live agents started
- * outside the Project view (LaTeX Editor, Analysis) and its running background
- * workflow runs. Hidden when there are none. Clicking an agent opens its view
- * with its tab focused; clicking a background run opens its result window.
+ * outside the Project view (LaTeX Editor, Analysis, Tasks, routines) and its
+ * running background workflow runs. Hidden when there are none. Clicking an agent
+ * opens its view on this project with its tab focused (a routine's agent opens as
+ * a tab here); clicking a background run opens its result window.
  */
 export function ProjectAgentsBox({
   projectId,
@@ -52,6 +54,7 @@ export function ProjectAgentsBox({
   const trpc = useTRPC()
   const navigate = useNavigate()
   const [openTask, setOpenTask] = useState<WorkflowTask | null>(null)
+  const requests = useRef(0)
   const query = useQuery(
     trpc.sessions.projectAgents.queryOptions(
       { projectId },
@@ -65,19 +68,19 @@ export function ProjectAgentsBox({
       setOpenTask(row.task)
       return
     }
-    if (row.origin === "latex") {
-      void navigate({
-        to: "/science/latex",
-        search: {
-          projectId,
-          sessionId: row.sessionId,
-          agentId: row.agentId,
-          agentLabel: row.name,
-        },
-      })
-      return
-    }
-    void navigate({ to: "/science/analysis" })
+    requests.current += 1
+    navigateToAgent(
+      navigate,
+      {
+        projectId,
+        workspaceId: row.workspaceId,
+        sessionId: row.sessionId,
+        agentId: row.agentId,
+        origin: row.origin,
+        label: row.name,
+      },
+      `project-agents-${requests.current}`,
+    )
   }
 
   const dialog = openTask ? (
@@ -128,6 +131,10 @@ export function ProjectAgentsBox({
                     <LatexLogo />
                   ) : origin === "analysis" ? (
                     <ChartArea className="size-3.5" aria-label={t("Analysis")} />
+                  ) : origin === "tasks" ? (
+                    <ListTodo className="size-3.5" aria-label={t("Tasks")} />
+                  ) : origin === "routine" ? (
+                    <Repeat className="size-3.5" aria-label={t("Routine")} />
                   ) : (
                     <Waypoints className="size-3.5" aria-label={t("Background routine")} />
                   )}

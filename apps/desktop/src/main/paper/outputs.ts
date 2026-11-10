@@ -57,7 +57,7 @@ export async function excludeEffectiveOutputs(
   defaultOutputDir: string,
 ): Promise<void> {
   if (paper.syncEnabled === false) return
-  const root = await findRootTex(paper.dir, await listPaperFiles(paper.dir))
+  const root = await findRootTex(paper.dir, (await listPaperFiles(paper.dir)).files)
   await excludePaperOutputs(paper.dir, effectiveOutputDir(paper, defaultOutputDir), root)
 }
 
@@ -77,7 +77,8 @@ export async function excludeDefaultOutputs(db: PiLabDatabase): Promise<void> {
 
 /**
  * A file tracked in the paper repo that lies in a folder named `outputDir` (at
- * any depth, as the exclude rule matches it), or null. Excluding such a folder
+ * any depth, since any root .tex in the paper may build into its own
+ * `outputDir`), or null. Excluding such a folder
  * would hide sources (e.g. `figures`) from Sync. "." is not a folder and is
  * never refused here.
  */

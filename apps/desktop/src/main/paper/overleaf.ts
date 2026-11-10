@@ -70,6 +70,28 @@ export function isOverleafUrl(url: string): boolean {
   return new URL(url).hostname.toLowerCase() === OVERLEAF_HOST
 }
 
+/** Error message for an Overleaf URL that is not one. */
+export const NOT_OVERLEAF_URL = "Enter an Overleaf Git URL (https://git.overleaf.com/…)"
+
+/** Error message for an Overleaf URL that carries a token or another user name. */
+export const URL_WITH_TOKEN =
+  "Paste the Git URL without the token; enter the token in the token field."
+
+/**
+ * Why `url` cannot be used as an Overleaf Git URL typed by the user, or null
+ * when it can. It must be an Overleaf URL ({@link isOverleafUrl}) with no
+ * password and no user name other than `git`: Git would store such a token in
+ * `.git/config` and show it in error messages.
+ */
+export function overleafUrlProblem(url: string): string | null {
+  if (!isOverleafUrl(url)) return NOT_OVERLEAF_URL
+  const parsed = new URL(url)
+  if (parsed.password !== "" || (parsed.username !== "" && parsed.username !== "git")) {
+    return URL_WITH_TOKEN
+  }
+  return null
+}
+
 /**
  * A remote URL safe to show in the renderer: credentials embedded in an
  * http(s) URL (`user:password@` or `token@`) are removed. A bare `git@` user
@@ -98,8 +120,10 @@ export async function writeAskpassScript(dir: string): Promise<string> {
  * Ask the user's Git whether it has a credential for git.overleaf.com with
  * user name `git`, the user name Overleaf tokens use. Runs `git credential
  * fill` with `env` (normally `process.env`), so the user's configured
- * credential helpers answer. Git never prompts: terminal prompts are off and
- * GIT_ASKPASS is `true`, which answers with an empty password. Only whether a
+ * credential helpers answer. Nothing ever asks the user: terminal prompts are
+ * off, GIT_ASKPASS and SSH_ASKPASS are `true` (an askpass that answers with an
+ * empty password), and Git Credential Manager is told never to show a sign-in
+ * window (GCM_INTERACTIVE=never). Only whether a
  * non-empty password came back is returned; the secret itself is dropped.
  * Throws when git fails or the lookup times out.
  */
@@ -109,7 +133,13 @@ export function gitHasOverleafCredential(env: NodeJS.ProcessEnv): Promise<boolea
       "git",
       ["credential", "fill"],
       {
-        env: { ...env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true" },
+        env: {
+          ...env,
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_ASKPASS: "true",
+          SSH_ASKPASS: "true",
+          GCM_INTERACTIVE: "never",
+        },
         timeout: GIT_CREDENTIAL_TIMEOUT_MS,
         windowsHide: true,
         encoding: "utf8",

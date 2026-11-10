@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../../../../test/fakeTrpcClient"
+import type { FocusSessionRequest } from "../ScienceSessionPanel"
 import type { TaskRecord, TaskSource } from "./TasksWorkspace"
 
 /**
@@ -11,6 +12,13 @@ import type { TaskRecord, TaskSource } from "./TasksWorkspace"
  */
 const mocks = vi.hoisted(() => ({ navigate: vi.fn() }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => mocks.navigate }))
+
+// xterm needs layout APIs jsdom lacks, so the terminal is a stub that shows its session id.
+vi.mock("../../../../../Terminal", () => ({
+  Terminal: ({ inputKind, sessionId }: { inputKind: "agent" | "terminal"; sessionId?: string }) => (
+    <div data-testid="terminal" data-input-kind={inputKind} data-session-id={sessionId} />
+  ),
+}))
 
 const { ScienceTasks } = await import("./ScienceTasks")
 
@@ -52,18 +60,23 @@ function task(projectId: string, projectName: string, title: string): TaskRecord
 }
 
 /** Mount the Tasks tab with two projects, one task each. */
-function renderTasks(initialProjectId: string | undefined) {
+function renderTasks(initialProjectId: string | undefined, focusSession?: FocusSessionRequest) {
   const client = createFakeTrpcClient({
     "science.tasks.list": () => ({
       tasks: [task("p1", "Alpha", "Build parser"), task("p2", "Beta", "Run benchmark")],
       sources: [source("p1", "Alpha"), source("p2", "Beta")],
     }),
     "agents.list": () => [],
+    "workspaces.ensureMain": () => ({ id: "ws-2" }),
+    "settings.get": () => ({ agents: { defaultAgentId: "claude-code" } }),
+    "agents.projectChoice": () => ({ agentId: null, storage: "app" }),
+    "terminal.list": () => [{ id: "agent-9", alive: true }],
+    "files.tree": () => [],
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceTasks initialProjectId={initialProjectId} />
+      <ScienceTasks initialProjectId={initialProjectId} focusSession={focusSession ?? null} />
     </AppProviders>,
   )
 }
@@ -132,4 +145,14 @@ test("opens on the remembered project", async () => {
   const select = (await screen.findByTestId("tasks-project-select")) as HTMLButtonElement
   await waitFor(() => expect(select.value).toBe("p1"))
   expect(rowTitles()).toEqual([expect.stringContaining("Build parser")])
+})
+
+test("arriving with an agent to focus opens it as the active tab of the session panel", async () => {
+  renderTasks("p2", { sessionId: "agent-9", agentId: "claude-code", agentLabel: "Claude Code" })
+  const terminal = await screen.findByTestId("terminal")
+  expect(terminal.getAttribute("data-session-id")).toBe("agent-9")
+  expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
+  const tab = screen.getByTestId("central-tab")
+  expect(tab.getAttribute("data-active")).toBe("true")
+  expect(tab.textContent).toContain("Claude Code")
 })

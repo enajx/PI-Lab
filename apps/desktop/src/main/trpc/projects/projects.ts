@@ -878,8 +878,8 @@ export const projectsRouter = router({
    * row so the dashboard re-renders from the mutation result.
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
-    // The linked paper folder, the stage and the results folder are not part of
-    // the card dialog; keep them.
+    // The linked paper folder, the paper auto-detect choice, the stage and the
+    // results folder are not part of the card dialog; keep them.
     const stored = ctx.db
       .select({ metadata: projects.metadata })
       .from(projects)
@@ -889,6 +889,7 @@ export const projectsRouter = router({
     if (stored?.paper !== undefined) kept.paper = stored.paper
     if (stored?.stage !== undefined) kept.stage = stored.stage
     if (stored?.resultsFolder !== undefined) kept.resultsFolder = stored.resultsFolder
+    if (stored?.paperAutoDetect !== undefined) kept.paperAutoDetect = stored.paperAutoDetect
     const metadata: ProjectMetadata | null =
       Object.keys(kept).length === 0 ? input.metadata : { ...input.metadata, ...kept }
     const row = ctx.db
@@ -949,9 +950,17 @@ export const projectsRouter = router({
       const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
       const agentValues = await saveDetailsAgent(ctx, project, input.details)
+      // Re-read the row after the await: metadata written meanwhile (stage, sync
+      // time, results folder) must not be lost; only the detail fields change.
+      const current = ctx.db
+        .select({ metadata: projects.metadata })
+        .from(projects)
+        .where(eq(projects.id, project.id))
+        .get()
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
       const updated = ctx.db
         .update(projects)
-        .set({ ...detailsValues(project, input.details), ...agentValues, updatedAt: Date.now() })
+        .set({ ...detailsValues(current, input.details), ...agentValues, updatedAt: Date.now() })
         .where(eq(projects.id, project.id))
         .returning()
         .get()

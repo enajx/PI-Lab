@@ -27,7 +27,12 @@ import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
-import { ScienceSessionPanel, type ScienceSessionRequest } from "../ScienceSessionPanel"
+import {
+  type FocusSessionRequest,
+  ScienceSessionPanel,
+  type ScienceSessionRequest,
+  useFocusSessionRequest,
+} from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
 
@@ -53,7 +58,14 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  * most-recently-opened project (`projects.list` is ordered that way). The two
  * columns each own their own scroll.
  */
-export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: string }) {
+export function ScienceAnalysis({
+  initialProjectId,
+  focusSession,
+}: {
+  initialProjectId?: string
+  /** An agent session of the initial project to open and focus in the session panel, or null. */
+  focusSession: FocusSessionRequest | null
+}) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -96,6 +108,7 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
   // A session a top bar button started, until the session panel opens it.
   const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
   const clearSessionRequest = useCallback(() => setSessionRequest(null), [])
+  useFocusSessionRequest(initialProjectId, focusSession, setSessionRequest)
   const [shortcutError, setShortcutError] = useState<string | null>(null)
   // Analyze experiments follows the new-session setting (Settings > Shortcuts), which
   // opens a terminal agent by default. When it is set to "Terminal", the project's

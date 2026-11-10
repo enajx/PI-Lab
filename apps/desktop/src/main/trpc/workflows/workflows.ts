@@ -23,7 +23,7 @@ import type {
   StartedNonInteractiveProcess,
 } from "../../automations/nonInteractiveRunner"
 import { computeGitStateHash, isGitRepo } from "../../git"
-import { conflictedFiles, isMerging } from "../../git/remote"
+import { conflictKinds, isMerging } from "../../git/remote"
 import { requireSyncEnabled } from "../../paper/overleaf"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
@@ -580,7 +580,8 @@ export function restoreProjectWorkflow(
 /**
  * Resolve where a run works. latex-merge runs in the linked paper folder and
  * needs Sync on for the paper and a merge in progress there with at least one
- * conflicted file; other tasks run in the project repo.
+ * conflicted text file (the only files it is given); other tasks run in the
+ * project repo.
  */
 async function workflowTarget(project: Project, task: WorkflowTask): Promise<WorkflowTarget> {
   if (task !== "latex-merge") return { cwd: project.repoPath, conflictedFiles: [] }
@@ -593,11 +594,14 @@ async function workflowTarget(project: Project, task: WorkflowTask): Promise<Wor
   }
   requireSyncEnabled(paper.syncEnabled)
   const dir = paper.dir
-  const files = (await isGitRepo(dir)) && (await isMerging(dir)) ? await conflictedFiles(dir) : []
+  // Only text conflicts go to the agent; figures and modify/delete conflicts
+  // are settled by the user's per-file choice in the review.
+  const conflicts = (await isGitRepo(dir)) && (await isMerging(dir)) ? await conflictKinds(dir) : []
+  const files = conflicts.filter((file) => file.kind === "text").map((file) => file.relPath)
   if (files.length === 0) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "The paper folder has no merge conflict to resolve",
+      message: "The paper folder has no text file in conflict for the agent to merge",
     })
   }
   return { cwd: dir, conflictedFiles: files }

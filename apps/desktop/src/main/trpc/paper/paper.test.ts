@@ -96,6 +96,11 @@ async function useTestCredentialHelper(): Promise<void> {
   await execFileAsync("git", ["config", "--global", "credential.helper", helper])
 }
 
+/** Make Git (test global config) use the local `path` whenever it is given the Overleaf URL `url`. */
+async function useOverleafStandIn(url: string, path: string): Promise<void> {
+  await execFileAsync("git", ["config", "--global", `url.${path}.insteadOf`, url])
+}
+
 /** Clone the remote outside the project and link it, returning the paper folder. */
 async function linkOutsideClone(): Promise<string> {
   const dir = join(h.dataDir, "my-paper")
@@ -166,6 +171,7 @@ describe("link, get, outline, unlink", () => {
       workspaceId: null,
       rootRelPath: null,
       autoDetect: true,
+      skippedFolders: [],
     })
     const dir = await linkOutsideClone()
     const result = await h.caller.paper.get({ projectId })
@@ -178,6 +184,7 @@ describe("link, get, outline, unlink", () => {
       outputDir: null,
       effectiveOutputDir: "build",
       syncEnabled: true,
+      missing: false,
     })
     expect(result.rootRelPath).toBe("main.tex")
     const workspaceId = result.workspaceId
@@ -215,6 +222,7 @@ describe("link, get, outline, unlink", () => {
       workspaceId: null,
       rootRelPath: null,
       autoDetect: false,
+      skippedFolders: [],
     })
     expect((await h.caller.projects.get({ id: projectId })).metadata?.venue).toBe("NeurIPS")
     expect(existsSync(join(dir, "main.tex"))).toBe(true)
@@ -394,6 +402,27 @@ describe("addOverleaf", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" })
   })
 
+  test("a token typed for the clone is saved only when the clone works", async () => {
+    // insteadOf sends these Overleaf URLs to local paths: a missing one (the clone fails) and the bare repo.
+    await useOverleafStandIn("https://git@git.overleaf.com/bad", join(h.dataDir, "missing.git"))
+    await useOverleafStandIn("https://git@git.overleaf.com/good", bare)
+    await expect(
+      h.caller.paper.addOverleaf({
+        projectId,
+        url: "https://git@git.overleaf.com/bad",
+        token: "olp_wrong",
+      }),
+    ).rejects.toThrow("does not appear to be a git repository")
+    expect(await h.caller.paper.token.status()).toEqual({ configured: false, source: null })
+    const state = await h.caller.paper.addOverleaf({
+      projectId,
+      url: "https://git@git.overleaf.com/good",
+      token: "olp_right",
+    })
+    expect(state.paper?.dir).toBe(join(h.repoDir, "paper"))
+    expect(await h.caller.paper.token.status()).toEqual({ configured: true, source: "saved" })
+  })
+
   test("clonePaper clones into <project>/paper, excludes it from the project repo, and links it", async () => {
     await clonePaper(h.db, projectId, bare, { env: null })
     const dir = join(h.repoDir, "paper")
@@ -404,7 +433,7 @@ describe("addOverleaf", () => {
     expect((await h.caller.paper.get({ projectId })).paper?.remoteUrl).toBe(bare)
     // Build output is hidden in the paper repo itself, locally, not in its .gitignore.
     const paperExclude = await readFile(join(dir, ".git", "info", "exclude"), "utf8")
-    expect(paperExclude.split("\n")).toContain("build/")
+    expect(paperExclude.split("\n")).toContain("/build/")
     expect(existsSync(join(dir, ".gitignore"))).toBe(false)
   })
 })
@@ -422,7 +451,7 @@ describe("build output folder", () => {
     expect(set.paper).toMatchObject({ outputDir: "out/pdf", effectiveOutputDir: "out/pdf" })
     const exclude = async (): Promise<string[]> =>
       (await readFile(join(dir, ".git", "info", "exclude"), "utf8")).split("\n")
-    expect(await exclude()).toContain("**/out/pdf/")
+    expect(await exclude()).toContain("/out/pdf/")
     await h.caller.paper.setOutputDir({ projectId, outputDir: "." })
     expect(await exclude()).toContain("/main.pdf")
     const cleared = await h.caller.paper.setOutputDir({ projectId, outputDir: "" })
@@ -439,7 +468,7 @@ describe("build output folder", () => {
     ).toBe("pdfout")
     expect((await h.caller.paper.get({ projectId })).paper?.effectiveOutputDir).toBe("pdfout")
     const exclude = await readFile(join(dir, ".git", "info", "exclude"), "utf8")
-    expect(exclude.split("\n")).toContain("pdfout/")
+    expect(exclude.split("\n")).toContain("/pdfout/")
   })
 })
 
@@ -488,8 +517,6 @@ describe("sync and resolve", { timeout: 30_000 }, () => {
   test("build output is not committed or pushed by sync", async () => {
     const dir = await linkOutsideClone()
     await writeFile(join(dir, "build", "main.aux"), "aux\n")
-    await mkdir(join(dir, "sections", "build"))
-    await writeFile(join(dir, "sections", "build", "x.log"), "log\n")
     await writeFile(join(dir, "main.tex"), "\\documentclass{article}\nedited\n")
     expect(await h.caller.paper.sync({ projectId, commit: false })).toEqual({
       state: "needs-commit",
@@ -498,7 +525,6 @@ describe("sync and resolve", { timeout: 30_000 }, () => {
     expect((await h.caller.paper.sync({ projectId, commit: true })).state).toBe("synced")
     const files = await remoteFiles()
     expect(files).not.toContain("build/main.aux")
-    expect(files).not.toContain("sections/build/x.log")
   })
 
   test("Sync does not commit build output in a custom output folder or next to main.tex", async () => {
@@ -984,6 +1010,40 @@ describe("create paper", () => {
     expect((await h.caller.paper.template.clear()).custom).toBeNull()
   })
 
+  test("with no Git name and email, Start draft is refused before anything is written", async () => {
+    // The test global config is empty; useConfigOnly stops Git guessing a name from the system.
+    await execFileAsync("git", ["config", "--global", "user.useConfigOnly", "true"])
+    const dir = join(h.repoDir, "paper")
+    await expect(h.caller.paper.create({ projectId, dir })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("Set your Git name and email first"),
+    })
+    expect(existsSync(dir)).toBe(false)
+    expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
+  })
+
+  test("a failed commit removes the folder Start draft made, links nothing, and reports Git's error", async () => {
+    await useCommitIdentity()
+    const hooks = join(h.dataDir, "test-hooks")
+    await mkdir(hooks)
+    await writeFile(join(hooks, "pre-commit"), "#!/bin/sh\necho blocked by test >&2\nexit 1\n", {
+      mode: 0o755,
+    })
+    await execFileAsync("git", ["config", "--global", "core.hooksPath", hooks])
+    const dir = join(h.repoDir, "paper")
+    await expect(h.caller.paper.create({ projectId, dir })).rejects.toThrow("blocked by test")
+    expect(existsSync(dir)).toBe(false)
+    expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
+    // A folder that was there before is never deleted.
+    const empty = join(h.dataDir, "empty-paper")
+    await mkdir(empty)
+    await expect(h.caller.paper.create({ projectId, dir: empty })).rejects.toThrow(
+      "blocked by test",
+    )
+    expect(existsSync(empty)).toBe(true)
+    expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
+  })
+
   test("refuses a folder with files in it, or whose parent folder is missing", async () => {
     const full = join(h.dataDir, "full")
     await mkdir(full)
@@ -1056,6 +1116,28 @@ describe("connect to Overleaf", { timeout: 30_000 }, () => {
     expect((await git(blank, ["ls-tree", "--name-only", "master"])).trim()).toBe("thesis.tex")
   })
 
+  test("a token typed for Connect is saved only when the connect works", async () => {
+    await useCommitIdentity()
+    await h.caller.paper.create({ projectId, dir: join(h.repoDir, "paper") })
+    await useOverleafStandIn("https://git@git.overleaf.com/bad", join(h.dataDir, "missing.git"))
+    await useOverleafStandIn("https://git@git.overleaf.com/good", await blankOverleafProject())
+    await expect(
+      h.caller.paper.connectOverleaf({
+        projectId,
+        url: "https://git@git.overleaf.com/bad",
+        token: "olp_wrong",
+      }),
+    ).rejects.toThrow("does not appear to be a git repository")
+    expect(await h.caller.paper.token.status()).toEqual({ configured: false, source: null })
+    const result = await h.caller.paper.connectOverleaf({
+      projectId,
+      url: "https://git@git.overleaf.com/good",
+      token: "olp_right",
+    })
+    expect(result.state).toBe("synced")
+    expect(await h.caller.paper.token.status()).toEqual({ configured: true, source: "saved" })
+  })
+
   test("a rejected push leaves the paper unconnected, so Connect can be tried again", async () => {
     await useCommitIdentity()
     await h.caller.paper.create({ projectId, dir: join(h.repoDir, "paper") })
@@ -1068,5 +1150,139 @@ describe("connect to Overleaf", { timeout: 30_000 }, () => {
     expect((await git(join(h.repoDir, "paper"), ["remote"])).trim()).toBe("")
     await rm(hook)
     expect((await connectRemote(h.db, projectId, blank, { env: null })).state).toBe("synced")
+  })
+})
+
+describe("a moved paper folder", () => {
+  test("is reported as missing with its saved path, and can be cleared or chosen again", async () => {
+    const dir = await linkOutsideClone()
+    await rm(dir, { recursive: true })
+    const state = await h.caller.paper.get({ projectId })
+    expect(state.paper).toMatchObject({ dir, missing: true })
+    expect(state.rootRelPath).toBeNull()
+    const again = await linkOutsideClone()
+    expect((await h.caller.paper.get({ projectId })).paper).toMatchObject({
+      dir: again,
+      missing: false,
+    })
+    await rm(again, { recursive: true })
+    await h.caller.paper.unlink({ projectId })
+    expect((await h.caller.paper.get({ projectId })).paper).toBeNull()
+  })
+
+  test("an unreadable subfolder is skipped and listed, not fatal", async () => {
+    const dir = await linkOutsideClone()
+    const locked = join(dir, "locked")
+    await mkdir(locked)
+    await chmod(locked, 0o000)
+    try {
+      const state = await h.caller.paper.get({ projectId })
+      expect(state.rootRelPath).toBe("main.tex")
+      expect(state.skippedFolders).toEqual(["locked"])
+      expect(await h.caller.paper.outline({ projectId })).not.toEqual([])
+    } finally {
+      await chmod(locked, 0o755)
+    }
+  })
+})
+
+describe("build output ignore rules", () => {
+  /** True when git ignores `relPath` in `dir`. */
+  async function ignored(dir: string, relPath: string): Promise<boolean> {
+    const result = await execFileAsync("git", ["-C", dir, "check-ignore", "-q", relPath]).then(
+      () => true,
+      () => false,
+    )
+    return result
+  }
+
+  test("cover only the outputs of the root .tex, not other build/ folders or *.out files", async () => {
+    const dir = await linkOutsideClone()
+    expect(await ignored(dir, "build/main.pdf")).toBe(true)
+    expect(await ignored(dir, "code/build/tool.py")).toBe(false)
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "." })
+    expect(await ignored(dir, "main.pdf")).toBe(true)
+    expect(await ignored(dir, "main.out")).toBe(true)
+    expect(await ignored(dir, "main.synctex.gz")).toBe(true)
+    // .aux files of \include'd chapters are written next to them.
+    expect(await ignored(dir, "chapters/intro.aux")).toBe(true)
+    expect(await ignored(dir, "slurm/job-1.out")).toBe(false)
+    expect(await ignored(dir, "run.log")).toBe(false)
+    expect(await ignored(dir, "figures/plot.pdf")).toBe(false)
+  })
+})
+
+describe("paper metadata writes after network calls", { timeout: 30_000 }, () => {
+  test("an output folder change made during Connect is kept", async () => {
+    await useCommitIdentity()
+    await h.caller.paper.create({ projectId, dir: join(h.repoDir, "paper") })
+    const blank = await blankOverleafProject()
+    // The push waits, so the output folder change lands while Connect runs.
+    const hook = join(blank, "hooks", "pre-receive")
+    await writeFile(hook, "#!/bin/sh\nsleep 1\nexit 0\n")
+    await chmod(hook, 0o755)
+    const connecting = connectRemote(h.db, projectId, blank, { env: null })
+    await h.caller.paper.setOutputDir({ projectId, outputDir: "pdf" })
+    expect((await connecting).state).toBe("synced")
+    expect((await h.caller.paper.get({ projectId })).paper).toMatchObject({
+      outputDir: "pdf",
+      remoteUrl: blank,
+    })
+  })
+})
+
+describe("Overleaf URLs with credentials", () => {
+  test("are refused with a message pointing at the token field", async () => {
+    for (const url of [
+      "https://git:olp_secret@git.overleaf.com/abc",
+      "https://olp_secret@git.overleaf.com/abc",
+    ]) {
+      await expect(h.caller.paper.addOverleaf({ projectId, url })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Paste the Git URL without the token; enter the token in the token field.",
+      })
+      await expect(h.caller.paper.connectOverleaf({ projectId, url })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Paste the Git URL without the token; enter the token in the token field.",
+      })
+    }
+  })
+})
+
+describe("per-file conflict choices", { timeout: 30_000 }, () => {
+  test("conflicts are listed by kind, and one file can take one side", async () => {
+    const dir = await linkOutsideClone()
+    await overleafCommit(async (theirs) => {
+      await writeFile(join(theirs, "main.tex"), "\\documentclass{article}\nfrom overleaf\n")
+      await writeFile(join(theirs, "figures", "plot.png"), "\0theirs")
+      await rm(join(theirs, "sections", "method.tex"))
+      await writeFile(join(theirs, "refs.bib"), "@article{b, title={B}}\n")
+    })
+    await writeFile(join(dir, "main.tex"), "\\documentclass{article}\nfrom pi lab\n")
+    await writeFile(join(dir, "figures", "plot.png"), "\0mine")
+    await writeFile(join(dir, "sections", "method.tex"), "\\section{Method edited}\n")
+    await rm(join(dir, "refs.bib"))
+    expect((await h.caller.paper.sync({ projectId, commit: true })).state).toBe("conflict")
+    expect(await h.caller.paper.conflicts({ projectId })).toEqual([
+      { relPath: "figures/plot.png", kind: "binary" },
+      { relPath: "main.tex", kind: "text" },
+      { relPath: "refs.bib", kind: "deleted-mine" },
+      { relPath: "sections/method.tex", kind: "deleted-overleaf" },
+    ])
+    await h.caller.paper.resolveFile({ projectId, relPath: "figures/plot.png", choice: "overleaf" })
+    await h.caller.paper.resolveFile({ projectId, relPath: "refs.bib", choice: "mine" })
+    await h.caller.paper.resolveFile({
+      projectId,
+      relPath: "sections/method.tex",
+      choice: "mine",
+    })
+    expect(await h.caller.paper.conflicts({ projectId })).toEqual([
+      { relPath: "main.tex", kind: "text" },
+    ])
+    await writeFile(join(dir, "main.tex"), "\\documentclass{article}\nboth\n")
+    expect((await h.caller.paper.sync({ projectId, commit: true })).state).toBe("synced")
+    expect(await git(bare, ["show", "main:figures/plot.png"])).toBe("\0theirs")
+    expect(await remoteFiles()).not.toContain("refs.bib")
+    expect(await git(bare, ["show", "main:sections/method.tex"])).toBe("\\section{Method edited}\n")
   })
 })

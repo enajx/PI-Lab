@@ -674,20 +674,27 @@ describe("Plan research skill", () => {
   })
 })
 
-/** Create a Git repo in `dir` whose main.tex is left in a merge conflict. */
-function conflictedPaperRepo(dir: string): void {
+/**
+ * Create a Git repo in `dir` whose main.tex is left in a merge conflict. With
+ * `figure`, the binary plot.png conflicts too.
+ */
+function conflictedPaperRepo(dir: string, figure: boolean): void {
   const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe" })
+  const write = (side: string): void => {
+    writeFileSync(join(dir, "main.tex"), `${side}\n`)
+    if (figure) writeFileSync(join(dir, "plot.png"), `\0${side}`)
+  }
   execFileSync("git", ["init", "-b", "main", dir], { stdio: "pipe" })
   git(["config", "user.email", "test@pi-lab.local"])
   git(["config", "user.name", "PI Lab Test"])
-  writeFileSync(join(dir, "main.tex"), "base\n")
+  write("base")
   git(["add", "."])
   git(["commit", "-m", "base"])
   git(["checkout", "-b", "other"])
-  writeFileSync(join(dir, "main.tex"), "other\n")
+  write("other")
   git(["commit", "-am", "other"])
   git(["checkout", "main"])
-  writeFileSync(join(dir, "main.tex"), "mine\n")
+  write("mine")
   git(["commit", "-am", "mine"])
   // The merge stops on the conflict (non-zero exit), which is the state this fixture wants.
   const merge = spawnSync("git", ["-C", dir, "merge", "other"], { stdio: "pipe" })
@@ -701,7 +708,7 @@ describe("LaTeX merge (latex-merge)", () => {
     try {
       const paperDir = join(harness.dataDir, "paper-outside")
       await mkdir(paperDir)
-      conflictedPaperRepo(paperDir)
+      conflictedPaperRepo(paperDir, false)
       await harness.caller.paper.link(withTex({ projectId, dir: paperDir, rootChoice: null }))
 
       await harness.caller.workflows.run({ projectId, task: "latex-merge" })
@@ -716,6 +723,24 @@ describe("LaTeX merge (latex-merge)", () => {
       const prompt = calls[0]?.args.at(-1) ?? ""
       expect(prompt).toContain("main.tex")
       expect(prompt).toContain("Do not commit")
+    } finally {
+      await harness.dispose()
+    }
+  })
+
+  test("gives the agent only the text files, not a conflicted figure", async () => {
+    const { calls, runner } = makeRunner(() => ok("Merged main.tex"))
+    const { harness, projectId } = await openProject(runner)
+    try {
+      const paperDir = join(harness.dataDir, "paper-outside")
+      await mkdir(paperDir)
+      conflictedPaperRepo(paperDir, true)
+      await harness.caller.paper.link(withTex({ projectId, dir: paperDir, rootChoice: null }))
+      await harness.caller.workflows.run({ projectId, task: "latex-merge" })
+      await settle(harness, projectId, "latex-merge")
+      const prompt = calls[0]?.args.at(-1) ?? ""
+      expect(prompt).toContain("- main.tex")
+      expect(prompt).not.toContain("plot.png")
     } finally {
       await harness.dispose()
     }

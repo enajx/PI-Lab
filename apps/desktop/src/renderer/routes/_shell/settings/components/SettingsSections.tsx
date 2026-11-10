@@ -162,12 +162,10 @@ export function GeneralSection() {
           <p className="text-muted-foreground text-xs" data-testid="settings-quit-choice">
             {quitChoice === "background"
               ? t("Remembered: Move to background")
-              : quitChoice === "quit"
-                ? t("Remembered: Quit and stop all agents")
-                : t("Ask every time")}
+              : t("Ask every time")}
           </p>
         </div>
-        {quitChoice !== "ask" ? (
+        {quitChoice === "background" ? (
           <Button
             type="button"
             size="sm"

@@ -192,9 +192,9 @@ test("builds into the paper's output folder or the global default, and excludes 
   expect(nextTo.relPath).toBe("other.pdf")
   // The build excludes the outputs of the root it built, not only main.tex's.
   const exclude = (await readFile(join(paperDir, ".git", "info", "exclude"), "utf8")).split("\n")
-  expect(exclude).toContain("**/out/pdf/")
+  expect(exclude).toContain("/out/pdf/")
   expect(exclude).toContain("/other.pdf")
-  expect(exclude).toContain("*.synctex.gz")
+  expect(exclude).toContain("/other.synctex.gz")
 }, 60_000)
 
 test("a build in the project folder linked with Sync off writes no exclude rule", async (context) => {

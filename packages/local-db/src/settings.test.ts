@@ -253,3 +253,30 @@ describe("Auto LaTeX provider migration", () => {
     expect(migrateFrom("system")).toBe("system")
   })
 })
+
+describe("Remembered Quit migration", () => {
+  /** Migrate a DB to just before 0034, store `choice`, then run every migration. */
+  function migrateFrom(choice: string): string {
+    const folder = join(dataDir, `before-quit-${choice}`)
+    cpSync(resolveMigrationsDir(), folder, { recursive: true })
+    const journalPath = join(folder, "meta", "_journal.json")
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"))
+    journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 34)
+    writeFileSync(journalPath, JSON.stringify(journal))
+    const path = join(dataDir, `quit-${choice}.db`)
+    const legacy = runMigrations(path, folder)
+    legacy.sqlite
+      .prepare("INSERT INTO settings (id, quit_choice, updated_at) VALUES (1, ?, 1234)")
+      .run(choice)
+    legacy.sqlite.close()
+    const migrated = runMigrations(path)
+    const saved = getSettingsOrDefaults(migrated.db).quitChoice
+    migrated.sqlite.close()
+    return saved
+  }
+
+  it("moves a saved Quit choice to ask and keeps Move to background", () => {
+    expect(migrateFrom("quit")).toBe("ask")
+    expect(migrateFrom("background")).toBe("background")
+  })
+})

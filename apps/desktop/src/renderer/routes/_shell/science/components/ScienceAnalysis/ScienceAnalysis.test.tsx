@@ -5,10 +5,18 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
+import type { FocusSessionRequest } from "../ScienceSessionPanel"
 
 // The router is a fake (mocked): the picker's address change is asserted as a call.
 const mocks = vi.hoisted(() => ({ navigate: vi.fn() }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => mocks.navigate }))
+
+// xterm needs layout APIs jsdom lacks, so the terminal is a stub that shows its session id.
+vi.mock("../../../../../Terminal", () => ({
+  Terminal: ({ inputKind, sessionId }: { inputKind: "agent" | "terminal"; sessionId?: string }) => (
+    <div data-testid="terminal" data-input-kind={inputKind} data-session-id={sessionId} />
+  ),
+}))
 
 const { ScienceAnalysis } = await import("./ScienceAnalysis")
 
@@ -19,12 +27,16 @@ const { ScienceAnalysis } = await import("./ScienceAnalysis")
  * no-projects states — never copy text or shadcn classes.
  */
 
-function renderAnalysis(handlers: FakeHandlers, initialProjectId?: string) {
+function renderAnalysis(
+  handlers: FakeHandlers,
+  initialProjectId?: string,
+  focusSession?: FocusSessionRequest,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient(handlers)
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceAnalysis initialProjectId={initialProjectId} />
+      <ScienceAnalysis initialProjectId={initialProjectId} focusSession={focusSession ?? null} />
     </AppProviders>,
   )
 }
@@ -923,6 +935,32 @@ describe("ScienceAnalysis", () => {
       replace: true,
     })
     expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p1")
+  })
+
+  test("arriving with an agent to focus opens it as the active tab of the session panel", async () => {
+    renderAnalysis(
+      {
+        "projects.list": () => [
+          project({ id: "p1", name: "alpha" }),
+          project({ id: "p2", name: "beta" }),
+        ],
+        "science.analysis.listFiles": () => listing([]),
+        "workspaces.ensureMain": () => ({ id: "ws-2" }),
+        "settings.get": () => ({ agents: { defaultAgentId: "claude-code" } }),
+        "agents.list": () => [],
+        "agents.projectChoice": () => ({ agentId: null, storage: "app" }),
+        "terminal.list": () => [{ id: "agent-9", alive: true }],
+        "files.tree": () => [],
+      },
+      "p2",
+      { sessionId: "agent-9", agentId: "claude-code", agentLabel: "Claude Code" },
+    )
+    const terminal = await screen.findByTestId("terminal")
+    expect(terminal.getAttribute("data-session-id")).toBe("agent-9")
+    expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
+    const tab = screen.getByTestId("central-tab")
+    expect(tab.getAttribute("data-active")).toBe("true")
+    expect(tab.textContent).toContain("Claude Code")
   })
 
   test("opens on the remembered project", async () => {

@@ -53,28 +53,30 @@ describe("outputDirProblem", () => {
 })
 
 describe("outputExcludePatterns", () => {
-  test("a folder is excluded wherever a root .tex builds into it", () => {
-    expect(outputExcludePatterns("build", "main.tex")).toEqual(["build/"])
-    expect(outputExcludePatterns("out/pdf", null)).toEqual(["**/out/pdf/"])
+  test("a folder is excluded only next to the root .tex, anchored to the paper folder", () => {
+    expect(outputExcludePatterns("build", "main.tex")).toEqual(["/build/"])
+    expect(outputExcludePatterns("out/pdf", "sub/paper.tex")).toEqual(["/sub/out/pdf/"])
+    expect(outputExcludePatterns("build", null)).toEqual(["/build/"])
   })
 
-  test("'.' excludes the root PDF by name and build-only files anywhere, never sources", () => {
+  test("'.' excludes the root's own outputs by name and .aux files below it, never sources", () => {
     expect(outputExcludePatterns(".", "main.tex")).toEqual([
       "/main.pdf",
-      "*.aux",
-      "*.log",
-      "*.synctex.gz",
-      "*.fls",
-      "*.fdb_latexmk",
-      "*.out",
-      "*.toc",
-      "*.bbl",
-      "*.blg",
+      "/main.aux",
+      "/main.log",
+      "/main.synctex.gz",
+      "/main.fls",
+      "/main.fdb_latexmk",
+      "/main.out",
+      "/main.toc",
+      "/main.bbl",
+      "/main.blg",
+      // .aux files of \include'd chapters in subfolders.
+      "/**/*.aux",
     ])
-    expect(outputExcludePatterns(".", "sub/paper.tex")[0]).toBe("/sub/paper.pdf")
-    // .aux files of \include'd chapters in subfolders are covered too.
-    expect(outputExcludePatterns(".", null)).toEqual(
-      outputExcludePatterns(".", "main.tex").slice(1),
-    )
+    expect(outputExcludePatterns(".", "sub/paper.tex")).toContain("/sub/paper.pdf")
+    expect(outputExcludePatterns(".", "sub/paper.tex").at(-1)).toBe("/sub/**/*.aux")
+    // With no root .tex known there is nothing built yet to exclude.
+    expect(outputExcludePatterns(".", null)).toEqual([])
   })
 })

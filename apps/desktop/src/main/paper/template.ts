@@ -111,8 +111,17 @@ export async function setCustomTemplate(dataDir: string, source: string): Promis
     recursive: true,
     filter: (path) => !SKIPPED.has(path.split(sep).pop() ?? ""),
   })
-  await rm(templateDir, { recursive: true, force: true })
-  await rename(staging, templateDir)
+  // The old copy is moved aside, not deleted, until the new one is in place:
+  // if the move-in fails, the old copy is moved back and the error is reported.
+  const old = join(dataDir, `${TEMPLATE_DIR}.old`)
+  await rm(old, { recursive: true, force: true })
+  const hadOld = existsSync(templateDir)
+  if (hadOld) await rename(templateDir, old)
+  await rename(staging, templateDir).catch(async (error: unknown) => {
+    if (hadOld) await rename(old, templateDir)
+    throw error
+  })
+  await rm(old, { recursive: true, force: true })
   await writeFile(
     join(dataDir, TEMPLATE_INFO),
     JSON.stringify({ source, setAt: Date.now() }, null, 2),

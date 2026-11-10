@@ -89,7 +89,7 @@ const generalPatch = z.object({
   worktreePerAgent: z.boolean().optional(),
   confirmOnQuit: z.boolean().optional(),
   keepRunningAfterClose: z.boolean().optional(),
-  quitChoice: z.enum(["ask", "background", "quit"]).optional(),
+  quitChoice: z.enum(["ask", "background"]).optional(),
   publicUpdateChannel: z.enum(["stable", "beta"]).optional(),
 })
 

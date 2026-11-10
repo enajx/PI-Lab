@@ -239,6 +239,13 @@
       "when": 1794329622373,
       "tag": "0033_project_sort_order",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1794333693124,
+      "tag": "0034_quit_choice_ask",
+      "breakpoints": true
     }
   ]
 }

@@ -964,6 +964,20 @@ describe("projects.setMetadata", () => {
     expect((await h.caller.projects.get({ id: project.id })).metadata).toBeNull()
   })
 
+  test("keeps the paper auto-detect choice the card dialog does not carry", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    h.db
+      .update(projects)
+      .set({ metadata: { paperAutoDetect: false } })
+      .where(eq(projects.id, project.id))
+      .run()
+    const updated = await h.caller.projects.setMetadata({
+      id: project.id,
+      metadata: { venue: "ICML" },
+    })
+    expect(updated.metadata).toEqual({ venue: "ICML", paperAutoDetect: false })
+  })
+
   test("throws NOT_FOUND for an unknown project", async () => {
     await expect(
       h.caller.projects.setMetadata({ id: "missing", metadata: METADATA }),
@@ -1039,6 +1053,19 @@ test("project details survive reopen and preserve hidden metadata", async () => 
   const reopened = await h.caller.projects.open({ path: h.repoDir })
   expect(reopened.name).toBe("Edited name")
   expect(reopened.typeId).toBe("software")
+})
+
+test("saving details keeps metadata written while the agent config file is written", async () => {
+  await h.caller.settings.updateAgents({ projectConfigStorage: "project" })
+  const project = await h.caller.projects.open({ path: h.repoDir })
+  const details = { name: "Edited", typeId: "software" as const, deadline: null, agentId: null }
+  // The stage is set while updateDetails waits on the agent config file write.
+  const saving = h.caller.projects.updateDetails({ id: project.id, details })
+  await h.caller.projects.setStage({ id: project.id, stage: "experiments" })
+  const saved = await saving
+  expect(saved.name).toBe("Edited")
+  expect(saved.metadata?.stage).toBe("experiments")
+  expect((await h.caller.projects.get({ id: project.id })).metadata?.stage).toBe("experiments")
 })
 
 test("adding details accepts symlinked project Markdown and leaves no row after config failure", async () => {
