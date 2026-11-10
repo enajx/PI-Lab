@@ -13,7 +13,16 @@ import { closeQuickBuffer, writeQuickBuffer } from "../../../../QuickEditor/quic
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
 import { ProjectActivityProvider } from "../../-ProjectActivity"
 import { writeProjectWorkspaceState } from "../../projects/-workspaceState"
-import { Sidebar } from "./Sidebar"
+import { FEATURE_HELP_CONTROLS, FeatureHelpPanel, Sidebar, sameHelpText } from "./Sidebar"
+
+describe("sameHelpText", () => {
+  test("treats case, spacing, and trailing punctuation as the same text", () => {
+    expect(sameHelpText("Add or remove header shortcuts", "add or remove  header shortcuts.")).toBe(
+      true,
+    )
+    expect(sameHelpText("Header shortcuts", "Choose which buttons this top bar shows.")).toBe(false)
+  })
+})
 
 /**
  * Component test for the left sidebar. Mounts the
@@ -797,6 +806,49 @@ describe("Sidebar", () => {
     expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
       "Collapse the sidebar to its compact icon rail",
     )
+  })
+
+  test("the What's this? card never shows a body equal to its title for any sidebar control", async () => {
+    window.localStorage.setItem("pi-lab.sidebar.showEditor", "true")
+    renderSidebar({
+      "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],
+    })
+    await screen.findByText("Alpha")
+    const controls = Array.from(
+      screen.getByTestId("app-sidebar").querySelectorAll<HTMLElement>(FEATURE_HELP_CONTROLS),
+    )
+    expect(controls.length).toBeGreaterThan(5)
+    for (const control of controls) {
+      fireEvent.pointerOver(control)
+      const label = screen.getByTestId("sidebar-feature-help-label").textContent ?? ""
+      const body = screen.queryByTestId("sidebar-feature-help-description")?.textContent ?? ""
+      expect(sameHelpText(label, body), `${label} / ${body}`).toBe(false)
+      fireEvent.pointerOut(control)
+    }
+  })
+
+  test("a control with no separate description shows only its title", async () => {
+    render(
+      <AppProviders client={createFakeTrpcClient({})} queryClient={new QueryClient()}>
+        <FeatureHelpPanel onHide={() => {}} />
+        <button type="button" aria-label="Close file" title="Close file" />
+        <button type="button">Save</button>
+        <button
+          type="button"
+          aria-label="Add or remove header shortcuts"
+          data-feature-help="Add or remove header shortcuts."
+        />
+      </AppProviders>,
+    )
+    for (const [name, label] of [
+      [/Close file/, "Close file"],
+      [/Save/, "Save"],
+      [/Add or remove header shortcuts/, "Add or remove header shortcuts"],
+    ] as const) {
+      fireEvent.pointerOver(screen.getByRole("button", { name }))
+      expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe(label)
+      expect(screen.queryByTestId("sidebar-feature-help-description")).toBeNull()
+    }
   })
 
   test("persists hiding feature help and leaves a compact restore control", async () => {

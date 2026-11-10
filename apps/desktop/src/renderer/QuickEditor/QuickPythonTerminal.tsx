@@ -21,6 +21,7 @@ export function QuickPythonTerminal({
           type="button"
           data-testid="quick-python-terminal-close"
           aria-label="Close run terminal"
+          data-feature-help="Hide the terminal that shows the output of the last run."
           onClick={onClose}
           className="rounded px-1 hover:bg-accent hover:text-foreground"
         >

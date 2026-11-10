@@ -1,4 +1,4 @@
-import { Input } from "@pi-lab/ui"
+import { Button, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FilePlus, FolderOpen, GitBranch } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -12,8 +12,10 @@ const TOKEN_URL = "https://www.overleaf.com/user/settings"
 /** Overleaf's documentation of its Git integration. */
 const DOCS_URL =
   "https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration"
-const cardClass =
-  "flex flex-col items-center justify-center gap-2 rounded-lg border border-border p-2 text-center"
+/** The card of the Library's source chooser (LibrarySourceChooser), so both setup pages look the same. */
+const cardClass = "flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card/40 p-4"
+const cardTitleClass = "font-medium text-foreground text-sm"
+const cardTextClass = "text-muted-foreground text-xs leading-relaxed"
 const linkClass = "text-muted-foreground underline underline-offset-2 hover:text-foreground"
 
 /** A paper Create paper just made: its workspace and the build of its main .tex (null when none ran). */
@@ -29,9 +31,8 @@ export interface CreatedPaper {
  * one is used right away, and several are listed to pick one (with a note when
  * the search stopped early on a large project). With it off (the user cleared
  * the paper folder) it does not search. Then it offers the three
- * agreed ways to set a paper folder, side by side as narrow cards of the same height
- * (stacked when the page is too narrow), at the top of the page and horizontally centred, each with its
- * content centred: clone an Overleaf project into `<project>/paper/` from its
+ * agreed ways to set a paper folder as three cards of the same height, laid out like the
+ * Library's source chooser (same width, padding, card style, text sizes and buttons): clone an Overleaf project into `<project>/paper/` from its
  * Git URL, open a folder the user already cloned, or create a new paper from
  * the LaTeX template (in `<project>/paper/`, or a folder the user chooses;
  * see `paper.create`). The one Overleaf token is
@@ -173,14 +174,19 @@ export function PaperSetup({
     !busy && tokenStatus.isSuccess && url.trim() !== "" && (!needsToken || token.trim() !== "")
 
   return (
-    <div
-      data-testid="paper-setup"
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-14 pb-4"
-    >
+    <div data-testid="paper-setup" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div
         data-testid="paper-setup-content"
-        className="mx-auto flex w-full max-w-6xl flex-col gap-3"
+        className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-6"
       >
+        <div className="flex flex-col items-center gap-1 text-center">
+          <h2 className="font-semibold text-foreground text-sm">{t("Choose a paper folder")}</h2>
+          <p className="max-w-md text-muted-foreground text-xs leading-relaxed">
+            {t(
+              "Clone an Overleaf project, open a folder you already cloned, or start a new paper.",
+            )}
+          </p>
+        </div>
         {autoLinking ? (
           <p data-testid="paper-detecting" className="text-center text-muted-foreground text-sm">
             {link.isPending
@@ -201,11 +207,9 @@ export function PaperSetup({
             ) : null}
             {clones.length > 1 ? (
               <section data-testid="paper-detected" className={cardClass}>
-                <h2 className="font-medium text-sm">
-                  {t("Overleaf folders found in this project")}
-                </h2>
-                <p className="text-muted-foreground text-xs">{t("Choose the paper folder.")}</p>
-                <div className="flex flex-wrap justify-center gap-2">
+                <h3 className={cardTitleClass}>{t("Overleaf folders found in this project")}</h3>
+                <p className={cardTextClass}>{t("Choose the paper folder.")}</p>
+                <div className="flex flex-wrap gap-2">
                   {clones.map((clone) => (
                     <button
                       key={clone.dir}
@@ -224,27 +228,24 @@ export function PaperSetup({
                 </div>
               </section>
             ) : null}
-            {/* Three cards of up to 20rem with two 2.5rem gaps; they share narrower widths
-                and wrap only below 16rem each. */}
-            <div className="mx-auto grid w-full max-w-[65rem] grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-10">
+            {/* Grid items stretch, so the three cards have the same height (stacked when narrow). */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <section data-testid="paper-setup-overleaf" className={cardClass}>
-                <GitBranch className="size-5 text-muted-foreground" aria-hidden />
-                <h2 className="font-medium text-sm">{t("Add Overleaf project")}</h2>
-                <p className="text-muted-foreground text-xs">
-                  {t("Clone your Overleaf project into paper/.")}
-                </p>
+                <div className="flex items-center gap-2">
+                  <GitBranch className="size-4 text-muted-foreground" aria-hidden />
+                  <h3 className={cardTitleClass}>{t("Add Overleaf project")}</h3>
+                </div>
+                <p className={cardTextClass}>{t("Clone your Overleaf project into paper/.")}</p>
                 <Input
                   data-testid="paper-overleaf-url"
-                  className="max-w-80"
                   aria-label={t("Overleaf Git URL")}
-                  placeholder="https://git@git.overleaf.com/…"
+                  placeholder={t("Overleaf Git URL")}
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
                 />
                 {needsToken ? (
                   <Input
                     data-testid="paper-overleaf-token"
-                    className="max-w-80"
                     type="password"
                     aria-label={t("Overleaf Git token")}
                     placeholder={t("Overleaf Git token")}
@@ -252,24 +253,12 @@ export function PaperSetup({
                     onChange={(event) => setToken(event.target.value)}
                   />
                 ) : tokenFromGit ? (
-                  <p
-                    data-testid="paper-overleaf-token-found"
-                    className="text-muted-foreground text-xs"
-                  >
+                  <p data-testid="paper-overleaf-token-found" className={cardTextClass}>
                     {t("Overleaf Git detected")}
                   </p>
                 ) : null}
-                <button
-                  type="button"
-                  data-testid="paper-overleaf-add"
-                  disabled={!canSubmit}
-                  onClick={() => void submit()}
-                  className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {addOverleaf.isPending ? t("Cloning…") : t("Add Overleaf project")}
-                </button>
                 {needsToken ? (
-                  <div className="flex gap-3 text-xs">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
                     {/* A new-window link is handed to the user's browser by the main process. */}
                     <a href={TOKEN_URL} target="_blank" rel="noreferrer" className={linkClass}>
                       {t("Get a Git token")}
@@ -279,45 +268,57 @@ export function PaperSetup({
                     </a>
                   </div>
                 ) : null}
+                <div className="mt-auto">
+                  <Button
+                    type="button"
+                    size="sm"
+                    data-testid="paper-overleaf-add"
+                    disabled={!canSubmit}
+                    onClick={() => void submit()}
+                  >
+                    {addOverleaf.isPending ? t("Cloning…") : t("Add Overleaf project")}
+                  </Button>
+                </div>
               </section>
 
               <section data-testid="paper-setup-folder" className={cardClass}>
-                <FolderOpen className="size-5 text-muted-foreground" aria-hidden />
-                <h2 className="font-medium text-sm">{t("Use an existing folder")}</h2>
-                <p className="text-muted-foreground text-xs">
-                  {t("Open a paper folder you already cloned.")}
-                </p>
-                <button
-                  type="button"
-                  data-testid="paper-use-folder"
-                  disabled={busy}
-                  onClick={chooseFolder}
-                  className="rounded border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-                >
-                  {t("Choose folder…")}
-                </button>
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
+                  <h3 className={cardTitleClass}>{t("Use an existing folder")}</h3>
+                </div>
+                <p className={cardTextClass}>{t("Open a paper folder you already cloned.")}</p>
+                <div className="mt-auto">
+                  <Button
+                    type="button"
+                    size="sm"
+                    data-testid="paper-use-folder"
+                    disabled={busy}
+                    onClick={chooseFolder}
+                  >
+                    {t("Choose folder…")}
+                  </Button>
+                </div>
               </section>
 
               <section data-testid="paper-setup-create" className={cardClass}>
-                <FilePlus className="size-5 text-muted-foreground" aria-hidden />
-                <h2 className="font-medium text-sm">{t("Create paper")}</h2>
-                <p className="text-muted-foreground text-xs">
-                  {t("Start a new paper from your LaTeX template.")}
-                </p>
-                <div className="flex max-w-full items-center gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <FilePlus className="size-4 text-muted-foreground" aria-hidden />
+                  <h3 className={cardTitleClass}>{t("Create paper")}</h3>
+                </div>
+                <p className={cardTextClass}>{t("Start a new paper from your LaTeX template.")}</p>
+                {/* The folder wraps onto more lines when it is long; it is never cut. */}
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
                   <span
                     data-testid="paper-create-folder"
                     title={createDir ?? createTarget.data?.dir}
-                    className="min-w-0 truncate font-mono [direction:rtl]"
+                    className="min-w-0 font-mono wrap-anywhere"
                   >
-                    <bdi>
-                      {createDir ??
-                        (createTarget.data
-                          ? createTarget.data.available
-                            ? `${createTarget.data.displayDir}/`
-                            : t("paper/ has files in it, choose a folder")
-                          : "")}
-                    </bdi>
+                    {createDir ??
+                      (createTarget.data
+                        ? createTarget.data.available
+                          ? `${createTarget.data.displayDir}/`
+                          : t("paper/ has files in it, choose a folder")
+                        : "")}
                   </span>
                   <button
                     type="button"
@@ -332,23 +333,25 @@ export function PaperSetup({
                     {t("Change…")}
                   </button>
                 </div>
-                <button
-                  type="button"
-                  data-testid="paper-create"
-                  disabled={busy || createInto === null}
-                  onClick={() => {
-                    if (createInto === null) return
-                    setError(null)
-                    create.mutate({ projectId, dir: createInto })
-                  }}
-                  className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {create.isPending
-                    ? createStep === "building"
-                      ? t("Building PDF…")
-                      : t("Creating…")
-                    : t("Create paper")}
-                </button>
+                <div className="mt-auto">
+                  <Button
+                    type="button"
+                    size="sm"
+                    data-testid="paper-create"
+                    disabled={busy || createInto === null}
+                    onClick={() => {
+                      if (createInto === null) return
+                      setError(null)
+                      create.mutate({ projectId, dir: createInto })
+                    }}
+                  >
+                    {create.isPending
+                      ? createStep === "building"
+                        ? t("Building PDF…")
+                        : t("Creating…")
+                      : t("Create paper")}
+                  </Button>
+                </div>
               </section>
             </div>
           </>

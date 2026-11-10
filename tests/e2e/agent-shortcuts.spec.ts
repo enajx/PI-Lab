@@ -214,7 +214,8 @@ test("⌘T in Tasks asks for a project, then opens a session in the Tasks sessio
     "Pick a project to open a session",
   )
 
-  await window.getByTestId("tasks-project-select").selectOption({ index: 1 })
+  await window.getByTestId("tasks-project-select").click()
+  await window.getByRole("listbox", { name: "Project filter" }).getByRole("option").nth(1).click()
   await window.getByTestId("science-sessions-collapse").click()
   await blurFocus(window)
   await window.keyboard.press("ControlOrMeta+t")

@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { LatexText } from "../../../../components/LatexText"
+import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import {
   dismissNonGitNotice,
@@ -108,7 +109,8 @@ export interface FeatureHelp {
   description: string
 }
 
-const FEATURE_HELP_SELECTOR = [
+/** Elements the "What's this?" card describes when hovered or focused. */
+export const FEATURE_HELP_CONTROLS = [
   "[data-feature-help]",
   "button",
   "a[href]",
@@ -121,9 +123,23 @@ const FEATURE_HELP_SELECTOR = [
   '[role="tab"]',
 ].join(",")
 
+/**
+ * True when two help texts say the same thing: equal after ignoring case, extra
+ * spaces, and trailing punctuation such as "." or "…".
+ */
+export function sameHelpText(a: string, b: string): boolean {
+  const norm = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[\s.…!?:]+$/u, "")
+      .trim()
+  return norm(a) === norm(b)
+}
+
 function featureElement(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null
-  const match = target.closest(FEATURE_HELP_SELECTOR)
+  const match = target.closest(FEATURE_HELP_CONTROLS)
   return match instanceof HTMLElement ? match : null
 }
 
@@ -134,11 +150,13 @@ function featureHelpFromElement(element: HTMLElement): FeatureHelp | null {
   const input = element instanceof HTMLInputElement ? element.placeholder.trim() : ""
   const label = element.dataset.featureLabel?.trim() || ariaLabel || title || input || text
   if (!label) return null
+  // The body is the first text that adds something to the title; empty when none does.
   const description =
-    element.dataset.featureHelp?.trim() ||
-    element.getAttribute("aria-description")?.trim() ||
-    (title !== label ? title : "") ||
-    label
+    [
+      element.dataset.featureHelp?.trim() ?? "",
+      element.getAttribute("aria-description")?.trim() ?? "",
+      title,
+    ].find((text) => text !== "" && !sameHelpText(text, label)) ?? ""
   return { label, description }
 }
 
@@ -539,8 +557,9 @@ export function FeatureHelpPanel({ onHide }: { onHide: () => void }) {
   const help = useFeatureHelp(true)
   const t = useTranslate()
   const label = help?.label ?? t("What’s this?")
-  const description = help?.description ?? t("Hover over or focus a control to learn what it does.")
-  const showDescription = description !== label
+  const description = help
+    ? help.description
+    : t("Hover over or focus a control to learn what it does.")
 
   return (
     <section
@@ -568,12 +587,14 @@ export function FeatureHelpPanel({ onHide }: { onHide: () => void }) {
           <X className="size-3.5" aria-hidden />
         </button>
       </div>
-      <p
-        data-testid="sidebar-feature-help-description"
-        className="mt-1 line-clamp-3 text-[11px] text-muted-foreground leading-relaxed"
-      >
-        {showDescription ? description : label}
-      </p>
+      {description !== "" ? (
+        <p
+          data-testid="sidebar-feature-help-description"
+          className="mt-1 line-clamp-3 text-[11px] text-muted-foreground leading-relaxed"
+        >
+          {description}
+        </p>
+      ) : null}
     </section>
   )
 }
@@ -663,21 +684,7 @@ function ProjectContextMenu({
   const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    if (!menu) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) onClose()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [menu, onClose])
+  usePopupDismiss(menu !== null, [rootRef], onClose)
 
   if (!menu) return null
   return (

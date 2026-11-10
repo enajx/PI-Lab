@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import type { QuickEditBridge } from "../../shared/quickEdit"
+import { usePopupDismiss } from "../components/usePopupDismiss"
 
 type OptionsResult = Awaited<ReturnType<QuickEditBridge["pythonOptions"]>>
 
@@ -12,21 +13,7 @@ export function QuickPythonEnvironmentPicker({ targetId }: { targetId: string })
   const rootRef = useRef<HTMLDivElement>(null)
   const bridge = window.piLab?.quickEdit
 
-  useEffect(() => {
-    if (!open) return
-    const dismiss = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", dismiss)
-    document.addEventListener("keydown", dismissOnEscape)
-    return () => {
-      document.removeEventListener("mousedown", dismiss)
-      document.removeEventListener("keydown", dismissOnEscape)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   const toggle = (): void => {
     if (open) {
@@ -76,6 +63,8 @@ export function QuickPythonEnvironmentPicker({ targetId }: { targetId: string })
         type="button"
         data-testid="quick-python-environment"
         aria-label="Python"
+        data-feature-label="Python environment"
+        data-feature-help="Choose the Python used to run this file."
         aria-expanded={open}
         onMouseDown={(event) => event.preventDefault()}
         onClick={toggle}

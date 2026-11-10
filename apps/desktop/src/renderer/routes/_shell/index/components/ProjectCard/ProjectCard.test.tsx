@@ -180,25 +180,16 @@ describe("ProjectCard thumbnail", () => {
     expect(tallHeight).toBe(Math.round(baseHeight * 1.5))
   })
 
-  test("shows the project stage row below the buttons and saves a double-clicked stage", async () => {
-    const calls: unknown[] = []
-    renderCard(project({ id: "p1", name: "Photon Drift", metadata: { stage: "experiments" } }), {
-      "projects.setStage": (input) => {
-        calls.push(input)
-        return { id: "p1" }
-      },
-      "projects.list": () => [],
-    })
-    const stage = await screen.findByTestId("project-card-stage")
-    expect(screen.getByTestId("project-card-actions").nextElementSibling).toBe(stage)
-    const experiments = within(stage).getByTestId("project-card-stage-step-experiments")
-    expect(experiments.getAttribute("aria-current")).toBe("step")
-    expect(within(stage).getByTestId("project-card-stage-step-planning").dataset.filled).toBe(
-      "true",
-    )
-    fireEvent.click(within(stage).getByTestId("project-card-stage-step-submitted"))
-    await waitFor(() => expect(calls).toEqual([{ id: "p1", stage: "submitted" }]))
-    expect(screen.queryByTestId("on-project-route")).toBeNull()
+  test("the title has its own full-width line, the agent status is on the line below, and there is no stage row", async () => {
+    renderCard(project({ id: "p1", name: "cpp-research", metadata: { stage: "experiments" } }))
+    const title = await screen.findByTestId("project-card-title")
+    const status = screen.getByTestId("project-card-status")
+    expect(title.textContent).toBe("cpp-research")
+    expect(title.parentElement).toBe(screen.getByTestId("project-card-open"))
+    expect(title.nextElementSibling).toBe(status)
+    expect(title.className).toContain("w-full")
+    expect(status.textContent).toBe("No active agents")
+    expect(screen.queryByTestId("project-card-stage")).toBeNull()
   })
 
   test("does not expose the removed card type dropdown or fetch control", async () => {

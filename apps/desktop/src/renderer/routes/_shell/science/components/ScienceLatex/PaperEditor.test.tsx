@@ -441,7 +441,7 @@ describe("PaperEditor Create paper and Update paper (mocked server)", () => {
     await waitFor(() => expect(within(slot).queryByTestId("paper-update")).toBeNull())
     expect(
       JSON.parse(window.localStorage.getItem("pi-lab.latexEditor.headerShortcuts") ?? ""),
-    ).toEqual([])
+    ).toEqual(["sync"])
 
     fireEvent.click(within(menu).getByRole("button", { name: "Skills" }))
     fireEvent.click(await within(menu).findByRole("menuitemcheckbox", { name: "Review notes" }))
@@ -450,6 +450,26 @@ describe("PaperEditor Create paper and Update paper (mocked server)", () => {
     fireEvent.click(skill)
     await waitFor(() => expect(tabLabels()).toEqual(["main.tex", "Review notes"]))
     expect(started).toEqual([{ projectId: "p8", skillSlug: "review-notes", origin: "latex" }])
+    cleanup()
+    slot.remove()
+  })
+
+  test("the top bar + menu lists Update paper and Sync, checked, and Sync can be removed and added back", async () => {
+    const slot = document.createElement("div")
+    document.body.append(slot)
+    renderEditor(createFakeTrpcClient(handlers()), "p9", null, null, slot)
+    await waitFor(() => expect(tabLabels()).toEqual(["main.tex"]))
+    expect(within(slot).getByTestId("paper-sync")).toBeTruthy()
+    fireEvent.click(within(slot).getByTestId("latex-shortcuts-add"))
+    const menu = await screen.findByRole("menu", { name: "Header shortcuts" })
+    const items = within(menu).getAllByRole("menuitemcheckbox")
+    expect(items.map((item) => item.textContent)).toEqual(["Update paper", "Sync"])
+    expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual(["true", "true"])
+
+    fireEvent.click(items[1] as HTMLElement)
+    await waitFor(() => expect(within(slot).queryByTestId("paper-sync")).toBeNull())
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Sync" }))
+    await waitFor(() => expect(within(slot).getByTestId("paper-sync")).toBeTruthy())
     cleanup()
     slot.remove()
   })

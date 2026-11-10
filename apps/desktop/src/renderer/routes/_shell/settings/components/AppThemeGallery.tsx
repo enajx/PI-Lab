@@ -23,6 +23,7 @@ export function AppThemeGallery() {
               type="button"
               aria-label={t(theme.label)}
               aria-pressed={selected}
+              data-feature-help={selected ? t("The current theme.") : t("Click to use this theme.")}
               data-testid={`settings-app-theme-${theme.id}`}
               onClick={() => setThemeId(theme.id)}
               className={cn(

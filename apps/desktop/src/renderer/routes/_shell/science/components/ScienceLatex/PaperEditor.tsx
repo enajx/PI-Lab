@@ -157,6 +157,8 @@ export function PaperEditor({
   const [openError, setOpenError] = useState<string | null>(null)
   // The editor footer element the Sync controls put their footer items in.
   const [footerSlot, setFooterSlot] = useState<HTMLElement | null>(null)
+  // The top bar element for the Sync button, inside the "+" shortcut list; null when Sync is removed.
+  const [syncButtonSlot, setSyncButtonSlot] = useState<HTMLElement | null>(null)
   const [connectOpen, setConnectOpen] = useState(false)
   const onSaved = useCallback(
     (relPath: string): void => {
@@ -350,6 +352,8 @@ export function PaperEditor({
                   type="button"
                   data-testid="paper-outline-entry"
                   title={`${entry.relPath}:${entry.line}`}
+                  data-feature-label={entry.title}
+                  data-feature-help={`${t("Go to")} ${entry.relPath}:${entry.line}`}
                   className="w-full truncate py-1 pr-2 text-left hover:bg-accent"
                   style={{ paddingLeft: `${12 + Math.max(0, entry.level - 2) * 10}px` }}
                   onClick={() =>
@@ -416,6 +420,7 @@ export function PaperEditor({
                   type="button"
                   data-testid="paper-connect-overleaf"
                   title={t("Send this paper to a new Overleaf project")}
+                  data-feature-label={t("Connect to Overleaf")}
                   onClick={() => setConnectOpen(true)}
                   className="shrink-0 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
                 >
@@ -452,6 +457,7 @@ export function PaperEditor({
                       data-testid="paper-update"
                       disabled={startUpdate.isPending}
                       title={t("Start an agent that updates the paper from the project's results")}
+                      data-feature-label={t("Update paper")}
                       onClick={() => {
                         setOpenError(null)
                         startUpdate.mutate({ projectId })
@@ -463,6 +469,17 @@ export function PaperEditor({
                     </button>
                   ),
                 },
+                {
+                  id: "sync",
+                  label: t("Sync"),
+                  node: (
+                    <div
+                      ref={setSyncButtonSlot}
+                      data-testid="paper-sync-button-slot"
+                      className="contents"
+                    />
+                  ),
+                },
               ]}
             />,
             syncSlot,
@@ -471,7 +488,7 @@ export function PaperEditor({
       <PaperSyncBar
         projectId={projectId}
         workspaceId={workspaceId}
-        syncSlot={syncSlot}
+        syncSlot={syncButtonSlot}
         footerSlot={footerSlot}
         lastSyncAt={lastSyncAt}
         hasRemote={hasRemote}

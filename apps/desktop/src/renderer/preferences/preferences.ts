@@ -1,6 +1,6 @@
 import { DEFAULT_AGENT_ID } from "@pi-lab/shared/agents/catalog"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
 import { useTRPC } from "../trpc/react"
 
 /**
@@ -440,15 +440,16 @@ export type HeaderShortcutsView = "project" | "latex" | "tasks" | "analysis"
 /**
  * Default top bar shortcuts per view, in top bar order. Built-in ids are the
  * view's own buttons (Project view: `tasks`, `auto-research`, `plan-research`,
- * `project-status`; LaTeX Editor: `update-paper`; Analysis:
- * `analyze-experiments`; Tasks has none); added skills and routines are stored
- * as `skill:<slug>` and `routine:<automation id>`.
+ * `project-status`; LaTeX Editor: `update-paper`, `sync`; Analysis:
+ * `analyze-experiments`, `html-report`, `fetch-experiments`; Tasks has none);
+ * added skills and routines are stored as `skill:<slug>` and
+ * `routine:<automation id>`.
  */
 export const DEFAULT_HEADER_SHORTCUTS: Record<HeaderShortcutsView, string[]> = {
   project: ["tasks", "auto-research", "plan-research", "project-status"],
-  latex: ["update-paper"],
+  latex: ["update-paper", "sync"],
   tasks: [],
-  analysis: ["analyze-experiments"],
+  analysis: ["analyze-experiments", "html-report", "fetch-experiments"],
 }
 const HEADER_SHORTCUTS_KEYS: Record<HeaderShortcutsView, string> = {
   project: "pi-lab.projectView.headerShortcuts",
@@ -456,11 +457,56 @@ const HEADER_SHORTCUTS_KEYS: Record<HeaderShortcutsView, string> = {
   tasks: "pi-lab.tasks.headerShortcuts",
   analysis: "pi-lab.analysis.headerShortcuts",
 }
+/**
+ * Built-in ids that became listable in version 2 of the saved lists. A list
+ * saved before then (no `<key>Version` of "2") gets them added at their
+ * default positions; any write saves version "2", so a later removal stays.
+ */
+const HEADER_SHORTCUTS_ADDED_IN_V2: Record<HeaderShortcutsView, string[]> = {
+  project: [],
+  latex: ["sync"],
+  tasks: [],
+  analysis: ["html-report", "fetch-experiments"],
+}
+const HEADER_SHORTCUTS_VERSION = "2"
+/** `saved` with each id of `added` that it lacks put after its nearest default predecessor. */
+function withAddedShortcuts(saved: string[], defaults: string[], added: string[]): string[] {
+  const next = [...saved]
+  for (const id of added) {
+    if (next.includes(id)) continue
+    const before = defaults.slice(0, defaults.indexOf(id)).filter((entry) => next.includes(entry))
+    const anchor = before.at(-1)
+    next.splice(anchor === undefined ? 0 : next.indexOf(anchor) + 1, 0, id)
+  }
+  return next
+}
 /** One view's top bar shortcut buttons (by id, in order), shared by every project. */
 export const useHeaderShortcuts = (
   view: HeaderShortcutsView,
-): [string[], (next: string[]) => void] =>
-  useOrderPref(HEADER_SHORTCUTS_KEYS[view], DEFAULT_HEADER_SHORTCUTS[view])
+): [string[], (next: string[]) => void] => {
+  const key = HEADER_SHORTCUTS_KEYS[view]
+  const [saved, setSaved] = useOrderPref(key, DEFAULT_HEADER_SHORTCUTS[view])
+  const [version, setVersion] = useStringPref(`${key}Version`, "1")
+  const value = useMemo(
+    () =>
+      version === HEADER_SHORTCUTS_VERSION
+        ? saved
+        : withAddedShortcuts(
+            saved,
+            DEFAULT_HEADER_SHORTCUTS[view],
+            HEADER_SHORTCUTS_ADDED_IN_V2[view],
+          ),
+    [saved, version, view],
+  )
+  const set = useCallback(
+    (next: string[]) => {
+      setVersion(HEADER_SHORTCUTS_VERSION)
+      setSaved(next)
+    },
+    [setSaved, setVersion],
+  )
+  return [value, set]
+}
 /** Where experiment runs are tracked. One kind for now: an EXPERIMENTS.md-style table file. */
 export type ExperimentRunsSource = "experiments-md"
 /** The default experiments file, relative to each project. */

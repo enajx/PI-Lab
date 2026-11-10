@@ -221,6 +221,34 @@ describe("project details", () => {
   })
 })
 
+test("Edit project has a Project status row that sets the stage on click", async () => {
+  const calls: unknown[] = []
+  renderDetailsWith(
+    project({ id: "p1", name: "Study", metadata: { stage: "planning" } }),
+    "edit",
+    null,
+    {
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null, autoDetect: true }),
+      "projects.setStage": (input) => {
+        calls.push(input)
+        return { id: "p1" }
+      },
+    },
+  )
+  const row = screen.getByTestId("edit-project-stage")
+  expect(row.parentElement?.firstElementChild?.textContent).toBe("Project status")
+  expect(
+    within(row).getByTestId("edit-project-stage-step-planning").getAttribute("aria-current"),
+  ).toBe("step")
+  fireEvent.click(within(row).getByTestId("edit-project-stage-step-experiments"))
+  await waitFor(() => expect(calls).toEqual([{ id: "p1", stage: "experiments" }]))
+})
+
+test("Add project has no Project status row", () => {
+  renderDetails(project({ id: "p1", name: "Study" }), "add", null)
+  expect(screen.queryByTestId("edit-project-stage")).toBeNull()
+})
+
 test("Add uses an unselected type and keeps Plan research disabled", async () => {
   const { onSave, onClose } = renderDetails(
     project({ id: "new", name: "folder-name", typeId: "general" }),

@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
 import { EditorSettingsMenu } from "../../../../../Editor/components/EditorSettingsMenu"
 import { EditorStatusBar } from "../../../../../Editor/components/EditorStatusBar"
@@ -156,21 +157,7 @@ export function CentralPanel({
     onFileFinderOpened()
   }, [openFileFinder, onFileFinderOpened])
 
-  useEffect(() => {
-    if (!addMenuOpen) return
-    const onPointerDown = (event: PointerEvent) => {
-      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAddMenuOpen(false)
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    document.addEventListener("keydown", onKeyDown)
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown)
-      document.removeEventListener("keydown", onKeyDown)
-    }
-  }, [addMenuOpen])
+  usePopupDismiss(addMenuOpen, [addMenuRef], () => setAddMenuOpen(false))
 
   // The Run tab is not a controller tab, so the panel tracks when it has focus. Any
   // controller focus change (another tab selected or opened) moves focus off it.
@@ -582,6 +569,7 @@ export function CentralPanel({
               data-testid="central-add-menu"
               title={t("Add pane")}
               aria-label={t("Add pane")}
+              data-feature-help={t("Open an agent, a terminal, or a document in a new pane.")}
               aria-haspopup="menu"
               aria-expanded={addMenuOpen}
               onClick={() => setAddMenuOpen((open) => !open)}

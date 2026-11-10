@@ -322,6 +322,7 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
                     type="button"
                     data-testid="analysis-analyze-experiments"
                     disabled={!selectedProjectId || analyzeExperiments.isPending}
+                    data-feature-label={t("Analyze experiments")}
                     title={
                       selectedProjectId
                         ? t("Start an agent that summarises what each experiment shows")
@@ -339,44 +340,60 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
                   </button>
                 ),
               },
+              {
+                id: "html-report",
+                label: t("HTML report"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="analysis-new-html-report"
+                    disabled={!selectedProjectId || createTemplate.isPending}
+                    data-feature-help={
+                      selectedProjectId
+                        ? t("Add a new HTML report file to the project and show it.")
+                        : t("Select a project")
+                    }
+                    onClick={() =>
+                      createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
+                    }
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <FileCode2 className="size-3.5" aria-hidden />
+                    {t("HTML report")}
+                  </button>
+                ),
+              },
+              {
+                id: "fetch-experiments",
+                label: t("Fetch experiments"),
+                node: selectedProject ? (
+                  <ProjectWorkflowControl
+                    key={selectedProject.id}
+                    projectId={selectedProject.id}
+                    projectName={selectedProject.name}
+                    task="fetch-experiments"
+                    variant="labeled"
+                    testId="analysis-fetch-experiments"
+                    instructions={fetchInstructions}
+                    disabled={!gitAvailable}
+                    disabledReason={!gitAvailable ? gitDisabledReason : undefined}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="analysis-fetch-experiments"
+                    disabled
+                    title={t("Select a project")}
+                    data-feature-label={t("Fetch experiments")}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CloudDownload className="size-3.5" aria-hidden />
+                    {t("Fetch experiments")}
+                  </button>
+                ),
+              },
             ]}
           />
-          <button
-            type="button"
-            data-testid="analysis-new-html-report"
-            disabled={!selectedProjectId || createTemplate.isPending}
-            onClick={() =>
-              createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
-            }
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileCode2 className="size-3.5" aria-hidden />
-            {t("HTML report")}
-          </button>
-          {selectedProject ? (
-            <ProjectWorkflowControl
-              key={selectedProject.id}
-              projectId={selectedProject.id}
-              projectName={selectedProject.name}
-              task="fetch-experiments"
-              variant="labeled"
-              testId="analysis-fetch-experiments"
-              instructions={fetchInstructions}
-              disabled={!gitAvailable}
-              disabledReason={!gitAvailable ? gitDisabledReason : undefined}
-            />
-          ) : (
-            <button
-              type="button"
-              data-testid="analysis-fetch-experiments"
-              disabled
-              title={t("Select a project")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <CloudDownload className="size-3.5" aria-hidden />
-              {t("Fetch experiments")}
-            </button>
-          )}
         </>
       }
     >

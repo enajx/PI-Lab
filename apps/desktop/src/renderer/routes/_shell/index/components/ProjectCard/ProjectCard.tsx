@@ -16,8 +16,8 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useCardGridHeightScale } from "../../../../../components/CardGrid"
-import { ProjectStageRow } from "../../../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import {
   useDigitalRainDensity,
@@ -47,8 +47,8 @@ import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
  *     sets the thumbnail. Each artwork kind replaces the others (enforced
  *     server-side). A project with none yet captures a default gradient from the
  *     current theme on first render and persists it, so it stays fixed thereafter.
- *   - an **info area** — the project name and a status badge from shared live
- *     agent activity. The status is idle, working, or paused. An `active`
+ *   - an **info area** — the project name on its own full-width line, and below
+ *     it a status badge from shared live agent activity. The status is idle, working, or paused. An `active`
  *     project's gradient also drifts as a live activity cue.
  *
  * Clicking the card opens the project's route; right-clicking anywhere on it
@@ -455,19 +455,20 @@ export function ProjectCard({ project }: ProjectCardProps) {
           )}
           className="flex flex-col items-start gap-1.5 px-2.5 py-2 text-start outline-none transition-colors focus-visible:bg-accent/40"
         >
-          <div className="flex w-full items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
-              {project.name}
-            </span>
-            <span
-              data-testid="project-card-status"
-              data-state={state}
-              className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
-            >
-              <span className={cn("size-2 rounded-full", STATUS_DOT[state])} aria-hidden />
-              {t(STATUS_LABEL[state])}
-            </span>
-          </div>
+          <span
+            data-testid="project-card-title"
+            className="w-full min-w-0 truncate font-medium text-foreground text-sm"
+          >
+            {project.name}
+          </span>
+          <span
+            data-testid="project-card-status"
+            data-state={state}
+            className="inline-flex max-w-full items-center gap-1.5 text-muted-foreground text-xs"
+          >
+            <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[state])} aria-hidden />
+            <span className="min-w-0 truncate">{t(STATUS_LABEL[state])}</span>
+          </span>
         </button>
 
         {/* Show the project deadline and assigned tags below the title. */}
@@ -545,13 +546,6 @@ export function ProjectCard({ project }: ProjectCardProps) {
           <Telescope className="size-4 shrink-0" aria-hidden />
         </button>
       </div>
-
-      <ProjectStageRow
-        projectId={project.id}
-        stage={project.metadata?.stage ?? null}
-        testId="project-card-stage"
-        className="justify-center px-2.5 pb-1.5"
-      />
 
       <ProjectCardMenu
         menu={menu}
@@ -666,21 +660,7 @@ function ProjectCardMenu({
   const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    if (!menu) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) onClose()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [menu, onClose])
+  usePopupDismiss(menu !== null, [rootRef], onClose)
 
   if (!menu) return null
   return (

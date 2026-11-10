@@ -726,6 +726,7 @@ function AgentLaunchDefaultsField({
         <input
           data-testid={`settings-agent-model-${agent.id}`}
           aria-label={`${agent.label} model`}
+          data-feature-help="The model new agents use. Leave empty to use the CLI default."
           placeholder="CLI default"
           value={model}
           onChange={(event) => setModel(event.target.value)}
@@ -774,6 +775,11 @@ function AgentExecutableField({
       <input
         data-testid={`settings-agent-executable-${agent.id}`}
         aria-label={`${agent.label} executable path`}
+        data-feature-help={
+          agent.available
+            ? `${t("Detected:")} ${agent.executable}`
+            : `${t("Not found:")} ${agent.executable}`
+        }
         value={value}
         placeholder={agent.id === "claude-code" ? "claude" : "codex"}
         onChange={(event) => setValue(event.target.value)}
@@ -888,6 +894,9 @@ export function NotificationsSection() {
                 role="switch"
                 aria-checked={value.enabled}
                 aria-label={`${t(event.label)} ${t("notifications")}`}
+                data-feature-help={
+                  value.enabled ? t("On. Click to turn off.") : t("Off. Click to turn on.")
+                }
                 data-testid={`settings-notification-${event.key}-enabled`}
                 onClick={() => patchEvent(event.key, { enabled: !value.enabled })}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -902,6 +911,7 @@ export function NotificationsSection() {
               </button>
               <select
                 aria-label={`${t(event.label)} ${t("sound")}`}
+                data-feature-help={t("The sound played with this notification.")}
                 data-testid={`settings-notification-${event.key}-sound`}
                 value={value.sound}
                 onChange={(change) =>
@@ -920,6 +930,7 @@ export function NotificationsSection() {
                 variant="ghost"
                 size="sm"
                 aria-label={`${t("Preview")} ${t(event.label)} ${t("sound")}`}
+                data-feature-help={t("Play the chosen sound once.")}
                 data-testid={`settings-notification-${event.key}-preview`}
                 onClick={() => void preview(event.label, value.sound)}
               >

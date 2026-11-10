@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { FilePlus2, FolderOpen, FolderPlus, GitFork, Plus, X } from "lucide-react"
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { translateKnownError } from "../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import { useTRPC } from "../../../trpc/react"
@@ -190,6 +191,10 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
       if (previewDelayRef.current) clearTimeout(previewDelayRef.current)
     }
   }, [])
+
+  // The plain menu also closes on window blur and takes title bar clicks; the clone
+  // and template forms stay open on blur so typed input is not lost.
+  usePopupDismiss(open && !setup && mode === "menu", [rootRef, menuRef], () => setOpen(false))
 
   useEffect(() => {
     if (!open || setup) return

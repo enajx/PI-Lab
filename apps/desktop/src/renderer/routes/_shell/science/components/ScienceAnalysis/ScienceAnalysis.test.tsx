@@ -177,7 +177,8 @@ describe("ScienceAnalysis", () => {
       ),
     )
     fireEvent.click(await screen.findByTestId("workflow-result-close"))
-    fireEvent.change(screen.getByTestId("analysis-project-select"), { target: { value: "plain" } })
+    fireEvent.click(screen.getByTestId("analysis-project-select"))
+    fireEvent.click(screen.getByRole("option", { name: "Plain" }))
     await waitFor(() =>
       expect(screen.getByTestId("analysis-fetch-experiments")).toHaveProperty("disabled", true),
     )
@@ -876,13 +877,17 @@ describe("ScienceAnalysis", () => {
 
     const select = (await within(screen.getByRole("banner")).findByTestId(
       "analysis-project-select",
-    )) as HTMLSelectElement
+    )) as HTMLButtonElement
     await waitFor(() => {
       expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("a.csv")
     })
-    expect([...select.options].map((option) => option.value)).toEqual(["p1", "p2"])
+    fireEvent.click(select)
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "alpha",
+      "beta",
+    ])
 
-    fireEvent.change(select, { target: { value: "p2" } })
+    fireEvent.click(screen.getByRole("option", { name: "beta" }))
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/science/analysis",
       search: { projectId: "p2" },
@@ -905,11 +910,12 @@ describe("ScienceAnalysis", () => {
       },
       "p2",
     )
-    const select = (await screen.findByTestId("analysis-project-select")) as HTMLSelectElement
+    const select = (await screen.findByTestId("analysis-project-select")) as HTMLButtonElement
     await waitFor(() => expect(select.value).toBe("p2"))
     expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p2")
 
-    fireEvent.change(select, { target: { value: "p1" } })
+    fireEvent.click(select)
+    fireEvent.click(screen.getByRole("option", { name: "alpha" }))
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/science/analysis",
       search: { projectId: "p1" },
@@ -928,7 +934,7 @@ describe("ScienceAnalysis", () => {
       ],
       "science.analysis.listFiles": listFiles,
     })
-    const select = (await screen.findByTestId("analysis-project-select")) as HTMLSelectElement
+    const select = (await screen.findByTestId("analysis-project-select")) as HTMLButtonElement
     await waitFor(() => expect(select.value).toBe("p2"))
     expect(listFiles).toHaveBeenCalledWith({ projectId: "p2", defaultResultsFolder: "results" })
     expect(listFiles).not.toHaveBeenCalledWith({ projectId: "p1", defaultResultsFolder: "results" })

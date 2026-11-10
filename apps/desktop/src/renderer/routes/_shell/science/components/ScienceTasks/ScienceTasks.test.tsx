@@ -82,16 +82,18 @@ afterEach(() => cleanup())
 test("the top bar picker defaults to All projects and narrows the list to the chosen project", async () => {
   renderTasks(undefined)
   const header = screen.getByRole("banner")
-  const select = (await within(header).findByTestId("tasks-project-select")) as HTMLSelectElement
+  const select = (await within(header).findByTestId("tasks-project-select")) as HTMLButtonElement
   await waitFor(() => expect(screen.getAllByTestId("task-row")).toHaveLength(2))
   expect(select.value).toBe("")
-  expect([...select.options].map((option) => option.text)).toEqual([
-    "All projects",
-    "Alpha",
-    "Beta",
-  ])
+  fireEvent.click(select)
+  const list = screen.getByRole("listbox", { name: "Project filter" })
+  expect(
+    within(list)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["All projects", "Alpha", "Beta"])
 
-  fireEvent.change(select, { target: { value: "p2" } })
+  fireEvent.click(within(list).getByRole("option", { name: "Beta" }))
   expect(mocks.navigate).toHaveBeenCalledWith({
     to: "/science/tasks",
     search: { projectId: "p2" },
@@ -109,12 +111,17 @@ test("the top bar picker defaults to All projects and narrows the list to the ch
 
 test("arriving with ?projectId selects and remembers it; the picker then wins", async () => {
   renderTasks("p2")
-  const select = (await screen.findByTestId("tasks-project-select")) as HTMLSelectElement
+  const select = (await screen.findByTestId("tasks-project-select")) as HTMLButtonElement
   await waitFor(() => expect(select.value).toBe("p2"))
   expect(rowTitles()).toEqual([expect.stringContaining("Run benchmark")])
   expect(window.localStorage.getItem(PREF_KEY)).toBe("p2")
 
-  fireEvent.change(select, { target: { value: "" } })
+  fireEvent.click(select)
+  fireEvent.click(
+    within(screen.getByRole("listbox", { name: "Project filter" })).getByRole("option", {
+      name: "All projects",
+    }),
+  )
   expect(mocks.navigate).toHaveBeenCalledWith({ to: "/science/tasks", search: {}, replace: true })
   expect(window.localStorage.getItem(PREF_KEY)).toBe("")
 })
@@ -122,7 +129,7 @@ test("arriving with ?projectId selects and remembers it; the picker then wins", 
 test("opens on the remembered project", async () => {
   window.localStorage.setItem(PREF_KEY, "p1")
   renderTasks(undefined)
-  const select = (await screen.findByTestId("tasks-project-select")) as HTMLSelectElement
+  const select = (await screen.findByTestId("tasks-project-select")) as HTMLButtonElement
   await waitFor(() => expect(select.value).toBe("p1"))
   expect(rowTitles()).toEqual([expect.stringContaining("Build parser")])
 })

@@ -209,4 +209,82 @@ describe("Analysis top bar shortcuts", () => {
         .some((tab) => tab.getAttribute("aria-label") === "Analyze experiments"),
     ).toBe(true)
   })
+
+  const analysisHandlers = (): FakeHandlers => ({
+    ...sessionHandlers(),
+    "projects.list": () => [project("p1", "alpha")],
+    "projects.capabilities": () => ({ git: true }),
+    "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
+    "science.analysis.listFiles": () => ({ groups: [], total: 0, truncated: false }),
+  })
+
+  /** The labels and checked states of the Analysis "+" menu's own buttons. */
+  async function openAnalysisMenu() {
+    fireEvent.click(within(screen.getByRole("banner")).getByTestId("analysis-shortcuts-add"))
+    const menu = await screen.findByRole("menu", { name: "Header shortcuts" })
+    return menu
+  }
+  const builtinItems = (menu: HTMLElement) =>
+    within(menu)
+      .getAllByRole("menuitemcheckbox")
+      .map((item) => [item.textContent, item.getAttribute("aria-checked")])
+
+  test("the menu lists Analyze experiments, HTML report and Fetch experiments, all checked; HTML report can be removed and added back", async () => {
+    mount(<ScienceAnalysis initialProjectId={undefined} />, analysisHandlers())
+    const banner = screen.getByRole("banner")
+    await within(banner).findByTestId("analysis-analyze-experiments")
+    expect(within(banner).getByTestId("analysis-new-html-report")).toBeTruthy()
+    expect(within(banner).getByTestId("analysis-fetch-experiments")).toBeTruthy()
+
+    const menu = await openAnalysisMenu()
+    expect(builtinItems(menu)).toEqual([
+      ["Analyze experiments", "true"],
+      ["HTML report", "true"],
+      ["Fetch experiments", "true"],
+    ])
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "HTML report" }))
+    await waitFor(() => expect(within(banner).queryByTestId("analysis-new-html-report")).toBeNull())
+    expect(
+      within(menu)
+        .getByRole("menuitemcheckbox", { name: "HTML report" })
+        .getAttribute("aria-checked"),
+    ).toBe("false")
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "HTML report" }))
+    await waitFor(() => expect(within(banner).getByTestId("analysis-new-html-report")).toBeTruthy())
+  })
+
+  test("a list saved before HTML report and Fetch experiments were listable gets them added; a removed one stays removed", async () => {
+    window.localStorage.setItem(
+      "pi-lab.analysis.headerShortcuts",
+      JSON.stringify(["analyze-experiments", "skill:review-notes"]),
+    )
+    mount(<ScienceAnalysis initialProjectId={undefined} />, analysisHandlers())
+    const banner = screen.getByRole("banner")
+    await within(banner).findByTestId("analysis-new-html-report")
+    expect(within(banner).getByTestId("analysis-fetch-experiments")).toBeTruthy()
+    let menu = await openAnalysisMenu()
+    expect(builtinItems(menu)).toEqual([
+      ["Analyze experiments", "true"],
+      ["HTML report", "true"],
+      ["Fetch experiments", "true"],
+    ])
+
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "HTML report" }))
+    await waitFor(() => expect(within(banner).queryByTestId("analysis-new-html-report")).toBeNull())
+    expect(
+      JSON.parse(window.localStorage.getItem("pi-lab.analysis.headerShortcuts") ?? ""),
+    ).toEqual(["analyze-experiments", "fetch-experiments", "skill:review-notes"])
+
+    cleanup()
+    mount(<ScienceAnalysis initialProjectId={undefined} />, analysisHandlers())
+    const again = screen.getByRole("banner")
+    await within(again).findByTestId("analysis-analyze-experiments")
+    expect(within(again).queryByTestId("analysis-new-html-report")).toBeNull()
+    menu = await openAnalysisMenu()
+    expect(builtinItems(menu)).toEqual([
+      ["Analyze experiments", "true"],
+      ["HTML report", "false"],
+      ["Fetch experiments", "true"],
+    ])
+  })
 })

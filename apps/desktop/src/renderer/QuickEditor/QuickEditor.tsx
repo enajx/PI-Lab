@@ -762,6 +762,7 @@ export function QuickEditor({
             data-testid="quick-editor-settings"
             aria-label="Quick Editor settings"
             title="Quick Editor settings"
+            data-feature-help="Save the file and open the settings for the Quick Editor."
             className="app-no-drag rounded px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
             disabled={busy}
             onClick={() => void openQuickSettings()}
@@ -798,6 +799,7 @@ export function QuickEditor({
             <button
               type="button"
               aria-label="Close file"
+              data-feature-help="Close this file. You are asked first if it has unsaved changes."
               className="rounded px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               data-testid="quick-editor-tab-close"
               onClick={requestFileClose}

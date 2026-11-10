@@ -30,8 +30,11 @@ function nextStage(index: number, currentIndex: number): ProjectStage | null {
  * reached steps and the lines between them are filled, and the current step has
  * a ring. Clicking a step (or pressing Enter or Space on it) saves it as the stage;
  * clicking the current step moves back one step. The click does not reach the
- * host, so on the project card it does not open the project. Saves through
- * `projects.setStage` and refreshes the project list and project queries.
+ * host. Saves through `projects.setStage` and refreshes the project list and
+ * project queries. The row is named "Project status": its hover text says so, and
+ * the "What's this?" card shows that name with the current stage and how to set
+ * it (each step carries the same text, as the card reads the hovered button).
+ * Each step's accessible name is its own, e.g. "Planning step".
  */
 export function ProjectStageRow({
   projectId,
@@ -59,18 +62,29 @@ export function ProjectStageRow({
     }),
   )
   const currentIndex = stage === null ? -1 : STEPS.findIndex((step) => step.id === stage)
+  const current = STEPS[currentIndex]
+  const name = t("Project status")
+  const help = current
+    ? `${t("Current:")} ${t(current.label)}. ${t("Click a step to set it.")}`
+    : t("Not started. Click a step to set it.")
   const choose = (index: number) => {
     if (setStage.isPending) return
     setStage.mutate({ id: projectId, stage: nextStage(index, currentIndex) })
   }
 
   return (
-    <div data-testid={testId} className={cn("flex select-none items-center gap-1.5", className)}>
+    <div
+      data-testid={testId}
+      title={name}
+      data-feature-label={name}
+      data-feature-help={help}
+      className={cn("flex select-none items-center gap-1.5", className)}
+    >
       <div className="flex items-center">
         {STEPS.map((step, index) => {
           const filled = index <= currentIndex
-          const current = index === currentIndex
-          const label = t(step.label)
+          const isCurrent = index === currentIndex
+          const label = `${t(step.label)} ${t("step")}`
           return (
             <Fragment key={step.id}>
               {index > 0 ? (
@@ -85,9 +99,10 @@ export function ProjectStageRow({
                 type="button"
                 data-testid={`${testId}-step-${step.id}`}
                 data-filled={filled}
-                aria-current={current ? "step" : undefined}
-                aria-label={current ? `${label} ${t("(current stage)")}` : label}
-                title={`${label}. ${t("Click to set")}`}
+                aria-current={isCurrent ? "step" : undefined}
+                aria-label={isCurrent ? `${label} ${t("(current)")}` : label}
+                data-feature-label={name}
+                data-feature-help={help}
                 onClick={(event) => {
                   event.stopPropagation()
                   // The second click of a double-click is not a second choice.
@@ -104,7 +119,7 @@ export function ProjectStageRow({
                     filled
                       ? "border-muted-foreground bg-muted-foreground"
                       : "border-muted-foreground/50 group-hover/step:border-muted-foreground",
-                    current && "border-foreground bg-foreground ring-2 ring-foreground/20",
+                    isCurrent && "border-foreground bg-foreground ring-2 ring-foreground/20",
                   )}
                 />
               </button>

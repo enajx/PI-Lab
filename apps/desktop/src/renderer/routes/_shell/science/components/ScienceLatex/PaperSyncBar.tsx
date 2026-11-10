@@ -3,6 +3,7 @@ import { ChevronDown, RefreshCw } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { elapsedSince } from "../../../../../components/elapsed"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 import { AgentMergeReview } from "./AgentMergeReview"
@@ -25,7 +26,7 @@ interface PaperSyncBarProps {
   projectId: string
   /** The paper folder's workspace, used to read files for the agent-merge review. */
   workspaceId: string
-  /** The page top bar's element that gets the Sync button, or null before it mounts. */
+  /** The page top bar's element that gets the Sync button, or null before it mounts or when the user removed Sync from the top bar. */
   syncSlot: HTMLElement | null
   /** The editor footer's element that gets the last sync time, Sync messages and the output folder item, or null before it mounts. */
   footerSlot: HTMLElement | null
@@ -156,6 +157,7 @@ export function PaperSyncBar({
               data-testid="paper-sync"
               disabled={!hasRemote || busy}
               title={hasRemote ? t("Pull from and push to Overleaf") : t("No Git remote")}
+              data-feature-label={t("Sync")}
               onClick={() => void startSync(!confirmCommit)}
               className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
             >
@@ -293,21 +295,7 @@ function OutputFolderItem({
     }),
   )
 
-  useEffect(() => {
-    if (!open) return
-    const dismiss = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", dismiss)
-    document.addEventListener("keydown", dismissOnEscape)
-    return () => {
-      document.removeEventListener("mousedown", dismiss)
-      document.removeEventListener("keydown", dismissOnEscape)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   return (
     <div ref={rootRef} className="relative flex shrink-0 items-center">
@@ -315,6 +303,7 @@ function OutputFolderItem({
         type="button"
         data-testid="paper-output-folder"
         title={error ?? t("Build output folder for this paper")}
+        data-feature-label={t("Output folder")}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -538,6 +527,7 @@ function ConflictDialog({
           type="button"
           data-testid="paper-conflict-cancel"
           title={t("Leave the conflict to solve it manually")}
+          data-feature-label={t("Cancel")}
           className={buttonClass}
           onClick={() => onChoice("cancel")}
         >

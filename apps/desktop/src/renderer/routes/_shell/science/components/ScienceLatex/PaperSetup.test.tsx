@@ -1,3 +1,4 @@
+import { buttonVariants, cn } from "@pi-lab/ui"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
@@ -354,7 +355,7 @@ describe("PaperSetup (mocked server)", () => {
     expect(screen.queryByTestId("paper-overleaf-token-found")).toBeNull()
   })
 
-  test("the cards sit near the top with clear space above, horizontally centred, and each card centres its content vertically", async () => {
+  test("the page has the Library source chooser's layout: a short heading, three cards in a row, and padding on every side", async () => {
     renderSetup({
       "paper.token.status": () => ({ configured: false, source: null }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
@@ -364,47 +365,73 @@ describe("PaperSetup (mocked server)", () => {
     const page = screen.getByTestId("paper-setup")
     expect(page.className).toContain("flex-1")
     expect(page.className).toContain("overflow-y-auto")
-    // Clear space (3.5rem) above the cards, so they do not sit right under the top bar.
-    expect(page.className).toContain("pt-14")
-    // The content sits at the top (no vertical auto margins) and is centred horizontally.
+    // As in the Library: centred, at most 48rem wide, with 1.5rem padding on every side.
     const content = screen.getByTestId("paper-setup-content")
     expect(content.parentElement).toBe(page)
     expect(content.className).toContain("mx-auto")
-    expect(content.className).not.toMatch(/(^|\s)m-auto/)
-    expect(content.className).not.toMatch(/(^|\s)my-auto/)
-    // Narrow cards: a small overall width and tight padding.
-    expect(content.className).toContain("max-w-6xl")
-    expect(screen.getByTestId("paper-setup-overleaf").className).toMatch(/(^|\s)p-2(\s|$)/)
-    // Grid items stretch, so all cards have the same height; the cards are 2.5rem apart.
+    expect(content.className).toContain("max-w-3xl")
+    expect(content.className).toMatch(/(^|\s)p-6(\s|$)/)
+    // A heading and one line of text above the cards, as in the Library.
+    expect(
+      within(content).getByRole("heading", { level: 2, name: "Choose a paper folder" }),
+    ).toBeTruthy()
+    // Three columns 0.75rem apart; grid items stretch, so the cards have the same height.
     const grid = screen.getByTestId("paper-setup-overleaf").parentElement as HTMLElement
     expect(grid.className).toContain("grid")
-    expect(grid.className).toMatch(/(^|\s)gap-10(\s|$)/)
+    expect(grid.className).toContain("sm:grid-cols-3")
+    expect(grid.className).toMatch(/(^|\s)gap-3(\s|$)/)
     expect(grid.className).not.toMatch(/items-(start|center|end)/)
+    // The Library's card: rounded border, light card background, 1rem padding, left-aligned text.
     for (const card of [
       screen.getByTestId("paper-setup-overleaf"),
       screen.getByTestId("paper-setup-folder"),
       screen.getByTestId("paper-setup-create"),
     ]) {
-      expect(card.className).toContain("justify-center")
+      for (const name of ["rounded-lg", "border", "bg-card/40", "p-4", "flex-col"]) {
+        expect(card.className.split(" ")).toContain(name)
+      }
+      expect(card.className).not.toContain("text-center")
+    }
+    // The buttons are the shared small primary Button the Library cards use.
+    const libraryButton = cn(buttonVariants({ size: "sm" }))
+    for (const id of ["paper-overleaf-add", "paper-use-folder", "paper-create"]) {
+      expect(screen.getByTestId(id).getAttribute("data-slot")).toBe("button")
+      expect(screen.getByTestId(id).className).toBe(libraryButton)
     }
   })
 
-  test("both cards centre their content and keep the text short", async () => {
+  test("the cards keep the text short", async () => {
     renderSetup({
       "paper.token.status": () => ({ configured: false, source: null }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
     })
     const overleaf = await screen.findByTestId("paper-setup-overleaf")
     const folder = screen.getByTestId("paper-setup-folder")
-    for (const card of [overleaf, folder]) {
-      expect(card.className).toContain("items-center")
-      expect(card.className).toContain("text-center")
-    }
     expect(overleaf.textContent).toContain("Clone your Overleaf project into paper/.")
     expect(folder.textContent).toContain("Open a paper folder you already cloned.")
     expect(folder.textContent).not.toContain("outside this project")
     await screen.findByTestId("paper-overleaf-token")
     expect(overleaf.textContent).not.toContain("keychain")
+  })
+
+  test("long text in the cards wraps instead of being cut", async () => {
+    renderSetup({
+      "paper.token.status": () => ({ configured: false, source: null }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper", available: false }),
+    })
+    const folder = await screen.findByTestId("paper-create-folder")
+    await waitFor(() => expect(folder.textContent).toBe("paper/ has files in it, choose a folder"))
+    for (const name of ["truncate", "overflow-hidden", "whitespace-nowrap", "text-ellipsis"]) {
+      expect(folder.className.split(" ")).not.toContain(name)
+    }
+    expect(folder.className).toContain("wrap-anywhere")
+    // The folder line and the token links wrap onto a second line when the card is narrow.
+    expect((folder.parentElement as HTMLElement).className).toContain("flex-wrap")
+    const card = screen.getByTestId("paper-setup-overleaf")
+    const links = (await within(card).findByRole("link", { name: "Get a Git token" }))
+      .parentElement as HTMLElement
+    expect(links.className).toContain("flex-wrap")
   })
 
   test("links to the Overleaf token page and the Git docs open in the browser", async () => {

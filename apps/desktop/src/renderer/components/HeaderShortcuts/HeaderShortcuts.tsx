@@ -3,10 +3,11 @@ import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Check, ChevronDown, ChevronRight, FlaskConical, Plus, Waypoints } from "lucide-react"
-import { Fragment, type ReactNode, useEffect, useRef, useState } from "react"
+import { Fragment, type ReactNode, useRef, useState } from "react"
 import { useTranslate } from "../../i18n/language"
 import { type HeaderShortcutsView, useHeaderShortcuts } from "../../preferences/preferences"
 import { useTRPC } from "../../trpc/react"
+import { usePopupDismiss } from "../usePopupDismiss"
 
 /** One of a view's own top bar buttons that the "+" menu can add or remove. */
 export interface BuiltinShortcut {
@@ -109,21 +110,7 @@ export function HeaderShortcuts({
   )
   const routines = routinesQuery.data ?? []
 
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("mousedown", onPointerDown)
-    return () => {
-      window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("mousedown", onPointerDown)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   const toggle = (id: string) =>
     setShortcuts(
@@ -190,6 +177,7 @@ export function HeaderShortcuts({
           type="button"
           data-testid={`${testId}-shortcut-skill-${slug}`}
           title={reason}
+          data-feature-label={skill?.name ?? slug}
           aria-busy={startSkill.isPending}
           disabled={projectId === null || !skill || startSkill.isPending}
           onClick={() => onSkill(slug)}
@@ -215,6 +203,7 @@ export function HeaderShortcuts({
           type="button"
           data-testid={`${testId}-shortcut-routine-${automationId}`}
           title={reason}
+          data-feature-label={routine?.name ?? t("Routine")}
           aria-busy={runRoutine.isPending}
           disabled={!routine || runRoutine.isPending}
           onClick={() => onRoutine(automationId)}
@@ -236,6 +225,11 @@ export function HeaderShortcuts({
         type="button"
         role="menuitemcheckbox"
         aria-checked={added}
+        data-feature-help={
+          added
+            ? t("Shown in the top bar. Click to remove it.")
+            : t("Not in the top bar. Click to add it.")
+        }
         onClick={() => toggle(id)}
         className={menuItemClass}
       >
@@ -282,8 +276,9 @@ export function HeaderShortcuts({
         <button
           type="button"
           data-testid={`${testId}-shortcuts-add`}
-          aria-label={t("Add or remove header shortcuts")}
-          title={t("Add or remove header shortcuts")}
+          aria-label={t("Header shortcuts")}
+          title={t("Header shortcuts")}
+          data-feature-help={t("Choose which buttons this top bar shows.")}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen(!open)}

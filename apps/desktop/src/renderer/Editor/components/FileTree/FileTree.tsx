@@ -389,6 +389,7 @@ export function FileTree({
             data-testid="central-files-section"
             aria-expanded={true}
             aria-label={t("Collapse files")}
+            data-feature-help={t("Hide the file list to give the panes more room.")}
             onClick={onCollapse}
             className="text-muted-foreground hover:text-foreground"
           >
@@ -400,6 +401,7 @@ export function FileTree({
           data-testid="file-tree-root"
           data-selected={isSelected(selection, "dir", "")}
           title={t("Use project root for new files and folders")}
+          data-feature-label={t("Files")}
           onClick={() => setSelection(ROOT_SELECTION)}
           className="mr-auto rounded px-1 font-medium text-muted-foreground text-xs uppercase tracking-wide hover:text-foreground"
         >

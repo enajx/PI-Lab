@@ -2,6 +2,7 @@ import type { ProjectStage } from "@pi-lab/local-db"
 import { QueryClient, useQuery } from "@tanstack/react-query"
 import { describe, expect, test } from "vitest"
 import { AppProviders } from "../../providers/AppProviders"
+import { FeatureHelpPanel } from "../../routes/_shell/components/Sidebar/Sidebar"
 import { createFakeTrpcClient } from "../../test/fakeTrpcClient"
 import { fireEvent, render, screen, waitFor } from "../../test/render"
 import { useTRPC } from "../../trpc/react"
@@ -56,14 +57,15 @@ function stepStates() {
 }
 
 describe("Project stage row", () => {
-  test("a new project has no step filled; each step has its name and how to set it", async () => {
+  test("a new project has no step filled; the row is named Project status and each step has its own name", async () => {
     renderStage(null)
     const planning = await screen.findByTestId("stage-step-planning")
     expect(stepStates()).toEqual(["empty", "empty", "empty", "empty"])
-    expect(planning.getAttribute("title")).toBe("Planning. Click to set")
-    expect(planning.getAttribute("aria-label")).toBe("Planning")
-    expect(screen.getByTestId("stage-step-paperWriting").getAttribute("title")).toBe(
-      "Paper writing. Click to set",
+    expect(screen.getByTestId("stage").getAttribute("title")).toBe("Project status")
+    expect(planning.getAttribute("title")).toBeNull()
+    expect(planning.getAttribute("aria-label")).toBe("Planning step")
+    expect(screen.getByTestId("stage-step-paperWriting").getAttribute("aria-label")).toBe(
+      "Paper writing step",
     )
   })
 
@@ -72,10 +74,30 @@ describe("Project stage row", () => {
     await screen.findByTestId("stage-step-planning")
     expect(stepStates()).toEqual(["filled", "filled", "filled,current", "empty"])
     expect(screen.getByTestId("stage-step-paperWriting").getAttribute("aria-label")).toBe(
-      "Paper writing (current stage)",
+      "Paper writing step (current)",
     )
     const lines = screen.getAllByTestId("stage-line").map((line) => line.dataset.filled)
     expect(lines).toEqual(["true", "true", "false"])
+  })
+
+  test("the What's this? card shows Project status and the current stage when a step is hovered", async () => {
+    const state = renderStage(null)
+    render(<FeatureHelpPanel onHide={() => {}} />)
+    fireEvent.pointerOver(await screen.findByTestId("stage-step-experiments"))
+    expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe("Project status")
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Not started. Click a step to set it.",
+    )
+    fireEvent.click(screen.getByTestId("stage-step-experiments"))
+    await waitFor(() => expect(state.stage).toBe("experiments"))
+    await waitFor(() =>
+      expect(screen.getByTestId("stage-step-planning").dataset.filled).toBe("true"),
+    )
+    fireEvent.pointerOver(screen.getByTestId("stage-step-planning"))
+    expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe("Project status")
+    expect(screen.getByTestId("sidebar-feature-help-description").textContent).toBe(
+      "Current: Experiments. Click a step to set it.",
+    )
   })
 
   test("clicking a step sets the stage and saves it", async () => {

@@ -137,7 +137,7 @@ async function openAndLink(page: Page, agentId: string): Promise<void> {
   await page.getByTestId("edit-project-save").click()
   await page.getByTestId("project-card").getByTestId("project-card-latex").click()
   await expect(page.getByTestId("science-latex")).toBeVisible()
-  await expect(page.getByTestId("latex-project-select")).toHaveValue(/.+/)
+  await expect(page.getByTestId("latex-project-select")).toHaveAttribute("value", /.+/)
   await expectSetupCards(page)
   await page.screenshot({ path: test.info().outputPath("latex-setup.png") })
   // No Sync button before a paper is linked.
@@ -152,7 +152,7 @@ const SETUP_CARDS = ["paper-setup-overleaf", "paper-setup-folder", "paper-setup-
 /**
  * The token status loads after the cards appear and can change their height
  * for a moment, so wait for the settled layout: three equal cards side by side
- * on one row, at the top of the page and centred.
+ * on one row, laid out like the Library's source chooser (see {@link expectCentredSetup}).
  */
 async function expectSetupCards(page: Page): Promise<void> {
   await expect
@@ -174,44 +174,73 @@ async function expectSetupCards(page: Page): Promise<void> {
   await page.screenshot({ path: resolve(".cache", "screens", "latex-setup-cards.png") })
 }
 
-/** Vertical middle of a box. */
-function middleY(box: { y: number; height: number }): number {
-  return box.y + box.height / 2
-}
+/** The bottom-right button of each setup card, in the order of {@link SETUP_CARDS}. */
+const SETUP_BUTTONS = ["paper-overleaf-add", "paper-use-folder", "paper-create"]
 
 /**
- * The setup cards have the same height, the shorter card's content sits in its
- * vertical middle, and the row sits near the top of the area below the top bar
- * (with clear space above it), horizontally centred, with clear gaps between cards.
+ * The setup page is laid out like the Library's source chooser: a heading above
+ * three cards in a row, horizontally centred with at least 24px on both sides at
+ * the default window size, with gaps between the cards, 16px of padding inside
+ * each card above its title and below its button, and nothing in a card cut or
+ * reaching past its edges (long text wraps).
  */
 async function expectCentredSetup(page: Page): Promise<void> {
-  const overleaf = await page.getByTestId("paper-setup-overleaf").boundingBox()
-  const folder = await page.getByTestId("paper-setup-folder").boundingBox()
-  const create = await page.getByTestId("paper-setup-create").boundingBox()
-  const icon = await page.getByTestId("paper-setup-folder").locator("svg").first().boundingBox()
-  const button = await page.getByTestId("paper-use-folder").boundingBox()
+  const cards = await Promise.all(SETUP_CARDS.map((id) => page.getByTestId(id).boundingBox()))
+  const buttons = await Promise.all(SETUP_BUTTONS.map((id) => page.getByTestId(id).boundingBox()))
   const area = await page.getByTestId("paper-setup").boundingBox()
-  const content = await page.getByTestId("paper-setup-content").boundingBox()
-  if (!overleaf || !folder || !create || !icon || !button || !area || !content) {
+  const heading = await page
+    .getByTestId("paper-setup-content")
+    .getByRole("heading", { level: 2 })
+    .boundingBox()
+  const [overleaf, folder, create] = cards
+  if (!overleaf || !folder || !create || !area || !heading || buttons.some((box) => !box)) {
     throw new Error("setup layout is not visible")
   }
-  expect(Math.abs(folder.height - overleaf.height)).toBeLessThan(1)
-  const contentMiddle = (icon.y + button.y + button.height) / 2
-  expect(Math.abs(contentMiddle - middleY(folder))).toBeLessThan(2)
-  // Near the top: clear space (about 56px) above the cards, but not in the page's vertical middle.
-  expect(overleaf.y - area.y).toBeGreaterThanOrEqual(48)
-  expect(overleaf.y - area.y).toBeLessThanOrEqual(64)
-  // About 40px between neighbouring cards.
+  // The heading sits above the cards, with space between it and the top bar.
+  expect(heading.y - area.y).toBeGreaterThanOrEqual(24)
+  expect(heading.y + heading.height).toBeLessThanOrEqual(overleaf.y)
+  // Clear margins on both sides of the row, and the row is centred.
+  expect(overleaf.x - area.x).toBeGreaterThanOrEqual(24)
+  expect(area.x + area.width - (create.x + create.width)).toBeGreaterThanOrEqual(24)
+  const row = { left: overleaf.x, right: create.x + create.width }
+  expect(Math.abs((row.left + row.right) / 2 - (area.x + area.width / 2))).toBeLessThan(2)
+  // The cards do not touch.
   for (const [left, right] of [
     [overleaf, folder],
     [folder, create],
   ]) {
-    expect(Math.abs(right.x - (left.x + left.width) - 40)).toBeLessThan(2)
+    expect(right.x - (left.x + left.width)).toBeGreaterThanOrEqual(8)
   }
-  // Horizontally centred, with cards of at most 20rem (320px) each.
-  const row = { left: overleaf.x, right: create.x + create.width }
-  expect(Math.abs((row.left + row.right) / 2 - (area.x + area.width / 2))).toBeLessThan(2)
-  for (const card of [overleaf, folder, create]) expect(card.width).toBeLessThanOrEqual(320 + 1)
+  // 16px of padding above each card's content and below its button.
+  for (const [index, card] of cards.entries()) {
+    const button = buttons[index]
+    if (!card || !button) throw new Error("setup layout is not visible")
+    expect(Math.abs(card.y + card.height - (button.y + button.height) - 16)).toBeLessThan(2)
+  }
+  // Nothing in a card is cut (no element scrolls its own text) or reaches past the card's padding.
+  const problems = await page.evaluate((ids) => {
+    const found: string[] = []
+    for (const id of ids) {
+      const card = document.querySelector(`[data-testid="${id}"]`) as HTMLElement
+      const box = card.getBoundingClientRect()
+      if (box.top + 15 > (card.firstElementChild as HTMLElement).getBoundingClientRect().top) {
+        found.push(`${id}: less than 16px above its content`)
+      }
+      for (const element of [card, ...card.querySelectorAll<HTMLElement>("*")]) {
+        if (element instanceof SVGElement || element.tagName === "INPUT") continue
+        const inner = element.getBoundingClientRect()
+        if (element.scrollWidth > element.clientWidth + 1) {
+          found.push(`${id}: "${element.textContent}" is cut`)
+        }
+        if (inner.left < box.left + 15 && element !== card) found.push(`${id}: past the left edge`)
+        if (inner.right > box.right - 15 && element !== card) {
+          found.push(`${id}: "${element.textContent}" reaches past the right edge`)
+        }
+      }
+    }
+    return found
+  }, SETUP_CARDS)
+  expect(problems).toEqual([])
 }
 
 /** Replace the line under \section{Introduction} (the line both sides edit). */

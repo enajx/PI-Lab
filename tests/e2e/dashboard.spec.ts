@@ -668,27 +668,52 @@ test("leaving Settings restores the view that opened it", async () => {
   await expect(window.getByTestId("project-view")).toBeVisible()
 })
 
-test("the project stage set on the card shows in the project view and survives a restart", async () => {
+test("the card title has its own line with the agent status below it", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const card = window.getByTestId("project-card")
+  await expect(card).toBeVisible({ timeout: 30_000 })
+  const title = card.getByTestId("project-card-title")
+  const status = card.getByTestId("project-card-status")
+  await expect(status).toHaveText("No active agents")
+  await expect(card.getByTestId("project-card-stage")).toHaveCount(0)
+  const open = await card.getByTestId("project-card-open").boundingBox()
+  const titleBox = await title.boundingBox()
+  const statusBox = await status.boundingBox()
+  if (!open || !titleBox || !statusBox)
+    throw new Error("Project card title or status is not visible")
+  // The title spans the card's text area (its padding aside), and the status starts below it.
+  expect(titleBox.width).toBeGreaterThan(open.width - 24)
+  expect(statusBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height)
+  await card.screenshot({ path: resolve(".cache", "screens", "card-title.png") })
+})
+
+test("the project stage set in Edit project shows in the project view and survives a restart", async () => {
   let window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   const card = window.getByTestId("project-card")
   await expect(card).toBeVisible({ timeout: 30_000 })
 
-  // A new project has no step filled.
-  const cardStage = card.getByTestId("project-card-stage")
-  await expect(cardStage.locator('[data-filled="true"]')).toHaveCount(0)
+  // Edit project has a Project status row; a new project has no step filled.
+  await card.getByTestId("project-card-body").click({ button: "right", position: { x: 24, y: 24 } })
+  await window.getByTestId("project-card-menu").getByTestId("project-card-menu-edit").click()
+  const editDialog = window.getByTestId("edit-project-dialog")
+  const editStage = editDialog.getByTestId("edit-project-stage")
+  await expect(editDialog.getByText("Project status")).toBeVisible()
+  await expect(editStage.locator('[data-filled="true"]')).toHaveCount(0)
 
   // Clicking Experiments fills Planning and Experiments; Experiments is current.
-  await cardStage.getByTestId("project-card-stage-step-experiments").click()
-  await expect(cardStage.getByTestId("project-card-stage-step-experiments")).toHaveAttribute(
+  await editStage.getByTestId("edit-project-stage-step-experiments").click()
+  await expect(editStage.getByTestId("edit-project-stage-step-experiments")).toHaveAttribute(
     "aria-current",
     "step",
   )
-  await expect(cardStage.getByTestId("project-card-stage-step-planning")).toHaveAttribute(
+  await expect(editStage.getByTestId("edit-project-stage-step-planning")).toHaveAttribute(
     "data-filled",
     "true",
   )
-  await expect(window.getByTestId("dashboard")).toBeVisible()
+  await editDialog.getByTestId("edit-project-cancel").click()
+  await expect(editDialog).toHaveCount(0)
 
   // The project view top bar shows the same stage.
   await card.getByTestId("project-card-open").click()
@@ -697,6 +722,17 @@ test("the project stage set on the card shows in the project view and survives a
     "aria-current",
     "step",
   )
+
+  // Hovering the row: the tooltip is "Project status", and the What's this? card
+  // shows "Project status" with the current stage, not the step's name again.
+  await expect(viewStage).toHaveAttribute("title", "Project status")
+  await viewStage.getByTestId("project-view-stage-step-planning").hover()
+  const help = window.getByTestId("sidebar-feature-help")
+  await expect(help.getByTestId("sidebar-feature-help-label")).toHaveText("Project status")
+  await expect(help.getByTestId("sidebar-feature-help-description")).toHaveText(
+    "Current: Experiments. Click a step to set it.",
+  )
+  await window.screenshot({ path: resolve(".cache", "screens", "stage-hint.png") })
 
   // Clicking the current step moves back one step.
   await viewStage.getByTestId("project-view-stage-step-experiments").click()
@@ -709,7 +745,11 @@ test("the project stage set on the card shows in the project view and survives a
   await launchApp()
   window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window
+    .getByTestId("project-card")
+    .getByTestId("project-card-open")
+    .click({ timeout: 30_000 })
   await expect(
-    window.getByTestId("project-card").getByTestId("project-card-stage-step-planning"),
+    window.getByTestId("project-view-stage").getByTestId("project-view-stage-step-planning"),
   ).toHaveAttribute("aria-current", "step", { timeout: 30_000 })
 })

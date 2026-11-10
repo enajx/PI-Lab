@@ -18,7 +18,8 @@ import {
   Ungroup,
   X,
 } from "lucide-react"
-import { type DragEvent, type FormEvent, type ReactNode, useMemo, useState } from "react"
+import { type DragEvent, type FormEvent, type ReactNode, useMemo, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { translateKnownError } from "../../../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 
@@ -716,6 +717,8 @@ function ColumnPicker({
 }) {
   const t = useTranslate()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
   const hiddenTaskCount = columns
     .filter((column) => !visibleKeys.includes(column.key))
     .reduce((sum, column) => sum + column.count, 0)
@@ -725,7 +728,7 @@ function ColumnPicker({
       ? ""
       : `, ${hiddenTaskCount} ${t(hiddenTaskCount === 1 ? "task" : "tasks")} ${t("in hidden columns")}`
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         aria-label={

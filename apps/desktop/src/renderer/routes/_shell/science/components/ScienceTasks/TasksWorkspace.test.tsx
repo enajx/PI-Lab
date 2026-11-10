@@ -322,6 +322,10 @@ describe("TasksWorkspace", () => {
 
     expect(within(project).queryByRole("group", { name: "TODO / One" })).toBeNull()
     expect(within(project).getByRole("group", { name: "TODO / Five" })).toBeTruthy()
+    // A click outside the open column menu closes it.
+    expect(within(project).getByRole("menu")).toBeTruthy()
+    fireEvent.mouseDown(document.body)
+    expect(within(project).queryByRole("menu")).toBeNull()
   })
 
   test("always shows three Kanban lanes and maps existing statuses without rewriting them", () => {

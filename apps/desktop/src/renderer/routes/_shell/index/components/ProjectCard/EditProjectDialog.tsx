@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { ProjectStageRow } from "../../../../../components/ProjectStage"
 import { useTranslate } from "../../../../../i18n/language"
 import { useEmojiTagPalette } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
@@ -80,6 +81,8 @@ type PaperFolderDraft = { kind: "keep" } | ({ kind: "set" } & ChosenPaperFolder)
  * other details; if it fails, the error is shown and nothing else is saved.
  * A saved paper folder with no Git remote also gets "Connect to Overleaf…",
  * which acts at once (it opens the Connect to Overleaf dialog).
+ * When editing, a "Project status" row shows the project stage; clicking a step
+ * saves it at once, as in the project view top bar.
  */
 export function EditProjectDialog({
   project,
@@ -302,6 +305,17 @@ export function EditProjectDialog({
               </select>
             </label>
           ) : null}
+          {mode === "edit" && projectId !== "" ? (
+            <div className="flex flex-col gap-1">
+              <span className="font-medium text-foreground text-xs">{t("Project status")}</span>
+              <ProjectStageRow
+                projectId={projectId}
+                stage={project.metadata?.stage ?? null}
+                testId="edit-project-stage"
+                className="-ms-1"
+              />
+            </div>
+          ) : null}
           <label className="flex flex-col gap-1 text-xs font-medium">
             {t("Agent")}
             <select
@@ -420,6 +434,7 @@ export function EditProjectDialog({
                     type="button"
                     data-testid="edit-project-tag-add"
                     aria-label={t("Add tag")}
+                    data-feature-help={t("Add the typed text as a tag on this project.")}
                     disabled={!tagLabel.trim()}
                     onClick={addTextTag}
                     className="p-2 rounded border border-border disabled:opacity-50"
@@ -458,6 +473,7 @@ export function EditProjectDialog({
                     type="button"
                     data-testid="edit-project-paper-connect"
                     title={t("Send this paper to a new Overleaf project")}
+                    data-feature-label={t("Connect to Overleaf")}
                     onClick={() => {
                       setPaperError(null)
                       setConnectOpen(true)
@@ -472,6 +488,7 @@ export function EditProjectDialog({
                     type="button"
                     data-testid="edit-project-paper-clear"
                     title={t("Forget this folder. No files are deleted.")}
+                    data-feature-label={t("Clear paper folder")}
                     onClick={() => {
                       setPaperError(null)
                       setPaperDraft({ kind: "clear" })
@@ -502,6 +519,7 @@ export function EditProjectDialog({
               type="button"
               disabled
               title={t("Coming later")}
+              data-feature-label={t("Plan research")}
               className="mr-auto rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground opacity-50"
             >
               {t("Plan research")}

@@ -650,30 +650,35 @@ export function CodeMirrorBuffer({
         >
           <MarkdownFormatButton
             label={t("Bold")}
+            help={t("Make the selected text bold.")}
             text="B"
             className="font-bold"
             onClick={() => formatSelection("**", "**", "bold text")}
           />
           <MarkdownFormatButton
             label={t("Italic")}
+            help={t("Make the selected text italic.")}
             text="I"
             className="italic"
             onClick={() => formatSelection("_", "_", "italic text")}
           />
           <MarkdownFormatButton
             label={t("Strikethrough")}
+            help={t("Strike through the selected text.")}
             text="S"
             className="line-through"
             onClick={() => formatSelection("~~", "~~", "struck text")}
           />
           <MarkdownFormatButton
             label={t("Inline code")}
+            help={t("Format the selected text as code.")}
             text="&lt;/&gt;"
             className="font-mono text-[10px]"
             onClick={() => formatSelection("`", "`", "code")}
           />
           <MarkdownFormatButton
             label={t("Link")}
+            help={t("Turn the selected text into a link.")}
             text="↗"
             onClick={() => formatSelection("[", "](url)", "link text")}
           />
@@ -700,6 +705,7 @@ export function CodeMirrorBuffer({
                 role="option"
                 aria-selected={index === selectedSlashIndex}
                 aria-label={t(command.label)}
+                data-feature-help={t(command.hint)}
                 className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-accent ${
                   index === selectedSlashIndex ? "bg-accent" : ""
                 }`}
@@ -750,6 +756,7 @@ export function CodeMirrorBuffer({
                 role="option"
                 aria-selected={index === selectedMentionIndex}
                 aria-label={entry.relPath}
+                data-feature-help={t("Insert a link to this file.")}
                 className={`flex w-full rounded px-2 py-1.5 text-left text-xs hover:bg-accent ${
                   index === selectedMentionIndex ? "bg-accent" : ""
                 }`}
@@ -794,11 +801,13 @@ function editorTypographyStyle(fontFamily: string, fontSize: number): CSSPropert
 
 function MarkdownFormatButton({
   label,
+  help,
   text,
   className,
   onClick,
 }: {
   label: string
+  help: string
   text: string
   className?: string
   onClick: () => void
@@ -808,6 +817,7 @@ function MarkdownFormatButton({
       type="button"
       aria-label={label}
       title={label}
+      data-feature-help={help}
       className={`flex h-7 min-w-7 items-center justify-center rounded px-1.5 text-xs hover:bg-accent ${className ?? ""}`}
       onClick={onClick}
     >

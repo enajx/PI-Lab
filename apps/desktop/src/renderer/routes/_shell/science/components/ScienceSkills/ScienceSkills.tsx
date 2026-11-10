@@ -16,6 +16,7 @@ import {
   useVisibleSkills,
 } from "../../../../../skills"
 import { useTRPC } from "../../../../../trpc/react"
+import { ProjectPicker } from "../ProjectPicker"
 import { ScienceTabShell } from "../ScienceTabShell"
 
 const EMPTY_SKILLS: SkillCatalogItem[] = []
@@ -110,24 +111,18 @@ export function ScienceSkills() {
 
   const selector =
     projects.length > 0 ? (
-      <select
-        data-testid="skills-project-select"
-        aria-label={t("Skills project")}
-        data-feature-label={t("Skills project")}
-        data-feature-help={t("Choose which project repository to inspect for agent skills.")}
+      <ProjectPicker
+        testId="skills-project-select"
+        label={t("Skills project")}
+        help={t("Choose which project repository to inspect for agent skills.")}
         value={selectedId ?? ""}
-        onChange={(event) => {
-          setSelectedId(event.target.value)
+        projects={projects.map((project) => ({ id: project.id, name: project.name }))}
+        allLabel={null}
+        onChange={(projectId) => {
+          setSelectedId(projectId)
           setSelectedKey(null) // drop a stale finder highlight when the skill list changes
         }}
-        className="h-8 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-      >
-        {projects.map((project) => (
-          <option key={project.id} value={project.id}>
-            {project.name}
-          </option>
-        ))}
-      </select>
+      />
     ) : null
 
   return (

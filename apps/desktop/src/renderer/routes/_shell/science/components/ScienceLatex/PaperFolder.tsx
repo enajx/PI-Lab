@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, FolderOpen, X } from "lucide-react"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 import { PaperDialog } from "./PaperSyncBar"
@@ -150,6 +151,8 @@ function NotPaperDialog({
                 data-testid="paper-inside-option"
                 data-rel-path={paper.relPath}
                 title={paper.dir}
+                data-feature-label={paper.relPath}
+                data-feature-help={t("Use this folder as the paper folder.")}
                 onClick={() => onChoice(paper)}
                 className="flex w-full items-center gap-2 rounded border border-border px-3 py-1.5 text-left font-mono text-xs hover:bg-accent"
               >
@@ -290,21 +293,7 @@ export function PaperFolderStatusItem({
     onError,
   )
 
-  useEffect(() => {
-    if (!open) return
-    const dismiss = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", dismiss)
-    document.addEventListener("keydown", dismissOnEscape)
-    return () => {
-      document.removeEventListener("mousedown", dismiss)
-      document.removeEventListener("keydown", dismissOnEscape)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   const busy = picker.busy || link.isPending || unlink.isPending
   const itemClass =
@@ -320,6 +309,8 @@ export function PaperFolderStatusItem({
         type="button"
         data-testid="editor-paper-folder"
         title={`${t("Paper folder")}: ${dir}`}
+        data-feature-label={t("Paper folder")}
+        data-feature-help={`${dir}. ${t("Click to choose or clear the folder that holds the paper.")}`}
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={busy}
@@ -360,6 +351,7 @@ export function PaperFolderStatusItem({
             role="menuitem"
             data-testid="paper-folder-clear"
             title={t("Forget this folder. No files are deleted.")}
+            data-feature-label={t("Clear paper folder")}
             onClick={() => {
               setOpen(false)
               setError(null)

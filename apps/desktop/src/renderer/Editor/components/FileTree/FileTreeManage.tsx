@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { useTranslate } from "../../../i18n/language"
 
 /** A file tree row an action applies to. */
@@ -111,21 +112,7 @@ export function FileTreeContextMenu({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
 
-  useEffect(() => {
-    if (!menu) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) onClose()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [menu, onClose])
+  usePopupDismiss(menu !== null, [rootRef], onClose)
 
   // Shift the menu up/left when the cursor is near the window's bottom/right edge.
   useLayoutEffect(() => {

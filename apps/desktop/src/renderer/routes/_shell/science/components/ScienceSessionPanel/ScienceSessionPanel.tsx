@@ -78,6 +78,7 @@ export function ScienceSessionPanel({
           data-testid="science-sessions-expand"
           title={t("Show sessions")}
           aria-label={t("Show sessions")}
+          data-feature-help={t("Open the panel with this project's agent and terminal sessions.")}
           onClick={expand}
           className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -91,6 +92,7 @@ export function ScienceSessionPanel({
             data-testid="science-sessions-collapse"
             title={t("Hide sessions")}
             aria-label={t("Hide sessions")}
+            data-feature-help={t("Collapse this panel to give the main view more room.")}
             onClick={() => setCollapsed(true)}
             className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
           >
@@ -375,12 +377,14 @@ function NoticeButton({
   onClick: () => void
   children: ReactNode
 }) {
+  const t = useTranslate()
   return (
     <button
       type="button"
       data-testid={testId}
       title={label}
       aria-label={label}
+      data-feature-help={t("Pick a project first to open a session.")}
       onClick={onClick}
       className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >

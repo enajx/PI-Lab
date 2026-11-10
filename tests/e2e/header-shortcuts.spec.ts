@@ -160,10 +160,13 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
     await page.getByTestId("latex-shortcuts-add").click()
     const menu = page.getByRole("menu", { name: "Header shortcuts" })
-    await expect(menu.getByRole("menuitemcheckbox", { name: "Update paper" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    )
+    // The menu lists the LaTeX Editor's own top bar buttons, all shown.
+    await expect(menu.getByRole("menuitemcheckbox")).toHaveText(["Update paper", "Sync"])
+    for (const name of ["Update paper", "Sync"])
+      await expect(menu.getByRole("menuitemcheckbox", { name })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      )
     await menu.getByRole("button", { name: "Skills" }).click()
     await page.screenshot({ path: resolve(".cache", "screens", "shortcut-menu.png") })
     // The menu is small: narrow, with short rows.
@@ -177,6 +180,22 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     // Analysis: Analyze experiments is in the top bar and opens its agent in the session panel.
     await page.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
     await expect(page.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+    // Its "+" menu lists every button of the Analysis top bar, all shown.
+    await page.getByTestId("analysis-shortcuts-add").click()
+    const analysisItems = menu.getByRole("menuitemcheckbox")
+    await expect(analysisItems).toHaveText([
+      "Analyze experiments",
+      "HTML report",
+      "Fetch experiments",
+    ])
+    for (const name of ["Analyze experiments", "HTML report", "Fetch experiments"])
+      await expect(menu.getByRole("menuitemcheckbox", { name })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      )
+    await page.screenshot({ path: resolve(".cache", "screens", "analysis-menu.png") })
+    await page.keyboard.press("Escape")
+    await expect(menu).toHaveCount(0)
     const analyze = page.getByTestId("analysis-analyze-experiments")
     await expect(analyze).toBeEnabled()
     await analyze.click()
@@ -186,6 +205,114 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     await expect(
       panel.getByTestId("central-tab-select").filter({ hasText: "Analyze experiments" }),
     ).toBeVisible()
+  } finally {
+    // The test-mode dialog responder answers the quit confirmation with Quit.
+    await app.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Real app and window chrome: an open "+" menu turns the LaTeX Editor top bar
+ * (a window drag region, which Electron keeps from the page) into a normal page
+ * area, so a click on the top bar title closes the menu. The top bar project
+ * picker is the app's own dropdown and switches the project.
+ */
+test("a click on the top bar closes the + menu, and the project picker switches projects", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-lab-popup-dismiss-"))
+  const repos = { alpha: join(dir, "alpha"), beta: join(dir, "beta") }
+  for (const repo of Object.values(repos)) {
+    await mkdir(join(repo, "paper"), { recursive: true })
+    await writeFile(join(repo, "PROJECT.md"), "# Fixture project\n")
+    await writeFile(
+      join(repo, "paper", "main.tex"),
+      "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n",
+    )
+    await execFileAsync("git", ["init", "-b", "main", repo])
+    await execFileAsync("git", ["-C", repo, "add", "."])
+    await execFileAsync("git", [
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "Fixture",
+    ])
+  }
+  const desktop = join(process.cwd(), "apps/desktop")
+  // biome-ignore lint/suspicious/noUndeclaredEnvVars: Optional packaged app verification.
+  const binary = process.env.PI_LAB_PACKAGED_BINARY
+  // Each launch opens one more project into the same data folder.
+  const launch = (repo: string) =>
+    electron.launch({
+      executablePath: binary ?? createRequire(join(desktop, "package.json"))("electron"),
+      args: binary ? [] : [join(desktop, "out/main/index.js")],
+      env: {
+        ...process.env,
+        PI_LAB_TEST_MODE: "1",
+        PI_LAB_DATA_DIR: join(dir, "data"),
+        PI_LAB_SOCKET_PATH: join(dir, "daemon.sock"),
+        PI_LAB_TEST_OPEN_PROJECT: repo,
+        PI_LAB_TEST_PICK_DIRECTORY: join(repos.alpha, "paper"),
+      },
+    })
+  let app = await launch(repos.beta)
+  try {
+    let page = await app.firstWindow()
+    await expect(page.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+    await app.close()
+    app = await launch(repos.alpha)
+    page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId("project-item")).toHaveCount(2)
+
+    await page.getByTestId("nav-dashboard").click()
+    await page
+      .getByTestId("project-card")
+      .filter({ hasText: "alpha" })
+      .getByTestId("project-card-latex")
+      .click()
+    await expect(page.getByTestId("science-latex")).toBeVisible()
+    await page.getByTestId("paper-use-folder").click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+
+    // The top bar is a window drag region until a menu opens.
+    const topBar = page.getByTestId("science-latex").locator("header").first()
+    const appRegion = () =>
+      topBar.evaluate((element) => {
+        const style = getComputedStyle(element)
+        return style.getPropertyValue("-webkit-app-region") || style.getPropertyValue("app-region")
+      })
+    expect(await appRegion()).toBe("drag")
+    await page.getByTestId("latex-shortcuts-add").click()
+    const menu = page.getByRole("menu", { name: "Header shortcuts" })
+    await expect(menu).toBeVisible()
+    expect(await appRegion()).toBe("no-drag")
+    await topBar.locator("h1").click()
+    await expect(menu).toHaveCount(0)
+    expect(await appRegion()).toBe("drag")
+
+    // The project picker is the app's own dropdown; it lists both projects.
+    const picker = page.getByTestId("latex-project-select")
+    await expect(picker).toHaveText("alpha")
+    await picker.click()
+    const list = page.getByRole("listbox", { name: "LaTeX Editor project" })
+    await expect(list.getByRole("option")).toHaveCount(2)
+    await expect(list.getByRole("option", { name: "beta" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    )
+    await expect(list.getByRole("option", { name: "alpha" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await page.screenshot({ path: resolve(".cache", "screens", "project-picker.png") })
+    await list.getByRole("option", { name: "beta" }).click()
+    await expect(list).toHaveCount(0)
+    await expect(picker).toHaveText("beta")
   } finally {
     // The test-mode dialog responder answers the quit confirmation with Quit.
     await app.close()

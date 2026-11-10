@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslate } from "../../../../../i18n/language"
 import { useLatexEditorProject } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { ProjectPicker } from "../ProjectPicker"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type FocusSessionRequest, PaperEditor } from "./PaperEditor"
 import { type CreatedPaper, PaperSetup } from "./PaperSetup"
@@ -72,19 +73,15 @@ export function ScienceLatex({
       testId="science-latex"
       actions={
         <>
-          <select
-            data-testid="latex-project-select"
-            aria-label={t("LaTeX Editor project")}
+          <ProjectPicker
+            testId="latex-project-select"
+            label={t("LaTeX Editor project")}
+            help={null}
             value={selected?.id ?? ""}
-            onChange={(event) => chooseProject(event.target.value)}
-            className="h-8 max-w-56 rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+            projects={projects.map((project) => ({ id: project.id, name: project.name }))}
+            allLabel={null}
+            onChange={chooseProject}
+          />
           <div ref={setSyncSlot} data-testid="latex-sync-slot" className="contents" />
         </>
       }

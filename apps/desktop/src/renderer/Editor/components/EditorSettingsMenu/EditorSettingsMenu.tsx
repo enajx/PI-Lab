@@ -1,7 +1,8 @@
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { Check, Settings2 } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useId, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { useTranslate } from "../../../i18n/language"
 import { useTheme } from "../../../providers/ThemeProvider"
 import { rememberCurrentSettingsReturnRoute } from "../../../routes/_shell/-settingsReturnRoute"
@@ -40,22 +41,7 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
     ? settings.editorTheme
     : defaultEditorThemeId(resolvedMode)
 
-  // Close on outside click or Escape so the menu behaves like a real popover.
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   return (
     <div ref={rootRef} className="relative">

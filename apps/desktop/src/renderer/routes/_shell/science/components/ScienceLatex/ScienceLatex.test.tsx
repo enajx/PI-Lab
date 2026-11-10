@@ -47,9 +47,10 @@ test("after arriving with a project in the address, the picker still switches pr
       />
     </AppProviders>,
   )
-  const select = (await screen.findByTestId("latex-project-select")) as HTMLSelectElement
+  const select = (await screen.findByTestId("latex-project-select")) as HTMLButtonElement
   await waitFor(() => expect(select.value).toBe("p1"))
-  fireEvent.change(select, { target: { value: "p2" } })
+  fireEvent.click(select)
+  fireEvent.click(screen.getByRole("option", { name: "Two" }))
   // The address switches to the chosen project and drops the agent to focus.
   expect(mocks.navigate).toHaveBeenCalledWith({
     to: "/science/latex",

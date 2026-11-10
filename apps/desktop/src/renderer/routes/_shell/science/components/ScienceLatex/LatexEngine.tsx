@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, ChevronDown, Download } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 
@@ -50,21 +51,7 @@ export function LatexEngineStatusItem() {
     void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
   }, [installState, queryClient, trpc])
 
-  useEffect(() => {
-    if (!open) return
-    const dismiss = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", dismiss)
-    document.addEventListener("keydown", dismissOnEscape)
-    return () => {
-      document.removeEventListener("mousedown", dismiss)
-      document.removeEventListener("keydown", dismissOnEscape)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   const data = status.data
   const error = status.error?.message ?? update.error?.message ?? install.error?.message ?? null
@@ -92,6 +79,8 @@ export function LatexEngineStatusItem() {
       aria-checked={data?.provider === provider}
       disabled={disabledReason !== null}
       title={disabledReason ?? undefined}
+      data-feature-label={name}
+      data-feature-help={disabledReason ?? detail ?? undefined}
       onClick={() => choose(provider)}
       className={itemClass}
     >
@@ -118,6 +107,8 @@ export function LatexEngineStatusItem() {
         type="button"
         data-testid="latex-engine"
         title={`${t("LaTeX engine")}: ${label}`}
+        data-feature-label={t("LaTeX engine")}
+        data-feature-help={`${t("Current:")} ${label}. ${t("Click to choose the program that builds the PDF.")}`}
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={!data}
@@ -160,6 +151,7 @@ export function LatexEngineStatusItem() {
                 ? t("System LaTeX is already installed.")
                 : t("Downloads TinyTeX, shared with VS Code and your terminal.")
             }
+            data-feature-label={t("Install TinyTeX")}
             onClick={() => {
               setOpen(false)
               install.mutate()
