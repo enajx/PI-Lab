@@ -7,6 +7,7 @@ import { readDefaultAgentId, useTasksProject } from "../../../../../preferences/
 import { useTRPC } from "../../../../../trpc/react"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
 import { ProjectPicker } from "../ProjectPicker"
+import { ScienceSessionPanel } from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type TaskDraft, type TaskRecord, type TaskStatus, TasksWorkspace } from "./TasksWorkspace"
 
@@ -68,6 +69,8 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
     listing.data === undefined || sources.some((source) => source.projectId === wanted)
       ? wanted
       : ""
+  // Sessions start in the selected project; "All projects" has none.
+  const selectedSource = sources.find((source) => source.projectId === selectedProjectId)
   const busy =
     createTask.isPending ||
     updateTask.isPending ||
@@ -189,50 +192,65 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
         />
       }
     >
-      {listing.isLoading ? (
-        <div className="grid min-h-0 flex-1 place-items-center text-muted-foreground text-sm">
-          {t("Loading tasks…")}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {listing.isLoading ? (
+            <div className="grid min-h-0 flex-1 place-items-center text-muted-foreground text-sm">
+              {t("Loading tasks…")}
+            </div>
+          ) : (
+            <>
+              {sources
+                .filter(
+                  (source) =>
+                    source.state !== "ready" &&
+                    (!selectedProjectId || source.projectId === selectedProjectId),
+                )
+                .map((source) => (
+                  <div
+                    key={source.projectId}
+                    data-testid={`tasks-source-choice-${source.projectId}`}
+                    className="border-border border-b px-4 py-3"
+                  >
+                    <p className="mb-2 text-sm">
+                      {t("Choose a task file for {project}").replace(
+                        "{project}",
+                        source.projectName,
+                      )}
+                    </p>
+                    <ProjectMarkdownChoice
+                      projectId={source.projectId}
+                      kind="tasks"
+                      currentPath={source.relPath}
+                    />
+                  </div>
+                ))}
+              <TasksWorkspace
+                tasks={tasks}
+                sources={sources}
+                projectId={selectedProjectId}
+                agents={agents.data ?? []}
+                defaultAgentId={readDefaultAgentId()}
+                busy={busy}
+                error={error}
+                onCreate={create}
+                onUpdate={update}
+                onDelete={remove}
+                onMove={move}
+                onRun={run}
+              />
+            </>
+          )}
         </div>
-      ) : (
-        <>
-          {sources
-            .filter(
-              (source) =>
-                source.state !== "ready" &&
-                (!selectedProjectId || source.projectId === selectedProjectId),
-            )
-            .map((source) => (
-              <div
-                key={source.projectId}
-                data-testid={`tasks-source-choice-${source.projectId}`}
-                className="border-border border-b px-4 py-3"
-              >
-                <p className="mb-2 text-sm">
-                  {t("Choose a task file for {project}").replace("{project}", source.projectName)}
-                </p>
-                <ProjectMarkdownChoice
-                  projectId={source.projectId}
-                  kind="tasks"
-                  currentPath={source.relPath}
-                />
-              </div>
-            ))}
-          <TasksWorkspace
-            tasks={tasks}
-            sources={sources}
-            projectId={selectedProjectId}
-            agents={agents.data ?? []}
-            defaultAgentId={readDefaultAgentId()}
-            busy={busy}
-            error={error}
-            onCreate={create}
-            onUpdate={update}
-            onDelete={remove}
-            onMove={move}
-            onRun={run}
-          />
-        </>
-      )}
+        <ScienceSessionPanel
+          view="tasks"
+          project={
+            selectedSource
+              ? { id: selectedSource.projectId, name: selectedSource.projectName }
+              : null
+          }
+        />
+      </div>
     </ScienceTabShell>
   )
 }

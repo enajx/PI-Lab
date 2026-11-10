@@ -34,10 +34,13 @@ const linkClass = "text-muted-foreground underline underline-offset-2 hover:text
 export function PaperSetup({
   projectId,
   autoDetect,
+  onCreated,
 }: {
   projectId: string
   /** False after the user cleared the paper folder: no search for Overleaf clones. */
   autoDetect: boolean
+  /** After Create paper: the new paper's workspace id, so the editor builds its PDF. */
+  onCreated: (workspaceId: string | null) => void
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -79,7 +82,15 @@ export function PaperSetup({
       onError,
     }),
   )
-  const create = useMutation(trpc.paper.create.mutationOptions({ onSuccess: linked, onError }))
+  const create = useMutation(
+    trpc.paper.create.mutationOptions({
+      onSuccess: (state) => {
+        onCreated(state.workspaceId)
+        linked()
+      },
+      onError,
+    }),
+  )
   const createInto = createDir ?? (createTarget.data?.available ? createTarget.data.dir : null)
   const busy =
     addOverleaf.isPending ||

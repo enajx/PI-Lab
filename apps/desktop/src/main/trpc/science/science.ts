@@ -1,6 +1,7 @@
 import { router } from "../trpc"
 import { analysisRouter } from "./analysis"
 import { clusterRouter } from "./cluster/cluster"
+import { experimentsRouter } from "./experiments/experiments"
 import { libraryRouter } from "./library"
 import { skillsRouter } from "./skills/skills"
 import { tasksRouter } from "./tasks"
@@ -19,4 +20,5 @@ export const scienceRouter = router({
   analysis: analysisRouter,
   library: libraryRouter,
   tasks: tasksRouter,
+  experiments: experimentsRouter,
 })

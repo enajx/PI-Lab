@@ -147,6 +147,27 @@ const FULL_METADATA: ProjectMetadata = {
 }
 
 describe("ProjectCard thumbnail", () => {
+  test("shows the project stage row below the buttons and saves a double-clicked stage", async () => {
+    const calls: unknown[] = []
+    renderCard(project({ id: "p1", name: "Photon Drift", metadata: { stage: "experiments" } }), {
+      "projects.setStage": (input) => {
+        calls.push(input)
+        return { id: "p1" }
+      },
+      "projects.list": () => [],
+    })
+    const stage = await screen.findByTestId("project-card-stage")
+    expect(screen.getByTestId("project-card-actions").nextElementSibling).toBe(stage)
+    const experiments = within(stage).getByTestId("project-card-stage-step-experiments")
+    expect(experiments.getAttribute("aria-current")).toBe("step")
+    expect(within(stage).getByTestId("project-card-stage-step-planning").dataset.filled).toBe(
+      "true",
+    )
+    fireEvent.click(within(stage).getByTestId("project-card-stage-step-submitted"))
+    await waitFor(() => expect(calls).toEqual([{ id: "p1", stage: "submitted" }]))
+    expect(screen.queryByTestId("on-project-route")).toBeNull()
+  })
+
   test("does not expose the removed card type dropdown or fetch control", async () => {
     renderCard(project({ id: "p1", name: "Project" }))
     await screen.findByTestId("project-card")
@@ -364,11 +385,18 @@ describe("ProjectCard metadata", () => {
     expect(status.getAttribute("aria-label")).toContain("Project status")
     expect(status.getAttribute("title")).toBe("Project status")
 
-    // The action buttons live in one shared footer row; Tasks sits next to LaTeX Editor.
+    // The action buttons live in one shared footer row, left to right:
+    // Project status, Tasks, Analysis, Paper (LaTeX Editor), Auto research.
     for (const button of [analysis, latex, tasks, status]) {
       expect(button.parentElement).toBe(auto.parentElement)
     }
-    expect(latex.nextElementSibling).toBe(tasks)
+    expect(Array.from(auto.parentElement?.children ?? [])).toEqual([
+      status,
+      tasks,
+      analysis,
+      latex,
+      auto,
+    ])
   })
 
   test("disables Git-only card actions with an Initialize Git explanation", async () => {

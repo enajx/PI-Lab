@@ -18,7 +18,8 @@ test("install is explicit, reports failure, and switches globally only after suc
   mocks.probe.mockResolvedValue({ bundled: { available: true }, system: { available: false } })
   h = await createHarness([], { git: false, daemon: "lazy" })
   const caller = h.caller
-  expect((await h.caller.latex.status()).provider).toBe("bundled")
+  expect((await h.caller.latex.status()).provider).toBe("auto")
+  await h.caller.settings.updateEditor({ latexProvider: "bundled" })
   expect(mocks.install).not.toHaveBeenCalled()
   mocks.install.mockRejectedValueOnce(new Error("download failed"))
   await h.caller.latex.install()
@@ -67,6 +68,7 @@ test("reports typed install stages and rejects duplicate starts", async () => {
 test("preserves an existing system installation", async () => {
   mocks.probe.mockResolvedValue({ bundled: { available: true }, system: { available: true } })
   h = await createHarness([], { git: false, daemon: "lazy" })
+  await h.caller.settings.updateEditor({ latexProvider: "bundled" })
   await h.caller.latex.install()
   expect(mocks.install).not.toHaveBeenCalled()
   expect((await h.caller.settings.get()).editor.latexProvider).toBe("system")
@@ -78,6 +80,7 @@ test("reads the current provider after a slow status probe finishes", async () =
   mocks.probe.mockResolvedValue(tools)
   h = await createHarness([], { git: false, daemon: "lazy" })
   const caller = h.caller
+  await caller.settings.updateEditor({ latexProvider: "bundled" })
   let finish: () => void = () => {
     throw new Error("Probe has not started")
   }
@@ -98,4 +101,35 @@ test("reads the current provider after a slow status probe finishes", async () =
     provider: "system",
     installation: { state: "complete" },
   })
+})
+
+/** Mocked probe: Auto keeps Auto after an install, since Auto then finds the installed LaTeX. */
+test("installing from Auto keeps Auto", async () => {
+  mocks.probe.mockResolvedValue({ bundled: { available: true }, system: { available: false } })
+  mocks.install.mockResolvedValueOnce({ binDir: "/tmp/validated/bin" })
+  h = await createHarness([], { git: false, daemon: "lazy" })
+  const caller = h.caller
+  await caller.latex.install()
+  await vi.waitFor(async () =>
+    expect((await caller.latex.status()).installation.state).toBe("complete"),
+  )
+  expect((await caller.settings.get()).editor.latexProvider).toBe("auto")
+})
+
+/** Mocked probe: status names the engine a build would use for the chosen setting. */
+test("status reports the LaTeX engine in use", async () => {
+  const system = { available: true, name: "TeX Live 2026", version: "pdfTeX (TeX Live 2026)" }
+  const bundled = { available: true, name: "Tectonic", version: "Tectonic 0.15.0" }
+  const missing = { available: false, name: "System LaTeX", version: null }
+  mocks.probe.mockResolvedValue({ bundled, system })
+  h = await createHarness([], { git: false, daemon: "lazy" })
+  const caller = h.caller
+  expect((await caller.latex.status()).engine).toEqual({ kind: "system", name: "TeX Live 2026" })
+  await caller.settings.updateEditor({ latexProvider: "bundled" })
+  expect((await caller.latex.status()).engine).toEqual({ kind: "bundled", name: "Tectonic" })
+  mocks.probe.mockResolvedValue({ bundled, system: missing })
+  await caller.settings.updateEditor({ latexProvider: "auto" })
+  expect((await caller.latex.status()).engine).toEqual({ kind: "bundled", name: "Tectonic" })
+  await caller.settings.updateEditor({ latexProvider: "system" })
+  expect((await caller.latex.status()).engine).toBeNull()
 })

@@ -105,6 +105,8 @@ export interface CentralPanelController {
   launchWarning: string | null
   latexBuildStatus?: { message: string; log: string } | null
   pdfBuildState?: PdfBuildState | null
+  /** Build a saved .tex file as Cmd+S does (status, log, and `onBuilt` after a successful build). */
+  buildLatex: (relPath: string) => void
 }
 
 interface UseCentralPanelArgs {
@@ -624,6 +626,7 @@ export function useCentralPanel({
   return {
     latexBuildStatus,
     pdfBuildState,
+    buildLatex: saved,
     editor,
     sessions,
     active,

@@ -92,3 +92,31 @@ test("project-list reset covers the LaTeX Editor tabs of each project", () => {
   expect(alphaProjectsHaveUnsavedWork(["project-1"], recovery)).toBe(true)
   recovery.dispose()
 })
+
+test("project-list reset covers the Tasks and Analysis session panel tabs of each project", () => {
+  window.localStorage.setItem("pi-lab.projectWorkspace.v2.tasks:project-1", "tasks tabs")
+  window.localStorage.setItem("pi-lab.projectWorkspace.v2.analysis:project-1", "analysis tabs")
+  clearAlphaProjectUiState(window.localStorage, ["project-1"])
+  expect(window.localStorage.getItem("pi-lab.projectWorkspace.v2.tasks:project-1")).toBeNull()
+  expect(window.localStorage.getItem("pi-lab.projectWorkspace.v2.analysis:project-1")).toBeNull()
+
+  const recovery = new WorkspaceRecoveryStore(window.localStorage)
+  recovery.write("analysis:project-1", {
+    buffers: [
+      {
+        relPath: "notes.md",
+        content: "unsaved",
+        savedContent: "saved",
+        baseline: { mtimeMs: 1, size: 5 },
+        externalChange: false,
+        epoch: 0,
+      },
+    ],
+    activeRelPath: "notes.md",
+    sessions: [],
+    active: { type: "file" as const, relPath: "notes.md" },
+    belowEditorRun: null,
+  })
+  expect(alphaProjectsHaveUnsavedWork(["project-1"], recovery)).toBe(true)
+  recovery.dispose()
+})

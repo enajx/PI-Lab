@@ -111,6 +111,20 @@ describe("Settings sections", () => {
     expect(screen.getByTestId("shortcut-next-waiting-agent").textContent).toBe("⌥TAB")
   })
 
+  test("Shortcuts lists the new-session shortcut and saves what it opens", () => {
+    renderSection(<ShortcutsSection />)
+
+    expect(screen.getByTestId("shortcut-new-session").textContent).toBe("⌘T")
+    const kind = screen.getByTestId<HTMLSelectElement>("settings-new-session-kind")
+    expect(kind.value).toBe("terminal-agent")
+    const chat = [...kind.options].find((option) => option.value === "chat-agent")
+    expect(chat?.disabled).toBe(true)
+
+    fireEvent.change(kind, { target: { value: "terminal" } })
+    expect(window.localStorage.getItem("pi-lab.shortcuts.newSessionKind")).toBe("terminal")
+    expect(kind.value).toBe("terminal")
+  })
+
   test("Shortcuts refuses a reset when another action uses the default chord", async () => {
     renderSection(<ShortcutsSection />)
 
@@ -140,56 +154,6 @@ describe("Settings sections", () => {
 
     fireEvent.change(screen.getByTestId("settings-theme-mode"), { target: { value: "dark" } })
     await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true))
-  })
-
-  test("Appearance offers icon choices only in Alpha", async () => {
-    const getChannel = vi.fn(async () => "stable" as const)
-    const previous = window.piLab
-    window.piLab = {
-      platform: "darwin",
-      shutdown: {} as NonNullable<typeof window.piLab>["shutdown"],
-      appIcon: {
-        getChannel,
-        get: async () => APP_ICON_DEFAULT_SELECTION,
-        set: async (selection) => selection,
-        preview: async () => "data:image/png;base64,preview",
-      },
-    } as NonNullable<typeof window.piLab>
-    try {
-      renderSection(<AppearanceSection />)
-      await waitFor(() => expect(getChannel).toHaveBeenCalledOnce())
-      expect(screen.queryByText("App icon")).toBeNull()
-    } finally {
-      window.piLab = previous
-    }
-  })
-
-  test("Appearance shows the icon picker in Alpha", async () => {
-    const previous = window.piLab
-    window.piLab = {
-      platform: "darwin",
-      shutdown: {} as NonNullable<typeof window.piLab>["shutdown"],
-      appIcon: {
-        getChannel: async () => "alpha",
-        get: async () => ({
-          ...APP_ICON_DEFAULT_SELECTION,
-          alphaWhiteBackground: true,
-          piPalette: "viridis",
-        }),
-        set: async (selection) => selection,
-        preview: async () => "data:image/png;base64,preview",
-      },
-    } as NonNullable<typeof window.piLab>
-    try {
-      renderSection(<AppearanceSection />)
-      expect(await screen.findByText("App icon")).toBeTruthy()
-      expect(await screen.findByTestId("settings-app-icon-font")).toHaveProperty(
-        "value",
-        "gill-sans-regular",
-      )
-    } finally {
-      window.piLab = previous
-    }
   })
 
   test("Appearance gallery selects and applies a named app theme", async () => {

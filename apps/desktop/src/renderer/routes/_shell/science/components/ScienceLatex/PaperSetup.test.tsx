@@ -10,6 +10,9 @@ import { PaperSetup } from "./PaperSetup"
  * (mocked); cloning and linking for real are covered by the `paper` router tests
  * and the e2e test.
  */
+/** Workspace ids PaperSetup reported as just created, in order. */
+let created: (string | null)[] = []
+
 function renderSetup(handlers: FakeHandlers) {
   return renderSetupWith(handlers, true)
 }
@@ -24,7 +27,11 @@ function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
   })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <PaperSetup projectId="p1" autoDetect={autoDetect} />
+      <PaperSetup
+        projectId="p1"
+        autoDetect={autoDetect}
+        onCreated={(workspaceId) => created.push(workspaceId)}
+      />
     </AppProviders>,
   )
 }
@@ -438,7 +445,13 @@ describe("PaperSetup (mocked server)", () => {
   })
 
   test("Create paper creates the paper in <project>/paper, or in the folder the user chose", async () => {
-    const create = vi.fn(() => undefined)
+    created = []
+    const create = vi.fn(() => ({
+      paper: null,
+      workspaceId: "new-paper-ws",
+      rootRelPath: "main.tex",
+      autoDetect: true,
+    }))
     renderSetup({
       "paper.token.status": () => ({ configured: true, source: "saved" }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
@@ -451,6 +464,8 @@ describe("PaperSetup (mocked server)", () => {
     )
     fireEvent.click(screen.getByTestId("paper-create"))
     await waitFor(() => expect(create).toHaveBeenCalledWith({ projectId: "p1", dir: "/p/paper" }))
+    // The page is told which paper workspace was just created, so it builds its PDF.
+    await waitFor(() => expect(created).toEqual(["new-paper-ws"]))
     fireEvent.click(screen.getByTestId("paper-create-change"))
     await waitFor(() =>
       expect(screen.getByTestId("paper-create-folder").textContent).toBe("/elsewhere/new-paper"),

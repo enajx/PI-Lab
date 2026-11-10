@@ -15,6 +15,7 @@ import {
   Telescope,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { ProjectStageRow } from "../../../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import {
@@ -444,7 +445,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           data-feature-help={t(
             "Open this project workspace; right-click anywhere on the card to set a thumbnail or generate a new gradient",
           )}
-          className="flex flex-col items-start gap-1.5 p-3 text-start outline-none transition-colors focus-visible:bg-accent/40"
+          className="flex flex-col items-start gap-1.5 px-2.5 py-2 text-start outline-none transition-colors focus-visible:bg-accent/40"
         >
           <div className="flex w-full items-center gap-2">
             <span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
@@ -467,24 +468,28 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
       <div
         data-testid="project-card-actions"
-        className="mt-auto flex items-center gap-1.5 border-border border-t p-2 transition-[filter] group-hover:brightness-105"
+        className="mt-auto flex items-center gap-1.5 border-border border-t p-1.5 transition-[filter] group-hover:brightness-105"
       >
+        <ProjectStatusControl
+          projectId={project.id}
+          projectName={project.name}
+          lastOpenedAt={project.lastOpenedAt}
+          variant="compact"
+          testId="project-card-status-button"
+          gitAvailable={gitAvailable}
+          gitDisabledReason={gitDisabledReason}
+        />
         <button
           type="button"
-          data-testid="project-card-auto-research"
-          aria-label={`${t("Auto-research")} ${project.name}`}
-          title={gitAvailable ? t("Auto-research") : gitDisabledReason}
-          data-feature-label={`${t("Auto-research")} ${project.name}`}
-          data-feature-help={
-            gitAvailable
-              ? t("Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md")
-              : gitDisabledReason
-          }
-          disabled={!gitAvailable}
-          onClick={onAutoResearch}
+          data-testid="project-card-tasks"
+          aria-label={`${t("Tasks")} ${project.name}`}
+          title={t("Tasks")}
+          data-feature-label={t("Tasks")}
+          data-feature-help={t("Open this project's tasks")}
           className={CARD_ACTION_CLASS}
+          onClick={() => void navigate({ to: "/science/tasks", search: { projectId: project.id } })}
         >
-          <Telescope className="size-4 shrink-0" aria-hidden />
+          <ListTodo className="size-4 shrink-0" aria-hidden />
         </button>
         {showAnalysis ? (
           <button
@@ -516,26 +521,29 @@ export function ProjectCard({ project }: ProjectCardProps) {
         </button>
         <button
           type="button"
-          data-testid="project-card-tasks"
-          aria-label={`${t("Tasks")} ${project.name}`}
-          title={t("Tasks")}
-          data-feature-label={t("Tasks")}
-          data-feature-help={t("Open this project's tasks")}
+          data-testid="project-card-auto-research"
+          aria-label={`${t("Auto-research")} ${project.name}`}
+          title={gitAvailable ? t("Auto-research") : gitDisabledReason}
+          data-feature-label={`${t("Auto-research")} ${project.name}`}
+          data-feature-help={
+            gitAvailable
+              ? t("Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md")
+              : gitDisabledReason
+          }
+          disabled={!gitAvailable}
+          onClick={onAutoResearch}
           className={CARD_ACTION_CLASS}
-          onClick={() => void navigate({ to: "/science/tasks", search: { projectId: project.id } })}
         >
-          <ListTodo className="size-4 shrink-0" aria-hidden />
+          <Telescope className="size-4 shrink-0" aria-hidden />
         </button>
-        <ProjectStatusControl
-          projectId={project.id}
-          projectName={project.name}
-          lastOpenedAt={project.lastOpenedAt}
-          variant="compact"
-          testId="project-card-status-button"
-          gitAvailable={gitAvailable}
-          gitDisabledReason={gitDisabledReason}
-        />
       </div>
+
+      <ProjectStageRow
+        projectId={project.id}
+        stage={project.metadata?.stage ?? null}
+        testId="project-card-stage"
+        className="justify-center px-2.5 pb-1.5"
+      />
 
       <ProjectCardMenu
         menu={menu}
@@ -590,7 +598,7 @@ function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
   return (
     <div
       data-testid="project-card-metadata"
-      className="flex flex-col gap-1.5 px-3 pb-3 text-muted-foreground text-xs"
+      className="flex flex-col gap-1.5 px-2.5 pb-2 text-muted-foreground text-xs"
     >
       {metadata.deadline ? (
         <div data-testid="project-card-deadline" className="flex items-center gap-1.5">

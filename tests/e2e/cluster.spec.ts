@@ -99,11 +99,11 @@ test("cluster tab imports machines from a fixture ssh-config", async () => {
     "data-card-grid-base-column",
     "280",
   )
-  await expect(window.getByTestId("cluster-grid")).toHaveAttribute("data-card-grid-scale", "1")
+  await expect(window.getByTestId("cluster-grid")).toHaveAttribute("data-card-grid-height", "1")
   const firstItem = window.getByTestId("machine-card-drag").first()
   await expect(firstItem).toHaveAttribute("data-card-span", "1x1")
   await window.getByTestId("card-resize-handle").first().focus()
   await window.keyboard.press("ArrowDown")
-  await expect(window.getByTestId("cluster-grid")).toHaveAttribute("data-card-grid-scale", "1.05")
+  await expect(window.getByTestId("cluster-grid")).toHaveAttribute("data-card-grid-height", "1.1")
   await expect(firstItem).toHaveAttribute("data-card-span", "1x1")
 })

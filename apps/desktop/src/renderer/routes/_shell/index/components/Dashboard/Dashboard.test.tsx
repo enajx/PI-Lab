@@ -221,6 +221,19 @@ describe("Dashboard", () => {
     expect(screen.getByTestId("card-resize-handle")).toBeTruthy()
   })
 
+  test("spaces the cards apart and leaves two card gaps of space above the grid", async () => {
+    renderDashboard({
+      "projects.list": () => [project("p1", "Anything")],
+      "workspaces.list": () => [],
+    })
+
+    await screen.findByTestId("project-card")
+    const grid = screen.getByTestId("dashboard-grid")
+    // gap-6 is 24px between cards; pt-12 is 48px, two gaps, above the first row.
+    expect(grid.className).toContain("gap-6")
+    expect(grid.parentElement?.className).toContain("pt-12")
+  })
+
   test("a card renders its stored gradient as three baked, drifting layers", async () => {
     renderDashboard({
       "projects.list": () => [

@@ -54,7 +54,9 @@ export function ScienceLatex({
       },
     }),
   )
-  // The top bar element the paper workspace puts its Sync controls in.
+  // The paper workspace Create paper just made; its editor builds the PDF once it opens.
+  const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(null)
+  // The top bar element the paper workspace puts its Update paper and Sync buttons in.
   const [syncSlot, setSyncSlot] = useState<HTMLElement | null>(null)
   const paper = useQuery({
     ...trpc.paper.get.queryOptions({ projectId: selected?.id ?? "" }),
@@ -119,9 +121,15 @@ export function ScienceLatex({
           onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
           focusSession={selected.id === initialProjectId ? focusSession : null}
           syncSlot={syncSlot}
+          buildOnOpen={paper.data.workspaceId === createdWorkspaceId}
         />
       ) : (
-        <PaperSetup key={selected.id} projectId={selected.id} autoDetect={paper.data.autoDetect} />
+        <PaperSetup
+          key={selected.id}
+          projectId={selected.id}
+          autoDetect={paper.data.autoDetect}
+          onCreated={setCreatedWorkspaceId}
+        />
       )}
     </ScienceTabShell>
   )

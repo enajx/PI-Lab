@@ -15,6 +15,14 @@ export function latexWorkspaceKey(projectId: string): string {
   return `latex:${projectId}`
 }
 
+/** The science views that keep their own session panel tabs per project. */
+export type SessionPanelView = "tasks" | "analysis"
+
+/** Recovery-store key of a project's session panel tabs in the Tasks or Analysis view. */
+export function sessionPanelWorkspaceKey(view: SessionPanelView, projectId: string): string {
+  return `${view}:${projectId}`
+}
+
 export interface OmittedBuffer {
   relPath: string
   untitled: boolean

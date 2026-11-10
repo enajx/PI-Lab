@@ -71,11 +71,12 @@ export function LatexSection() {
               label="LaTeX compiler"
               value={data.provider}
               options={[
+                { value: "auto", label: "Auto (system LaTeX when installed, else Tectonic)" },
                 { value: "bundled", label: "Bundled Tectonic" },
                 { value: "system", label: "System LaTeX (PDFLaTeX)" },
               ]}
               onChange={(value) => {
-                if (value === "bundled" || value === "system")
+                if (value === "auto" || value === "bundled" || value === "system")
                   update.mutate({ latexProvider: value })
               }}
             />

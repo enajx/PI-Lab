@@ -299,6 +299,9 @@ export interface ProjectPaper {
   syncEnabled?: boolean
 }
 
+/** The project stage set by the user on the stage row, in order. */
+export type ProjectStage = "planning" | "experiments" | "paperWriting" | "submitted"
+
 export interface ProjectMetadata {
   textTags?: ProjectTextTag[]
   /** Free-text collaborators (e.g. co-authors), as typed by the user. */
@@ -318,6 +321,8 @@ export interface ProjectMetadata {
    * not look for Overleaf clones until a folder is chosen again. Absent: it does.
    */
   paperAutoDetect?: boolean
+  /** The project stage set on the stage row; absent: no stage reached yet. */
+  stage?: ProjectStage
 }
 
 /** A locally-known v2 Team. */

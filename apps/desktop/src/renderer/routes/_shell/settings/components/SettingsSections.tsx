@@ -29,13 +29,17 @@ import {
   EDITOR_FONT_DEFAULT_SIZE,
   EDITOR_FONT_MAX_SIZE,
   EDITOR_FONT_MIN_SIZE,
+  type NewSessionKind,
   useDefaultAgentId,
   useDigitalRainDensity,
   useDigitalRainSpeed,
   useEditorFontFamily,
   useEditorFontSize,
   useExperimentalV2,
+  useExperimentRunsFile,
+  useExperimentRunsSource,
   useFetchExperimentsInstructions,
+  useNewSessionKind,
   useRestoreProjectTabs,
   useShowAnalysisSection,
   useShowClusterSection,
@@ -59,29 +63,14 @@ import { requestUpdateCheck } from "../../../../updates/UpdateFeedback"
 import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
 import { AlphaTestingResets } from "./AlphaTestingResets"
-import { AppIconGallery } from "./AppIconGallery"
 import { AppThemeGallery } from "./AppThemeGallery"
-import { SelectField, SettingsSection, TextAreaField, ToggleField } from "./SettingsControls"
-
-/** The icon workshop belongs to the separate Alpha app. */
-function AlphaAppIconGallery() {
-  const [show, setShow] = useState(false)
-  useEffect(() => {
-    let active = true
-    void window.piLab?.appIcon
-      ?.getChannel()
-      .then((channel) => {
-        if (active) setShow(channel === "alpha")
-      })
-      .catch((error: unknown) => {
-        console.warn("[pi-lab] Could not determine app icon channel:", error)
-      })
-    return () => {
-      active = false
-    }
-  }, [])
-  return show ? <AppIconGallery /> : null
-}
+import {
+  SelectField,
+  SettingsSection,
+  TextAreaField,
+  TextField,
+  ToggleField,
+} from "./SettingsControls"
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   muted: false,
@@ -238,7 +227,6 @@ export function AppearanceSection() {
         onChange={(value) => setMode(value as ThemeMode)}
       />
       <AppThemeGallery />
-      <AlphaAppIconGallery />
       <div
         id="appearance-advanced"
         data-testid="appearance-advanced"
@@ -1220,6 +1208,8 @@ export function SectionsSection() {
  */
 export function ExperimentsSection() {
   const [instructions, setInstructions] = useFetchExperimentsInstructions()
+  const [runsSource, setRunsSource] = useExperimentRunsSource()
+  const [runsFile, setRunsFile] = useExperimentRunsFile()
   return (
     <SettingsSection
       testId="settings-section-experiments"
@@ -1233,6 +1223,24 @@ export function ExperimentsSection() {
         value={instructions}
         placeholder="e.g. Only pull the latest run's metrics into results/."
         onChange={setInstructions}
+      />
+      <SelectField
+        testId="settings-experiment-runs-source"
+        label="Experiment runs source"
+        description="Where the Project status card reads experiment runs from."
+        value={runsSource}
+        options={[{ value: "experiments-md", label: "EXPERIMENTS.md file" }]}
+        onChange={(next) => {
+          if (next === "experiments-md") setRunsSource(next)
+        }}
+      />
+      <TextField
+        testId="settings-experiment-runs-file"
+        label="Experiments file"
+        description="Path relative to each project. Its table's status column gives the running, finished and failed counts."
+        value={runsFile}
+        placeholder="EXPERIMENTS.md"
+        onChange={setRunsFile}
       />
     </SettingsSection>
   )
@@ -1262,6 +1270,7 @@ export function ExperimentalSection() {
 export function ShortcutsSection() {
   const t = useTranslate()
   const { bindingFor, setBinding, resetBinding } = useShortcutBindings()
+  const [newSessionKind, setNewSessionKind] = useNewSessionKind()
   const [recording, setRecording] = useState<string | null>(null)
   const [conflict, setConflict] = useState<{
     binding: string
@@ -1378,6 +1387,29 @@ export function ShortcutsSection() {
           </div>
         </div>
       ))}
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div className="flex min-w-0 flex-col">
+          <label htmlFor="settings-new-session-kind" className="text-foreground text-sm">
+            {t("New session opens")}
+          </label>
+          <span className="text-muted-foreground text-xs">
+            {t("What the New session shortcut opens")}
+          </span>
+        </div>
+        <select
+          id="settings-new-session-kind"
+          data-testid="settings-new-session-kind"
+          value={newSessionKind}
+          onChange={(event) => setNewSessionKind(event.target.value as NewSessionKind)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-foreground text-sm outline-none"
+        >
+          <option value="chat-agent" disabled>
+            {t("Chat agent (not available yet)")}
+          </option>
+          <option value="terminal-agent">{t("Terminal agent")}</option>
+          <option value="terminal">{t("Terminal")}</option>
+        </select>
+      </div>
     </SettingsSection>
   )
 }

@@ -9,10 +9,11 @@ const ProjectStatusDialog = lazy(() =>
 
 /**
  * The "Project status" button, used on the Dashboard project card (compact,
- * icon-only) and in the project-view header (labeled). Clicking it opens the
+ * full-width icon) and in the project-view header (`icon`: a square icon-only
+ * button with the "Project status" hover title). Clicking it opens the
  * Project status card: the project's last activity and its stored project
- * summary, with a button to update that summary. Opening the card never runs an
- * agent; only the card's "Update project summary" button does.
+ * summary, with a button to generate that summary. Opening the card never runs an
+ * agent; only the card's "Generate project summary" button does.
  */
 export function ProjectStatusControl({
   projectId,
@@ -27,7 +28,7 @@ export function ProjectStatusControl({
   projectName: string
   /** When the project was last opened (epoch ms); 0 when unknown. */
   lastOpenedAt: number
-  variant: "compact" | "labeled"
+  variant: "compact" | "icon"
   /** Stable data-testid for the button (e.g. `project-card-status-button`). */
   testId: string
   /** Whether the project is Git-backed; the summary update needs Git. */
@@ -56,14 +57,13 @@ export function ProjectStatusControl({
           "border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60",
           variant === "compact"
             ? "inline-flex h-7 flex-1 items-center justify-center rounded-md border"
-            : "flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs",
+            : "flex size-7 items-center justify-center rounded-md border",
         )}
       >
         <Activity
           className={cn("shrink-0", variant === "compact" ? "size-4" : "size-3.5")}
           aria-hidden
         />
-        {variant === "labeled" ? <span>{label}</span> : null}
       </button>
       {open ? (
         // The dialog code loads in a moment; an inline placeholder would sit inside the

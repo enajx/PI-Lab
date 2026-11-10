@@ -1,6 +1,6 @@
 import { getSettingsOrDefaults, type PiLabDatabase } from "@pi-lab/local-db"
 import { defaultPdfLatexInstallDir, installPdfLatex } from "../../latex/install"
-import { probeLatexRuntimes } from "../../latex/runtime"
+import { type LatexEngine, type LatexProvider, probeLatexRuntimes } from "../../latex/runtime"
 import type { AppContext } from "../context"
 import { writeEditorSettings } from "../settings/settings"
 import { publicProcedure, router } from "../trpc"
@@ -57,7 +57,9 @@ async function installFor(ctx: AppContext, job: InstallJob): Promise<void> {
       },
     })
   }
-  writeEditorSettings(ctx.db, { latexProvider: "system" })
+  // Auto already picks the installed LaTeX; Bundled switches to it after an explicit install.
+  if (getSettingsOrDefaults(ctx.db).editor.latexProvider === "bundled")
+    writeEditorSettings(ctx.db, { latexProvider: "system" })
   job.status = {
     state: "complete",
     progress: 100,
@@ -68,12 +70,26 @@ async function installFor(ctx: AppContext, job: InstallJob): Promise<void> {
   }
 }
 
+/** The compiler a build uses for a provider setting, or null when it is unavailable. */
+function engineInUse(
+  provider: LatexProvider,
+  runtimes: Awaited<ReturnType<typeof probeLatexRuntimes>>,
+): { kind: LatexEngine; name: string } | null {
+  const kind: LatexEngine =
+    provider === "auto" ? (runtimes.system.available ? "system" : "bundled") : provider
+  const runtime = runtimes[kind]
+  return runtime.available ? { kind, name: runtime.name } : null
+}
+
 export const latexRouter = router({
   status: publicProcedure.query(async ({ ctx }) => {
     const runtimes = await probeLatexRuntimes(ctx)
+    const provider = getSettingsOrDefaults(ctx.db).editor.latexProvider
     return {
       ...runtimes,
-      provider: getSettingsOrDefaults(ctx.db).editor.latexProvider,
+      provider,
+      /** The compiler builds use now, e.g. "TeX Live 2026" or "Tectonic"; null when none. */
+      engine: engineInUse(provider, runtimes),
       installation: jobFor(ctx).status,
     }
   }),

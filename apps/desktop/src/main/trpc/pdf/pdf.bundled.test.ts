@@ -37,7 +37,7 @@ test.skipIf(!process.env.PI_LAB_TECTONIC_TEST_CACHE)(
       join(h.repoDir, "paper/chapters/body.tex"),
       "% !TeX root = ../main.tex\nA bundled compiler sentence.\\par\nSecond sentence.\n",
     )
-    expect((await h.caller.settings.get()).editor.latexProvider).toBe("bundled")
+    await h.caller.settings.updateEditor({ latexProvider: "bundled" })
     const built = await h.caller.pdf.build({
       workspaceId: workspace.id,
       relPath: "paper/chapters/body.tex",

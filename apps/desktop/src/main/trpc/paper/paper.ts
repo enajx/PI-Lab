@@ -73,6 +73,7 @@ import {
 } from "../../paper/template"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
+import { type StartUpdatePaperResult, startUpdatePaper } from "./updatePaper"
 
 /**
  * Paper router: the LaTeX Editor page links one paper folder per project,
@@ -850,6 +851,13 @@ export const paperRouter = router({
   createTarget: publicProcedure
     .input(projectIdInput)
     .query(({ ctx, input }): Promise<CreateTarget> => createTarget(ctx.db, input.projectId)),
+
+  /** The Update paper button: start an agent with the write-research skill; see {@link startUpdatePaper}. */
+  startUpdate: publicProcedure
+    .input(projectIdInput)
+    .mutation(
+      ({ ctx, input }): Promise<StartUpdatePaperResult> => startUpdatePaper(ctx, input.projectId),
+    ),
 
   /** Create a new paper from the LaTeX template; see {@link createPaper}. */
   create: publicProcedure

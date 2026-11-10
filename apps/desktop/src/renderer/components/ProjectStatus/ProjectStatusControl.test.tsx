@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
+import { observable } from "@trpc/server/observable"
 import { describe, expect, test } from "vitest"
 import { AppProviders } from "../../providers/AppProviders"
 import { ProjectActivityProvider } from "../../routes/_shell/-ProjectActivity"
@@ -35,6 +36,8 @@ function renderStatus(
       latexMerge: null,
     }),
     "workflows.onOutput": () => ({ kind: "start", command: "claude" }),
+    "science.tasks.list": () => ({ tasks: [], sources: [] }),
+    "science.experiments.status": () => ({ found: false, relPath: "EXPERIMENTS.md" }),
     ...handlers,
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -86,6 +89,97 @@ describe("Project status card", () => {
     await waitFor(() =>
       expect(within(card).getByTestId("project-status-last-activity").textContent).toContain(
         "2 hours ago",
+      ),
+    )
+  })
+
+  test("shows how many agents are active and how many tasks are open in the project", async () => {
+    const live = (sessionId: string, projectId: string, state: "working" | "waiting") => ({
+      sessionId,
+      projectId,
+      projectName: projectId,
+      agentId: "codex",
+      workspaceId: null,
+      origin: "project",
+      state,
+    })
+    const task = (id: string, projectId: string, status: string) => ({ id, projectId, status })
+    renderStatus(
+      {
+        "sessions.onStatus": () =>
+          observable((emit) => {
+            emit.next([
+              live("s1", "p1", "working"),
+              live("s2", "p1", "waiting"),
+              live("s3", "p2", "working"),
+            ])
+          }),
+        "science.tasks.list": () => ({
+          tasks: [
+            task("t1", "p1", "backlog"),
+            task("t2", "p1", "wip"),
+            task("t3", "p1", "planned"),
+            task("t4", "p1", "done"),
+            task("t5", "p2", "wip"),
+          ],
+          sources: [],
+        }),
+      },
+      { lastOpenedAt: 0, gitAvailable: true },
+    )
+    const card = await openCard()
+    await waitFor(() =>
+      expect(within(card).getByTestId("project-status-active-agents").textContent).toBe(
+        "Active agents: 2",
+      ),
+    )
+    await waitFor(() =>
+      expect(within(card).getByTestId("project-status-open-tasks").textContent).toBe(
+        "Open tasks: 3",
+      ),
+    )
+  })
+
+  test("shows the experiment run counts read from the configured experiments file", async () => {
+    window.localStorage.setItem("pi-lab.experiments.runsFile", "notes/runs.md")
+    const calls: unknown[] = []
+    renderStatus(
+      {
+        "science.experiments.status": (input) => {
+          calls.push(input)
+          return {
+            found: true,
+            relPath: "notes/runs.md",
+            running: 1,
+            finished: 2,
+            failed: 1,
+            other: [
+              { status: "ABORTED", count: 1 },
+              { status: "PLANNED", count: 2 },
+            ],
+          }
+        },
+      },
+      { lastOpenedAt: 0, gitAvailable: true },
+    )
+    const card = await openCard()
+    await waitFor(() =>
+      expect(within(card).getByTestId("project-status-experiment-runs").textContent).toBe(
+        "Experiment runs: 1 running, 2 finished, 1 failed; other: 1 ABORTED, 2 PLANNED",
+      ),
+    )
+    expect(calls).toEqual([
+      { projectId: "p1", source: { kind: "experiments-md", relPath: "notes/runs.md" } },
+    ])
+    window.localStorage.clear()
+  })
+
+  test("says the experiments file is missing instead of showing zero runs", async () => {
+    renderStatus({}, { lastOpenedAt: 0, gitAvailable: true })
+    const card = await openCard()
+    await waitFor(() =>
+      expect(within(card).getByTestId("project-status-experiment-runs").textContent).toBe(
+        "Experiment runs: No EXPERIMENTS.md",
       ),
     )
   })
@@ -154,7 +248,7 @@ describe("Project status card", () => {
     )
   })
 
-  test("Update project summary runs the summary workflow and the card shows the new summary", async () => {
+  test("Generate project summary runs the summary workflow and the card shows the new summary", async () => {
     const calls: unknown[] = []
     let stored: ReturnType<typeof summaryRecord> | null = null
     renderStatus(
@@ -182,7 +276,7 @@ describe("Project status card", () => {
     const card = await openCard()
     await within(card).findByTestId("project-status-no-summary")
     const update = within(card).getByTestId("project-status-update-summary")
-    expect(update.textContent).toContain("Update project summary")
+    expect(update.textContent).toContain("Generate project summary")
     fireEvent.click(update)
 
     await waitFor(() => expect(calls).toEqual([{ projectId: "p1", task: "summary" }]))
@@ -201,7 +295,7 @@ describe("Project status card", () => {
     ).toBe("Written by Codex, just now")
   })
 
-  test("Update project summary is disabled with the Git reason when Git is unavailable", async () => {
+  test("Generate project summary is disabled with the Git reason when Git is unavailable", async () => {
     renderStatus({}, { lastOpenedAt: 0, gitAvailable: false })
     const card = await openCard()
     const update = within(card).getByTestId("project-status-update-summary")

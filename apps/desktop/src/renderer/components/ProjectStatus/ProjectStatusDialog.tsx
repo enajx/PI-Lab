@@ -2,7 +2,12 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect } from "react"
 import { createPortal } from "react-dom"
 import { useInterfaceLanguage, useTranslate } from "../../i18n/language"
-import { useProjectActivityState } from "../../routes/_shell/-ProjectActivity"
+import {
+  DEFAULT_EXPERIMENT_RUNS_FILE,
+  useExperimentRunsFile,
+  useExperimentRunsSource,
+} from "../../preferences/preferences"
+import { useAgentStatus, useProjectActivityState } from "../../routes/_shell/-ProjectActivity"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
 import { useTRPC } from "../../trpc/react"
 import { elapsedSince } from "../elapsed"
@@ -32,10 +37,16 @@ export function formatTimeAgo(
  *   - the last activity: the most recent of when the project was last opened,
  *     its agents' last activity (`sessions.projectAgents`, plus "now" while an
  *     agent works on it), and its background workflows' last runs;
+ *   - the experiment run counts (running / finished / failed, plus every other
+ *     status word) from the experiments file set in Settings > Remote
+ *     experiments (`science.experiments.status`), or "No <file>" when missing;
+ *   - how many agents are live in the project (working or waiting, any view,
+ *     from the shared `sessions.onStatus` stream) and how many of its tasks are
+ *     open (not done, from `science.tasks.list`);
  *   - the stored project summary (the last result of the summary workflow) as
  *     Markdown, with the agent that wrote it and when, or "No project summary
  *     yet"; a failed last run shows its error;
- *   - an "Update project summary" button, the shared summary workflow control
+ *   - a "Generate project summary" button, the shared summary workflow control
  *     (same run, live window, error and Git-required behaviour). The card reads
  *     the same `workflows.status` query, so it updates when the run finishes.
  * Closes on Escape (unless the run's own window is open on top), a backdrop
@@ -72,6 +83,24 @@ export function ProjectStatusDialog({
   const agentsQuery = useQuery(
     trpc.sessions.projectAgents.queryOptions({ projectId }, { staleTime: 0 }),
   )
+  const liveAgents = useAgentStatus()
+  const [runsSource] = useExperimentRunsSource()
+  const [runsFile] = useExperimentRunsFile()
+  const runsRelPath = runsFile.trim() || DEFAULT_EXPERIMENT_RUNS_FILE
+  const runsQuery = useQuery(
+    trpc.science.experiments.status.queryOptions(
+      { projectId, source: { kind: runsSource, relPath: runsRelPath } },
+      { staleTime: 0 },
+    ),
+  )
+  const runs = runsQuery.data
+  const tasksQuery = useQuery(trpc.science.tasks.list.queryOptions(undefined, { staleTime: 0 }))
+  const activeAgents = (liveAgents.data ?? []).filter(
+    (agent) => agent.projectId === projectId,
+  ).length
+  const openTasks = (tasksQuery.data?.tasks ?? []).filter(
+    (task) => task.projectId === projectId && task.status !== "done",
+  ).length
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -130,6 +159,36 @@ export function ProjectStatusDialog({
               ? formatTimeAgo(lastActivity, now, language, justNow)
               : t("No activity yet")}
           </p>
+          <p data-testid="project-status-experiment-runs" className="text-foreground text-sm">
+            <span className="text-muted-foreground">{t("Experiment runs:")}</span>{" "}
+            {runsQuery.isError
+              ? `${t("Could not read experiment runs:")} ${runsQuery.error.message}`
+              : !runs
+                ? t("Loading…")
+                : !runs.found
+                  ? `${t("No")} ${runs.relPath}`
+                  : `${runs.running} ${t("running")}, ${runs.finished} ${t("finished")}, ${runs.failed} ${t("failed")}${
+                      runs.other.length > 0
+                        ? `; ${t("other:")} ${runs.other.map((entry) => `${entry.count} ${entry.status}`).join(", ")}`
+                        : ""
+                    }`}
+          </p>
+          <p data-testid="project-status-active-agents" className="text-foreground text-sm">
+            <span className="text-muted-foreground">{t("Active agents:")}</span>{" "}
+            {liveAgents.error
+              ? `${t("Could not read agent status:")} ${liveAgents.error.message}`
+              : liveAgents.data === undefined
+                ? t("Loading…")
+                : activeAgents}
+          </p>
+          <p data-testid="project-status-open-tasks" className="text-foreground text-sm">
+            <span className="text-muted-foreground">{t("Open tasks:")}</span>{" "}
+            {tasksQuery.isError
+              ? `${t("Could not read tasks:")} ${tasksQuery.error.message}`
+              : tasksQuery.isPending
+                ? t("Loading…")
+                : openTasks}
+          </p>
 
           <section className="flex flex-col gap-2">
             <h3 className="font-medium text-foreground text-sm">{t("Project summary")}</h3>
@@ -175,7 +234,7 @@ export function ProjectStatusDialog({
             task="summary"
             variant="labeled"
             testId="project-status-update-summary"
-            label={t("Update project summary")}
+            label={t("Generate project summary")}
             disabled={!gitAvailable}
             disabledReason={gitAvailable ? undefined : gitDisabledReason}
           />

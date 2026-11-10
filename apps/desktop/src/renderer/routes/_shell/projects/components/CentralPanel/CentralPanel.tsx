@@ -34,6 +34,7 @@ import {
   FILES_PANEL_MIN_WIDTH,
   useFilesPanelWidth,
 } from "../../../../../preferences/preferences"
+import { overlayIsOpen } from "../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { Terminal } from "../../../../../Terminal"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
@@ -42,6 +43,7 @@ import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../SplitDock/SplitDock"
 import { CloseFilePrompt, useCloseFilePrompt } from "./CloseFilePrompt"
 import { CollapsibleSection } from "./CollapsibleSection"
+import { useNewSessionShortcut, useOpenNewSession } from "./newSessionShortcut"
 import { pdfBesideSource } from "./pdfBesideSource"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
 
@@ -247,6 +249,14 @@ export function CentralPanel({
     window.addEventListener("keydown", onKeyDown, true)
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [])
+
+  // The new-session shortcut (⌘T) does what the matching toolbar button does, unless the
+  // finder, the agent chooser or another dialog, menu or popover is open.
+  const openNewSession = useOpenNewSession(controller)
+  useNewSessionShortcut(() => {
+    if (quickOpen || controller.agentChooserOpen || overlayIsOpen()) return false
+    return openNewSession()
+  })
 
   const [pdfLocation, setPdfLocation] = useState<PdfLocation | null>(null)
   const [sourceLocation, setSourceLocation] = useState<SourceLocation | null>(null)

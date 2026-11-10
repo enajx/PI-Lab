@@ -435,6 +435,37 @@ const DEFAULT_RIGHT_SIDEBAR_TAB_ORDER: string[] = ["files", "research", "todos"]
 /** Persisted drag order for the project-view right-sidebar tabs (by tab id), shared by every project. */
 export const useRightSidebarTabOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.projectView.sidebarTabOrder", DEFAULT_RIGHT_SIDEBAR_TAB_ORDER)
+/**
+ * Default Project view header shortcuts, in header order. Built-in ids are
+ * `tasks`, `auto-research`, `plan-research` and `project-status`; added skills
+ * and routines are stored as `skill:<slug>` and `routine:<automation id>`.
+ */
+export const DEFAULT_PROJECT_HEADER_SHORTCUTS: string[] = [
+  "tasks",
+  "auto-research",
+  "plan-research",
+  "project-status",
+]
+/** The Project view header shortcut buttons (by id, in order), shared by every project. */
+export const useProjectHeaderShortcuts = (): [string[], (next: string[]) => void] =>
+  useOrderPref("pi-lab.projectView.headerShortcuts", DEFAULT_PROJECT_HEADER_SHORTCUTS)
+/** Where experiment runs are tracked. One kind for now: an EXPERIMENTS.md-style table file. */
+export type ExperimentRunsSource = "experiments-md"
+/** The default experiments file, relative to each project. */
+export const DEFAULT_EXPERIMENT_RUNS_FILE = "EXPERIMENTS.md"
+/** The experiment-runs source for the Project status card (app-wide). */
+export const useExperimentRunsSource = (): [
+  ExperimentRunsSource,
+  (next: ExperimentRunsSource) => void,
+] => {
+  const [stored, setStored] = useStringPref("pi-lab.experiments.runsSource", "experiments-md")
+  // EXPERIMENTS.md is the only kind so far; a stored value from a later build reads as it.
+  const value: ExperimentRunsSource = stored === "experiments-md" ? stored : "experiments-md"
+  return [value, setStored]
+}
+/** The experiments file path, relative to each project (app-wide; default EXPERIMENTS.md). */
+export const useExperimentRunsFile = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.experiments.runsFile", DEFAULT_EXPERIMENT_RUNS_FILE)
 
 // --- Global emoji-tag palette: shared across ALL projects ---------------------
 // The reusable set of emoji the "Edit project…" dialog offers as toggle chips.
@@ -523,4 +554,27 @@ export function resolveLaunchAgentId(defaultAgentId?: string): string {
     if (override && override.length > 0) return override
   }
   return defaultAgentId ?? readDefaultAgentId()
+}
+
+// --- New-session shortcut (⌘T): what it opens in the central panel ----------
+/** What the new-session shortcut opens. "chat-agent" is reserved until chat sessions exist. */
+export type NewSessionKind = "chat-agent" | "terminal-agent" | "terminal"
+const NEW_SESSION_KIND_KEY = "pi-lab.shortcuts.newSessionKind"
+/** Kinds the shortcut can open today; chat agents are not built yet. */
+const NEW_SESSION_KINDS = new Set<NewSessionKind>(["terminal-agent", "terminal"])
+const DEFAULT_NEW_SESSION_KIND: NewSessionKind = "terminal-agent"
+
+/** Parse a stored value; anything unknown or not yet available falls back to the default. */
+function toNewSessionKind(raw: string): NewSessionKind {
+  return NEW_SESSION_KINDS.has(raw as NewSessionKind)
+    ? (raw as NewSessionKind)
+    : DEFAULT_NEW_SESSION_KIND
+}
+
+/** Read at key time by the shortcut handler, so a change in Settings applies at once. */
+export const readNewSessionKind = (): NewSessionKind =>
+  toNewSessionKind(readString(NEW_SESSION_KIND_KEY, DEFAULT_NEW_SESSION_KIND))
+export const useNewSessionKind = (): [NewSessionKind, (next: NewSessionKind) => void] => {
+  const [stored, setStored] = useStringPref(NEW_SESSION_KIND_KEY, DEFAULT_NEW_SESSION_KIND)
+  return [toNewSessionKind(stored), setStored]
 }

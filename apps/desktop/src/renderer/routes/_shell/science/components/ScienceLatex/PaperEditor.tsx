@@ -1,6 +1,8 @@
 import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { PenLine } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { useTranslate } from "../../../../../i18n/language"
@@ -26,6 +28,7 @@ import {
 import { CollapsibleSection } from "../../../projects/components/CentralPanel/CollapsibleSection"
 import type { CentralPanelRestoreState } from "../../../projects/components/CentralPanel/useCentralPanel"
 import { ConnectOverleafDialog } from "./ConnectOverleaf"
+import { LatexEngineStatusItem } from "./LatexEngine"
 import { PaperFolderStatusItem } from "./PaperFolder"
 import { PaperSyncBar } from "./PaperSyncBar"
 
@@ -52,8 +55,10 @@ interface PaperEditorProps {
   onUpdateEditorSettings: (patch: Partial<EditorSettings>) => void
   /** An agent session to focus (and open as a tab when it is not open), or null. */
   focusSession: FocusSessionRequest | null
-  /** The page top bar's element that holds the Sync button, or null before it mounts. */
+  /** The page top bar's element that holds the Update paper and Sync buttons, or null before it mounts. */
   syncSlot: HTMLElement | null
+  /** True right after Create paper: build the main .tex so its PDF opens beside it. */
+  buildOnOpen: boolean
 }
 
 /** A request to show one agent session in the LaTeX Editor, e.g. from the Project Agents box. */
@@ -101,7 +106,9 @@ function hasRestoredTabs(state: ReturnType<typeof readProjectWorkspaceState>): b
  * (the Sync button in the page top bar; the last sync time, Sync messages and
  * the output folder item in the editor status bar, before the paper folder item).
  * Saving a .tex builds it and opens the built PDF beside the source when it is
- * not open yet (an open PDF reloads itself when the file changes).
+ * not open yet (an open PDF reloads itself when the file changes). The footer
+ * also has the LaTeX engine item, and the top bar an Update paper button that
+ * starts an agent with the write-research skill.
  */
 export function PaperEditor({
   projectId,
@@ -119,6 +126,7 @@ export function PaperEditor({
   onUpdateEditorSettings,
   focusSession,
   syncSlot,
+  buildOnOpen,
 }: PaperEditorProps) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -199,10 +207,13 @@ export function PaperEditor({
   } | null>(null)
 
   // Open the main .tex and, when it was built before, its PDF beside it, once per
-  // paper, unless tabs from an earlier visit were restored.
+  // paper, unless tabs from an earlier visit were restored. A just-created paper
+  // has no PDF yet: build it, and `onBuilt` opens the PDF beside the source.
   const openedFor = useRef<string | null>(hasRestoredTabs(restoredState) ? workspaceId : null)
   const openFile = controller.openFile
   const openBuffer = controller.editor.openFile
+  const buildLatex = controller.buildLatex
+  const attachSession = controller.attachSession
   const focusRequested = useRef(focusSession !== null)
   useEffect(() => {
     if (!rootRelPath || openedFor.current === workspaceId) return
@@ -211,7 +222,10 @@ export function PaperEditor({
     const pdf = pdfFor(rootRelPath, effectiveOutputDir)
     client.files.stat.query({ workspaceId, relPath: pdf }).then(
       (stat) => {
-        if (!stat.exists) return
+        if (!stat.exists) {
+          if (buildOnOpen) buildLatex(rootRelPath)
+          return
+        }
         // A requested agent tab keeps the focus; the PDF still opens beside the source.
         if (focusRequested.current) {
           openBuffer(pdf).then(undefined, (cause: unknown) =>
@@ -221,12 +235,38 @@ export function PaperEditor({
       },
       (cause: unknown) => setOpenError(`${pdf}: ${String(cause)}`),
     )
-  }, [client, effectiveOutputDir, openBuffer, openFile, rootRelPath, workspaceId])
+  }, [
+    buildLatex,
+    buildOnOpen,
+    client,
+    effectiveOutputDir,
+    openBuffer,
+    openFile,
+    rootRelPath,
+    workspaceId,
+  ])
+
+  // Update paper: an agent with the write-research skill, shown as a focused tab.
+  const [updateWarning, setUpdateWarning] = useState<string | null>(null)
+  const startUpdate = useMutation(
+    trpc.paper.startUpdate.mutationOptions({
+      onSuccess: (result) => {
+        setUpdateWarning(result.warning)
+        attachSession({
+          kind: "agent",
+          sessionId: result.sessionId,
+          label: t("Update paper"),
+          wsKind: result.kind,
+          launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
+        })
+      },
+      onError: (cause) => setOpenError(cause.message),
+    }),
+  )
 
   // Focus a requested agent session once, opening it as a tab when it is not open.
   // This runs after the main .tex opens, so the agent tab ends up focused.
   const focusedRequest = useRef<string | null>(null)
-  const attachSession = controller.attachSession
   useEffect(() => {
     if (!focusSession || focusedRequest.current === focusSession.sessionId) return
     focusedRequest.current = focusSession.sessionId
@@ -296,6 +336,14 @@ export function PaperEditor({
             {openError}
           </p>
         ) : null}
+        {updateWarning ? (
+          <p
+            data-testid="paper-update-warning"
+            className="cursor-text select-text px-3 py-1 text-muted-foreground text-xs"
+          >
+            {updateWarning}
+          </p>
+        ) : null}
         <CentralPanel
           controller={controller}
           client={client}
@@ -319,6 +367,7 @@ export function PaperEditor({
           paperFolderItem={
             <>
               <div ref={setFooterSlot} data-testid="paper-footer-slot" className="contents" />
+              <LatexEngineStatusItem />
               {syncEnabled && !hasRemote ? (
                 <button
                   type="button"
@@ -335,6 +384,25 @@ export function PaperEditor({
           }
         />
       </div>
+      {syncSlot
+        ? createPortal(
+            <button
+              type="button"
+              data-testid="paper-update"
+              disabled={startUpdate.isPending}
+              title={t("Start an agent that updates the paper from the project's results")}
+              onClick={() => {
+                setOpenError(null)
+                startUpdate.mutate({ projectId })
+              }}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+            >
+              <PenLine className="size-3.5" aria-hidden />
+              {t("Update paper")}
+            </button>,
+            syncSlot,
+          )
+        : null}
       <PaperSyncBar
         projectId={projectId}
         workspaceId={workspaceId}

@@ -77,7 +77,7 @@ const editorPatch = z.object({
   editorTheme: z.string().optional(),
   customEditorThemes: z.array(importedTheme).max(100).optional(),
   pythonRunDestination: z.enum(["central", "below-editor"]).optional(),
-  latexProvider: z.enum(["bundled", "system"]).optional(),
+  latexProvider: z.enum(["auto", "bundled", "system"]).optional(),
   latexOutputDir: z.string().max(512).optional(),
   showHiddenFiles: z.boolean().optional(),
   confirmFileDelete: z.boolean().optional(),

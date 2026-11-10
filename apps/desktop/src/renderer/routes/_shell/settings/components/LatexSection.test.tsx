@@ -53,6 +53,11 @@ describe("LaTeX Settings (mocked RPC)", () => {
     await waitFor(() =>
       expect((screen.getByLabelText("LaTeX compiler") as HTMLSelectElement).value).toBe("system"),
     )
+    fireEvent.change(screen.getByLabelText("LaTeX compiler"), { target: { value: "auto" } })
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ latexProvider: "auto" }))
+    await waitFor(() =>
+      expect((screen.getByLabelText("LaTeX compiler") as HTMLSelectElement).value).toBe("auto"),
+    )
   })
 
   it("hides installation prompts when system LaTeX is detected and keeps paths in Details", async () => {

@@ -1041,6 +1041,8 @@
   "Resize all cards from": "ここからすべてのカードのサイズを変更:",
   "currently": "現在",
   "percent": "パーセント",
+  "width": "幅",
+  "height": "高さ",
   "Resize": "サイズを変更",
   "Drag the lower-right corner or use arrow keys to resize all cards": "右下隅をドラッグするか矢印キーですべてのカードのサイズを変更します",
   "Auto": "自動",

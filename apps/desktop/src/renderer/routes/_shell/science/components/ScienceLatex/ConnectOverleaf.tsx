@@ -79,11 +79,7 @@ export function ConnectOverleafDialog({
           </a>
         </li>
         <li>{t("In that project, open Integrations > Git and copy the Git URL.")}</li>
-        <li>
-          {t(
-            "Paste it here. PI Lab sends this paper to it; your files replace Overleaf's default ones.",
-          )}
-        </li>
+        <li>{t("Paste it here. Your files replace Overleaf's default ones.")}</li>
       </ol>
       <div className="mt-3 flex flex-col gap-2">
         <Input

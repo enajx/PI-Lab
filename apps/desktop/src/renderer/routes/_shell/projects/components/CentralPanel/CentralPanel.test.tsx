@@ -620,6 +620,71 @@ describe("CentralPanel — panel", () => {
     expect(container.querySelectorAll(".dv-groupview")).toHaveLength(1)
   })
 
+  /** ⌘T does what the robot button does: it starts the remembered terminal agent. */
+  test("the new-session shortcut opens a terminal agent like the New agent button", async () => {
+    renderPanel()
+    await waitFor(() =>
+      expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
+    )
+
+    const event = new KeyboardEvent("keydown", {
+      key: "t",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    await screen.findByTestId("terminal")
+    expect(launchedAgents).toEqual(["claude-code"])
+    expect(launchedWorkspaceModes).toEqual(["policy"])
+  })
+
+  /** ⌘T pressed while the agent list is still loading opens the agent once it loads. */
+  test("the new-session shortcut pressed before the agents load opens the agent when they load", async () => {
+    renderPanel()
+    expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(true)
+
+    const event = new KeyboardEvent("keydown", {
+      key: "t",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    await screen.findByTestId("terminal")
+    expect(launchedAgents).toEqual(["claude-code"])
+  })
+
+  /** With "Terminal" chosen in Settings → Shortcuts, ⌘T opens a plain terminal. */
+  test("the new-session shortcut opens a plain terminal when Settings chooses Terminal", async () => {
+    window.localStorage.setItem("pi-lab.shortcuts.newSessionKind", "terminal")
+    renderPanel()
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true })
+
+    const terminal = await screen.findByTestId("terminal")
+    expect(terminal.getAttribute("data-input-kind")).toBe("terminal")
+    expect(launchedAgents).toEqual([])
+  })
+
+  /** An open dialog keeps the key: ⌘T does not start a session behind it. */
+  test("the new-session shortcut does nothing while the agent chooser is open", async () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId("central-add-menu"))
+    fireEvent.click(screen.getByTestId("central-add-agent"))
+    await screen.findByTestId("new-agent-dialog")
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true })
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(launchedAgents).toEqual([])
+    expect(screen.queryByTestId("terminal")).toBeNull()
+  })
+
   test("closing a terminal tab terminates its PTY instead of leaving a hidden session", async () => {
     const killed: string[] = []
     renderPanel(

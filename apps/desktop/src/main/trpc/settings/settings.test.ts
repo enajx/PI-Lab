@@ -65,7 +65,7 @@ describe("settings.get", () => {
       diagnosticsEnabled: false,
       customEditorThemes: [],
       pythonRunDestination: "central",
-      latexProvider: "bundled",
+      latexProvider: "auto",
       latexOutputDir: "build",
       showHiddenFiles: true,
       confirmFileDelete: true,
@@ -193,7 +193,7 @@ describe("settings.updateEditor", () => {
       editorTheme: "default",
       customEditorThemes: [],
       pythonRunDestination: "central",
-      latexProvider: "bundled",
+      latexProvider: "auto",
       latexOutputDir: "build",
       showHiddenFiles: true,
       confirmFileDelete: true,
@@ -217,7 +217,7 @@ describe("settings.updateEditor", () => {
       editorTheme: "default",
       customEditorThemes: [],
       pythonRunDestination: "central",
-      latexProvider: "bundled",
+      latexProvider: "auto",
       latexOutputDir: "build",
       showHiddenFiles: true,
       confirmFileDelete: true,
@@ -397,6 +397,8 @@ describe("global LaTeX provider", () => {
     expect((await harness.caller.settings.get()).confirmOnQuit).toBe(false)
     await harness.caller.settings.updateEditor({ latexProvider: "bundled" })
     expect((await harness.caller.settings.get()).editor.latexProvider).toBe("bundled")
+    await harness.caller.settings.updateEditor({ latexProvider: "auto" })
+    expect((await harness.caller.settings.get()).editor.latexProvider).toBe("auto")
     await expect(
       harness.caller.settings.updateEditor({ latexProvider: "managed" as never }),
     ).rejects.toThrow()

@@ -182,7 +182,7 @@ describe("getAgentSettingsOrDefaults", () => {
 })
 
 describe("global LaTeX provider migration", () => {
-  it("adds bundled to legacy JSON while preserving every saved preference", () => {
+  it("adds a provider to legacy JSON (bundled, then auto from 0031) while preserving every saved preference", () => {
     const folder = join(dataDir, "legacy-migrations")
     cpSync(resolveMigrationsDir(), folder, { recursive: true })
     const journalPath = join(folder, "meta", "_journal.json")
@@ -204,9 +204,51 @@ describe("global LaTeX provider migration", () => {
 
     const migrated = runMigrations(dbPath)
     const after = migrated.sqlite.prepare("SELECT * FROM settings").get() as Record<string, unknown>
-    expect(JSON.parse(after.editor as string)).toEqual({ ...editor, latexProvider: "bundled" })
+    expect(JSON.parse(after.editor as string)).toEqual({ ...editor, latexProvider: "auto" })
     expect({ ...after, editor: before.editor }).toEqual(before)
-    expect(getSettingsOrDefaults(migrated.db).editor.latexProvider).toBe("bundled")
+    expect(getSettingsOrDefaults(migrated.db).editor.latexProvider).toBe("auto")
     migrated.sqlite.close()
+  })
+})
+
+describe("LaTeX provider default", () => {
+  it("is auto for a new install, also when the first settings write leaves the editor column out", () => {
+    const { db, sqlite } = runMigrations(dbPath)
+    try {
+      expect(getSettingsOrDefaults(db).editor.latexProvider).toBe("auto")
+      // First-run setup inserts the row with other columns only, so the SQL default fills `editor`.
+      db.insert(settings).values({ id: SETTINGS_ROW_ID, theme: "dark", updatedAt: 1 }).run()
+      expect(getSettingsOrDefaults(db).editor.latexProvider).toBe("auto")
+    } finally {
+      sqlite.close()
+    }
+  })
+})
+
+describe("Auto LaTeX provider migration", () => {
+  /** Migrate a DB to just before 0031, store `provider`, then run every migration. */
+  function migrateFrom(provider: string): string {
+    const folder = join(dataDir, `before-auto-${provider}`)
+    cpSync(resolveMigrationsDir(), folder, { recursive: true })
+    const journalPath = join(folder, "meta", "_journal.json")
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"))
+    journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 31)
+    writeFileSync(journalPath, JSON.stringify(journal))
+    const path = join(dataDir, `auto-${provider}.db`)
+    const legacy = runMigrations(path, folder)
+    legacy.sqlite
+      .prepare("INSERT INTO settings (id, editor, updated_at) VALUES (1, ?, 1234)")
+      .run(JSON.stringify({ autosave: true, latexProvider: provider }))
+    legacy.sqlite.close()
+    const migrated = runMigrations(path)
+    const editor = getSettingsOrDefaults(migrated.db).editor
+    migrated.sqlite.close()
+    expect(editor.autosave).toBe(true)
+    return editor.latexProvider
+  }
+
+  it("moves a saved bundled choice to auto and keeps system", () => {
+    expect(migrateFrom("bundled")).toBe("auto")
+    expect(migrateFrom("system")).toBe("system")
   })
 })

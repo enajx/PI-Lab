@@ -24,6 +24,7 @@ import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
+import { ScienceSessionPanel } from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
 
@@ -268,162 +269,172 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
         </>
       }
     >
-      {projects.length === 0 ? (
-        <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <NoProjectsState />
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1">
-          {/* Left column: search + category filter + file list. */}
-          <div className="flex w-80 shrink-0 flex-col border-border border-r">
-            <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
-              <div className="relative">
-                <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
-                <Input
-                  data-testid="analysis-search"
-                  aria-label={t("Search data files")}
-                  data-feature-label={t("Search data files")}
-                  data-feature-help={t(
-                    "Filter this project's discovered data files by name or path.",
-                  )}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("Search files…")}
-                  className="h-8 pl-8"
-                  disabled={allFiles.length === 0}
-                />
-              </div>
-              {categoriesPresent.length > 0 ? (
-                <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
-                  <FilterChip
-                    label={t("All")}
-                    active={categoryFilter === "all"}
-                    onClick={() => selectCategory("all")}
-                    testId="analysis-category-all"
-                  />
-                  {categoriesPresent.map((category) => (
-                    <FilterChip
-                      key={category}
-                      label={t(DATA_FILE_CATEGORY_LABELS[category])}
-                      active={categoryFilter === category}
-                      onClick={() => selectCategory(category)}
-                      testId={`analysis-category-${category}`}
-                    />
-                  ))}
-                </div>
-              ) : null}
-              {subKindsPresent.length > 1 ? (
-                <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
-                  <FilterChip
-                    label={t("All")}
-                    active={kindFilter === null}
-                    onClick={() => setKindFilter(null)}
-                    testId="analysis-subkind-all"
-                  />
-                  {subKindsPresent.map((kind) => (
-                    <FilterChip
-                      key={kind}
-                      label={t(DATA_FILE_KIND_LABELS[kind])}
-                      active={kindFilter === kind}
-                      onClick={() => setKindFilter(kind)}
-                      testId={`analysis-subkind-${kind}`}
-                    />
-                  ))}
-                </div>
-              ) : null}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {projects.length === 0 ? (
+            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+              <NoProjectsState />
             </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {listing.data?.partial ? (
-                <p
-                  data-testid="analysis-partial"
-                  role="status"
-                  className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
-                  title={listing.data.skipped.join("\n")}
-                >
-                  {t("Some project paths could not be read")} ({listing.data.skipped.length}).
-                </p>
-              ) : null}
-              {listing.isError ? (
-                <p
-                  data-testid="analysis-list-error"
-                  role="alert"
-                  className="p-4 text-destructive text-xs"
-                >
-                  {t("Could not read project data files:")} {listing.error.message}
-                </p>
-              ) : allFiles.length === 0 && !listing.isLoading ? (
-                <EmptyState />
-              ) : (
-                <div className="flex flex-col gap-3 p-3">
-                  <div className="flex items-center justify-between px-1">
-                    <span
-                      data-testid="analysis-file-count"
-                      className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
-                    >
-                      {filtered.length} {t("of")} {allFiles.length} {t("files")}
-                    </span>
-                    {listing.data?.truncated ? (
-                      <span
-                        data-testid="analysis-truncated"
-                        className="text-[10px] text-amber-500"
-                        title={t("The repo has more data files than are shown")}
-                      >
-                        {t("truncated")}
-                      </span>
-                    ) : null}
+          ) : (
+            <div className="flex min-h-0 flex-1">
+              {/* Left column: search + category filter + file list. */}
+              <div className="flex w-80 shrink-0 flex-col border-border border-r">
+                <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
+                  <div className="relative">
+                    <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
+                    <Input
+                      data-testid="analysis-search"
+                      aria-label={t("Search data files")}
+                      data-feature-label={t("Search data files")}
+                      data-feature-help={t(
+                        "Filter this project's discovered data files by name or path.",
+                      )}
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder={t("Search files…")}
+                      className="h-8 pl-8"
+                      disabled={allFiles.length === 0}
+                    />
                   </div>
-
-                  {filteredGroups.map((group) => (
-                    <div key={group.category} className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2 px-1">
-                        <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                          {t(DATA_FILE_CATEGORY_LABELS[group.category])}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground/50">
-                          {group.files.length}
-                        </span>
-                      </div>
-                      {group.files.map((rankedFile) => (
-                        <FileRow
-                          key={rankedFile.file.relPath}
-                          file={rankedFile.file}
-                          namePositions={rankedFile.namePositions}
-                          pathPositions={rankedFile.pathPositions}
-                          selected={rankedFile.file.relPath === selectedRelPath}
-                          onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+                  {categoriesPresent.length > 0 ? (
+                    <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                      <FilterChip
+                        label={t("All")}
+                        active={categoryFilter === "all"}
+                        onClick={() => selectCategory("all")}
+                        testId="analysis-category-all"
+                      />
+                      {categoriesPresent.map((category) => (
+                        <FilterChip
+                          key={category}
+                          label={t(DATA_FILE_CATEGORY_LABELS[category])}
+                          active={categoryFilter === category}
+                          onClick={() => selectCategory(category)}
+                          testId={`analysis-category-${category}`}
                         />
                       ))}
                     </div>
-                  ))}
-
-                  {filtered.length === 0 && allFiles.length > 0 ? (
-                    <p
-                      data-testid="analysis-no-matches"
-                      className="px-1 text-muted-foreground text-xs"
-                    >
-                      {t("No files match the current filter.")}
-                    </p>
+                  ) : null}
+                  {subKindsPresent.length > 1 ? (
+                    <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
+                      <FilterChip
+                        label={t("All")}
+                        active={kindFilter === null}
+                        onClick={() => setKindFilter(null)}
+                        testId="analysis-subkind-all"
+                      />
+                      {subKindsPresent.map((kind) => (
+                        <FilterChip
+                          key={kind}
+                          label={t(DATA_FILE_KIND_LABELS[kind])}
+                          active={kindFilter === kind}
+                          onClick={() => setKindFilter(kind)}
+                          testId={`analysis-subkind-${kind}`}
+                        />
+                      ))}
+                    </div>
                   ) : null}
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Right column: preview pane for the selected file. */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {selectedProjectId && selectedRelPath ? (
-              <AnalysisPreview
-                projectId={selectedProjectId}
-                relPath={selectedRelPath}
-                kind={allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"}
-              />
-            ) : (
-              <NoSelectionState />
-            )}
-          </div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  {listing.data?.partial ? (
+                    <p
+                      data-testid="analysis-partial"
+                      role="status"
+                      className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
+                      title={listing.data.skipped.join("\n")}
+                    >
+                      {t("Some project paths could not be read")} ({listing.data.skipped.length}).
+                    </p>
+                  ) : null}
+                  {listing.isError ? (
+                    <p
+                      data-testid="analysis-list-error"
+                      role="alert"
+                      className="p-4 text-destructive text-xs"
+                    >
+                      {t("Could not read project data files:")} {listing.error.message}
+                    </p>
+                  ) : allFiles.length === 0 && !listing.isLoading ? (
+                    <EmptyState />
+                  ) : (
+                    <div className="flex flex-col gap-3 p-3">
+                      <div className="flex items-center justify-between px-1">
+                        <span
+                          data-testid="analysis-file-count"
+                          className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                        >
+                          {filtered.length} {t("of")} {allFiles.length} {t("files")}
+                        </span>
+                        {listing.data?.truncated ? (
+                          <span
+                            data-testid="analysis-truncated"
+                            className="text-[10px] text-amber-500"
+                            title={t("The repo has more data files than are shown")}
+                          >
+                            {t("truncated")}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {filteredGroups.map((group) => (
+                        <div key={group.category} className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 px-1">
+                            <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+                              {t(DATA_FILE_CATEGORY_LABELS[group.category])}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/50">
+                              {group.files.length}
+                            </span>
+                          </div>
+                          {group.files.map((rankedFile) => (
+                            <FileRow
+                              key={rankedFile.file.relPath}
+                              file={rankedFile.file}
+                              namePositions={rankedFile.namePositions}
+                              pathPositions={rankedFile.pathPositions}
+                              selected={rankedFile.file.relPath === selectedRelPath}
+                              onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+                            />
+                          ))}
+                        </div>
+                      ))}
+
+                      {filtered.length === 0 && allFiles.length > 0 ? (
+                        <p
+                          data-testid="analysis-no-matches"
+                          className="px-1 text-muted-foreground text-xs"
+                        >
+                          {t("No files match the current filter.")}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right column: preview pane for the selected file. */}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {selectedProjectId && selectedRelPath ? (
+                  <AnalysisPreview
+                    projectId={selectedProjectId}
+                    relPath={selectedRelPath}
+                    kind={
+                      allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"
+                    }
+                  />
+                ) : (
+                  <NoSelectionState />
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+        <ScienceSessionPanel
+          view="analysis"
+          project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
+        />
+      </div>
 
       {findOpen ? (
         <QuickFind

@@ -549,6 +549,41 @@ describe("sessions.startAutoResearch — placeholder worktree launch", () => {
   })
 })
 
+describe("sessions.startSkill — header skill shortcut", () => {
+  test("starts the project's agent with a prompt that triggers the named skill", async () => {
+    const skillDir = join(h.repoDir, ".claude", "skills", "review-notes")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: Review notes\ndescription: Review the lab notes\n---\nReview the notes.\n",
+    )
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
+
+    const result = await h.caller.sessions.startSkill({ projectId, skillSlug: "review-notes" })
+
+    expect(result.agentId).toBe("prompt-agent")
+    expect(result.label).toBe("Review notes")
+    const chunks: string[] = []
+    const stream = await h.caller.terminal.onData({ sessionId: result.sessionId })
+    const sub = stream.subscribe({
+      next: (event) => {
+        if (event.type === "data") chunks.push(event.chunk)
+      },
+    })
+    await waitFor(() => chunks.join("").includes("review-notes skill"))
+    sub.unsubscribe()
+    expect(chunks.join("")).toContain(join(skillDir, "SKILL.md"))
+  })
+
+  test("a skill the project does not have is a clear error and starts nothing", async () => {
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
+    await expect(
+      h.caller.sessions.startSkill({ projectId, skillSlug: "missing-skill" }),
+    ).rejects.toThrow("missing-skill")
+    expect(await h.caller.terminal.list()).toEqual([])
+  })
+})
+
 describe("sessions.start — worktreePerAgent ON", () => {
   test("the FIRST start is already a 'worktree'", async () => {
     enableWorktreePerAgent()

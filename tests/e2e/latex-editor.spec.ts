@@ -714,6 +714,10 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
   await git(seed, "commit", "-m", "blank")
   await git(seed, "push", blank, "master")
   const overleafUrl = "https://git@git.overleaf.com/0123456789abcdef01234567"
+  // Create paper builds the PDF. With no system LaTeX, Auto uses Tectonic and the shared cache.
+  await mkdir(PERSISTENT_CACHE, { recursive: true })
+  await mkdir(join(root, "data", "latex"), { recursive: true })
+  await symlink(PERSISTENT_CACHE, join(root, "data", "latex", "cache"), "dir")
   const gitConfig = join(root, "gitconfig")
   await writeFile(
     gitConfig,
@@ -746,6 +750,34 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     await page.screenshot({ path: test.info().outputPath("latex-setup-create.png") })
     await page.getByTestId("paper-create").click()
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    // main.tex opens on the left and, once built, its PDF on the right.
+    const editor = page.getByTestId("editor-buffer")
+    await expect(editor).toBeVisible()
+    // CI runners have no TeX and skip the large TeX bundle download.
+    if (!process.env.CI) {
+      const viewer = page.getByTestId("pdf-viewer")
+      await expect(viewer).toBeVisible({ timeout: 200_000 })
+      const source = await editor.boundingBox()
+      const pdf = await viewer.boundingBox()
+      expect(source && pdf && pdf.x > source.x + source.width / 2).toBe(true)
+    }
+
+    // The footer shows the LaTeX engine in use; its menu has Auto chosen by default.
+    const engine = page.getByTestId("editor-status-bar").getByTestId("latex-engine")
+    await expect(engine).toHaveText(/TeX Live|MiKTeX|System LaTeX|Tectonic/, { timeout: 15_000 })
+    await engine.click()
+    await expect(page.getByTestId("latex-engine-auto")).toHaveAttribute("aria-checked", "true")
+    await expect(page.getByTestId("latex-engine-bundled")).toBeVisible()
+    await expect(page.getByTestId("latex-engine-install")).toBeVisible()
+    await page.screenshot({ path: test.info().outputPath("latex-engine-menu.png") })
+    await page.keyboard.press("Escape")
+    await expect(page.getByTestId("latex-engine-auto")).toHaveCount(0)
+
+    // Update paper (top bar) starts a write-research agent as a focused tab.
+    await page.getByTestId("paper-update").click()
+    const updateTab = page.getByTestId("central-tab").filter({ hasText: "Update paper" })
+    await expect(updateTab).toHaveAttribute("data-active", "true", { timeout: 15_000 })
+
     const paper = join(project, "paper")
     expect(await readFile(join(paper, "refs.bib"), "utf8")).toBe("@misc{a}\n")
     expect((await git(paper, "ls-files")).trim().split("\n")).toEqual(["main.tex", "refs.bib"])
@@ -757,6 +789,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     await page.getByTestId("paper-connect-overleaf").click()
     const dialog = page.getByTestId("paper-connect-dialog")
     await expect(dialog).toContainText("create a Blank project")
+    await expect(dialog).toContainText("Paste it here. Your files replace Overleaf's default ones.")
     await page.screenshot({ path: test.info().outputPath("latex-connect.png") })
     await page.getByTestId("paper-connect-url").fill(overleafUrl)
     await page.getByTestId("paper-connect-token").fill("olp_e2e_token")

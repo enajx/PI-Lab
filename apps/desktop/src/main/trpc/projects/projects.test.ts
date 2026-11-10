@@ -873,6 +873,40 @@ describe("projects.setMetadata", () => {
   })
 })
 
+describe("projects.setStage", () => {
+  test("sets, reads back, and clears the project stage, keeping other metadata", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "NeurIPS" } })
+
+    const updated = await h.caller.projects.setStage({ id: project.id, stage: "experiments" })
+    expect(updated.metadata).toEqual({ venue: "NeurIPS", stage: "experiments" })
+    expect((await h.caller.projects.get({ id: project.id })).metadata?.stage).toBe("experiments")
+    const listed = (await h.caller.projects.list()).find((p) => p.id === project.id)
+    expect(listed?.metadata?.stage).toBe("experiments")
+
+    // The card's metadata dialog does not carry the stage; saving it keeps the stage.
+    await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "ICML" } })
+    expect((await h.caller.projects.get({ id: project.id })).metadata).toEqual({
+      venue: "ICML",
+      stage: "experiments",
+    })
+
+    const cleared = await h.caller.projects.setStage({ id: project.id, stage: null })
+    expect(cleared.metadata).toEqual({ venue: "ICML" })
+  })
+
+  test("refuses an unknown stage and an unknown project", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await expect(
+      h.caller.projects.setStage({ id: project.id, stage: "done" as never }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await h.caller.projects.get({ id: project.id })).metadata).toBeNull()
+    await expect(
+      h.caller.projects.setStage({ id: "missing", stage: "planning" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+})
+
 test("project details survive reopen and preserve hidden metadata", async () => {
   const project = await h.caller.projects.open({
     path: h.repoDir,

@@ -153,3 +153,111 @@ test("⌘Escape opens the Dashboard from a project view and the Library, but not
   await window.keyboard.press("ControlOrMeta+Escape")
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
 })
+
+test("⌘T in the project view does what the New agent button does", async () => {
+  const window = await app.firstWindow()
+  await openProject(window)
+  await blurFocus(window)
+  await window.keyboard.press("ControlOrMeta+t")
+  // The robot button starts the remembered agent, or opens the chooser when it is not
+  // detected; either is the button's own result.
+  const agentTab = window.locator('[data-testid="central-tab"][data-tab-kind="agent"]')
+  await expect(agentTab.or(window.getByTestId("new-agent-dialog"))).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(window.locator('[data-testid="central-tab"][data-tab-kind="terminal"]')).toHaveCount(
+    0,
+  )
+})
+
+test("⌘T opens a plain terminal when Settings > Shortcuts chooses Terminal", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-shortcuts").click()
+  await expect(window.getByTestId("shortcut-new-session")).toHaveText("⌘T")
+  await window.getByTestId("settings-new-session-kind").selectOption("terminal")
+  await window.getByTestId("settings-back").click()
+  await openProject(window)
+
+  await blurFocus(window)
+  await window.keyboard.press("ControlOrMeta+t")
+  await expect(window.locator('[data-testid="central-tab"][data-tab-kind="terminal"]')).toHaveCount(
+    1,
+    { timeout: 30_000 },
+  )
+  await expect(window.locator('[data-testid="terminal"][data-input-kind="terminal"]')).toBeVisible()
+
+  // A second ⌘T from inside the focused terminal opens another one (macOS: Cmd is not
+  // a shell key; elsewhere Ctrl+T stays with the shell).
+  if (process.platform === "darwin") {
+    await window.locator(".xterm").first().click()
+    await window.keyboard.press("Meta+t")
+    await expect(
+      window.locator('[data-testid="central-tab"][data-tab-kind="terminal"]'),
+    ).toHaveCount(2, { timeout: 30_000 })
+  }
+})
+
+test("⌘T in Tasks asks for a project, then opens a session in the Tasks session panel", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
+  await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  const panel = window.getByTestId("science-sessions")
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+
+  // "All projects" has no project to start a session in.
+  await blurFocus(window)
+  await window.keyboard.press("ControlOrMeta+t")
+  await expect(window.getByTestId("science-sessions-notice")).toHaveText(
+    "Pick a project to open a session",
+  )
+
+  await window.getByTestId("tasks-project-select").selectOption({ index: 1 })
+  await window.getByTestId("science-sessions-collapse").click()
+  await blurFocus(window)
+  await window.keyboard.press("ControlOrMeta+t")
+  // The robot button's own result: the remembered agent, or the chooser when it is not detected.
+  const agentTab = panel.locator('[data-testid="central-tab"][data-tab-kind="agent"]')
+  await expect(agentTab.or(window.getByTestId("new-agent-dialog"))).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+})
+
+test("⌘T in Analysis opens a terminal in the session panel, kept after leaving the view", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-shortcuts").click()
+  await window.getByTestId("settings-new-session-kind").selectOption("terminal")
+  await window.getByTestId("settings-back").click()
+
+  const analysisNav = window.locator(
+    '[data-testid="science-nav-item"][data-science-tab="analysis"]',
+  )
+  await analysisNav.click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  const panel = window.getByTestId("science-sessions")
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+
+  await blurFocus(window)
+  await window.keyboard.press("ControlOrMeta+t")
+  await expect(panel).toHaveAttribute("data-collapsed", "false", { timeout: 30_000 })
+  await expect(panel.locator('[data-testid="central-tab"][data-tab-kind="terminal"]')).toHaveCount(
+    1,
+  )
+  const terminal = panel.locator('[data-testid="terminal"][data-input-kind="terminal"]')
+  const sessionId = await terminal.getAttribute("data-session-id")
+  expect(sessionId).toBeTruthy()
+
+  await window.getByTestId("nav-dashboard").click()
+  await expect(window.getByTestId("dashboard")).toBeVisible()
+  await analysisNav.click()
+  await expect(
+    window.locator(
+      `[data-testid="science-sessions"] [data-testid="terminal"][data-session-id="${sessionId}"]`,
+    ),
+  ).toBeVisible({ timeout: 30_000 })
+})

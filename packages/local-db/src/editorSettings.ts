@@ -11,7 +11,7 @@ export type {
   ImportedEditorTokenColor,
 } from "./editorThemeImport"
 
-export type LatexProvider = "bundled" | "system"
+export type LatexProvider = "auto" | "bundled" | "system"
 
 export type PythonRunDestination = "central" | "below-editor"
 
@@ -35,7 +35,7 @@ export interface EditorSettings {
   customEditorThemes: ImportedEditorTheme[]
   /** Default destination for Run Python; each run may override it. */
   pythonRunDestination: PythonRunDestination
-  /** LaTeX compiler used for every project. */
+  /** LaTeX compiler used for every project; "auto" uses system LaTeX when found, else bundled Tectonic. */
   latexProvider: LatexProvider
   /**
    * Default LaTeX build output folder, relative to the root .tex file's folder
@@ -60,7 +60,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   editorTheme: "default",
   customEditorThemes: [],
   pythonRunDestination: "central",
-  latexProvider: "bundled",
+  latexProvider: "auto",
   latexOutputDir: "build",
   showHiddenFiles: true,
   confirmFileDelete: true,

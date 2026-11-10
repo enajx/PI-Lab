@@ -2,8 +2,22 @@ import {
   isDirtyBuffer,
   isUntitledBuffer,
   latexWorkspaceKey,
+  sessionPanelWorkspaceKey,
   type WorkspaceRecoveryStore,
 } from "../routes/_shell/projects/-workspaceRecovery"
+
+/**
+ * Each project keeps Project view, LaTeX Editor, Tasks and Analysis session panel tabs
+ * under separate recovery keys.
+ */
+function workspaceKeys(projectId: string): string[] {
+  return [
+    projectId,
+    latexWorkspaceKey(projectId),
+    sessionPanelWorkspaceKey("tasks", projectId),
+    sessionPanelWorkspaceKey("analysis", projectId),
+  ]
+}
 
 /** Clearing a project must not discard its only copy of unsaved editor work. */
 export function alphaProjectsHaveUnsavedWork(
@@ -11,9 +25,8 @@ export function alphaProjectsHaveUnsavedWork(
   recovery: Pick<WorkspaceRecoveryStore, "read" | "warnings">,
 ): boolean {
   if (recovery.warnings().length > 0) return true
-  // Each project keeps Project view tabs and LaTeX Editor tabs under separate keys.
   return projectIds
-    .flatMap((id) => [id, latexWorkspaceKey(id)])
+    .flatMap((id) => workspaceKeys(id))
     .some((id) => {
       const state = recovery.read(id, true)
       return Boolean(
@@ -42,9 +55,9 @@ export function clearAlphaProjectUiState(storage: Storage, projectIds: string[])
       key === "pi-lab.sidebar.projectOrder" ||
       projectIds.some(
         (id) =>
-          key === `pi-lab.projectWorkspace.v2.${id}` ||
-          key === `pi-lab.projectWorkspace.v2.${latexWorkspaceKey(id)}` ||
-          key.startsWith(`pi-lab.project.${id}.`),
+          workspaceKeys(id).some(
+            (workspaceKey) => key === `pi-lab.projectWorkspace.v2.${workspaceKey}`,
+          ) || key.startsWith(`pi-lab.project.${id}.`),
       )
     ) {
       storage.removeItem(key)

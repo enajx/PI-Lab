@@ -16,7 +16,7 @@ import { ProjectCard } from "../ProjectCard"
 /**
  * The project-cards dashboard is the shell home. A responsive grid of large project cards, one per
  * opened project (most-recently-opened first, mirroring the sidebar), with a
- * bottom-corner handle that persists each card's independent grid span.
+ * bottom-corner handle that sets one shared card width and height.
  *
  * This is the functional first pass: the structure (grid, card, gradient/
  * thumbnail/drag-drop, direct resizing) is here; the heavy visual polish and the
@@ -81,7 +81,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-12 pb-6">
         {projects.length === 0 ? (
           <p
             data-testid="dashboard-empty"
@@ -103,7 +103,7 @@ export function Dashboard() {
             projectsQuery.data === undefined ? null : visibleProjects.map((project) => project.id)
           }
           testId="dashboard-grid"
-          className="gap-4"
+          className="gap-6"
         >
           {visibleProjects.map((project) => (
             <ResizableCardGridItem

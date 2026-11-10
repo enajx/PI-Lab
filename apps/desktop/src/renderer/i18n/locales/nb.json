@@ -1041,6 +1041,8 @@
   "Resize all cards from": "Endre størrelse på alle kort fra",
   "currently": "for øyeblikket",
   "percent": "prosent",
+  "width": "bredde",
+  "height": "høyde",
   "Resize": "Endre størrelse på",
   "Drag the lower-right corner or use arrow keys to resize all cards": "Dra nederste høyre hjørne eller bruk piltastene for å endre størrelsen på alle kort",
   "Auto": "Automatisk",

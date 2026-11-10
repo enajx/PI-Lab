@@ -59,6 +59,25 @@ function handlers(): FakeHandlers {
     },
     "terminal.list": () => liveSessionIds.map((id) => ({ id, alive: true })),
     "terminal.kill": () => ({ ok: true }),
+    "latex.status": () => ({
+      provider: "auto",
+      bundled: { available: true, version: "Tectonic 0.15.0", name: "Tectonic", error: null },
+      system: { available: false, version: null, name: "System LaTeX", error: "Not found" },
+      engine: { kind: "bundled", name: "Tectonic" },
+      installation: { state: "idle", progress: null, message: "", error: null },
+    }),
+    "paper.startUpdate": (input) => {
+      started.push(input)
+      const sessionId = `update-${started.length}`
+      liveSessionIds.push(sessionId)
+      return {
+        sessionId,
+        workspaceId: "paper-ws",
+        kind: "branch",
+        warning: null,
+        agentId: "claude-code",
+      }
+    },
   }
 }
 
@@ -67,11 +86,14 @@ function renderEditor(
   client: ReturnType<typeof createFakeTrpcClient>,
   projectId: string,
   focusSession: { sessionId: string; agentId: string; agentLabel: string } | null,
+  buildOnOpen: boolean,
+  syncSlot: HTMLElement | null,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
       <PaperEditor
+        buildOnOpen={buildOnOpen}
         projectId={projectId}
         projectName="Project"
         workspaceId="paper-ws"
@@ -86,7 +108,7 @@ function renderEditor(
         settings={DEFAULT_EDITOR_SETTINGS}
         onUpdateEditorSettings={() => undefined}
         focusSession={focusSession}
-        syncSlot={null}
+        syncSlot={syncSlot}
       />
     </AppProviders>,
   )
@@ -101,7 +123,7 @@ function tabLabels(): string[] {
 describe("PaperEditor agents (mocked server)", () => {
   test("starts agents as LaTeX Editor agents and keeps its tabs after leaving and coming back", async () => {
     const client = createFakeTrpcClient(handlers())
-    renderEditor(client, "p1", null)
+    renderEditor(client, "p1", null, false, null)
     await waitFor(() => expect(tabLabels()).toEqual(["main.tex"]))
     await waitFor(() =>
       expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
@@ -112,7 +134,7 @@ describe("PaperEditor agents (mocked server)", () => {
 
     // Leave the page (unmount) and come back.
     cleanup()
-    renderEditor(client, "p1", null)
+    renderEditor(client, "p1", null, false, null)
     await waitFor(() => expect(tabLabels()).toEqual(["main.tex", "Claude Code"]))
     const agentTab = screen
       .getAllByTestId("central-tab")
@@ -125,11 +147,17 @@ describe("PaperEditor agents (mocked server)", () => {
   test("a requested agent session is focused, and attached as a tab when it is not open yet", async () => {
     liveSessionIds = ["live-latex-agent"]
     const client = createFakeTrpcClient(handlers())
-    renderEditor(client, "p2", {
-      sessionId: "live-latex-agent",
-      agentId: "claude-code",
-      agentLabel: "Claude Code",
-    })
+    renderEditor(
+      client,
+      "p2",
+      {
+        sessionId: "live-latex-agent",
+        agentId: "claude-code",
+        agentLabel: "Claude Code",
+      },
+      false,
+      null,
+    )
     await waitFor(() => expect(tabLabels()).toContain("Claude Code"))
     const agentTab = screen
       .getAllByTestId("central-tab")
@@ -144,7 +172,7 @@ describe("PaperEditor agents (mocked server)", () => {
     startWarning =
       "Claude Code cannot be given the paper folder /papers/p; it only sees the project folder."
     const client = createFakeTrpcClient(handlers())
-    renderEditor(client, "p3", null)
+    renderEditor(client, "p3", null, false, null)
     await waitFor(() =>
       expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
     )
@@ -162,7 +190,7 @@ describe("PaperEditor left column (mocked server)", () => {
       window.localStorage.removeItem(`pi-lab.latexEditor.${key}`)
     }
     const client = createFakeTrpcClient(handlers())
-    renderEditor(client, "p4", null)
+    renderEditor(client, "p4", null, false, null)
     const toggle = await screen.findByTestId("central-files-toggle")
     expect(screen.queryByTestId("central-files-panel")).toBeNull()
     fireEvent.click(toggle)
@@ -179,5 +207,64 @@ describe("PaperEditor left column (mocked server)", () => {
     await waitFor(() => expect(within(column).queryByTestId("panel-files")).toBeNull())
     expect(window.localStorage.getItem("pi-lab.latexEditor.filesOpen")).toContain("false")
     cleanup()
+  })
+})
+
+describe("PaperEditor Create paper and Update paper (mocked server)", () => {
+  test("a just-created paper builds main.tex and opens its PDF beside the source", async () => {
+    const builds: unknown[] = []
+    const client = createFakeTrpcClient({
+      ...handlers(),
+      // The PDF exists only once the build has run.
+      "files.stat": (input) => ({
+        exists: builds.length > 0 && (input as { relPath: string }).relPath === "build/main.pdf",
+        mtimeMs: 1,
+        size: 10,
+      }),
+      "pdf.build": (input) => {
+        builds.push(input)
+        return { relPath: "build/main.pdf", success: true, log: "" }
+      },
+    })
+    renderEditor(client, "p5", null, true, null)
+    await waitFor(() => expect(builds).toEqual([{ workspaceId: "paper-ws", relPath: "main.tex" }]))
+    await waitFor(() => expect(tabLabels()).toEqual(["main.tex", "main.pdf"]))
+    cleanup()
+  })
+
+  test("an existing paper with no PDF is not built when it opens", async () => {
+    const builds: unknown[] = []
+    const client = createFakeTrpcClient({
+      ...handlers(),
+      "pdf.build": (input) => {
+        builds.push(input)
+        return { relPath: "build/main.pdf", success: true, log: "" }
+      },
+    })
+    renderEditor(client, "p6", null, false, null)
+    await waitFor(() => expect(tabLabels()).toEqual(["main.tex"]))
+    expect(builds).toEqual([])
+    cleanup()
+  })
+
+  test("Update paper in the top bar starts a write-research agent as a focused tab", async () => {
+    const slot = document.createElement("div")
+    document.body.append(slot)
+    const client = createFakeTrpcClient(handlers())
+    renderEditor(client, "p7", null, false, slot)
+    await waitFor(() => expect(tabLabels()).toEqual(["main.tex"]))
+    const button = within(slot).getByTestId("paper-update")
+    // It sits before Sync in the top bar.
+    const sync = within(slot).getByTestId("paper-sync")
+    expect(button.compareDocumentPosition(sync) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(button)
+    await waitFor(() => expect(tabLabels()).toEqual(["main.tex", "Update paper"]))
+    expect(started).toEqual([{ projectId: "p7" }])
+    const agentTab = screen
+      .getAllByTestId("central-tab")
+      .find((tab) => tab.getAttribute("data-tab-kind") === "agent")
+    expect(agentTab?.getAttribute("data-active")).toBe("true")
+    cleanup()
+    slot.remove()
   })
 })

@@ -187,6 +187,12 @@ const setMetadataInput = z.object({
     .nullable(),
 })
 
+/** Set the project stage, or clear it with `stage: null`. */
+const setStageInput = z.object({
+  id: z.string().min(1),
+  stage: z.enum(["planning", "experiments", "paperWriting", "submitted"]).nullable(),
+})
+
 const setDocumentPathInput = z.object({
   id: z.string().min(1),
   kind: z.enum(["tasks", "main"]),
@@ -831,14 +837,17 @@ export const projectsRouter = router({
    * row so the dashboard re-renders from the mutation result.
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
-    // The linked paper folder is not part of the card dialog; keep it across edits.
-    const paper = ctx.db
+    // The linked paper folder and the stage are not part of the card dialog; keep them.
+    const stored = ctx.db
       .select({ metadata: projects.metadata })
       .from(projects)
       .where(eq(projects.id, input.id))
-      .get()?.metadata?.paper
+      .get()?.metadata
+    const kept: ProjectMetadata = {}
+    if (stored?.paper !== undefined) kept.paper = stored.paper
+    if (stored?.stage !== undefined) kept.stage = stored.stage
     const metadata: ProjectMetadata | null =
-      paper === undefined ? input.metadata : { ...input.metadata, paper }
+      Object.keys(kept).length === 0 ? input.metadata : { ...input.metadata, ...kept }
     const row = ctx.db
       .update(projects)
       .set({ metadata, updatedAt: Date.now() })
@@ -848,6 +857,25 @@ export const projectsRouter = router({
     if (!row) {
       throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
     }
+    return row
+  }),
+
+  /**
+   * Set the project stage shown on the stage row (Planning, Experiments, Paper
+   * writing, Submitted), or clear it with `stage: null`, keeping the other metadata.
+   */
+  setStage: publicProcedure.input(setStageInput).mutation(({ ctx, input }): Project => {
+    const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+    if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+    const { stage: _old, ...rest } = project.metadata ?? {}
+    const metadata: ProjectMetadata = input.stage === null ? rest : { ...rest, stage: input.stage }
+    const row = ctx.db
+      .update(projects)
+      .set({ metadata, updatedAt: Date.now() })
+      .where(eq(projects.id, input.id))
+      .returning()
+      .get()
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
     return row
   }),
 

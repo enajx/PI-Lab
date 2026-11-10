@@ -89,6 +89,14 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     editable: true,
   },
   {
+    id: "new-session",
+    label: "New session",
+    description:
+      "Open a new session in the project view, Tasks, LaTeX Editor or Analysis, like the agent or terminal button",
+    defaultBinding: "Mod+t",
+    editable: true,
+  },
+  {
     id: "save-file",
     label: "Save file",
     description: "Save the active editor buffer (CodeMirror)",

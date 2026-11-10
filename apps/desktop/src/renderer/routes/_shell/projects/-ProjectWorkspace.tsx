@@ -7,6 +7,7 @@ import { ListTodo, Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
+import { ProjectStageRow } from "../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
@@ -40,6 +41,7 @@ import {
 import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 import { ProjectAgentsBox } from "./components/ProjectAgents/ProjectAgentsBox"
+import { ProjectHeaderShortcuts } from "./components/ProjectHeaderShortcuts"
 import { ProjectPalette } from "./components/ProjectPalette"
 import { FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
 
@@ -324,7 +326,8 @@ export function ProjectWorkspace({
 
   // Card-triggered and in-view auto-research launch failures surface here (no
   // silent failure — AGENTS.md), so a failed launch never leaves the view stuck.
-  const launchError = startAutoResearch.error?.message ?? null
+  const [shortcutError, setShortcutError] = useState<string | null>(null)
+  const launchError = startAutoResearch.error?.message ?? shortcutError
 
   const handledActivation = useRef<string | null>(null)
   useEffect(() => {
@@ -386,60 +389,93 @@ export function ProjectWorkspace({
           titleBarInsetHeaderClass(collapsed),
         )}
       >
-        <div className={cn("flex min-w-0 flex-col", titleBarControlClass(collapsed))}>
-          <h1 className="truncate text-foreground text-sm tracking-tight">
-            {project?.name ?? t("Loading…")}
-          </h1>
+        <div className={cn("flex min-w-0 items-center gap-3", titleBarControlClass(collapsed))}>
+          <div className="flex min-w-0 flex-col">
+            <h1 className="truncate text-foreground text-sm tracking-tight">
+              {project?.name ?? t("Loading…")}
+            </h1>
+            {project ? (
+              <p className="cursor-text select-text truncate text-muted-foreground text-xs">
+                {project.repoPath}
+              </p>
+            ) : null}
+          </div>
           {project ? (
-            <p className="cursor-text select-text truncate text-muted-foreground text-xs">
-              {project.repoPath}
-            </p>
+            <ProjectStageRow
+              projectId={projectId}
+              stage={project.metadata?.stage ?? null}
+              testId="project-view-stage"
+              className="shrink-0"
+            />
           ) : null}
         </div>
         <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
-          <button
-            type="button"
-            data-testid="project-view-tasks"
-            title={t("Tasks")}
-            data-feature-label={t("Tasks")}
-            data-feature-help={t("Open this project's tasks")}
-            onClick={() => void navigate({ to: "/science/tasks", search: { projectId } })}
-            className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60"
-          >
-            <ListTodo className="size-3.5 shrink-0" aria-hidden />
-            <span>{t("Tasks")}</span>
-          </button>
-          <button
-            type="button"
-            data-testid="project-view-auto-research"
-            aria-busy={startAutoResearch.isPending}
-            title={!gitAvailable ? gitDisabledReason : t("Auto research")}
-            data-feature-label={t("Auto research")}
-            data-feature-help={t(
-              "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
-            )}
-            disabled={!gitAvailable || !workspaceId || startAutoResearch.isPending}
-            onClick={onAutoResearch}
-            className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Telescope className="size-3.5 shrink-0" aria-hidden />
-            <span>{t("Auto research")}</span>
-          </button>
-          <ProjectWorkflowControl
+          <ProjectHeaderShortcuts
             projectId={projectId}
-            projectName={project?.name ?? t("Project")}
-            task="plan-research"
-            variant="labeled"
-            testId="project-view-plan-research"
-          />
-          <ProjectStatusControl
-            projectId={projectId}
-            projectName={project?.name ?? t("Project")}
-            lastOpenedAt={project?.lastOpenedAt ?? 0}
-            variant="labeled"
-            testId="project-view-status"
-            gitAvailable={gitAvailable}
-            gitDisabledReason={gitDisabledReason}
+            onError={setShortcutError}
+            onSkillSessionStarted={(session) =>
+              controller.attachSession({
+                kind: "agent",
+                sessionId: session.sessionId,
+                label: session.label,
+                wsKind: session.kind,
+                launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
+              })
+            }
+            builtins={{
+              tasks: (
+                <button
+                  type="button"
+                  data-testid="project-view-tasks"
+                  title={t("Tasks")}
+                  data-feature-label={t("Tasks")}
+                  data-feature-help={t("Open this project's tasks")}
+                  onClick={() => void navigate({ to: "/science/tasks", search: { projectId } })}
+                  className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60"
+                >
+                  <ListTodo className="size-3.5 shrink-0" aria-hidden />
+                  <span>{t("Tasks")}</span>
+                </button>
+              ),
+              "auto-research": (
+                <button
+                  type="button"
+                  data-testid="project-view-auto-research"
+                  aria-busy={startAutoResearch.isPending}
+                  title={!gitAvailable ? gitDisabledReason : t("Auto research")}
+                  data-feature-label={t("Auto research")}
+                  data-feature-help={t(
+                    "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
+                  )}
+                  disabled={!gitAvailable || !workspaceId || startAutoResearch.isPending}
+                  onClick={onAutoResearch}
+                  className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Telescope className="size-3.5 shrink-0" aria-hidden />
+                  <span>{t("Auto research")}</span>
+                </button>
+              ),
+              "plan-research": (
+                <ProjectWorkflowControl
+                  projectId={projectId}
+                  projectName={project?.name ?? t("Project")}
+                  task="plan-research"
+                  variant="labeled"
+                  testId="project-view-plan-research"
+                />
+              ),
+              "project-status": (
+                <ProjectStatusControl
+                  projectId={projectId}
+                  projectName={project?.name ?? t("Project")}
+                  lastOpenedAt={project?.lastOpenedAt ?? 0}
+                  variant="icon"
+                  testId="project-view-status"
+                  gitAvailable={gitAvailable}
+                  gitDisabledReason={gitDisabledReason}
+                />
+              ),
+            }}
           />
           <AgentStatusControl />
           <CaffeineControl />

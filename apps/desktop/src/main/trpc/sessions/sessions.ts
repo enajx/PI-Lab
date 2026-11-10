@@ -22,6 +22,7 @@ import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { isGitRepo } from "../../git"
 import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
+import { discoverSkills } from "../science/skills/skills"
 import { publicProcedure, router } from "../trpc"
 import { runningProjectWorkflowTasks } from "../workflows/running"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
@@ -337,6 +338,13 @@ The real auto-research instructions and loop will live in this file later.
 /** Result of {@link startAutoResearch} — the seeded worktree's live session. */
 export type StartAutoResearchResult = StartSessionResult
 
+/** The project's remembered agent choice, falling back to the default agent, then the catalog default. */
+async function projectAgentId(ctx: AppContext, project: Project): Promise<string> {
+  const agentSettings = getAgentSettingsOrDefaults(ctx.db)
+  const config = await readProjectAgentConfig(project, agentSettings.projectConfigStorage)
+  return config.agentId ?? agentSettings.defaultAgentId ?? DEFAULT_AGENT_ID
+}
+
 /**
  * Placeholder "Auto-research" trigger for a Dashboard project card. Opens an
  * isolated git-worktree agent session for the project — separate from its main
@@ -358,11 +366,7 @@ export async function startAutoResearch(
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
   }
 
-  // The project's remembered agent choice, falling back to the catalog default.
-  const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
-  const config = await readProjectAgentConfig(project, storage)
-  const agentId =
-    config.agentId ?? getAgentSettingsOrDefaults(ctx.db).defaultAgentId ?? DEFAULT_AGENT_ID
+  const agentId = await projectAgentId(ctx, project)
 
   // Seed the placeholder BEFORE the agent launches, via the pre-spawn hook, so the
   // worktree always has AUTORESEARCH.md before the session starts and a failed seed
@@ -377,6 +381,47 @@ export async function startAutoResearch(
       await writeTextFile(join(dir, AUTORESEARCH_FILENAME), AUTORESEARCH_PLACEHOLDER)
     },
   })
+}
+
+/** A skill-shortcut launch: the started session plus the agent and the skill's display name. */
+export interface StartSkillResult extends StartSessionResult {
+  agentId: string
+  /** The skill's name, used as the session tab label. */
+  label: string
+}
+
+/**
+ * Start the project's agent (remembered choice, else the default) with a prompt
+ * that triggers one of the project's skills, found by its folder name (`slug`) in
+ * the same project and user skill folders the Skills page lists. Used by a skill
+ * shortcut button in the Project view header. A slug the project does not have
+ * is a NOT_FOUND error, and no session is started.
+ */
+export async function startSkill(
+  ctx: AppContext,
+  input: { projectId: string; skillSlug: string },
+): Promise<StartSkillResult> {
+  const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
+  if (!project) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+  }
+  const catalog = await discoverSkills(project.repoPath, ctx.skillsHomeDir)
+  const skill = catalog.skills.find((entry) => entry.slug === input.skillSlug)
+  if (!skill) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `The skill "${input.skillSlug}" was not found in this project or your user skill folders.`,
+    })
+  }
+  const agentId = await projectAgentId(ctx, project)
+  const result = await startAgentSession(ctx, {
+    projectId: project.id,
+    agentId,
+    origin: "project",
+    workspaceMode: "policy",
+    prompt: `Use the ${skill.slug} skill. Its SKILL.md is at ${skill.path}. Follow its instructions.`,
+  })
+  return { ...result, agentId, label: skill.name }
 }
 
 /**
@@ -442,4 +487,9 @@ export const sessionsRouter = router({
   startAutoResearch: publicProcedure
     .input(z.object({ projectId: z.string().min(1) }))
     .mutation(({ ctx, input }): Promise<StartAutoResearchResult> => startAutoResearch(ctx, input)),
+
+  /** Start the project's agent with one of its skills triggered (see {@link startSkill}). */
+  startSkill: publicProcedure
+    .input(z.object({ projectId: z.string().min(1), skillSlug: z.string().min(1) }))
+    .mutation(({ ctx, input }): Promise<StartSkillResult> => startSkill(ctx, input)),
 })

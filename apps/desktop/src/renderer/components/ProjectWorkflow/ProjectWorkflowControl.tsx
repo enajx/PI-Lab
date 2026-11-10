@@ -180,7 +180,7 @@ export function ProjectWorkflowControl({
   instructions?: string
   disabled?: boolean
   disabledReason?: string
-  /** Button text in place of the task's own label (e.g. "Update project summary"). */
+  /** Button text in place of the task's own label (e.g. "Generate project summary"). */
   label?: string
 }) {
   const t = useTranslate()
