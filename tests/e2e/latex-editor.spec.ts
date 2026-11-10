@@ -67,8 +67,9 @@ async function setUp(root: string): Promise<{ project: string; paper: string; ov
 }
 
 /**
- * Start the real desktop build with isolated data, the project open, and a
- * fixed folder picker. `extraEnv` is added to the app's environment.
+ * Start the real desktop build with isolated data (in `<root>/data`), the
+ * project open, and a fixed folder picker. `extraEnv` is added to the app's
+ * environment.
  */
 async function launch(
   root: string,
@@ -87,7 +88,9 @@ async function launch(
       ...process.env,
       PI_LAB_TEST_MODE: "1",
       PI_LAB_TEST_HIDE_WINDOWS: "1",
-      PI_LAB_DATA_DIR: root,
+      // Its own folder: a packaged Alpha app empties its data folder when it starts a new
+      // build, which would delete the test's project and paper folders kept in `root`.
+      PI_LAB_DATA_DIR: join(root, "data"),
       PI_LAB_SOCKET_PATH: join(root, "daemon.sock"),
       PI_LAB_TEST_OPEN_PROJECT: project,
       PI_LAB_TEST_PICK_DIRECTORY: pickDir,
@@ -361,8 +364,8 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
   const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-editor-build-e2e-"))
   const { project, paper, overleaf } = await setUp(root)
   await mkdir(PERSISTENT_CACHE, { recursive: true })
-  await mkdir(join(root, "latex"))
-  await symlink(PERSISTENT_CACHE, join(root, "latex", "cache"), "dir")
+  await mkdir(join(root, "data", "latex"), { recursive: true })
+  await symlink(PERSISTENT_CACHE, join(root, "data", "latex", "cache"), "dir")
   let app: ElectronApplication | null = null
   try {
     app = await launch(root, project, paper, {})
