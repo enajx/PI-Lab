@@ -1029,12 +1029,97 @@ describe("CentralPanel — Cmd+W through the close-tab responder (fake bridge)",
     await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
   })
 
-  test("a focused terminal or an empty panel leaves Cmd+W to the background action", async () => {
+  test("an empty panel has no tab to close, so Cmd+W is not handled", () => {
     renderPanel()
     expect(pressCmdW()).toBe(false)
+  })
+
+  test("Cmd+W on a terminal tab asks first; Cancel keeps it, Close terminal stops it", async () => {
+    const killed: string[] = []
+    renderPanel(
+      baseHandlers("main.py", {
+        "terminal.kill": (input) => {
+          killed.push((input as { sessionId: string }).sessionId)
+          return { ok: true }
+        },
+      }),
+    )
     fireEvent.click(screen.getByTestId("launcher-terminal"))
     await screen.findByTestId("terminal")
+
+    expect(pressCmdW()).toBe(true)
+    const prompt = await screen.findByTestId("close-session-prompt")
+    expect(prompt.textContent).toContain("Close terminal?")
+    // A second press while the prompt is open does nothing more.
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(within(prompt).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("close-session-prompt")).toBeNull())
+    expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("terminal")
+    expect(killed).toEqual([])
+
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(
+      within(await screen.findByTestId("close-session-prompt")).getByRole("button", {
+        name: "Close terminal",
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(killed).toEqual(["term-1"])
     expect(pressCmdW()).toBe(false)
+  })
+
+  test("Cmd+W on an agent tab asks before stopping the agent", async () => {
+    const killed: string[] = []
+    renderPanel(
+      baseHandlers("main.py", {
+        "terminal.kill": (input) => {
+          killed.push((input as { sessionId: string }).sessionId)
+          return { ok: true }
+        },
+      }),
+      DEFAULT_SETTINGS,
+      () => {},
+      { kind: "agent", sessionId: "task-agent-1", label: "Implement parser", wsKind: "worktree" },
+    )
+    await screen.findByTestId("terminal")
+    expect(pressCmdW()).toBe(true)
+    const prompt = await screen.findByTestId("close-session-prompt")
+    expect(prompt.textContent).toContain("Stop agent?")
+    expect(prompt.textContent).toContain("Implement parser")
+    expect(killed).toEqual([])
+    fireEvent.click(within(prompt).getByRole("button", { name: "Stop agent" }))
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(killed).toEqual(["task-agent-1"])
+  })
+
+  test("with a file and a terminal open, Cmd+W closes only the active terminal, then the file", async () => {
+    renderPanel()
+    await openFile()
+    fireEvent.click(screen.getByTestId("central-new-terminal"))
+    await screen.findByTestId("terminal")
+    expect(screen.getAllByTestId("central-tab")).toHaveLength(2)
+
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(
+      within(await screen.findByTestId("close-session-prompt")).getByRole("button", {
+        name: "Close terminal",
+      }),
+    )
+    await waitFor(() => expect(screen.getAllByTestId("central-tab")).toHaveLength(1))
+    expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("file")
+
+    expect(pressCmdW()).toBe(true)
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+  })
+
+  test("Ctrl+W on a terminal tab asks first, like Cmd+W", async () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId("launcher-terminal"))
+    await screen.findByTestId("terminal")
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true })
+    const prompt = await screen.findByTestId("close-session-prompt")
+    fireEvent.click(within(prompt).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("close-session-prompt")).toBeNull())
     expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("terminal")
   })
 })

@@ -1,6 +1,12 @@
 import { mkdir, realpath, stat, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, relative, sep } from "node:path"
-import { type PiLabDatabase, projects, workspaces } from "@pi-lab/local-db"
+import {
+  type PiLabDatabase,
+  type Project,
+  type ProjectMetadata,
+  projects,
+  workspaces,
+} from "@pi-lab/local-db"
 import { classifyDataFile } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { and, eq } from "drizzle-orm"
@@ -32,9 +38,30 @@ import type { AnalysisInteractiveResult } from "./interactive"
  */
 
 const listInput = z.object({
-  /** The project whose repo is scanned for data files. */
+  /** The project whose results folder is scanned for data files. */
   projectId: z.string().min(1),
+  /**
+   * The default results folder from Settings, relative to the project. Used
+   * when the project has no results folder of its own.
+   */
+  defaultResultsFolder: z.string().min(1),
 })
+
+const setResultsFolderInput = z.object({
+  projectId: z.string().min(1),
+  /** Absolute folder path from the folder picker, or null to use the default again. */
+  dir: z.string().min(1).nullable(),
+})
+
+/** The Analysis file listing of a project's results folder. */
+export interface ResultsListing extends DataFileListing {
+  /** The results folder that was listed, relative to the project (POSIX separators). */
+  resultsFolder: string
+  /** True when the project's own folder was used instead of the default. */
+  overridden: boolean
+  /** False when the results folder does not exist (the listing is then empty). */
+  exists: boolean
+}
 
 const previewInput = z.object({
   projectId: z.string().min(1),
@@ -96,13 +123,49 @@ if __name__ == "__main__":
     app.run()
 `
 
-/** Resolve a project's repo path from the store or throw a clean NOT_FOUND. */
-function requireRepoPath(db: PiLabDatabase, projectId: string): string {
+/** Resolve a project's row from the store or throw a clean NOT_FOUND. */
+function requireProject(db: PiLabDatabase, projectId: string): Project {
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get()
   if (!project) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${projectId}` })
   }
-  return project.repoPath
+  return project
+}
+
+/** Resolve a project's repo path from the store or throw a clean NOT_FOUND. */
+function requireRepoPath(db: PiLabDatabase, projectId: string): string {
+  return requireProject(db, projectId).repoPath
+}
+
+/** True when `child` is a folder strictly inside `parent` (both absolute). */
+function isStrictlyInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
+}
+
+/**
+ * Return the folder's path relative to the project (POSIX separators), from
+ * both real paths (after symlinks). FORBIDDEN unless it is strictly inside.
+ */
+async function realPathInside(repoPath: string, dir: string, shown: string): Promise<string> {
+  const [canonicalRepo, canonicalDir] = await Promise.all([realpath(repoPath), realpath(dir)])
+  if (!isStrictlyInside(canonicalRepo, canonicalDir)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `The results folder must be inside the project: ${shown}`,
+    })
+  }
+  return relative(canonicalRepo, canonicalDir).replaceAll("\\", "/")
+}
+
+/** stat that answers null for a missing path; other errors surface. */
+async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
+  try {
+    return await stat(path)
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+    throw error
+  }
 }
 
 export const analysisRouter = router({
@@ -137,17 +200,76 @@ export const analysisRouter = router({
       })
     }),
   /**
-   * Discover and classify the data/analysis files in a project's repo. Walks the
-   * tree (skipping noise dirs), tags each file with its data-file kind, and
-   * returns them grouped by kind with per-file metadata (size, mtime). The walk
-   * is capped, and `truncated` flags when the cap was hit so the UI can say so
-   * rather than silently dropping files.
+   * Discover and classify the data/analysis files in a project's results folder
+   * (the project's own folder, else the default from Settings). Each folder
+   * inside it is one experiment; every file carries its experiment name, or
+   * null when it sits directly in the results folder. Walks the tree (skipping
+   * noise dirs), tags each file with its data-file kind, and returns them
+   * grouped by kind with per-file metadata (size, mtime) and repo-relative
+   * paths. A missing results folder is `exists: false`; a folder outside the
+   * project (or the project folder itself) is FORBIDDEN. The walk is capped,
+   * and `truncated` flags when the cap was hit.
    */
   listFiles: publicProcedure
     .input(listInput)
-    .query(async ({ ctx, input }): Promise<DataFileListing> => {
-      const repoPath = requireRepoPath(ctx.db, input.projectId)
-      return discoverDataFiles(repoPath)
+    .query(async ({ ctx, input }): Promise<ResultsListing> => {
+      const project = requireProject(ctx.db, input.projectId)
+      const own = project.metadata?.resultsFolder
+      const resultsFolder = own ?? input.defaultResultsFolder
+      const overridden = own !== undefined
+      const root = resolveInsideDir(project.repoPath, resultsFolder)
+      const info = await statOrNull(root)
+      if (info === null) {
+        return {
+          resultsFolder,
+          overridden,
+          exists: false,
+          groups: [],
+          total: 0,
+          truncated: false,
+          partial: false,
+          skipped: [],
+        }
+      }
+      await realPathInside(project.repoPath, root, resultsFolder)
+      if (!info.isDirectory()) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `The results folder is not a folder: ${resultsFolder}`,
+        })
+      }
+      const listing = await discoverDataFiles(project.repoPath, root)
+      return { ...listing, resultsFolder, overridden, exists: true }
+    }),
+
+  /**
+   * Set the project's own results folder from an absolute folder path (the
+   * folder picker), stored relative to the project in `metadata.resultsFolder`;
+   * `dir: null` removes it so the default from Settings applies again. Only a
+   * folder strictly inside the project is accepted (FORBIDDEN otherwise).
+   */
+  setResultsFolder: publicProcedure
+    .input(setResultsFolderInput)
+    .mutation(async ({ ctx, input }): Promise<{ resultsFolder: string | null }> => {
+      const project = requireProject(ctx.db, input.projectId)
+      const { resultsFolder: _old, ...rest } = project.metadata ?? {}
+      let resultsFolder: string | null = null
+      if (input.dir !== null) {
+        if (!isAbsolute(input.dir)) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: `The results folder must be an absolute path: ${input.dir}`,
+          })
+        }
+        resultsFolder = await realPathInside(project.repoPath, input.dir, input.dir)
+      }
+      const metadata: ProjectMetadata = resultsFolder === null ? rest : { ...rest, resultsFolder }
+      ctx.db
+        .update(projects)
+        .set({ metadata, updatedAt: Date.now() })
+        .where(eq(projects.id, input.projectId))
+        .run()
+      return { resultsFolder }
     }),
 
   /**

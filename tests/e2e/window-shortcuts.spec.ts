@@ -52,7 +52,7 @@ test("Escape returns from Settings to the main view", async () => {
   await expect(window.getByTestId("dashboard")).toBeVisible()
 })
 
-test("Cmd+W menu action backgrounds the app without destroying its window", async () => {
+test("Cmd+W menu action on the Dashboard keeps the app and its window visible", async () => {
   test.skip(process.platform !== "darwin", "macOS app shortcut")
   const window = await app.firstWindow()
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
@@ -64,12 +64,15 @@ test("Cmd+W menu action backgrounds the app without destroying its window", asyn
     return true
   })
   expect(shortcut).toBe(true)
-  await expect.poll(() => app.evaluate(({ app }) => app.isHidden())).toBe(true)
+  // Longer than main's wait for the renderer's answer (1.5 s).
+  await window.waitForTimeout(2_500)
+  expect(await app.evaluate(({ app }) => app.isHidden())).toBe(false)
   expect(
     await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows().some((win) => !win.isDestroyed()),
+      BrowserWindow.getAllWindows().some((win) => !win.isDestroyed() && win.isVisible()),
     ),
   ).toBe(true)
+  await expect(window.getByTestId("dashboard")).toBeVisible()
 })
 
 // Verify Chromium drag-region styles and control interaction.

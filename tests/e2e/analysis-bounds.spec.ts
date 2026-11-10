@@ -62,15 +62,16 @@ test("Analysis keeps research output, previews bounded NumPy arrays and reports 
   await execFileAsync("git", ["init", "-b", "main", repo])
   await execFileAsync("git", ["-C", repo, "config", "user.email", "test@pi-lab.local"])
   await execFileAsync("git", ["-C", repo, "config", "user.name", "PI Lab Test"])
-  await mkdir(join(repo, "build"))
-  await mkdir(join(repo, "private"))
-  await writeFile(join(repo, "build", "matrix.npy"), numpyGrid())
-  await writeFile(join(repo, "private", "data.csv"), "a\n1\n")
+  // Analysis lists the results folder (`results/` by default).
+  await mkdir(join(repo, "results", "build"), { recursive: true })
+  await mkdir(join(repo, "results", "private"))
+  await writeFile(join(repo, "results", "build", "matrix.npy"), numpyGrid())
+  await writeFile(join(repo, "results", "private", "data.csv"), "a\n1\n")
   await execFileAsync("git", ["-C", repo, "add", "."])
   await execFileAsync("git", ["-C", repo, "commit", "-m", "fixture"])
-  await writeFile(join(repo, "build", "large-grid.npy"), largeNumpyGrid())
-  await writeFile(join(repo, "build", "long-series.npy"), largeNumpySeries())
-  await chmod(join(repo, "private"), 0)
+  await writeFile(join(repo, "results", "build", "large-grid.npy"), largeNumpyGrid())
+  await writeFile(join(repo, "results", "build", "long-series.npy"), largeNumpySeries())
+  await chmod(join(repo, "results", "private"), 0)
 
   let app: ElectronApplication | undefined
   try {
@@ -89,7 +90,9 @@ test("Analysis keeps research output, previews bounded NumPy arrays and reports 
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
     await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
-    const matrix = window.locator('[data-testid="analysis-file"][data-rel-path="build/matrix.npy"]')
+    const matrix = window.locator(
+      '[data-testid="analysis-file"][data-rel-path="results/build/matrix.npy"]',
+    )
     await expect(matrix).toBeVisible({ timeout: 30_000 })
     await expect(window.getByTestId("analysis-partial")).toContainText("1")
     await matrix.click()
@@ -100,7 +103,7 @@ test("Analysis keeps research output, previews bounded NumPy arrays and reports 
     await expect(grid.locator("tbody tr").last().locator("td")).toHaveText(["1", "4", "5", ""])
 
     await window
-      .locator('[data-testid="analysis-file"][data-rel-path="build/large-grid.npy"]')
+      .locator('[data-testid="analysis-file"][data-rel-path="results/build/large-grid.npy"]')
       .click()
     const largeGrid = window.getByTestId("analysis-preview-array")
     await expect(largeGrid).toBeVisible()
@@ -111,7 +114,7 @@ test("Analysis keeps research output, previews bounded NumPy arrays and reports 
     await expect(window.getByTestId("analysis-preview")).toContainText("Array truncated")
 
     await window
-      .locator('[data-testid="analysis-file"][data-rel-path="build/long-series.npy"]')
+      .locator('[data-testid="analysis-file"][data-rel-path="results/build/long-series.npy"]')
       .click()
     await expect(window.getByTestId("analysis-preview-chart")).toBeVisible()
     await expect(window.getByTestId("analysis-preview")).toContainText("Chart downsampled")
@@ -127,7 +130,7 @@ test("Analysis keeps research output, previews bounded NumPy arrays and reports 
       await app.close().catch(() => child.kill("SIGKILL"))
       clearTimeout(forceExit)
     }
-    await chmod(join(repo, "private"), 0o755)
+    await chmod(join(repo, "results", "private"), 0o755)
     await rm(dataDir, { recursive: true, force: true })
   }
 })

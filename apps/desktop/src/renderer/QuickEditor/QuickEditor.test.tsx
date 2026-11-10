@@ -189,7 +189,7 @@ test("Cmd+W in the full-app Editor closes a saved file and asks before closing a
   expect(pressCmdW()).toBe(false)
 })
 
-test("Cmd+W in an empty full-app Editor or the standalone quick editor backgrounds the app", async () => {
+test("Cmd+W in an empty full-app Editor or the standalone quick editor has no tab to close", async () => {
   const { bridge } = installBridge({ id: "cmd-w-quick", path: "/tmp/cmd-w-quick.txt" }, async () =>
     text("abc"),
   )

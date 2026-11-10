@@ -2,8 +2,9 @@ import { Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FilePlus, FolderOpen, GitBranch } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import type { BuildResult } from "../../../../../../main/trpc/pdf/pdf"
 import { useTranslate } from "../../../../../i18n/language"
-import { useTRPC } from "../../../../../trpc/react"
+import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
 import { usePaperFolderPicker } from "./PaperFolder"
 
 /** Overleaf's account settings, where a Git token is created. */
@@ -12,8 +13,15 @@ const TOKEN_URL = "https://www.overleaf.com/user/settings"
 const DOCS_URL =
   "https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration"
 const cardClass =
-  "flex flex-col items-center justify-center gap-2 rounded-lg border border-border p-4 text-center"
+  "flex flex-col items-center justify-center gap-2 rounded-lg border border-border p-2 text-center"
 const linkClass = "text-muted-foreground underline underline-offset-2 hover:text-foreground"
+
+/** A paper Create paper just made: its workspace and the build of its main .tex (null when none ran). */
+export interface CreatedPaper {
+  workspaceId: string | null
+  /** Settled before the page is told; it rejects when the build could not run. */
+  build: Promise<BuildResult> | null
+}
 
 /**
  * Shown when the chosen project has no paper folder yet. With `autoDetect` on
@@ -34,16 +42,20 @@ const linkClass = "text-muted-foreground underline underline-offset-2 hover:text
 export function PaperSetup({
   projectId,
   autoDetect,
+  onCreateStart,
   onCreated,
 }: {
   projectId: string
   /** False after the user cleared the paper folder: no search for Overleaf clones. */
   autoDetect: boolean
-  /** After Create paper: the new paper's workspace id, so the editor builds its PDF. */
-  onCreated: (workspaceId: string | null) => void
+  /** Create paper started; the page keeps the setup shown until `onCreated`. */
+  onCreateStart: () => void
+  /** Create paper finished: the new paper with its PDF build, or null when creating it failed. */
+  onCreated: (paper: CreatedPaper | null) => void
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
+  const client = useTRPCClient()
   const queryClient = useQueryClient()
   const [url, setUrl] = useState("")
   const [token, setToken] = useState("")
@@ -82,15 +94,37 @@ export function PaperSetup({
       onError,
     }),
   )
-  const create = useMutation(
-    trpc.paper.create.mutationOptions({
-      onSuccess: (state) => {
-        onCreated(state.workspaceId)
-        linked()
-      },
-      onError,
-    }),
-  )
+  // Create paper also builds the main .tex, so the editor opens with its PDF beside it.
+  const [createStep, setCreateStep] = useState<"creating" | "building">("creating")
+  const create = useMutation({
+    mutationFn: async (input: { projectId: string; dir: string }): Promise<CreatedPaper> => {
+      setCreateStep("creating")
+      const state = await client.paper.create.mutate(input)
+      if (!state.workspaceId || !state.rootRelPath) {
+        return { workspaceId: state.workspaceId, build: null }
+      }
+      setCreateStep("building")
+      const build = client.pdf.build.mutate({
+        workspaceId: state.workspaceId,
+        relPath: state.rootRelPath,
+      })
+      // A failed build still opens the paper; the editor shows the failure and its log.
+      await build.then(
+        () => undefined,
+        () => undefined,
+      )
+      return { workspaceId: state.workspaceId, build }
+    },
+    onMutate: onCreateStart,
+    onSuccess: (paper) => {
+      onCreated(paper)
+      linked()
+    },
+    onError: (cause: { message: string }) => {
+      onCreated(null)
+      onError(cause)
+    },
+  })
   const createInto = createDir ?? (createTarget.data?.available ? createTarget.data.dir : null)
   const busy =
     addOverleaf.isPending ||
@@ -139,10 +173,13 @@ export function PaperSetup({
     !busy && tokenStatus.isSuccess && url.trim() !== "" && (!needsToken || token.trim() !== "")
 
   return (
-    <div data-testid="paper-setup" className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+    <div
+      data-testid="paper-setup"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-14 pb-4"
+    >
       <div
         data-testid="paper-setup-content"
-        className="mx-auto flex w-full max-w-5xl flex-col gap-3"
+        className="mx-auto flex w-full max-w-6xl flex-col gap-3"
       >
         {autoLinking ? (
           <p data-testid="paper-detecting" className="text-center text-muted-foreground text-sm">
@@ -187,7 +224,9 @@ export function PaperSetup({
                 </div>
               </section>
             ) : null}
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(16rem,20rem))] justify-center gap-3">
+            {/* Three cards of up to 20rem with two 2.5rem gaps; they share narrower widths
+                and wrap only below 16rem each. */}
+            <div className="mx-auto grid w-full max-w-[65rem] grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-10">
               <section data-testid="paper-setup-overleaf" className={cardClass}>
                 <GitBranch className="size-5 text-muted-foreground" aria-hidden />
                 <h2 className="font-medium text-sm">{t("Add Overleaf project")}</h2>
@@ -304,7 +343,11 @@ export function PaperSetup({
                   }}
                   className="rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {create.isPending ? t("Creating…") : t("Create paper")}
+                  {create.isPending
+                    ? createStep === "building"
+                      ? t("Building PDF…")
+                      : t("Creating…")
+                    : t("Create paper")}
                 </button>
               </section>
             </div>

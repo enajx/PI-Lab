@@ -323,6 +323,11 @@ export interface ProjectMetadata {
   paperAutoDetect?: boolean
   /** The project stage set on the stage row; absent: no stage reached yet. */
   stage?: ProjectStage
+  /**
+   * The project's own Analysis results folder, relative to the project (POSIX
+   * separators). Absent: the default folder from Settings is used.
+   */
+  resultsFolder?: string
 }
 
 /** A locally-known v2 Team. */
@@ -643,6 +648,14 @@ export const settings = sqliteTable("settings", {
   keepRunningAfterClose: integer("keep_running_after_close", { mode: "boolean" })
     .notNull()
     .default(true),
+  /**
+   * The Quit dialog's "Remember my choice": "ask" shows the dialog, "background"
+   * moves PI Lab to the background and "quit" quits and stops agents, both
+   * without asking. Settings resets it to "ask".
+   */
+  quitChoice: text("quit_choice", { enum: ["ask", "background", "quit"] })
+    .notNull()
+    .default("ask"),
   /** Public update stream for the single installed PI Lab app. */
   publicUpdateChannel: text("public_update_channel", {
     enum: ["stable", "beta"],

@@ -432,7 +432,9 @@ describe("Project header shortcuts menu", () => {
     expect(headerShortcutIds().at(-1)).toBe("project-view-shortcut-skill-review-notes")
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
     fireEvent.click(button)
-    await waitFor(() => expect(calls).toEqual([{ projectId: "p1", skillSlug: "review-notes" }]))
+    await waitFor(() =>
+      expect(calls).toEqual([{ projectId: "p1", skillSlug: "review-notes", origin: "project" }]),
+    )
     const tab = await waitFor(() => {
       const found = screen
         .getAllByTestId("central-tab")

@@ -7,7 +7,7 @@ import { useLatexEditorProject } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type FocusSessionRequest, PaperEditor } from "./PaperEditor"
-import { PaperSetup } from "./PaperSetup"
+import { type CreatedPaper, PaperSetup } from "./PaperSetup"
 
 /**
  * LaTeX Editor science tab: a project picker at the top (remembers the last
@@ -54,8 +54,11 @@ export function ScienceLatex({
       },
     }),
   )
-  // The paper workspace Create paper just made; its editor builds the PDF once it opens.
-  const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(null)
+  // The project whose Create paper is running: its setup stays shown until the
+  // PDF is built, even if the paper state already has the new paper.
+  const [creatingFor, setCreatingFor] = useState<string | null>(null)
+  // The paper Create paper just made; its editor shows that build's PDF or failure.
+  const [created, setCreated] = useState<CreatedPaper | null>(null)
   // The top bar element the paper workspace puts its Update paper and Sync buttons in.
   const [syncSlot, setSyncSlot] = useState<HTMLElement | null>(null)
   const paper = useQuery({
@@ -103,7 +106,9 @@ export function ScienceLatex({
         <p role="alert" className="cursor-text select-text p-6 text-destructive text-sm">
           {paper.error.message}
         </p>
-      ) : paper.data === undefined ? null : paper.data.paper && paper.data.workspaceId ? (
+      ) : paper.data === undefined ? null : paper.data.paper &&
+        paper.data.workspaceId &&
+        creatingFor !== selected.id ? (
         <PaperEditor
           key={paper.data.workspaceId}
           projectId={selected.id}
@@ -121,14 +126,20 @@ export function ScienceLatex({
           onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
           focusSession={selected.id === initialProjectId ? focusSession : null}
           syncSlot={syncSlot}
-          buildOnOpen={paper.data.workspaceId === createdWorkspaceId}
+          createdBuild={
+            created && created.workspaceId === paper.data.workspaceId ? created.build : null
+          }
         />
       ) : (
         <PaperSetup
           key={selected.id}
           projectId={selected.id}
           autoDetect={paper.data.autoDetect}
-          onCreated={setCreatedWorkspaceId}
+          onCreateStart={() => setCreatingFor(selected.id)}
+          onCreated={(paper) => {
+            setCreatingFor(null)
+            setCreated(paper)
+          }}
         />
       )}
     </ScienceTabShell>

@@ -31,6 +31,7 @@ import {
   EDITOR_FONT_MIN_SIZE,
   type NewSessionKind,
   useDefaultAgentId,
+  useDefaultResultsFolder,
   useDigitalRainDensity,
   useDigitalRainSpeed,
   useEditorFontFamily,
@@ -89,7 +90,9 @@ export function GeneralSection() {
   const [language, setLanguage] = useInterfaceLanguage()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const settingsQuery = useQuery(trpc.settings.get.queryOptions())
+  // The main process saves the remembered quit choice without the renderer, so read the
+  // settings again each time General opens.
+  const settingsQuery = useQuery({ ...trpc.settings.get.queryOptions(), refetchOnMount: "always" })
   const startAtLoginQuery = useQuery(trpc.system.startAtLogin.queryOptions())
   const updateGeneral = useMutation(
     trpc.settings.updateGeneral.mutationOptions({
@@ -104,6 +107,7 @@ export function GeneralSection() {
     }),
   )
   const keepRunningAfterClose = settingsQuery.data?.keepRunningAfterClose ?? true
+  const quitChoice = settingsQuery.data?.quitChoice ?? "ask"
   const publicUpdateChannel = settingsQuery.data?.publicUpdateChannel ?? "stable"
   const [restoreProjectTabs, setRestoreProjectTabs] = useRestoreProjectTabs()
 
@@ -152,6 +156,29 @@ export function GeneralSection() {
         checked={keepRunningAfterClose}
         onChange={(value) => updateGeneral.mutate({ keepRunningAfterClose: value })}
       />
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div>
+          <p className="text-sm">{t("When quitting")}</p>
+          <p className="text-muted-foreground text-xs" data-testid="settings-quit-choice">
+            {quitChoice === "background"
+              ? t("Remembered: Move to background")
+              : quitChoice === "quit"
+                ? t("Remembered: Quit and stop all agents")
+                : t("Ask every time")}
+          </p>
+        </div>
+        {quitChoice !== "ask" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="settings-quit-choice-reset"
+            onClick={() => updateGeneral.mutate({ quitChoice: "ask" })}
+          >
+            {t("Ask every time")}
+          </Button>
+        ) : null}
+      </div>
       <ToggleField
         testId="settings-start-at-login"
         label="Start at login"
@@ -1210,6 +1237,7 @@ export function ExperimentsSection() {
   const [instructions, setInstructions] = useFetchExperimentsInstructions()
   const [runsSource, setRunsSource] = useExperimentRunsSource()
   const [runsFile, setRunsFile] = useExperimentRunsFile()
+  const [resultsFolder, setResultsFolder] = useDefaultResultsFolder()
   return (
     <SettingsSection
       testId="settings-section-experiments"
@@ -1241,6 +1269,14 @@ export function ExperimentsSection() {
         value={runsFile}
         placeholder="EXPERIMENTS.md"
         onChange={setRunsFile}
+      />
+      <TextField
+        testId="settings-results-folder"
+        label="Results folder"
+        description="Folder relative to each project that Analysis lists. Each folder inside it is one experiment. A project can choose its own folder in Analysis."
+        value={resultsFolder}
+        placeholder="results"
+        onChange={setResultsFolder}
       />
     </SettingsSection>
   )

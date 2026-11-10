@@ -1,12 +1,12 @@
 export const CLOSE_TAB_REQUEST_CHANNEL = "pi-lab:close-tab-request"
 export const CLOSE_TAB_RESPONSE_CHANNEL = "pi-lab:close-tab-response"
 
-/** Main asks the focused window whether Cmd+W closes one of its tabs. */
+/** Main asks the focused window to close the active tab of its focused panel (Cmd+W). */
 export interface CloseTabRequest {
   requestId: string
 }
 
-/** `handled: false` tells main to move the app to the background instead. */
+/** `handled: false` means there was no tab to close; main then does nothing. */
 export interface CloseTabResponse {
   requestId: string
   handled: boolean

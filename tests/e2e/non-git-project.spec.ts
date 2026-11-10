@@ -20,10 +20,10 @@ let dataDir: string
 let folderDir: string
 
 async function createPlainFolder(dir: string): Promise<void> {
-  await mkdir(join(dir, "data"), { recursive: true })
+  await mkdir(join(dir, "results", "data"), { recursive: true })
   await writeFile(join(dir, "README.md"), "# Plain folder\n\nFiles still work.\n")
   await writeFile(join(dir, "TODO.md"), "# TODO\n\n- [ ] Folder task\n")
-  await writeFile(join(dir, "data", "metrics.csv"), "epoch,label\n0,start\n1,end\n")
+  await writeFile(join(dir, "results", "data", "metrics.csv"), "epoch,label\n0,start\n1,end\n")
 }
 
 test.beforeEach(async () => {
@@ -99,7 +99,7 @@ test("plain folders work and Git features unlock after Initialize Git", async ()
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
   await expect(
-    window.locator('[data-testid="analysis-file"][data-rel-path="data/metrics.csv"]'),
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/data/metrics.csv"]'),
   ).toBeVisible({ timeout: 30_000 })
 
   await projectItem.click()

@@ -303,6 +303,21 @@ describe("settings.updateGeneral", () => {
     expect((await harness.caller.settings.get()).keepRunningAfterClose).toBe(false)
   })
 
+  it("asks on quit by default, persists a remembered quit choice, and resets it", async () => {
+    expect((await harness.caller.settings.get()).quitChoice).toBe("ask")
+    const updated = await harness.caller.settings.updateGeneral({ quitChoice: "background" })
+    expect(updated.quitChoice).toBe("background")
+    await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    expect((await harness.caller.settings.get()).quitChoice).toBe("background")
+    await harness.caller.settings.updateGeneral({ quitChoice: "quit" })
+    expect((await harness.caller.settings.get()).quitChoice).toBe("quit")
+    await harness.caller.settings.updateGeneral({ quitChoice: "ask" })
+    expect((await harness.caller.settings.get()).quitChoice).toBe("ask")
+    await expect(
+      harness.caller.settings.updateGeneral({ quitChoice: "never" as "ask" }),
+    ).rejects.toThrow()
+  })
+
   it("round-trips worktreePerAgent and confirmOnQuit", async () => {
     const updated = await harness.caller.settings.updateGeneral({
       worktreePerAgent: true,

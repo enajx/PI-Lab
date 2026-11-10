@@ -58,7 +58,12 @@ function renderPanel(
   const client = createFakeTrpcClient(fake)
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceSessionPanel view={view} project={project} />
+      <ScienceSessionPanel
+        view={view}
+        project={project}
+        openSession={null}
+        onSessionOpened={() => undefined}
+      />
     </AppProviders>,
   )
 }

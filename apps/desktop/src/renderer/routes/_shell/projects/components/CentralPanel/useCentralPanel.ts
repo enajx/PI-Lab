@@ -3,6 +3,7 @@ import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/edit
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { SerializedDockview } from "dockview-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { BuildResult } from "../../../../../../main/trpc/pdf/pdf"
 import type { PdfBuildState } from "../../../../../Editor/components/PdfViewer/PdfViewer"
 import {
   type EditorBuffersApi,
@@ -107,6 +108,8 @@ export interface CentralPanelController {
   pdfBuildState?: PdfBuildState | null
   /** Build a saved .tex file as Cmd+S does (status, log, and `onBuilt` after a successful build). */
   buildLatex: (relPath: string) => void
+  /** Show a build of a root .tex started elsewhere (e.g. by Create paper) as `buildLatex` shows its own. */
+  showLatexBuild: (relPath: string, build: Promise<BuildResult>) => void
 }
 
 interface UseCentralPanelArgs {
@@ -155,6 +158,7 @@ export function useCentralPanel({
   const [defaultAgentId, , defaultAgentError, defaultAgentPending] = useDefaultAgentId()
   const {
     saved,
+    track,
     status: latexBuildStatus,
     pdfBuildState,
   } = useLatexBuild(client, workspaceId, onSaved, onBuilt)
@@ -627,6 +631,7 @@ export function useCentralPanel({
     latexBuildStatus,
     pdfBuildState,
     buildLatex: saved,
+    showLatexBuild: track,
     editor,
     sessions,
     active,

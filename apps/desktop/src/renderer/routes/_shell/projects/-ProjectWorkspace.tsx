@@ -7,6 +7,7 @@ import { ListTodo, Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
+import { HeaderShortcuts } from "../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectStageRow } from "../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
@@ -41,7 +42,6 @@ import {
 import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 import { ProjectAgentsBox } from "./components/ProjectAgents/ProjectAgentsBox"
-import { ProjectHeaderShortcuts } from "./components/ProjectHeaderShortcuts"
 import { ProjectPalette } from "./components/ProjectPalette"
 import { FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
 
@@ -410,7 +410,8 @@ export function ProjectWorkspace({
           ) : null}
         </div>
         <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
-          <ProjectHeaderShortcuts
+          <HeaderShortcuts
+            view="project"
             projectId={projectId}
             onError={setShortcutError}
             onSkillSessionStarted={(session) =>
@@ -422,60 +423,76 @@ export function ProjectWorkspace({
                 launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
               })
             }
-            builtins={{
-              tasks: (
-                <button
-                  type="button"
-                  data-testid="project-view-tasks"
-                  title={t("Tasks")}
-                  data-feature-label={t("Tasks")}
-                  data-feature-help={t("Open this project's tasks")}
-                  onClick={() => void navigate({ to: "/science/tasks", search: { projectId } })}
-                  className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60"
-                >
-                  <ListTodo className="size-3.5 shrink-0" aria-hidden />
-                  <span>{t("Tasks")}</span>
-                </button>
-              ),
-              "auto-research": (
-                <button
-                  type="button"
-                  data-testid="project-view-auto-research"
-                  aria-busy={startAutoResearch.isPending}
-                  title={!gitAvailable ? gitDisabledReason : t("Auto research")}
-                  data-feature-label={t("Auto research")}
-                  data-feature-help={t(
-                    "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
-                  )}
-                  disabled={!gitAvailable || !workspaceId || startAutoResearch.isPending}
-                  onClick={onAutoResearch}
-                  className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Telescope className="size-3.5 shrink-0" aria-hidden />
-                  <span>{t("Auto research")}</span>
-                </button>
-              ),
-              "plan-research": (
-                <ProjectWorkflowControl
-                  projectId={projectId}
-                  projectName={project?.name ?? t("Project")}
-                  task="plan-research"
-                  variant="labeled"
-                  testId="project-view-plan-research"
-                />
-              ),
-              "project-status": (
-                <ProjectStatusControl
-                  projectId={projectId}
-                  projectName={project?.name ?? t("Project")}
-                  lastOpenedAt={project?.lastOpenedAt ?? 0}
-                  variant="icon"
-                  testId="project-view-status"
-                  gitAvailable={gitAvailable}
-                  gitDisabledReason={gitDisabledReason}
-                />
-              ),
-            }}
+            builtins={[
+              {
+                id: "tasks",
+                label: t("Tasks"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="project-view-tasks"
+                    title={t("Tasks")}
+                    data-feature-label={t("Tasks")}
+                    data-feature-help={t("Open this project's tasks")}
+                    onClick={() => void navigate({ to: "/science/tasks", search: { projectId } })}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60"
+                  >
+                    <ListTodo className="size-3.5 shrink-0" aria-hidden />
+                    <span>{t("Tasks")}</span>
+                  </button>
+                ),
+              },
+              {
+                id: "auto-research",
+                label: t("Auto research"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="project-view-auto-research"
+                    aria-busy={startAutoResearch.isPending}
+                    title={!gitAvailable ? gitDisabledReason : t("Auto research")}
+                    data-feature-label={t("Auto research")}
+                    data-feature-help={t(
+                      "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
+                    )}
+                    disabled={!gitAvailable || !workspaceId || startAutoResearch.isPending}
+                    onClick={onAutoResearch}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Telescope className="size-3.5 shrink-0" aria-hidden />
+                    <span>{t("Auto research")}</span>
+                  </button>
+                ),
+              },
+              {
+                id: "plan-research",
+                label: t("Plan research"),
+                node: (
+                  <ProjectWorkflowControl
+                    projectId={projectId}
+                    projectName={project?.name ?? t("Project")}
+                    task="plan-research"
+                    variant="labeled"
+                    testId="project-view-plan-research"
+                  />
+                ),
+              },
+              {
+                id: "project-status",
+                label: t("Project status"),
+                node: (
+                  <ProjectStatusControl
+                    projectId={projectId}
+                    projectName={project?.name ?? t("Project")}
+                    lastOpenedAt={project?.lastOpenedAt ?? 0}
+                    variant="icon"
+                    testId="project-view-status"
+                    gitAvailable={gitAvailable}
+                    gitDisabledReason={gitDisabledReason}
+                  />
+                ),
+              },
+            ]}
           />
           <AgentStatusControl />
           <CaffeineControl />

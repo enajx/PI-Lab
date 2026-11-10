@@ -69,6 +69,23 @@ const CLICK_SCRIPT = `on run argv
   error "No button named " & target
 end run`
 
+/** Ticks the checkbox named argv[2] in the first window of process argv[1] that has it. */
+const TICK_SCRIPT = `on run argv
+  set pidValue to (item 1 of argv) as integer
+  set target to item 2 of argv
+  tell application "System Events"
+    set proc to first process whose unix id is pidValue
+    repeat with w in windows of proc
+      if (name of checkboxes of w) contains target then
+        set box to (first checkbox of w whose name is target)
+        if (value of box as integer) is 0 then click box
+        return "ticked"
+      end if
+    end repeat
+  end tell
+  error "No checkbox named " & target
+end run`
+
 interface AxWindow {
   texts: string[]
   buttons: string[]
@@ -124,6 +141,11 @@ async function waitForDialogGone(pid: number, button: string): Promise<void> {
       timeout: 10_000,
     })
     .toBe(false)
+}
+
+/** Ticks a native dialog checkbox by name. */
+async function tick(pid: number, checkbox: string): Promise<void> {
+  await osascript(TICK_SCRIPT, [String(pid), checkbox])
 }
 
 /** Clicks a native dialog button by name. */
@@ -289,6 +311,65 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
       await expect.poll(() => daemonPidFor(fixture?.socketPath ?? "")).toBeUndefined()
       expect(alive(daemonPid as number)).toBe(false)
       expect(alive(fixture.shellPid)).toBe(false)
+    } finally {
+      await cleanUp(fixture, closed)
+    }
+  })
+
+  test("Remember my choice with Move to background: the next quit skips the dialog, and Settings Ask every time brings it back", async () => {
+    test.setTimeout(150_000)
+    let fixture: Fixture | null = null
+    let closed = false
+    try {
+      fixture = await launchWithBusyTerminal("pi-lab-e2e-native-quit-remember-")
+      const { app, pid, window } = fixture
+      app.once("close", () => {
+        closed = true
+      })
+      const requestQuit = () =>
+        app.evaluate(({ Menu }) => {
+          const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
+          if (!item) throw new Error("Missing Quit menu item")
+          setImmediate(() => item.click())
+        })
+      const isHidden = () => app.evaluate(({ app }) => app.isHidden())
+      const showApp = async () => {
+        await app.evaluate(({ app }) => app.show())
+        await expect.poll(isHidden).toBe(false)
+      }
+
+      await requestQuit()
+      await waitForDialog(pid, "Move to background")
+      await tick(pid, "Remember my choice")
+      await click(pid, "Move to background")
+      await waitForDialogGone(pid, "Move to background")
+      await expect.poll(isHidden).toBe(true)
+
+      // The second quit moves to the background again without any dialog.
+      await showApp()
+      await requestQuit()
+      await expect.poll(isHidden).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 2_000))
+      expect((await axWindows(pid)).some((w) => w.buttons.includes("Move to background"))).toBe(
+        false,
+      )
+      expect(closed).toBe(false)
+      expect(await fixture.foreground()).toBe("sleep")
+
+      // Settings shows the remembered choice; Ask every time resets it.
+      await showApp()
+      await window.getByTestId("nav-settings").click()
+      const choice = window.getByTestId("settings-quit-choice")
+      await expect(choice).toHaveText("Remembered: Move to background")
+      await window.getByTestId("settings-quit-choice-reset").click()
+      await expect(choice).toHaveText("Ask every time")
+
+      await requestQuit()
+      await waitForDialog(pid, "Move to background")
+      await click(pid, "Cancel")
+      await waitForDialogGone(pid, "Move to background")
+      expect(closed).toBe(false)
+      expect(alive(pid)).toBe(true)
     } finally {
       await cleanUp(fixture, closed)
     }

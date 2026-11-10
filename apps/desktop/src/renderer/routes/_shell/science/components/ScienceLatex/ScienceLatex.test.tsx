@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query"
+import { focusManager, QueryClient } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
@@ -64,10 +64,9 @@ function renderPage(paperGet: FakeHandlers[string]) {
   return renderPageWith(paperGet, { "paper.detect": () => [] })
 }
 
-/** {@link renderPage} with extra fake procedures. */
+/** {@link renderPage} with extra fake procedures (they replace the default ones). */
 function renderPageWith(paperGet: FakeHandlers[string], extra: FakeHandlers) {
   const client = createFakeTrpcClient({
-    ...extra,
     "projects.list": () => [{ id: "p1", name: "One" }],
     "settings.get": () => ({}),
     "paper.get": paperGet,
@@ -84,6 +83,8 @@ function renderPageWith(paperGet: FakeHandlers[string], extra: FakeHandlers) {
     "agents.list": () => [],
     "agents.projectChoice": () => ({ agentId: null, storage: "app" }),
     "terminal.list": () => [],
+    // Last, so a test can replace any of the procedures above.
+    ...extra,
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -210,4 +211,73 @@ test("the footer shows the paper folder; Clear paper folder shows the setup page
   expect(screen.queryByTestId("paper-detecting")).toBeNull()
   expect(link).toHaveBeenCalledTimes(1)
   expect(detect).toHaveBeenCalledTimes(1)
+})
+
+test("Create paper keeps the setup shown while the PDF builds, then opens main.tex with the built PDF beside it", async () => {
+  const created = {
+    paper: {
+      dir: "/proj/paper",
+      displayDir: "paper",
+      lastSyncAt: null,
+      remoteUrl: null,
+      isOverleaf: false,
+      outputDir: null,
+      effectiveOutputDir: "build",
+      syncEnabled: true,
+    },
+    workspaceId: "paper-ws",
+    rootRelPath: "main.tex",
+    autoDetect: true,
+  }
+  let current: unknown = { paper: null, workspaceId: null, rootRelPath: null, autoDetect: true }
+  const builds: unknown[] = []
+  let finishBuild: (result: unknown) => void = () => undefined
+  let paperGets = 0
+  const paperGet = (): unknown => {
+    paperGets += 1
+    return current
+  }
+  renderPageWith(paperGet, {
+    "paper.detect": () => ({ clones: [], stoppedEarly: false }),
+    "paper.createTarget": () => ({ dir: "/proj/paper", displayDir: "paper", available: true }),
+    "paper.create": () => {
+      current = created
+      return created
+    },
+    "pdf.build": (input) => {
+      builds.push(input)
+      return new Promise((resolve) => {
+        finishBuild = resolve
+      })
+    },
+    "files.stat": (input) => {
+      const relPath = (input as { relPath: string }).relPath
+      if (relPath === "main.tex") return { exists: true, mtimeMs: 1, size: 10 }
+      return relPath === "build/main.pdf" && builds.length > 0
+        ? { exists: true, mtimeMs: 2, size: 10 }
+        : { exists: false, mtimeMs: 0, size: 0 }
+    },
+  })
+  const button = (await screen.findByTestId("paper-create")) as HTMLButtonElement
+  await waitFor(() => expect(button.disabled).toBe(false))
+  fireEvent.click(button)
+  await waitFor(() => expect(button.textContent).toBe("Building PDF…"))
+  // The paper state is read again while the PDF builds (the window got the focus back),
+  // and it already has the new paper: the setup still stays until the build ends.
+  const getsBefore = paperGets
+  focusManager.setFocused(false)
+  focusManager.setFocused(true)
+  await waitFor(() => expect(paperGets).toBeGreaterThan(getsBefore))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(screen.queryByTestId("paper-editor")).toBeNull()
+  finishBuild({ relPath: "build/main.pdf", success: true, log: "" })
+  expect(await screen.findByTestId("paper-editor")).toBeTruthy()
+  await waitFor(() =>
+    expect(
+      screen
+        .getAllByTestId("central-tab")
+        .map((tab) => within(tab).getByTestId("central-tab-select").getAttribute("aria-label")),
+    ).toEqual(["main.tex", "main.pdf"]),
+  )
+  expect(builds).toEqual([{ workspaceId: "paper-ws", relPath: "main.tex" }])
 })

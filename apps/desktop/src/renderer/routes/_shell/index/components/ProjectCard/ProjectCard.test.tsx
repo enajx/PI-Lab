@@ -9,8 +9,10 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { type Observer, observable } from "@trpc/server/observable"
+import type { ReactNode } from "react"
 import { describe, expect, test, vi } from "vitest"
 import type { LiveAgentStatus } from "../../../../../../shared/agentStatus"
+import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
@@ -49,6 +51,11 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
 const IDLE_STATUS = { summary: null, fetchExperiments: null }
 
 function renderCard(p: Project, handlers: FakeHandlers = {}) {
+  return renderCardIn(p, handlers, (card) => card)
+}
+
+/** Render the card through `wrap`, e.g. inside a dashboard CardGrid. */
+function renderCardIn(p: Project, handlers: FakeHandlers, wrap: (card: ReactNode) => ReactNode) {
   const { thumbnail, ...fields } = p
   const summary = { ...fields, hasThumbnail: thumbnail !== null }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -68,7 +75,7 @@ function renderCard(p: Project, handlers: FakeHandlers = {}) {
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <ProjectCard project={summary} />,
+    component: () => wrap(<ProjectCard project={summary} />),
   })
   const projectRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -147,6 +154,32 @@ const FULL_METADATA: ProjectMetadata = {
 }
 
 describe("ProjectCard thumbnail", () => {
+  test("the thumbnail height follows the shared card height scale", async () => {
+    const renderInGrid = () =>
+      renderCardIn(project({ id: "p1", name: "Tall" }), {}, (card) => (
+        <CardGrid surface="dashboard" cardIds={["p1"]}>
+          <ResizableCardGridItem cardId="p1" label="Tall">
+            {card}
+          </ResizableCardGridItem>
+        </CardGrid>
+      ))
+    const first = renderInGrid()
+    const baseHeight = Number.parseFloat(
+      (await screen.findByTestId("project-card-image")).style.height,
+    )
+    expect(baseHeight).toBeGreaterThan(0)
+    first.unmount()
+    window.localStorage.setItem(
+      "pi-lab.cardGrid.dashboard.size",
+      JSON.stringify({ width: 1, height: 1.5 }),
+    )
+    renderInGrid()
+    const tallHeight = Number.parseFloat(
+      (await screen.findByTestId("project-card-image")).style.height,
+    )
+    expect(tallHeight).toBe(Math.round(baseHeight * 1.5))
+  })
+
   test("shows the project stage row below the buttons and saves a double-clicked stage", async () => {
     const calls: unknown[] = []
     renderCard(project({ id: "p1", name: "Photon Drift", metadata: { stage: "experiments" } }), {

@@ -1,1 +1,1 @@
-export { ScienceSessionPanel } from "./ScienceSessionPanel"
+export { ScienceSessionPanel, type ScienceSessionRequest } from "./ScienceSessionPanel"

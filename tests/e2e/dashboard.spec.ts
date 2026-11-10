@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { DaemonClient } from "../../packages/pty-daemon/src/index"
@@ -190,9 +190,14 @@ test("dashboard shows a directly resizable project card", async () => {
   await expect
     .poll(() => item.evaluate((element) => element.getBoundingClientRect().width))
     .toBe(242)
+  const imageHeight = () => image.evaluate((element) => element.getBoundingClientRect().height)
+  const baseImageHeight = await imageHeight()
   await window.keyboard.press("ArrowDown")
   await expect(grid).toHaveAttribute("data-card-grid-height", "1.1")
   await expect(item).toHaveAttribute("data-card-span", "1x1")
+  // A taller card has a taller thumbnail, in the same proportion as the card.
+  await expect.poll(imageHeight).toBe(Math.round(baseImageHeight * 1.1))
+  await window.screenshot({ path: resolve(".cache", "screens", "dashboard-card-taller.png") })
 
   // A corner drag changes width and height separately, in 10% steps.
   const handleBox = await resizeHandle.boundingBox()
@@ -524,6 +529,35 @@ test("Dashboard navigation keeps the project's open workspace tabs", async () =>
     "data-session-id",
     liveSessionId ?? "",
   )
+})
+
+test("project view tab rows are no taller than the toolbar row above them", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-card").click()
+  await expect(window.getByTestId("project-view")).toBeVisible()
+  await window.getByTestId("panel-tab-files").click()
+  await window.getByTestId("file-tree-file").click()
+  await expect(window.getByTestId("central-tab")).toContainText("README.md")
+  await window.getByTestId("central-new-terminal").click()
+  await expect(window.getByTestId("terminal")).toHaveAttribute("data-session-id", /.+/)
+
+  const heightOf = (locator: Locator) =>
+    locator.evaluate((element) => element.getBoundingClientRect().height)
+  // The toolbar row holds the files-panel toggle and the +, agent, terminal, file, settings buttons.
+  const toolbarRow = window.getByTestId("central-files-toggle").locator("xpath=../..")
+  const toolbarHeight = await heightOf(toolbarRow)
+  const tabRows = window.getByTestId("central-panel").locator(".dv-tabs-and-actions-container")
+  expect(await tabRows.count()).toBeGreaterThan(0)
+  for (const row of await tabRows.all()) {
+    expect(await heightOf(row)).toBeLessThanOrEqual(toolbarHeight)
+  }
+  // The tabs fit inside the row and keep readable 12px text.
+  for (const tab of await window.getByTestId("central-tab").all()) {
+    expect(await heightOf(tab)).toBeLessThanOrEqual(toolbarHeight)
+    expect(await tab.evaluate((element) => getComputedStyle(element).fontSize)).toBe("12px")
+  }
+  await window.screenshot({ path: resolve(".cache", "screens", "project-view-tab-rows.png") })
 })
 
 test("relaunching PI Lab restores files and recreates terminal and agent tabs", async () => {

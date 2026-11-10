@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectMarkdownChoice } from "../../../../../components/ProjectMarkdownChoice"
 import { useTranslate } from "../../../../../i18n/language"
 import { readDefaultAgentId, useTasksProject } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
 import { ProjectPicker } from "../ProjectPicker"
-import { ScienceSessionPanel } from "../ScienceSessionPanel"
+import { ScienceSessionPanel, type ScienceSessionRequest } from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type TaskDraft, type TaskRecord, type TaskStatus, TasksWorkspace } from "./TasksWorkspace"
 
@@ -60,6 +61,10 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
   const deleteTask = useMutation(trpc.science.tasks.delete.mutationOptions(mutationOptions))
   const moveTask = useMutation(trpc.science.tasks.move.mutationOptions(mutationOptions))
   const startSession = useMutation(trpc.sessions.start.mutationOptions())
+  // A skill session a top bar button started, until the session panel opens it.
+  const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
+  const clearSessionRequest = useCallback(() => setSessionRequest(null), [])
+  const [shortcutError, setShortcutError] = useState<string | null>(null)
 
   const tasks = (listing.data?.tasks ?? []) as TaskRecord[]
   const sources = listing.data?.sources ?? []
@@ -85,6 +90,7 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
       deleteTask.error?.message ??
       moveTask.error?.message ??
       startSession.error?.message ??
+      shortcutError ??
       null,
     [
       listing.error,
@@ -93,6 +99,7 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
       deleteTask.error,
       moveTask.error,
       startSession.error,
+      shortcutError,
     ],
   )
 
@@ -181,15 +188,37 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
       title={t("Tasks")}
       subtitle={t("Every project's TODO Markdown, in one place")}
       actions={
-        <ProjectPicker
-          testId="tasks-project-select"
-          label={t("Project filter")}
-          help={t("Filter tasks by project")}
-          value={selectedProjectId}
-          projects={sources.map((source) => ({ id: source.projectId, name: source.projectName }))}
-          allLabel={t("All projects")}
-          onChange={chooseProject}
-        />
+        <>
+          <ProjectPicker
+            testId="tasks-project-select"
+            label={t("Project filter")}
+            help={t("Filter tasks by project")}
+            value={selectedProjectId}
+            projects={sources.map((source) => ({ id: source.projectId, name: source.projectName }))}
+            allLabel={t("All projects")}
+            onChange={chooseProject}
+          />
+          <HeaderShortcuts
+            view="tasks"
+            projectId={selectedSource?.projectId ?? null}
+            builtins={[]}
+            onError={setShortcutError}
+            onSkillSessionStarted={(session) =>
+              selectedSource
+                ? setSessionRequest({
+                    projectId: selectedSource.projectId,
+                    pane: {
+                      kind: "agent",
+                      sessionId: session.sessionId,
+                      label: session.label,
+                      wsKind: session.kind,
+                      launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
+                    },
+                  })
+                : undefined
+            }
+          />
+        </>
       }
     >
       <div className="flex min-h-0 flex-1">
@@ -249,6 +278,8 @@ export function ScienceTasks({ initialProjectId }: { initialProjectId?: string }
               ? { id: selectedSource.projectId, name: selectedSource.projectName }
               : null
           }
+          openSession={sessionRequest}
+          onSessionOpened={clearSessionRequest}
         />
       </div>
     </ScienceTabShell>

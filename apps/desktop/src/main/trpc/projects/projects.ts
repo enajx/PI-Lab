@@ -837,7 +837,8 @@ export const projectsRouter = router({
    * row so the dashboard re-renders from the mutation result.
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
-    // The linked paper folder and the stage are not part of the card dialog; keep them.
+    // The linked paper folder, the stage and the results folder are not part of
+    // the card dialog; keep them.
     const stored = ctx.db
       .select({ metadata: projects.metadata })
       .from(projects)
@@ -846,6 +847,7 @@ export const projectsRouter = router({
     const kept: ProjectMetadata = {}
     if (stored?.paper !== undefined) kept.paper = stored.paper
     if (stored?.stage !== undefined) kept.stage = stored.stage
+    if (stored?.resultsFolder !== undefined) kept.resultsFolder = stored.resultsFolder
     const metadata: ProjectMetadata | null =
       Object.keys(kept).length === 0 ? input.metadata : { ...input.metadata, ...kept }
     const row = ctx.db

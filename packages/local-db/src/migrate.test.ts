@@ -487,7 +487,10 @@ it("keeps every settings value and agent session through the 0029 settings rebui
 
   const upgraded = runMigrations(dbPath)
   try {
-    expect(upgraded.sqlite.prepare("SELECT * FROM settings").all()).toEqual(stored)
+    // Later migrations only add columns with their defaults (0032: quit_choice).
+    expect(upgraded.sqlite.prepare("SELECT * FROM settings").all()).toEqual(
+      stored.map((row) => ({ ...(row as object), quit_choice: "ask" })),
+    )
     expect(upgraded.sqlite.prepare("SELECT session_id, origin FROM agent_sessions").all()).toEqual([
       { session_id: "s", origin: "project" },
     ])

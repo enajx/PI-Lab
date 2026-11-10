@@ -15,6 +15,7 @@ import {
   Telescope,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useCardGridHeightScale } from "../../../../../components/CardGrid"
 import { ProjectStageRow } from "../../../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
@@ -66,6 +67,9 @@ const STATUS_DOT: Record<ProjectState, string> = {
   attention: "bg-red-500",
 }
 
+/** Thumbnail height at the base card height; it scales with the card's height. */
+const BASE_THUMBNAIL_PX = 128
+
 const GRADIENT_LAYER_NAMES = ["a", "b", "c"] as const
 
 // Compact, icon-forward card-action button — modeled on the Caffeine title-bar
@@ -95,6 +99,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const [actionError, setActionError] = useState<string | null>(null)
   const artworkGenerationRef = useRef(0)
   const thumbnail = useProjectThumbnail(project, "card")
+  const thumbnailHeight = Math.round(BASE_THUMBNAIL_PX * useCardGridHeightScale())
 
   const state = useProjectActivityState(project.id)
   const capabilitiesQuery = useQuery(trpc.projects.capabilities.queryOptions({ id: project.id }))
@@ -309,11 +314,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the click only mirrors the info button's navigation, which is the real keyboard-activable control; a key handler / extra tab stop here would be a redundant duplicate target. */}
       <div
         data-testid="project-card-image"
-        className="relative isolate h-32 w-full shrink-0 overflow-hidden transition-[filter] group-hover:brightness-105 group-hover:contrast-105 group-hover:saturate-125"
+        className="relative isolate w-full shrink-0 overflow-hidden transition-[filter,height] group-hover:brightness-105 group-hover:contrast-105 group-hover:saturate-125"
         style={
           thumbnail.dataUrl
-            ? undefined
-            : { backgroundColor: project.digitalRain ? "#000" : "var(--muted)" }
+            ? { height: `${thumbnailHeight}px` }
+            : {
+                height: `${thumbnailHeight}px`,
+                backgroundColor: project.digitalRain ? "#000" : "var(--muted)",
+              }
         }
         onClick={openProject}
         onDragOver={(event) => {

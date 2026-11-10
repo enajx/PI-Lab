@@ -74,12 +74,13 @@ import {
   reconcilePlanningSessions,
 } from "./trpc/projects/planning"
 import { AnalysisInteractiveController } from "./trpc/science/analysis/interactiveController"
+import { writeGeneralSettings } from "./trpc/settings/settings"
 import { seedWritableTemplate } from "./trpc/template"
 import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "./trpc/workflows/workflows"
 import { publicReleaseFromPackage } from "./updates/release"
 import { initializePublicUpdateChannel } from "./updates/selection"
 import { installAppMenu } from "./window/appMenu"
-import { confirmStopDialog, type QuitWork } from "./window/userQuit"
+import { confirmStopDialog, type QuitWork, type RememberedQuitChoice } from "./window/userQuit"
 
 interface FullRuntimeHost {
   getAppIconPath: () => string | null
@@ -338,6 +339,16 @@ export class FullRuntime {
   /** Read the persisted background preference after the local database opens. */
   keepRunningAfterClose(): boolean {
     return getSettingsOrDefaults(getDb()).keepRunningAfterClose
+  }
+
+  /** The Quit dialog choice saved with "Remember my choice" ("ask" when none is). */
+  quitChoice(): RememberedQuitChoice {
+    return getSettingsOrDefaults(getDb()).quitChoice
+  }
+
+  /** Save a ticked Quit dialog choice; Settings resets it to "ask". */
+  rememberQuitChoice(choice: "background" | "quit"): void {
+    writeGeneralSettings(getDb(), { quitChoice: choice })
   }
 
   /** Seed Quick Editor's Vim cache after the full database starts in the background. */

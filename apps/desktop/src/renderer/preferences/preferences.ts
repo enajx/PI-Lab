@@ -435,20 +435,32 @@ const DEFAULT_RIGHT_SIDEBAR_TAB_ORDER: string[] = ["files", "research", "todos"]
 /** Persisted drag order for the project-view right-sidebar tabs (by tab id), shared by every project. */
 export const useRightSidebarTabOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.projectView.sidebarTabOrder", DEFAULT_RIGHT_SIDEBAR_TAB_ORDER)
+/** The views whose top bar has a "+" shortcut menu, each with its own saved list. */
+export type HeaderShortcutsView = "project" | "latex" | "tasks" | "analysis"
 /**
- * Default Project view header shortcuts, in header order. Built-in ids are
- * `tasks`, `auto-research`, `plan-research` and `project-status`; added skills
- * and routines are stored as `skill:<slug>` and `routine:<automation id>`.
+ * Default top bar shortcuts per view, in top bar order. Built-in ids are the
+ * view's own buttons (Project view: `tasks`, `auto-research`, `plan-research`,
+ * `project-status`; LaTeX Editor: `update-paper`; Analysis:
+ * `analyze-experiments`; Tasks has none); added skills and routines are stored
+ * as `skill:<slug>` and `routine:<automation id>`.
  */
-export const DEFAULT_PROJECT_HEADER_SHORTCUTS: string[] = [
-  "tasks",
-  "auto-research",
-  "plan-research",
-  "project-status",
-]
-/** The Project view header shortcut buttons (by id, in order), shared by every project. */
-export const useProjectHeaderShortcuts = (): [string[], (next: string[]) => void] =>
-  useOrderPref("pi-lab.projectView.headerShortcuts", DEFAULT_PROJECT_HEADER_SHORTCUTS)
+export const DEFAULT_HEADER_SHORTCUTS: Record<HeaderShortcutsView, string[]> = {
+  project: ["tasks", "auto-research", "plan-research", "project-status"],
+  latex: ["update-paper"],
+  tasks: [],
+  analysis: ["analyze-experiments"],
+}
+const HEADER_SHORTCUTS_KEYS: Record<HeaderShortcutsView, string> = {
+  project: "pi-lab.projectView.headerShortcuts",
+  latex: "pi-lab.latexEditor.headerShortcuts",
+  tasks: "pi-lab.tasks.headerShortcuts",
+  analysis: "pi-lab.analysis.headerShortcuts",
+}
+/** One view's top bar shortcut buttons (by id, in order), shared by every project. */
+export const useHeaderShortcuts = (
+  view: HeaderShortcutsView,
+): [string[], (next: string[]) => void] =>
+  useOrderPref(HEADER_SHORTCUTS_KEYS[view], DEFAULT_HEADER_SHORTCUTS[view])
 /** Where experiment runs are tracked. One kind for now: an EXPERIMENTS.md-style table file. */
 export type ExperimentRunsSource = "experiments-md"
 /** The default experiments file, relative to each project. */
@@ -466,6 +478,15 @@ export const useExperimentRunsSource = (): [
 /** The experiments file path, relative to each project (app-wide; default EXPERIMENTS.md). */
 export const useExperimentRunsFile = (): [string, (next: string) => void] =>
   useStringPref("pi-lab.experiments.runsFile", DEFAULT_EXPERIMENT_RUNS_FILE)
+/** The default Analysis results folder, relative to each project. */
+export const DEFAULT_RESULTS_FOLDER = "results"
+/**
+ * The default Analysis results folder, relative to each project (app-wide;
+ * default `results`). Each folder inside it is one experiment. A project can
+ * use its own folder instead (`metadata.resultsFolder`).
+ */
+export const useDefaultResultsFolder = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.experiments.resultsFolder", DEFAULT_RESULTS_FOLDER)
 
 // --- Global emoji-tag palette: shared across ALL projects ---------------------
 // The reusable set of emoji the "Edit project…" dialog offers as toggle chips.

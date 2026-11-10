@@ -3,15 +3,15 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
-import { PaperSetup } from "./PaperSetup"
+import { type CreatedPaper, PaperSetup } from "./PaperSetup"
 
 /**
  * Component tests for linking a paper to a project. The tRPC server is a fake
  * (mocked); cloning and linking for real are covered by the `paper` router tests
  * and the e2e test.
  */
-/** Workspace ids PaperSetup reported as just created, in order. */
-let created: (string | null)[] = []
+/** What PaperSetup reported about Create paper, in order: "start", then the created paper or null. */
+let created: ("start" | CreatedPaper | null)[] = []
 
 function renderSetup(handlers: FakeHandlers) {
   return renderSetupWith(handlers, true)
@@ -30,7 +30,8 @@ function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
       <PaperSetup
         projectId="p1"
         autoDetect={autoDetect}
-        onCreated={(workspaceId) => created.push(workspaceId)}
+        onCreateStart={() => created.push("start")}
+        onCreated={(paper) => created.push(paper)}
       />
     </AppProviders>,
   )
@@ -353,7 +354,7 @@ describe("PaperSetup (mocked server)", () => {
     expect(screen.queryByTestId("paper-overleaf-token-found")).toBeNull()
   })
 
-  test("the cards sit at the top, horizontally centred, and each card centres its content vertically", async () => {
+  test("the cards sit near the top with clear space above, horizontally centred, and each card centres its content vertically", async () => {
     renderSetup({
       "paper.token.status": () => ({ configured: false, source: null }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
@@ -363,6 +364,8 @@ describe("PaperSetup (mocked server)", () => {
     const page = screen.getByTestId("paper-setup")
     expect(page.className).toContain("flex-1")
     expect(page.className).toContain("overflow-y-auto")
+    // Clear space (3.5rem) above the cards, so they do not sit right under the top bar.
+    expect(page.className).toContain("pt-14")
     // The content sits at the top (no vertical auto margins) and is centred horizontally.
     const content = screen.getByTestId("paper-setup-content")
     expect(content.parentElement).toBe(page)
@@ -370,11 +373,12 @@ describe("PaperSetup (mocked server)", () => {
     expect(content.className).not.toMatch(/(^|\s)m-auto/)
     expect(content.className).not.toMatch(/(^|\s)my-auto/)
     // Narrow cards: a small overall width and tight padding.
-    expect(content.className).toContain("max-w-5xl")
-    expect(screen.getByTestId("paper-setup-overleaf").className).toContain("p-4")
-    // Grid items stretch, so all cards have the same height.
+    expect(content.className).toContain("max-w-6xl")
+    expect(screen.getByTestId("paper-setup-overleaf").className).toMatch(/(^|\s)p-2(\s|$)/)
+    // Grid items stretch, so all cards have the same height; the cards are 2.5rem apart.
     const grid = screen.getByTestId("paper-setup-overleaf").parentElement as HTMLElement
     expect(grid.className).toContain("grid")
+    expect(grid.className).toMatch(/(^|\s)gap-10(\s|$)/)
     expect(grid.className).not.toMatch(/items-(start|center|end)/)
     for (const card of [
       screen.getByTestId("paper-setup-overleaf"),
@@ -456,6 +460,7 @@ describe("PaperSetup (mocked server)", () => {
       "paper.token.status": () => ({ configured: true, source: "saved" }),
       "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
       "paper.create": create,
+      "pdf.build": () => ({ relPath: "build/main.pdf", success: true, log: "" }),
       "system.pickDirectory": () => "/elsewhere/new-paper",
     })
     expect((await screen.findByTestId("paper-create-folder")).textContent).toBe("paper/")
@@ -464,8 +469,9 @@ describe("PaperSetup (mocked server)", () => {
     )
     fireEvent.click(screen.getByTestId("paper-create"))
     await waitFor(() => expect(create).toHaveBeenCalledWith({ projectId: "p1", dir: "/p/paper" }))
-    // The page is told which paper workspace was just created, so it builds its PDF.
-    await waitFor(() => expect(created).toEqual(["new-paper-ws"]))
+    // The page is told which paper workspace was just created, with its PDF build.
+    await waitFor(() => expect(created).toHaveLength(2))
+    expect((created[1] as CreatedPaper).workspaceId).toBe("new-paper-ws")
     fireEvent.click(screen.getByTestId("paper-create-change"))
     await waitFor(() =>
       expect(screen.getByTestId("paper-create-folder").textContent).toBe("/elsewhere/new-paper"),
@@ -474,6 +480,82 @@ describe("PaperSetup (mocked server)", () => {
     await waitFor(() =>
       expect(create).toHaveBeenLastCalledWith({ projectId: "p1", dir: "/elsewhere/new-paper" }),
     )
+  })
+
+  test("Create paper builds main.tex before the editor opens, showing Building PDF… meanwhile", async () => {
+    created = []
+    const builds: unknown[] = []
+    let finishBuild: (result: unknown) => void = () => undefined
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.create": () => ({
+        paper: null,
+        workspaceId: "new-paper-ws",
+        rootRelPath: "main.tex",
+        autoDetect: true,
+      }),
+      "pdf.build": (input) => {
+        builds.push(input)
+        return new Promise((resolve) => {
+          finishBuild = resolve
+        })
+      },
+    })
+    const button = (await screen.findByTestId("paper-create")) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+    await waitFor(() => expect(button.textContent).toBe("Building PDF…"))
+    expect(builds).toEqual([{ workspaceId: "new-paper-ws", relPath: "main.tex" }])
+    // The editor is not shown yet: the page only knows a create is running.
+    expect(created).toEqual(["start"])
+    finishBuild({ relPath: "build/main.pdf", success: true, log: "" })
+    await waitFor(() => expect(created).toHaveLength(2))
+    const paper = created[1] as CreatedPaper
+    expect(paper.workspaceId).toBe("new-paper-ws")
+    await expect(paper.build).resolves.toEqual({
+      relPath: "build/main.pdf",
+      success: true,
+      log: "",
+    })
+  })
+
+  test("Create paper's build that cannot run still opens the paper, with the error for the editor to show", async () => {
+    created = []
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.create": () => ({
+        paper: null,
+        workspaceId: "new-paper-ws",
+        rootRelPath: "main.tex",
+        autoDetect: true,
+      }),
+      "pdf.build": () => {
+        throw new Error("No LaTeX engine found")
+      },
+    })
+    const button = (await screen.findByTestId("paper-create")) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+    await waitFor(() => expect(created).toHaveLength(2))
+    await expect((created[1] as CreatedPaper).build).rejects.toThrow("No LaTeX engine found")
+  })
+
+  test("when Create paper fails, the page is told and the error is shown", async () => {
+    created = []
+    renderSetup({
+      "paper.token.status": () => ({ configured: true, source: "saved" }),
+      "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      "paper.create": () => {
+        throw new Error("Choose an empty folder for the new paper")
+      },
+    })
+    const button = (await screen.findByTestId("paper-create")) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+    expect((await screen.findByRole("alert")).textContent).toContain("Choose an empty folder")
+    expect(created).toEqual(["start", null])
   })
 
   test("when paper/ has files in it, Create paper waits for a chosen folder", async () => {

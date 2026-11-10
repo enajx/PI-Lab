@@ -31,4 +31,15 @@ describe("Settings > Remote experiments: where runs are tracked", () => {
     expect(window.localStorage.getItem("pi-lab.experiments.runsFile")).toBe("notes/runs.md")
     expect(path.value).toBe("notes/runs.md")
   })
+
+  test("sets the default results folder that Analysis lists, relative to each project", () => {
+    renderSection()
+    const folder = screen.getByTestId("settings-results-folder") as HTMLInputElement
+    expect(folder.value).toBe("results")
+
+    fireEvent.change(folder, { target: { value: "outputs/runs" } })
+
+    expect(window.localStorage.getItem("pi-lab.experiments.resultsFolder")).toBe("outputs/runs")
+    expect(folder.value).toBe("outputs/runs")
+  })
 })

@@ -1,9 +1,9 @@
 import type { CloseTabBridge } from "../../shared/closeTab"
 
-/** Close the focused file tab (or start its unsaved-changes prompt); false when there is none. */
+/** Close the active tab (or open its confirmation prompt); false when there is none. */
 export type CloseTabHandler = () => boolean
 
-// Mounted views that can close a file tab; the most recently mounted one decides.
+// Mounted views that can close a tab; the most recently mounted one decides.
 const handlers: CloseTabHandler[] = []
 
 /** Let a mounted view answer Cmd+W. Returns the matching unregister function. */
@@ -17,7 +17,7 @@ export function registerCloseTabHandler(handler: CloseTabHandler): () => void {
 
 /**
  * Answer main's Cmd+W requests for this window. Every request gets an answer;
- * "not handled" makes main move the app to the background.
+ * with "not handled" main does nothing (Cmd+W never hides the app).
  */
 export function installCloseTabResponder(bridge: CloseTabBridge): () => void {
   return bridge.subscribe((request) => {

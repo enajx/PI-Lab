@@ -51,7 +51,9 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
   }
 }
 
-function listing(files: Array<{ relPath: string; name: string; kind: string }>) {
+function listing(
+  files: Array<{ relPath: string; name: string; kind: string; experiment?: string | null }>,
+) {
   // Group the way the router does (canonical kind order isn't asserted here).
   const byKind = new Map<string, typeof files>()
   for (const f of files) {
@@ -62,10 +64,15 @@ function listing(files: Array<{ relPath: string; name: string; kind: string }>) 
   return {
     groups: [...byKind.entries()].map(([kind, fs]) => ({
       kind,
-      files: fs.map((f) => ({ ...f, size: 10, mtime: 0 })),
+      files: fs.map((f) => ({ ...f, experiment: f.experiment ?? null, size: 10, mtime: 0 })),
     })),
     total: files.length,
     truncated: false,
+    partial: false,
+    skipped: [],
+    resultsFolder: "results",
+    overridden: false,
+    exists: true,
   }
 }
 
@@ -91,8 +98,14 @@ describe("ScienceAnalysis", () => {
     await waitFor(() =>
       expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "selected"),
     )
-    expect(listFiles).toHaveBeenCalledWith({ projectId: "selected" })
-    expect(listFiles).not.toHaveBeenCalledWith({ projectId: "first" })
+    expect(listFiles).toHaveBeenCalledWith({
+      projectId: "selected",
+      defaultResultsFolder: "results",
+    })
+    expect(listFiles).not.toHaveBeenCalledWith({
+      projectId: "first",
+      defaultResultsFolder: "results",
+    })
   })
 
   test("shows Analysis guidance in the selected interface language", async () => {
@@ -161,6 +174,129 @@ describe("ScienceAnalysis", () => {
   test("disables fetching when no project is selected", async () => {
     renderAnalysis({ "projects.list": () => [] })
     expect(await screen.findByTestId("analysis-fetch-experiments")).toHaveProperty("disabled", true)
+  })
+
+  test("shows the results folder above the search and groups files by experiment", async () => {
+    window.localStorage.setItem("pi-lab.experiments.resultsFolder", "outputs")
+    const listFiles = vi.fn(() => ({
+      ...listing([
+        { relPath: "outputs/summary.json", name: "summary.json", kind: "json", experiment: null },
+        { relPath: "outputs/exp-b/log.txt", name: "log.txt", kind: "text", experiment: "exp-b" },
+        { relPath: "outputs/exp-a/plot.png", name: "plot.png", kind: "image", experiment: "exp-a" },
+      ]),
+      resultsFolder: "outputs",
+    }))
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": listFiles,
+    })
+
+    const folder = await screen.findByTestId("analysis-results-folder")
+    await waitFor(() =>
+      expect(within(folder).getByTestId("analysis-results-folder-path").textContent).toBe(
+        "outputs/",
+      ),
+    )
+    // The default folder is in use, so there is nothing to reset.
+    expect(within(folder).queryByTestId("analysis-results-folder-reset")).toBeNull()
+    expect(listFiles).toHaveBeenCalledWith({ projectId: "p1", defaultResultsFolder: "outputs" })
+    // The folder field comes before the search bar.
+    expect(
+      folder.compareDocumentPosition(screen.getByTestId("analysis-search")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(3))
+    const groups = screen.getAllByTestId("analysis-experiment-group")
+    expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual([
+      "exp-a",
+      "exp-b",
+      "",
+    ])
+    expect(within(groups[2] as HTMLElement).getByText("No experiment")).toBeTruthy()
+    expect(
+      within(groups[0] as HTMLElement)
+        .getAllByTestId("analysis-file")
+        .map((row) => row.getAttribute("data-rel-path")),
+    ).toEqual(["outputs/exp-a/plot.png"])
+
+    // The category filters and the search still narrow the results files.
+    fireEvent.click(screen.getByTestId("analysis-category-text"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "outputs/exp-b/log.txt",
+    ])
+    fireEvent.click(screen.getByTestId("analysis-category-all"))
+    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "plot.png" } })
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "outputs/exp-a/plot.png",
+    ])
+    expect(screen.getAllByTestId("analysis-experiment-group")).toHaveLength(1)
+  })
+
+  test("says plainly when the results folder does not exist, and offers Change…", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({ ...listing([]), exists: false }),
+    })
+    const missing = await screen.findByTestId("analysis-results-missing")
+    expect(missing.textContent).toContain("No results/ folder in this project")
+    expect(screen.queryByTestId("science-analysis-empty")).toBeNull()
+    expect(screen.getByTestId("analysis-results-folder-change")).toBeTruthy()
+  })
+
+  test("Change… saves a picked folder for the project, and Reset to default clears it", async () => {
+    let own: string | null = null
+    const setResultsFolder = vi.fn((input: unknown) => {
+      const dir = (input as { dir: string | null }).dir
+      own = dir === null ? null : "runs/out"
+      return { resultsFolder: own }
+    })
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([]),
+        resultsFolder: own ?? "results",
+        overridden: own !== null,
+        exists: own !== null,
+      }),
+      "system.pickDirectory": () => "/repos/alpha/runs/out",
+      "science.analysis.setResultsFolder": setResultsFolder,
+    })
+
+    fireEvent.click(await screen.findByTestId("analysis-results-folder-change"))
+    await waitFor(() =>
+      expect(setResultsFolder).toHaveBeenCalledWith({
+        projectId: "p1",
+        dir: "/repos/alpha/runs/out",
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-results-folder-path").textContent).toBe("runs/out/"),
+    )
+
+    fireEvent.click(screen.getByTestId("analysis-results-folder-reset"))
+    await waitFor(() =>
+      expect(setResultsFolder).toHaveBeenLastCalledWith({ projectId: "p1", dir: null }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-results-folder-path").textContent).toBe("results/"),
+    )
+    expect(screen.queryByTestId("analysis-results-folder-reset")).toBeNull()
+  })
+
+  test("shows why a picked folder was refused", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => listing([]),
+      "system.pickDirectory": () => "/elsewhere",
+      "science.analysis.setResultsFolder": async () => {
+        throw new Error("The results folder must be inside the project: /elsewhere")
+      },
+    })
+    fireEvent.click(await screen.findByTestId("analysis-results-folder-change"))
+    expect((await screen.findByTestId("analysis-results-folder-error")).textContent).toContain(
+      "must be inside the project",
+    )
   })
 
   test("renders a row per discovered file", async () => {
@@ -694,8 +830,8 @@ describe("ScienceAnalysis", () => {
     })
     const select = (await screen.findByTestId("analysis-project-select")) as HTMLSelectElement
     await waitFor(() => expect(select.value).toBe("p2"))
-    expect(listFiles).toHaveBeenCalledWith({ projectId: "p2" })
-    expect(listFiles).not.toHaveBeenCalledWith({ projectId: "p1" })
+    expect(listFiles).toHaveBeenCalledWith({ projectId: "p2", defaultResultsFolder: "results" })
+    expect(listFiles).not.toHaveBeenCalledWith({ projectId: "p1", defaultResultsFolder: "results" })
   })
 
   test("shows the empty state when the project has no data files", async () => {

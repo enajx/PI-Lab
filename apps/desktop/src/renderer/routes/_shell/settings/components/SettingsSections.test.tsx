@@ -304,6 +304,32 @@ describe("Settings sections", () => {
     })
   })
 
+  test("General shows the remembered quit choice and Ask every time resets it", async () => {
+    const patches: unknown[] = []
+    let quitChoice = "background"
+    renderSection(<GeneralSection />, {
+      "settings.get": () => ({ quitChoice }),
+      "settings.updateGeneral": (input) => {
+        patches.push(input)
+        quitChoice = (input as { quitChoice: string }).quitChoice
+        return { quitChoice }
+      },
+    })
+    const choice = await screen.findByTestId("settings-quit-choice")
+    await waitFor(() => expect(choice.textContent).toContain("Move to background"))
+    fireEvent.click(screen.getByTestId("settings-quit-choice-reset"))
+    await waitFor(() => expect(patches).toEqual([{ quitChoice: "ask" }]))
+    await waitFor(() => expect(choice.textContent).toContain("Ask every time"))
+    expect(screen.queryByTestId("settings-quit-choice-reset")).toBeNull()
+  })
+
+  test("General shows a remembered Quit as quitting and stopping all agents", async () => {
+    renderSection(<GeneralSection />, { "settings.get": () => ({ quitChoice: "quit" }) })
+    const choice = await screen.findByTestId("settings-quit-choice")
+    await waitFor(() => expect(choice.textContent).toContain("Quit and stop all agents"))
+    expect(screen.getByTestId("settings-quit-choice-reset")).toBeTruthy()
+  })
+
   test("General does not offer a switch to hide the always-visible menu-bar icon", async () => {
     renderSection(<GeneralSection />, {})
     await waitFor(() => expect(screen.getByTestId("settings-run-setup")).toBeTruthy())

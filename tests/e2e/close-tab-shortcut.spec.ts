@@ -15,9 +15,10 @@ import {
 
 /**
  * macOS Cmd+W in the project view: the native menu item asks the renderer, which
- * closes the focused file tab (asking first when it is dirty); with no file tab
- * focused the app moves to the background. The menu item is clicked from main,
- * the same handler the Command+W accelerator runs. The tab × uses the same prompt.
+ * closes the active tab (asking first when it is a dirty file, an agent or a
+ * terminal). Cmd+W never hides or closes the window; with no tab open it does
+ * nothing. The menu item is clicked from main, the same handler the Command+W
+ * accelerator runs. The tab × uses the same file prompt.
  */
 
 const SEED_FILE = "close-me.txt"
@@ -156,16 +157,70 @@ test("the tab × on a dirty file asks first; Cancel keeps it and Discard closes 
   expect(await readFile(join(repoDir, SEED_FILE), "utf8")).toBe(SEED_CONTENT)
 })
 
-test("Cmd+W with no file tab focused moves the app to the background", async () => {
+/** The window is on screen: the app is not hidden and the user window is visible. */
+async function expectWindowVisible(): Promise<void> {
+  expect(await isHidden()).toBe(false)
+  expect(
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows().some((win) => !win.isDestroyed() && win.isVisible()),
+    ),
+  ).toBe(true)
+}
+
+test("Cmd+W with no tab open does nothing and the window stays visible", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
   await expect(window.getByTestId("central-launcher")).toBeVisible()
   await pressCmdW()
-  await expect.poll(isHidden).toBe(true)
-  expect(
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows().some((win) => !win.isDestroyed()),
-    ),
-  ).toBe(true)
+  await window.waitForTimeout(FALLBACK_WINDOW_MS)
+  await expectWindowVisible()
+  await expect(window.getByTestId("central-launcher")).toBeVisible()
+})
+
+test("with a file and a terminal open, Cmd+W asks, closes only the terminal, and the window stays visible", async () => {
+  const window = await openSeedFile()
+  await window.getByTestId("central-add-menu").click()
+  await window.getByTestId("central-add-terminal").click()
+  await expect(window.getByTestId("central-tab")).toHaveCount(2)
+  // Focus inside the terminal, as when the user types in it before pressing Cmd+W.
+  await window.locator('[data-testid="terminal"]:visible .xterm-helper-textarea').focus()
+
+  await pressCmdW()
+  const prompt = window.getByTestId("close-session-prompt")
+  await expect(prompt).toBeVisible()
+  await expect(prompt).toContainText("Close terminal?")
+  await prompt.getByRole("button", { name: "Close terminal", exact: true }).click()
+  await expect(window.getByTestId("central-tab")).toHaveCount(1)
+  await expect(window.getByTestId("central-tab")).toHaveAttribute("data-tab-kind", "file")
+  await window.waitForTimeout(FALLBACK_WINDOW_MS)
+  await expectWindowVisible()
+})
+
+test("Cmd+W on an agent tab asks first; Cancel keeps the agent, Stop agent closes it", async () => {
+  test.setTimeout(90_000)
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await window.getByTestId("central-add-menu").click()
+  await window.getByTestId("central-add-agent").click()
+  const chooser = window.getByTestId("new-agent-dialog")
+  await chooser.locator("label", { hasText: "Test Waiting" }).click()
+  await chooser.getByRole("button", { name: "Start agent" }).click()
+  await expect(window.getByTestId("terminal")).toContainText("Do you want to proceed?")
+  await window.locator('[data-testid="terminal"]:visible .xterm-helper-textarea').focus()
+
+  await pressCmdW()
+  const prompt = window.getByTestId("close-session-prompt")
+  await expect(prompt).toContainText("Stop agent?")
+  await prompt.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(prompt).toHaveCount(0)
+  await expect(window.getByTestId("central-tab")).toHaveAttribute("data-tab-kind", "agent")
+
+  await pressCmdW()
+  await prompt.getByRole("button", { name: "Stop agent", exact: true }).click()
+  await expect(window.getByTestId("central-tab")).toHaveCount(0)
+  await expect(window.getByTestId("central-launcher")).toBeVisible()
+  await window.waitForTimeout(FALLBACK_WINDOW_MS)
+  await expectWindowVisible()
 })

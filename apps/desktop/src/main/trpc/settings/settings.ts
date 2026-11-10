@@ -89,6 +89,7 @@ const generalPatch = z.object({
   worktreePerAgent: z.boolean().optional(),
   confirmOnQuit: z.boolean().optional(),
   keepRunningAfterClose: z.boolean().optional(),
+  quitChoice: z.enum(["ask", "background", "quit"]).optional(),
   publicUpdateChannel: z.enum(["stable", "beta"]).optional(),
 })
 
@@ -185,7 +186,11 @@ export function writeEditorSettings(
 /** The general-settings columns this router patches (top-level, not a JSON blob). */
 export type GeneralSettings = Pick<
   Settings,
-  "worktreePerAgent" | "confirmOnQuit" | "keepRunningAfterClose" | "publicUpdateChannel"
+  | "worktreePerAgent"
+  | "confirmOnQuit"
+  | "keepRunningAfterClose"
+  | "quitChoice"
+  | "publicUpdateChannel"
 >
 
 /**
@@ -201,6 +206,7 @@ export function writeGeneralSettings(db: PiLabDatabase, patch: Partial<GeneralSe
     worktreePerAgent: patch.worktreePerAgent ?? current.worktreePerAgent,
     confirmOnQuit: patch.confirmOnQuit ?? current.confirmOnQuit,
     keepRunningAfterClose: patch.keepRunningAfterClose ?? current.keepRunningAfterClose,
+    quitChoice: patch.quitChoice ?? current.quitChoice,
     publicUpdateChannel: patch.publicUpdateChannel ?? current.publicUpdateChannel,
   }
   db.insert(settings)

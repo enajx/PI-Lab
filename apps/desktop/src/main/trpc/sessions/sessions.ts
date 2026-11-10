@@ -24,6 +24,7 @@ import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
 import { discoverSkills } from "../science/skills/skills"
 import { publicProcedure, router } from "../trpc"
+import { findSkill } from "../workflows/planResearchSkill"
 import { runningProjectWorkflowTasks } from "../workflows/running"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
 
@@ -394,12 +395,13 @@ export interface StartSkillResult extends StartSessionResult {
  * Start the project's agent (remembered choice, else the default) with a prompt
  * that triggers one of the project's skills, found by its folder name (`slug`) in
  * the same project and user skill folders the Skills page lists. Used by a skill
- * shortcut button in the Project view header. A slug the project does not have
- * is a NOT_FOUND error, and no session is started.
+ * shortcut button in a view's top bar; `origin` is the view that opens the
+ * session. A slug the project does not have is a NOT_FOUND error, and no
+ * session is started.
  */
 export async function startSkill(
   ctx: AppContext,
-  input: { projectId: string; skillSlug: string },
+  input: { projectId: string; skillSlug: string; origin: AgentSessionOrigin },
 ): Promise<StartSkillResult> {
   const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
   if (!project) {
@@ -417,11 +419,49 @@ export async function startSkill(
   const result = await startAgentSession(ctx, {
     projectId: project.id,
     agentId,
-    origin: "project",
+    origin: input.origin,
     workspaceMode: "policy",
     prompt: `Use the ${skill.slug} skill. Its SKILL.md is at ${skill.path}. Follow its instructions.`,
   })
   return { ...result, agentId, label: skill.name }
+}
+
+/** An Analyze experiments launch: the started session and the agent it runs. */
+export interface StartAnalyzeExperimentsResult extends StartSessionResult {
+  agentId: string
+}
+
+/**
+ * The Analysis view's Analyze experiments button: start the project's agent
+ * (remembered choice, else the default) as an Analysis agent, with a prompt
+ * that triggers the `analyze-experiments` skill (PI Lab's bundled copy first,
+ * then project and user skills). Throws, starting nothing, when the skill
+ * cannot be found.
+ */
+export async function startAnalyzeExperiments(
+  ctx: AppContext,
+  input: { projectId: string },
+): Promise<StartAnalyzeExperimentsResult> {
+  const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
+  if (!project) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+  }
+  const skill = await findSkill(
+    "analyze-experiments",
+    "Analyze experiments",
+    project.repoPath,
+    ctx.skillsHomeDir,
+    ctx.bundledSkillsDir,
+  )
+  const agentId = await projectAgentId(ctx, project)
+  const result = await startAgentSession(ctx, {
+    projectId: project.id,
+    agentId,
+    origin: "analysis",
+    workspaceMode: "policy",
+    prompt: `Use the analyze-experiments skill to analyze this project's experiments. Its SKILL.md is at ${skill.path}. Follow its instructions.`,
+  })
+  return { ...result, agentId }
 }
 
 /**
@@ -490,6 +530,20 @@ export const sessionsRouter = router({
 
   /** Start the project's agent with one of its skills triggered (see {@link startSkill}). */
   startSkill: publicProcedure
-    .input(z.object({ projectId: z.string().min(1), skillSlug: z.string().min(1) }))
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        skillSlug: z.string().min(1),
+        origin: originSchema,
+      }),
+    )
     .mutation(({ ctx, input }): Promise<StartSkillResult> => startSkill(ctx, input)),
+
+  /** The Analysis view's Analyze experiments button (see {@link startAnalyzeExperiments}). */
+  startAnalyzeExperiments: publicProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(
+      ({ ctx, input }): Promise<StartAnalyzeExperimentsResult> =>
+        startAnalyzeExperiments(ctx, input),
+    ),
 })

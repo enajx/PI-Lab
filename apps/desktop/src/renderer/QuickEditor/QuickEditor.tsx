@@ -664,7 +664,7 @@ export function QuickEditor({
   }, [fullApp, requestFileClose])
 
   // macOS Cmd+W from the native menu closes the open file like Ctrl+W. An empty
-  // Untitled editor has nothing to close, so main moves the app to the background.
+  // Untitled editor has nothing to close, so Cmd+W does nothing.
   useEffect(() => {
     if (!fullApp) return
     return registerCloseTabHandler(() => {

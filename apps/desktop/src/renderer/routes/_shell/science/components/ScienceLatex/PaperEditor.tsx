@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { PenLine } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import type { BuildResult } from "../../../../../../main/trpc/pdf/pdf"
+import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { useTranslate } from "../../../../../i18n/language"
@@ -57,8 +59,11 @@ interface PaperEditorProps {
   focusSession: FocusSessionRequest | null
   /** The page top bar's element that holds the Update paper and Sync buttons, or null before it mounts. */
   syncSlot: HTMLElement | null
-  /** True right after Create paper: build the main .tex so its PDF opens beside it. */
-  buildOnOpen: boolean
+  /**
+   * Right after Create paper: the build of the main .tex it ran before the
+   * editor opened (its PDF then opens beside the source), else null.
+   */
+  createdBuild: Promise<BuildResult> | null
 }
 
 /** A request to show one agent session in the LaTeX Editor, e.g. from the Project Agents box. */
@@ -78,6 +83,19 @@ function pdfFor(rootRelPath: string, outputDir: string): string {
   const dir = slash < 0 ? "" : rootRelPath.slice(0, slash + 1)
   const name = rootRelPath.slice(slash + 1).replace(/\.tex$/i, "")
   return outputDir === "." ? `${dir}${name}.pdf` : `${dir}${outputDir}/${name}.pdf`
+}
+
+/**
+ * Whether the open file `relPath` is an earlier build of the same root .tex as
+ * `pdfRelPath`, in another output folder: a PDF with the same name, inside the
+ * root's folder, at another path.
+ */
+function isOtherBuildOf(relPath: string, pdfRelPath: string, sourceRelPath: string): boolean {
+  if (relPath === pdfRelPath || !/\.pdf$/i.test(relPath)) return false
+  const name = (path: string): string => path.slice(path.lastIndexOf("/") + 1)
+  const slash = sourceRelPath.lastIndexOf("/")
+  const sourceDir = slash < 0 ? "" : sourceRelPath.slice(0, slash + 1)
+  return name(relPath) === name(pdfRelPath) && relPath.startsWith(sourceDir)
 }
 
 /** The saved LaTeX Editor state, only when it belongs to this paper workspace. */
@@ -126,7 +144,7 @@ export function PaperEditor({
   onUpdateEditorSettings,
   focusSession,
   syncSlot,
-  buildOnOpen,
+  createdBuild,
 }: PaperEditorProps) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -152,6 +170,11 @@ export function PaperEditor({
   const onBuilt = useCallback((pdfRelPath: string, sourceRelPath: string): void => {
     const panel = controllerRef.current
     if (!panel || panel.editor.tabs.some((tab) => tab.relPath === pdfRelPath)) return
+    // A PDF of the same source built into another output folder (the folder was
+    // changed) is closed, so the one PDF beside the source is the current one.
+    for (const tab of panel.editor.tabs) {
+      if (isOtherBuildOf(tab.relPath, pdfRelPath, sourceRelPath)) panel.closeFile(tab.relPath)
+    }
     // Open the PDF beside the source and keep the source focused for typing.
     panel.editor.openFile(pdfRelPath).then(
       () => panel.selectFile(sourceRelPath),
@@ -206,26 +229,44 @@ export function PaperEditor({
     nonce: number
   } | null>(null)
 
-  // Open the main .tex and, when it was built before, its PDF beside it, once per
-  // paper, unless tabs from an earlier visit were restored. A just-created paper
-  // has no PDF yet: build it, and `onBuilt` opens the PDF beside the source.
-  const openedFor = useRef<string | null>(hasRestoredTabs(restoredState) ? workspaceId : null)
+  // Once per paper: open the main .tex (unless tabs from an earlier visit were
+  // restored) and show its PDF beside it. A just-created paper shows the build
+  // Create paper ran. Otherwise a missing PDF, or one older than the .tex, is
+  // built first; `onBuilt` then opens it beside the source. A failed build
+  // shows "LaTeX build failed" and its log in the footer.
+  const restoredTabs = useRef(hasRestoredTabs(restoredState)).current
+  const openedFor = useRef<string | null>(null)
   const openFile = controller.openFile
   const openBuffer = controller.editor.openFile
   const buildLatex = controller.buildLatex
+  const showLatexBuild = controller.showLatexBuild
   const attachSession = controller.attachSession
   const focusRequested = useRef(focusSession !== null)
   useEffect(() => {
     if (!rootRelPath || openedFor.current === workspaceId) return
     openedFor.current = workspaceId
-    openFile(rootRelPath)
+    if (!restoredTabs) openFile(rootRelPath)
+    // The PDF tab is placed beside the source's tab, so the source opens first.
+    const sourceOpened = restoredTabs ? Promise.resolve() : openBuffer(rootRelPath)
+    if (createdBuild) {
+      sourceOpened.then(
+        () => showLatexBuild(rootRelPath, createdBuild),
+        (cause: unknown) => setOpenError(`${rootRelPath}: ${String(cause)}`),
+      )
+      return
+    }
     const pdf = pdfFor(rootRelPath, effectiveOutputDir)
-    client.files.stat.query({ workspaceId, relPath: pdf }).then(
-      (stat) => {
-        if (!stat.exists) {
-          if (buildOnOpen) buildLatex(rootRelPath)
+    Promise.all([
+      client.files.stat.query({ workspaceId, relPath: rootRelPath }),
+      client.files.stat.query({ workspaceId, relPath: pdf }),
+      sourceOpened,
+    ]).then(
+      ([source, built]) => {
+        if (!built.exists || built.mtimeMs < source.mtimeMs) {
+          buildLatex(rootRelPath)
           return
         }
+        if (restoredTabs) return
         // A requested agent tab keeps the focus; the PDF still opens beside the source.
         if (focusRequested.current) {
           openBuffer(pdf).then(undefined, (cause: unknown) =>
@@ -237,12 +278,14 @@ export function PaperEditor({
     )
   }, [
     buildLatex,
-    buildOnOpen,
     client,
+    createdBuild,
     effectiveOutputDir,
     openBuffer,
     openFile,
+    restoredTabs,
     rootRelPath,
+    showLatexBuild,
     workspaceId,
   ])
 
@@ -386,20 +429,42 @@ export function PaperEditor({
       </div>
       {syncSlot
         ? createPortal(
-            <button
-              type="button"
-              data-testid="paper-update"
-              disabled={startUpdate.isPending}
-              title={t("Start an agent that updates the paper from the project's results")}
-              onClick={() => {
-                setOpenError(null)
-                startUpdate.mutate({ projectId })
-              }}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
-            >
-              <PenLine className="size-3.5" aria-hidden />
-              {t("Update paper")}
-            </button>,
+            <HeaderShortcuts
+              view="latex"
+              projectId={projectId}
+              onError={setOpenError}
+              onSkillSessionStarted={(session) =>
+                attachSession({
+                  kind: "agent",
+                  sessionId: session.sessionId,
+                  label: session.label,
+                  wsKind: session.kind,
+                  launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
+                })
+              }
+              builtins={[
+                {
+                  id: "update-paper",
+                  label: t("Update paper"),
+                  node: (
+                    <button
+                      type="button"
+                      data-testid="paper-update"
+                      disabled={startUpdate.isPending}
+                      title={t("Start an agent that updates the paper from the project's results")}
+                      onClick={() => {
+                        setOpenError(null)
+                        startUpdate.mutate({ projectId })
+                      }}
+                      className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+                    >
+                      <PenLine className="size-3.5" aria-hidden />
+                      {t("Update paper")}
+                    </button>
+                  ),
+                },
+              ]}
+            />,
             syncSlot,
           )
         : null}

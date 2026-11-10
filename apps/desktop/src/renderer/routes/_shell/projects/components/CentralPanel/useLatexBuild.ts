@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import type { BuildOutputEvent } from "../../../../../../main/trpc/pdf/pdf"
+import type { BuildOutputEvent, BuildResult } from "../../../../../../main/trpc/pdf/pdf"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 
 /** Most live output kept per build, so a long build cannot grow memory without limit. */
@@ -67,6 +67,7 @@ export function useLatexBuild(
   onBuilt: ((pdfRelPath: string, sourceRelPath: string) => void) | undefined,
 ): {
   saved: (relPath: string) => void
+  track: (relPath: string, build: Promise<BuildResult>) => void
   status: BuildStatus | null
   pdfBuildState: BuildState | null
 } {
@@ -156,14 +157,17 @@ export function useLatexBuild(
     }
   }, [scope, publish])
 
-  const saved = useCallback(
-    (relPath: string): void => {
-      onSaved?.(relPath)
-      if (!/\.tex$/i.test(relPath) || !scope.live) return
+  /**
+   * Show one build of the root `relPath` (one this hook started, or one started
+   * elsewhere such as Create paper's): status and log while it runs and after,
+   * and `onBuilt` when it succeeds.
+   */
+  const track = useCallback(
+    (relPath: string, build: Promise<BuildResult>): void => {
+      if (!scope.live) return
       scope.pending += 1
       publish()
-      void client.pdf.build
-        .mutate({ workspaceId, relPath })
+      void build
         .then(async (result) => {
           if (!scope.live) return
           scope.lastLog = result.log
@@ -208,11 +212,21 @@ export function useLatexBuild(
           publish()
         })
     },
-    [client, workspaceId, onSaved, onBuilt, scope, publish],
+    [client, workspaceId, onBuilt, scope, publish],
+  )
+
+  const saved = useCallback(
+    (relPath: string): void => {
+      onSaved?.(relPath)
+      if (!/\.tex$/i.test(relPath) || !scope.live) return
+      track(relPath, client.pdf.build.mutate({ workspaceId, relPath }))
+    },
+    [client, workspaceId, onSaved, scope, track],
   )
 
   return {
     saved,
+    track,
     status: snapshot?.scope === scope ? snapshot.status : null,
     pdfBuildState: snapshot?.scope === scope ? snapshot.pdfBuildState : null,
   }

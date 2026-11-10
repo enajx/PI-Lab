@@ -112,6 +112,14 @@ function readStoredSize(surface: CardGridSurface): CardGridSize {
   return snapSize({ width, height })
 }
 
+/**
+ * The shared card height as a multiple of the base row height, or 1 outside a
+ * CardGrid. Cards use it to scale inner parts (e.g. a thumbnail) with the card.
+ */
+export function useCardGridHeightScale(): number {
+  return useContext(CardGridContext)?.size.height ?? DEFAULT_SCALE
+}
+
 interface CardGridProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
   surface: CardGridSurface
   /** Retained for surface callers; card size is now shared rather than per-card. */

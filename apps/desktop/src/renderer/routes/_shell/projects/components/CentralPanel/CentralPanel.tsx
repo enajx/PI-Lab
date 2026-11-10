@@ -34,6 +34,7 @@ import {
   FILES_PANEL_MIN_WIDTH,
   useFilesPanelWidth,
 } from "../../../../../preferences/preferences"
+import { registerCloseTabHandler } from "../../../../../shortcuts/closeTab"
 import { overlayIsOpen } from "../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { Terminal } from "../../../../../Terminal"
@@ -42,6 +43,7 @@ import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../SplitDock/SplitDock"
 import { CloseFilePrompt, useCloseFilePrompt } from "./CloseFilePrompt"
+import { CloseSessionPrompt, useCloseSessionPrompt } from "./CloseSessionPrompt"
 import { CollapsibleSection } from "./CollapsibleSection"
 import { useNewSessionShortcut, useOpenNewSession } from "./newSessionShortcut"
 import { pdfBesideSource } from "./pdfBesideSource"
@@ -179,22 +181,40 @@ export function CentralPanel({
   const belowEditorRun = controller.belowEditorRun
   const runFocusedNow = runFocused && belowEditorRun !== null
 
-  // Tab ×, Ctrl+W and macOS Cmd+W (from the native menu) close a file tab, asking
-  // first when it has unsaved changes. Cmd+W with no file tab focused moves the app
-  // to the background instead.
-  const closeFilePrompt = useCloseFilePrompt({
-    controller,
-    runFocused: runFocusedNow,
-    onSaveUntitled,
-  })
+  // Tab × closes a file tab, asking first when it has unsaved changes.
+  const closeFilePrompt = useCloseFilePrompt({ controller, onSaveUntitled })
+  const closeSessionPrompt = useCloseSessionPrompt()
 
-  // Ctrl+W closes the active tab.
-  const closeActiveTabRef = useRef(controller.closeActiveTab)
-  closeActiveTabRef.current = runFocusedNow
-    ? controller.closeBelowEditorRun
-    : active?.type === "file"
-      ? () => closeFilePrompt.requestClose(active.relPath)
-      : controller.closeActiveTab
+  // Ctrl+W and macOS Cmd+W (from the native menu) close the active tab: a dirty
+  // file, an agent, a terminal or the Run tab asks first. Returns false when no
+  // tab is active, so Cmd+W does nothing; it never hides the app.
+  const closeActiveTabRef = useRef<() => boolean>(() => false)
+  closeActiveTabRef.current = () => {
+    // A close prompt is already asking: the shortcut does nothing more.
+    if (closeFilePrompt.prompt || closeSessionPrompt.prompt) return true
+    if (runFocusedNow && belowEditorRun) {
+      closeSessionPrompt.requestClose({
+        kind: "terminal",
+        label: belowEditorRun.label,
+        close: controller.closeBelowEditorRun,
+      })
+      return true
+    }
+    if (active?.type === "file") {
+      closeFilePrompt.requestClose(active.relPath)
+      return true
+    }
+    const session =
+      active?.type === "session" ? sessions.find((pane) => pane.id === active.id) : undefined
+    if (!session) return false
+    closeSessionPrompt.requestClose({
+      kind: session.kind,
+      label: session.label,
+      close: () => controller.closeSession(session.id),
+    })
+    return true
+  }
+  useEffect(() => registerCloseTabHandler(() => closeActiveTabRef.current()), [])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -833,6 +853,12 @@ export function CentralPanel({
           onChoose={(choice) => void closeFilePrompt.choose(choice)}
         />
       ) : null}
+      {closeSessionPrompt.prompt ? (
+        <CloseSessionPrompt
+          prompt={closeSessionPrompt.prompt}
+          onChoose={closeSessionPrompt.choose}
+        />
+      ) : null}
       {quickOpen ? (
         <QuickOpen
           workspaceId={workspaceId}
@@ -1243,7 +1269,7 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
       data-active={active}
       data-dirty={dirty ?? false}
       className={cn(
-        "flex items-center gap-1.5 border-border border-r pr-1 pl-2.5 text-xs",
+        "flex h-full items-center gap-1.5 border-border border-r pr-1 pl-2.5 text-xs",
         active ? "bg-background text-foreground" : "text-muted-foreground hover:bg-accent/40",
       )}
     >
@@ -1254,7 +1280,7 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
         data-feature-label={label}
         data-feature-help={description}
         onClick={onSelect}
-        className="flex items-center gap-1.5 py-1.5"
+        className="flex items-center gap-1.5 py-1"
         title={label}
       >
         <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />

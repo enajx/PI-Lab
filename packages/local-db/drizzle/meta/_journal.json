@@ -225,6 +225,13 @@
       "when": 1794314858951,
       "tag": "0031_latex_provider_auto",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794321154453,
+      "tag": "0032_quit_choice",
+      "breakpoints": true
     }
   ]
 }

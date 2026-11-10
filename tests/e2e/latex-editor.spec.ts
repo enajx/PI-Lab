@@ -171,6 +171,7 @@ async function expectSetupCards(page: Page): Promise<void> {
     })
     .toBe("ok")
   await expect(() => expectCentredSetup(page)).toPass({ timeout: 5_000 })
+  await page.screenshot({ path: resolve(".cache", "screens", "latex-setup-cards.png") })
 }
 
 /** Vertical middle of a box. */
@@ -180,8 +181,8 @@ function middleY(box: { y: number; height: number }): number {
 
 /**
  * The setup cards have the same height, the shorter card's content sits in its
- * vertical middle, and the row sits at the top of the area below the top bar,
- * horizontally centred.
+ * vertical middle, and the row sits near the top of the area below the top bar
+ * (with clear space above it), horizontally centred, with clear gaps between cards.
  */
 async function expectCentredSetup(page: Page): Promise<void> {
   const overleaf = await page.getByTestId("paper-setup-overleaf").boundingBox()
@@ -197,8 +198,16 @@ async function expectCentredSetup(page: Page): Promise<void> {
   expect(Math.abs(folder.height - overleaf.height)).toBeLessThan(1)
   const contentMiddle = (icon.y + button.y + button.height) / 2
   expect(Math.abs(contentMiddle - middleY(folder))).toBeLessThan(2)
-  // At the top: the cards start near the top edge of the page, not in its vertical middle.
-  expect(overleaf.y - area.y).toBeLessThan(40)
+  // Near the top: clear space (about 56px) above the cards, but not in the page's vertical middle.
+  expect(overleaf.y - area.y).toBeGreaterThanOrEqual(48)
+  expect(overleaf.y - area.y).toBeLessThanOrEqual(64)
+  // About 40px between neighbouring cards.
+  for (const [left, right] of [
+    [overleaf, folder],
+    [folder, create],
+  ]) {
+    expect(Math.abs(right.x - (left.x + left.width) - 40)).toBeLessThan(2)
+  }
   // Horizontally centred, with cards of at most 20rem (320px) each.
   const row = { left: overleaf.x, right: create.x + create.width }
   expect(Math.abs((row.left + row.right) / 2 - (area.x + area.width / 2))).toBeLessThan(2)
@@ -372,6 +381,11 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     const page = await app.firstWindow()
     // Background agent work (Ask agent to merge) uses the deterministic test merge agent.
     await openAndLink(page, "test-merge")
+    // The linked paper has no PDF yet, so it is built on open (into the default build/)
+    // and shown beside the source.
+    const builtOnOpen = page.locator('[data-testid="pdf-viewer"]:visible')
+    await expect(builtOnOpen.locator(".page canvas").first()).toBeVisible({ timeout: 200_000 })
+    expect(existsSync(join(paper, "build", "main.pdf"))).toBe(true)
 
     // This paper builds into its own folder.
     // The output folder is set from the editor footer's popover.
@@ -391,17 +405,22 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     const editor = page.getByTestId("editor-buffer")
     await editor.locator(".cm-content").click()
     await page.keyboard.press("ControlOrMeta+s")
+    // The status already says complete from the build on open, so wait for the new PDF first.
+    await expect
+      .poll(() => existsSync(join(paper, "pdfout", "main.pdf")), { timeout: 200_000 })
+      .toBe(true)
     await expect(page.locator('[data-testid="latex-build-status"]:visible')).toContainText(
       /complete/i,
       { timeout: 200_000 },
     )
+    // The new PDF replaces the build/ one beside the source: one PDF, the current one.
+    await expect(page.getByTestId("central-tab").filter({ hasText: "main.pdf" })).toHaveCount(1)
+    await expect(page.getByTestId("pdf-viewer")).toHaveCount(1)
     const viewer = page.getByTestId("pdf-viewer")
-    await expect(viewer).toBeVisible({ timeout: 15_000 })
+    await expect(viewer.locator(".page canvas").first()).toBeVisible({ timeout: 15_000 })
     const source = await editor.boundingBox()
     const pdf = await viewer.boundingBox()
     expect(source && pdf && pdf.x > source.x + source.width / 2).toBe(true)
-    expect(existsSync(join(paper, "pdfout", "main.pdf"))).toBe(true)
-    expect(existsSync(join(paper, "build"))).toBe(false)
 
     // A later save rebuilds, and the open PDF shows the new text.
     await editor.getByText("Method text.").click()
@@ -410,6 +429,7 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     await page.keyboard.press("ControlOrMeta+s")
     await expect(viewer).toContainText("Zyxrefresh", { timeout: 120_000 })
     await expect(page.getByTestId("pdf-viewer")).toHaveCount(1)
+    await expect(page.getByTestId("central-tab").filter({ hasText: "main.pdf" })).toHaveCount(1)
 
     // Sync sends the edit but not the build output.
     await page.getByTestId("paper-sync").click()
@@ -749,18 +769,35 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     await expect(page.getByTestId("paper-create-folder")).toHaveText("paper/")
     await page.screenshot({ path: test.info().outputPath("latex-setup-create.png") })
     await page.getByTestId("paper-create").click()
-    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
-    // main.tex opens on the left and, once built, its PDF on the right.
+    // Create paper builds main.tex before the editor opens.
+    await expect(page.getByTestId("paper-create")).toHaveText("Building PDF…", {
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 200_000 })
+    // main.tex opens on the left with its built PDF already on the right: no save or click.
     const editor = page.getByTestId("editor-buffer")
     await expect(editor).toBeVisible()
-    // CI runners have no TeX and skip the large TeX bundle download.
-    if (!process.env.CI) {
+    /** The PDF viewer shows a rendered page to the right of the source. */
+    const expectPdfBeside = async (): Promise<void> => {
       const viewer = page.getByTestId("pdf-viewer")
-      await expect(viewer).toBeVisible({ timeout: 200_000 })
+      await expect(viewer.locator(".page canvas").first()).toBeVisible({ timeout: 15_000 })
+      await expect(viewer.locator(".textLayer").first()).toContainText("Shared first line.")
       const source = await editor.boundingBox()
       const pdf = await viewer.boundingBox()
       expect(source && pdf && pdf.x > source.x + source.width / 2).toBe(true)
     }
+    // CI runners have no TeX and skip the large TeX bundle download.
+    if (!process.env.CI) {
+      await expectPdfBeside()
+      await page.screenshot({ path: resolve(".cache", "screens", "latex-create-pdf.png") })
+    }
+    // Opening the LaTeX Editor again for this existing paper shows the PDF on the right.
+    await page.getByTestId("nav-dashboard").click()
+    await expect(page.getByTestId("paper-editor")).toHaveCount(0)
+    await openLatexEditor(page)
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    await expect(editor).toBeVisible()
+    if (!process.env.CI) await expectPdfBeside()
 
     // The footer shows the LaTeX engine in use; its menu has Auto chosen by default.
     const engine = page.getByTestId("editor-status-bar").getByTestId("latex-engine")

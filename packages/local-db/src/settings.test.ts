@@ -205,7 +205,8 @@ describe("global LaTeX provider migration", () => {
     const migrated = runMigrations(dbPath)
     const after = migrated.sqlite.prepare("SELECT * FROM settings").get() as Record<string, unknown>
     expect(JSON.parse(after.editor as string)).toEqual({ ...editor, latexProvider: "auto" })
-    expect({ ...after, editor: before.editor }).toEqual(before)
+    // 0032 adds quit_choice with its default.
+    expect({ ...after, editor: before.editor }).toEqual({ ...before, quit_choice: "ask" })
     expect(getSettingsOrDefaults(migrated.db).editor.latexProvider).toBe("auto")
     migrated.sqlite.close()
   })

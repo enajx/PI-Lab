@@ -20,6 +20,7 @@ import {
 } from "../../activity"
 import { runGit } from "../../git"
 import { createHarness, FAKE_AGENT, type Harness, LONG_FAKE_AGENT, makeRepo } from "../testHarness"
+import { findSkill } from "../workflows/planResearchSkill"
 import { workspaceWorkingDir } from "../workspaces"
 
 /**
@@ -559,7 +560,11 @@ describe("sessions.startSkill — header skill shortcut", () => {
     )
     await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
 
-    const result = await h.caller.sessions.startSkill({ projectId, skillSlug: "review-notes" })
+    const result = await h.caller.sessions.startSkill({
+      projectId,
+      skillSlug: "review-notes",
+      origin: "project",
+    })
 
     expect(result.agentId).toBe("prompt-agent")
     expect(result.label).toBe("Review notes")
@@ -578,9 +583,73 @@ describe("sessions.startSkill — header skill shortcut", () => {
   test("a skill the project does not have is a clear error and starts nothing", async () => {
     await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
     await expect(
-      h.caller.sessions.startSkill({ projectId, skillSlug: "missing-skill" }),
+      h.caller.sessions.startSkill({ projectId, skillSlug: "missing-skill", origin: "project" }),
     ).rejects.toThrow("missing-skill")
     expect(await h.caller.terminal.list()).toEqual([])
+  })
+
+  test("a skill started from the LaTeX Editor is recorded as a LaTeX Editor agent", async () => {
+    const skillDir = join(h.repoDir, ".claude", "skills", "review-notes")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "---\nname: Review notes\n---\nReview.\n")
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
+
+    const result = await h.caller.sessions.startSkill({
+      projectId,
+      skillSlug: "review-notes",
+      origin: "latex",
+    })
+
+    const row = h.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, result.sessionId))
+      .get()
+    expect(row?.origin).toBe("latex")
+  })
+})
+
+describe("sessions.startAnalyzeExperiments — Analysis button", () => {
+  test("starts the project's agent as an Analysis agent with the analyze-experiments skill", async () => {
+    const skillDir = join(h.skillsHomeDir, ".agents", "skills", "analyze-experiments")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Analyze experiments\nUSER SKILL TEXT\n")
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
+
+    const result = await h.caller.sessions.startAnalyzeExperiments({ projectId })
+
+    expect(result.agentId).toBe("prompt-agent")
+    const row = h.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, result.sessionId))
+      .get()
+    expect(row?.origin).toBe("analysis")
+    const chunks: string[] = []
+    const stream = await h.caller.terminal.onData({ sessionId: result.sessionId })
+    const sub = stream.subscribe({
+      next: (event) => {
+        if (event.type === "data") chunks.push(event.chunk)
+      },
+    })
+    await waitFor(() => chunks.join("").includes("analyze-experiments skill"))
+    sub.unsubscribe()
+    expect(chunks.join("").replace(/\r?\n/g, "")).toContain(join(skillDir, "SKILL.md"))
+  })
+
+  test("PI Lab ships the analyze-experiments placeholder skill", async () => {
+    const bundled = join(__dirname, "..", "..", "..", "..", "resources", "skills")
+    const skill = await findSkill(
+      "analyze-experiments",
+      "Analyze experiments",
+      "/missing",
+      "/missing",
+      bundled,
+    )
+    expect(skill.path).toBe(join(bundled, "analyze-experiments", "SKILL.md"))
+    expect(skill.content).toContain("placeholder")
+    expect(skill.content).toContain("EXPERIMENTS.md")
+    expect(skill.content).toContain("results/")
   })
 })
 

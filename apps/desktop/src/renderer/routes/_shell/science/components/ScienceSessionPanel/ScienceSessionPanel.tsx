@@ -22,12 +22,26 @@ import {
   useNewSessionShortcut,
   useOpenNewSession,
 } from "../../../projects/components/CentralPanel/newSessionShortcut"
-import type { CentralPanelRestoreState } from "../../../projects/components/CentralPanel/useCentralPanel"
+import type {
+  CentralPanelRestoreState,
+  SessionPane,
+} from "../../../projects/components/CentralPanel/useCentralPanel"
+
+/** A session started outside the panel (a top bar button) for the panel to open as a tab. */
+export interface ScienceSessionRequest {
+  /** The project it was started in; the panel opens it only while showing that project. */
+  projectId: string
+  pane: Omit<SessionPane, "id">
+}
 
 interface ScienceSessionPanelProps {
   view: SessionPanelView
   /** The project sessions start in, or null when none is chosen (Tasks "All projects"). */
   project: { id: string; name: string } | null
+  /** A started session to open as a tab, or null. */
+  openSession: ScienceSessionRequest | null
+  /** Called once `openSession` is open, so the caller can clear it. */
+  onSessionOpened: () => void
 }
 
 /**
@@ -37,8 +51,14 @@ interface ScienceSessionPanelProps {
  * It starts collapsed and opens when a session opens. ⌘T (Settings → Shortcuts) opens
  * a session here, collapsed or not. Its tabs are kept per project and view, like the
  * LaTeX Editor's. With no project chosen, ⌘T and the buttons ask to pick one.
+ * `openSession` (from a top bar button) opens as a tab and shows the panel.
  */
-export function ScienceSessionPanel({ view, project }: ScienceSessionPanelProps) {
+export function ScienceSessionPanel({
+  view,
+  project,
+  openSession,
+  onSessionOpened,
+}: ScienceSessionPanelProps) {
   const t = useTranslate()
   const [collapsed, setCollapsed] = useState(true)
   const expand = useCallback(() => setCollapsed(false), [])
@@ -85,6 +105,8 @@ export function ScienceSessionPanel({ view, project }: ScienceSessionPanelProps)
           project={project}
           collapsed={collapsed}
           onExpand={expand}
+          openSession={openSession?.projectId === project.id ? openSession.pane : null}
+          onSessionOpened={onSessionOpened}
         />
       ) : (
         <NoProjectSessions collapsed={collapsed} onExpand={expand} />
@@ -98,13 +120,21 @@ interface SessionsBodyProps {
   onExpand: () => void
 }
 
+interface OpenSessionProps {
+  openSession: Omit<SessionPane, "id"> | null
+  onSessionOpened: () => void
+}
+
 /** Resolve the project's main-checkout workspace, then show its sessions. */
 function ProjectSessions({
   view,
   project,
   collapsed,
   onExpand,
-}: SessionsBodyProps & { view: SessionPanelView; project: { id: string; name: string } }) {
+  openSession,
+  onSessionOpened,
+}: SessionsBodyProps &
+  OpenSessionProps & { view: SessionPanelView; project: { id: string; name: string } }) {
   const trpc = useTRPC()
   const ensureMain = useMutation(trpc.workspaces.ensureMain.mutationOptions())
   const ensureMainRef = useRef(ensureMain.mutateAsync)
@@ -139,6 +169,8 @@ function ProjectSessions({
       workspaceId={workspaceId}
       collapsed={collapsed}
       onExpand={onExpand}
+      openSession={openSession}
+      onSessionOpened={onSessionOpened}
     />
   )
 }
@@ -150,11 +182,14 @@ function SessionsBody({
   workspaceId,
   collapsed,
   onExpand,
-}: SessionsBodyProps & {
-  view: SessionPanelView
-  project: { id: string; name: string }
-  workspaceId: string
-}) {
+  openSession,
+  onSessionOpened,
+}: SessionsBodyProps &
+  OpenSessionProps & {
+    view: SessionPanelView
+    project: { id: string; name: string }
+    workspaceId: string
+  }) {
   const trpc = useTRPC()
   const client = useTRPCClient()
   const queryClient = useQueryClient()
@@ -220,6 +255,15 @@ function SessionsBody({
   useEffect(() => {
     if (controller.agentChooserOpen || controller.launchError) onExpand()
   }, [controller.agentChooserOpen, controller.launchError, onExpand])
+
+  // A session a top bar button started opens here as a tab and shows the panel.
+  const attachSession = controller.attachSession
+  useEffect(() => {
+    if (!openSession) return
+    attachSession(openSession)
+    onExpand()
+    onSessionOpened()
+  }, [attachSession, onExpand, onSessionOpened, openSession])
 
   // While collapsed the central panel is not mounted, so ⌘T is handled here.
   const openNewSession = useOpenNewSession(controller)
