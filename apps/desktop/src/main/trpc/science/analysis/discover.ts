@@ -42,6 +42,8 @@ export interface DataFileEntry {
    * listed root, or null for a file directly in the root ("No experiment").
    */
   experiment: string | null
+  /** True for a file in the project's `reports/` folder, listed as its own group. */
+  inReportsFolder: boolean
 }
 
 export interface DataFileGroup {
@@ -66,11 +68,15 @@ export interface DataFileListing {
  * files never enter the candidate set, so the cap applies after filtering and a
  * source-heavy directory cannot starve deeper results. `.zarr` directories are
  * collected as one metadata-only dataset and pruned. Paths are returned relative
- * to `repoPath`; each entry's experiment is its first folder under `rootPath`.
+ * to `repoPath`. For the results folder (`folder: "results"`) each entry's
+ * experiment is its first folder under `rootPath`; for the project's reports
+ * folder (`folder: "reports"`) entries have no experiment and are marked
+ * `inReportsFolder`.
  */
 export async function discoverDataFiles(
   repoPath: string,
   rootPath: string,
+  folder: "results" | "reports",
 ): Promise<DataFileListing> {
   const walk = await walkAnalysisArtifacts(rootPath, MAX_LISTED_FILES + 1)
   const candidates = walk.artifacts
@@ -84,7 +90,7 @@ export async function discoverDataFiles(
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
     const underRoot = toPosix(relative(rootPath, abs))
     const slash = underRoot.indexOf("/")
-    const experiment = slash >= 0 ? underRoot.slice(0, slash) : null
+    const experiment = folder === "results" && slash >= 0 ? underRoot.slice(0, slash) : null
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
@@ -100,6 +106,7 @@ export async function discoverDataFiles(
       size: info.size,
       mtime: info.mtimeMs,
       experiment,
+      inReportsFolder: folder === "reports",
     })
   }
 

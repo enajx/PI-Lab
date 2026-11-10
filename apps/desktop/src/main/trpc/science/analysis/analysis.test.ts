@@ -2,7 +2,7 @@
 // a temp SQLite DB with the real migrations and a real temp git repo (AGENTS.md
 // Data files are written into the repo and classified/previewed off real
 // bytes — no filesystem mocking.
-import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -411,6 +411,69 @@ describe("science.analysis.listFiles", () => {
     expect(listing.resultsFolder).toBe("results")
     expect(listing.total).toBe(0)
     expect(listing.groups).toEqual([])
+  })
+
+  test("also lists the project's reports/ folder as its own group", async () => {
+    await writeRepoFile("results/exp-a/log.txt", "x\n")
+    await writeRepoFile("results/reports/inner.html", "<p>experiment</p>")
+    await writeRepoFile("reports/report.html", "<p>report</p>")
+    await writeRepoFile("reports/nested/summary.md", "# summary\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    const byRel = Object.fromEntries(
+      listing.groups.flatMap((group) =>
+        group.files.map((file) => [file.relPath, [file.experiment, file.inReportsFolder]] as const),
+      ),
+    )
+    expect(byRel).toEqual({
+      "results/exp-a/log.txt": ["exp-a", false],
+      // A reports/ folder inside the results folder stays an experiment.
+      "results/reports/inner.html": ["reports", false],
+      "reports/report.html": [null, true],
+      "reports/nested/summary.md": [null, true],
+    })
+    expect(listing.total).toBe(4)
+  })
+
+  test("reports/ is listed once when it is the results folder or contains it", async () => {
+    await writeRepoFile("reports/exp-a/log.txt", "x\n")
+    await writeRepoFile("reports/report.html", "<p>report</p>")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    for (const defaultResultsFolder of ["reports", "reports/exp-a"]) {
+      const listing = await h.caller.science.analysis.listFiles({
+        projectId: project.id,
+        defaultResultsFolder,
+      })
+      const rels = listing.groups.flatMap((group) => group.files.map((file) => file.relPath))
+      expect(rels.sort()).toEqual(["reports/exp-a/log.txt", "reports/report.html"])
+      expect(listing.total).toBe(2)
+    }
+  })
+
+  test("reports/ is still listed when the results folder is missing; no reports/ is no group", async () => {
+    await writeRepoFile("reports/report.html", "<p>report</p>")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    expect(listing.exists).toBe(false)
+    expect(listing.groups.flatMap((g) => g.files.map((f) => f.relPath))).toEqual([
+      "reports/report.html",
+    ])
+
+    await writeRepoFile("results/exp-a/log.txt", "x\n")
+    await rm(join(h.repoDir, "reports"), { recursive: true })
+    const noReports = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    expect(noReports.groups.flatMap((g) => g.files.every((f) => !f.inReportsFolder))).toEqual([
+      true,
+    ])
   })
 
   test("refuses results folders outside the project", async () => {

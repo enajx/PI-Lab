@@ -158,6 +158,57 @@ async function realPathInside(repoPath: string, dir: string, shown: string): Pro
   return relative(canonicalRepo, canonicalDir).replaceAll("\\", "/")
 }
 
+/** The project's reports folder, where "HTML report" creates its files. */
+const REPORTS_FOLDER = "reports"
+
+const EMPTY_LISTING: DataFileListing = {
+  groups: [],
+  total: 0,
+  truncated: false,
+  partial: false,
+  skipped: [],
+}
+
+/**
+ * List the project's `reports/` folder, or an empty listing when it does not
+ * exist (or is not a folder). A `reports` symlink that leaves the project is
+ * refused like a results folder.
+ */
+async function listReportsFolder(repoPath: string): Promise<DataFileListing> {
+  const root = resolveInsideDir(repoPath, REPORTS_FOLDER)
+  const info = await statOrNull(root)
+  if (info === null || !info.isDirectory()) return EMPTY_LISTING
+  await realPathInside(repoPath, root, REPORTS_FOLDER)
+  return discoverDataFiles(repoPath, root, "reports")
+}
+
+/**
+ * Join the results listing and the reports listing, keeping kind groups in the
+ * results listing's order. A file in both (the results folder is or is inside
+ * `reports/`, or holds it) is kept once, from the results listing.
+ */
+function mergeListings(results: DataFileListing, reports: DataFileListing): DataFileListing {
+  const seen = new Set(results.groups.flatMap((group) => group.files.map((file) => file.relPath)))
+  const groups = results.groups.map((group) => ({ kind: group.kind, files: [...group.files] }))
+  let added = 0
+  for (const group of reports.groups) {
+    const files = group.files.filter((file) => !seen.has(file.relPath))
+    if (files.length === 0) continue
+    added += files.length
+    const existing = groups.find((candidate) => candidate.kind === group.kind)
+    if (existing) existing.files.push(...files)
+    else groups.push({ kind: group.kind, files })
+  }
+  const skipped = [...new Set([...results.skipped, ...reports.skipped])]
+  return {
+    groups,
+    total: results.total + added,
+    truncated: results.truncated || reports.truncated,
+    partial: skipped.length > 0,
+    skipped,
+  }
+}
+
 /** stat that answers null for a missing path; other errors surface. */
 async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
   try {
@@ -206,7 +257,9 @@ export const analysisRouter = router({
    * null when it sits directly in the results folder. Walks the tree (skipping
    * noise dirs), tags each file with its data-file kind, and returns them
    * grouped by kind with per-file metadata (size, mtime) and repo-relative
-   * paths. A missing results folder is `exists: false`; a folder outside the
+   * paths. The project's `reports/` folder (where "HTML report" saves) is
+   * listed too, marked `inReportsFolder`, each file once; no `reports/` folder
+   * adds nothing. A missing results folder is `exists: false`; a folder outside the
    * project (or the project folder itself) is FORBIDDEN. The walk is capped,
    * and `truncated` flags when the cap was hit.
    */
@@ -219,27 +272,24 @@ export const analysisRouter = router({
       const overridden = own !== undefined
       const root = resolveInsideDir(project.repoPath, resultsFolder)
       const info = await statOrNull(root)
-      if (info === null) {
-        return {
-          resultsFolder,
-          overridden,
-          exists: false,
-          groups: [],
-          total: 0,
-          truncated: false,
-          partial: false,
-          skipped: [],
+      let results: DataFileListing = EMPTY_LISTING
+      if (info !== null) {
+        await realPathInside(project.repoPath, root, resultsFolder)
+        if (!info.isDirectory()) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `The results folder is not a folder: ${resultsFolder}`,
+          })
         }
+        results = await discoverDataFiles(project.repoPath, root, "results")
       }
-      await realPathInside(project.repoPath, root, resultsFolder)
-      if (!info.isDirectory()) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `The results folder is not a folder: ${resultsFolder}`,
-        })
+      const reports = await listReportsFolder(project.repoPath)
+      return {
+        ...mergeListings(results, reports),
+        resultsFolder,
+        overridden,
+        exists: info !== null,
       }
-      const listing = await discoverDataFiles(project.repoPath, root)
-      return { ...listing, resultsFolder, overridden, exists: true }
     }),
 
   /**

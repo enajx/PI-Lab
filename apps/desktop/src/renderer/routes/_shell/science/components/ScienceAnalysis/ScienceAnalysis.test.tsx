@@ -52,7 +52,13 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
 }
 
 function listing(
-  files: Array<{ relPath: string; name: string; kind: string; experiment?: string | null }>,
+  files: Array<{
+    relPath: string
+    name: string
+    kind: string
+    experiment?: string | null
+    inReportsFolder?: boolean
+  }>,
 ) {
   // Group the way the router does (canonical kind order isn't asserted here).
   const byKind = new Map<string, typeof files>()
@@ -64,7 +70,13 @@ function listing(
   return {
     groups: [...byKind.entries()].map(([kind, fs]) => ({
       kind,
-      files: fs.map((f) => ({ ...f, experiment: f.experiment ?? null, size: 10, mtime: 0 })),
+      files: fs.map((f) => ({
+        ...f,
+        experiment: f.experiment ?? null,
+        inReportsFolder: f.inReportsFolder ?? false,
+        size: 10,
+        mtime: 0,
+      })),
     })),
     total: files.length,
     truncated: false,
@@ -231,6 +243,94 @@ describe("ScienceAnalysis", () => {
       "outputs/exp-a/plot.png",
     ])
     expect(screen.getAllByTestId("analysis-experiment-group")).toHaveLength(1)
+  })
+
+  test("lists the project's reports/ folder as its own group after the experiments", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          {
+            relPath: "reports/report.html",
+            name: "report.html",
+            kind: "report",
+            inReportsFolder: true,
+          },
+          { relPath: "results/exp-a/log.txt", name: "log.txt", kind: "text", experiment: "exp-a" },
+          { relPath: "results/top.json", name: "top.json", kind: "json" },
+        ]),
+    })
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(3))
+    const groups = screen.getAllByTestId("analysis-experiment-group")
+    expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual(["exp-a", ""])
+    const reports = screen.getByTestId("analysis-reports-group")
+    expect(within(reports).getByText("Reports (reports/)")).toBeTruthy()
+    expect(
+      within(reports)
+        .getAllByTestId("analysis-file")
+        .map((row) => row.dataset.relPath),
+    ).toEqual(["reports/report.html"])
+    // The reports group comes after the experiment groups.
+    expect(
+      (groups[1] as HTMLElement).compareDocumentPosition(reports) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  test("a new HTML report is listed and stays selected", async () => {
+    let created = false
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing(
+          created
+            ? [
+                {
+                  relPath: "reports/report.html",
+                  name: "report.html",
+                  kind: "report",
+                  inReportsFolder: true,
+                },
+              ]
+            : [],
+        ),
+      "science.analysis.createTemplate": () => {
+        created = true
+        return { relPath: "reports/report.html" }
+      },
+      "science.analysis.openInteractive": () => ({ type: "html", url: "pi-lab-report://test" }),
+      "science.analysis.closeInteractive": () => undefined,
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "p1"),
+    )
+    fireEvent.click(await screen.findByTestId("analysis-new-html-report"))
+    const row = await within(await screen.findByTestId("analysis-reports-group")).findByTestId(
+      "analysis-file",
+    )
+    expect(row.dataset.relPath).toBe("reports/report.html")
+    await waitFor(() => expect(row.getAttribute("aria-pressed")).toBe("true"))
+  })
+
+  test("a missing results folder still lists the reports/ folder below the notice", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([
+          {
+            relPath: "reports/report.html",
+            name: "report.html",
+            kind: "report",
+            inReportsFolder: true,
+          },
+        ]),
+        exists: false,
+      }),
+    })
+    expect(await screen.findByTestId("analysis-results-missing")).toBeTruthy()
+    expect(
+      within(await screen.findByTestId("analysis-reports-group")).getByTestId("analysis-file"),
+    ).toBeTruthy()
   })
 
   test("says plainly when the results folder does not exist, and offers Change…", async () => {

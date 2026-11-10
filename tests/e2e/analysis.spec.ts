@@ -244,6 +244,36 @@ test("Analysis lists the results folder grouped by experiment and Change… pick
   await expect(group("exp-a")).toBeVisible()
 })
 
+test("a new HTML report is saved in reports/, listed in the Reports group and stays selected", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/", {
+    timeout: 30_000,
+  })
+  // No reports/ folder yet: no Reports group.
+  await expect(window.getByTestId("analysis-reports-group")).toHaveCount(0)
+
+  await window.getByTestId("analysis-new-html-report").click()
+  const row = window
+    .getByTestId("analysis-reports-group")
+    .locator('[data-testid="analysis-file"][data-rel-path="reports/report.html"]')
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await expect(row).toHaveAttribute("aria-pressed", "true")
+  await expect(window.getByTestId("analysis-preview-html")).toBeVisible({ timeout: 30_000 })
+  await expect(readFile(join(repoDir, "reports", "report.html"), "utf8")).resolves.toContain(
+    "Interactive report",
+  )
+  // The reports/ inside the results folder stays an experiment group.
+  await expect(
+    window.locator(
+      '[data-testid="analysis-experiment-group"][data-experiment="reports"] [data-rel-path="results/reports/interactive.html"]',
+    ),
+  ).toBeVisible()
+})
+
 test("interactive HTML is sandboxed while scripts, relative assets, and network fetch work", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })

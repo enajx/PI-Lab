@@ -230,10 +230,12 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
 
   // Re-group the filtered files by experiment (the folder inside the results
   // folder), sorted by name, with "No experiment" (files directly in the
-  // results folder) last. Within a group the ranking order is kept.
+  // results folder) last. Files of the project's reports/ folder form their own
+  // group after these. Within a group the ranking order is kept.
   const filteredGroups = useMemo(() => {
     const byExperiment = new Map<string | null, RankedAnalysisFile[]>()
     for (const rankedFile of filtered) {
+      if (rankedFile.file.inReportsFolder) continue
       const experiment = rankedFile.file.experiment
       const bucket = byExperiment.get(experiment)
       if (bucket) bucket.push(rankedFile)
@@ -245,6 +247,21 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
     const order: Array<string | null> = byExperiment.has(null) ? [...named, null] : named
     return order.map((experiment) => ({ experiment, files: byExperiment.get(experiment) ?? [] }))
   }, [filtered])
+  const filteredReports = useMemo(
+    () => filtered.filter((rankedFile) => rankedFile.file.inReportsFolder),
+    [filtered],
+  )
+  const fileRows = (files: RankedAnalysisFile[]) =>
+    files.map((rankedFile) => (
+      <FileRow
+        key={rankedFile.file.relPath}
+        file={rankedFile.file}
+        namePositions={rankedFile.namePositions}
+        pathPositions={rankedFile.pathPositions}
+        selected={rankedFile.file.relPath === selectedRelPath}
+        onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+      />
+    ))
 
   // Selecting a category clears any narrower sub-kind; "All" clears both.
   const selectCategory = (category: DataFileCategory | "all") => {
@@ -457,12 +474,23 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
                     >
                       {t("Could not read project data files:")} {listing.error.message}
                     </p>
-                  ) : resultsMissing ? (
+                  ) : resultsMissing && allFiles.length === 0 ? (
                     <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
                   ) : allFiles.length === 0 && !listing.isLoading ? (
                     <EmptyState />
                   ) : (
                     <div className="flex flex-col gap-3 p-3">
+                      {resultsMissing ? (
+                        <p
+                          data-testid="analysis-results-missing"
+                          className="rounded border border-border border-dashed px-2 py-1.5 text-muted-foreground text-xs"
+                        >
+                          {t("No {folder} folder in this project").replace(
+                            "{folder}",
+                            `${listing.data?.resultsFolder ?? ""}/`,
+                          )}
+                        </p>
+                      ) : null}
                       <div className="flex items-center justify-between px-1">
                         <span
                           data-testid="analysis-file-count"
@@ -499,18 +527,23 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
                               {group.files.length}
                             </span>
                           </div>
-                          {group.files.map((rankedFile) => (
-                            <FileRow
-                              key={rankedFile.file.relPath}
-                              file={rankedFile.file}
-                              namePositions={rankedFile.namePositions}
-                              pathPositions={rankedFile.pathPositions}
-                              selected={rankedFile.file.relPath === selectedRelPath}
-                              onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
-                            />
-                          ))}
+                          {fileRows(group.files)}
                         </div>
                       ))}
+
+                      {filteredReports.length > 0 ? (
+                        <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 px-1">
+                            <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+                              {t("Reports (reports/)")}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/50">
+                              {filteredReports.length}
+                            </span>
+                          </div>
+                          {fileRows(filteredReports)}
+                        </div>
+                      ) : null}
 
                       {filtered.length === 0 && allFiles.length > 0 ? (
                         <p
