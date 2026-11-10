@@ -1,7 +1,6 @@
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { APP_ICON_DEFAULT_SELECTION } from "../../../../../shared/appIcon"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
 import {
