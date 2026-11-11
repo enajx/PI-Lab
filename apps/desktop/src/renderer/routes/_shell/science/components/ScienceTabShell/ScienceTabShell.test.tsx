@@ -25,4 +25,37 @@ describe("ScienceTabShell", () => {
       true,
     )
   })
+
+  test("draws LaTeX in the title as the stylised logo", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders
+        client={createFakeTrpcClient({
+          "caffeine.status": () => ({ mode: "auto", scope: "system-only", held: true }),
+        })}
+        queryClient={queryClient}
+      >
+        <ScienceTabShell title="LaTeX Editor">Content</ScienceTabShell>
+      </AppProviders>,
+    )
+    const heading = await screen.findByRole("heading", { level: 1 })
+    expect(heading.querySelector('[data-testid="latex-logo"]')).not.toBeNull()
+  })
+
+  test("the page title in the top bar is not bold and keeps its size", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders
+        client={createFakeTrpcClient({
+          "caffeine.status": () => ({ mode: "auto", scope: "system-only", held: true }),
+        })}
+        queryClient={queryClient}
+      >
+        <ScienceTabShell title="Analysis">Content</ScienceTabShell>
+      </AppProviders>,
+    )
+    const heading = await screen.findByRole("heading", { level: 1, name: "Analysis" })
+    expect(heading.className).not.toMatch(/font-(semibold|bold|medium)/)
+    expect(heading.className).toContain("text-sm")
+  })
 })

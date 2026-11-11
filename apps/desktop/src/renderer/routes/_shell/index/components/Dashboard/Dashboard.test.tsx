@@ -100,6 +100,9 @@ describe("Dashboard", () => {
         .closest("header")
         ?.classList.contains("app-drag"),
     ).toBe(true)
+    const title = screen.getByRole("heading", { name: "Projects Dashboard" })
+    expect(title.className).not.toMatch(/font-(semibold|bold|medium)/)
+    expect(title.className).toContain("text-sm")
   })
 
   test("translates dashboard copy after choosing Norwegian", async () => {
@@ -107,7 +110,6 @@ describe("Dashboard", () => {
     renderDashboard({ "projects.list": () => [] })
 
     expect(await screen.findByRole("heading", { name: "Prosjektoversikt" })).toBeTruthy()
-    expect(screen.getByTestId("dashboard-empty").textContent).toBe("Ingen prosjekter ennå.")
   })
 
   test("renders a card per project with its name and a status badge", async () => {
@@ -216,6 +218,19 @@ describe("Dashboard", () => {
     )
     expect(screen.getByTestId("project-card-grid-item").getAttribute("data-card-span")).toBe("1x1")
     expect(screen.getByTestId("card-resize-handle")).toBeTruthy()
+  })
+
+  test("spaces the cards apart and leaves two card gaps of space above the grid", async () => {
+    renderDashboard({
+      "projects.list": () => [project("p1", "Anything")],
+      "workspaces.list": () => [],
+    })
+
+    await screen.findByTestId("project-card")
+    const grid = screen.getByTestId("dashboard-grid")
+    // gap-6 is 24px between cards; pt-12 is 48px, two gaps, above the first row.
+    expect(grid.className).toContain("gap-6")
+    expect(grid.parentElement?.className).toContain("pt-12")
   })
 
   test("a card renders its stored gradient as three baked, drifting layers", async () => {
@@ -368,6 +383,90 @@ describe("Dashboard", () => {
     expect((updates[0] as { dataUrl: string }).dataUrl).toMatch(/^data:image\/gif;base64,/)
   })
 
+  describe("moving cards", () => {
+    /** Lay the grid items out in one row, 250px apart (jsdom has no layout of its own). */
+    function layOutCardsInARow() {
+      const original = Element.prototype.getBoundingClientRect
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        const item = this.closest("[data-card-grid-item]")
+        if (!item) return original.call(this)
+        const items = [...document.querySelectorAll("[data-card-grid-item]")]
+        const left = items.indexOf(item) * 250
+        return DOMRect.fromRect({ x: left, y: 0, width: 220, height: 236 })
+      }
+      return () => {
+        Element.prototype.getBoundingClientRect = original
+      }
+    }
+
+    function cardNames(): string[] {
+      return screen.getAllByTestId("project-card-title").map((el) => el.textContent ?? "")
+    }
+
+    test("Space, an arrow key and Space move a card and save the new order of every project", async () => {
+      const restoreLayout = layOutCardsInARow()
+      let projects = [
+        project("p1", "Photon Drift"),
+        project("hidden", "Hidden One", null, null, 5),
+        project("p2", "Lattice QCD"),
+        project("p3", "Dark Matter"),
+      ]
+      const reorderCalls: unknown[] = []
+      renderDashboard({
+        "projects.list": () => projects,
+        "workspaces.list": () => [],
+        "projects.reorder": (input) => {
+          reorderCalls.push(input)
+          const { ids } = input as { ids: string[] }
+          projects = ids.flatMap((id) => projects.filter((row) => row.id === id))
+          return undefined
+        },
+      })
+      await waitFor(() =>
+        expect(cardNames()).toEqual(["Photon Drift", "Lattice QCD", "Dark Matter"]),
+      )
+
+      const first = screen.getAllByTestId("project-card-grid-item")[0] as HTMLElement
+      first.focus()
+      fireEvent.keyDown(first, { code: "Space", key: " " })
+      await waitFor(() => expect(first.getAttribute("aria-pressed")).toBe("true"))
+      fireEvent.keyDown(first, { code: "ArrowRight", key: "ArrowRight" })
+      fireEvent.keyDown(first, { code: "Space", key: " " })
+
+      await waitFor(() => expect(reorderCalls).toEqual([{ ids: ["p2", "hidden", "p1", "p3"] }]))
+      await waitFor(() =>
+        expect(cardNames()).toEqual(["Lattice QCD", "Photon Drift", "Dark Matter"]),
+      )
+      restoreLayout()
+    })
+
+    test("a click on a draggable card still opens the project", async () => {
+      const { router } = renderDashboard({
+        "projects.list": () => [project("p1", "Photon Drift"), project("p2", "Lattice QCD")],
+        "workspaces.list": () => [],
+      })
+      const image = (await screen.findAllByTestId("project-card-image"))[0] as HTMLElement
+      fireEvent.pointerDown(image, { button: 0, isPrimary: true, clientX: 10, clientY: 10 })
+      fireEvent.pointerUp(image, { button: 0, isPrimary: true, clientX: 10, clientY: 10 })
+      fireEvent.click(image)
+      await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1"))
+    })
+
+    test("the New project card cannot be picked up", async () => {
+      renderDashboard({
+        "projects.list": () => [project("p1", "Photon Drift")],
+        "workspaces.list": () => [],
+      })
+      await screen.findByTestId("project-card-grid-item")
+      expect(
+        screen.getByTestId("project-card-grid-item").getAttribute("aria-roledescription"),
+      ).toBe("sortable")
+      const shadowCard = screen.getByTestId("new-project-card")
+      expect(shadowCard.getAttribute("aria-roledescription")).toBeNull()
+      expect(shadowCard.querySelector("[aria-roledescription]")).toBeNull()
+    })
+  })
+
   test("using the resize handle does not navigate the project card", async () => {
     const { router } = renderDashboard({
       "projects.list": () => [project("p1", "Photon Drift")],
@@ -378,12 +477,11 @@ describe("Dashboard", () => {
     expect(router.state.location.pathname).toBe("/")
   })
 
-  test("shows the empty state when there are no projects", async () => {
+  test("with no projects it shows only the New project card, with no empty-state text", async () => {
     renderDashboard({ "projects.list": () => [] })
 
-    await waitFor(() => {
-      expect(screen.getByTestId("dashboard-empty")).toBeTruthy()
-    })
+    expect(await screen.findByRole("button", { name: "New project" })).toBeTruthy()
+    expect(screen.queryByTestId("dashboard-empty")).toBeNull()
     expect(screen.queryByTestId("project-card")).toBeNull()
     expect(screen.getByRole("button", { name: "New project" })).toBeTruthy()
     expect(screen.getByTestId("dashboard-grid").hidden).toBe(false)
@@ -453,7 +551,8 @@ describe("Dashboard", () => {
     projects = []
     await queryClient.invalidateQueries()
 
-    await screen.findByTestId("dashboard-empty")
+    await waitFor(() => expect(screen.queryByTestId("project-card")).toBeNull())
+    expect(screen.queryByTestId("dashboard-empty")).toBeNull()
     expect(screen.getByTestId("dashboard-grid").hidden).toBe(false)
     expect(screen.getByRole("button", { name: "New project" })).toBeTruthy()
     await waitFor(() => {

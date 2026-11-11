@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { FilePlus2, FolderOpen, FolderPlus, GitFork, Plus, X } from "lucide-react"
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { translateKnownError } from "../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
 import { useTRPC } from "../../../trpc/react"
@@ -94,7 +95,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     props.onAdded(project)
   }
   const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
-  const openProject = useMutation(trpc.projects.open.mutationOptions({ onSuccess }))
+  const openProject = useMutation(trpc.projects.add.mutationOptions({ onSuccess }))
   const cloneProject = useMutation(trpc.projects.clone.mutationOptions({ onSuccess }))
   const pickFile = useMutation(trpc.system.pickFile.mutationOptions())
   const templateProject = useMutation(
@@ -190,6 +191,10 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
       if (previewDelayRef.current) clearTimeout(previewDelayRef.current)
     }
   }, [])
+
+  // The plain menu also takes title bar clicks. It stays open on window blur, since the
+  // native folder picker it opens takes the focus.
+  usePopupDismiss(open && !setup && mode === "menu", [rootRef, menuRef], () => setOpen(false))
 
   useEffect(() => {
     if (!open || setup) return

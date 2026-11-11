@@ -14,7 +14,7 @@ import {
   projects,
 } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
-import { and, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { writeProjectAgentConfig } from "../../agents/projectConfig"
 import { GitError, isGitRepo, resolveDefaultBranch, runGit } from "../../git"
@@ -84,6 +84,18 @@ const openInput = z.object({
 })
 
 const idInput = z.object({ id: z.string().min(1) })
+
+const reorderInput = z.object({ ids: z.array(z.string().min(1)) })
+
+/**
+ * The saved project order: `sortOrder` ascending; rows without one go last, most
+ * recently opened first.
+ */
+const PROJECT_ORDER = [
+  sql`${projects.sortOrder} IS NULL`,
+  asc(projects.sortOrder),
+  desc(projects.lastOpenedAt),
+]
 
 const setArchivedInput = z.object({
   id: z.string().min(1),
@@ -185,6 +197,12 @@ const setMetadataInput = z.object({
         .optional(),
     })
     .nullable(),
+})
+
+/** Set the project stage, or clear it with `stage: null`. */
+const setStageInput = z.object({
+  id: z.string().min(1),
+  stage: z.enum(["planning", "experiments", "paperWriting", "submitted"]).nullable(),
 })
 
 const setDocumentPathInput = z.object({
@@ -304,6 +322,11 @@ async function upsertProjectFromDirectory(
     ? await saveDetailsAgent(ctx, { id: "", repoPath: root, agentConfig: null }, details)
     : {}
   const editedValues = details ? detailsValues(undefined, details) : {}
+  // A new project goes before all others in the saved order.
+  const first = db
+    .select({ value: sql<number | null>`MIN(${projects.sortOrder})` })
+    .from(projects)
+    .get()
   return db
     .insert(projects)
     .values({
@@ -312,6 +335,7 @@ async function upsertProjectFromDirectory(
       defaultBranch,
       taskRelPath: discoveredTaskPath,
       typeId: detectedType ?? "general",
+      sortOrder: first?.value == null ? 0 : first.value - 1,
       ...editedValues,
       ...agentValues,
     })
@@ -430,8 +454,55 @@ async function sampleDigitalRainCharacters(repoPath: string): Promise<string> {
   return characters || DIGITAL_RAIN_FALLBACK_CHARACTERS
 }
 
+/**
+ * Add `dir` (an existing folder) as a paper-only project: a project marked
+ * `paperOnly` whose folder is the paper (see the LaTeX Editor). CONFLICT when
+ * the folder is already in PI Lab, with the same messages as `projects.add`.
+ */
+export async function addPaperOnlyProject(ctx: AppContext, dir: string): Promise<Project> {
+  const root = await realpath(dir)
+  const existing = ctx.db.select().from(projects).where(eq(projects.repoPath, root)).get()
+  if (existing) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: existing.archivedAt
+        ? `"${existing.name}" is already in PI Lab, hidden. Use Show hidden on the Projects Dashboard to restore it.`
+        : `"${existing.name}" is already in PI Lab.`,
+    })
+  }
+  const project = await upsertProjectFromDirectory(ctx, root, false, undefined)
+  return ctx.db
+    .update(projects)
+    .set({ metadata: { paperOnly: true } })
+    .where(eq(projects.id, project.id))
+    .returning()
+    .get()
+}
+
 export const projectsRouter = router({
   ...planningProcedures,
+  /**
+   * Add a folder from the Add project menu. A folder that is already a project is
+   * refused (CONFLICT) and left as it is; `open` is the call that reopens one.
+   */
+  add: publicProcedure.input(openInput).mutation(async ({ ctx, input }): Promise<Project> => {
+    const requested = resolve(input.path)
+    const directory = await statOrNull(requested)
+    if (directory?.isDirectory()) {
+      const root = await realpath(requested)
+      const existing = ctx.db.select().from(projects).where(eq(projects.repoPath, root)).get()
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: existing.archivedAt
+            ? `"${existing.name}" is already in PI Lab, hidden. Use Show hidden on the Projects Dashboard to restore it.`
+            : `"${existing.name}" is already in PI Lab.`,
+        })
+      }
+    }
+    return upsertProjectFromDirectory(ctx, requested, true, input.details)
+  }),
+
   /**
    * Open a Git repository or ordinary local folder as a project.
    */
@@ -635,8 +706,8 @@ export const projectsRouter = router({
     }),
 
   /**
-   * Every opened project, most-recently-opened first. Archived rows remain in
-   * this public list so project-aware surfaces and direct routes keep working;
+   * Every opened project, in the saved order (`reorder`; a new project goes first).
+   * Archived rows remain in this public list so project-aware surfaces and direct routes keep working;
    * Dashboard and sidebar apply their own presentational visibility filter.
    */
   list: publicProcedure.query(({ ctx }): ProjectSummary[] => {
@@ -656,13 +727,14 @@ export const projectsRouter = router({
         typeId: projects.typeId,
         agentConfig: projects.agentConfig,
         sortIndex: projects.sortIndex,
+        sortOrder: projects.sortOrder,
         archivedAt: projects.archivedAt,
         createdAt: projects.createdAt,
         updatedAt: projects.updatedAt,
         lastOpenedAt: projects.lastOpenedAt,
       })
       .from(projects)
-      .orderBy(desc(projects.lastOpenedAt))
+      .orderBy(...PROJECT_ORDER)
       .all()
     return rows.map(({ hasThumbnail, ...fields }) => ({
       ...fields,
@@ -831,7 +903,21 @@ export const projectsRouter = router({
    * row so the dashboard re-renders from the mutation result.
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
-    const metadata: ProjectMetadata | null = input.metadata
+    // The linked paper folder, the paper auto-detect choice, the paper-only
+    // mark, the stage and the results folder are not part of the card dialog; keep them.
+    const stored = ctx.db
+      .select({ metadata: projects.metadata })
+      .from(projects)
+      .where(eq(projects.id, input.id))
+      .get()?.metadata
+    const kept: ProjectMetadata = {}
+    if (stored?.paper !== undefined) kept.paper = stored.paper
+    if (stored?.stage !== undefined) kept.stage = stored.stage
+    if (stored?.resultsFolder !== undefined) kept.resultsFolder = stored.resultsFolder
+    if (stored?.paperAutoDetect !== undefined) kept.paperAutoDetect = stored.paperAutoDetect
+    if (stored?.paperOnly !== undefined) kept.paperOnly = stored.paperOnly
+    const metadata: ProjectMetadata | null =
+      Object.keys(kept).length === 0 ? input.metadata : { ...input.metadata, ...kept }
     const row = ctx.db
       .update(projects)
       .set({ metadata, updatedAt: Date.now() })
@@ -841,6 +927,25 @@ export const projectsRouter = router({
     if (!row) {
       throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
     }
+    return row
+  }),
+
+  /**
+   * Set the project stage shown on the stage row (Planning, Experiments, Paper
+   * writing, Submitted), or clear it with `stage: null`, keeping the other metadata.
+   */
+  setStage: publicProcedure.input(setStageInput).mutation(({ ctx, input }): Project => {
+    const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+    if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+    const { stage: _old, ...rest } = project.metadata ?? {}
+    const metadata: ProjectMetadata = input.stage === null ? rest : { ...rest, stage: input.stage }
+    const row = ctx.db
+      .update(projects)
+      .set({ metadata, updatedAt: Date.now() })
+      .where(eq(projects.id, input.id))
+      .returning()
+      .get()
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
     return row
   }),
 
@@ -871,9 +976,17 @@ export const projectsRouter = router({
       const project = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
       const agentValues = await saveDetailsAgent(ctx, project, input.details)
+      // Re-read the row after the await: metadata written meanwhile (stage, sync
+      // time, results folder) must not be lost; only the detail fields change.
+      const current = ctx.db
+        .select({ metadata: projects.metadata })
+        .from(projects)
+        .where(eq(projects.id, project.id))
+        .get()
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
       const updated = ctx.db
         .update(projects)
-        .set({ ...detailsValues(project, input.details), ...agentValues, updatedAt: Date.now() })
+        .set({ ...detailsValues(current, input.details), ...agentValues, updatedAt: Date.now() })
         .where(eq(projects.id, project.id))
         .returning()
         .get()
@@ -932,7 +1045,32 @@ export const projectsRouter = router({
         .get()
     }),
 
-  /** Bump `lastOpenedAt` so the project rises in "recent" ordering. */
+  /**
+   * Save the project order from a Dashboard card drag. `ids` come first in the given
+   * order; projects left out follow in their current order. An unknown id is refused
+   * and nothing changes.
+   */
+  reorder: publicProcedure.input(reorderInput).mutation(({ ctx, input }): void => {
+    ctx.db.transaction((tx) => {
+      const current = tx
+        .select({ id: projects.id })
+        .from(projects)
+        .orderBy(...PROJECT_ORDER)
+        .all()
+      const known = new Set(current.map((row) => row.id))
+      const missing = input.ids.find((id) => !known.has(id))
+      if (missing !== undefined) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No project ${missing}` })
+      }
+      const listed = new Set(input.ids)
+      const order = [...input.ids, ...current.map((row) => row.id).filter((id) => !listed.has(id))]
+      order.forEach((id, index) => {
+        tx.update(projects).set({ sortOrder: index }).where(eq(projects.id, id)).run()
+      })
+    })
+  }),
+
+  /** Record when the project was last opened. This does not change the saved project order. */
   touch: publicProcedure.input(idInput).mutation(({ ctx, input }): Project => {
     const row = ctx.db
       .update(projects)

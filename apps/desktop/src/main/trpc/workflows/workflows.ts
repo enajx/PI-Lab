@@ -23,11 +23,14 @@ import type {
   StartedNonInteractiveProcess,
 } from "../../automations/nonInteractiveRunner"
 import { computeGitStateHash, isGitRepo } from "../../git"
+import { conflictKinds, isMerging } from "../../git/remote"
+import { requireSyncEnabled } from "../../paper/overleaf"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
 import { ClaudeStreamParser } from "./claudeStreamParser"
 import { planResearchPrompt } from "./planResearchSkill"
+import { runningKey, runningProjectWorkflowTasks, runningTasks } from "./running"
 
 /**
  * Non-interactive background project workflows (plan "Project cards / panels /
@@ -46,20 +49,9 @@ import { planResearchPrompt } from "./planResearchSkill"
 /** Hard wall-clock cap for a single workflow run; a hang past this is a failure. */
 const WORKFLOW_TIMEOUT_MS = 180_000
 
-/**
- * In-memory "currently running" tracker, keyed by `${projectId}:${task}`. The DB
- * only ever stores the last COMPLETED result, so this is the sole source of the
- * transient running flag `status` reports. It lives for the process lifetime, so
- * on startup nothing is running — exactly the desired reset.
- */
-const runningTasks = new Set<string>()
-const runningKey = (projectId: string, task: WorkflowTask): string => `${projectId}:${task}`
-
 /** Keep project records until background completion has been persisted. */
 export function hasRunningProjectWorkflow(projectId: string): boolean {
-  return ["summary", "fetch-experiments", "plan-research"].some((task) =>
-    runningTasks.has(`${projectId}:${task}`),
-  )
+  return runningProjectWorkflowTasks(projectId).length > 0
 }
 
 /**
@@ -231,6 +223,21 @@ async function scaffoldFetchExperimentsSkill(repoPath: string): Promise<void> {
   await writeTextFile(target, FETCH_EXPERIMENTS_SKILL_PLACEHOLDER)
 }
 
+/**
+ * Prompt for "Ask agent to merge" on the LaTeX Editor page. The agent runs in
+ * the paper folder and only edits the conflicted files; the user reviews the
+ * result before PI Lab commits and pushes it.
+ */
+function latexMergePrompt(files: string[]): string {
+  return `This folder is a LaTeX paper with a Git merge in progress. These files contain Git conflict markers (<<<<<<<, =======, >>>>>>>):
+
+${files.map((file) => `- ${file}`).join("\n")}
+
+Resolve the conflict markers in these files by combining both sides sensibly, so that no conflict markers remain. Keep the LaTeX valid. Do not commit. Do not run git commands that change history (no commit, merge, rebase, reset, checkout or push).
+
+When finished, print a short plain-text summary of how you combined each file as your last output. This printed text is shown to the user in a popup, so keep it self-contained and free of tool chatter.`
+}
+
 /** The base prompt for a task, with any extra fetch instructions appended. */
 function promptForTask(task: WorkflowTask, instructions: string | undefined): string {
   if (task === "summary") return PROJECT_SUMMARY_PROMPT
@@ -250,6 +257,8 @@ export interface ProjectWorkflowRecord {
   lastCheckedAt: number
   /** Failure detail from the last run, or null on success / never-run. */
   errorMessage: string | null
+  /** Label of the agent that wrote `result` (e.g. "Claude Code"); null when unknown or on error. */
+  agentLabel: string | null
 }
 
 /** Result of {@link runProjectWorkflow}: the record plus whether it was cached. */
@@ -265,6 +274,14 @@ export interface RunProjectWorkflowInput {
   force?: boolean
   /** Extra instructions appended to the fetch-experiments prompt (from Settings). */
   instructions?: string
+}
+
+/** Where and on what a run works: the project repo, or the paper folder for latex-merge. */
+interface WorkflowTarget {
+  /** Working directory of the agent process. */
+  cwd: string
+  /** Conflicted files (relative to `cwd`) for latex-merge; empty for other tasks. */
+  conflictedFiles: string[]
 }
 
 /** Read the stored row for one (project, task), if any. */
@@ -287,7 +304,13 @@ function upsertRow(
   db: PiLabDatabase,
   projectId: string,
   task: WorkflowTask,
-  values: { result: string; inputHash: string; lastCheckedAt: number; errorMessage: string | null },
+  values: {
+    result: string
+    inputHash: string
+    lastCheckedAt: number
+    errorMessage: string | null
+    agentLabel: string | null
+  },
 ): ProjectWorkflowRun {
   const now = Date.now()
   return db
@@ -309,7 +332,14 @@ function toRecord(row: ProjectWorkflowRun, running: boolean): ProjectWorkflowRec
     inputHash: row.inputHash,
     lastCheckedAt: row.lastCheckedAt,
     errorMessage: row.errorMessage,
+    agentLabel: row.agentLabel,
   }
+}
+
+/** A finished run's captured text and the label of the agent that produced it. */
+interface WorkflowOutput {
+  result: string
+  agentLabel: string
 }
 
 /**
@@ -324,13 +354,16 @@ async function executeWorkflow(
   input: RunProjectWorkflowInput,
   stream: RunStream,
   inputHash: string,
-): Promise<string> {
+  target: WorkflowTarget,
+): Promise<WorkflowOutput> {
   if (input.task === "fetch-experiments") await scaffoldFetchExperimentsSkill(project.repoPath)
 
   const prompt =
     input.task === "plan-research"
       ? await planResearchPrompt(project.repoPath, ctx.skillsHomeDir, ctx.bundledSkillsDir)
-      : promptForTask(input.task, input.instructions)
+      : input.task === "latex-merge"
+        ? latexMergePrompt(target.conflictedFiles)
+        : promptForTask(input.task, input.instructions)
 
   // The project's remembered agent choice, falling back to the catalog default.
   const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
@@ -388,7 +421,7 @@ async function executeWorkflow(
     },
     command,
     args,
-    cwd: project.repoPath,
+    cwd: target.cwd,
     env: { ...launchEnvironment, ...agent.env },
     timeoutMs: WORKFLOW_TIMEOUT_MS,
     onOutput: (chunk, streamName) => {
@@ -403,7 +436,7 @@ async function executeWorkflow(
   })
   stream.process = started
   const result = await started.completion
-  return workflowResult(agent.label, isClaude, result, parser)
+  return { result: workflowResult(agent.label, isClaude, result, parser), agentLabel: agent.label }
 }
 
 /** Decode the retained final output as well as live chunks, including after reconnect. */
@@ -444,6 +477,7 @@ async function executeAndPersist(
   currentHash: string,
   key: string,
   stream: RunStream,
+  target: WorkflowTarget,
 ): Promise<void> {
   return persistWorkflow(
     ctx,
@@ -452,7 +486,7 @@ async function executeAndPersist(
     currentHash,
     key,
     stream,
-    executeWorkflow(ctx, project, input, stream, currentHash),
+    executeWorkflow(ctx, project, input, stream, currentHash, target),
   )
 }
 
@@ -464,10 +498,10 @@ async function persistWorkflow(
   currentHash: string,
   key: string,
   stream: RunStream,
-  completion: Promise<string>,
+  completion: Promise<WorkflowOutput>,
 ): Promise<void> {
   try {
-    const result = await completion
+    const { result, agentLabel } = await completion
     if (
       !ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).get()
     ) {
@@ -478,6 +512,7 @@ async function persistWorkflow(
       inputHash: currentHash,
       lastCheckedAt: Date.now(),
       errorMessage: null,
+      agentLabel,
     })
     finishStream(stream, { kind: "done", result })
   } catch (error) {
@@ -490,6 +525,7 @@ async function persistWorkflow(
         inputHash: currentHash,
         lastCheckedAt: Date.now(),
         errorMessage: message,
+        agentLabel: null,
       })
     }
     finishStream(stream, { kind: "error", message })
@@ -508,7 +544,7 @@ export function restoreProjectWorkflow(
   const metadata = z
     .object({
       projectId: z.string(),
-      task: z.enum(["summary", "fetch-experiments", "plan-research"]),
+      task: z.enum(["summary", "fetch-experiments", "plan-research", "latex-merge"]),
       inputHash: z.string(),
       agentLabel: z.string(),
       agentId: z.string(),
@@ -527,10 +563,48 @@ export function restoreProjectWorkflow(
     metadata.inputHash,
     key,
     stream,
-    process.completion.then((result) =>
-      workflowResult(metadata.agentLabel, metadata.agentId === "claude-code", result, null),
+    process.completion.then(
+      (result): WorkflowOutput => ({
+        result: workflowResult(
+          metadata.agentLabel,
+          metadata.agentId === "claude-code",
+          result,
+          null,
+        ),
+        agentLabel: metadata.agentLabel,
+      }),
     ),
   )
+}
+
+/**
+ * Resolve where a run works. latex-merge runs in the linked paper folder and
+ * needs Sync on for the paper and a merge in progress there with at least one
+ * conflicted text file (the only files it is given); other tasks run in the
+ * project repo.
+ */
+async function workflowTarget(project: Project, task: WorkflowTask): Promise<WorkflowTarget> {
+  if (task !== "latex-merge") return { cwd: project.repoPath, conflictedFiles: [] }
+  const paper = project.metadata?.paper
+  if (!paper) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "This project has no paper folder",
+    })
+  }
+  requireSyncEnabled(paper.syncEnabled)
+  const dir = paper.dir
+  // Only text conflicts go to the agent; figures and modify/delete conflicts
+  // are settled by the user's per-file choice in the review.
+  const conflicts = (await isGitRepo(dir)) && (await isMerging(dir)) ? await conflictKinds(dir) : []
+  const files = conflicts.filter((file) => file.kind === "text").map((file) => file.relPath)
+  if (files.length === 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The paper folder has no text file in conflict for the agent to merge",
+    })
+  }
+  return { cwd: dir, conflictedFiles: files }
 }
 
 /**
@@ -554,7 +628,8 @@ export async function runProjectWorkflow(
   if (!project) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
   }
-  const needsGit = input.task !== "plan-research"
+  const target = await workflowTarget(project, input.task)
+  const needsGit = input.task !== "plan-research" && input.task !== "latex-merge"
   if (needsGit && !(await isGitRepo(project.repoPath))) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
@@ -585,6 +660,7 @@ export async function runProjectWorkflow(
     inputHash: currentHash,
     lastCheckedAt: stored?.lastCheckedAt ?? 0,
     errorMessage: null,
+    agentLabel: stored?.agentLabel ?? null,
   }
   // Idempotent: a click on an already-running control returns the running record
   // without starting a second process (or clobbering the live stream).
@@ -592,12 +668,13 @@ export async function runProjectWorkflow(
 
   runningTasks.add(key)
   const stream = createStream(key)
-  void executeAndPersist(ctx, project, input, currentHash, key, stream)
+  void executeAndPersist(ctx, project, input, currentHash, key, stream, target)
   return runningRecord
 }
 
 /** Both tasks' current state for a project (null when never run and not running). */
 export interface ProjectWorkflowStatus {
+  latexMerge: ProjectWorkflowRecord | null
   planResearch: ProjectWorkflowRecord | null
   summary: ProjectWorkflowRecord | null
   fetchExperiments: ProjectWorkflowRecord | null
@@ -612,7 +689,14 @@ function readStatus(
   const row = readRow(ctx.db, projectId, task)
   if (!row)
     return running
-      ? { running, result: "", inputHash: "", lastCheckedAt: 0, errorMessage: null }
+      ? {
+          running,
+          result: "",
+          inputHash: "",
+          lastCheckedAt: 0,
+          errorMessage: null,
+          agentLabel: null,
+        }
       : null
   return toRecord(row, running)
 }
@@ -620,13 +704,14 @@ function readStatus(
 /** Current status of both background workflows for a project. */
 export function projectWorkflowStatus(ctx: AppContext, projectId: string): ProjectWorkflowStatus {
   return {
+    latexMerge: readStatus(ctx, projectId, "latex-merge"),
     planResearch: readStatus(ctx, projectId, "plan-research"),
     summary: readStatus(ctx, projectId, "summary"),
     fetchExperiments: readStatus(ctx, projectId, "fetch-experiments"),
   }
 }
 
-const taskSchema = z.enum(["summary", "fetch-experiments", "plan-research"])
+const taskSchema = z.enum(["summary", "fetch-experiments", "plan-research", "latex-merge"])
 
 export const workflowsRouter = router({
   /**

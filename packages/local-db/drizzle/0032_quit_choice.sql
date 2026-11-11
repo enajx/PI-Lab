@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `quit_choice` text DEFAULT 'ask' NOT NULL;

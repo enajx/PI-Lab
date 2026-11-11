@@ -51,6 +51,7 @@ async function fixture(name: string): Promise<{ root: string; project: Project }
       typeId: "general",
       agentConfig: null,
       sortIndex: 0,
+      sortOrder: null,
       archivedAt: null,
       createdAt: 1,
       updatedAt: 1,

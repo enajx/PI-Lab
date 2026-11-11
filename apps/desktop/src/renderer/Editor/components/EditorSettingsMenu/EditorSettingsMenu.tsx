@@ -1,10 +1,12 @@
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { Check, Settings2 } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useId, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { useTranslate } from "../../../i18n/language"
+import { useTheme } from "../../../providers/ThemeProvider"
 import { rememberCurrentSettingsReturnRoute } from "../../../routes/_shell/-settingsReturnRoute"
-import { allEditorThemes, DEFAULT_EDITOR_THEME_ID } from "../editorThemes"
+import { allEditorThemes, defaultEditorThemeId } from "../editorThemes"
 
 interface EditorSettingsMenuProps {
   /** Current editor preferences (drives the toggle states). */
@@ -33,27 +35,13 @@ export function EditorSettingsMenu({ settings, onChange }: EditorSettingsMenuPro
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const labelId = useId()
+  const { resolvedMode } = useTheme()
   const themes = allEditorThemes(settings.customEditorThemes ?? [])
   const selectedTheme = themes.some((theme) => theme.id === settings.editorTheme)
     ? settings.editorTheme
-    : DEFAULT_EDITOR_THEME_ID
+    : defaultEditorThemeId(resolvedMode)
 
-  // Close on outside click or Escape so the menu behaves like a real popover.
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   return (
     <div ref={rootRef} className="relative">

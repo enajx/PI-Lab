@@ -1,11 +1,24 @@
 import type { Project } from "@pi-lab/local-db"
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, test, vi } from "vitest"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
-import { ScienceAnalysis } from "./ScienceAnalysis"
+import type { FocusSessionRequest } from "../ScienceSessionPanel"
+
+// The router is a fake (mocked): the picker's address change is asserted as a call.
+const mocks = vi.hoisted(() => ({ navigate: vi.fn() }))
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => mocks.navigate }))
+
+// xterm needs layout APIs jsdom lacks, so the terminal is a stub that shows its session id.
+vi.mock("../../../../../Terminal", () => ({
+  Terminal: ({ inputKind, sessionId }: { inputKind: "agent" | "terminal"; sessionId?: string }) => (
+    <div data-testid="terminal" data-input-kind={inputKind} data-session-id={sessionId} />
+  ),
+}))
+
+const { ScienceAnalysis } = await import("./ScienceAnalysis")
 
 /**
  * Component test for the Analysis science tab. Renders plain DOM
@@ -14,12 +27,16 @@ import { ScienceAnalysis } from "./ScienceAnalysis"
  * no-projects states — never copy text or shadcn classes.
  */
 
-function renderAnalysis(handlers: FakeHandlers, initialProjectId?: string) {
+function renderAnalysis(
+  handlers: FakeHandlers,
+  initialProjectId?: string,
+  focusSession?: FocusSessionRequest,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient(handlers)
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceAnalysis initialProjectId={initialProjectId} />
+      <ScienceAnalysis initialProjectId={initialProjectId} focusSession={focusSession ?? null} />
     </AppProviders>,
   )
 }
@@ -38,6 +55,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     typeId: "general",
     agentConfig: null,
     sortIndex: 0,
+    sortOrder: null,
     archivedAt: null,
     createdAt: 0,
     updatedAt: 0,
@@ -46,7 +64,15 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
   }
 }
 
-function listing(files: Array<{ relPath: string; name: string; kind: string }>) {
+function listing(
+  files: Array<{
+    relPath: string
+    name: string
+    kind: string
+    experiment?: string | null
+    inReportsFolder?: boolean
+  }>,
+) {
   // Group the way the router does (canonical kind order isn't asserted here).
   const byKind = new Map<string, typeof files>()
   for (const f of files) {
@@ -57,14 +83,29 @@ function listing(files: Array<{ relPath: string; name: string; kind: string }>) 
   return {
     groups: [...byKind.entries()].map(([kind, fs]) => ({
       kind,
-      files: fs.map((f) => ({ ...f, size: 10, mtime: 0 })),
+      files: fs.map((f) => ({
+        ...f,
+        experiment: f.experiment ?? null,
+        inReportsFolder: f.inReportsFolder ?? false,
+        size: 10,
+        mtime: 0,
+      })),
     })),
     total: files.length,
     truncated: false,
+    partial: false,
+    skipped: [],
+    resultsFolder: "results",
+    overridden: false,
+    exists: true,
   }
 }
 
 describe("ScienceAnalysis", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    mocks.navigate.mockReset()
+  })
   afterEach(() => setInterfaceLanguage("en"))
 
   test("opens the project requested by its dashboard card", async () => {
@@ -82,8 +123,14 @@ describe("ScienceAnalysis", () => {
     await waitFor(() =>
       expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "selected"),
     )
-    expect(listFiles).toHaveBeenCalledWith({ projectId: "selected" })
-    expect(listFiles).not.toHaveBeenCalledWith({ projectId: "first" })
+    expect(listFiles).toHaveBeenCalledWith({
+      projectId: "selected",
+      defaultResultsFolder: "results",
+    })
+    expect(listFiles).not.toHaveBeenCalledWith({
+      projectId: "first",
+      defaultResultsFolder: "results",
+    })
   })
 
   test("shows Analysis guidance in the selected interface language", async () => {
@@ -143,7 +190,8 @@ describe("ScienceAnalysis", () => {
       ),
     )
     fireEvent.click(await screen.findByTestId("workflow-result-close"))
-    fireEvent.change(screen.getByTestId("analysis-project-select"), { target: { value: "plain" } })
+    fireEvent.click(screen.getByTestId("analysis-project-select"))
+    fireEvent.click(screen.getByRole("option", { name: "Plain" }))
     await waitFor(() =>
       expect(screen.getByTestId("analysis-fetch-experiments")).toHaveProperty("disabled", true),
     )
@@ -152,6 +200,217 @@ describe("ScienceAnalysis", () => {
   test("disables fetching when no project is selected", async () => {
     renderAnalysis({ "projects.list": () => [] })
     expect(await screen.findByTestId("analysis-fetch-experiments")).toHaveProperty("disabled", true)
+  })
+
+  test("shows the results folder above the search and groups files by experiment", async () => {
+    window.localStorage.setItem("pi-lab.experiments.resultsFolder", "outputs")
+    const listFiles = vi.fn(() => ({
+      ...listing([
+        { relPath: "outputs/summary.json", name: "summary.json", kind: "json", experiment: null },
+        { relPath: "outputs/exp-b/log.txt", name: "log.txt", kind: "text", experiment: "exp-b" },
+        { relPath: "outputs/exp-a/plot.png", name: "plot.png", kind: "image", experiment: "exp-a" },
+      ]),
+      resultsFolder: "outputs",
+    }))
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": listFiles,
+    })
+
+    const folder = await screen.findByTestId("analysis-results-folder")
+    await waitFor(() =>
+      expect(within(folder).getByTestId("analysis-results-folder-path").textContent).toBe(
+        "outputs/",
+      ),
+    )
+    // The default folder is in use, so there is nothing to reset.
+    expect(within(folder).queryByTestId("analysis-results-folder-reset")).toBeNull()
+    expect(listFiles).toHaveBeenCalledWith({ projectId: "p1", defaultResultsFolder: "outputs" })
+    // The folder field comes before the search bar.
+    expect(
+      folder.compareDocumentPosition(screen.getByTestId("analysis-search")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(3))
+    const groups = screen.getAllByTestId("analysis-experiment-group")
+    expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual([
+      "exp-a",
+      "exp-b",
+      "",
+    ])
+    expect(within(groups[2] as HTMLElement).getByText("No experiment")).toBeTruthy()
+    expect(
+      within(groups[0] as HTMLElement)
+        .getAllByTestId("analysis-file")
+        .map((row) => row.getAttribute("data-rel-path")),
+    ).toEqual(["outputs/exp-a/plot.png"])
+
+    // The category filters and the search still narrow the results files.
+    fireEvent.click(screen.getByTestId("analysis-category-text"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "outputs/exp-b/log.txt",
+    ])
+    fireEvent.click(screen.getByTestId("analysis-category-all"))
+    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "plot.png" } })
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "outputs/exp-a/plot.png",
+    ])
+    expect(screen.getAllByTestId("analysis-experiment-group")).toHaveLength(1)
+  })
+
+  test("lists the project's reports/ folder as its own group after the experiments", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          {
+            relPath: "reports/report.html",
+            name: "report.html",
+            kind: "report",
+            inReportsFolder: true,
+          },
+          { relPath: "results/exp-a/log.txt", name: "log.txt", kind: "text", experiment: "exp-a" },
+          { relPath: "results/top.json", name: "top.json", kind: "json" },
+        ]),
+    })
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(3))
+    const groups = screen.getAllByTestId("analysis-experiment-group")
+    expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual(["exp-a", ""])
+    const reports = screen.getByTestId("analysis-reports-group")
+    expect(within(reports).getByText("Reports (reports/)")).toBeTruthy()
+    expect(
+      within(reports)
+        .getAllByTestId("analysis-file")
+        .map((row) => row.dataset.relPath),
+    ).toEqual(["reports/report.html"])
+    // The reports group comes after the experiment groups.
+    expect(
+      (groups[1] as HTMLElement).compareDocumentPosition(reports) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  test("a new HTML report is listed and stays selected", async () => {
+    let created = false
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing(
+          created
+            ? [
+                {
+                  relPath: "reports/report.html",
+                  name: "report.html",
+                  kind: "report",
+                  inReportsFolder: true,
+                },
+              ]
+            : [],
+        ),
+      "science.analysis.createTemplate": () => {
+        created = true
+        return { relPath: "reports/report.html" }
+      },
+      "science.analysis.openInteractive": () => ({ type: "html", url: "pi-lab-report://test" }),
+      "science.analysis.closeInteractive": () => undefined,
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "p1"),
+    )
+    fireEvent.click(await screen.findByTestId("analysis-new-html-report"))
+    const row = await within(await screen.findByTestId("analysis-reports-group")).findByTestId(
+      "analysis-file",
+    )
+    expect(row.dataset.relPath).toBe("reports/report.html")
+    await waitFor(() => expect(row.getAttribute("aria-pressed")).toBe("true"))
+  })
+
+  test("a missing results folder still lists the reports/ folder below the notice", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([
+          {
+            relPath: "reports/report.html",
+            name: "report.html",
+            kind: "report",
+            inReportsFolder: true,
+          },
+        ]),
+        exists: false,
+      }),
+    })
+    expect(await screen.findByTestId("analysis-results-missing")).toBeTruthy()
+    expect(
+      within(await screen.findByTestId("analysis-reports-group")).getByTestId("analysis-file"),
+    ).toBeTruthy()
+  })
+
+  test("says plainly when the results folder does not exist, and offers Change…", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({ ...listing([]), exists: false }),
+    })
+    const missing = await screen.findByTestId("analysis-results-missing")
+    expect(missing.textContent).toContain("No results/ folder in this project")
+    expect(screen.queryByTestId("science-analysis-empty")).toBeNull()
+    expect(screen.getByTestId("analysis-results-folder-change")).toBeTruthy()
+  })
+
+  test("Change… saves a picked folder for the project, and Reset to default clears it", async () => {
+    let own: string | null = null
+    const setResultsFolder = vi.fn((input: unknown) => {
+      const dir = (input as { dir: string | null }).dir
+      own = dir === null ? null : "runs/out"
+      return { resultsFolder: own }
+    })
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([]),
+        resultsFolder: own ?? "results",
+        overridden: own !== null,
+        exists: own !== null,
+      }),
+      "system.pickDirectory": () => "/repos/alpha/runs/out",
+      "science.analysis.setResultsFolder": setResultsFolder,
+    })
+
+    fireEvent.click(await screen.findByTestId("analysis-results-folder-change"))
+    await waitFor(() =>
+      expect(setResultsFolder).toHaveBeenCalledWith({
+        projectId: "p1",
+        dir: "/repos/alpha/runs/out",
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-results-folder-path").textContent).toBe("runs/out/"),
+    )
+
+    fireEvent.click(screen.getByTestId("analysis-results-folder-reset"))
+    await waitFor(() =>
+      expect(setResultsFolder).toHaveBeenLastCalledWith({ projectId: "p1", dir: null }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("analysis-results-folder-path").textContent).toBe("results/"),
+    )
+    expect(screen.queryByTestId("analysis-results-folder-reset")).toBeNull()
+  })
+
+  test("shows why a picked folder was refused", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => listing([]),
+      "system.pickDirectory": () => "/elsewhere",
+      "science.analysis.setResultsFolder": async () => {
+        throw new Error("The results folder must be inside the project: /elsewhere")
+      },
+    })
+    fireEvent.click(await screen.findByTestId("analysis-results-folder-change"))
+    expect((await screen.findByTestId("analysis-results-folder-error")).textContent).toContain(
+      "must be inside the project",
+    )
   })
 
   test("renders a row per discovered file", async () => {
@@ -617,7 +876,7 @@ describe("ScienceAnalysis", () => {
     expect(screen.queryByTestId("analysis-subkind-filters")).toBeNull()
   })
 
-  test("the project selector sits in the left column and switches the project", async () => {
+  test("the project picker sits in the top bar and switches and remembers the project", async () => {
     renderAnalysis({
       "projects.list": () => [
         project({ id: "p1", name: "alpha" }),
@@ -629,15 +888,95 @@ describe("ScienceAnalysis", () => {
           : listing([{ relPath: "b.json", name: "b.json", kind: "json" }]),
     })
 
-    const select = (await screen.findByTestId("analysis-project-select")) as HTMLSelectElement
+    const select = (await within(screen.getByRole("banner")).findByTestId(
+      "analysis-project-select",
+    )) as HTMLButtonElement
     await waitFor(() => {
       expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("a.csv")
     })
+    fireEvent.click(select)
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "alpha",
+      "beta",
+    ])
 
-    fireEvent.change(select, { target: { value: "p2" } })
+    fireEvent.click(screen.getByRole("option", { name: "beta" }))
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/analysis",
+      search: { projectId: "p2" },
+      replace: true,
+    })
+    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p2")
     await waitFor(() => {
       expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("b.json")
     })
+  })
+
+  test("arriving with ?projectId remembers it; the picker then wins", async () => {
+    renderAnalysis(
+      {
+        "projects.list": () => [
+          project({ id: "p1", name: "alpha" }),
+          project({ id: "p2", name: "beta" }),
+        ],
+        "science.analysis.listFiles": () => listing([]),
+      },
+      "p2",
+    )
+    const select = (await screen.findByTestId("analysis-project-select")) as HTMLButtonElement
+    await waitFor(() => expect(select.value).toBe("p2"))
+    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p2")
+
+    fireEvent.click(select)
+    fireEvent.click(screen.getByRole("option", { name: "alpha" }))
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/analysis",
+      search: { projectId: "p1" },
+      replace: true,
+    })
+    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p1")
+  })
+
+  test("arriving with an agent to focus opens it as the active tab of the session panel", async () => {
+    renderAnalysis(
+      {
+        "projects.list": () => [
+          project({ id: "p1", name: "alpha" }),
+          project({ id: "p2", name: "beta" }),
+        ],
+        "science.analysis.listFiles": () => listing([]),
+        "workspaces.ensureMain": () => ({ id: "ws-2" }),
+        "settings.get": () => ({ agents: { defaultAgentId: "claude-code" } }),
+        "agents.list": () => [],
+        "agents.projectChoice": () => ({ agentId: null, storage: "app" }),
+        "terminal.list": () => [{ id: "agent-9", alive: true }],
+        "files.tree": () => [],
+      },
+      "p2",
+      { sessionId: "agent-9", agentId: "claude-code", agentLabel: "Claude Code" },
+    )
+    const terminal = await screen.findByTestId("terminal")
+    expect(terminal.getAttribute("data-session-id")).toBe("agent-9")
+    expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
+    const tab = screen.getByTestId("central-tab")
+    expect(tab.getAttribute("data-active")).toBe("true")
+    expect(tab.textContent).toContain("Claude Code")
+  })
+
+  test("opens on the remembered project", async () => {
+    window.localStorage.setItem("pi-lab.analysis.project", "p2")
+    const listFiles = vi.fn(() => listing([]))
+    renderAnalysis({
+      "projects.list": () => [
+        project({ id: "p1", name: "alpha" }),
+        project({ id: "p2", name: "beta" }),
+      ],
+      "science.analysis.listFiles": listFiles,
+    })
+    const select = (await screen.findByTestId("analysis-project-select")) as HTMLButtonElement
+    await waitFor(() => expect(select.value).toBe("p2"))
+    expect(listFiles).toHaveBeenCalledWith({ projectId: "p2", defaultResultsFolder: "results" })
+    expect(listFiles).not.toHaveBeenCalledWith({ projectId: "p1", defaultResultsFolder: "results" })
   })
 
   test("shows the empty state when the project has no data files", async () => {

@@ -1,8 +1,11 @@
-import { join } from "node:path"
+import { realpath } from "node:fs/promises"
+import { isAbsolute, join, relative, sep } from "node:path"
 import {
+  type AgentSessionOrigin,
   getAgentSettingsOrDefaults,
   getSettingsOrDefaults,
   type PiLabDatabase,
+  type Project,
   projects,
   type Workspace,
   workspaces,
@@ -14,11 +17,15 @@ import { observable } from "@trpc/server/observable"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
 import type { LiveAgentStatus } from "../../../shared/agentStatus"
+import type { ProjectAgentRow } from "../../../shared/projectAgents"
 import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { isGitRepo } from "../../git"
 import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
+import { discoverSkills } from "../science/skills/skills"
 import { publicProcedure, router } from "../trpc"
+import { findSkill } from "../workflows/planResearchSkill"
+import { runningProjectWorkflowTasks } from "../workflows/running"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
 
 /**
@@ -37,9 +44,14 @@ import { createWorkspace, workspaceWorkingDir } from "../workspaces"
  * logic here is the policy and the live-session bookkeeping.
  */
 
+/** The views an agent can be started from. */
+const originSchema = z.enum(["project", "latex", "analysis", "tasks", "routine"])
+
 const startInput = z.object({
   projectId: z.string().min(1),
   agentId: z.string().min(1),
+  /** The view the agent is started from; each view shows only its own agents. */
+  origin: originSchema,
   /** Display name for a freshly-created worktree workspace. Defaulted when omitted. */
   name: z.string().min(1).optional(),
   /** Optional initial prompt passed to the selected agent. */
@@ -55,12 +67,18 @@ const startInput = z.object({
 })
 
 /** Which kind of workspace an agent session was opened in. */
-export type SessionKind = Workspace["kind"]
+/** Agent sessions run only in branch or worktree workspaces, never in a paper workspace. */
+export type SessionKind = Exclude<Workspace["kind"], "paper">
 
 export interface StartSessionResult {
   sessionId: string
   workspaceId: string
   kind: SessionKind
+  /**
+   * Shown to the user after a start that worked with a limit, e.g. an agent
+   * that cannot be given the paper folder; null when there is none.
+   */
+  warning: string | null
 }
 
 /**
@@ -115,6 +133,25 @@ function freshWorktreeName(requested?: string): string {
   return `agent-${Date.now().toString(36)}`
 }
 
+/**
+ * Extra folders for an agent started from the LaTeX Editor: the linked paper
+ * folder whenever the agent's working folder does not contain it (a paper
+ * outside the project, or any paper when the agent runs in a worktree). Both
+ * sides are compared as real paths. Other views get none.
+ */
+export async function paperExtraDirs(
+  project: Project,
+  origin: AgentSessionOrigin,
+  workingDir: string,
+): Promise<string[]> {
+  const dir = project.metadata?.paper?.dir
+  if (origin !== "latex" || !dir) return []
+  const paperDir = await realpath(dir)
+  const path = relative(await realpath(workingDir), paperDir)
+  const inside = path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+  return inside ? [] : [paperDir]
+}
+
 /** Arguments for {@link startAgentSession} — the plain-function start flow. */
 export interface StartAgentSessionInput {
   projectId: string
@@ -125,6 +162,8 @@ export interface StartAgentSessionInput {
   prompt?: string
   /** Override the normal worktree policy for a source-file-bound launch. */
   workspaceMode?: "policy" | "main" | "worktree"
+  /** The view the agent is started from, recorded with the session. */
+  origin: AgentSessionOrigin
   cols?: number
   rows?: number
   /** Workflow run whose initially-launched interactive turn this session owns. */
@@ -180,7 +219,7 @@ export async function startAgentSession(
 
   const promptArgs = input.prompt?.trim() ? [input.prompt] : []
   const agentSettings = getAgentSettingsOrDefaults(ctx.db)
-  const [catalogCommand, ...args] = buildLaunchArgv(agent, {
+  const [catalogCommand] = buildLaunchArgv(agent, {
     ...agentSettings.launchDefaults[agent.id],
     args: promptArgs,
   })
@@ -226,6 +265,19 @@ export async function startAgentSession(
       // here aborts the start before any PTY is spawned, so it can't orphan a session.
       if (input.onWorkspaceReady) await input.onWorkspaceReady(dir, workspace)
 
+      // The paper folder can only be compared once the working folder is known.
+      const extraDirs = await paperExtraDirs(project, input.origin, dir)
+      const [, ...args] = buildLaunchArgv(agent, {
+        ...agentSettings.launchDefaults[agent.id],
+        extraDirs,
+        args: promptArgs,
+      })
+      // An agent with no extra-folder flag still starts; the user is told what it cannot see.
+      const warning =
+        extraDirs.length > 0 && !agent.addDirArg
+          ? `${agent.label} cannot be given the paper folder ${extraDirs.join(", ")}; it only sees the project folder.`
+          : null
+
       const client = await ctx.getDaemonClient()
       const launchEnvironment = await ctx.getAgentLaunchEnvironment()
       const spawned = await client.spawn({
@@ -243,6 +295,7 @@ export async function startAgentSession(
         workspaceId: workspace.id,
         agentId: agent.id,
         workflowRunId: input.workflowRunId ?? null,
+        origin: input.origin,
         turnArmed: Boolean(input.prompt?.trim()),
         cols: input.cols ?? 80,
         rows: input.rows ?? 24,
@@ -256,7 +309,7 @@ export async function startAgentSession(
         .where(eq(workspaces.id, workspace.id))
         .run()
 
-      return { sessionId: session.id, workspaceId: workspace.id, kind }
+      return { sessionId: session.id, workspaceId: workspace.id, kind, warning }
     },
   })
 }
@@ -286,6 +339,13 @@ The real auto-research instructions and loop will live in this file later.
 /** Result of {@link startAutoResearch} — the seeded worktree's live session. */
 export type StartAutoResearchResult = StartSessionResult
 
+/** The project's remembered agent choice, falling back to the default agent, then the catalog default. */
+async function projectAgentId(ctx: AppContext, project: Project): Promise<string> {
+  const agentSettings = getAgentSettingsOrDefaults(ctx.db)
+  const config = await readProjectAgentConfig(project, agentSettings.projectConfigStorage)
+  return config.agentId ?? agentSettings.defaultAgentId ?? DEFAULT_AGENT_ID
+}
+
 /**
  * Placeholder "Auto-research" trigger for a Dashboard project card. Opens an
  * isolated git-worktree agent session for the project — separate from its main
@@ -307,11 +367,7 @@ export async function startAutoResearch(
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
   }
 
-  // The project's remembered agent choice, falling back to the catalog default.
-  const storage = getAgentSettingsOrDefaults(ctx.db).projectConfigStorage
-  const config = await readProjectAgentConfig(project, storage)
-  const agentId =
-    config.agentId ?? getAgentSettingsOrDefaults(ctx.db).defaultAgentId ?? DEFAULT_AGENT_ID
+  const agentId = await projectAgentId(ctx, project)
 
   // Seed the placeholder BEFORE the agent launches, via the pre-spawn hook, so the
   // worktree always has AUTORESEARCH.md before the session starts and a failed seed
@@ -321,13 +377,133 @@ export async function startAutoResearch(
     agentId,
     name: `auto-research-${Date.now().toString(36)}`,
     workspaceMode: "worktree",
+    origin: "project",
     onWorkspaceReady: async (dir) => {
       await writeTextFile(join(dir, AUTORESEARCH_FILENAME), AUTORESEARCH_PLACEHOLDER)
     },
   })
 }
 
+/** A skill-shortcut launch: the started session plus the agent and the skill's display name. */
+export interface StartSkillResult extends StartSessionResult {
+  agentId: string
+  /** The skill's name, used as the session tab label. */
+  label: string
+}
+
+/**
+ * Start the project's agent (remembered choice, else the default) with a prompt
+ * that triggers one of the project's skills, found by its folder name (`slug`) in
+ * the same project and user skill folders the Skills page lists. Used by a skill
+ * shortcut button in a view's top bar; `origin` is the view that opens the
+ * session. A slug the project does not have is a NOT_FOUND error, and no
+ * session is started.
+ */
+export async function startSkill(
+  ctx: AppContext,
+  input: { projectId: string; skillSlug: string; origin: AgentSessionOrigin },
+): Promise<StartSkillResult> {
+  const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
+  if (!project) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+  }
+  const catalog = await discoverSkills(project.repoPath, ctx.skillsHomeDir)
+  const skill = catalog.skills.find((entry) => entry.slug === input.skillSlug)
+  if (!skill) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `The skill "${input.skillSlug}" was not found in this project or your user skill folders.`,
+    })
+  }
+  const agentId = await projectAgentId(ctx, project)
+  const result = await startAgentSession(ctx, {
+    projectId: project.id,
+    agentId,
+    origin: input.origin,
+    workspaceMode: "policy",
+    prompt: `Use the ${skill.slug} skill. Its SKILL.md is at ${skill.path}. Follow its instructions.`,
+  })
+  return { ...result, agentId, label: skill.name }
+}
+
+/** An Analyze experiments launch: the started session and the agent it runs. */
+export interface StartAnalyzeExperimentsResult extends StartSessionResult {
+  agentId: string
+}
+
+/**
+ * The Analysis view's Analyze experiments button: start the project's agent
+ * (remembered choice, else the default) as an Analysis agent, with a prompt
+ * that triggers the `analyze-experiments` skill (PI Lab's bundled copy first,
+ * then project and user skills). Throws, starting nothing, when the skill
+ * cannot be found.
+ */
+export async function startAnalyzeExperiments(
+  ctx: AppContext,
+  input: { projectId: string },
+): Promise<StartAnalyzeExperimentsResult> {
+  const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
+  if (!project) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+  }
+  const skill = await findSkill(
+    "analyze-experiments",
+    "Analyze experiments",
+    project.repoPath,
+    ctx.skillsHomeDir,
+    ctx.bundledSkillsDir,
+  )
+  const agentId = await projectAgentId(ctx, project)
+  const result = await startAgentSession(ctx, {
+    projectId: project.id,
+    agentId,
+    origin: "analysis",
+    workspaceMode: "policy",
+    prompt: `Use the analyze-experiments skill to analyze this project's experiments. Its SKILL.md is at ${skill.path}. Follow its instructions.`,
+  })
+  return { ...result, agentId }
+}
+
+/**
+ * The rows of a project's "Project Agents" box: its live agents started outside
+ * the Project view (LaTeX Editor, Analysis, Tasks, routines) and its running background workflow
+ * runs. An agent waiting after a finished turn reads "done"; any other wait reads
+ * "waiting". Exited agents are not live and are left out.
+ */
+export function listProjectAgents(ctx: AppContext, projectId: string): ProjectAgentRow[] {
+  const now = Date.now()
+  const agents = ctx.activityMonitor.liveAgents(projectId).flatMap((session): ProjectAgentRow[] => {
+    if (session.origin === "project" || session.state === "exited") return []
+    return [
+      {
+        kind: "agent",
+        sessionId: session.sessionId,
+        agentId: session.agentId,
+        workspaceId: session.workspaceId,
+        origin: session.origin,
+        name: getAgent(session.agentId, ctx.agentCatalog)?.label ?? session.agentId,
+        status:
+          session.state === "working"
+            ? "working"
+            : session.waitingReason === "turn-complete"
+              ? "done"
+              : "waiting",
+        lastActiveAt:
+          session.state === "working" ? now : (session.waitingSince ?? session.updatedAt),
+      },
+    ]
+  })
+  const background = runningProjectWorkflowTasks(projectId).map(
+    (task): ProjectAgentRow => ({ kind: "background", task, status: "working", lastActiveAt: now }),
+  )
+  return [...agents, ...background]
+}
+
 export const sessionsRouter = router({
+  /** The rows of a project's "Project Agents" box (see {@link listProjectAgents}). */
+  projectAgents: publicProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .query(({ ctx, input }): ProjectAgentRow[] => listProjectAgents(ctx, input.projectId)),
   /** One compact stream shared by shell indicators and the title bar. */
   onStatus: publicProcedure.subscription(({ ctx }) =>
     observable<LiveAgentStatus[]>((emit) =>
@@ -352,4 +528,23 @@ export const sessionsRouter = router({
   startAutoResearch: publicProcedure
     .input(z.object({ projectId: z.string().min(1) }))
     .mutation(({ ctx, input }): Promise<StartAutoResearchResult> => startAutoResearch(ctx, input)),
+
+  /** Start the project's agent with one of its skills triggered (see {@link startSkill}). */
+  startSkill: publicProcedure
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        skillSlug: z.string().min(1),
+        origin: originSchema,
+      }),
+    )
+    .mutation(({ ctx, input }): Promise<StartSkillResult> => startSkill(ctx, input)),
+
+  /** The Analysis view's Analyze experiments button (see {@link startAnalyzeExperiments}). */
+  startAnalyzeExperiments: publicProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(
+      ({ ctx, input }): Promise<StartAnalyzeExperimentsResult> =>
+        startAnalyzeExperiments(ctx, input),
+    ),
 })

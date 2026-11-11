@@ -10,22 +10,49 @@ import {
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChartArea, CloudDownload, FileCode2, FileText, Search } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
+import {
+  ChartArea,
+  CloudDownload,
+  FileCode2,
+  FileText,
+  Microscope,
+  NotebookPen,
+  Search,
+} from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
+import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
+import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { useTranslate } from "../../../../../i18n/language"
-import { useFetchExperimentsInstructions } from "../../../../../preferences/preferences"
+import {
+  DEFAULT_RESULTS_FOLDER,
+  useAnalysisProject,
+  useDefaultResultsFolder,
+  useFetchExperimentsInstructions,
+  useResearchDiaryOpen,
+} from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
+import { ProjectPicker } from "../ProjectPicker"
+import {
+  type FocusSessionRequest,
+  ScienceSessionPanel,
+  type ScienceSessionRequest,
+  useFocusSessionRequest,
+} from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
 
 /**
  * Analysis science tab — a **read-only data
- * browser**: pick a project, browse the data/analysis files discovered in its
- * repo (grouped by category, filtered by a search box), and preview a selected
+ * browser**: pick a project, browse the data/analysis files in its results
+ * folder (`results/` by default, set in Settings; each project can choose its
+ * own above the search). Each folder inside it is one experiment, and the list
+ * is grouped by experiment, filtered by a search box and the category chips.
+ * Preview a selected
  * file in a side pane. CSV/TSV render as a sampled table (or a line chart when
  * they look like a metric log), NumPy arrays as a chart (1-D) or grid (2-D),
  * images inline, JSON pretty-printed, text as a head; everything else shows a
@@ -35,35 +62,43 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  * selecting a category that spans more than one sub-format reveals a second row
  * of sub-format bubbles (e.g. CSV / NumPy under Data) to narrow further.
  *
- * The project defaults to the most-recently-opened (`projects.list` is ordered
- * that way), with a selector at the top of the left column. The two columns each
- * own their own scroll.
+ * A project picker in the top bar remembers the last project; `initialProjectId`
+ * (from `?projectId=`) selects one and becomes the remembered one, and the picker
+ * always wins afterwards. With no usable choice it falls back to the
+ * most-recently-opened project (`projects.list` is ordered that way). The two
+ * columns each own their own scroll.
  */
-export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: string }) {
+export function ScienceAnalysis({
+  initialProjectId,
+  focusSession,
+}: {
+  initialProjectId?: string
+  /** An agent session of the initial project to open and focus in the session panel, or null. */
+  focusSession: FocusSessionRequest | null
+}) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
 
-  // Default to the most-recently-opened project (first in the ordered list) and
-  // keep the selection valid as the project list loads / changes.
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    initialProjectId ?? null,
-  )
+  const [savedProjectId, setSavedProjectId] = useAnalysisProject()
+  const navigate = useNavigate()
+  // The picker remembers the choice and replaces the address.
+  const chooseProject = (projectId: string): void => {
+    setSavedProjectId(projectId)
+    void navigate({ to: "/science/analysis", search: { projectId }, replace: true })
+  }
+  // A project given in the address wins and becomes the remembered one.
   useEffect(() => {
-    if (projectsQuery.isPending) return
-    if (projects.length === 0) {
-      if (selectedProjectId !== null) setSelectedProjectId(null)
-      return
-    }
-    if (!selectedProjectId || !projects.some((p) => p.id === selectedProjectId)) {
-      setSelectedProjectId(projects[0]?.id ?? null)
-    }
-  }, [projects, selectedProjectId, projectsQuery.isPending])
-
-  const selectedProject = projects.find((project) => project.id === selectedProjectId)
+    if (initialProjectId) setSavedProjectId(initialProjectId)
+  }, [initialProjectId, setSavedProjectId])
+  const wanted = initialProjectId ?? savedProjectId
+  // An unknown or missing choice falls back to the most-recently-opened project.
+  const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
+  const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
+  const [researchDiaryOpen, setResearchDiaryOpen] = useResearchDiaryOpen()
   const capabilities = useQuery({
     ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
     enabled: Boolean(selectedProject),
@@ -81,6 +116,30 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
   const [kindFilter, setKindFilter] = useState<DataFileKind | null>(null)
   const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
+  // A session a top bar button started, until the session panel opens it.
+  const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
+  const clearSessionRequest = useCallback(() => setSessionRequest(null), [])
+  useFocusSessionRequest(initialProjectId, focusSession, setSessionRequest)
+  const [shortcutError, setShortcutError] = useState<string | null>(null)
+  // Analyze experiments follows the new-session setting (Settings > Shortcuts), which
+  // opens a terminal agent by default. When it is set to "Terminal", the project's
+  // agent still starts, since a skill needs an agent to run it.
+  const analyzeExperiments = useMutation(
+    trpc.sessions.startAnalyzeExperiments.mutationOptions({
+      onSuccess: (result, input) =>
+        setSessionRequest({
+          projectId: input.projectId,
+          pane: {
+            kind: "agent",
+            sessionId: result.sessionId,
+            label: t("Analyze experiments"),
+            wsKind: result.kind,
+            launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
+          },
+        }),
+      onError: (cause) => setShortcutError(cause.message),
+    }),
+  )
   const createTemplate = useMutation(
     trpc.science.analysis.createTemplate.mutationOptions({
       onSuccess: async (created) => {
@@ -91,11 +150,18 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
       },
     }),
   )
+  // The default results folder from Settings; an empty field means the built-in default.
+  const [defaultResultsFolderSetting] = useDefaultResultsFolder()
+  const defaultResultsFolder = defaultResultsFolderSetting.trim() || DEFAULT_RESULTS_FOLDER
   const listing = useQuery({
-    ...trpc.science.analysis.listFiles.queryOptions({ projectId: selectedProjectId ?? "" }),
+    ...trpc.science.analysis.listFiles.queryOptions({
+      projectId: selectedProjectId ?? "",
+      defaultResultsFolder,
+    }),
     enabled: selectedProjectId !== null,
     staleTime: 30_000,
   })
+  const resultsMissing = listing.data?.exists === false
 
   // Flatten the grouped listing once; the UI re-groups after filtering.
   const allFiles = useMemo<DataFileEntry[]>(
@@ -186,21 +252,40 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
     return ranked
   }, [allFiles, query, categoryFilter, kindFilter])
 
-  // Re-group the filtered files by category in canonical order for sectioned
-  // rendering — the header reads "Data", not the raw sub-format.
+  // Re-group the filtered files by experiment (the folder inside the results
+  // folder), sorted by name, with "No experiment" (files directly in the
+  // results folder) last. Files of the project's reports/ folder form their own
+  // group after these. Within a group the ranking order is kept.
   const filteredGroups = useMemo(() => {
-    const byCategory = new Map<DataFileCategory, RankedAnalysisFile[]>()
+    const byExperiment = new Map<string | null, RankedAnalysisFile[]>()
     for (const rankedFile of filtered) {
-      const category = categoryOf(rankedFile.file.kind)
-      const bucket = byCategory.get(category)
+      if (rankedFile.file.inReportsFolder) continue
+      const experiment = rankedFile.file.experiment
+      const bucket = byExperiment.get(experiment)
       if (bucket) bucket.push(rankedFile)
-      else byCategory.set(category, [rankedFile])
+      else byExperiment.set(experiment, [rankedFile])
     }
-    return ALL_DATA_FILE_CATEGORIES.filter((c) => byCategory.has(c)).map((category) => ({
-      category,
-      files: byCategory.get(category) ?? [],
-    }))
+    const named = [...byExperiment.keys()]
+      .filter((experiment): experiment is string => experiment !== null)
+      .sort((a, b) => a.localeCompare(b))
+    const order: Array<string | null> = byExperiment.has(null) ? [...named, null] : named
+    return order.map((experiment) => ({ experiment, files: byExperiment.get(experiment) ?? [] }))
   }, [filtered])
+  const filteredReports = useMemo(
+    () => filtered.filter((rankedFile) => rankedFile.file.inReportsFolder),
+    [filtered],
+  )
+  const fileRows = (files: RankedAnalysisFile[]) =>
+    files.map((rankedFile) => (
+      <FileRow
+        key={rankedFile.file.relPath}
+        file={rankedFile.file}
+        namePositions={rankedFile.namePositions}
+        pathPositions={rankedFile.pathPositions}
+        selected={rankedFile.file.relPath === selectedRelPath}
+        onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+      />
+    ))
 
   // Selecting a category clears any narrower sub-kind; "All" clears both.
   const selectCategory = (category: DataFileCategory | "all") => {
@@ -215,219 +300,354 @@ export function ScienceAnalysis({ initialProjectId }: { initialProjectId?: strin
       subtitle={t("Browse and preview the data files in a project's repo")}
       actions={
         <>
-          <button
-            type="button"
-            data-testid="analysis-new-html-report"
-            disabled={!selectedProjectId || createTemplate.isPending}
-            onClick={() =>
-              createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
-            }
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileCode2 className="size-3.5" aria-hidden />
-            {t("HTML report")}
-          </button>
-          {selectedProject ? (
-            <ProjectWorkflowControl
-              key={selectedProject.id}
-              projectId={selectedProject.id}
-              projectName={selectedProject.name}
-              task="fetch-experiments"
-              variant="labeled"
-              testId="analysis-fetch-experiments"
-              instructions={fetchInstructions}
-              disabled={!gitAvailable}
-              disabledReason={!gitAvailable ? gitDisabledReason : undefined}
-            />
-          ) : (
-            <button
-              type="button"
-              data-testid="analysis-fetch-experiments"
-              disabled
-              title={t("Select a project")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          <ProjectPicker
+            testId="analysis-project-select"
+            label={t("Analysis project")}
+            help={t("Choose which project repository to scan for data files.")}
+            value={selectedProjectId ?? ""}
+            projects={projects}
+            allLabel={null}
+            onChange={chooseProject}
+          />
+          {shortcutError ? (
+            <span
+              role="alert"
+              data-testid="analysis-shortcut-error"
+              title={shortcutError}
+              className="max-w-56 cursor-text select-text truncate text-destructive text-xs"
             >
-              <CloudDownload className="size-3.5" aria-hidden />
-              {t("Fetch experiments")}
-            </button>
-          )}
+              {shortcutError}
+            </span>
+          ) : null}
+          <HeaderShortcuts
+            view="analysis"
+            projectId={selectedProjectId}
+            onError={setShortcutError}
+            onSkillSessionStarted={(session) =>
+              selectedProjectId
+                ? setSessionRequest({
+                    projectId: selectedProjectId,
+                    pane: {
+                      kind: "agent",
+                      sessionId: session.sessionId,
+                      label: session.label,
+                      wsKind: session.kind,
+                      launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
+                    },
+                  })
+                : undefined
+            }
+            builtins={[
+              {
+                id: "analyze-experiments",
+                label: t("Analyze experiments"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="analysis-analyze-experiments"
+                    disabled={!selectedProjectId || analyzeExperiments.isPending}
+                    data-feature-label={t("Analyze experiments")}
+                    title={
+                      selectedProjectId
+                        ? t("Start an agent that summarises what each experiment shows")
+                        : t("Select a project")
+                    }
+                    onClick={() => {
+                      if (!selectedProjectId) return
+                      setShortcutError(null)
+                      analyzeExperiments.mutate({ projectId: selectedProjectId })
+                    }}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Microscope className="size-3.5" aria-hidden />
+                    {t("Analyze experiments")}
+                  </button>
+                ),
+              },
+              {
+                id: "html-report",
+                label: t("HTML report"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="analysis-new-html-report"
+                    disabled={!selectedProjectId || createTemplate.isPending}
+                    data-feature-help={
+                      selectedProjectId
+                        ? t("Add a new HTML report file to the project and show it.")
+                        : t("Select a project")
+                    }
+                    onClick={() =>
+                      createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
+                    }
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <FileCode2 className="size-3.5" aria-hidden />
+                    {t("HTML report")}
+                  </button>
+                ),
+              },
+              {
+                id: "fetch-experiments",
+                label: t("Fetch experiments"),
+                node: selectedProject ? (
+                  <ProjectWorkflowControl
+                    key={selectedProject.id}
+                    projectId={selectedProject.id}
+                    projectName={selectedProject.name}
+                    task="fetch-experiments"
+                    variant="labeled"
+                    testId="analysis-fetch-experiments"
+                    instructions={fetchInstructions}
+                    disabled={!gitAvailable}
+                    disabledReason={!gitAvailable ? gitDisabledReason : undefined}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="analysis-fetch-experiments"
+                    disabled
+                    title={t("Select a project")}
+                    data-feature-label={t("Fetch experiments")}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CloudDownload className="size-3.5" aria-hidden />
+                    {t("Fetch experiments")}
+                  </button>
+                ),
+              },
+              {
+                id: "research-diary",
+                label: t("Research diary"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="analysis-research-diary"
+                    aria-label={t("Research diary")}
+                    aria-pressed={researchDiaryOpen}
+                    title={t("Research diary")}
+                    data-feature-label={t("Research diary")}
+                    data-feature-help={t("Show or hide the chosen project's research diary")}
+                    onClick={() => setResearchDiaryOpen(!researchDiaryOpen)}
+                    className={cn(
+                      "inline-flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                      researchDiaryOpen && "text-foreground",
+                    )}
+                  >
+                    <NotebookPen className="size-3.5" aria-hidden />
+                  </button>
+                ),
+              },
+            ]}
+          />
         </>
       }
     >
-      {projects.length === 0 ? (
-        <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <NoProjectsState />
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1">
-          {/* Left column: project selector + search + category filter + file list. */}
-          <div className="flex w-80 shrink-0 flex-col border-border border-r">
-            <div className="flex shrink-0 items-center border-border border-b px-4 py-2">
-              <select
-                data-testid="analysis-project-select"
-                aria-label={t("Analysis project")}
-                data-feature-label={t("Analysis project")}
-                data-feature-help={t("Choose which project repository to scan for data files.")}
-                value={selectedProjectId ?? ""}
-                onChange={(event) => setSelectedProjectId(event.target.value)}
-                className="h-8 w-full rounded-md border border-border bg-background px-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {projects.length === 0 ? (
+            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+              <NoProjectsState />
             </div>
-
-            <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
-              <div className="relative">
-                <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
-                <Input
-                  data-testid="analysis-search"
-                  aria-label={t("Search data files")}
-                  data-feature-label={t("Search data files")}
-                  data-feature-help={t(
-                    "Filter this project's discovered data files by name or path.",
-                  )}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("Search files…")}
-                  className="h-8 pl-8"
-                  disabled={allFiles.length === 0}
-                />
-              </div>
-              {categoriesPresent.length > 0 ? (
-                <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
-                  <FilterChip
-                    label={t("All")}
-                    active={categoryFilter === "all"}
-                    onClick={() => selectCategory("all")}
-                    testId="analysis-category-all"
-                  />
-                  {categoriesPresent.map((category) => (
-                    <FilterChip
-                      key={category}
-                      label={t(DATA_FILE_CATEGORY_LABELS[category])}
-                      active={categoryFilter === category}
-                      onClick={() => selectCategory(category)}
-                      testId={`analysis-category-${category}`}
+          ) : (
+            <div className="flex min-h-0 flex-1">
+              {/* Left column: search + category filter + file list. */}
+              <div className="flex w-80 shrink-0 flex-col border-border border-r">
+                <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
+                  {selectedProjectId ? (
+                    <ResultsFolderField
+                      key={selectedProjectId}
+                      projectId={selectedProjectId}
+                      resultsFolder={listing.data?.resultsFolder ?? null}
+                      overridden={listing.data?.overridden === true}
                     />
-                  ))}
-                </div>
-              ) : null}
-              {subKindsPresent.length > 1 ? (
-                <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
-                  <FilterChip
-                    label={t("All")}
-                    active={kindFilter === null}
-                    onClick={() => setKindFilter(null)}
-                    testId="analysis-subkind-all"
-                  />
-                  {subKindsPresent.map((kind) => (
-                    <FilterChip
-                      key={kind}
-                      label={t(DATA_FILE_KIND_LABELS[kind])}
-                      active={kindFilter === kind}
-                      onClick={() => setKindFilter(kind)}
-                      testId={`analysis-subkind-${kind}`}
+                  ) : null}
+                  <div className="relative">
+                    <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
+                    <Input
+                      data-testid="analysis-search"
+                      aria-label={t("Search data files")}
+                      data-feature-label={t("Search data files")}
+                      data-feature-help={t(
+                        "Filter this project's discovered data files by name or path.",
+                      )}
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder={t("Search files…")}
+                      className="h-8 pl-8"
+                      disabled={allFiles.length === 0}
                     />
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {listing.data?.partial ? (
-                <p
-                  data-testid="analysis-partial"
-                  role="status"
-                  className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
-                  title={listing.data.skipped.join("\n")}
-                >
-                  {t("Some project paths could not be read")} ({listing.data.skipped.length}).
-                </p>
-              ) : null}
-              {listing.isError ? (
-                <p
-                  data-testid="analysis-list-error"
-                  role="alert"
-                  className="p-4 text-destructive text-xs"
-                >
-                  {t("Could not read project data files:")} {listing.error.message}
-                </p>
-              ) : allFiles.length === 0 && !listing.isLoading ? (
-                <EmptyState />
-              ) : (
-                <div className="flex flex-col gap-3 p-3">
-                  <div className="flex items-center justify-between px-1">
-                    <span
-                      data-testid="analysis-file-count"
-                      className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
-                    >
-                      {filtered.length} {t("of")} {allFiles.length} {t("files")}
-                    </span>
-                    {listing.data?.truncated ? (
-                      <span
-                        data-testid="analysis-truncated"
-                        className="text-[10px] text-amber-500"
-                        title={t("The repo has more data files than are shown")}
-                      >
-                        {t("truncated")}
-                      </span>
-                    ) : null}
                   </div>
-
-                  {filteredGroups.map((group) => (
-                    <div key={group.category} className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2 px-1">
-                        <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                          {t(DATA_FILE_CATEGORY_LABELS[group.category])}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground/50">
-                          {group.files.length}
-                        </span>
-                      </div>
-                      {group.files.map((rankedFile) => (
-                        <FileRow
-                          key={rankedFile.file.relPath}
-                          file={rankedFile.file}
-                          namePositions={rankedFile.namePositions}
-                          pathPositions={rankedFile.pathPositions}
-                          selected={rankedFile.file.relPath === selectedRelPath}
-                          onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+                  {categoriesPresent.length > 0 ? (
+                    <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                      <FilterChip
+                        label={t("All")}
+                        active={categoryFilter === "all"}
+                        onClick={() => selectCategory("all")}
+                        testId="analysis-category-all"
+                      />
+                      {categoriesPresent.map((category) => (
+                        <FilterChip
+                          key={category}
+                          label={t(DATA_FILE_CATEGORY_LABELS[category])}
+                          active={categoryFilter === category}
+                          onClick={() => selectCategory(category)}
+                          testId={`analysis-category-${category}`}
                         />
                       ))}
                     </div>
-                  ))}
-
-                  {filtered.length === 0 && allFiles.length > 0 ? (
-                    <p
-                      data-testid="analysis-no-matches"
-                      className="px-1 text-muted-foreground text-xs"
-                    >
-                      {t("No files match the current filter.")}
-                    </p>
+                  ) : null}
+                  {subKindsPresent.length > 1 ? (
+                    <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
+                      <FilterChip
+                        label={t("All")}
+                        active={kindFilter === null}
+                        onClick={() => setKindFilter(null)}
+                        testId="analysis-subkind-all"
+                      />
+                      {subKindsPresent.map((kind) => (
+                        <FilterChip
+                          key={kind}
+                          label={t(DATA_FILE_KIND_LABELS[kind])}
+                          active={kindFilter === kind}
+                          onClick={() => setKindFilter(kind)}
+                          testId={`analysis-subkind-${kind}`}
+                        />
+                      ))}
+                    </div>
                   ) : null}
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Right column: preview pane for the selected file. */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {selectedProjectId && selectedRelPath ? (
-              <AnalysisPreview
-                projectId={selectedProjectId}
-                relPath={selectedRelPath}
-                kind={allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"}
-              />
-            ) : (
-              <NoSelectionState />
-            )}
-          </div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  {listing.data?.partial ? (
+                    <p
+                      data-testid="analysis-partial"
+                      role="status"
+                      className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
+                      title={listing.data.skipped.join("\n")}
+                    >
+                      {t("Some project paths could not be read")} ({listing.data.skipped.length}).
+                    </p>
+                  ) : null}
+                  {listing.isError ? (
+                    <p
+                      data-testid="analysis-list-error"
+                      role="alert"
+                      className="p-4 text-destructive text-xs"
+                    >
+                      {t("Could not read project data files:")} {listing.error.message}
+                    </p>
+                  ) : resultsMissing && allFiles.length === 0 ? (
+                    <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
+                  ) : allFiles.length === 0 && !listing.isLoading ? (
+                    <EmptyState />
+                  ) : (
+                    <div className="flex flex-col gap-3 p-3">
+                      {resultsMissing ? (
+                        <p
+                          data-testid="analysis-results-missing"
+                          className="rounded border border-border border-dashed px-2 py-1.5 text-muted-foreground text-xs"
+                        >
+                          {t("No {folder} folder in this project").replace(
+                            "{folder}",
+                            `${listing.data?.resultsFolder ?? ""}/`,
+                          )}
+                        </p>
+                      ) : null}
+                      <div className="flex items-center justify-between px-1">
+                        <span
+                          data-testid="analysis-file-count"
+                          className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                        >
+                          {filtered.length} {t("of")} {allFiles.length} {t("files")}
+                        </span>
+                        {listing.data?.truncated ? (
+                          <span
+                            data-testid="analysis-truncated"
+                            className="text-[10px] text-amber-500"
+                            title={t("The repo has more data files than are shown")}
+                          >
+                            {t("truncated")}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {filteredGroups.map((group) => (
+                        <div
+                          key={group.experiment ?? ""}
+                          data-testid="analysis-experiment-group"
+                          data-experiment={group.experiment ?? ""}
+                          className="flex flex-col gap-1"
+                        >
+                          <div className="flex items-center gap-2 px-1">
+                            <span
+                              className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
+                              title={group.experiment ?? undefined}
+                            >
+                              {group.experiment ?? t("No experiment")}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/50">
+                              {group.files.length}
+                            </span>
+                          </div>
+                          {fileRows(group.files)}
+                        </div>
+                      ))}
+
+                      {filteredReports.length > 0 ? (
+                        <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 px-1">
+                            <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+                              {t("Reports (reports/)")}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/50">
+                              {filteredReports.length}
+                            </span>
+                          </div>
+                          {fileRows(filteredReports)}
+                        </div>
+                      ) : null}
+
+                      {filtered.length === 0 && allFiles.length > 0 ? (
+                        <p
+                          data-testid="analysis-no-matches"
+                          className="px-1 text-muted-foreground text-xs"
+                        >
+                          {t("No files match the current filter.")}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right column: preview pane for the selected file. */}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {selectedProjectId && selectedRelPath ? (
+                  <AnalysisPreview
+                    projectId={selectedProjectId}
+                    relPath={selectedRelPath}
+                    kind={
+                      allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"
+                    }
+                  />
+                ) : (
+                  <NoSelectionState />
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+        {researchDiaryOpen && selectedProjectId ? (
+          <ResearchDiaryPanel key={selectedProjectId} projectId={selectedProjectId} />
+        ) : null}
+        <ScienceSessionPanel
+          view="analysis"
+          project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
+          openSession={sessionRequest}
+          onSessionOpened={clearSessionRequest}
+        />
+      </div>
 
       {findOpen ? (
         <QuickFind
@@ -635,6 +855,119 @@ function NoProjectsState() {
         <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
           {t("Open a project from the sidebar to browse the data files in its repo.")}
         </p>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The results folder row above the file search: the folder Analysis lists,
+ * "Change…" (folder picker; the router accepts only folders inside the
+ * project and stores it for this project) and, when the project uses its own
+ * folder, "Reset to default". A refused folder shows the reason.
+ */
+function ResultsFolderField({
+  projectId,
+  resultsFolder,
+  overridden,
+}: {
+  projectId: string
+  resultsFolder: string | null
+  overridden: boolean
+}) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const setResultsFolder = useMutation(
+    trpc.science.analysis.setResultsFolder.mutationOptions({
+      onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: trpc.science.analysis.listFiles.queryKey() }),
+    }),
+  )
+  const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
+  const busy = setResultsFolder.isPending || pickDirectory.isPending
+  const error = pickDirectory.error ?? setResultsFolder.error
+  const change = (): void => {
+    setResultsFolder.reset()
+    pickDirectory.mutate(undefined, {
+      onSuccess: (dir) => {
+        if (dir) setResultsFolder.mutate({ projectId, dir })
+      },
+    })
+  }
+  const buttonClass =
+    "shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+  return (
+    <div data-testid="analysis-results-folder" className="flex flex-col gap-1">
+      <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+        {t("Results folder")}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <span
+          data-testid="analysis-results-folder-path"
+          className="min-w-0 flex-1 truncate font-mono text-xs"
+          title={resultsFolder === null ? undefined : `${resultsFolder}/`}
+        >
+          {resultsFolder === null ? "" : `${resultsFolder}/`}
+        </span>
+        <button
+          type="button"
+          data-testid="analysis-results-folder-change"
+          data-feature-label={t("Change results folder")}
+          data-feature-help={t(
+            "Choose a folder inside the project to list in Analysis. Each folder inside it is one experiment.",
+          )}
+          disabled={busy}
+          onClick={change}
+          className={buttonClass}
+        >
+          {t("Change…")}
+        </button>
+        {overridden ? (
+          <button
+            type="button"
+            data-testid="analysis-results-folder-reset"
+            data-feature-label={t("Reset to default")}
+            data-feature-help={t("Use the default results folder from Settings again.")}
+            disabled={busy}
+            onClick={() => setResultsFolder.mutate({ projectId, dir: null })}
+            className={buttonClass}
+          >
+            {t("Reset to default")}
+          </button>
+        ) : null}
+      </div>
+      {error ? (
+        <p
+          data-testid="analysis-results-folder-error"
+          role="alert"
+          className="text-destructive text-xs"
+        >
+          {error.message}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/** Shown when the results folder does not exist in the selected project. */
+function ResultsMissingState({ resultsFolder }: { resultsFolder: string }) {
+  const t = useTranslate()
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <div
+        data-testid="analysis-results-missing"
+        className="flex flex-col items-center gap-3 rounded-lg border border-border border-dashed p-8 text-center"
+      >
+        <ChartArea className="size-8 text-muted-foreground" aria-hidden />
+        <div className="flex flex-col gap-1">
+          <p className="font-medium text-foreground text-sm">
+            {t("No {folder} folder in this project").replace("{folder}", `${resultsFolder}/`)}
+          </p>
+          <p className="max-w-xs text-muted-foreground text-xs leading-relaxed">
+            {t("Use Change… above to choose the folder that holds the experiment results.")}
+          </p>
+        </div>
       </div>
     </div>
   )

@@ -4,6 +4,7 @@ import { z } from "zod"
 import { useTranslate } from "../i18n/language"
 import { useTRPCClient } from "../trpc/react"
 import { notificationActivationSchema } from "./activation"
+import { navigateToAgent } from "./agentNavigation"
 import { NOTIFICATION_SOUND_IDS, type NotificationSoundId, playNotificationSound } from "./sounds"
 
 function isSoundId(value: unknown): value is NotificationSoundId {
@@ -34,18 +35,7 @@ export function NotificationBridge() {
         activationSequence.current += 1
         const notificationId = `${target.type}-${activationSequence.current}`
         if (target.type === "agent") {
-          void navigate({
-            to: "/projects/$projectId",
-            params: { projectId: target.projectId },
-            search: {
-              notificationId,
-              notificationKind: "agent",
-              notificationSessionId: target.sessionId,
-              notificationWorkspaceId: target.workspaceId,
-              notificationAgentId: target.agentId,
-              notificationLabel: target.label,
-            },
-          })
+          navigateToAgent(navigate, target, notificationId)
           return
         }
         if (target.type === "terminal") {

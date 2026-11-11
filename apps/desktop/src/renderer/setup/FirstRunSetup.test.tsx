@@ -15,13 +15,23 @@ const ENVIRONMENT = {
   apiConfigured: { "claude-code": false, codex: false },
 } as const
 
+/** Each setup row has its own check: harness rows, GitHub and Zotero. */
+const ROW_HANDLERS = {
+  "setup.harnesses": () => ({
+    harnesses: ENVIRONMENT.harnesses,
+    apiConfigured: ENVIRONMENT.apiConfigured,
+  }),
+  "setup.github": () => ENVIRONMENT.github,
+  "setup.zotero": () => ENVIRONMENT.zotero,
+}
+
 function renderSetup(
   handlers: Record<string, (input: unknown) => unknown | Promise<unknown>>,
   onClose = vi.fn(),
 ) {
   const client = createFakeTrpcClient({
     "settings.updateAgents": (input) => input,
-    "setup.environment": () => ENVIRONMENT,
+    ...ROW_HANDLERS,
     "settings.get": () => ({
       agents: { projectConfigStorage: "app", executableOverrides: {}, setupCompleted: false },
     }),
@@ -135,9 +145,68 @@ describe("FirstRunSetup", () => {
     expect(screen.queryByText(/Log in/u)).toBeNull()
   })
 
+  test("shows Checking… instead of Not detected until the environment check finishes", async () => {
+    let resolveHarnesses: (value: unknown) => void = () => undefined
+    let resolveGithub: (value: unknown) => void = () => undefined
+    let resolveZotero: (value: unknown) => void = () => undefined
+    renderSetup({
+      "setup.harnesses": () => new Promise((resolve) => (resolveHarnesses = resolve)),
+      "setup.github": () => new Promise((resolve) => (resolveGithub = resolve)),
+      "setup.zotero": () => new Promise((resolve) => (resolveZotero = resolve)),
+    })
+
+    expect((await screen.findAllByText("Checking…")).length).toBe(4)
+    expect(screen.queryByText("Not detected")).toBeNull()
+    expect(screen.queryByText("Detected")).toBeNull()
+    expect(screen.queryByText("Not found")).toBeNull()
+
+    resolveHarnesses(ROW_HANDLERS["setup.harnesses"]())
+    resolveGithub(ENVIRONMENT.github)
+    resolveZotero(ENVIRONMENT.zotero)
+    expect(await screen.findByText("Detected")).toBeTruthy()
+    expect(screen.getByText("Not detected")).toBeTruthy()
+    expect(screen.getByText("octo")).toBeTruthy()
+    expect(screen.queryByText("Checking…")).toBeNull()
+  })
+
+  test("each row shows its own result while a slower check still says Checking…", async () => {
+    let resolveGithub: (value: unknown) => void = () => undefined
+    renderSetup({ "setup.github": () => new Promise((resolve) => (resolveGithub = resolve)) })
+
+    expect(await screen.findByText("Detected")).toBeTruthy()
+    expect(screen.getByText("Not detected")).toBeTruthy()
+    expect(screen.getByText("Installed")).toBeTruthy()
+    expect(screen.getAllByText("Checking…")).toHaveLength(1)
+    expect(screen.queryByText("octo")).toBeNull()
+
+    resolveGithub(ENVIRONMENT.github)
+    expect(await screen.findByText("octo")).toBeTruthy()
+    expect(screen.queryByText("Checking…")).toBeNull()
+  })
+
+  test("shows Checking… again while Recheck runs", async () => {
+    let checking = false
+    const releases: (() => void)[] = []
+    /** Answer at once on the first check; on a recheck, wait until released. */
+    const held = (value: () => unknown) => (): unknown =>
+      checking ? new Promise((resolve) => releases.push(() => resolve(value()))) : value()
+    renderSetup({
+      "setup.harnesses": held(ROW_HANDLERS["setup.harnesses"]),
+      "setup.github": held(ROW_HANDLERS["setup.github"]),
+      "setup.zotero": held(ROW_HANDLERS["setup.zotero"]),
+    })
+    expect(await screen.findByText("Detected")).toBeTruthy()
+    checking = true
+    fireEvent.click(screen.getByRole("button", { name: "Recheck" }))
+    expect((await screen.findAllByText("Checking…")).length).toBe(4)
+    for (const release of releases) release()
+    await waitFor(() => expect(screen.queryByText("Checking…")).toBeNull())
+    expect(screen.getByText("Not detected")).toBeTruthy()
+  })
+
   test("renders local integrations as cards and makes a failed Codex check retryable", async () => {
-    const environment = vi.fn(() => ({
-      ...ENVIRONMENT,
+    const harnesses = vi.fn(() => ({
+      apiConfigured: ENVIRONMENT.apiConfigured,
       harnesses: ENVIRONMENT.harnesses.map((harness) =>
         harness.id === "codex"
           ? {
@@ -148,14 +217,14 @@ describe("FirstRunSetup", () => {
           : harness,
       ),
     }))
-    renderSetup({ "setup.environment": environment })
+    renderSetup({ "setup.harnesses": harnesses })
 
     expect(await screen.findByText("Codex returned an unknown status")).toBeTruthy()
     expect(screen.getByText("Clone, push, and create pull requests.")).toBeTruthy()
     expect(screen.getByText("Use your local library as a research source.")).toBeTruthy()
     expect(screen.getByText("codex login status")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Retry detection" }))
-    await waitFor(() => expect(environment).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(harnesses).toHaveBeenCalledTimes(2))
   })
 
   test("reveals an API field only after explicit choice and never retains its value in the renderer", async () => {
@@ -182,8 +251,8 @@ describe("FirstRunSetup", () => {
 
   test("lets several detected subscriptions stay without a default", async () => {
     renderSetup({
-      "setup.environment": () => ({
-        ...ENVIRONMENT,
+      "setup.harnesses": () => ({
+        apiConfigured: ENVIRONMENT.apiConfigured,
         harnesses: ENVIRONMENT.harnesses.map((harness) => ({ ...harness, state: "authenticated" })),
       }),
     })

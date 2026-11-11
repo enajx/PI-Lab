@@ -1041,6 +1041,8 @@
   "Resize all cards from": "从此处调整所有卡片大小：",
   "currently": "当前",
   "percent": "百分比",
+  "width": "宽度",
+  "height": "高度",
   "Resize": "调整大小",
   "Drag the lower-right corner or use arrow keys to resize all cards": "拖动右下角或使用方向键调整所有卡片大小",
   "Auto": "自动",

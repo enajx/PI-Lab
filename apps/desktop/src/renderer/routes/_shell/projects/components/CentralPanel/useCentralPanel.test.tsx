@@ -16,7 +16,11 @@ function deferred<T>() {
 }
 
 /** Async restoration races use an injected IPC boundary and the shipping controller. */
-function setup(initialState: CentralPanelRestoreState, handlers: FakeHandlers) {
+function setup(
+  initialState: CentralPanelRestoreState | undefined,
+  handlers: FakeHandlers,
+  origin: "project" | "latex",
+) {
   const client = createFakeTrpcClient({
     "settings.get": () => ({ agents: { defaultAgentId: "claude-code" } }),
     "agents.list": () => [],
@@ -31,6 +35,7 @@ function setup(initialState: CentralPanelRestoreState, handlers: FakeHandlers) {
         client,
         workspaceId: "restore-race",
         projectId: "restore-project",
+        origin,
         settings: DEFAULT_EDITOR_SETTINGS,
         initialState,
       }),
@@ -69,6 +74,7 @@ test("restoration preserves newly opened panes and reaps a recreated pane closed
       active: { type: "session", id: "pane-1" },
     },
     { "workspaces.spawnTerminal": spawn, "terminal.kill": kill },
+    "project",
   )
   await waitFor(() => expect(spawn).toHaveBeenCalledOnce())
   act(() => view.result.current.openTerminal())
@@ -94,11 +100,44 @@ test("closing a below-editor run during restore does not resurrect its replaceme
       belowEditorRun: { sessionId: "old-run", label: "Run file.py", relPath: "file.py" },
     },
     { "python.runFile": run, "terminal.kill": kill },
+    "project",
   )
   await waitFor(() => expect(run).toHaveBeenCalledOnce())
   act(() => view.result.current.closeBelowEditorRun())
   await act(async () => restored.resolve({ sessionId: "orphan-run" }))
   await waitFor(() => expect(kill).toHaveBeenCalledWith({ sessionId: "orphan-run" }))
   expect(view.result.current.belowEditorRun).toBeNull()
+  view.dispose()
+})
+
+test("agents launched and restored by a panel record the panel's view as their origin", async () => {
+  const start = vi
+    .fn()
+    .mockResolvedValueOnce({ sessionId: "restored-agent", workspaceId: "w", kind: "branch" })
+    .mockResolvedValueOnce({ sessionId: "new-agent", workspaceId: "w", kind: "branch" })
+  const view = setup(
+    {
+      buffers: [],
+      activeRelPath: null,
+      belowEditorRun: null,
+      sessions: [
+        {
+          id: "pane-1",
+          kind: "agent",
+          sessionId: "gone-agent",
+          label: "Claude Code",
+          launch: { type: "agent", agentId: "claude-code", workspaceMode: "policy" },
+        },
+      ],
+      active: { type: "session", id: "pane-1" },
+    },
+    { "sessions.start": start },
+    "latex",
+  )
+  await waitFor(() => expect(start).toHaveBeenCalledOnce())
+  expect(start.mock.calls[0]?.[0]).toMatchObject({ agentId: "claude-code", origin: "latex" })
+  act(() => view.result.current.launchChosenAgent("codex", "main"))
+  await waitFor(() => expect(start).toHaveBeenCalledTimes(2))
+  expect(start.mock.calls[1]?.[0]).toMatchObject({ agentId: "codex", origin: "latex" })
   view.dispose()
 })

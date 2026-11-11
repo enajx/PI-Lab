@@ -6,13 +6,24 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../providers/AppProviders"
+import { closeQuickBuffer, writeQuickBuffer } from "../../../../QuickEditor/quickEditorState"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
 import { ProjectActivityProvider } from "../../-ProjectActivity"
 import { writeProjectWorkspaceState } from "../../projects/-workspaceState"
-import { Sidebar } from "./Sidebar"
+import { SectionsSection } from "../../settings/components/SettingsSections"
+import { FEATURE_HELP_CONTROLS, FeatureHelpPanel, Sidebar, sameHelpText } from "./Sidebar"
+
+describe("sameHelpText", () => {
+  test("treats case, spacing, and trailing punctuation as the same text", () => {
+    expect(sameHelpText("Add or remove header shortcuts", "add or remove  header shortcuts.")).toBe(
+      true,
+    )
+    expect(sameHelpText("Header shortcuts", "Choose which buttons this top bar shows.")).toBe(false)
+  })
+})
 
 /**
  * Component test for the left sidebar. Mounts the
@@ -315,25 +326,40 @@ describe("Sidebar", () => {
     expect(screen.getAllByTestId("science-nav-item").length).toBeGreaterThan(0)
   })
 
-  test("workspace nav uses the requested default order and Editor opens without a file", async () => {
-    const { router } = renderSidebar()
+  test("workspace nav uses the requested default order and hides Editor by default", async () => {
+    renderSidebar()
     const nav = await screen.findByTestId("science-nav")
-    const editor = screen.getByTestId("nav-editor")
-    expect(nav.contains(editor)).toBe(true)
     expect([...nav.children].map((row) => row.getAttribute("data-science-tab"))).toEqual([
-      "editor",
-      "analysis",
       "tasks",
       "library",
+      "analysis",
+      "latex",
       "skills",
       "workflows",
       "cluster",
     ])
+    expect(screen.queryByTestId("nav-editor")).toBeNull()
+  })
+
+  test("the Sections setting shows Editor at the bottom, and it opens without a file", async () => {
+    window.localStorage.setItem("pi-lab.sections.showEditor", "true")
+    const { router } = renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const editor = screen.getByTestId("nav-editor")
+    expect(nav.lastElementChild).toBe(editor)
     fireEvent.click(editor)
     await waitFor(() => expect(router.state.location.pathname).toBe("/quick-edit"))
   })
 
-  test("Editor respects a saved workspace nav order", async () => {
+  test("a saved order that contains Editor does not make it visible", async () => {
+    window.localStorage.setItem("pi-lab.sidebar.navOrder", JSON.stringify(["editor", "workflows"]))
+    renderSidebar()
+    await screen.findByTestId("science-nav")
+    expect(screen.queryByTestId("nav-editor")).toBeNull()
+  })
+
+  test("Editor keeps its dragged position from a saved order when shown", async () => {
+    window.localStorage.setItem("pi-lab.sections.showEditor", "true")
     window.localStorage.setItem("pi-lab.sidebar.navOrder", JSON.stringify(["editor", "workflows"]))
     renderSidebar()
     const nav = await screen.findByTestId("science-nav")
@@ -341,17 +367,65 @@ describe("Sidebar", () => {
     expect(nav.children[1]).toBe(screen.getByTestId("nav-automations"))
   })
 
-  test("adds Editor after Routines in an older saved nav order", async () => {
+  test("shown Editor goes to the bottom of an older saved order without it", async () => {
+    window.localStorage.setItem("pi-lab.sections.showEditor", "true")
     window.localStorage.setItem(
       "pi-lab.sidebar.navOrder",
       JSON.stringify(["workflows", "library", "analysis"]),
     )
     renderSidebar()
-    const workflows = await screen.findByTestId("nav-automations")
-    expect(workflows.nextElementSibling).toBe(screen.getByTestId("nav-editor"))
-    expect(
-      screen.getByTestId("nav-editor").nextElementSibling?.getAttribute("data-science-tab"),
-    ).toBe("library")
+    const nav = await screen.findByTestId("science-nav")
+    expect(nav.lastElementChild).toBe(screen.getByTestId("nav-editor"))
+  })
+
+  test("Editor shows at the bottom while a file outside any project is open, and hides after", async () => {
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    expect(screen.queryByTestId("nav-editor")).toBeNull()
+
+    const target = { id: "outside-file", path: "/tmp/outside.txt" }
+    act(() =>
+      writeQuickBuffer({
+        target,
+        content: "x",
+        savedContent: "x",
+        baseline: { exists: true, mtimeMs: 1, size: 1 },
+        epoch: 0,
+        conflict: false,
+      }),
+    )
+    const editor = await screen.findByTestId("nav-editor")
+    expect(nav.lastElementChild).toBe(editor)
+
+    act(() => closeQuickBuffer(target.id))
+    await waitFor(() => expect(screen.queryByTestId("nav-editor")).toBeNull())
+  })
+
+  test("the active nav row is not bold", async () => {
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const row = [...nav.children].find((item) => item.getAttribute("data-science-tab") === "tasks")
+    fireEvent.click(row?.querySelector("a") ?? (row as HTMLElement))
+    await waitFor(() => expect(nav.querySelector(".bg-accent")).not.toBeNull())
+    expect(nav.querySelector(".font-medium, .font-semibold, .font-bold")).toBeNull()
+  })
+
+  test("the LaTeX Editor row shows the stylised LaTeX logo", async () => {
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const row = [...nav.children].find((item) => item.getAttribute("data-science-tab") === "latex")
+    expect(row?.querySelector('[data-testid="latex-logo"]')).not.toBeNull()
+  })
+
+  test("adds LaTeX Editor below Tasks in an older saved nav order", async () => {
+    window.localStorage.setItem(
+      "pi-lab.sidebar.navOrder",
+      JSON.stringify(["library", "tasks", "analysis", "workflows", "editor"]),
+    )
+    renderSidebar()
+    const nav = await screen.findByTestId("science-nav")
+    const order = [...nav.children].map((row) => row.getAttribute("data-science-tab"))
+    expect(order.indexOf("latex")).toBe(order.indexOf("tasks") + 1)
   })
 
   test("hides Cluster/Analysis nav rows when their section preference is off, restores when on", async () => {
@@ -426,6 +500,17 @@ describe("Sidebar", () => {
     for (const element of [row, ...document.querySelectorAll("[draggable=true]")])
       expect(element.className).not.toContain("cursor-grab")
     expect(row.className).toContain("cursor-pointer")
+  })
+
+  test("a paper-only project's row opens it in the LaTeX Editor", async () => {
+    const { router } = renderSidebar({
+      "projects.list": () => [
+        { id: "solo", name: "My paper", repoPath: "/p", metadata: { paperOnly: true } },
+      ],
+    })
+    fireEvent.click(await screen.findByTestId("project-agent-status"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/science/latex"))
+    expect(router.state.location.search).toEqual({ projectId: "solo" })
   })
 
   test("a project’s sidebar ring reflects its active agent state", async () => {
@@ -558,13 +643,14 @@ describe("Sidebar", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/sessions-project"))
   })
 
-  test("projects render in the persisted order, with new ids appended", async () => {
-    window.localStorage.setItem("pi-lab.sidebar.projectOrder", JSON.stringify(["c", "a"]))
+  test("projects render in the saved project order that the Dashboard also uses", async () => {
+    // An old sidebar-only order left in local storage is ignored.
+    window.localStorage.setItem("pi-lab.sidebar.projectOrder", JSON.stringify(["a", "b"]))
     renderSidebar({
       "projects.list": () => [
+        { id: "c", name: "Gamma", repoPath: "/c" },
         { id: "a", name: "Alpha", repoPath: "/a" },
         { id: "b", name: "Beta", repoPath: "/b" },
-        { id: "c", name: "Gamma", repoPath: "/c" },
       ],
     })
     await waitFor(() => expect(screen.getAllByTestId("project-item").length).toBe(3))
@@ -572,8 +658,40 @@ describe("Sidebar", () => {
     const ids = screen
       .getAllByTestId("project-item")
       .map((el) => el.getAttribute("data-project-id"))
-    // Stored ids first (c, a), then the not-yet-stored id (b) in natural order.
     expect(ids).toEqual(["c", "a", "b"])
+  })
+
+  test("dragging a project row saves the new order for every project, hidden ones included", async () => {
+    let projects = [
+      { id: "a", name: "Alpha", repoPath: "/a", archivedAt: null },
+      { id: "h", name: "Hidden", repoPath: "/h", archivedAt: 1 },
+      { id: "b", name: "Beta", repoPath: "/b", archivedAt: null },
+    ]
+    const reorderCalls: unknown[] = []
+    renderSidebar({
+      "projects.list": () => projects,
+      "projects.reorder": (input) => {
+        reorderCalls.push(input)
+        const { ids } = input as { ids: string[] }
+        projects = ids.flatMap((id) => projects.filter((row) => row.id === id))
+        return undefined
+      },
+    })
+    await waitFor(() => expect(screen.getAllByTestId("project-item").length).toBe(2))
+    const alpha = screen.getByText("Alpha")
+    const beta = screen.getByText("Beta")
+    const dataTransfer = { effectAllowed: "", dropEffect: "" }
+    // Drop Beta on the top half of Alpha: Beta goes before it.
+    fireEvent.dragStart(beta, { dataTransfer })
+    fireEvent.dragOver(alpha, { dataTransfer })
+    fireEvent.drop(alpha, { dataTransfer })
+
+    await waitFor(() => expect(reorderCalls).toEqual([{ ids: ["b", "h", "a"] }]))
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId("project-item").map((el) => el.getAttribute("data-project-id")),
+      ).toEqual(["b", "a"]),
+    )
   })
 
   test("hides archived projects in both sidebar layouts and can reveal and restore them", async () => {
@@ -735,6 +853,49 @@ describe("Sidebar", () => {
     )
   })
 
+  test("the What's this? card never shows a body equal to its title for any sidebar control", async () => {
+    window.localStorage.setItem("pi-lab.sidebar.showEditor", "true")
+    renderSidebar({
+      "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],
+    })
+    await screen.findByText("Alpha")
+    const controls = Array.from(
+      screen.getByTestId("app-sidebar").querySelectorAll<HTMLElement>(FEATURE_HELP_CONTROLS),
+    )
+    expect(controls.length).toBeGreaterThan(5)
+    for (const control of controls) {
+      fireEvent.pointerOver(control)
+      const label = screen.getByTestId("sidebar-feature-help-label").textContent ?? ""
+      const body = screen.queryByTestId("sidebar-feature-help-description")?.textContent ?? ""
+      expect(sameHelpText(label, body), `${label} / ${body}`).toBe(false)
+      fireEvent.pointerOut(control)
+    }
+  })
+
+  test("a control with no separate description shows only its title", async () => {
+    render(
+      <AppProviders client={createFakeTrpcClient({})} queryClient={new QueryClient()}>
+        <FeatureHelpPanel onHide={() => {}} />
+        <button type="button" aria-label="Close file" title="Close file" />
+        <button type="button">Save</button>
+        <button
+          type="button"
+          aria-label="Add or remove header shortcuts"
+          data-feature-help="Add or remove header shortcuts."
+        />
+      </AppProviders>,
+    )
+    for (const [name, label] of [
+      [/Close file/, "Close file"],
+      [/Save/, "Save"],
+      [/Add or remove header shortcuts/, "Add or remove header shortcuts"],
+    ] as const) {
+      fireEvent.pointerOver(screen.getByRole("button", { name }))
+      expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe(label)
+      expect(screen.queryByTestId("sidebar-feature-help-description")).toBeNull()
+    }
+  })
+
   test("persists hiding feature help and leaves a compact restore control", async () => {
     renderSidebar()
     await waitFor(() => expect(screen.getByTestId("sidebar-feature-help")).toBeTruthy())
@@ -776,5 +937,179 @@ describe("Sidebar", () => {
     await waitFor(() => expect(removeInput).toEqual({ id: "a" }))
     // Removing closes the menu.
     expect(screen.queryByTestId("project-context-menu")).toBeNull()
+  })
+})
+
+/** The workspace nav row for view entry `id`. */
+function navRow(id: string): HTMLElement | undefined {
+  const nav = screen.queryByTestId("science-nav")
+  if (!nav) return undefined
+  return [...nav.children].find((row) => row.getAttribute("data-science-tab") === id) as
+    | HTMLElement
+    | undefined
+}
+
+/** The labels and check states of the view-entry menu's list, in order. */
+function menuEntries(): Array<{ label: string; checked: string | null }> {
+  const menu = screen.getByTestId("sidebar-view-menu")
+  return within(menu)
+    .getAllByRole("menuitemcheckbox")
+    .map((item) => ({
+      label: item.textContent ?? "",
+      checked: item.getAttribute("aria-checked"),
+    }))
+}
+
+describe("Sidebar view-entry menu", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  test("right-clicking a view entry opens a menu with Hide and every entry checked", async () => {
+    renderSidebar()
+    await screen.findByTestId("science-nav")
+    expect(screen.queryByTestId("sidebar-view-menu")).toBeNull()
+
+    fireEvent.contextMenu(navRow("library") as HTMLElement, { clientX: 40, clientY: 120 })
+    const menu = screen.getByTestId("sidebar-view-menu")
+    expect(menu.style.left).toBe("40px")
+    expect(menu.style.top).toBe("120px")
+    expect(within(menu).getByTestId("sidebar-view-menu-hide").textContent).toBe("Hide 'Library'")
+    expect(menuEntries()).toEqual([
+      { label: "Tasks", checked: "true" },
+      { label: "Library", checked: "true" },
+      { label: "Analysis", checked: "true" },
+      { label: "LaTeX Editor", checked: "true" },
+      { label: "Skills", checked: "true" },
+      { label: "Routines", checked: "true" },
+      { label: "Cluster", checked: "true" },
+      { label: "Editor", checked: "false" },
+    ])
+    // Projects Dashboard is always shown, so it is not in the list.
+    expect(menu.textContent).not.toContain("Dashboard")
+
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.queryByTestId("sidebar-view-menu")).toBeNull()
+  })
+
+  test("Hide removes the entry, it stays hidden after remount, and the list shows it again", async () => {
+    const first = renderSidebar()
+    await screen.findByTestId("science-nav")
+    fireEvent.contextMenu(navRow("library") as HTMLElement)
+    fireEvent.click(screen.getByTestId("sidebar-view-menu-hide"))
+    expect(screen.queryByTestId("sidebar-view-menu")).toBeNull()
+    expect(navRow("library")).toBeUndefined()
+    first.unmount()
+
+    renderSidebar()
+    await screen.findByTestId("science-nav")
+    expect(navRow("library")).toBeUndefined()
+
+    fireEvent.contextMenu(navRow("tasks") as HTMLElement)
+    expect(menuEntries().find((entry) => entry.label === "Library")?.checked).toBe("false")
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Library" }))
+    expect(navRow("library")).toBeTruthy()
+    // The saved order is kept: Library is back in its place.
+    const nav = screen.getByTestId("science-nav")
+    expect(nav.children[1]?.getAttribute("data-science-tab")).toBe("library")
+  })
+
+  test("hiding the entry you are on keeps you on that page", async () => {
+    const { router } = renderSidebar()
+    await screen.findByTestId("science-nav")
+    fireEvent.click(navRow("library")?.closest("a") ?? (navRow("library") as HTMLElement))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/science/library"))
+    fireEvent.contextMenu(navRow("library") as HTMLElement)
+    fireEvent.click(screen.getByTestId("sidebar-view-menu-hide"))
+    expect(navRow("library")).toBeUndefined()
+    expect(router.state.location.pathname).toBe("/science/library")
+  })
+
+  test("Settings section toggles and the menu agree", async () => {
+    renderSidebar()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders client={createFakeTrpcClient({})} queryClient={queryClient}>
+        <SectionsSection />
+      </AppProviders>,
+    )
+    await screen.findByTestId("science-nav")
+    const analysisToggle = screen.getByTestId("settings-show-analysis-section")
+
+    // Menu to Settings.
+    fireEvent.contextMenu(navRow("analysis") as HTMLElement)
+    fireEvent.click(screen.getByTestId("sidebar-view-menu-hide"))
+    expect(analysisToggle.getAttribute("aria-checked")).toBe("false")
+
+    // Settings to menu.
+    fireEvent.click(analysisToggle)
+    expect(navRow("analysis")).toBeTruthy()
+    fireEvent.contextMenu(navRow("tasks") as HTMLElement)
+    expect(menuEntries().find((entry) => entry.label === "Analysis")?.checked).toBe("true")
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Editor" }))
+    expect(screen.getByTestId("settings-show-editor-section").getAttribute("aria-checked")).toBe(
+      "true",
+    )
+  })
+})
+
+describe("Sidebar project menu: Edit project…", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  test("opens the Edit project dialog with the project's details and saves through updateDetails", async () => {
+    const alpha = {
+      id: "a",
+      name: "Alpha",
+      repoPath: "/a",
+      typeId: "software",
+      metadata: { deadline: "2027-01-02", emojiTags: [], textTags: [] },
+      agentConfig: null,
+      archivedAt: null,
+      hasThumbnail: false,
+    }
+    const calls: unknown[] = []
+    const { queryClient } = renderSidebar({
+      "projects.list": () => [alpha],
+      "agents.projectChoice": () => ({ agentId: null }),
+      "paper.get": () => ({ paper: null }),
+      "projects.updateDetails": (input) => {
+        calls.push(input)
+        return alpha
+      },
+    })
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+    fireEvent.contextMenu(await screen.findByTestId("project-item"))
+    const menu = screen.getByTestId("project-context-menu")
+    const items = within(menu).getAllByRole("menuitem")
+    expect(items[0]?.getAttribute("data-testid")).toBe("project-edit")
+    expect(items[0]?.textContent).toBe("Edit project…")
+    fireEvent.click(items[0] as HTMLElement)
+    expect(screen.queryByTestId("project-context-menu")).toBeNull()
+
+    const dialog = screen.getByTestId("edit-project-dialog")
+    expect((within(dialog).getByTestId("edit-project-name") as HTMLInputElement).value).toBe(
+      "Alpha",
+    )
+    expect((within(dialog).getByTestId("edit-project-type") as HTMLSelectElement).value).toBe(
+      "software",
+    )
+    fireEvent.change(within(dialog).getByTestId("edit-project-name"), {
+      target: { value: "Beta" },
+    })
+    await waitFor(() =>
+      expect((within(dialog).getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    )
+    fireEvent.click(within(dialog).getByTestId("edit-project-save"))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toMatchObject({ id: "a", details: { name: "Beta", typeId: "software" } })
+    await waitFor(() => expect(screen.queryByTestId("edit-project-dialog")).toBeNull())
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey))
+    expect(keys.some((key) => key.includes("list"))).toBe(true)
+    expect(keys.some((key) => key.includes("thumbnail"))).toBe(true)
+    expect(keys.some((key) => key.includes("projectChoice"))).toBe(true)
   })
 })

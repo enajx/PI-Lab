@@ -148,67 +148,6 @@ test("packaged Alpha generates choices from compact icon masters", async () => {
   expect(await readFile(join(resources, "pi-lab-icon.png"))).toEqual(
     await readFile(join(DESKTOP_DIR, "assets", "icons", "icon-alpha.png")),
   )
-
-  let window = await app.firstWindow()
-  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 60_000 })
-  await window.getByTestId("nav-settings").click()
-  await window.getByTestId("settings-nav-appearance").click()
-  const preview = window.getByTestId("settings-app-icon-preview")
-  const source = async () => preview.getAttribute("src")
-  const changed = async (previous: string | null) => {
-    await expect.poll(source).not.toBe(previous)
-    const next = await source()
-    expect(next).toMatch(/^data:image\/png;base64,/u)
-    return next
-  }
-  await expect(window.getByTestId("settings-app-icon-font")).toHaveValue("gill-sans-regular")
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
-  await expect(window.getByTestId("settings-app-icon-alpha-white-background")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  const defaultIcon = await readFile(join(resources, "pi-lab-icon.png"))
-  await expect.poll(source).toBe(`data:image/png;base64,${defaultIcon.toString("base64")}`)
-
-  await window.getByTestId("settings-app-icon-family").selectOption("joyplot")
-  let previous = await changed(`data:image/png;base64,${defaultIcon.toString("base64")}`)
-  await window.getByTestId("settings-app-icon-palette").selectOption("plasma")
-  previous = await changed(previous)
-  await window.getByTestId("settings-app-icon-reverse").check()
-  previous = await changed(previous)
-  await window.getByTestId("settings-app-icon-limit-visible-range").check()
-  previous = await changed(previous)
-  await window.getByTestId("settings-app-icon-alpha-white-background").click()
-  await changed(previous)
-  await window.getByTestId("settings-app-icon-favorite").click()
-  await expect(window.getByTestId("settings-app-icon-favorites").locator("option")).toHaveCount(2)
-
-  await app.close()
-  app = await electron.launch({
-    executablePath: PACKAGED_BINARY,
-    env: {
-      ...process.env,
-      PI_LAB_TEST_MODE: "1",
-      PI_LAB_DATA_DIR: dataDir,
-      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
-    },
-  })
-  window = await app.firstWindow()
-  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 60_000 })
-  await window.getByTestId("nav-settings").click()
-  await window.getByTestId("settings-nav-appearance").click()
-  await expect(window.getByTestId("settings-app-icon-family")).toHaveValue("joyplot")
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("plasma")
-  await expect(window.getByTestId("settings-app-icon-reverse")).toBeChecked()
-  await expect(window.getByTestId("settings-app-icon-limit-visible-range")).toBeChecked()
-  await expect(window.getByTestId("settings-app-icon-alpha-white-background")).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  )
-  await expect(window.getByTestId("settings-app-icon-preview")).toHaveAttribute(
-    "src",
-    /^data:image\/png;base64,/u,
-  )
 })
 
 test("packaged public app keeps its release icon and hides icon choices", async () => {

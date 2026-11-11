@@ -1,10 +1,14 @@
 import type { WorkflowTask } from "@pi-lab/local-db"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CloudDownload, FileText, type LucideIcon } from "lucide-react"
+import { CloudDownload, FileText, GitMerge, type LucideIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import { useTranslate } from "../../i18n/language"
 import { useTRPC } from "../../trpc/react"
+import type { RouterOutputs } from "../../trpc/types"
+
+type ProjectWorkflowStatusData = RouterOutputs["workflows"]["status"]
+type ProjectWorkflowRecordData = ProjectWorkflowStatusData["summary"]
 
 const WorkflowResultDialog = lazy(() =>
   import("./WorkflowResultDialog").then((module) => ({ default: module.WorkflowResultDialog })),
@@ -13,7 +17,8 @@ const WorkflowResultDialog = lazy(() =>
 /**
  * The stateful control for a background project workflow ("Project summary" /
  * "Fetch remote experiments"), used on both the Dashboard card (compact,
- * icon-only) and the project-view header (labeled). It is driven entirely by
+ * icon-only), the project-view header (icon: a square icon-only button) and
+ * the Analysis top bar (labeled). It is driven entirely by
  * `workflows.status`, so both surfaces reflect the same live state and a run
  * started on one shows as running on the other.
  *
@@ -55,12 +60,94 @@ const TASK_META: Record<WorkflowTask, TaskMeta> = {
     reportHeading: "Project status",
     guidance: "Check RESEARCH.md for the updated status.",
   },
+  "latex-merge": {
+    icon: GitMerge,
+    label: "Agent merge",
+    reportHeading: "Agent merge",
+    guidance: "",
+  },
   "fetch-experiments": {
     icon: CloudDownload,
     label: "Fetch experiments",
     reportHeading: "Fetch results",
     guidance: "Fetched — check Analysis for the results.",
   },
+}
+
+/** The user-facing label of a background workflow task, e.g. "Plan research". */
+export function workflowTaskLabel(task: WorkflowTask): string {
+  return TASK_META[task].label
+}
+
+/** The status record of one task in a `workflows.status` result. */
+function taskRecord(
+  status: ProjectWorkflowStatusData | undefined,
+  task: WorkflowTask,
+): ProjectWorkflowRecordData | undefined {
+  if (!status) return undefined
+  if (task === "summary") return status.summary
+  if (task === "plan-research") return status.planResearch
+  if (task === "latex-merge") return status.latexMerge
+  return status.fetchExperiments
+}
+
+/**
+ * The result/progress window of one background workflow, opened from outside
+ * its control (the Project Agents box). Same window and Recheck as the control.
+ */
+export function ProjectWorkflowDialog({
+  projectId,
+  projectName,
+  task,
+  onClose,
+}: {
+  projectId: string
+  projectName: string
+  task: WorkflowTask
+  onClose: () => void
+}) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const statusQuery = useQuery(
+    trpc.workflows.status.queryOptions(
+      { projectId },
+      {
+        staleTime: 0,
+        refetchInterval: (query) => (taskRecord(query.state.data, task)?.running ? 800 : false),
+      },
+    ),
+  )
+  const run = useMutation(
+    trpc.workflows.run.mutationOptions({
+      onSettled: () =>
+        void queryClient.invalidateQueries({
+          queryKey: trpc.workflows.status.queryKey({ projectId }),
+        }),
+    }),
+  )
+  const record = taskRecord(statusQuery.data, task)
+  const meta = TASK_META[task]
+  return (
+    <Suspense fallback={<div role="status">{t("Loading routine result…")}</div>}>
+      <WorkflowResultDialog
+        projectId={projectId}
+        task={task}
+        title={t(meta.label)}
+        reportHeading={t(meta.reportHeading)}
+        projectName={projectName}
+        running={run.isPending || Boolean(record?.running)}
+        result={record?.result ?? ""}
+        errorMessage={
+          statusQuery.error?.message ?? run.error?.message ?? record?.errorMessage ?? null
+        }
+        lastCheckedAt={record?.lastCheckedAt ?? 0}
+        guidance={t(meta.guidance)}
+        onRecheck={() => run.mutateAsync({ projectId, task, force: true })}
+        onClose={onClose}
+      />
+    </Suspense>
+  )
 }
 
 // State tints. Only a *running* control is coloured — a brand-orange underline
@@ -82,17 +169,20 @@ export function ProjectWorkflowControl({
   instructions,
   disabled,
   disabledReason,
+  label,
 }: {
   projectId: string
   projectName: string
   task: WorkflowTask
-  variant: "compact" | "labeled"
+  variant: "compact" | "icon" | "labeled"
   /** Stable data-testid for the control (e.g. `project-card-summary`). */
   testId: string
   /** Extra prompt instructions for the fetch task (from Settings); ignored otherwise. */
   instructions?: string
   disabled?: boolean
   disabledReason?: string
+  /** Button text in place of the task's own label (e.g. "Generate project summary"). */
+  label?: string
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -169,18 +259,21 @@ export function ProjectWorkflowControl({
 
   const meta = TASK_META[task]
   const Icon = meta.icon
+  const buttonLabel = label ?? t(meta.label)
 
   const ariaLabel =
     state === "running"
-      ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("working")}`
+      ? `${buttonLabel} ${t("for")} ${projectName} — ${t("working")}`
       : state === "done"
-        ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("done, view result")}`
+        ? `${buttonLabel} ${t("for")} ${projectName} — ${t("done, view result")}`
         : state === "error"
-          ? `${t(meta.label)} ${t("for")} ${projectName} — ${t("failed, view error")}`
-          : `${t(meta.label)} ${t("for")} ${projectName}`
+          ? `${buttonLabel} ${t("for")} ${projectName} — ${t("failed, view error")}`
+          : `${buttonLabel} ${t("for")} ${projectName}`
 
   const compact =
     "relative inline-flex h-7 flex-1 items-center justify-center rounded-md border outline-none transition-colors focus-visible:bg-accent/60 disabled:cursor-not-allowed"
+  const icon =
+    "relative flex size-7 items-center justify-center rounded-md border outline-none transition-colors focus-visible:bg-accent/60 disabled:cursor-not-allowed"
   const labeled =
     "relative flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs outline-none transition-colors disabled:cursor-not-allowed"
 
@@ -192,18 +285,26 @@ export function ProjectWorkflowControl({
         data-state={state}
         disabled={disabled}
         aria-label={ariaLabel}
-        title={disabledReason ?? t(meta.label)}
-        data-feature-label={t(meta.label)}
+        title={disabledReason ?? buttonLabel}
+        data-feature-label={buttonLabel}
         data-feature-help={
           disabledReason ??
-          `${t(meta.label)} ${t("for")} ${projectName} — ${t("Runs as a background task; click while running to watch its live output, or when done to view the result and re-check")}`
+          `${buttonLabel} ${t("for")} ${projectName} — ${t("Runs as a background task; click while running to watch its live output, or when done to view the result and re-check")}`
         }
         onClick={onClick}
-        className={cn(variant === "compact" ? compact : labeled, STATE_TINT[state])}
+        className={cn(
+          variant === "compact" ? compact : variant === "icon" ? icon : labeled,
+          STATE_TINT[state],
+        )}
       >
         {variant === "compact" ? (
           <Icon
             className={cn("size-4 shrink-0", state === "running" && "opacity-70")}
+            aria-hidden
+          />
+        ) : variant === "icon" ? (
+          <Icon
+            className={cn("size-3.5 shrink-0", state === "running" && "opacity-70")}
             aria-hidden
           />
         ) : (
@@ -212,7 +313,7 @@ export function ProjectWorkflowControl({
               className={cn("size-3.5 shrink-0", state === "running" && "opacity-70")}
               aria-hidden
             />
-            <span>{state === "running" ? t("Working") : t(meta.label)}</span>
+            <span>{state === "running" ? t("Working") : buttonLabel}</span>
           </>
         )}
         {/* A compositor-friendly moving underline — only while working. */}

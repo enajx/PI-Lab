@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router"
 import {
   Bot,
+  Check,
   ChevronDown,
   Eye,
   EyeOff,
@@ -11,33 +12,39 @@ import {
   LayoutDashboard,
   PanelLeft,
   PanelLeftClose,
+  Pencil,
   Settings,
   Trash2,
   Waypoints,
   X,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { LatexText } from "../../../../components/LatexText"
+import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import {
   dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   useNavOrder,
-  useProjectOrder,
   useRestoreProjectTabs,
-  useShowAnalysisSection,
-  useShowClusterSection,
   useShowHiddenProjects,
+  useShownNavEntries,
   useSidebarCollapsed,
   useSidebarFeatureHelp,
   useSidebarWidth,
 } from "../../../../preferences/preferences"
-import { readActiveQuickTarget } from "../../../../QuickEditor/quickEditorState"
+import {
+  readActiveQuickTarget,
+  subscribeQuickEditor,
+} from "../../../../QuickEditor/quickEditorState"
+import { useDisplayPath } from "../../../../trpc/displayPath"
 import { useTRPC } from "../../../../trpc/react"
 import type { ProjectSummary } from "../../../../trpc/useProjectThumbnail"
 import { useProjectThumbnail } from "../../../../trpc/useProjectThumbnail"
 import { useProjectActivityStates } from "../../-ProjectActivity"
 import { rememberSettingsReturnRoute } from "../../-settingsReturnRoute"
+import { EditProjectDialog } from "../../index/components/ProjectCard/EditProjectDialog"
 import type { ProjectState } from "../../index/utils/deriveProjectState"
 import {
   type ProjectWorkspaceState,
@@ -50,6 +57,7 @@ import { type ScienceNavItem, scienceNavItems } from "../../science/components/s
 import { readOpenProjectOverride } from "../../utils/openProjectOverride"
 import { AddProjectMenu } from "../AddProjectMenu"
 import { ProjectVisibilityToggle } from "../ProjectVisibilityToggle"
+import { useProjectReorder } from "../useProjectReorder"
 
 /**
  * Shared layout/typography for every sidebar nav row (Dashboard, Science tabs,
@@ -61,16 +69,17 @@ const navRowClass = "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm tran
 
 /** Active/inactive colours for a nav row, layered on top of `navRowClass`. */
 const navStateClass = (isActive: boolean): string =>
-  isActive
-    ? "bg-accent font-medium text-accent-foreground"
-    : "text-sidebar-foreground hover:bg-accent/60"
+  isActive ? "bg-accent text-accent-foreground" : "text-sidebar-foreground hover:bg-accent/60"
 
-/** Default only; a persisted drag order takes priority. */
+/**
+ * Default only; a persisted drag order takes priority. Editor is not listed: it is
+ * hidden by default and, when shown, goes to the bottom unless the user dragged it.
+ */
 const DEFAULT_NAV_ORDER = [
-  "editor",
-  "analysis",
   "tasks",
   "library",
+  "analysis",
+  "latex",
   "skills",
   "workflows",
   "cluster",
@@ -102,7 +111,8 @@ export interface FeatureHelp {
   description: string
 }
 
-const FEATURE_HELP_SELECTOR = [
+/** Elements the "What's this?" card describes when hovered or focused. */
+export const FEATURE_HELP_CONTROLS = [
   "[data-feature-help]",
   "button",
   "a[href]",
@@ -115,9 +125,23 @@ const FEATURE_HELP_SELECTOR = [
   '[role="tab"]',
 ].join(",")
 
+/**
+ * True when two help texts say the same thing: equal after ignoring case, extra
+ * spaces, and trailing punctuation such as "." or "…".
+ */
+export function sameHelpText(a: string, b: string): boolean {
+  const norm = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[\s.…!?:]+$/u, "")
+      .trim()
+  return norm(a) === norm(b)
+}
+
 function featureElement(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null
-  const match = target.closest(FEATURE_HELP_SELECTOR)
+  const match = target.closest(FEATURE_HELP_CONTROLS)
   return match instanceof HTMLElement ? match : null
 }
 
@@ -128,11 +152,13 @@ function featureHelpFromElement(element: HTMLElement): FeatureHelp | null {
   const input = element instanceof HTMLInputElement ? element.placeholder.trim() : ""
   const label = element.dataset.featureLabel?.trim() || ariaLabel || title || input || text
   if (!label) return null
+  // The body is the first text that adds something to the title; empty when none does.
   const description =
-    element.dataset.featureHelp?.trim() ||
-    element.getAttribute("aria-description")?.trim() ||
-    (title !== label ? title : "") ||
-    label
+    [
+      element.dataset.featureHelp?.trim() ?? "",
+      element.getAttribute("aria-description")?.trim() ?? "",
+      title,
+    ].find((text) => text !== "" && !sameHelpText(text, label)) ?? ""
   return { label, description }
 }
 
@@ -294,11 +320,11 @@ interface ProjectMenuState {
 /**
  * Left sidebar.
  * Top to bottom: a "Dashboard" entry (carrying the divider below it), one unified
- * workspace nav (Library, Analysis, Cluster, Tasks, Skills, Workflows) rendered as a
+ * workspace nav (Tasks, Library, Analysis, LaTeX Editor, Skills, Routines, Cluster) rendered as a
  * single `gap-0.5` list, a divider-topped "Projects" label + the opened projects (the
  * scroll region), then a tight bottom cluster of "Add project" + Settings under a single
  * divider. Both the workspace nav and the project list are drag-reorderable within
- * themselves (`useNavOrder` / `useProjectOrder`); reordering never crosses between the
+ * themselves (`useNavOrder` / the saved project order, `useProjectReorder`); reordering never crosses between the
  * two, shows a move cursor (not a copy "+"), and marks the drop slot with a line.
  * Right-clicking a project offers "Remove from PI Lab" (removes the row only, never the
  * files on disk).
@@ -365,6 +391,21 @@ export function Sidebar() {
     }),
   )
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
+  // The project whose Edit project dialog is open (the same dialog as the Dashboard card).
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const editingProject = projects.find((project) => project.id === editingProjectId) ?? null
+  const updateDetails = useMutation(
+    trpc.projects.updateDetails.mutationOptions({
+      onSuccess: (_project, input) => {
+        setEditingProjectId(null)
+        void invalidateProjects()
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.thumbnail.pathKey() })
+        void queryClient.invalidateQueries({
+          queryKey: trpc.agents.projectChoice.queryKey({ projectId: input.id }),
+        })
+      },
+    }),
+  )
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
   const [, setWorkspaceRevision] = useState(0)
 
@@ -377,13 +418,12 @@ export function Sidebar() {
     void openProject.mutateAsync({ path })
   })
 
-  const [projectOrder, setProjectOrder] = useProjectOrder()
-  const orderedProjects = orderById(projects, projectOrder).filter(
-    (project) => showHidden || !project.archivedAt,
-  )
+  // `projects.list` returns the saved project order, the one the Dashboard cards use too.
+  const reorderProjects = useProjectReorder((message) => setActionError(message))
+  const orderedProjects = projects.filter((project) => showHidden || !project.archivedAt)
   const projectRowProps = useDragReorder(
     orderedProjects.map((project) => project.id),
-    setProjectOrder,
+    reorderProjects,
   )
 
   return (
@@ -512,6 +552,10 @@ export function Sidebar() {
       <ProjectContextMenu
         menu={projectMenu}
         onClose={() => setProjectMenu(null)}
+        onEdit={(id) => {
+          setEditingProjectId(id)
+          setProjectMenu(null)
+        }}
         onRemove={(id) => {
           removeProject.mutate({ id })
           setProjectMenu(null)
@@ -525,6 +569,17 @@ export function Sidebar() {
           setProjectMenu(null)
         }}
       />
+
+      {editingProject ? (
+        <EditProjectDialog
+          project={editingProject}
+          mode="edit"
+          pending={updateDetails.isPending}
+          error={updateDetails.error?.message ?? null}
+          onClose={() => setEditingProjectId(null)}
+          onSave={(details) => updateDetails.mutate({ id: editingProject.id, details })}
+        />
+      ) : null}
     </aside>
   )
 }
@@ -533,8 +588,9 @@ export function FeatureHelpPanel({ onHide }: { onHide: () => void }) {
   const help = useFeatureHelp(true)
   const t = useTranslate()
   const label = help?.label ?? t("What’s this?")
-  const description = help?.description ?? t("Hover over or focus a control to learn what it does.")
-  const showDescription = description !== label
+  const description = help
+    ? help.description
+    : t("Hover over or focus a control to learn what it does.")
 
   return (
     <section
@@ -562,12 +618,14 @@ export function FeatureHelpPanel({ onHide }: { onHide: () => void }) {
           <X className="size-3.5" aria-hidden />
         </button>
       </div>
-      <p
-        data-testid="sidebar-feature-help-description"
-        className="mt-1 line-clamp-3 text-[11px] text-muted-foreground leading-relaxed"
-      >
-        {showDescription ? description : label}
-      </p>
+      {description !== "" ? (
+        <p
+          data-testid="sidebar-feature-help-description"
+          className="mt-1 line-clamp-3 text-[11px] text-muted-foreground leading-relaxed"
+        >
+          {description}
+        </p>
+      ) : null}
     </section>
   )
 }
@@ -636,20 +694,23 @@ function CollapseToggle({
 
 /**
  * The right-click menu for a project row, rendered once at the sidebar root and
- * positioned at the cursor. Its only action removes the project from the app
- * (`projects.remove` — the DB row only; the folder on disk is left untouched).
+ * positioned at the cursor: Edit project… (the Dashboard card's dialog), Dismiss Git
+ * warning, Hide/Unhide, and Remove from PI Lab (`projects.remove`, the DB row only;
+ * the folder on disk is left untouched).
  * Closes on outside mousedown or Escape; clicks inside (the action) don't close it
  * early thanks to the `rootRef` containment check.
  */
 function ProjectContextMenu({
   menu,
   onClose,
+  onEdit,
   onRemove,
   onSetHidden,
   onDismissGitNotice,
 }: {
   menu: ProjectMenuState | null
   onClose: () => void
+  onEdit: (id: string) => void
   onRemove: (id: string) => void
   onSetHidden: (id: string, hidden: boolean) => void
   onDismissGitNotice: (id: string) => void
@@ -657,21 +718,7 @@ function ProjectContextMenu({
   const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    if (!menu) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) onClose()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [menu, onClose])
+  usePopupDismiss(menu !== null, [rootRef], onClose)
 
   if (!menu) return null
   return (
@@ -682,6 +729,16 @@ function ProjectContextMenu({
       className="fixed z-50 w-60 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
       style={{ left: menu.x, top: menu.y }}
     >
+      <button
+        type="button"
+        role="menuitem"
+        data-testid="project-edit"
+        onClick={() => onEdit(menu.id)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60"
+      >
+        <Pencil className="size-4 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{t("Edit project…")}</span>
+      </button>
       <button
         type="button"
         role="menuitem"
@@ -842,103 +899,208 @@ function WorkspaceNav({ collapsed }: { collapsed: boolean }) {
   const { location } = useRouterState()
   const pathname = location.pathname
   const [navOrder, setNavOrder] = useNavOrder()
-  const [showCluster] = useShowClusterSection()
-  const [showAnalysis] = useShowAnalysisSection()
-  // Hide the optional sections whose Settings toggle is off (the surfaces stay
-  // route-guarded too, so a bookmarked URL can't reach a hidden section).
-  const visibleItems = navItems.filter((item) => {
-    if (item.id === "cluster") return showCluster
-    if (item.id === "analysis") return showAnalysis
-    return true
-  })
-  // Existing saved orders predate Editor. Place the new row after Workflows
-  // once, then let drag-and-drop persist any position the user chooses.
-  const workflowsIndex = navOrder.indexOf("workflows")
-  const effectiveOrder =
-    navOrder.includes("editor") || workflowsIndex < 0
+  const [shownEntries, setEntryShown] = useShownNavEntries()
+  const [entryMenu, setEntryMenu] = useState<NavEntryMenuState | null>(null)
+  // A file outside every project is open in the Editor (project files open in
+  // their project view instead, so only outside files reach the quick-edit state).
+  const outsideFileOpen =
+    useSyncExternalStore(subscribeQuickEditor, readActiveQuickTarget, readActiveQuickTarget) !==
+    null
+  // Hide the entries turned off in the right-click menu or in Settings > Sections
+  // (Cluster and Analysis stay route-guarded too, so a bookmarked URL can't reach a
+  // hidden section; the other routes stay reachable). Editor also shows while a file
+  // outside every project is open.
+  const isShown = (item: ScienceNavItem): boolean =>
+    shownEntries.has(item.id) || (item.id === "editor" && outsideFileOpen)
+  // Saved orders predate LaTeX Editor: place it below Tasks once.
+  const tasksIndex = navOrder.indexOf("tasks")
+  const orderWithLatex =
+    navOrder.includes("latex") || tasksIndex < 0
       ? navOrder
-      : [...navOrder.slice(0, workflowsIndex + 1), "editor", ...navOrder.slice(workflowsIndex + 1)]
-  const ordered = orderById(
-    visibleItems,
-    effectiveOrder.length ? effectiveOrder : DEFAULT_NAV_ORDER,
-  )
+      : [...navOrder.slice(0, tasksIndex + 1), "latex", ...navOrder.slice(tasksIndex + 1)]
+  // Every entry in sidebar order (the menu's list); dragging reorders this full
+  // list, so a hidden entry keeps its place for when it is shown again.
+  const allOrdered = orderById(navItems, orderWithLatex.length ? orderWithLatex : DEFAULT_NAV_ORDER)
+  const ordered = allOrdered.filter(isShown)
   const navRowProps = useDragReorder(
-    ordered.map((item) => item.id),
+    allOrdered.map((item) => item.id),
     setNavOrder,
   )
+  const openEntryMenu = (item: ScienceNavItem) => (event: React.MouseEvent) => {
+    event.preventDefault()
+    setEntryMenu({ id: item.id, label: item.label, x: event.clientX, y: event.clientY })
+  }
 
   return (
-    <nav
-      aria-label={t("Workspace")}
-      data-testid="science-nav"
-      className="flex shrink-0 flex-col gap-0.5"
-    >
-      {ordered.map((item) => {
-        const Icon = item.icon
-        const testId =
-          item.id === "workflows"
-            ? "nav-automations"
-            : item.id === "editor"
-              ? "nav-editor"
-              : "science-nav-item"
-        const reorder = collapsed ? null : navRowProps(item.id)
-        if (!item.ready || !item.to) {
+    <>
+      <nav
+        aria-label={t("Workspace")}
+        data-testid="science-nav"
+        className="flex shrink-0 flex-col gap-0.5"
+      >
+        {ordered.map((item) => {
+          const Icon = item.icon
+          const testId =
+            item.id === "workflows"
+              ? "nav-automations"
+              : item.id === "editor"
+                ? "nav-editor"
+                : "science-nav-item"
+          const reorder = collapsed ? null : navRowProps(item.id)
+          if (!item.ready || !item.to) {
+            return (
+              <span
+                key={item.id}
+                data-testid={testId}
+                data-science-tab={item.id}
+                data-ready={false}
+                aria-disabled
+                title={collapsed ? `${t(item.label)} (${t("soon")})` : undefined}
+                data-feature-label={t(item.label)}
+                data-feature-help={t(item.description)}
+                className={cn(
+                  navRowClass,
+                  "text-muted-foreground/50",
+                  "cursor-default",
+                  collapsed && "justify-center",
+                  reorder?.dropClass,
+                )}
+                {...reorder?.dragProps}
+              >
+                <Icon className="size-4" aria-hidden />
+                {collapsed ? null : (
+                  <>
+                    <span className="flex-1 truncate">
+                      <LatexText text={t(item.label)} />
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide">{t("soon")}</span>
+                  </>
+                )}
+              </span>
+            )
+          }
+          const isActive = pathname.startsWith(item.to)
           return (
-            <span
+            <Link
               key={item.id}
+              to={item.to}
+              search={item.id === "editor" ? { target: readActiveQuickTarget()?.id } : undefined}
               data-testid={testId}
               data-science-tab={item.id}
-              data-ready={false}
-              aria-disabled
-              title={collapsed ? `${t(item.label)} (${t("soon")})` : undefined}
+              data-ready={true}
+              data-active={isActive}
+              title={collapsed ? t(item.label) : undefined}
               data-feature-label={t(item.label)}
               data-feature-help={t(item.description)}
+              onContextMenu={openEntryMenu(item)}
               className={cn(
                 navRowClass,
-                "text-muted-foreground/50",
-                "cursor-default",
                 collapsed && "justify-center",
+                navStateClass(isActive),
                 reorder?.dropClass,
               )}
               {...reorder?.dragProps}
             >
               <Icon className="size-4" aria-hidden />
               {collapsed ? null : (
-                <>
-                  <span className="flex-1 truncate">{t(item.label)}</span>
-                  <span className="text-[10px] uppercase tracking-wide">{t("soon")}</span>
-                </>
+                <span className="flex-1 truncate">
+                  <LatexText text={t(item.label)} />
+                </span>
               )}
-            </span>
+            </Link>
           )
-        }
-        const isActive = pathname.startsWith(item.to)
+        })}
+      </nav>
+      <NavEntryMenu
+        menu={entryMenu}
+        entries={allOrdered}
+        shown={shownEntries}
+        onClose={() => setEntryMenu(null)}
+        onSetShown={(id, shown) => {
+          setEntryShown(id, shown)
+          setEntryMenu(null)
+        }}
+      />
+    </>
+  )
+}
+
+/** A right-click target on a view entry of the workspace nav. */
+interface NavEntryMenuState {
+  id: string
+  label: string
+  x: number
+  y: number
+}
+
+const navEntryMenuItemClass =
+  "flex h-6 w-full shrink-0 items-center gap-1.5 rounded px-1.5 text-start text-foreground text-xs outline-none hover:bg-accent focus-visible:bg-accent"
+
+/**
+ * The right-click menu of the workspace nav, at the click point: "Hide '<entry>'",
+ * a separator, then every view entry with a check mark on the shown ones (clicking
+ * one shows or hides it). Projects Dashboard is always shown and not listed. Hiding
+ * the current page's entry only removes it from the sidebar. Escape and an outside
+ * click close it.
+ */
+function NavEntryMenu({
+  menu,
+  entries,
+  shown,
+  onClose,
+  onSetShown,
+}: {
+  menu: NavEntryMenuState | null
+  entries: ScienceNavItem[]
+  shown: ReadonlySet<string>
+  onClose: () => void
+  onSetShown: (id: string, shown: boolean) => void
+}) {
+  const t = useTranslate()
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  usePopupDismiss(menu !== null, [rootRef], onClose)
+
+  if (!menu) return null
+  return (
+    <div
+      ref={rootRef}
+      data-testid="sidebar-view-menu"
+      role="menu"
+      aria-label={t("Sidebar views")}
+      className="fixed z-50 flex w-48 flex-col rounded-md border border-border bg-popover p-1 text-popover-foreground text-xs shadow-lg"
+      style={{ left: menu.x, top: menu.y }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        data-testid="sidebar-view-menu-hide"
+        onClick={() => onSetShown(menu.id, false)}
+        className={navEntryMenuItemClass}
+      >
+        <span className="size-3 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{`${t("Hide")} '${t(menu.label)}'`}</span>
+      </button>
+      <div className="my-1 shrink-0 border-border border-t" />
+      {entries.map((entry) => {
+        const isShown = shown.has(entry.id)
         return (
-          <Link
-            key={item.id}
-            to={item.to}
-            search={item.id === "editor" ? { target: readActiveQuickTarget()?.id } : undefined}
-            data-testid={testId}
-            data-science-tab={item.id}
-            data-ready={true}
-            data-active={isActive}
-            title={collapsed ? t(item.label) : undefined}
-            data-feature-label={t(item.label)}
-            data-feature-help={t(item.description)}
-            className={cn(
-              navRowClass,
-              collapsed && "justify-center",
-              navStateClass(isActive),
-              reorder?.dropClass,
-            )}
-            {...reorder?.dragProps}
+          <button
+            key={entry.id}
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={isShown}
+            data-testid="sidebar-view-menu-entry"
+            data-science-tab={entry.id}
+            onClick={() => onSetShown(entry.id, !isShown)}
+            className={navEntryMenuItemClass}
           >
-            <Icon className="size-4" aria-hidden />
-            {collapsed ? null : <span className="flex-1 truncate">{t(item.label)}</span>}
-          </Link>
+            <Check className={cn("size-3 shrink-0", isShown ? "" : "invisible")} aria-hidden />
+            <span className="min-w-0 truncate">{t(entry.label)}</span>
+          </button>
         )
       })}
-    </nav>
+    </div>
   )
 }
 
@@ -994,6 +1156,7 @@ function ProjectItem({
   onContextMenu: (event: React.MouseEvent) => void
 }) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const params = useParams({ strict: false }) as { projectId?: string }
   const isActive = params.projectId === project.id
   const navigate = useNavigate()
@@ -1003,12 +1166,19 @@ function ProjectItem({
     workspaceState?.buffers.some(
       (buffer) => buffer.externalChange || buffer.content !== buffer.savedContent,
     ) ?? false
+  // A paper added in the LaTeX Editor with no project opens there, not in a project view.
+  const paperOnly = project.metadata?.paperOnly === true
+  const target = paperOnly
+    ? ({ to: "/science/latex", search: { projectId: project.id } } as const)
+    : ({ to: "/projects/$projectId", params: { projectId: project.id } } as const)
+  const openHelp = paperOnly
+    ? `${t("Open ")}${project.name}${t(" in the LaTeX Editor")}`
+    : `${t("Open the ")}${project.name}${t(" project workspace")}`
 
   if (collapsed) {
     return (
       <Link
-        to="/projects/$projectId"
-        params={{ projectId: project.id }}
+        {...target}
         data-testid="project-item"
         data-project-id={project.id}
         data-active={isActive}
@@ -1021,7 +1191,7 @@ function ProjectItem({
         )}
         title={project.name}
         data-feature-label={project.name}
-        data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace")}`}
+        data-feature-help={openHelp}
       >
         <span className="relative">
           <ProjectBadge project={project} isActive={isActive} />
@@ -1048,7 +1218,7 @@ function ProjectItem({
         data-testid="project-row"
         onClick={(event) => {
           if (event.target instanceof Element && event.target.closest("a, button")) return
-          void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+          void navigate(target)
         }}
         onContextMenu={onContextMenu}
         className={cn(
@@ -1078,8 +1248,7 @@ function ProjectItem({
           />
         </button>
         <Link
-          to="/projects/$projectId"
-          params={{ projectId: project.id }}
+          {...target}
           data-testid="project-item"
           data-project-id={project.id}
           data-active={isActive}
@@ -1090,7 +1259,11 @@ function ProjectItem({
           )}
           title={project.repoPath}
           data-feature-label={project.name}
-          data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace at ")}${project.repoPath}`}
+          data-feature-help={
+            paperOnly
+              ? `${openHelp}: ${toDisplayPath(project.repoPath)}`
+              : `${t("Open the ")}${project.name}${t(" project workspace at ")}${toDisplayPath(project.repoPath)}`
+          }
         >
           {project.name}
         </Link>

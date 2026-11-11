@@ -1,5 +1,6 @@
 import { ChevronUp } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useId, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { useTranslate } from "../../../i18n/language"
 
 export interface LatexBuildStatusData {
@@ -14,21 +15,7 @@ export function LatexBuildStatus({ status }: { status: LatexBuildStatusData }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const logId = useId()
 
-  useEffect(() => {
-    if (!open) return
-    const dismiss = (event: MouseEvent): void => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", dismiss)
-    document.addEventListener("keydown", dismissOnEscape)
-    return () => {
-      document.removeEventListener("mousedown", dismiss)
-      document.removeEventListener("keydown", dismissOnEscape)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   return (
     <div ref={rootRef} data-testid="latex-build-status" className="relative min-w-0">

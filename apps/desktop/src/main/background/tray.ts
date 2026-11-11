@@ -38,7 +38,7 @@ export class BackgroundTray {
     if (process.platform === "linux") this.tray.setContextMenu(this.menu())
     else
       this.tray.on("right-click", () => {
-        this.popover?.hide()
+        this.hide()
         this.tray.popUpContextMenu(this.menu())
       })
   }
@@ -68,6 +68,7 @@ export class BackgroundTray {
 
   /** Hide the popover after one of its actions opens a window. */
   hide(): void {
+    this.stopRefreshing()
     this.popover?.hide()
   }
 
@@ -100,7 +101,7 @@ export class BackgroundTray {
   private toggle(bounds: Rectangle): void {
     const window = this.ensurePopover()
     if (window.isVisible()) {
-      window.hide()
+      this.hide()
       return
     }
     this.publish(this.readSnapshot())
@@ -121,6 +122,10 @@ export class BackgroundTray {
       window.show()
       window.focus()
     }
+    // Start here, not on the window's "show" event: macOS emits that event from occlusion
+    // changes, so it does not fire while the screen is locked or the window is covered.
+    this.stopRefreshing()
+    this.refreshTimer = setInterval(() => this.publish(this.readSnapshot()), 1000)
   }
 
   /** Poll only while visible, including activity that has no live terminal session. */
@@ -153,11 +158,7 @@ export class BackgroundTray {
     if (isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1") {
       window.setIgnoreMouseEvents(true)
     }
-    window.on("blur", () => window.hide())
-    window.on("show", () => {
-      this.stopRefreshing()
-      this.refreshTimer = setInterval(() => this.publish(this.readSnapshot()), 1000)
-    })
+    window.on("blur", () => this.hide())
     window.on("hide", () => this.stopRefreshing())
     window.on("closed", () => {
       this.stopRefreshing()

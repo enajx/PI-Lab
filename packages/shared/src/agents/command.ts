@@ -11,6 +11,8 @@ export interface LaunchOptions {
   args?: string[]
   model?: string
   effort?: string
+  /** Folders outside the working directory the agent may also use (needs `addDirArg`). */
+  extraDirs?: string[]
 }
 
 /**
@@ -19,11 +21,26 @@ export interface LaunchOptions {
  * and no quoting is needed.
  *
  * Invariants (property-tested): `argv[0]` is always `agent.command`; the agent's
- * default args precede the caller's extra args, both preserved in order.
+ * default args precede the caller's extra args, both preserved in order. Extra
+ * folders (`options.extraDirs`) are passed with the agent's `addDirArg`, then
+ * `--`, then the caller's args; an agent without `addDirArg` gets none.
  */
 export function buildLaunchArgv(agent: TerminalAgent, options: LaunchOptions = {}): string[] {
   const defaults = launchDefaultsArgv(agent, options)
-  return [agent.command, ...(agent.defaultArgs ?? []), ...defaults, ...(options.args ?? [])]
+  const addDirArg = agent.addDirArg
+  const extraDirs = addDirArg ? (options.extraDirs ?? []).flatMap((dir) => [addDirArg, dir]) : []
+  const args = options.args ?? []
+  // Claude's --add-dir takes several folders, so "--" ends the options before
+  // the prompt; both Claude and Codex accept "--" there.
+  const separator = extraDirs.length > 0 && args.length > 0 ? ["--"] : []
+  return [
+    agent.command,
+    ...(agent.defaultArgs ?? []),
+    ...defaults,
+    ...extraDirs,
+    ...separator,
+    ...args,
+  ]
 }
 
 /** The provider's model and effort flags, shared by interactive and one-shot launches. */

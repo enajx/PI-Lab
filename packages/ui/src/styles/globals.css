@@ -141,6 +141,11 @@
 .app-no-drag {
   -webkit-app-region: no-drag;
 }
+/* While a popup menu is open (usePopupDismiss), drag regions take clicks like the
+   rest of the page, so a click on the title bar closes the menu. */
+:root[data-popup-open] .app-drag {
+  -webkit-app-region: no-drag;
+}
 
 /* Shared activity animation for compact controls. */
 .control-animation {

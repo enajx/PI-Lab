@@ -92,7 +92,7 @@ function harnessContext(): AppContext {
     runNonInteractiveProcess: async () => {
       throw new Error("interactive test unexpectedly ran a one-shot workflow")
     },
-    credentialCipher: { encrypt: (value) => value },
+    credentialCipher: { encrypt: (value) => value, decrypt: (value) => value },
     sshExec: async () => ({ ok: true, detail: "" }),
     httpFetch: async () => {
       throw new Error("no network in tests")
@@ -371,6 +371,14 @@ describe("runNow — fires via the real session-start flow", () => {
     const runs = await h.caller.automations.listRuns({ automationId: created.id })
     expect(runs).toHaveLength(1)
     expect(runs[0]?.state).toBe("completed")
+    // The run's agent is recorded as a routine's, so the Project Agents box lists it.
+    expect(
+      h.db
+        .select({ origin: agentSessions.origin })
+        .from(agentSessions)
+        .where(eq(agentSessions.sessionId, runs[0]?.sessionId ?? ""))
+        .get()?.origin,
+    ).toBe("routine")
     expect(runs[0]?.workspaceId).toBeTruthy()
     expect(runs[0]?.sessionId).toBeTruthy()
     expect(runs[0]?.completedAt).toEqual(expect.any(Number))
@@ -461,6 +469,7 @@ describe("runNow — non-interactive process lifecycle", () => {
     )
 
     const interactive = await h.caller.sessions.start({
+      origin: "project",
       projectId: plainProject.id,
       agentId: WORKFLOW_AGENT.id,
     })

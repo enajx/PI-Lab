@@ -1041,6 +1041,8 @@
   "Resize all cards from": "Cambiar tamaño de todas las tarjetas desde",
   "currently": "actualmente",
   "percent": "por ciento",
+  "width": "ancho",
+  "height": "alto",
   "Resize": "Cambiar tamaño de",
   "Drag the lower-right corner or use arrow keys to resize all cards": "Arrastra la esquina inferior derecha o usa las flechas para cambiar el tamaño de todas las tarjetas",
   "Auto": "Automático",

@@ -2,13 +2,16 @@ import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Workflow } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { CaffeineControl } from "../../../../../caffeine"
 import { useTranslate } from "../../../../../i18n/language"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
-import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
+import {
+  TitleBarSystemControls,
+  titleBarControlClass,
+  titleBarHeaderClass,
+} from "../../../titleBar"
 import { AutomationRow } from "./components/AutomationRow"
 import { AutomationsEmptyState } from "./components/AutomationsEmptyState"
 import { CreateAutomationForm } from "./components/CreateAutomationForm"
@@ -89,9 +92,7 @@ export function AutomationsView({
         <div className="flex min-w-0 items-center gap-2">
           <Workflow className="size-4 shrink-0 text-brand" aria-hidden />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
-              {t("Routines")}
-            </h1>
+            <h1 className="truncate text-foreground text-sm tracking-tight">{t("Routines")}</h1>
             <p className="truncate text-muted-foreground text-xs">
               {t("Scheduled & looping agent runs")}
             </p>
@@ -111,8 +112,7 @@ export function AutomationsView({
             <Plus aria-hidden />
             {t("New routine")}
           </Button>
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
 

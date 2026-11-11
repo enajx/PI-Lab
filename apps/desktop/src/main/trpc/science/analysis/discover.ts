@@ -1,5 +1,5 @@
 import { open, readFile, stat } from "node:fs/promises"
-import { extname, relative } from "node:path"
+import { extname, join, relative } from "node:path"
 import {
   ALL_DATA_FILE_KINDS,
   classifyAnalysisArtifact,
@@ -37,6 +37,13 @@ export interface DataFileEntry {
   kind: DataFileKind
   size: number
   mtime: number
+  /**
+   * The experiment the file belongs to: the name of the first folder under the
+   * listed root, or null for a file directly in the root ("No experiment").
+   */
+  experiment: string | null
+  /** True for a file in the project's `reports/` folder, listed as its own group. */
+  inReportsFolder: boolean
 }
 
 export interface DataFileGroup {
@@ -56,22 +63,34 @@ export interface DataFileListing {
 }
 
 /**
- * Walk a repo for explicitly whitelisted data/analysis artifacts. Source,
- * compiled, and unknown files never enter the candidate set, so the cap applies
- * after filtering and a source-heavy directory cannot starve deeper results.
- * `.zarr` directories are collected as one metadata-only dataset and pruned.
+ * Walk `rootPath` (a folder inside the repo, e.g. its results folder) for
+ * explicitly whitelisted data/analysis artifacts. Source, compiled, and unknown
+ * files never enter the candidate set, so the cap applies after filtering and a
+ * source-heavy directory cannot starve deeper results. `.zarr` directories are
+ * collected as one metadata-only dataset and pruned. Paths are returned relative
+ * to `repoPath`. For the results folder (`folder: "results"`) each entry's
+ * experiment is its first folder under `rootPath`; for the project's reports
+ * folder (`folder: "reports"`) entries have no experiment and are marked
+ * `inReportsFolder`.
  */
-export async function discoverDataFiles(repoPath: string): Promise<DataFileListing> {
-  const walk = await walkAnalysisArtifacts(repoPath, MAX_LISTED_FILES + 1)
+export async function discoverDataFiles(
+  repoPath: string,
+  rootPath: string,
+  folder: "results" | "reports",
+): Promise<DataFileListing> {
+  const walk = await walkAnalysisArtifacts(rootPath, MAX_LISTED_FILES + 1)
   const candidates = walk.artifacts
   const truncated = candidates.length > MAX_LISTED_FILES
   const kept = truncated ? candidates.slice(0, MAX_LISTED_FILES) : candidates
 
   const entries: DataFileEntry[] = []
-  const skipped = [...walk.skipped]
+  const skipped = walk.skipped.map((path) => toPosix(relative(repoPath, join(rootPath, path))))
   for (const { abs, kind } of kept) {
     const relPath = toPosix(relative(repoPath, abs))
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
+    const underRoot = toPosix(relative(rootPath, abs))
+    const slash = underRoot.indexOf("/")
+    const experiment = folder === "results" && slash >= 0 ? underRoot.slice(0, slash) : null
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
@@ -86,6 +105,8 @@ export async function discoverDataFiles(repoPath: string): Promise<DataFileListi
       kind,
       size: info.size,
       mtime: info.mtimeMs,
+      experiment,
+      inReportsFolder: folder === "reports",
     })
   }
 

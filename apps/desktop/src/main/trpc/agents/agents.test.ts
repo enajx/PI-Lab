@@ -94,7 +94,7 @@ describe("agents catalog and project choice", () => {
       executable: "/missing/pi-lab-agent",
     })
     await expect(
-      h.caller.sessions.start({ projectId, agentId: FAKE_AGENT.id }),
+      h.caller.sessions.start({ origin: "project", projectId, agentId: FAKE_AGENT.id }),
     ).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
       message: expect.stringContaining("not available"),

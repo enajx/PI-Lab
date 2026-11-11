@@ -11,7 +11,8 @@ import {
   RefreshCw,
   TerminalSquare,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { useTranslate } from "../../../i18n/language"
 import type { RouterOutputs } from "../../../trpc/types"
 import type { PythonRuntimeState } from "../../hooks/useEditorBuffers/useEditorBuffers"
@@ -56,6 +57,8 @@ interface EditorStatusBarProps {
   /** Markdown buffers can switch their source/render presentation from the lower status bar. */
   markdownMode?: "render" | "source"
   onMarkdownModeChange?: (mode: "render" | "source") => void
+  /** The LaTeX Editor's footer items (Sync status, output folder, paper folder); the project view leaves it out. */
+  paperFolderItem?: ReactNode
 }
 
 /**
@@ -88,6 +91,7 @@ export function EditorStatusBar({
   markdownMode,
   onMarkdownModeChange,
   latexBuildStatus,
+  paperFolderItem,
 }: EditorStatusBarProps) {
   const t = useTranslate()
   return (
@@ -95,7 +99,7 @@ export function EditorStatusBar({
       data-testid="editor-status-bar"
       className="flex h-6 shrink-0 items-center justify-end gap-3 border-border border-t bg-muted/30 px-3 text-[11px] text-muted-foreground"
     >
-      <span data-testid="editor-status-label" className="mr-auto min-w-0 truncate">
+      <span data-testid="editor-status-label" className="mr-auto min-w-16 truncate">
         {label}
       </span>
       {latexBuildStatus ? (
@@ -115,10 +119,13 @@ export function EditorStatusBar({
           className="shrink-0 rounded px-1 hover:bg-accent hover:text-foreground"
           onClick={onShowInPdf}
           title="Show current source position in PDF. You can also double-click LaTeX text."
+          data-feature-label="Show in PDF"
+          data-feature-help="Show current source position in PDF. You can also double-click LaTeX text."
         >
           Show in PDF
         </button>
       ) : null}
+      {paperFolderItem}
       <div className="flex shrink-0 items-center gap-3">
         {isPython ? (
           <>
@@ -166,6 +173,7 @@ export function EditorStatusBar({
           <button
             type="button"
             aria-label={t("Render Markdown")}
+            data-feature-help={t("Show the Markdown with its formatting applied.")}
             aria-pressed={markdownMode === "render"}
             onClick={() => onMarkdownModeChange("render")}
             className={
@@ -179,6 +187,7 @@ export function EditorStatusBar({
           <button
             type="button"
             aria-label={t("Source Markdown")}
+            data-feature-help={t("Show the plain Markdown text for editing.")}
             aria-pressed={markdownMode === "source"}
             onClick={() => onMarkdownModeChange("source")}
             className={
@@ -220,21 +229,7 @@ function PythonRuntimeSummary({
   const [menuError, setMenuError] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    const dismiss = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", dismiss)
-    document.addEventListener("keydown", dismissOnEscape)
-    return () => {
-      document.removeEventListener("mousedown", dismiss)
-      document.removeEventListener("keydown", dismissOnEscape)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   const toggle = async (): Promise<void> => {
     if (open) {
@@ -280,6 +275,8 @@ function PythonRuntimeSummary({
         type="button"
         data-testid="editor-python-runtime"
         title={tooltip}
+        data-feature-label={t("Python environment")}
+        data-feature-help={`${label}: ${tooltip}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => void toggle()}

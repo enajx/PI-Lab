@@ -23,6 +23,7 @@ describe("notification subscription contract", () => {
       workspaceId: "workspace-1",
       sessionId: "session-1",
       agentId: "codex",
+      origin: "project",
     }
 
     harness.notifications.activations.publish(target)
@@ -42,6 +43,7 @@ describe("notification subscription contract", () => {
         workspaceId: "",
         sessionId: "session-1",
         agentId: "codex",
+        origin: "project",
       }),
     ).toThrow()
     subscription.unsubscribe()

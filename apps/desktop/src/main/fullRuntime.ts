@@ -40,6 +40,7 @@ import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
 import { getDb, initDatabase } from "./db/db"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelFromAppName } from "./identity/channel"
+import { tectonicCacheDir } from "./latex/runtime"
 import {
   createElectronAppFocusAdapter,
   createElectronNativeNotificationAdapter,
@@ -73,12 +74,13 @@ import {
   reconcilePlanningSessions,
 } from "./trpc/projects/planning"
 import { AnalysisInteractiveController } from "./trpc/science/analysis/interactiveController"
+import { writeGeneralSettings } from "./trpc/settings/settings"
 import { seedWritableTemplate } from "./trpc/template"
 import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "./trpc/workflows/workflows"
 import { publicReleaseFromPackage } from "./updates/release"
 import { initializePublicUpdateChannel } from "./updates/selection"
 import { installAppMenu } from "./window/appMenu"
-import { confirmStopDialog, type QuitWork } from "./window/userQuit"
+import { confirmStopDialog, type QuitWork, type RememberedQuitChoice } from "./window/userQuit"
 
 interface FullRuntimeHost {
   getAppIconPath: () => string | null
@@ -339,6 +341,16 @@ export class FullRuntime {
     return getSettingsOrDefaults(getDb()).keepRunningAfterClose
   }
 
+  /** The Quit dialog choice saved with "Remember option" ("ask" when none is). */
+  quitChoice(): RememberedQuitChoice {
+    return getSettingsOrDefaults(getDb()).quitChoice
+  }
+
+  /** Save a ticked Quit dialog choice; Settings resets it to "ask". */
+  rememberQuitChoice(choice: "background"): void {
+    writeGeneralSettings(getDb(), { quitChoice: choice })
+  }
+
   /** Seed Quick Editor's Vim cache after the full database starts in the background. */
   editorVim(): boolean {
     return getSettingsOrDefaults(getDb()).editor.vim
@@ -533,7 +545,13 @@ export class FullRuntime {
       latexResourcesDir: app.isPackaged
         ? join(process.resourcesPath, "latex")
         : join(__dirname, "..", "..", "resources", "latex"),
-      latexDataDir: join(resolveDataDir(), "latex"),
+      latexCacheDir: tectonicCacheDir(
+        isTestMode,
+        resolveDataDir(),
+        process.platform,
+        homedir(),
+        process.env,
+      ),
       bundledSkillsDir: app.isPackaged
         ? join(process.resourcesPath, "skills")
         : join(__dirname, "..", "..", "resources", "skills"),
@@ -552,6 +570,12 @@ export class FullRuntime {
             throw new Error("Your operating system keychain is unavailable for API-key storage")
           }
           return safeStorage.encryptString(value).toString("base64")
+        },
+        decrypt: (encrypted) => {
+          if (!safeStorage.isEncryptionAvailable()) {
+            throw new Error("Your operating system keychain is unavailable for reading credentials")
+          }
+          return safeStorage.decryptString(Buffer.from(encrypted, "base64"))
         },
       },
       sshExec: DEFAULT_SSH_EXEC,

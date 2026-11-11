@@ -11,9 +11,12 @@ export type {
   ImportedEditorTokenColor,
 } from "./editorThemeImport"
 
-export type LatexProvider = "bundled" | "system"
+export type LatexProvider = "auto" | "bundled" | "system"
 
 export type PythonRunDestination = "central" | "below-editor"
+
+/** File format of the research diary: Markdown (`diary.md`) or Quarto Markdown (`diary.qmd`). */
+export type ResearchDiaryFormat = "md" | "qmd"
 
 export interface EditorSettings {
   /** Save on debounce/blur instead of requiring an explicit ⌘S (default off). */
@@ -35,12 +38,28 @@ export interface EditorSettings {
   customEditorThemes: ImportedEditorTheme[]
   /** Default destination for Run Python; each run may override it. */
   pythonRunDestination: PythonRunDestination
-  /** LaTeX compiler used for every project. */
+  /** LaTeX compiler used for every project; "auto" uses system LaTeX when found, else bundled Tectonic. */
   latexProvider: LatexProvider
+  /**
+   * Default LaTeX build output folder, relative to the root .tex file's folder
+   * ("." means next to the .tex). A paper can override it (default `build`).
+   */
+  latexOutputDir: string
   /** Show entries whose name starts with "." in the file tree (default on). */
   showHiddenFiles: boolean
   /** Ask before moving a file tree entry to the Trash (default on). */
   confirmFileDelete: boolean
+  /** Ask before committing unsent paper edits when syncing with Overleaf (default on). */
+  confirmOverleafCommit: boolean
+  /**
+   * Folder where papers added in the LaTeX Editor with no project go, one
+   * folder per paper ("~" is the home folder; default `~/Papers`).
+   */
+  papersFolder: string
+  /** Ask where to put such a paper, proposing a folder in {@link papersFolder} (default on). */
+  askPapersFolder: boolean
+  /** Research diary file format; switching renames the diary when its panel next opens (default `md`). */
+  researchDiaryFormat: ResearchDiaryFormat
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -53,7 +72,12 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   editorTheme: "default",
   customEditorThemes: [],
   pythonRunDestination: "central",
-  latexProvider: "bundled",
+  latexProvider: "auto",
+  latexOutputDir: "build",
   showHiddenFiles: true,
   confirmFileDelete: true,
+  confirmOverleafCommit: true,
+  papersFolder: "~/Papers",
+  askPapersFolder: true,
+  researchDiaryFormat: "md",
 }

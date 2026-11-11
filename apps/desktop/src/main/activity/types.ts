@@ -1,6 +1,8 @@
 export const WAITING_CONFIRMATION_MS = 2_000
 export const IDLE_FALLBACK_MS = 30_000
 
+import type { AgentSessionOrigin } from "@pi-lab/local-db"
+
 export type AgentActivityState = "working" | "waiting" | "exited"
 
 export type WaitingReason = "initial-prompt" | "permission" | "question" | "turn-complete" | "idle"
@@ -17,6 +19,8 @@ export interface AgentActivityRecord {
   workspaceId: string | null
   agentId: string
   workflowRunId: string | null
+  /** The view the agent was started from. */
+  origin: AgentSessionOrigin
   state: AgentActivityState
   waitingReason: WaitingReason | null
   waitingSince: number | null
@@ -38,6 +42,8 @@ export interface RegisterAgentActivity {
   workspaceId: string | null
   agentId: string
   workflowRunId: string | null
+  /** The view the agent was started from. */
+  origin: AgentSessionOrigin
   turnArmed: boolean
 }
 

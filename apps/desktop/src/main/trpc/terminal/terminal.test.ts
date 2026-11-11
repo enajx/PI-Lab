@@ -54,7 +54,7 @@ beforeEach(async () => {
     runNonInteractiveProcess: async () => {
       throw new Error("runNonInteractiveProcess unused in terminal tests")
     },
-    credentialCipher: { encrypt: (value) => value },
+    credentialCipher: { encrypt: (value) => value, decrypt: (value) => value },
     sshExec: async () => ({ ok: true, detail: "stub" }),
     httpFetch: async () => {
       throw new Error("httpFetch unused in terminal tests")
@@ -85,6 +85,7 @@ beforeEach(async () => {
       trackTerminal: async () => {},
       reconcile: async () => {},
       liveAgentCount: () => 0,
+      liveAgents: () => [],
       userInput: () => {},
       resize: () => {},
       dispose: () => {},

@@ -3,6 +3,7 @@ import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FilePlus2, Trash2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
 import { translateKnownError } from "../../../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
@@ -48,6 +49,7 @@ export function ProjectTemplateSection() {
 
   // CodeMirrorBuffer's onSave has no payload, so keep the current text here.
   const draftRef = useRef("")
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const [dirty, setDirty] = useState(false)
 
   // A file switch or save refetch replaces the draft.
@@ -106,16 +108,7 @@ export function ProjectTemplateSection() {
     }),
   )
 
-  useEffect(() => {
-    if (contextMenu === null) return
-    const close = () => setContextMenu(null)
-    window.addEventListener("mousedown", close)
-    window.addEventListener("keydown", close)
-    return () => {
-      window.removeEventListener("mousedown", close)
-      window.removeEventListener("keydown", close)
-    }
-  }, [contextMenu])
+  usePopupDismiss(contextMenu !== null, [contextMenuRef], () => setContextMenu(null))
 
   const handleChange = (doc: string) => {
     draftRef.current = doc
@@ -298,6 +291,7 @@ export function ProjectTemplateSection() {
       {contextMenu !== null ? (
         <div
           role="menu"
+          ref={contextMenuRef}
           data-testid="template-file-context-menu"
           className="fixed z-50 w-40 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}

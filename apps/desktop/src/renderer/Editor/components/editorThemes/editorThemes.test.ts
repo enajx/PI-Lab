@@ -2,7 +2,7 @@ import { EditorState } from "@codemirror/state"
 import { describe, expect, test } from "vitest"
 import {
   allEditorThemes,
-  DEFAULT_EDITOR_THEME_ID,
+  defaultEditorThemeId,
   EDITOR_THEMES,
   editorThemeExtension,
 } from "./editorThemes"
@@ -37,10 +37,13 @@ describe("editorThemes registry", () => {
     }
   })
 
-  test("the default id is a registered light theme", () => {
-    const fallback = EDITOR_THEMES.find((theme) => theme.id === DEFAULT_EDITOR_THEME_ID)
-    expect(fallback).toBeDefined()
-    expect(fallback?.mode).toBe("light")
+  test("the default theme is GitHub, Light or Dark following the app appearance", () => {
+    expect(defaultEditorThemeId("light")).toBe("github-light")
+    expect(defaultEditorThemeId("dark")).toBe("github-dark")
+    for (const mode of ["light", "dark"] as const) {
+      const fallback = EDITOR_THEMES.find((theme) => theme.id === defaultEditorThemeId(mode))
+      expect(fallback?.mode).toBe(mode)
+    }
   })
 
   test("every theme extension builds into a valid EditorState", () => {
@@ -58,23 +61,28 @@ describe("editorThemeExtension", () => {
   test("resolves a known id to its registered extension", () => {
     const known = EDITOR_THEMES.find((theme) => theme.id === "one-dark")
     expect(known).toBeDefined()
-    expect(editorThemeExtension("one-dark")).toBe(known?.extension)
+    expect(editorThemeExtension("one-dark", [], "light")).toBe(known?.extension)
+    // An explicit choice is kept, even the old default palette.
+    const solarized = EDITOR_THEMES.find((theme) => theme.id === "solarized-light")
+    expect(editorThemeExtension("solarized-light", [], "dark")).toBe(solarized?.extension)
   })
 
-  test("falls back to the default theme's extension for undefined/empty/unknown/legacy ids", () => {
-    const fallback = EDITOR_THEMES.find((theme) => theme.id === DEFAULT_EDITOR_THEME_ID)?.extension
-    expect(fallback).toBeDefined()
-    expect(editorThemeExtension(undefined)).toBe(fallback)
-    expect(editorThemeExtension("")).toBe(fallback)
-    expect(editorThemeExtension("not-a-real-theme")).toBe(fallback)
-    // "default" is the retired sentinel still persisted by older rows.
-    expect(editorThemeExtension("default")).toBe(fallback)
+  test("resolves undefined/empty/unknown/default ids to GitHub for the app appearance", () => {
+    for (const mode of ["light", "dark"] as const) {
+      const fallback = EDITOR_THEMES.find((theme) => theme.id === `github-${mode}`)?.extension
+      expect(fallback).toBeDefined()
+      expect(editorThemeExtension(undefined, [], mode)).toBe(fallback)
+      expect(editorThemeExtension("", [], mode)).toBe(fallback)
+      expect(editorThemeExtension("not-a-real-theme", [], mode)).toBe(fallback)
+      // "default" is the stored value when the user never picked a theme.
+      expect(editorThemeExtension("default", [], mode)).toBe(fallback)
+    }
   })
 
   test("never throws and never returns an unstyled buffer", () => {
     for (const id of [undefined, "", "default", "not-a-real-theme", "solarized-light"]) {
-      expect(() => editorThemeExtension(id)).not.toThrow()
-      expect(editorThemeExtension(id)).not.toEqual([])
+      expect(() => editorThemeExtension(id, [], "light")).not.toThrow()
+      expect(editorThemeExtension(id, [], "light")).not.toEqual([])
     }
   })
 
@@ -100,7 +108,7 @@ describe("editorThemeExtension", () => {
     expect(() =>
       EditorState.create({
         doc: "def run(): pass",
-        extensions: [editorThemeExtension(custom.id, [custom])],
+        extensions: [editorThemeExtension(custom.id, [custom], "dark")],
       }),
     ).not.toThrow()
   })

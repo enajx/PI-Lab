@@ -7,6 +7,22 @@ export const RECOVERY_PREFIX = "pi-lab.projectWorkspace.v2."
 const CONTENT_LIMIT = 1_000_000
 const STORAGE_LIMIT = 4 * 1024 * 1024
 
+/**
+ * Recovery-store key of a project's LaTeX Editor tabs, kept apart from the
+ * Project view's tabs (stored under the plain project id).
+ */
+export function latexWorkspaceKey(projectId: string): string {
+  return `latex:${projectId}`
+}
+
+/** The science views that keep their own session panel tabs per project. */
+export type SessionPanelView = "tasks" | "analysis"
+
+/** Recovery-store key of a project's session panel tabs in the Tasks or Analysis view. */
+export function sessionPanelWorkspaceKey(view: SessionPanelView, projectId: string): string {
+  return `${view}:${projectId}`
+}
+
 export interface OmittedBuffer {
   relPath: string
   untitled: boolean

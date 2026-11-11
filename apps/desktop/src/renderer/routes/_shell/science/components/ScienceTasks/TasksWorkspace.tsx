@@ -18,7 +18,8 @@ import {
   Ungroup,
   X,
 } from "lucide-react"
-import { type DragEvent, type FormEvent, type ReactNode, useMemo, useState } from "react"
+import { type DragEvent, type FormEvent, type ReactNode, useMemo, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { translateKnownError } from "../../../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 
@@ -77,6 +78,8 @@ export interface AgentChoice {
 interface TasksWorkspaceProps {
   tasks: TaskRecord[]
   sources: TaskSource[]
+  /** The project chosen in the top bar picker, or "" for all projects. */
+  projectId: string
   agents: AgentChoice[]
   defaultAgentId: string
   busy?: boolean
@@ -165,6 +168,7 @@ function taskMatches(
 export function TasksWorkspace({
   tasks,
   sources,
+  projectId,
   agents,
   defaultAgentId,
   busy = false,
@@ -181,7 +185,6 @@ export function TasksWorkspace({
   const [listMode, setListMode] = useState<ListMode>("plain")
   const [boardMode, setBoardMode] = useState<BoardMode>("headings")
   const [query, setQuery] = useState("")
-  const [projectId, setProjectId] = useState("")
   const [status, setStatus] = useState("")
   const [priority, setPriority] = useState("")
   const [owner, setOwner] = useState("")
@@ -193,6 +196,7 @@ export function TasksWorkspace({
   const [draggedKey, setDraggedKey] = useState<string | null>(null)
   const [headingSelections, setHeadingSelections] = useState<Record<string, string[]>>({})
 
+  const shownSources = sources.filter((source) => !projectId || source.projectId === projectId)
   const writableSources = sources.filter(
     (source) => source.state === "ready" || source.state === "missing",
   )
@@ -223,22 +227,6 @@ export function TasksWorkspace({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="tasks-workspace">
       <div className="flex flex-wrap items-center gap-2 border-border border-b px-4 py-2">
-        <select
-          data-testid="tasks-project-filter"
-          aria-label={t("Project filter")}
-          title={t("Filter tasks by project")}
-          data-feature-help={t("Filter tasks by project")}
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
-          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
-        >
-          <option value="">{t("All projects")}</option>
-          {sources.map((source) => (
-            <option key={source.projectId} value={source.projectId}>
-              {source.projectName}
-            </option>
-          ))}
-        </select>
         <div className="relative min-w-44 flex-1 sm:max-w-xs">
           <Search
             aria-hidden
@@ -387,7 +375,7 @@ export function TasksWorkspace({
       </div>
 
       {error ? <ErrorBanner message={translateKnownError(language, error)} /> : null}
-      <SourceNotices sources={sources} />
+      <SourceNotices sources={shownSources} />
 
       <div className="min-h-0 flex-1 overflow-auto">
         {filtered.length === 0 && view === "list" ? (
@@ -414,7 +402,7 @@ export function TasksWorkspace({
         ) : view === "list" ? (
           <HeadingTaskList
             tasks={filtered}
-            sources={sources.filter((source) => !projectId || source.projectId === projectId)}
+            sources={shownSources}
             showProjectHeadings={!projectId}
             onEdit={setEditing}
             onRun={setRunning}
@@ -436,7 +424,7 @@ export function TasksWorkspace({
         ) : (
           <HeadingBoard
             tasks={filtered}
-            sources={sources.filter((source) => !projectId || source.projectId === projectId)}
+            sources={shownSources}
             selections={headingSelections}
             onSelectionChange={(selectedProjectId, keys) =>
               setHeadingSelections((current) => ({ ...current, [selectedProjectId]: keys }))
@@ -729,6 +717,8 @@ function ColumnPicker({
 }) {
   const t = useTranslate()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
   const hiddenTaskCount = columns
     .filter((column) => !visibleKeys.includes(column.key))
     .reduce((sum, column) => sum + column.count, 0)
@@ -738,7 +728,7 @@ function ColumnPicker({
       ? ""
       : `, ${hiddenTaskCount} ${t(hiddenTaskCount === 1 ? "task" : "tasks")} ${t("in hidden columns")}`
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         aria-label={

@@ -1,4 +1,4 @@
-export { analysisRouter } from "./analysis"
+export { analysisRouter, type ResultsListing } from "./analysis"
 export type {
   ArrayPreview,
   ChartPreview,

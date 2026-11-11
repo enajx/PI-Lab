@@ -4,7 +4,7 @@ import type { PropsWithChildren } from "react"
 import { expect, test, vi } from "vitest"
 import { AppProviders } from "../providers/AppProviders"
 import { createFakeTrpcClient } from "../test/fakeTrpcClient"
-import { useDefaultAgentId } from "./preferences"
+import { useDefaultAgentId, useHeaderShortcuts } from "./preferences"
 
 test("legacy agent preference migrates once and configured changes reach mounted consumers", async () => {
   window.localStorage.setItem("pi-lab.defaultAgentId", "codex")
@@ -45,4 +45,25 @@ test("legacy agent preference migrates once and configured changes reach mounted
   reopened.unmount()
   queryClient.clear()
   window.localStorage.removeItem("pi-lab.defaultAgentId")
+})
+
+test("saved header shortcut lists get each later built-in once, and keep earlier removals", () => {
+  // Project view list from version 1: Paper is added after Tasks, Research diary at the end.
+  window.localStorage.setItem(
+    "pi-lab.projectView.headerShortcuts",
+    JSON.stringify(["tasks", "project-status"]),
+  )
+  // LaTeX list saved at version 2 with Sync removed: Sync must not come back.
+  window.localStorage.setItem(
+    "pi-lab.latexEditor.headerShortcuts",
+    JSON.stringify(["update-paper"]),
+  )
+  window.localStorage.setItem("pi-lab.latexEditor.headerShortcutsVersion", "2")
+  const project = renderHook(() => useHeaderShortcuts("project"))
+  const latex = renderHook(() => useHeaderShortcuts("latex"))
+  expect(project.result.current[0]).toEqual(["tasks", "paper", "project-status", "research-diary"])
+  expect(latex.result.current[0]).toEqual(["update-paper"])
+  project.unmount()
+  latex.unmount()
+  window.localStorage.clear()
 })

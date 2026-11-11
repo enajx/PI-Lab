@@ -197,6 +197,55 @@
       "when": 1793290758182,
       "tag": "0027_rapid_tyrannus",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1794229638133,
+      "tag": "0028_service_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794234086699,
+      "tag": "0029_agent_session_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1794254082131,
+      "tag": "0030_workflow_run_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1794314858951,
+      "tag": "0031_latex_provider_auto",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794321154453,
+      "tag": "0032_quit_choice",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794329622373,
+      "tag": "0033_project_sort_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1794333693124,
+      "tag": "0034_quit_choice_ask",
+      "breakpoints": true
     }
   ]
 }

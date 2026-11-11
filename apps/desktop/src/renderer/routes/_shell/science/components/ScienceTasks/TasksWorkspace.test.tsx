@@ -81,6 +81,7 @@ function renderWorkspace(overrides: Partial<ComponentProps<typeof TasksWorkspace
       }),
     ],
     sources,
+    projectId: "",
     agents: [
       { id: "claude-code", label: "Claude Code" },
       { id: "codex", label: "Codex" },
@@ -103,7 +104,6 @@ describe("TasksWorkspace", () => {
   test("shows task controls in the selected interface language", () => {
     setInterfaceLanguage("es")
     renderWorkspace()
-    expect(screen.getByText("Todos los proyectos")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Nueva tarea" })).toBeTruthy()
   })
 
@@ -322,6 +322,10 @@ describe("TasksWorkspace", () => {
 
     expect(within(project).queryByRole("group", { name: "TODO / One" })).toBeNull()
     expect(within(project).getByRole("group", { name: "TODO / Five" })).toBeTruthy()
+    // A click outside the open column menu closes it.
+    expect(within(project).getByRole("menu")).toBeTruthy()
+    fireEvent.mouseDown(document.body)
+    expect(within(project).queryByRole("menu")).toBeNull()
   })
 
   test("always shows three Kanban lanes and maps existing statuses without rewriting them", () => {

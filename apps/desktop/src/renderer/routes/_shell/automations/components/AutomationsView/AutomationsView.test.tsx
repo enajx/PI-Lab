@@ -67,6 +67,9 @@ describe("AutomationsView", () => {
     const caffeine = screen.getByTestId("caffeine-control")
     expect(caffeine).toBeTruthy()
     expect(caffeine.parentElement?.lastElementChild).toBe(caffeine)
+    const title = screen.getByRole("heading", { level: 1, name: "Routines" })
+    expect(title.className).not.toMatch(/font-(semibold|bold|medium)/)
+    expect(title.className).toContain("text-sm")
   })
 
   test("renders a row per automation with its schedule summary and next run", async () => {

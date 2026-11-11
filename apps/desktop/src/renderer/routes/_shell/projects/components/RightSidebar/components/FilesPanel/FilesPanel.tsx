@@ -12,6 +12,7 @@ export function FilesPanel({
   onPinFile,
   onSetMainFile,
   editorTabs,
+  onCollapse,
 }: {
   workspaceId: string
   onOpenFile: (relPath: string) => void
@@ -21,6 +22,8 @@ export function FilesPanel({
   onSetMainFile?: (relPath: string) => void
   /** Open editor tabs, closed or moved when the tree deletes or renames their files. */
   editorTabs?: FileTreeEditorTabs
+  /** Show a collapse chevron in the tree header (LaTeX Editor column). */
+  onCollapse?: () => void
 }) {
   return (
     <section data-testid="panel-files" className="flex min-h-0 flex-1 flex-col">
@@ -31,6 +34,7 @@ export function FilesPanel({
         onPinFile={onPinFile}
         onSetMainFile={onSetMainFile}
         editorTabs={editorTabs}
+        onCollapse={onCollapse}
       />
     </section>
   )

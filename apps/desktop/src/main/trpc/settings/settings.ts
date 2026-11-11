@@ -21,6 +21,11 @@ import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import {
+  excludeDefaultOutputs,
+  outputDirOrBadRequest,
+  requireUntrackedDefaultOutputDir,
+} from "../../paper/outputs"
 import { publishPublicUpdateChannelChanged } from "../../updates/selection"
 import { publicProcedure, router } from "../trpc"
 
@@ -72,9 +77,14 @@ const editorPatch = z.object({
   editorTheme: z.string().optional(),
   customEditorThemes: z.array(importedTheme).max(100).optional(),
   pythonRunDestination: z.enum(["central", "below-editor"]).optional(),
-  latexProvider: z.enum(["bundled", "system"]).optional(),
+  latexProvider: z.enum(["auto", "bundled", "system"]).optional(),
+  latexOutputDir: z.string().max(512).optional(),
   showHiddenFiles: z.boolean().optional(),
   confirmFileDelete: z.boolean().optional(),
+  confirmOverleafCommit: z.boolean().optional(),
+  papersFolder: z.string().trim().min(1).max(1024).optional(),
+  askPapersFolder: z.boolean().optional(),
+  researchDiaryFormat: z.enum(["md", "qmd"]).optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */
@@ -82,6 +92,7 @@ const generalPatch = z.object({
   worktreePerAgent: z.boolean().optional(),
   confirmOnQuit: z.boolean().optional(),
   keepRunningAfterClose: z.boolean().optional(),
+  quitChoice: z.enum(["ask", "background"]).optional(),
   publicUpdateChannel: z.enum(["stable", "beta"]).optional(),
 })
 
@@ -178,7 +189,11 @@ export function writeEditorSettings(
 /** The general-settings columns this router patches (top-level, not a JSON blob). */
 export type GeneralSettings = Pick<
   Settings,
-  "worktreePerAgent" | "confirmOnQuit" | "keepRunningAfterClose" | "publicUpdateChannel"
+  | "worktreePerAgent"
+  | "confirmOnQuit"
+  | "keepRunningAfterClose"
+  | "quitChoice"
+  | "publicUpdateChannel"
 >
 
 /**
@@ -194,6 +209,7 @@ export function writeGeneralSettings(db: PiLabDatabase, patch: Partial<GeneralSe
     worktreePerAgent: patch.worktreePerAgent ?? current.worktreePerAgent,
     confirmOnQuit: patch.confirmOnQuit ?? current.confirmOnQuit,
     keepRunningAfterClose: patch.keepRunningAfterClose ?? current.keepRunningAfterClose,
+    quitChoice: patch.quitChoice ?? current.quitChoice,
     publicUpdateChannel: patch.publicUpdateChannel ?? current.publicUpdateChannel,
   }
   db.insert(settings)
@@ -332,7 +348,16 @@ export const settingsRouter = router({
    */
   updateEditor: publicProcedure
     .input(editorPatch)
-    .mutation(({ ctx, input }): EditorSettings => writeEditorSettings(ctx.db, input)),
+    .mutation(async ({ ctx, input }): Promise<EditorSettings> => {
+      if (input.latexOutputDir === undefined) return writeEditorSettings(ctx.db, input)
+      // A new default output folder is checked, then kept out of every linked
+      // paper's commits that uses it (see excludeDefaultOutputs).
+      const latexOutputDir = outputDirOrBadRequest(input.latexOutputDir)
+      await requireUntrackedDefaultOutputDir(ctx.db, latexOutputDir)
+      const next = writeEditorSettings(ctx.db, { ...input, latexOutputDir })
+      await excludeDefaultOutputs(ctx.db)
+      return next
+    }),
 
   /**
    * Patch the general app preferences (worktree-per-agent policy, confirm-on-quit).

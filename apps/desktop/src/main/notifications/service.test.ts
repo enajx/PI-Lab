@@ -19,6 +19,7 @@ const REQUEST: NotificationRequest = {
     workspaceId: "workspace-1",
     sessionId: "session-1",
     agentId: "codex",
+    origin: "project",
   },
 }
 

@@ -32,8 +32,11 @@ const createdNow = () =>
  *                 of these may exist per project (see the partial unique index
  *                 added in migration 0001 — Drizzle can't express filtered
  *                 indexes in the schema DSL).
+ *   - "paper":    the project's linked LaTeX paper folder ({@link ProjectPaper}),
+ *                 which may be outside the project folder. At most one per
+ *                 project; hidden from workspace lists.
  */
-export type WorkspaceKind = "worktree" | "branch"
+export type WorkspaceKind = "worktree" | "branch" | "paper"
 
 /**
  * Lifecycle of a single automation firing.
@@ -49,6 +52,11 @@ export type AutomationExecutionMode = "interactive" | "noninteractive"
 
 /** Current lifecycle classification for a durable interactive agent session. */
 export type AgentSessionState = "working" | "waiting" | "exited"
+/**
+ * Where an interactive agent was started: an app view (each view shows only its own
+ * agents) or a routine run ("routine", shown in the Project view).
+ */
+export type AgentSessionOrigin = "project" | "latex" | "analysis" | "tasks" | "routine"
 
 /** Why a live interactive agent is waiting for the user. */
 export type AgentSessionWaitingReason =
@@ -274,6 +282,29 @@ export interface ProjectDetails {
   textTags?: ProjectTextTag[]
 }
 
+/** The LaTeX paper folder linked to a project (LaTeX Editor page). */
+export interface ProjectPaper {
+  /** Absolute path of the paper folder; may be inside or outside the project folder. */
+  dir: string
+  /** URL of the folder's `origin` remote when linked, or null when it has none. */
+  remoteUrl: string | null
+  /** When the last successful sync finished (epoch ms), or null before the first. */
+  lastSyncAt: number | null
+  /**
+   * Build output folder for this paper, relative to its root .tex file's folder
+   * ("." means next to the .tex). Absent: the `latexOutputDir` editor setting.
+   */
+  outputDir?: string
+  /**
+   * False when the paper is the project folder linked for editing and building
+   * only: Sync then refuses to run. Absent: Sync is on.
+   */
+  syncEnabled?: boolean
+}
+
+/** The project stage set by the user on the stage row, in order. */
+export type ProjectStage = "planning" | "experiments" | "paperWriting" | "submitted"
+
 export interface ProjectMetadata {
   textTags?: ProjectTextTag[]
   /** Free-text collaborators (e.g. co-authors), as typed by the user. */
@@ -286,6 +317,25 @@ export interface ProjectMetadata {
   emojiTags?: string[]
   /** Reference links, each a URL with an optional label. */
   referenceLinks?: ProjectReferenceLink[]
+  /** Linked LaTeX paper folder; absent when none is linked. */
+  paper?: ProjectPaper
+  /**
+   * True for a paper added in the LaTeX Editor with no project: the project
+   * folder is the paper folder, and its card offers only the paper.
+   */
+  paperOnly?: true
+  /**
+   * False after the user cleared the paper folder: the LaTeX Editor then does
+   * not look for Overleaf clones until a folder is chosen again. Absent: it does.
+   */
+  paperAutoDetect?: boolean
+  /** The project stage set on the stage row; absent: no stage reached yet. */
+  stage?: ProjectStage
+  /**
+   * The project's own Analysis results folder, relative to the project (POSIX
+   * separators). Absent: the default folder from Settings is used.
+   */
+  resultsFolder?: string
 }
 
 /** A locally-known v2 Team. */
@@ -463,6 +513,12 @@ export const projects = sqliteTable(
     agentConfig: text("agent_config", { mode: "json" }).$type<ProjectAgentConfig>(),
     /** Manual ordering in the sidebar; lower sorts first. */
     sortIndex: integer("sort_index").notNull().default(0),
+    /**
+     * Saved order of the Dashboard cards and the sidebar's project list; lower sorts
+     * first. Set by dragging a card; a new project gets one below all others. Null only
+     * for a row written without it, which `projects.list` puts last, most recently opened first.
+     */
+    sortOrder: integer("sort_order"),
     /** Archived projects are hidden from the active list but never deleted. */
     archivedAt: integer("archived_at"),
     createdAt: createdNow(),
@@ -606,6 +662,14 @@ export const settings = sqliteTable("settings", {
   keepRunningAfterClose: integer("keep_running_after_close", { mode: "boolean" })
     .notNull()
     .default(true),
+  /**
+   * The Quit dialog's "Remember option": "ask" shows the dialog,
+   * "background" moves PI Lab to the background without asking. Quit cannot be
+   * remembered (0034 moved a saved "quit" to "ask"). Settings resets it to "ask".
+   */
+  quitChoice: text("quit_choice", { enum: ["ask", "background"] })
+    .notNull()
+    .default("ask"),
   /** Public update stream for the single installed PI Lab app. */
   publicUpdateChannel: text("public_update_channel", {
     enum: ["stable", "beta"],
@@ -699,6 +763,19 @@ export const agentSettings = sqliteTable("agent_settings", {
  */
 export const agentCredentials = sqliteTable("agent_credentials", {
   agentId: text("agent_id").primaryKey(),
+  encryptedValue: text("encrypted_value").notNull(),
+  updatedAt: integer("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+})
+
+/**
+ * Encrypted, machine-local credentials for outside services (one row per
+ * service, e.g. "overleaf" for the Overleaf Git token). Ciphertext comes from
+ * Electron safeStorage in the main process; the renderer only sees presence.
+ */
+export const serviceCredentials = sqliteTable("service_credentials", {
+  service: text("service").primaryKey(),
   encryptedValue: text("encrypted_value").notNull(),
   updatedAt: integer("updated_at")
     .notNull()
@@ -874,7 +951,7 @@ export const automationRuns = sqliteTable(
 // ---------------------------------------------------------------------------
 
 /** A non-interactive project workflow with a cached, per-project result. */
-export type WorkflowTask = "summary" | "fetch-experiments" | "plan-research"
+export type WorkflowTask = "summary" | "fetch-experiments" | "plan-research" | "latex-merge"
 
 export const projectWorkflowRuns = sqliteTable(
   "project_workflow_runs",
@@ -899,6 +976,8 @@ export const projectWorkflowRuns = sqliteTable(
       .$defaultFn(() => Date.now()),
     /** Failure detail when the last run errored/timed out; null on success. */
     errorMessage: text("error_message"),
+    /** Label of the agent that wrote `result` (e.g. "Claude Code"); null on error or for older rows. */
+    agentLabel: text("agent_label"),
     updatedAt: integer("updated_at")
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -937,6 +1016,8 @@ export const agentSessions = sqliteTable(
     workflowRunId: text("workflow_run_id").references(() => automationRuns.id, {
       onDelete: "set null",
     }),
+    /** Where the agent was started (Project view, LaTeX Editor, Analysis, Tasks, a routine). */
+    origin: text("origin").notNull().$type<AgentSessionOrigin>().default("project"),
     state: text("state").notNull().$type<AgentSessionState>().default("working"),
     /**
      * Whether a real user/launch prompt has armed the current turn. Persisted so

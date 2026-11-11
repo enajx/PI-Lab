@@ -5,4 +5,5 @@ export {
   type CardSpan,
   type CardSpanToken,
   ResizableCardGridItem,
+  useCardGridHeightScale,
 } from "./CardGrid"

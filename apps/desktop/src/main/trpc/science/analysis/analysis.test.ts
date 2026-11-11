@@ -2,7 +2,7 @@
 // a temp SQLite DB with the real migrations and a real temp git repo (AGENTS.md
 // Data files are written into the repo and classified/previewed off real
 // bytes — no filesystem mocking.
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -82,130 +82,147 @@ function makeRawNpy(shape: string, descr: string, fortran: boolean, data: Buffer
 
 describe("science.analysis.listFiles", () => {
   test("discovers and classifies data files, grouped by kind", async () => {
-    await writeRepoFile("data/metrics.csv", "a,b\n1,2\n")
-    await writeRepoFile("data/series.tsv", "x\ty\n1\t2\n")
-    await writeRepoFile("config.json", '{"k":1}')
-    await writeRepoFile("figs/plot.png", TINY_PNG)
-    await writeRepoFile("analysis/explore.py", "print('hi')\n")
-    await writeRepoFile("notes.md", "# notes\n")
+    await writeRepoFile("results/data/metrics.csv", "a,b\n1,2\n")
+    await writeRepoFile("results/data/series.tsv", "x\ty\n1\t2\n")
+    await writeRepoFile("results/config.json", '{"k":1}')
+    await writeRepoFile("results/figs/plot.png", TINY_PNG)
+    await writeRepoFile("results/analysis/explore.py", "print('hi')\n")
+    await writeRepoFile("results/notes.md", "# notes\n")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
 
     const kindByRel = new Map<string, string>()
     for (const group of listing.groups) {
       for (const file of group.files) kindByRel.set(file.relPath, group.kind)
     }
 
-    expect(kindByRel.get("data/metrics.csv")).toBe("csv")
-    expect(kindByRel.get("data/series.tsv")).toBe("tsv")
-    expect(kindByRel.get("config.json")).toBe("json")
-    expect(kindByRel.get("figs/plot.png")).toBe("image")
-    expect(kindByRel.get("notes.md")).toBe("markdown")
-    expect(kindByRel.has("analysis/explore.py")).toBe(false)
+    expect(kindByRel.get("results/data/metrics.csv")).toBe("csv")
+    expect(kindByRel.get("results/data/series.tsv")).toBe("tsv")
+    expect(kindByRel.get("results/config.json")).toBe("json")
+    expect(kindByRel.get("results/figs/plot.png")).toBe("image")
+    expect(kindByRel.get("results/notes.md")).toBe("markdown")
+    expect(kindByRel.has("results/analysis/explore.py")).toBe(false)
 
     // NumPy arrays get their own kinds.
-    await writeRepoFile("runs/loss.npy", makeNpy([3], [0.5, 0.3, 0.1]))
-    await writeRepoFile("checkpoints/weights.npz", Buffer.from([0x50, 0x4b]))
-    const withNpy = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    await writeRepoFile("results/runs/loss.npy", makeNpy([3], [0.5, 0.3, 0.1]))
+    await writeRepoFile("results/checkpoints/weights.npz", Buffer.from([0x50, 0x4b]))
+    const withNpy = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
     const npyKind = new Map<string, string>()
     for (const group of withNpy.groups) {
       for (const file of group.files) npyKind.set(file.relPath, group.kind)
     }
-    expect(npyKind.get("runs/loss.npy")).toBe("npy")
-    expect(npyKind.get("checkpoints/weights.npz")).toBe("npz")
+    expect(npyKind.get("results/runs/loss.npy")).toBe("npy")
+    expect(npyKind.get("results/checkpoints/weights.npz")).toBe("npz")
 
     expect(listing.truncated).toBe(false)
-    // README.md from the fixture commit is also discovered (markdown).
     expect(listing.total).toBeGreaterThanOrEqual(5)
   })
 
   test("discovers marimo notebooks but continues to exclude ordinary Python source", async () => {
     await writeRepoFile(
-      "reports/live_notebook.py",
+      "results/reports/live_notebook.py",
       "import marimo\n\napp = marimo.App()\n\nif __name__ == '__main__':\n    app.run()\n",
     )
-    await writeRepoFile("reports/script.py", "import marimo\nprint('ordinary script')\n")
+    await writeRepoFile("results/reports/script.py", "import marimo\nprint('ordinary script')\n")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
     const kindByRel = new Map<string, string>()
     for (const group of listing.groups) {
       for (const file of group.files) kindByRel.set(file.relPath, group.kind)
     }
 
-    expect(kindByRel.get("reports/live_notebook.py")).toBe("marimo")
-    expect(kindByRel.has("reports/script.py")).toBe(false)
+    expect(kindByRel.get("results/reports/live_notebook.py")).toBe("marimo")
+    expect(kindByRel.has("results/reports/script.py")).toBe(false)
   })
 
   test("recognizes a large marimo notebook from its bounded source prefix", async () => {
     await writeRepoFile(
-      "reports/large.py",
+      "results/reports/large.py",
       `import marimo\napp = marimo.App()\n${"# generated cell\n".repeat(6_000)}`,
     )
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
 
     expect(
       listing.groups
         .flatMap((group) => group.files)
-        .find((file) => file.relPath === "reports/large.py")?.kind,
+        .find((file) => file.relPath === "results/reports/large.py")?.kind,
     ).toBe("marimo")
   })
 
   test("lists the scientific artifact whitelist and excludes source/unknown files", async () => {
     for (const relPath of [
-      "data/table.arrow",
-      "data/table.feather",
-      "data/experiment.h5",
-      "data/climate.nc",
-      "data/results.sqlite",
-      "data/results.xlsx",
-      "reports/summary.html",
-      "artifacts/model.pkl",
+      "results/data/table.arrow",
+      "results/data/table.feather",
+      "results/data/experiment.h5",
+      "results/data/climate.nc",
+      "results/data/results.sqlite",
+      "results/data/results.xlsx",
+      "results/reports/summary.html",
+      "results/artifacts/model.pkl",
     ]) {
       await writeRepoFile(relPath, "fixture")
     }
     for (const relPath of [
-      "src/analysis.py",
-      "scripts/run.sh",
-      "scripts/run.ps1",
-      "scripts/run.bat",
-      "build/native.dylib",
-      "mystery.xyz",
+      "results/src/analysis.py",
+      "results/scripts/run.sh",
+      "results/scripts/run.ps1",
+      "results/scripts/run.bat",
+      "results/build/native.dylib",
+      "results/mystery.xyz",
     ]) {
       await writeRepoFile(relPath, "not an analysis artifact")
     }
-    await mkdir(join(h.repoDir, "runs", "arrays.zarr"), { recursive: true })
+    await mkdir(join(h.repoDir, "results", "runs", "arrays.zarr"), { recursive: true })
 
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
     const kindByRel = new Map(
       listing.groups.flatMap((group) =>
         group.files.map((file) => [file.relPath, file.kind] as const),
       ),
     )
 
-    expect(kindByRel.get("data/experiment.h5")).toBe("dataset")
-    expect(kindByRel.get("data/climate.nc")).toBe("dataset")
-    expect(kindByRel.get("reports/summary.html")).toBe("report")
-    expect(kindByRel.get("artifacts/model.pkl")).toBe("other")
-    expect(kindByRel.get("runs/arrays.zarr")).toBe("dataset")
+    expect(kindByRel.get("results/data/experiment.h5")).toBe("dataset")
+    expect(kindByRel.get("results/data/climate.nc")).toBe("dataset")
+    expect(kindByRel.get("results/reports/summary.html")).toBe("report")
+    expect(kindByRel.get("results/artifacts/model.pkl")).toBe("other")
+    expect(kindByRel.get("results/runs/arrays.zarr")).toBe("dataset")
     expect([...kindByRel.keys()].some((path) => /\.(?:py|sh|ps1|bat|dylib|xyz)$/i.test(path))).toBe(
       false,
     )
   })
 
   test("skips .git and noise directories", async () => {
-    await writeRepoFile("real.csv", "a\n1\n")
-    await writeRepoFile("node_modules/pkg/data.csv", "junk\n")
-    await writeRepoFile("__pycache__/cache.json", "{}")
+    await writeRepoFile("results/real.csv", "a\n1\n")
+    await writeRepoFile("results/node_modules/pkg/data.csv", "junk\n")
+    await writeRepoFile("results/__pycache__/cache.json", "{}")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
 
     const allRel = listing.groups.flatMap((g) => g.files.map((f) => f.relPath))
-    expect(allRel).toContain("real.csv")
+    expect(allRel).toContain("results/real.csv")
     expect(allRel.some((r) => r.includes("node_modules"))).toBe(false)
     expect(allRel.some((r) => r.includes("__pycache__"))).toBe(false)
     expect(allRel.some((r) => r.startsWith(".git/"))).toBe(false)
@@ -213,45 +230,58 @@ describe("science.analysis.listFiles", () => {
 
   test("keeps research outputs in build, out and dist", async () => {
     for (const folder of ["build", "out", "dist"]) {
-      await writeRepoFile(`${folder}/result.npy`, makeNpy([1], [1]))
+      await writeRepoFile(`results/${folder}/result.npy`, makeNpy([1], [1]))
     }
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
     const paths = listing.groups.flatMap((group) => group.files.map((file) => file.relPath))
     expect(paths).toEqual(
-      expect.arrayContaining(["build/result.npy", "out/result.npy", "dist/result.npy"]),
+      expect.arrayContaining([
+        "results/build/result.npy",
+        "results/out/result.npy",
+        "results/dist/result.npy",
+      ]),
     )
   })
 
   test("reports an unreadable child as a partial listing", async () => {
-    await writeRepoFile("visible/data.csv", "a\n1\n")
-    await writeRepoFile("private/data.csv", "a\n2\n")
+    await writeRepoFile("results/visible/data.csv", "a\n1\n")
+    await writeRepoFile("results/private/data.csv", "a\n2\n")
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const privateDir = join(h.repoDir, "private")
+    const privateDir = join(h.repoDir, "results", "private")
     await chmod(privateDir, 0)
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
     await chmod(privateDir, 0o755)
     expect(listing.groups.flatMap((group) => group.files.map((file) => file.relPath))).toContain(
-      "visible/data.csv",
+      "results/visible/data.csv",
     )
     expect(listing.partial).toBe(true)
-    expect(listing.skipped).toContain("private")
+    expect(listing.skipped).toContain("results/private")
   })
 
   test("hides dotfiles (basename starting with a dot)", async () => {
-    await writeRepoFile("real.csv", "a\n1\n")
-    await writeRepoFile(".env", "SECRET=1\n")
-    await writeRepoFile("config/.hidden.json", "{}")
-    await writeRepoFile(".secret.csv", "a\n1\n")
+    await writeRepoFile("results/real.csv", "a\n1\n")
+    await writeRepoFile("results/.env", "SECRET=1\n")
+    await writeRepoFile("results/config/.hidden.json", "{}")
+    await writeRepoFile("results/.secret.csv", "a\n1\n")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
 
     const allRel = listing.groups.flatMap((g) => g.files.map((f) => f.relPath))
-    expect(allRel).toContain("real.csv")
-    expect(allRel).not.toContain(".env")
-    expect(allRel).not.toContain("config/.hidden.json")
-    expect(allRel).not.toContain(".secret.csv")
+    expect(allRel).toContain("results/real.csv")
+    expect(allRel).not.toContain("results/.env")
+    expect(allRel).not.toContain("results/config/.hidden.json")
+    expect(allRel).not.toContain("results/.secret.csv")
     // No discovered file's basename starts with a dot.
     expect(allRel.every((r) => !r.slice(r.lastIndexOf("/") + 1).startsWith("."))).toBe(true)
   })
@@ -260,11 +290,14 @@ describe("science.analysis.listFiles", () => {
     // Write one more than the cap of recognized data files.
     const count = MAX_LISTED_FILES + 5
     await Promise.all(
-      Array.from({ length: count }, (_, i) => writeRepoFile(`bulk/f${i}.csv`, "a\n1\n")),
+      Array.from({ length: count }, (_, i) => writeRepoFile(`results/bulk/f${i}.csv`, "a\n1\n")),
     )
 
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
 
     expect(listing.truncated).toBe(true)
     expect(listing.total).toBe(MAX_LISTED_FILES)
@@ -273,23 +306,210 @@ describe("science.analysis.listFiles", () => {
   test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", async () => {
     await Promise.all(
       Array.from({ length: MAX_LISTED_FILES + 5 }, (_, i) =>
-        writeRepoFile(`source-${i}.py`, "print('source')\n"),
+        writeRepoFile(`results/source-${i}.py`, "print('source')\n"),
       ),
     )
-    await writeRepoFile("deep/results/metrics.csv", "metric,value\nloss,0.1\n")
+    await writeRepoFile("results/deep/results/metrics.csv", "metric,value\nloss,0.1\n")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const listing = await h.caller.science.analysis.listFiles({ projectId: project.id })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
     const paths = listing.groups.flatMap((group) => group.files.map((file) => file.relPath))
 
-    expect(paths).toContain("deep/results/metrics.csv")
+    expect(paths).toContain("results/deep/results/metrics.csv")
     expect(paths.some((path) => path.endsWith(".py"))).toBe(false)
     expect(listing.truncated).toBe(false)
   })
 
+  test("lists only the results folder, grouping files by experiment folder", async () => {
+    await writeRepoFile("results/exp-a/plot.png", TINY_PNG)
+    await writeRepoFile("results/exp-a/deep/metrics.csv", "a,b\n1,2\n")
+    await writeRepoFile("results/exp-b/log.txt", "step 1\n")
+    await writeRepoFile("results/summary.json", "{}")
+    await writeRepoFile("data/outside.csv", "a\n1\n")
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+
+    expect(listing.resultsFolder).toBe("results")
+    expect(listing.overridden).toBe(false)
+    expect(listing.exists).toBe(true)
+    const experimentByRel = new Map(
+      listing.groups.flatMap((group) =>
+        group.files.map((file) => [file.relPath, file.experiment] as const),
+      ),
+    )
+    expect(Object.fromEntries(experimentByRel)).toEqual({
+      "results/exp-a/plot.png": "exp-a",
+      "results/exp-a/deep/metrics.csv": "exp-a",
+      "results/exp-b/log.txt": "exp-b",
+      "results/summary.json": null,
+    })
+  })
+
+  test("uses the default folder from Settings when it is not results/", async () => {
+    await writeRepoFile("outputs/run-1/log.txt", "x\n")
+    await writeRepoFile("results/exp-a/log.txt", "x\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "outputs",
+    })
+    expect(listing.resultsFolder).toBe("outputs")
+    expect(listing.groups.flatMap((g) => g.files.map((f) => f.relPath))).toEqual([
+      "outputs/run-1/log.txt",
+    ])
+  })
+
+  test("a project's own results folder overrides the default, is kept by setMetadata, and can be reset", async () => {
+    await writeRepoFile("runs/out/exp-c/log.txt", "x\n")
+    await writeRepoFile("results/exp-a/log.txt", "x\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+
+    const saved = await h.caller.science.analysis.setResultsFolder({
+      projectId: project.id,
+      dir: join(h.repoDir, "runs", "out"),
+    })
+    expect(saved.resultsFolder).toBe("runs/out")
+    // The card's "Edit project…" dialog rewrites the metadata; the folder stays.
+    await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "NeurIPS" } })
+
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    expect(listing.resultsFolder).toBe("runs/out")
+    expect(listing.overridden).toBe(true)
+    expect(listing.groups.flatMap((g) => g.files.map((f) => [f.relPath, f.experiment]))).toEqual([
+      ["runs/out/exp-c/log.txt", "exp-c"],
+    ])
+
+    await h.caller.science.analysis.setResultsFolder({ projectId: project.id, dir: null })
+    const reset = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    expect(reset.resultsFolder).toBe("results")
+    expect(reset.overridden).toBe(false)
+    const stored = (await h.caller.projects.list()).find((p) => p.id === project.id)
+    expect(stored?.metadata).toEqual({ venue: "NeurIPS" })
+  })
+
+  test("a missing results folder is reported as missing, not as an empty list", async () => {
+    await writeRepoFile("data/metrics.csv", "a\n1\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    expect(listing.exists).toBe(false)
+    expect(listing.resultsFolder).toBe("results")
+    expect(listing.total).toBe(0)
+    expect(listing.groups).toEqual([])
+  })
+
+  test("also lists the project's reports/ folder as its own group", async () => {
+    await writeRepoFile("results/exp-a/log.txt", "x\n")
+    await writeRepoFile("results/reports/inner.html", "<p>experiment</p>")
+    await writeRepoFile("reports/report.html", "<p>report</p>")
+    await writeRepoFile("reports/nested/summary.md", "# summary\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    const byRel = Object.fromEntries(
+      listing.groups.flatMap((group) =>
+        group.files.map((file) => [file.relPath, [file.experiment, file.inReportsFolder]] as const),
+      ),
+    )
+    expect(byRel).toEqual({
+      "results/exp-a/log.txt": ["exp-a", false],
+      // A reports/ folder inside the results folder stays an experiment.
+      "results/reports/inner.html": ["reports", false],
+      "reports/report.html": [null, true],
+      "reports/nested/summary.md": [null, true],
+    })
+    expect(listing.total).toBe(4)
+  })
+
+  test("reports/ is listed once when it is the results folder or contains it", async () => {
+    await writeRepoFile("reports/exp-a/log.txt", "x\n")
+    await writeRepoFile("reports/report.html", "<p>report</p>")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    for (const defaultResultsFolder of ["reports", "reports/exp-a"]) {
+      const listing = await h.caller.science.analysis.listFiles({
+        projectId: project.id,
+        defaultResultsFolder,
+      })
+      const rels = listing.groups.flatMap((group) => group.files.map((file) => file.relPath))
+      expect(rels.sort()).toEqual(["reports/exp-a/log.txt", "reports/report.html"])
+      expect(listing.total).toBe(2)
+    }
+  })
+
+  test("reports/ is still listed when the results folder is missing; no reports/ is no group", async () => {
+    await writeRepoFile("reports/report.html", "<p>report</p>")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    expect(listing.exists).toBe(false)
+    expect(listing.groups.flatMap((g) => g.files.map((f) => f.relPath))).toEqual([
+      "reports/report.html",
+    ])
+
+    await writeRepoFile("results/exp-a/log.txt", "x\n")
+    await rm(join(h.repoDir, "reports"), { recursive: true })
+    const noReports = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    expect(noReports.groups.flatMap((g) => g.files.every((f) => !f.inReportsFolder))).toEqual([
+      true,
+    ])
+  })
+
+  test("refuses results folders outside the project", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    for (const defaultResultsFolder of ["../elsewhere", "/tmp", "."]) {
+      await expect(
+        h.caller.science.analysis.listFiles({ projectId: project.id, defaultResultsFolder }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    }
+    for (const dir of [join(h.repoDir, ".."), h.repoDir, "relative/path"]) {
+      await expect(
+        h.caller.science.analysis.setResultsFolder({ projectId: project.id, dir }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    }
+    // A symlink inside the project that points outside it is refused too.
+    await symlink(join(h.repoDir, ".."), join(h.repoDir, "linked"))
+    await expect(
+      h.caller.science.analysis.listFiles({
+        projectId: project.id,
+        defaultResultsFolder: "linked",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(
+      h.caller.science.analysis.setResultsFolder({
+        projectId: project.id,
+        dir: join(h.repoDir, "linked"),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+
   test("an unknown projectId is a clean NOT_FOUND", async () => {
     await expect(
-      h.caller.science.analysis.listFiles({ projectId: "missing" }),
+      h.caller.science.analysis.listFiles({
+        projectId: "missing",
+        defaultResultsFolder: "results",
+      }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 })

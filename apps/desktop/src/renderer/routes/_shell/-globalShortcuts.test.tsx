@@ -8,7 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { useState } from "react"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../providers/AppProviders"
 import { createFakeTrpcClient } from "../../test/fakeTrpcClient"
 import { fireEvent, render, screen } from "../../test/render"
@@ -135,5 +135,54 @@ describe("palette shortcuts", () => {
     await screen.findByTestId("dashboard")
     fireEvent.keyDown(window, { key: "p", metaKey: true, shiftKey: true })
     expect(screen.getByTestId("global-palette")).toBeTruthy()
+  })
+})
+
+describe("go-to-dashboard shortcut (⌘Escape)", () => {
+  /** Mount `element` inside the project page and focus it. */
+  function focusInProject(element: HTMLElement): HTMLElement {
+    element.dataset.dashboardShortcutTest = "true"
+    document.body.appendChild(element)
+    element.focus()
+    return element
+  }
+
+  afterEach(() => {
+    for (const node of document.querySelectorAll("[data-dashboard-shortcut-test]")) node.remove()
+  })
+
+  test("⌘Escape with nothing focused opens the Dashboard", async () => {
+    renderShell("/projects/p1")
+    await screen.findByTestId("project-palette-ready")
+    fireEvent.keyDown(document.body, { key: "Escape", metaKey: true })
+    expect(await screen.findByTestId("dashboard")).toBeTruthy()
+  })
+
+  test("⌘Escape is left alone while focus is in a CodeMirror editor", async () => {
+    renderShell("/projects/p1")
+    await screen.findByTestId("project-palette-ready")
+    const editor = document.createElement("div")
+    editor.className = "cm-editor"
+    const content = document.createElement("div")
+    content.setAttribute("contenteditable", "true")
+    content.tabIndex = 0
+    editor.appendChild(content)
+    focusInProject(editor)
+    content.focus()
+    const notPrevented = fireEvent.keyDown(content, { key: "Escape", metaKey: true })
+    expect(notPrevented).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByTestId("dashboard")).toBeNull()
+  })
+
+  test("⌘Escape is left alone while a dialog is open", async () => {
+    renderShell("/projects/p1")
+    await screen.findByTestId("project-palette-ready")
+    const dialog = document.createElement("div")
+    dialog.setAttribute("role", "dialog")
+    focusInProject(dialog)
+    fireEvent.keyDown(document.body, { key: "Escape", metaKey: true })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByTestId("dashboard")).toBeNull()
   })
 })

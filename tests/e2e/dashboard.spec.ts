@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { DaemonClient } from "../../packages/pty-daemon/src/index"
@@ -92,7 +92,7 @@ test("title bar agent status shows installed agents and current sessions", async
     agentBounds && caffeineBounds && agentBounds.x + agentBounds.width <= caffeineBounds.x,
   ).toBe(true)
   await control.click()
-  const panel = window.getByRole("dialog", { name: "Agent status" })
+  const panel = window.getByRole("dialog", { name: "Agents status" })
   await expect(panel).toBeVisible()
   await expect(panel).toContainText("Claude Code")
   await expect(panel).toContainText("Codex")
@@ -171,22 +171,47 @@ test("dashboard shows a directly resizable project card", async () => {
     firstRainFrame,
   )
 
-  // It carries a status badge and starts at the default shared scale, with a
+  // It carries a status badge and starts at the default shared size, with a
   // keyboard-accessible, visually quiet corner handle rather than a toolbar slider.
+  // Arrow keys step 10%: left/right change the width, up/down the height.
   await expect(window.getByTestId("project-card-status")).toBeVisible()
   await expect(window.getByTestId("card-size-slider")).toHaveCount(0)
   const grid = window.getByTestId("dashboard-grid")
   const item = window.getByTestId("project-card-grid-item")
   const resizeHandle = window.getByTestId("card-resize-handle")
   await expect(grid).toHaveAttribute("data-card-grid-base-column", "220")
-  await expect(grid).toHaveAttribute("data-card-grid-scale", "1")
+  await expect(grid).toHaveAttribute("data-card-grid-width", "1")
+  await expect(grid).toHaveAttribute("data-card-grid-height", "1")
   await expect(item).toHaveAttribute("data-card-span", "1x1")
   await resizeHandle.focus()
   await window.keyboard.press("ArrowRight")
-  await expect(grid).toHaveAttribute("data-card-grid-scale", "1.05")
+  await expect(grid).toHaveAttribute("data-card-grid-width", "1.1")
+  await expect(grid).toHaveAttribute("data-card-grid-height", "1")
+  await expect
+    .poll(() => item.evaluate((element) => element.getBoundingClientRect().width))
+    .toBe(242)
+  const imageHeight = () => image.evaluate((element) => element.getBoundingClientRect().height)
+  const baseImageHeight = await imageHeight()
+  await window.keyboard.press("ArrowDown")
+  await expect(grid).toHaveAttribute("data-card-grid-height", "1.1")
   await expect(item).toHaveAttribute("data-card-span", "1x1")
+  // A taller card has a taller thumbnail, in the same proportion as the card.
+  await expect.poll(imageHeight).toBe(Math.round(baseImageHeight * 1.1))
+  await window.screenshot({ path: resolve(".cache", "screens", "dashboard-card-taller.png") })
 
-  // The shared scale keeps the grid within a narrow viewport without horizontal overflow.
+  // A corner drag changes width and height separately, in 10% steps.
+  const handleBox = await resizeHandle.boundingBox()
+  if (!handleBox) throw new Error("Expected the card resize handle to have a box")
+  const startX = handleBox.x + handleBox.width / 2
+  const startY = handleBox.y + handleBox.height / 2
+  await window.mouse.move(startX, startY)
+  await window.mouse.down()
+  await window.mouse.move(startX + 44, startY, { steps: 4 })
+  await window.mouse.up()
+  await expect(grid).toHaveAttribute("data-card-grid-width", "1.3")
+  await expect(grid).toHaveAttribute("data-card-grid-height", "1.1")
+
+  // The shared size keeps the grid within a narrow viewport without horizontal overflow.
   await window.setViewportSize({ width: 520, height: 720 })
   expect(await grid.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
     true,
@@ -216,11 +241,14 @@ test("Project summary stays viewport-sized when opened from a hovered card", asy
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
 
   const card = window.getByTestId("project-card")
-  const summary = card.getByTestId("project-card-summary")
-  await expect(summary).toBeVisible({ timeout: 30_000 })
+  const status = card.getByTestId("project-card-status-button")
+  await expect(status).toBeVisible({ timeout: 30_000 })
 
-  await summary.hover()
-  await summary.click()
+  await status.hover()
+  await status.click()
+  await expect(window.getByTestId("project-status-update-summary")).toBeVisible()
+  await window.screenshot({ path: test.info().outputPath("project-status.png") })
+  await window.getByTestId("project-status-update-summary").click()
 
   const backdrop = window.getByTestId("workflow-result-backdrop")
   await expect(backdrop).toBeVisible()
@@ -352,7 +380,7 @@ test("the final New project card opens the shared chooser and remains when the D
   await window.getByTestId("project-item").click({ button: "right" })
   await window.getByTestId("project-remove").click()
   await expect(window.getByTestId("project-card")).toHaveCount(0)
-  await expect(window.getByTestId("dashboard-empty")).toHaveText("No projects yet.")
+  await expect(window.getByTestId("dashboard-empty")).toHaveCount(0)
   await expect(newProjectCard).toBeVisible()
   expect(
     await grid.evaluate((element) => element.lastElementChild?.getAttribute("data-testid")),
@@ -503,6 +531,35 @@ test("Dashboard navigation keeps the project's open workspace tabs", async () =>
   )
 })
 
+test("project view tab rows are no taller than the toolbar row above them", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-card").click()
+  await expect(window.getByTestId("project-view")).toBeVisible()
+  await window.getByTestId("panel-tab-files").click()
+  await window.getByTestId("file-tree-file").click()
+  await expect(window.getByTestId("central-tab")).toContainText("README.md")
+  await window.getByTestId("central-new-terminal").click()
+  await expect(window.getByTestId("terminal")).toHaveAttribute("data-session-id", /.+/)
+
+  const heightOf = (locator: Locator) =>
+    locator.evaluate((element) => element.getBoundingClientRect().height)
+  // The toolbar row holds the files-panel toggle and the +, agent, terminal, file, settings buttons.
+  const toolbarRow = window.getByTestId("central-files-toggle").locator("xpath=../..")
+  const toolbarHeight = await heightOf(toolbarRow)
+  const tabRows = window.getByTestId("central-panel").locator(".dv-tabs-and-actions-container")
+  expect(await tabRows.count()).toBeGreaterThan(0)
+  for (const row of await tabRows.all()) {
+    expect(await heightOf(row)).toBeLessThanOrEqual(toolbarHeight)
+  }
+  // The tabs fit inside the row and keep readable 12px text.
+  for (const tab of await window.getByTestId("central-tab").all()) {
+    expect(await heightOf(tab)).toBeLessThanOrEqual(toolbarHeight)
+    expect(await tab.evaluate((element) => getComputedStyle(element).fontSize)).toBe("12px")
+  }
+  await window.screenshot({ path: resolve(".cache", "screens", "project-view-tab-rows.png") })
+})
+
 test("relaunching PI Lab restores files and recreates terminal and agent tabs", async () => {
   let window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
@@ -611,182 +668,158 @@ test("leaving Settings restores the view that opened it", async () => {
   await expect(window.getByTestId("project-view")).toBeVisible()
 })
 
-test("Alpha Appearance changes the running icon and restores palette and background choices", async () => {
+test("the card title has its own line with the agent status below it", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const card = window.getByTestId("project-card")
+  await expect(card).toBeVisible({ timeout: 30_000 })
+  const title = card.getByTestId("project-card-title")
+  const status = card.getByTestId("project-card-status")
+  await expect(status).toHaveText("No active agents")
+  await expect(card.getByTestId("project-card-stage")).toBeVisible()
+  const open = await card.getByTestId("project-card-open").boundingBox()
+  const titleBox = await title.boundingBox()
+  const statusBox = await status.boundingBox()
+  if (!open || !titleBox || !statusBox)
+    throw new Error("Project card title or status is not visible")
+  // The title spans the card's text area (its padding aside), and the status starts below it.
+  expect(titleBox.width).toBeGreaterThan(open.width - 24)
+  expect(statusBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height)
+  await card.screenshot({ path: resolve(".cache", "screens", "card-title.png") })
+})
+
+test("the project stage set in Edit project shows in the project view and survives a restart", async () => {
   let window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const card = window.getByTestId("project-card")
+  await expect(card).toBeVisible({ timeout: 30_000 })
 
-  const observeDock = async () => {
-    if (process.platform === "darwin") {
-      await app.evaluate(({ app: electronApp }) => {
-        const dock = electronApp.dock
-        const original = dock.setIcon.bind(dock)
-        const probe = globalThis as typeof globalThis & { __piLabDockIconCalls?: string[] }
-        probe.__piLabDockIconCalls = []
-        dock.setIcon = (icon) => {
-          probe.__piLabDockIconCalls?.push(typeof icon === "string" ? icon : "[image]")
-          original(icon)
-        }
-      })
+  // Edit project has a Project status row; a new project has no step filled.
+  await card.getByTestId("project-card-body").click({ button: "right", position: { x: 24, y: 24 } })
+  await window.getByTestId("project-card-menu").getByTestId("project-card-menu-edit").click()
+  const editDialog = window.getByTestId("edit-project-dialog")
+  const editStage = editDialog.getByTestId("edit-project-stage")
+  await expect(editDialog.getByText("Project status")).toBeVisible()
+  await expect(editStage.locator('[data-filled="true"]')).toHaveCount(0)
+
+  // Clicking Experiments fills Planning and Experiments; Experiments is current.
+  await editStage.getByTestId("edit-project-stage-step-experiments").click()
+  await expect(editStage.getByTestId("edit-project-stage-step-experiments")).toHaveAttribute(
+    "aria-current",
+    "step",
+  )
+  await expect(editStage.getByTestId("edit-project-stage-step-planning")).toHaveAttribute(
+    "data-filled",
+    "true",
+  )
+  await editDialog.getByTestId("edit-project-cancel").click()
+  await expect(editDialog).toHaveCount(0)
+
+  // The project view top bar shows the same stage.
+  await card.getByTestId("project-card-open").click()
+  const viewStage = window.getByTestId("project-view-stage")
+  await expect(viewStage.getByTestId("project-view-stage-step-experiments")).toHaveAttribute(
+    "aria-current",
+    "step",
+  )
+
+  // Hovering a step: its tooltip is the step's name, and the What's this? card shows
+  // "Project status" with that step, what a click does, and the current stage.
+  await expect(viewStage).toHaveAttribute("title", "Project status")
+  const planning = viewStage.getByTestId("project-view-stage-step-planning")
+  await expect(planning).toHaveAttribute("title", "Planning")
+  await planning.hover()
+  const help = window.getByTestId("sidebar-feature-help")
+  await expect(help.getByTestId("sidebar-feature-help-label")).toHaveText("Project status")
+  await expect(help.getByTestId("sidebar-feature-help-description")).toHaveText(
+    "Planning: click to set. Current: Experiments.",
+  )
+  await window.screenshot({ path: resolve(".cache", "screens", "stage-hint.png") })
+
+  // Clicking the current step moves back one step.
+  await viewStage.getByTestId("project-view-stage-step-experiments").click()
+  await expect(viewStage.getByTestId("project-view-stage-step-planning")).toHaveAttribute(
+    "aria-current",
+    "step",
+  )
+
+  await closeApp()
+  await launchApp()
+  window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window
+    .getByTestId("project-card")
+    .getByTestId("project-card-open")
+    .click({ timeout: 30_000 })
+  await expect(
+    window.getByTestId("project-view-stage").getByTestId("project-view-stage-step-planning"),
+  ).toHaveAttribute("aria-current", "step", { timeout: 30_000 })
+})
+
+test("dragging a project card moves it on the Dashboard and in the sidebar, and the order survives a restart", async () => {
+  // Add two more projects by launching with each one in turn: a new project goes first.
+  for (const [index, name] of ["repo", "beta", "gamma"].entries()) {
+    if (index > 0) {
+      await closeApp()
+      repoDir = join(dataDir, name)
+      await initRepo(repoDir)
+      await launchApp()
     }
-  }
-  await observeDock()
-
-  await window.getByTestId("nav-settings").click()
-  await window.getByTestId("settings-nav-appearance").click()
-  await expect(window.getByTestId("settings-section-appearance")).toBeVisible()
-
-  const picker = window.getByTestId("settings-app-icon-picker")
-  await expect(picker).toBeVisible()
-  await expect(window.getByTestId("settings-app-icon-family")).toHaveValue("pi")
-  await expect(window.getByTestId("settings-app-icon-font")).toHaveValue("gill-sans-regular")
-  await expect(window.getByTestId("settings-app-icon-alpha-white-background")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
-
-  // The built-in Alpha Pi matches its first preview, then the workshop can
-  // switch to a colored Joyplot tile.
-  const preview = window.getByTestId("settings-app-icon-preview")
-
-  // Check that the preview bridge returns the exact PNG for the selected icon.
-  const previewMatches = async (name: string): Promise<void> => {
-    const path =
-      name === "icon-alpha.png"
-        ? join(DESKTOP_DIR, "assets", "icons", name)
-        : join(
-            DESKTOP_DIR,
-            "src/renderer/routes/_shell/settings/components/AppIconGallery/channel-icons",
-            name,
-          )
-    const expected = await readFile(path)
-    await expect
-      .poll(async () => {
-        const source = await window.getByTestId("settings-app-icon-preview").getAttribute("src")
-        if (!source?.startsWith("data:image/png;base64,")) return false
-        return Buffer.from(source.slice("data:image/png;base64,".length), "base64").equals(expected)
-      })
-      .toBe(true)
-  }
-  await expect
-    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0)
-  await previewMatches("icon-alpha.png")
-  await window.getByTestId("settings-app-icon-alpha-white-background").click()
-  await window.getByTestId("settings-app-icon-family").selectOption("joyplot")
-  await expect(window.getByTestId("settings-app-icon-style")).toHaveValue("25")
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
-  await expect(window.getByTestId("settings-app-icon-palette")).toBeEnabled()
-  await expect(window.getByTestId("settings-app-icon-expanded")).toBeChecked()
-  await previewMatches("joyplot-25-alpha-expanded.png")
-  await window.getByTestId("settings-app-icon-expanded").uncheck()
-  await previewMatches("joyplot-25-alpha.png")
-  await expect
-    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0)
-  await window.getByTestId("settings-app-icon-next").click()
-  await expect(window.getByTestId("settings-app-icon-style")).toHaveValue("26")
-  await window.getByTestId("settings-app-icon-style").selectOption("37")
-  await previewMatches("joyplot-37-alpha.png")
-  await expect
-    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0)
-  await window.getByTestId("settings-app-icon-style").selectOption("33")
-  await window.getByTestId("settings-app-icon-expanded").check()
-  await previewMatches("joyplot-33-alpha-expanded.png")
-  if (process.platform === "darwin") {
-    await expect
-      .poll(() =>
-        app.evaluate(() =>
-          (
-            globalThis as typeof globalThis & { __piLabDockIconCalls?: string[] }
-          ).__piLabDockIconCalls?.at(-1),
-        ),
-      )
-      .toMatch(/joyplot-33-alpha-expanded\.png$/)
-  }
-  await expect
-    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0)
-
-  await window.getByTestId("settings-app-icon-family").selectOption("pi")
-  await expect(window.getByTestId("settings-app-icon-font")).toHaveValue("gill-sans-regular")
-  await expect(preview).toHaveAttribute("alt", "Pi Lab gill-sans-regular, Viridis")
-  await previewMatches("pi-gill-sans-regular-alpha.png")
-  await expect
-    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0)
-  await window.getByTestId("settings-app-icon-font").selectOption("didot-bold")
-  await expect(preview).toHaveAttribute("alt", "Pi Lab didot-bold, Viridis")
-  await previewMatches("pi-didot-bold-alpha.png")
-  await expect
-    .poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0)
-  await expect
-    .poll(async () => JSON.parse(await readFile(join(dataDir, "app-icon-selection.json"), "utf8")))
-    .toMatchObject({
-      family: "pi",
-      joyplotStyle: "33",
-      joyplotPalette: "viridis",
-      joyplotExpanded: true,
-      piFont: "didot-bold",
-      piPalette: "viridis",
+    // Wait until the seam has opened this project before going on.
+    await expect((await app.firstWindow()).getByTestId("project-card")).toHaveCount(index + 1, {
+      timeout: 30_000,
     })
-
-  await closeApp()
-  await launchApp()
-  await observeDock()
-  window = await app.firstWindow()
-  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
-  await window.getByTestId("nav-settings").click()
-  await window.getByTestId("settings-nav-appearance").click()
-  await expect(window.getByTestId("settings-app-icon-family")).toHaveValue("pi")
-  await expect(window.getByTestId("settings-app-icon-font")).toHaveValue("didot-bold")
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
-  await window.getByTestId("settings-app-icon-family").selectOption("joyplot")
-  await expect(window.getByTestId("settings-app-icon-style")).toHaveValue("33")
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("viridis")
-  await expect(window.getByTestId("settings-app-icon-expanded")).toBeChecked()
-  await previewMatches("joyplot-33-alpha-expanded.png")
-  const originalPreview = await window.getByTestId("settings-app-icon-preview").getAttribute("src")
-  await window.getByTestId("settings-app-icon-palette").selectOption("plasma")
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("plasma")
-  await expect
-    .poll(() => window.getByTestId("settings-app-icon-preview").getAttribute("src"))
-    .not.toBe(originalPreview)
-  if (process.platform === "darwin") {
-    await expect
-      .poll(() =>
-        app.evaluate(() =>
-          (
-            globalThis as typeof globalThis & { __piLabDockIconCalls?: string[] }
-          ).__piLabDockIconCalls?.at(-1),
-        ),
-      )
-      .toBe("[image]")
   }
-  const coloredPreview = await window.getByTestId("settings-app-icon-preview").getAttribute("src")
-  await window.getByTestId("settings-app-icon-alpha-white-background").click()
-  await expect(window.getByTestId("settings-app-icon-alpha-white-background")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect
-    .poll(() => window.getByTestId("settings-app-icon-preview").getAttribute("src"))
-    .not.toBe(coloredPreview)
-  await expect
-    .poll(async () => JSON.parse(await readFile(join(dataDir, "app-icon-selection.json"), "utf8")))
-    .toMatchObject({ joyplotPalette: "plasma", alphaWhiteBackground: true })
+  let window = await app.firstWindow()
+  await window.setViewportSize({ width: 1200, height: 800 })
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const cardTitles = window.getByTestId("project-card-title")
+  await expect(cardTitles).toHaveText(["gamma", "beta", "repo"], { timeout: 30_000 })
+  const sidebarOrder = () =>
+    window
+      .getByTestId("project-item")
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-project-id")))
+  const cardOrder = () =>
+    window
+      .getByTestId("project-card")
+      .evaluateAll((cards) => cards.map((card) => card.getAttribute("data-project-id")))
+  await expect.poll(sidebarOrder).toEqual(await cardOrder())
+
+  // Drag the first card's thumbnail onto the second card with the mouse.
+  const images = window.getByTestId("project-card-image")
+  const from = await images.nth(0).boundingBox()
+  const to = await images.nth(1).boundingBox()
+  if (!from || !to) throw new Error("Expected measurable project cards")
+  const start = { x: from.x + from.width / 2, y: from.y + from.height / 2 }
+  const end = { x: to.x + to.width / 2, y: to.y + to.height / 2 }
+  await window.mouse.move(start.x, start.y)
+  await window.mouse.down()
+  await window.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 8 })
+  await window.mouse.move(end.x, end.y, { steps: 8 })
+  await expect(
+    window.locator('[data-testid="project-card-grid-item"][data-dragging="true"]'),
+  ).toHaveCount(1)
+  await window.screenshot({ path: resolve(".cache", "screens", "card-drag.png") })
+  await window.mouse.up()
+
+  // The drop moved the card and did not open the project.
+  await expect(cardTitles).toHaveText(["beta", "gamma", "repo"])
+  await expect(window.getByTestId("dashboard")).toBeVisible()
+  await expect.poll(sidebarOrder).toEqual(await cardOrder())
+
+  // A plain click still opens a project.
+  await images.nth(0).click()
+  await expect(window.getByTestId("project-view")).toBeVisible()
+  await window.getByTestId("nav-dashboard").click()
+  await expect(cardTitles).toHaveText(["beta", "gamma", "repo"])
+
+  // The restart also opens "gamma" again through the test seam; opening keeps the order.
   await closeApp()
   await launchApp()
-  await observeDock()
   window = await app.firstWindow()
-  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
-  await window.getByTestId("nav-settings").click()
-  await window.getByTestId("settings-nav-appearance").click()
-  await expect(window.getByTestId("settings-app-icon-palette")).toHaveValue("plasma")
-  await expect(window.getByTestId("settings-app-icon-alpha-white-background")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-card-title")).toHaveText(["beta", "gamma", "repo"], {
+    timeout: 30_000,
+  })
+  await expect.poll(sidebarOrder).toEqual(await cardOrder())
 })

@@ -1041,6 +1041,8 @@
   "Resize all cards from": "تغيير حجم جميع البطاقات من",
   "currently": "حاليًا",
   "percent": "بالمئة",
+  "width": "العرض",
+  "height": "الارتفاع",
   "Resize": "تغيير حجم",
   "Drag the lower-right corner or use arrow keys to resize all cards": "اسحب الزاوية السفلية اليسرى أو استخدم الأسهم لتغيير حجم جميع البطاقات",
   "Auto": "تلقائي",

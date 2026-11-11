@@ -11,6 +11,7 @@ import {
   useEditorFontFamily,
   useEditorFontSize,
 } from "../../../preferences/preferences"
+import { useTheme } from "../../../providers/ThemeProvider"
 import { focusHeldOnOpen } from "../../focusOnOpen"
 import { languageForPath } from "../../utils/languageForPath"
 import { editorThemeExtension } from "../editorThemes"
@@ -85,8 +86,9 @@ interface CodeMirrorBufferProps {
   /**
    * Optional color-theme id (the stored `EditorSettings.editorTheme`). Resolved to
    * a CodeMirror extension via {@link editorThemeExtension} and layered on top of
-   * the structural height/scroll theme. Omitted / `"default"` / unknown ⇒ the
-   * registry's default theme. Changing it reconfigures live (no remount).
+   * the structural height/scroll theme. Omitted / `"default"` / unknown ⇒ GitHub,
+   * Light or Dark following the app's appearance. Changing it, or the appearance,
+   * reconfigures live (no remount).
    */
   theme?: string
   /** Parsed custom themes copied into editor settings. */
@@ -299,6 +301,7 @@ export function CodeMirrorBuffer({
   const vimCompartment = useRef(new Compartment()).current
   const autocompleteCompartment = useRef(new Compartment()).current
   const themeCompartment = useRef(new Compartment()).current
+  const { resolvedMode } = useTheme()
   const lintCompartment = useRef(new Compartment()).current
   const markdownCompartment = useRef(new Compartment()).current
 
@@ -459,7 +462,7 @@ export function CodeMirrorBuffer({
         // Color theme (chrome + syntax highlighting) chosen in Settings → Editor.
         // Layered over the default highlight; the structural height theme
         // below only sets layout, so the two never conflict on color.
-        themeCompartment.of(editorThemeExtension(theme, customThemes)),
+        themeCompartment.of(editorThemeExtension(theme, customThemes ?? [], resolvedMode)),
         editorTypographyExtension,
         lintCompartment.of(lintExtension(diagnostics)),
         markdownCompartment.of(
@@ -534,9 +537,11 @@ export function CodeMirrorBuffer({
   // Swap the color theme live.
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: themeCompartment.reconfigure(editorThemeExtension(theme, customThemes)),
+      effects: themeCompartment.reconfigure(
+        editorThemeExtension(theme, customThemes ?? [], resolvedMode),
+      ),
     })
-  }, [theme, customThemes, themeCompartment])
+  }, [theme, customThemes, resolvedMode, themeCompartment])
 
   // Swap the diagnostics source live.
   useEffect(() => {
@@ -645,30 +650,35 @@ export function CodeMirrorBuffer({
         >
           <MarkdownFormatButton
             label={t("Bold")}
+            help={t("Make the selected text bold.")}
             text="B"
             className="font-bold"
             onClick={() => formatSelection("**", "**", "bold text")}
           />
           <MarkdownFormatButton
             label={t("Italic")}
+            help={t("Make the selected text italic.")}
             text="I"
             className="italic"
             onClick={() => formatSelection("_", "_", "italic text")}
           />
           <MarkdownFormatButton
             label={t("Strikethrough")}
+            help={t("Strike through the selected text.")}
             text="S"
             className="line-through"
             onClick={() => formatSelection("~~", "~~", "struck text")}
           />
           <MarkdownFormatButton
             label={t("Inline code")}
+            help={t("Format the selected text as code.")}
             text="&lt;/&gt;"
             className="font-mono text-[10px]"
             onClick={() => formatSelection("`", "`", "code")}
           />
           <MarkdownFormatButton
             label={t("Link")}
+            help={t("Turn the selected text into a link.")}
             text="↗"
             onClick={() => formatSelection("[", "](url)", "link text")}
           />
@@ -695,6 +705,7 @@ export function CodeMirrorBuffer({
                 role="option"
                 aria-selected={index === selectedSlashIndex}
                 aria-label={t(command.label)}
+                data-feature-help={t(command.hint)}
                 className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-accent ${
                   index === selectedSlashIndex ? "bg-accent" : ""
                 }`}
@@ -745,6 +756,7 @@ export function CodeMirrorBuffer({
                 role="option"
                 aria-selected={index === selectedMentionIndex}
                 aria-label={entry.relPath}
+                data-feature-help={t("Insert a link to this file.")}
                 className={`flex w-full rounded px-2 py-1.5 text-left text-xs hover:bg-accent ${
                   index === selectedMentionIndex ? "bg-accent" : ""
                 }`}
@@ -789,11 +801,13 @@ function editorTypographyStyle(fontFamily: string, fontSize: number): CSSPropert
 
 function MarkdownFormatButton({
   label,
+  help,
   text,
   className,
   onClick,
 }: {
   label: string
+  help: string
   text: string
   className?: string
   onClick: () => void
@@ -803,6 +817,7 @@ function MarkdownFormatButton({
       type="button"
       aria-label={label}
       title={label}
+      data-feature-help={help}
       className={`flex h-7 min-w-7 items-center justify-center rounded px-1.5 text-xs hover:bg-accent ${className ?? ""}`}
       onClick={onClick}
     >

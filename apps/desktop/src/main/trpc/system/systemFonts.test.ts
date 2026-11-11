@@ -59,3 +59,19 @@ describe("system.startAtLogin", () => {
     await expect(caller.startAtLogin()).resolves.toEqual({ enabled: true, available: true })
   })
 })
+
+describe("system.homeDir", () => {
+  test("returns the OS home folder", async () => {
+    const caller = createCallerFactory(
+      createSystemRouter(
+        async () => ({ families: [], error: null }),
+        {
+          get: async () => ({ enabled: false, available: true }),
+          set: async () => ({ enabled: false, available: true }),
+        },
+        { get: async () => ({ visible: true }), set: async () => ({ visible: true }) } as never,
+      ),
+    )({} as AppContext)
+    await expect(caller.homeDir()).resolves.toBe((await import("node:os")).homedir())
+  })
+})

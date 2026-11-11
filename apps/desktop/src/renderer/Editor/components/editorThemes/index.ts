@@ -1,6 +1,6 @@
 export {
   allEditorThemes,
-  DEFAULT_EDITOR_THEME_ID,
+  defaultEditorThemeId,
   EDITOR_THEMES,
   type EditorTheme,
   type EditorThemeId,

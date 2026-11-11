@@ -5,7 +5,12 @@ import {
 } from "./-workspaceRecovery"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 
-export type { ProjectWorkspaceState } from "./-workspaceRecovery"
+export {
+  latexWorkspaceKey,
+  type ProjectWorkspaceState,
+  type SessionPanelView,
+  sessionPanelWorkspaceKey,
+} from "./-workspaceRecovery"
 
 let store: WorkspaceRecoveryStore | undefined
 

@@ -1,3 +1,4 @@
+import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
@@ -16,7 +17,15 @@ const initialStatus = {
 function renderSection(handlers: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
-    <AppProviders client={createFakeTrpcClient(handlers)} queryClient={queryClient}>
+    <AppProviders
+      client={createFakeTrpcClient({
+        "paper.token.status": () => ({ configured: false }),
+        "paper.template.status": () => ({ custom: null }),
+        "settings.get": () => ({ editor: DEFAULT_EDITOR_SETTINGS }),
+        ...handlers,
+      })}
+      queryClient={queryClient}
+    >
       <LatexSection />
     </AppProviders>,
   )
@@ -43,6 +52,11 @@ describe("LaTeX Settings (mocked RPC)", () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith({ latexProvider: "system" }))
     await waitFor(() =>
       expect((screen.getByLabelText("LaTeX compiler") as HTMLSelectElement).value).toBe("system"),
+    )
+    fireEvent.change(screen.getByLabelText("LaTeX compiler"), { target: { value: "auto" } })
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ latexProvider: "auto" }))
+    await waitFor(() =>
+      expect((screen.getByLabelText("LaTeX compiler") as HTMLSelectElement).value).toBe("auto"),
     )
   })
 
@@ -140,5 +154,21 @@ describe("LaTeX Settings (mocked RPC)", () => {
       },
     })
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Tool discovery failed")
+  })
+  it("saves the default build output folder and shows a rejected value", async () => {
+    const update = vi.fn((input: unknown) => {
+      if ((input as { latexOutputDir: string }).latexOutputDir.includes(".."))
+        throw new Error('The build output folder cannot contain "..": ../x')
+      return {}
+    })
+    renderSection({ "latex.status": () => initialStatus, "settings.updateEditor": update })
+    const field = (await screen.findByLabelText("Build output folder")) as HTMLInputElement
+    await waitFor(() => expect(field.value).toBe("build"))
+    fireEvent.change(field, { target: { value: "out" } })
+    fireEvent.click(screen.getByTestId("settings-latex-output-dir-save"))
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ latexOutputDir: "out" }))
+    fireEvent.change(field, { target: { value: "../x" } })
+    fireEvent.click(screen.getByTestId("settings-latex-output-dir-save"))
+    expect((await screen.findByRole("alert")).textContent).toContain('cannot contain ".."')
   })
 })

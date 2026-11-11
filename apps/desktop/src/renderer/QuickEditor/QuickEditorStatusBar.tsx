@@ -62,6 +62,7 @@ export function QuickEditorStatusBar({
           <button
             type="button"
             aria-label="Render Markdown"
+            data-feature-help="Show the Markdown with its formatting applied."
             aria-pressed={markdownMode === "render"}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onMarkdownModeChange("render")}
@@ -72,6 +73,7 @@ export function QuickEditorStatusBar({
           <button
             type="button"
             aria-label="Source Markdown"
+            data-feature-help="Show the plain Markdown text for editing."
             aria-pressed={markdownMode === "source"}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onMarkdownModeChange("source")}
@@ -84,6 +86,9 @@ export function QuickEditorStatusBar({
       <button
         type="button"
         aria-label="Vim mode"
+        data-feature-help={
+          vim ? "On. Click to use normal editing keys." : "Off. Click to edit with Vim keys."
+        }
         aria-pressed={vim}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => onVimChange(!vim)}

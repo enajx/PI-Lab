@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http"
 import { createRequire } from "node:module"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import {
@@ -34,7 +34,14 @@ const ELECTRON_PATH = createRequire(join(DESKTOP_DIR, "package.json"))("electron
 
 const execFileAsync = promisify(execFile)
 
-const CSV_REL_PATH = "data/metrics.csv"
+/** A 1×1 transparent PNG (smallest valid PNG). */
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+)
+
+// Analysis lists the project's results folder (`results/` by default).
+const CSV_REL_PATH = "results/data/metrics.csv"
 // A non-metric CSV (second column non-numeric) so the preview renders as a TABLE.
 // A two-numeric-column series like `epoch,loss` is now auto-detected as a metric
 // chart (see discover.ts detectScalarChart), which renders a chart, not a table.
@@ -56,16 +63,25 @@ async function initRepo(dir: string): Promise<void> {
   await writeFile(join(dir, "README.md"), "# fixture\n")
 
   // A data file the Analysis tab should discover and preview as a table.
-  await mkdir(join(dir, "data"), { recursive: true })
+  await mkdir(join(dir, "results", "data"), { recursive: true })
   await writeFile(join(dir, CSV_REL_PATH), CSV_BODY)
-  await writeFile(join(dir, "analysis.py"), "print('source, not a result artifact')\n")
-  await mkdir(join(dir, "reports"), { recursive: true })
+  await writeFile(join(dir, "results", "analysis.py"), "print('source, not a result artifact')\n")
+  // Two experiments (one folder each) and a data file outside the results folder.
+  await mkdir(join(dir, "results", "exp-a"), { recursive: true })
+  await writeFile(join(dir, "results", "exp-a", "plot.png"), TINY_PNG)
+  await mkdir(join(dir, "results", "exp-b"), { recursive: true })
+  await writeFile(join(dir, "results", "exp-b", "log.txt"), "step 1 loss 0.5\n")
+  await writeFile(join(dir, "outside.csv"), "a\n1\n")
+  // The folder the test folder picker returns (PI_LAB_TEST_PICK_DIRECTORY).
+  await mkdir(join(dir, "outputs", "exp-c"), { recursive: true })
+  await writeFile(join(dir, "outputs", "exp-c", "notes.txt"), "notes\n")
+  await mkdir(join(dir, "results", "reports"), { recursive: true })
   await writeFile(
-    join(dir, "reports", "interactive.html"),
+    join(dir, "results", "reports", "interactive.html"),
     "<!doctype html><button id='counter'>0</button><button id='navigate'>Navigate top</button><div id='capabilities'></div><div id='network'></div><div id='popup'></div><script src='./interactive.js'></script>",
   )
   await writeFile(
-    join(dir, "reports", "interactive.js"),
+    join(dir, "results", "reports", "interactive.js"),
     `counter.onclick = () => counter.textContent = String(Number(counter.textContent) + 1)
 capabilities.textContent = [
   "require:" + typeof window.require,
@@ -80,7 +96,7 @@ navigate.onclick = () => {
 }
 `,
   )
-  await writeFile(join(dir, "reports", "live.py"), "import marimo\napp = marimo.App()\n")
+  await writeFile(join(dir, "results", "reports", "live.py"), "import marimo\napp = marimo.App()\n")
 
   await run(["add", "."])
   await run(["commit", "-m", "initial"])
@@ -115,6 +131,7 @@ test.beforeEach(async () => {
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       // Open the temp repo as a project on load (renderer query seam).
       PI_LAB_TEST_OPEN_PROJECT: repoDir,
+      PI_LAB_TEST_PICK_DIRECTORY: join(repoDir, "outputs"),
       PI_LAB_TEST_MARIMO_FIXTURE: MARIMO_FIXTURE,
       PI_LAB_TEST_MARIMO_MARKER: markerPath,
     },
@@ -163,7 +180,7 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
   const fileRow = window.locator(`[data-testid="analysis-file"][data-rel-path="${CSV_REL_PATH}"]`)
   await expect(fileRow).toBeVisible({ timeout: 30_000 })
   await expect(
-    window.locator('[data-testid="analysis-file"][data-rel-path="analysis.py"]'),
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/analysis.py"]'),
   ).toHaveCount(0)
 
   // Selecting it renders the preview table.
@@ -175,6 +192,88 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
   await expect(table.locator("thead th").first()).toHaveText("epoch")
 })
 
+test("Analysis lists the results folder grouped by experiment and Change… picks another folder", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+
+  // The results folder row sits above the search and shows the default folder.
+  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/", {
+    timeout: 30_000,
+  })
+  await expect(window.getByTestId("analysis-results-folder-reset")).toHaveCount(0)
+
+  // Each folder inside results/ is one experiment; files outside it are not listed.
+  const group = (experiment: string) =>
+    window.locator(`[data-testid="analysis-experiment-group"][data-experiment="${experiment}"]`)
+  await expect(
+    group("exp-a").locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]'),
+  ).toBeVisible({ timeout: 30_000 })
+  await expect(
+    group("exp-b").locator('[data-testid="analysis-file"][data-rel-path="results/exp-b/log.txt"]'),
+  ).toBeVisible()
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path="outside.csv"]'),
+  ).toHaveCount(0)
+
+  // The category filters still narrow the results files.
+  await window.getByTestId("analysis-category-image").click()
+  await expect(window.getByTestId("analysis-file")).toHaveCount(1)
+  await expect(window.getByTestId("analysis-file")).toHaveAttribute(
+    "data-rel-path",
+    "results/exp-a/plot.png",
+  )
+  await window.getByTestId("analysis-category-all").click()
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-results.png") })
+
+  // Change… (test picker returns <project>/outputs) lists that folder for this project.
+  await window.getByTestId("analysis-results-folder-change").click()
+  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("outputs/")
+  await expect(
+    group("exp-c").locator(
+      '[data-testid="analysis-file"][data-rel-path="outputs/exp-c/notes.txt"]',
+    ),
+  ).toBeVisible()
+  await expect(group("exp-a")).toHaveCount(0)
+
+  // Reset to default goes back to results/.
+  await window.getByTestId("analysis-results-folder-reset").click()
+  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/")
+  await expect(group("exp-a")).toBeVisible()
+})
+
+test("a new HTML report is saved in reports/, listed in the Reports group and stays selected", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/", {
+    timeout: 30_000,
+  })
+  // No reports/ folder yet: no Reports group.
+  await expect(window.getByTestId("analysis-reports-group")).toHaveCount(0)
+
+  await window.getByTestId("analysis-new-html-report").click()
+  const row = window
+    .getByTestId("analysis-reports-group")
+    .locator('[data-testid="analysis-file"][data-rel-path="reports/report.html"]')
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await expect(row).toHaveAttribute("aria-pressed", "true")
+  await expect(window.getByTestId("analysis-preview-html")).toBeVisible({ timeout: 30_000 })
+  await expect(readFile(join(repoDir, "reports", "report.html"), "utf8")).resolves.toContain(
+    "Interactive report",
+  )
+  // The reports/ inside the results folder stays an experiment group.
+  await expect(
+    window.locator(
+      '[data-testid="analysis-experiment-group"][data-experiment="reports"] [data-rel-path="results/reports/interactive.html"]',
+    ),
+  ).toBeVisible()
+})
+
 test("interactive HTML is sandboxed while scripts, relative assets, and network fetch work", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
@@ -182,7 +281,7 @@ test("interactive HTML is sandboxed while scripts, relative assets, and network 
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
 
   await window
-    .locator('[data-testid="analysis-file"][data-rel-path="reports/interactive.html"]')
+    .locator('[data-testid="analysis-file"][data-rel-path="results/reports/interactive.html"]')
     .click()
   const report = window.frameLocator('[data-testid="analysis-preview-html"]')
   await expect(report.locator("#counter")).toHaveText("0", { timeout: 30_000 })
@@ -206,7 +305,9 @@ test("marimo starts interactively, stops on artifact switch, and is reaped on ap
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
 
-  const marimoRow = window.locator('[data-testid="analysis-file"][data-rel-path="reports/live.py"]')
+  const marimoRow = window.locator(
+    '[data-testid="analysis-file"][data-rel-path="results/reports/live.py"]',
+  )
   await marimoRow.click()
   const notebook = window.frameLocator('[data-testid="analysis-preview-marimo"]')
   await expect(notebook.locator("#marimo-counter")).toHaveText("0", { timeout: 30_000 })
@@ -237,7 +338,7 @@ test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", asyn
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("analysis-new-marimo-notebook")).toHaveCount(0)
   await expect(
-    window.locator('[data-testid="analysis-file"][data-rel-path="reports/live.py"]'),
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/reports/live.py"]'),
   ).toBeVisible()
   await window.getByTestId("analysis-fetch-experiments").click()
   await expect(window.getByTestId("workflow-result-dialog")).toBeVisible()

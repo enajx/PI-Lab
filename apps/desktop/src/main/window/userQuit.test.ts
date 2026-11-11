@@ -8,17 +8,91 @@ import {
 
 const idle: QuitWork = { agents: 0, terminals: [] }
 const agents = (count: number): QuitWork => ({ agents: count, terminals: [] })
+/** A first-dialog answer without "Remember option" ticked. */
+const pick = <C extends "quit" | "background" | "cancel">(choice: C) => ({
+  choice,
+  remember: false,
+})
+
+/** Quit action with a remembered choice; every other dependency is a spy. */
+function rememberHarness(
+  remembered: "ask" | "background",
+  answer: { choice: "quit" | "background" | "cancel"; remember: boolean },
+  running: "quit" | "background" | "cancel",
+  work: QuitWork,
+) {
+  const spies = {
+    choose: vi.fn(async () => answer),
+    confirmRunning: vi.fn(async () => running),
+    remember: vi.fn(),
+    quit: vi.fn(),
+    background: vi.fn(),
+  }
+  const request = createUserQuitAction({
+    pending: () => false,
+    remembered: () => remembered,
+    work: async () => work,
+    error: vi.fn(),
+    ...spies,
+  })
+  return { request, ...spies }
+}
+
+test("a remembered Move to background skips the dialog and moves to the background", async () => {
+  const h = rememberHarness("background", pick("cancel"), "cancel", agents(1))
+  await h.request()
+  expect(h.choose).not.toHaveBeenCalled()
+  expect(h.confirmRunning).not.toHaveBeenCalled()
+  expect(h.background).toHaveBeenCalledOnce()
+  expect(h.quit).not.toHaveBeenCalled()
+})
+
+test("ticking Remember option with Move to background saves it", async () => {
+  const h = rememberHarness("ask", { choice: "background", remember: true }, "cancel", agents(1))
+  await h.request()
+  expect(h.remember).toHaveBeenCalledExactlyOnceWith("background")
+  expect(h.background).toHaveBeenCalledOnce()
+})
+
+test("Quit with the box ticked quits but saves nothing", async () => {
+  const running = rememberHarness("ask", { choice: "quit", remember: true }, "quit", agents(1))
+  await running.request()
+  expect(running.quit).toHaveBeenCalledOnce()
+  expect(running.remember).not.toHaveBeenCalled()
+  const idleQuit = rememberHarness("ask", { choice: "quit", remember: true }, "quit", idle)
+  await idleQuit.request()
+  expect(idleQuit.quit).toHaveBeenCalledOnce()
+  expect(idleQuit.remember).not.toHaveBeenCalled()
+})
+
+test("Cancel never saves, in the first dialog or the running-work dialog", async () => {
+  const first = rememberHarness("ask", { choice: "cancel", remember: true }, "quit", idle)
+  await first.request()
+  expect(first.remember).not.toHaveBeenCalled()
+  const second = rememberHarness("ask", { choice: "quit", remember: true }, "cancel", agents(1))
+  await second.request()
+  expect(second.remember).not.toHaveBeenCalled()
+  expect(second.quit).not.toHaveBeenCalled()
+})
+
+test("an unticked choice is not saved", async () => {
+  const h = rememberHarness("ask", pick("background"), "cancel", idle)
+  await h.request()
+  expect(h.remember).not.toHaveBeenCalled()
+})
 
 test("each explicit quit offers all choices, background and cancel leave work running", async () => {
   const choose = vi
     .fn()
-    .mockResolvedValueOnce("cancel")
-    .mockResolvedValueOnce("background")
-    .mockResolvedValueOnce("quit")
+    .mockResolvedValueOnce(pick("cancel"))
+    .mockResolvedValueOnce(pick("background"))
+    .mockResolvedValueOnce(pick("quit"))
   const quit = vi.fn()
   const background = vi.fn()
   const request = createUserQuitAction({
     pending: () => false,
+    remembered: () => "ask",
+    remember: vi.fn(),
     work: async () => agents(2),
     choose,
     confirmRunning: async () => "quit",
@@ -38,15 +112,17 @@ test("each explicit quit offers all choices, background and cancel leave work ru
 })
 
 test("concurrent Cmd+Q does not open duplicate dialogs", async () => {
-  let finish!: (value: "cancel") => void
+  let finish!: (value: { choice: "cancel"; remember: boolean }) => void
   const choose = vi.fn(
     () =>
-      new Promise<"cancel">((resolve) => {
+      new Promise<{ choice: "cancel"; remember: boolean }>((resolve) => {
         finish = resolve
       }),
   )
   const request = createUserQuitAction({
     pending: () => false,
+    remembered: () => "ask",
+    remember: vi.fn(),
     work: async () => idle,
     choose,
     confirmRunning: async () => "quit",
@@ -58,7 +134,7 @@ test("concurrent Cmd+Q does not open duplicate dialogs", async () => {
   await vi.waitFor(() => expect(choose).toHaveBeenCalledOnce())
   await request()
   expect(choose).toHaveBeenCalledOnce()
-  finish("cancel")
+  finish(pick("cancel"))
   await first
 })
 
@@ -73,8 +149,10 @@ test("choosing Quit rechecks running work and offers a separate background or ca
     .mockResolvedValueOnce("quit")
   const request = createUserQuitAction({
     pending: () => false,
+    remembered: () => "ask",
+    remember: vi.fn(),
     work,
-    choose: async () => "quit",
+    choose: async () => pick("quit"),
     confirmRunning,
     quit,
     background,
@@ -95,8 +173,10 @@ test("no running work requires only the initial choice", async () => {
   const quit = vi.fn()
   const request = createUserQuitAction({
     pending: () => false,
+    remembered: () => "ask",
+    remember: vi.fn(),
     work: async () => idle,
-    choose: async () => "quit",
+    choose: async () => pick("quit"),
     confirmRunning,
     quit,
     background: vi.fn(),
@@ -108,11 +188,13 @@ test("no running work requires only the initial choice", async () => {
 })
 
 test("Quit label uses the initial count but newly started work still gets its second confirmation", async () => {
-  const choose = vi.fn(async () => "quit" as const)
+  const choose = vi.fn(async () => pick("quit"))
   const confirmRunning = vi.fn(async () => "cancel" as const)
   const quit = vi.fn()
   const request = createUserQuitAction({
     pending: () => false,
+    remembered: () => "ask",
+    remember: vi.fn(),
     work: vi.fn().mockResolvedValueOnce(idle).mockResolvedValueOnce(agents(1)),
     choose,
     confirmRunning,
@@ -132,8 +214,10 @@ test("a busy terminal alone gets the running-work confirmation; idle shells do n
   const quit = vi.fn()
   const request = createUserQuitAction({
     pending: () => false,
+    remembered: () => "ask",
+    remember: vi.fn(),
     work: async () => busy,
-    choose: async () => "quit",
+    choose: async () => pick("quit"),
     confirmRunning,
     quit,
     background: vi.fn(),

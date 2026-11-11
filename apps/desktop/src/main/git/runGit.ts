@@ -19,24 +19,36 @@ const MAX_BUFFER = 64 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
 
 /**
+ * `text` with the user name and password removed from every URL in it
+ * (`https://git:TOKEN@host/…` becomes `https://host/…`), so a token in a
+ * remote URL never reaches an error message or a log.
+ */
+export function redactUrlCredentials(text: string): string {
+  return text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, "$1")
+}
+
+/**
  * A failed `git` invocation. Carries the exit code and the raw stderr so the
- * message a user sees is git's own, not a generic wrapper string.
+ * message a user sees is git's own, not a generic wrapper string. Credentials
+ * in URLs are removed from the message, stderr and args.
  */
 export class GitError extends Error {
   /** Process exit code, or a spawn error code like "ENOENT" when git is absent. */
   readonly code: number | string | undefined
   /** Captured standard error from the failed command. */
   readonly stderr: string
-  /** The argv (after `git`) that failed, for diagnostics. */
+  /** The argv (after `git`) that failed, for diagnostics, with URL credentials removed. */
   readonly args: readonly string[]
 
   constructor(args: readonly string[], code: number | string | undefined, stderr: string) {
-    const detail = stderr.trim() || `git exited with ${code ?? "an unknown error"}`
-    super(`git ${args.join(" ")}: ${detail}`)
+    const safeArgs = args.map(redactUrlCredentials)
+    const safeStderr = redactUrlCredentials(stderr)
+    const detail = safeStderr.trim() || `git exited with ${code ?? "an unknown error"}`
+    super(`git ${safeArgs.join(" ")}: ${detail}`)
     this.name = "GitError"
     this.code = code
-    this.stderr = stderr
-    this.args = args
+    this.stderr = safeStderr
+    this.args = safeArgs
   }
 }
 
@@ -55,6 +67,11 @@ export interface RunGitOptions {
    * seam keeps callers from re-implementing exec).
    */
   allowFailure?: boolean
+  /**
+   * Extra environment variables for this call, added on top of the app's own
+   * environment. Leave unset to run git with the inherited environment only.
+   */
+  env?: Record<string, string>
 }
 
 export interface GitResult {
@@ -77,6 +94,7 @@ export async function runGit(
       maxBuffer: MAX_BUFFER,
       timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       windowsHide: true,
+      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     })
     return { stdout, stderr }
   } catch (error) {

@@ -8,12 +8,17 @@ import {
   Eye,
   EyeOff,
   ImagePlus,
+  ListTodo,
   Pencil,
+  ScrollText,
   Sparkles,
   Telescope,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
+import { useCardGridHeightScale } from "../../../../../components/CardGrid"
+import { ProjectStageRow } from "../../../../../components/ProjectStage"
+import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import {
   useDigitalRainDensity,
@@ -43,8 +48,8 @@ import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
  *     sets the thumbnail. Each artwork kind replaces the others (enforced
  *     server-side). A project with none yet captures a default gradient from the
  *     current theme on first render and persists it, so it stays fixed thereafter.
- *   - an **info area** — the project name and a status badge from shared live
- *     agent activity. The status is idle, working, or paused. An `active`
+ *   - an **info area** — the project name on its own full-width line, and below
+ *     it a status badge from shared live agent activity. The status is idle, working, or paused. An `active`
  *     project's gradient also drifts as a live activity cue.
  *
  * Clicking the card opens the project's route; right-clicking anywhere on it
@@ -62,6 +67,9 @@ const STATUS_DOT: Record<ProjectState, string> = {
   active: "bg-emerald-500",
   attention: "bg-red-500",
 }
+
+/** Thumbnail height at the base card height; it scales with the card's height. */
+const BASE_THUMBNAIL_PX = 128
 
 const GRADIENT_LAYER_NAMES = ["a", "b", "c"] as const
 
@@ -92,6 +100,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const [actionError, setActionError] = useState<string | null>(null)
   const artworkGenerationRef = useRef(0)
   const thumbnail = useProjectThumbnail(project, "card")
+  const thumbnailHeight = Math.round(BASE_THUMBNAIL_PX * useCardGridHeightScale())
 
   const state = useProjectActivityState(project.id)
   const capabilitiesQuery = useQuery(trpc.projects.capabilities.queryOptions({ id: project.id }))
@@ -145,8 +154,11 @@ export function ProjectCard({ project }: ProjectCardProps) {
     }),
   )
 
+  // A paper added in the LaTeX Editor with no project: its card offers only the paper.
+  const paperOnly = project.metadata?.paperOnly === true
   const openProject = () => {
-    void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+    if (paperOnly) void navigate({ to: "/science/latex", search: { projectId: project.id } })
+    else void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
   }
 
   // Auto-research: record the launch intent and open the project **immediately** —
@@ -306,11 +318,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the click only mirrors the info button's navigation, which is the real keyboard-activable control; a key handler / extra tab stop here would be a redundant duplicate target. */}
       <div
         data-testid="project-card-image"
-        className="relative isolate h-32 w-full shrink-0 overflow-hidden transition-[filter] group-hover:brightness-105 group-hover:contrast-105 group-hover:saturate-125"
+        className="relative isolate w-full shrink-0 overflow-hidden transition-[filter,height] group-hover:brightness-105 group-hover:contrast-105 group-hover:saturate-125"
         style={
           thumbnail.dataUrl
-            ? undefined
-            : { backgroundColor: project.digitalRain ? "#000" : "var(--muted)" }
+            ? { height: `${thumbnailHeight}px` }
+            : {
+                height: `${thumbnailHeight}px`,
+                backgroundColor: project.digitalRain ? "#000" : "var(--muted)",
+              }
         }
         onClick={openProject}
         onDragOver={(event) => {
@@ -442,21 +457,22 @@ export function ProjectCard({ project }: ProjectCardProps) {
           data-feature-help={t(
             "Open this project workspace; right-click anywhere on the card to set a thumbnail or generate a new gradient",
           )}
-          className="flex flex-col items-start gap-1.5 p-3 text-start outline-none transition-colors focus-visible:bg-accent/40"
+          className="flex flex-col items-start gap-1.5 px-2.5 py-2 text-start outline-none transition-colors focus-visible:bg-accent/40"
         >
-          <div className="flex w-full items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
-              {project.name}
-            </span>
-            <span
-              data-testid="project-card-status"
-              data-state={state}
-              className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
-            >
-              <span className={cn("size-2 rounded-full", STATUS_DOT[state])} aria-hidden />
-              {t(STATUS_LABEL[state])}
-            </span>
-          </div>
+          <span
+            data-testid="project-card-title"
+            className="w-full min-w-0 truncate font-medium text-foreground text-sm"
+          >
+            {project.name}
+          </span>
+          <span
+            data-testid="project-card-status"
+            data-state={state}
+            className="inline-flex max-w-full items-center gap-1.5 text-muted-foreground text-xs"
+          >
+            <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[state])} aria-hidden />
+            <span className="min-w-0 truncate">{t(STATUS_LABEL[state])}</span>
+          </span>
         </button>
 
         {/* Show the project deadline and assigned tags below the title. */}
@@ -465,26 +481,36 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
       <div
         data-testid="project-card-actions"
-        className="mt-auto flex items-center gap-1.5 border-border border-t p-2 transition-[filter] group-hover:brightness-105"
+        className="mt-auto flex items-center gap-1.5 border-border border-t p-1.5 transition-[filter] group-hover:brightness-105"
       >
-        <button
-          type="button"
-          data-testid="project-card-auto-research"
-          aria-label={`${t("Auto-research")} ${project.name}`}
-          title={gitAvailable ? t("Auto-research") : gitDisabledReason}
-          data-feature-label={`${t("Auto-research")} ${project.name}`}
-          data-feature-help={
-            gitAvailable
-              ? t("Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md")
-              : gitDisabledReason
-          }
-          disabled={!gitAvailable}
-          onClick={onAutoResearch}
-          className={CARD_ACTION_CLASS}
-        >
-          <Telescope className="size-4 shrink-0" aria-hidden />
-        </button>
-        {showAnalysis ? (
+        {paperOnly ? null : (
+          <ProjectStatusControl
+            projectId={project.id}
+            projectName={project.name}
+            lastOpenedAt={project.lastOpenedAt}
+            variant="compact"
+            testId="project-card-status-button"
+            gitAvailable={gitAvailable}
+            gitDisabledReason={gitDisabledReason}
+          />
+        )}
+        {paperOnly ? null : (
+          <button
+            type="button"
+            data-testid="project-card-tasks"
+            aria-label={`${t("Tasks")} ${project.name}`}
+            title={t("Tasks")}
+            data-feature-label={t("Tasks")}
+            data-feature-help={t("Open this project's tasks")}
+            className={CARD_ACTION_CLASS}
+            onClick={() =>
+              void navigate({ to: "/science/tasks", search: { projectId: project.id } })
+            }
+          >
+            <ListTodo className="size-4 shrink-0" aria-hidden />
+          </button>
+        )}
+        {showAnalysis && !paperOnly ? (
           <button
             type="button"
             data-testid="project-card-analysis"
@@ -500,16 +526,47 @@ export function ProjectCard({ project }: ProjectCardProps) {
             <ChartArea className="size-4 shrink-0" aria-hidden />
           </button>
         ) : null}
-        <ProjectWorkflowControl
-          projectId={project.id}
-          projectName={project.name}
-          task="summary"
-          variant="compact"
-          testId="project-card-summary"
-          disabled={!gitAvailable}
-          disabledReason={gitAvailable ? undefined : gitDisabledReason}
-        />
+        <button
+          type="button"
+          data-testid="project-card-latex"
+          aria-label={`${t("LaTeX Editor")} ${project.name}`}
+          title={t("LaTeX Editor")}
+          data-feature-label={t("LaTeX Editor")}
+          data-feature-help={t("Open this project's paper in the LaTeX Editor")}
+          className={CARD_ACTION_CLASS}
+          onClick={() => void navigate({ to: "/science/latex", search: { projectId: project.id } })}
+        >
+          <ScrollText className="size-4 shrink-0" aria-hidden />
+        </button>
+        {paperOnly ? null : (
+          <button
+            type="button"
+            data-testid="project-card-auto-research"
+            aria-label={`${t("Auto-research")} ${project.name}`}
+            title={gitAvailable ? t("Auto-research") : gitDisabledReason}
+            data-feature-label={`${t("Auto-research")} ${project.name}`}
+            data-feature-help={
+              gitAvailable
+                ? t(
+                    "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
+                  )
+                : gitDisabledReason
+            }
+            disabled={!gitAvailable}
+            onClick={onAutoResearch}
+            className={CARD_ACTION_CLASS}
+          >
+            <Telescope className="size-4 shrink-0" aria-hidden />
+          </button>
+        )}
       </div>
+
+      <ProjectStageRow
+        projectId={project.id}
+        stage={project.metadata?.stage ?? null}
+        testId="project-card-stage"
+        className="justify-center px-2.5 pb-1.5"
+      />
 
       <ProjectCardMenu
         menu={menu}
@@ -564,7 +621,7 @@ function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
   return (
     <div
       data-testid="project-card-metadata"
-      className="flex flex-col gap-1.5 px-3 pb-3 text-muted-foreground text-xs"
+      className="flex flex-col gap-1.5 px-2.5 pb-2 text-muted-foreground text-xs"
     >
       {metadata.deadline ? (
         <div data-testid="project-card-deadline" className="flex items-center gap-1.5">
@@ -624,21 +681,7 @@ function ProjectCardMenu({
   const t = useTranslate()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    if (!menu) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) onClose()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [menu, onClose])
+  usePopupDismiss(menu !== null, [rootRef], onClose)
 
   if (!menu) return null
   return (

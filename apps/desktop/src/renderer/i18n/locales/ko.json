@@ -1041,6 +1041,8 @@
   "Resize all cards from": "여기에서 모든 카드 크기 조정:",
   "currently": "현재",
   "percent": "퍼센트",
+  "width": "너비",
+  "height": "높이",
   "Resize": "크기 조정",
   "Drag the lower-right corner or use arrow keys to resize all cards": "오른쪽 아래 모서리를 끌거나 화살표 키로 모든 카드 크기를 조정합니다",
   "Auto": "자동",
