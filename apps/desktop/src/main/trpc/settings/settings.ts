@@ -1,6 +1,5 @@
 import {
   type AgentSettings,
-  ANALYSIS_FORMATS,
   agentSettings,
   type CaffeineSettings,
   DEFAULT_CAFFEINE_SETTINGS,
@@ -18,6 +17,7 @@ import {
   type Settings,
   settings,
 } from "@pi-lab/local-db"
+import { ANALYSIS_FORMATS } from "@pi-lab/local-db/editor-settings"
 import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"

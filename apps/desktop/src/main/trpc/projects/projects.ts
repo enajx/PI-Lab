@@ -3,7 +3,6 @@ import { constants } from "node:fs"
 import { copyFile, cp, mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
-  ANALYSIS_FORMATS,
   agentSessions,
   automationRuns,
   automations,
@@ -14,6 +13,7 @@ import {
   type ProjectMetadata,
   projects,
 } from "@pi-lab/local-db"
+import { ANALYSIS_FORMATS } from "@pi-lab/local-db/editor-settings"
 import { TRPCError } from "@trpc/server"
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"

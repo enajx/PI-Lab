@@ -18,6 +18,9 @@ vi.mock("electron", () => ({
   dialog: {},
   safeStorage: {},
   shell: {},
+  session: {
+    defaultSession: { webRequest: { onBeforeRequest: vi.fn(), onHeadersReceived: vi.fn() } },
+  },
 }))
 vi.mock("trpc-electron/main", () => ({ createIPCHandler: handler }))
 vi.mock("@pi-lab/local-db", () => ({
@@ -90,7 +93,7 @@ test("the window opens while reconciliation is pending and IPC launch context wa
       finish = resolve
     }),
   )
-  const window = {} as BrowserWindow
+  const window = fakeWindow()
   const initialWindow = vi.fn(() => window)
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
@@ -121,7 +124,7 @@ test("the window opens while reconciliation is pending and IPC launch context wa
 test("a reconciliation failure leaves read-only IPC usable and rejects agent launch preparation", async () => {
   handler.mockClear()
   reconcile.mockRejectedValue(new Error("Daemon adoption failed"))
-  const window = {} as BrowserWindow
+  const window = fakeWindow()
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
     ensureMainWindow: () => window,
@@ -152,7 +155,7 @@ test("a later launch retries failed recovery and concurrent launches share that 
           finish = resolve
         }),
     )
-  const window = {} as BrowserWindow
+  const window = fakeWindow()
   const runtime = new FullRuntime({
     getAppIconPath: () => null,
     ensureMainWindow: () => window,
@@ -178,3 +181,8 @@ test("a later launch retries failed recovery and concurrent launches share that 
   await context.getAgentLaunchEnvironment()
   expect(reconcile).toHaveBeenCalledTimes(2)
 })
+
+/** A window with the event hooks boot attaches to (notebook servers stop with the window). */
+function fakeWindow(): BrowserWindow {
+  return { on: vi.fn(), webContents: { on: vi.fn() } } as unknown as BrowserWindow
+}
