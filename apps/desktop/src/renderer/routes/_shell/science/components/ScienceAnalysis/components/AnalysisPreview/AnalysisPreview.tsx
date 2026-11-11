@@ -4,6 +4,12 @@ import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
+import {
+  type DocumentRenderResult,
+  documentToolForFile,
+  RenderControl,
+  RenderedDocument,
+} from "../../../../../../../components/DocumentRender/DocumentRender"
 import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { Markdown } from "../../../../../projects/components/RightSidebar/components/Markdown"
@@ -40,6 +46,17 @@ export function AnalysisPreview({
     enabled: !interactive,
     staleTime: 30_000,
   })
+  const renderTool = documentToolForFile(
+    relPath,
+    preview.data?.type === "text" ? preview.data.text : null,
+  )
+  // The last render of this file; a render of another file is not shown.
+  const [rendered, setRendered] = useState<{
+    relPath: string
+    result: DocumentRenderResult
+    at: number
+  } | null>(null)
+  const shownRender = rendered?.relPath === relPath ? rendered.result : null
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -59,12 +76,35 @@ export function AnalysisPreview({
             {t("marimo notebook")}
           </span>
         ) : null}
+        {renderTool ? (
+          <RenderControl
+            projectId={projectId}
+            relPath={relPath}
+            tool={renderTool}
+            onRendered={(result) => setRendered({ relPath, result, at: Date.now() })}
+          />
+        ) : null}
       </div>
       <div
         data-testid="analysis-preview"
-        className={`min-h-0 flex-1 ${interactive ? "overflow-hidden" : "overflow-auto p-4"}`}
+        className={`min-h-0 flex-1 ${interactive || shownRender ? "overflow-hidden" : "overflow-auto p-4"}`}
       >
-        {interactive ? (
+        {shownRender ? (
+          <RenderedDocument
+            projectId={projectId}
+            result={shownRender}
+            onClose={() => setRendered(null)}
+          >
+            {shownRender.outputRelPath ? (
+              <InteractivePreview
+                key={rendered?.at}
+                projectId={projectId}
+                relPath={shownRender.outputRelPath}
+                kind="report"
+              />
+            ) : null}
+          </RenderedDocument>
+        ) : interactive ? (
           <InteractivePreview
             projectId={projectId}
             relPath={relPath}
@@ -89,7 +129,7 @@ export function AnalysisPreview({
 
 type InteractiveStatus = "starting" | "running" | "stopping" | "stopped" | "error"
 
-function InteractivePreview({
+export function InteractivePreview({
   projectId,
   relPath,
   kind,

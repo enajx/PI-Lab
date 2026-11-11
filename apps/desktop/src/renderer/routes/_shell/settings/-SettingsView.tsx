@@ -8,6 +8,7 @@ import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
 import { FeatureHelpPanel, FeatureHelpRestoreButton } from "../components/Sidebar"
 import { TitleBarSystemControls } from "../titleBar"
+import { DocumentToolsSection } from "./components/DocumentToolsSection"
 import { LatexSection } from "./components/LatexSection"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
 import { QuickEditorSection } from "./components/QuickEditorSection"
@@ -65,6 +66,12 @@ const SECTIONS = [
     label: "LaTeX",
     description: "Choose the LaTeX compiler for all projects and install PDFLaTeX.",
     render: () => <LatexSection />,
+  },
+  {
+    id: "document-tools",
+    label: "Document tools",
+    description: "Find or install Quarto and MyST for the Render button.",
+    render: () => <DocumentToolsSection />,
   },
   {
     id: "quick-editor",
