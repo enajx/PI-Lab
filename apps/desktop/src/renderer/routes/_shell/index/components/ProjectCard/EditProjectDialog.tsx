@@ -1,4 +1,9 @@
 import type { Project, ProjectDetails, ProjectTextTag } from "@pi-lab/local-db"
+import {
+  ANALYSIS_FORMAT_LABELS,
+  ANALYSIS_FORMATS,
+  type AnalysisFormat,
+} from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
@@ -82,7 +87,9 @@ type PaperFolderDraft = { kind: "keep" } | ({ kind: "set" } & ChosenPaperFolder)
  * A saved paper folder with no Git remote also gets "Connect to Overleaf…",
  * which acts at once (it opens the Connect to Overleaf dialog).
  * When editing, a "Project status" row shows the project stage; clicking a step
- * saves it at once, as in the project view top bar.
+ * saves it at once, as in the project view top bar. An "Analysis format" choice
+ * sets the format agents write this project's analysis in, or leaves the
+ * default from Settings.
  */
 export function EditProjectDialog({
   project,
@@ -118,6 +125,10 @@ export function EditProjectDialog({
   const [agentChoice, setAgentChoice] = useState<string | null>(null)
   const agentId = agentChoice ?? choice.data?.agentId ?? ""
   const [deadline, setDeadline] = useState(existing?.deadline ?? "")
+  // "" means no override: the analysis format from Settings applies.
+  const [analysisFormat, setAnalysisFormat] = useState<AnalysisFormat | "">(
+    existing?.analysisFormat ?? "",
+  )
   const [emojiTags, setEmojiTags] = useState<string[]>(existing?.emojiTags ?? [])
   const [textTags, setTextTags] = useState<ProjectTextTag[]>(existing?.textTags ?? [])
   const [tagLabel, setTagLabel] = useState("")
@@ -239,6 +250,7 @@ export function EditProjectDialog({
       emojiTags,
       textTags,
     }
+    if (mode === "edit") details.analysisFormat = analysisFormat === "" ? null : analysisFormat
     if (paperDraft.kind === "keep") {
       onSave(details)
       return
@@ -356,6 +368,24 @@ export function EditProjectDialog({
                   value={deadline}
                   onChange={(event) => setDeadline(event.target.value)}
                 />
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-foreground text-xs">{t("Analysis format")}</span>
+                <select
+                  data-testid="edit-project-analysis-format"
+                  className={FIELD_CLASS}
+                  value={analysisFormat}
+                  onChange={(event) => setAnalysisFormat(event.target.value as AnalysisFormat | "")}
+                  data-feature-help={t("Format agents write this project's analysis in.")}
+                >
+                  <option value="">{t("Use default from Settings")}</option>
+                  {ANALYSIS_FORMATS.map((format) => (
+                    <option key={format} value={format}>
+                      {t(ANALYSIS_FORMAT_LABELS[format])}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <div className="flex flex-col gap-1.5">

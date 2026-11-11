@@ -3,6 +3,7 @@ import { constants } from "node:fs"
 import { copyFile, cp, mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
+  ANALYSIS_FORMATS,
   agentSessions,
   automationRuns,
   automations,
@@ -52,6 +53,7 @@ const projectDetailsInput = z.object({
   agentId: z.string().min(1).nullable(),
   emojiTags: z.array(z.string().min(1)).max(50).optional(),
   textTags: z.array(textTagInput).max(50).optional(),
+  analysisFormat: z.enum(ANALYSIS_FORMATS).nullable().optional(),
 })
 
 function detailsValues(project: Pick<Project, "metadata"> | undefined, details: ProjectDetails) {
@@ -60,6 +62,8 @@ function detailsValues(project: Pick<Project, "metadata"> | undefined, details: 
   else metadata.deadline = details.deadline
   if (details.emojiTags !== undefined) metadata.emojiTags = details.emojiTags
   if (details.textTags !== undefined) metadata.textTags = details.textTags
+  if (details.analysisFormat === null) delete metadata.analysisFormat
+  else if (details.analysisFormat !== undefined) metadata.analysisFormat = details.analysisFormat
   return { name: details.name, typeId: details.typeId, metadata }
 }
 
@@ -904,7 +908,8 @@ export const projectsRouter = router({
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
     // The linked paper folder, the paper auto-detect choice, the paper-only
-    // mark, the stage and the results folder are not part of the card dialog; keep them.
+    // mark, the stage, the results folder and the analysis format are not part
+    // of the card dialog; keep them.
     const stored = ctx.db
       .select({ metadata: projects.metadata })
       .from(projects)
@@ -916,6 +921,7 @@ export const projectsRouter = router({
     if (stored?.resultsFolder !== undefined) kept.resultsFolder = stored.resultsFolder
     if (stored?.paperAutoDetect !== undefined) kept.paperAutoDetect = stored.paperAutoDetect
     if (stored?.paperOnly !== undefined) kept.paperOnly = stored.paperOnly
+    if (stored?.analysisFormat !== undefined) kept.analysisFormat = stored.analysisFormat
     const metadata: ProjectMetadata | null =
       Object.keys(kept).length === 0 ? input.metadata : { ...input.metadata, ...kept }
     const row = ctx.db

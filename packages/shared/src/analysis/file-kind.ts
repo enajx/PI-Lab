@@ -94,6 +94,8 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   md: "markdown",
   markdown: "markdown",
   mdx: "markdown",
+  // Quarto Markdown (shown as Markdown until it can be rendered)
+  qmd: "markdown",
   // Plain text & logs (head-previewable)
   txt: "text",
   text: "text",
@@ -278,11 +280,11 @@ export function isMarimoNotebookSource(source: string): boolean {
 
 /**
  * Whether a kind is one Analysis can render a meaningful inline preview for
- * (table / chart / array / image / pretty-JSON / text head / isolated web
- * surface). Raw `.npy` arrays decode into a chart or grid; HTML reports and
- * marimo notebooks open in their isolated interactive surface. `.npz` (a zip
- * of arrays we don't unpack), `parquet`, `dataset`, `plot`, `notebook`, and
- * `other` fall back to a metadata-only card.
+ * (table / chart / array / image / pretty-JSON / text head / notebook cells /
+ * isolated web surface). Raw `.npy` arrays decode into a chart or grid; Jupyter
+ * notebooks show their cells; HTML reports and marimo notebooks open in their
+ * isolated interactive surface. `.npz` (a zip of arrays we don't unpack),
+ * `parquet`, `dataset`, `plot`, and `other` fall back to a metadata-only card.
  */
 export function isPreviewableKind(kind: DataFileKind): boolean {
   return (
@@ -291,6 +293,7 @@ export function isPreviewableKind(kind: DataFileKind): boolean {
     kind === "json" ||
     kind === "image" ||
     kind === "marimo" ||
+    kind === "notebook" ||
     kind === "report" ||
     kind === "markdown" ||
     kind === "text" ||

@@ -218,7 +218,36 @@ describe("project details", () => {
       agentId: null,
       emojiTags: [],
       textTags: [{ label: "Priority", color: "blue" }],
+      analysisFormat: null,
     })
+  })
+
+  test("sets and clears the project's analysis format override", async () => {
+    const { onSave } = renderDialog(
+      project({ id: "fmt", name: "Study", metadata: { analysisFormat: "qmd" } }),
+    )
+    const select = screen.getByLabelText("Analysis format") as HTMLSelectElement
+    expect(select.value).toBe("qmd")
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "Use default from Settings",
+      "Markdown",
+      "Quarto",
+      "MyST Markdown",
+      "HTML",
+      "marimo notebook",
+      "Jupyter notebook",
+    ])
+    await waitFor(() =>
+      expect((screen.getByTestId("edit-project-save") as HTMLButtonElement).disabled).toBe(false),
+    )
+
+    fireEvent.change(select, { target: { value: "ipynb" } })
+    fireEvent.click(screen.getByTestId("edit-project-save"))
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ analysisFormat: "ipynb" }))
+
+    fireEvent.change(select, { target: { value: "" } })
+    fireEvent.click(screen.getByTestId("edit-project-save"))
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ analysisFormat: null }))
   })
 })
 

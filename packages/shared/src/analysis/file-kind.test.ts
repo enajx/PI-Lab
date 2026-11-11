@@ -44,6 +44,7 @@ describe("classifyDataFile", () => {
 
   test("classifies markdown and text/log", () => {
     expect(classifyDataFile("RESEARCH.md")).toBe("markdown")
+    expect(classifyDataFile("analysis.qmd")).toBe("markdown")
     expect(classifyDataFile("run.log")).toBe("text")
     expect(classifyDataFile("params.yaml")).toBe("text")
   })
@@ -239,11 +240,11 @@ describe("isPreviewableKind", () => {
     expect(isPreviewableKind("npy")).toBe(true)
     expect(isPreviewableKind("report")).toBe(true)
     expect(isPreviewableKind("marimo")).toBe(true)
+    expect(isPreviewableKind("notebook")).toBe(true)
 
     expect(isPreviewableKind("parquet")).toBe(false)
     expect(isPreviewableKind("npz")).toBe(false)
     expect(isPreviewableKind("plot")).toBe(false)
-    expect(isPreviewableKind("notebook")).toBe(false)
     expect(isPreviewableKind("other")).toBe(false)
   })
 

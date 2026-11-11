@@ -40,10 +40,10 @@ const LOADED = {
   baseline: { exists: true, mtimeMs: 10, size: 33 },
 }
 
-function renderPanel(save: FakeHandlers[string]) {
+function renderPanel(save: FakeHandlers[string], loaded: typeof LOADED) {
   const handlers: FakeHandlers = {
     "settings.get": () => ({ editor: DEFAULT_EDITOR_SETTINGS }),
-    "diary.open": () => LOADED,
+    "diary.open": () => loaded,
     "diary.save": save,
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -60,7 +60,7 @@ describe("ResearchDiaryPanel", () => {
     renderPanel((input) => {
       saves.push(input)
       return { baseline: { exists: true, mtimeMs: 20, size: 38 } }
-    })
+    }, LOADED)
     const panel = await screen.findByTestId("research-diary-panel")
     expect(await within(panel).findByRole("heading", { name: "2026-11-11" })).toBeTruthy()
 
@@ -82,8 +82,12 @@ describe("ResearchDiaryPanel", () => {
   })
 
   test("shows the error and keeps the edit open when the file changed on disk", async () => {
-    renderPanel(() =>
-      Promise.reject(new Error("md/research-diary/diary.md changed on disk since it was loaded.")),
+    renderPanel(
+      () =>
+        Promise.reject(
+          new Error("md/research-diary/diary.md changed on disk since it was loaded."),
+        ),
+      LOADED,
     )
     const panel = await screen.findByTestId("research-diary-panel")
     await within(panel).findByRole("heading", { name: "2026-11-11" })
@@ -94,5 +98,16 @@ describe("ResearchDiaryPanel", () => {
 
     expect((await within(panel).findByRole("alert")).textContent).toMatch(/changed on disk/)
     expect(screen.getByTestId("editor-buffer")).toBeTruthy()
+  })
+
+  test("hides a MyST or Quarto front matter in the rendered view and keeps it in the source", async () => {
+    const content = "---\ntitle: Research diary\n---\n\n## 2026-11-11\n\nRan the baseline.\n"
+    renderPanel(() => null, { ...LOADED, content })
+    const panel = await screen.findByTestId("research-diary-panel")
+    expect(await within(panel).findByRole("heading", { name: "2026-11-11" })).toBeTruthy()
+    expect(within(panel).queryByText(/title: Research diary/)).toBeNull()
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Edit" }))
+    expect(screen.getByTestId("buffer-doc").textContent).toBe(content)
   })
 })

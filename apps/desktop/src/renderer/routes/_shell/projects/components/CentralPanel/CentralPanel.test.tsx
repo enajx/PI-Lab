@@ -107,6 +107,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   papersFolder: "~/Papers",
   askPapersFolder: true,
   researchDiaryFormat: "md",
+  analysisFormat: "md",
 }
 
 const PY_DIAGNOSTIC = {

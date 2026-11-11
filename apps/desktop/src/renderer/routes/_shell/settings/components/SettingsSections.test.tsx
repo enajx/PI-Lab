@@ -219,6 +219,36 @@ describe("Settings sections", () => {
     await waitFor(() => expect(patches).toEqual([{ showHiddenFiles: false }]))
   })
 
+  test("Editor offers MyST for the diary and the six analysis formats, and saves the choices", async () => {
+    const patches: unknown[] = []
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({ editor: { researchDiaryFormat: "md", analysisFormat: "md" } }),
+      "settings.updateEditor": (input) => {
+        patches.push(input)
+        return null
+      },
+    })
+
+    const diary = await screen.findByTestId<HTMLSelectElement>("settings-research-diary-format")
+    expect([...diary.options].map((option) => option.value)).toEqual(["md", "qmd", "myst"])
+    const analysis = await screen.findByTestId<HTMLSelectElement>("settings-analysis-format")
+    expect(analysis.value).toBe("md")
+    expect([...analysis.options].map((option) => option.textContent)).toEqual([
+      "Markdown",
+      "Quarto",
+      "MyST Markdown",
+      "HTML",
+      "marimo notebook",
+      "Jupyter notebook",
+    ])
+
+    fireEvent.change(diary, { target: { value: "myst" } })
+    fireEvent.change(analysis, { target: { value: "ipynb" } })
+    await waitFor(() =>
+      expect(patches).toEqual([{ researchDiaryFormat: "myst" }, { analysisFormat: "ipynb" }]),
+    )
+  })
+
   test("Editor confirms file deletes by default and persists turning it back on", async () => {
     const patches: unknown[] = []
     renderSection(<EditorSection />, {

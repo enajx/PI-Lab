@@ -1110,3 +1110,25 @@ test("explicit unselected type stays general on add and can clear an edited type
   expect(cleared.typeId).toBe("general")
   expect((await h.caller.projects.open({ path: h.repoDir })).typeId).toBe("general")
 })
+
+test("Edit project's analysis format override is saved, kept by setMetadata, and cleared with null", async () => {
+  const project = await h.caller.projects.open({ path: h.repoDir })
+  const details = { name: "Project", typeId: "software" as const, deadline: null, agentId: null }
+
+  await h.caller.projects.updateDetails({
+    id: project.id,
+    details: { ...details, analysisFormat: "ipynb" },
+  })
+  await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "Journal" } })
+  expect((await h.caller.projects.get({ id: project.id })).metadata?.analysisFormat).toBe("ipynb")
+
+  // Details saved without the field leave the override as it is.
+  await h.caller.projects.updateDetails({ id: project.id, details })
+  expect((await h.caller.projects.get({ id: project.id })).metadata?.analysisFormat).toBe("ipynb")
+
+  const cleared = await h.caller.projects.updateDetails({
+    id: project.id,
+    details: { ...details, analysisFormat: null },
+  })
+  expect(cleared.metadata?.analysisFormat).toBeUndefined()
+})

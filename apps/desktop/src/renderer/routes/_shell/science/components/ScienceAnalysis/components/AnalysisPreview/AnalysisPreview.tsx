@@ -1,9 +1,12 @@
 import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysis/file-kind"
+import type { NotebookCell, NotebookOutput } from "@pi-lab/shared/analysis/ipynb"
+import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
+import { Markdown } from "../../../../../projects/components/RightSidebar/components/Markdown"
 import { ArrayGrid } from "../ArrayGrid"
 import { MetricChart } from "../MetricChart"
 
@@ -11,8 +14,12 @@ import { MetricChart } from "../MetricChart"
  * Preview pane for a single selected data file (P8c). Fetches
  * `science.analysis.preview` and dispatches on the returned payload's `type`:
  * a sampled CSV/TSV table, a line chart (metric logs / 1-D NumPy arrays), a
- * NumPy 2-D array grid, an inline image, pretty-printed JSON, a text head, or a
- * metadata card for kinds with no inline renderer. The pane owns its own
+ * NumPy 2-D array grid, an inline image, pretty-printed JSON, a text head
+ * (Markdown, Quarto and MyST files render as Markdown with the front matter
+ * hidden), a Jupyter notebook's cells, or a metadata card for kinds with no
+ * inline renderer. HTML reports and marimo notebooks open in their interactive
+ * surface; a marimo notebook is labelled, and shows its Python code when marimo
+ * cannot start. The pane owns its own
  * vertical scroll; the fetch is keyed on the project + path so switching
  * files re-fetches cleanly.
  */
@@ -44,6 +51,14 @@ export function AnalysisPreview({
         >
           {relPath}
         </span>
+        {kind === "marimo" ? (
+          <span
+            data-testid="analysis-preview-label"
+            className="shrink-0 rounded-md border border-border px-1.5 py-0.5 text-muted-foreground text-xs"
+          >
+            {t("marimo notebook")}
+          </span>
+        ) : null}
       </div>
       <div
         data-testid="analysis-preview"
@@ -65,7 +80,7 @@ export function AnalysisPreview({
             {preview.error?.message ?? t("Failed to load preview.")}
           </p>
         ) : preview.data ? (
-          <PreviewBody preview={preview.data} />
+          <PreviewBody preview={preview.data} kind={kind} />
         ) : null}
       </div>
     </div>
@@ -152,7 +167,7 @@ function InteractivePreview({
     )
   }
   if (status === "error") {
-    return (
+    const message = (
       <InteractiveMessage testId="analysis-interactive-error">
         <span className="text-destructive">{error}</span>
         <button
@@ -163,6 +178,15 @@ function InteractivePreview({
           {t("Retry")}
         </button>
       </InteractiveMessage>
+    )
+    if (kind !== "marimo") return message
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="shrink-0">{message}</div>
+        <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
+          <MarimoSource projectId={projectId} relPath={relPath} />
+        </div>
+      </div>
     )
   }
   if (status === "stopping" || status === "stopped") {
@@ -224,10 +248,102 @@ function InteractiveMessage({ testId, children }: { testId: string; children: Re
   )
 }
 
+/** A marimo notebook's Python source, shown when the live notebook is not running. */
+function MarimoSource({ projectId, relPath }: { projectId: string; relPath: string }) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const source = useQuery(trpc.science.analysis.preview.queryOptions({ projectId, relPath }))
+  if (source.isError) {
+    return (
+      <p
+        data-testid="analysis-preview-error"
+        className="select-text cursor-text text-destructive text-sm"
+      >
+        {source.error.message}
+      </p>
+    )
+  }
+  if (source.data?.type !== "text") {
+    return <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
+  }
+  return (
+    <>
+      <CodeBlock testId="analysis-preview-code" code={source.data.text} />
+      {source.data.truncated ? <TruncatedNote /> : null}
+    </>
+  )
+}
+
+/** Source code shown as a plain, selectable block. */
+function CodeBlock({ testId, code }: { testId: string; code: string }) {
+  return (
+    <pre
+      data-testid={testId}
+      className="select-text cursor-text overflow-x-auto whitespace-pre rounded-md bg-muted/40 p-3 font-mono text-xs"
+    >
+      {code}
+    </pre>
+  )
+}
+
+/** A Jupyter notebook: Markdown cells rendered, code cells as code with their stored outputs. */
+function NotebookBody({ cells }: { cells: NotebookCell[] }) {
+  return (
+    <div data-testid="analysis-preview-notebook" className="flex flex-col gap-3">
+      {cells.map((cell, index) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: cells are positional
+          key={index}
+          data-testid="analysis-notebook-cell"
+          data-cell-type={cell.type}
+          className="flex flex-col gap-2"
+        >
+          {cell.type === "markdown" ? (
+            <Markdown content={cell.source} />
+          ) : (
+            <CodeBlock testId="analysis-notebook-code" code={cell.source} />
+          )}
+          {cell.outputs.map((output, outputIndex) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: outputs are positional
+            <NotebookOutputView key={outputIndex} output={output} />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function NotebookOutputView({ output }: { output: NotebookOutput }) {
+  const t = useTranslate()
+  if (output.type === "text") {
+    return (
+      <pre className="select-text cursor-text overflow-x-auto whitespace-pre-wrap break-words border-border border-l-2 pl-3 font-mono text-xs">
+        {output.text}
+      </pre>
+    )
+  }
+  if (output.type === "image") {
+    return (
+      <img
+        src={output.dataUrl}
+        alt={t("Notebook output")}
+        className="max-w-full self-start rounded-md border border-border bg-white"
+      />
+    )
+  }
+  return (
+    <p className="text-muted-foreground text-xs italic">
+      {`${t("Output not shown")} (${output.outputType})`}
+    </p>
+  )
+}
+
 /** Dispatch one preview payload to its renderer. */
-function PreviewBody({ preview }: { preview: DataFilePreview }) {
+function PreviewBody({ preview, kind }: { preview: DataFilePreview; kind: DataFileKind }) {
   const t = useTranslate()
   switch (preview.type) {
+    case "notebook":
+      return <NotebookBody cells={preview.cells} />
     case "table":
       return <TableBody preview={preview} />
     case "chart":
@@ -253,6 +369,14 @@ function PreviewBody({ preview }: { preview: DataFilePreview }) {
         </pre>
       )
     case "text":
+      if (kind === "markdown") {
+        return (
+          <>
+            <Markdown content={splitFrontMatter(preview.text).body} />
+            {preview.truncated ? <TruncatedNote /> : null}
+          </>
+        )
+      }
       return (
         <>
           <pre

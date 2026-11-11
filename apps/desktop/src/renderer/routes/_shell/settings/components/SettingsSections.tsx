@@ -4,8 +4,14 @@ import type {
   NotificationSettings,
   ProjectConfigStorage,
 } from "@pi-lab/local-db"
-import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
-import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
+import {
+  ANALYSIS_FORMAT_LABELS,
+  ANALYSIS_FORMATS,
+  type AnalysisFormat,
+  DEFAULT_EDITOR_SETTINGS,
+  type EditorSettings,
+  type PythonRunDestination,
+} from "@pi-lab/local-db/editor-settings"
 import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -509,15 +515,27 @@ export function EditorSection() {
       <SelectField
         testId="settings-research-diary-format"
         label="Research diary format"
-        description="File format of each project's research diary (md/research-diary). Switching renames the diary file when its panel next opens."
+        description="File format of each project's research diary (md/research-diary). Switching to or from Quarto renames the diary file when its panel next opens."
         value={editor.researchDiaryFormat}
         options={[
           { value: "md", label: ".md" },
           { value: "qmd", label: ".qmd (Quarto Markdown)" },
+          { value: "myst", label: ".md (MyST Markdown)" },
         ]}
         onChange={(value) =>
           patch({ researchDiaryFormat: value as EditorSettings["researchDiaryFormat"] })
         }
+      />
+      <SelectField
+        testId="settings-analysis-format"
+        label="Analysis format"
+        description="Format agents write analysis in. A project can choose its own in Edit project."
+        value={editor.analysisFormat}
+        options={ANALYSIS_FORMATS.map((format) => ({
+          value: format,
+          label: ANALYSIS_FORMAT_LABELS[format],
+        }))}
+        onChange={(value) => patch({ analysisFormat: value as AnalysisFormat })}
       />
       <SelectField
         testId="settings-editor-theme"

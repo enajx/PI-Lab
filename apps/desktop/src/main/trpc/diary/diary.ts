@@ -2,6 +2,7 @@ import { rename } from "node:fs/promises"
 import { join } from "node:path"
 import { getSettingsOrDefaults, type PiLabDatabase, projects } from "@pi-lab/local-db"
 import type { ResearchDiaryFormat } from "@pi-lab/local-db/editor-settings"
+import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import {
   type FileStat,
   readTextSnapshot,
@@ -17,20 +18,41 @@ import { publicProcedure, router } from "../trpc"
 /**
  * Research diary router: a blog-style Markdown log at
  * `<project folder>/md/research-diary/diary.md` (or `diary.qmd` with the Quarto
- * format setting), one `## YYYY-MM-DD` heading per day, newest first.
+ * format setting; MyST also uses `diary.md`), one `## YYYY-MM-DD` heading per
+ * day, newest first.
  *
  * `open` prepares the file for the diary panel: it renames the diary to the
- * current format when only the other one exists, creates it when missing, and
- * adds today's heading at the top when today has none. `save` writes the panel's
+ * current format's extension when only the other one exists, creates it when
+ * missing, adds a MyST front matter when the format is MyST and the file has
+ * none, and adds today's heading at the top when today has none. `save` writes the panel's
  * edit unless the file changed on disk since it was loaded (same mtime + size
  * check as the editor's save).
  */
 
 const DIARY_DIR = "md/research-diary"
 
-/** The diary's path relative to the project folder for a format. */
-function diaryRelPath(format: ResearchDiaryFormat): string {
-  return `${DIARY_DIR}/diary.${format}`
+/** The diary's file extension: MyST is Markdown with a front matter, so it uses `.md`. */
+type DiaryExtension = "md" | "qmd"
+
+function diaryExtension(format: ResearchDiaryFormat): DiaryExtension {
+  return format === "qmd" ? "qmd" : "md"
+}
+
+/** The diary's path relative to the project folder for a file extension. */
+function diaryRelPath(extension: DiaryExtension): string {
+  return `${DIARY_DIR}/diary.${extension}`
+}
+
+/**
+ * The front matter added to a MyST diary that has none. `title` is a standard
+ * mystmd page front matter field; the leading block marks the file as MyST.
+ */
+export const MYST_DIARY_FRONT_MATTER = "---\ntitle: Research diary\n---\n"
+
+/** Put {@link MYST_DIARY_FRONT_MATTER} at the top of `content` unless it has a front matter. */
+export function withMystFrontMatter(content: string): string {
+  if (splitFrontMatter(content).frontMatter !== null) return content
+  return `${MYST_DIARY_FRONT_MATTER}\n${content}`
 }
 
 /** `## YYYY-MM-DD` for the local calendar date of `date`. */
@@ -104,14 +126,16 @@ export const diaryRouter = router({
     .mutation(async ({ ctx, input }): Promise<DiaryFile> => {
       const folder = projectFolder(ctx.db, input.projectId)
       const format = getSettingsOrDefaults(ctx.db).editor.researchDiaryFormat
-      const relPath = diaryRelPath(format)
+      const extension = diaryExtension(format)
+      const relPath = diaryRelPath(extension)
       const target = join(folder, relPath)
-      const other = join(folder, diaryRelPath(format === "md" ? "qmd" : "md"))
+      const other = join(folder, diaryRelPath(extension === "md" ? "qmd" : "md"))
       if (!(await statFile(target)).exists && (await statFile(other)).exists) {
         await rename(other, target)
       }
       const loaded = await readDiary(target, relPath)
-      const next = withTodayHeading(loaded.content, localDateHeading(new Date()))
+      const marked = format === "myst" ? withMystFrontMatter(loaded.content) : loaded.content
+      const next = withTodayHeading(marked, localDateHeading(new Date()))
       if (next === loaded.content && loaded.baseline.exists) return loaded
       await writeTextFile(target, next)
       return readDiary(target, relPath)

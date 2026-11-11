@@ -637,6 +637,54 @@ describe("sessions.startAnalyzeExperiments — Analysis button", () => {
     expect(chunks.join("").replace(/\r?\n/g, "")).toContain(join(skillDir, "SKILL.md"))
   })
 
+  /** Start Analyze experiments and return the agent's output (the prompt), line breaks removed. */
+  async function analyzePrompt(): Promise<string> {
+    const skillDir = join(h.skillsHomeDir, ".agents", "skills", "analyze-experiments")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Analyze experiments\n")
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
+    const result = await h.caller.sessions.startAnalyzeExperiments({ projectId })
+    const chunks: string[] = []
+    const stream = await h.caller.terminal.onData({ sessionId: result.sessionId })
+    const sub = stream.subscribe({
+      next: (event) => {
+        if (event.type === "data") chunks.push(event.chunk)
+      },
+    })
+    await waitFor(() => chunks.join("").replace(/\r?\n/g, "").includes("Follow its instructions."))
+    sub.unsubscribe()
+    return chunks.join("").replace(/\r?\n/g, "")
+  }
+
+  test("tells the agent the analysis format from Settings when the project has no override", async () => {
+    await h.caller.settings.updateEditor({ analysisFormat: "qmd" })
+
+    const prompt = await analyzePrompt()
+
+    expect(prompt).toContain("Write the analysis as Quarto (.qmd)")
+    expect(prompt).not.toContain(".ipynb")
+  })
+
+  test("tells the agent the project's own analysis format over the Settings default", async () => {
+    await h.caller.settings.updateEditor({ analysisFormat: "qmd" })
+    const project = await h.caller.projects.get({ id: projectId })
+    await h.caller.projects.updateDetails({
+      id: projectId,
+      details: {
+        name: project.name,
+        typeId: "general",
+        deadline: null,
+        agentId: null,
+        analysisFormat: "ipynb",
+      },
+    })
+
+    const prompt = await analyzePrompt()
+
+    expect(prompt).toContain("Write the analysis as a Jupyter notebook (.ipynb)")
+    expect(prompt).not.toContain(".qmd")
+  })
+
   test("PI Lab ships the analyze-experiments placeholder skill", async () => {
     const bundled = join(__dirname, "..", "..", "..", "..", "resources", "skills")
     const skill = await findSkill(

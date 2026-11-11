@@ -1,4 +1,5 @@
 import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
+import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
@@ -19,7 +20,8 @@ import { EdgeResizeHandle } from "../EdgeResizeHandle"
  * Research diary panel, shown on the right of the project view and the Analysis
  * view. On mount (and on a project change) it calls `diary.open`, which creates
  * the diary file and today's `## YYYY-MM-DD` heading when needed, and shows the
- * diary rendered as Markdown. Edit switches to the Markdown source editor; Save
+ * diary rendered as Markdown (a Quarto or MyST diary too, for now; a leading
+ * YAML front matter is not shown). Edit switches to the Markdown source editor; Save
  * (or ⌘S) writes the file through `diary.save` and goes back to the rendered
  * view. A save refused because the file changed on disk shows the error and
  * keeps the edit open. The panel is resizable from its left edge; the width is
@@ -171,7 +173,7 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
           data-testid="research-diary-rendered"
           className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
         >
-          <Markdown content={loaded.content} />
+          <Markdown content={splitFrontMatter(loaded.content).body} />
         </div>
       )}
     </aside>

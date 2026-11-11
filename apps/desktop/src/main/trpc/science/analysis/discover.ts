@@ -7,6 +7,7 @@ import {
   type DataFileKind,
   isMarimoNotebookSource,
 } from "@pi-lab/shared"
+import { type ParsedNotebook, parseIpynb } from "@pi-lab/shared/analysis/ipynb"
 import { walkWorkspace } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 
@@ -281,7 +282,13 @@ export interface ArrayPreview {
   truncated: boolean
 }
 
+/** A Jupyter notebook's cells with their stored outputs (see {@link parseIpynb}). */
+export interface NotebookPreview extends ParsedNotebook {
+  type: "notebook"
+}
+
 export type DataFilePreview =
+  | NotebookPreview
   | TablePreview
   | JsonPreview
   | ImagePreview
@@ -302,6 +309,8 @@ export const MAX_CHART_POINTS = 1000
 export const MAX_ARRAY_ROWS = 200
 /** Max columns shown in an {@link ArrayPreview} grid (a 2-D array's width). */
 export const MAX_ARRAY_COLS = 32
+/** Max bytes of a `.ipynb` read for its preview (over this → metadata fallback). */
+export const MAX_NOTEBOOK_BYTES = 16 * 1024 * 1024
 /** Max bytes read when decoding a `.npy` array (over this → metadata fallback). */
 export const MAX_NPY_BYTES = 16 * 1024 * 1024
 
@@ -346,7 +355,15 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     note,
   })
 
+  // A marimo notebook is a `.py` file: show its source.
+  if (extname(relPath).toLowerCase() === ".py" && (await isMarimoNotebookFile(abs))) {
+    return previewText(abs)
+  }
+
   switch (kind) {
+    case "notebook":
+      if (info.size > MAX_NOTEBOOK_BYTES) return meta("Notebook too large to preview")
+      return { type: "notebook", ...parseIpynb(await readFile(abs, "utf8")) }
     case "csv":
     case "tsv":
       return previewTable(abs, kind === "tsv" ? "\t" : ",", meta)
@@ -360,7 +377,7 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     case "npy":
       return previewNpy(abs, relPath, info.size, meta)
     default:
-      // Binary stores (including pickle), reports, notebooks, plots, and Zarr
+      // Binary stores (including pickle), reports, plots, and Zarr
       // directories are intentionally metadata-only: never deserialize or read.
       return meta()
   }

@@ -60,6 +60,35 @@ describe("diary.open", () => {
     expect(md.content).toBe(`${today}\n\nEntry.\n`)
     await expect(stat(join(diaryDir(), "diary.qmd"))).rejects.toThrow()
   })
+  test("MyST adds a title front matter to diary.md once, and renames nothing", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const today = localDateHeading(new Date())
+    await mkdir(diaryDir(), { recursive: true })
+    await writeFile(join(diaryDir(), "diary.md"), `${today}\n\nEntry.\n`)
+
+    await h.caller.settings.updateEditor({ researchDiaryFormat: "myst" })
+    await h.caller.diary.open({ projectId: project.id })
+    const myst = await h.caller.diary.open({ projectId: project.id })
+
+    const expected = `---\ntitle: Research diary\n---\n\n${today}\n\nEntry.\n`
+    expect(myst.relPath).toBe("md/research-diary/diary.md")
+    expect(myst.content).toBe(expected)
+    expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(expected)
+  })
+
+  test("MyST keeps an existing front matter as it is", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const today = localDateHeading(new Date())
+    await mkdir(diaryDir(), { recursive: true })
+    await writeFile(join(diaryDir(), "diary.qmd"), `---\ntitle: Lab notes\n---\n\n${today}\n`)
+
+    await h.caller.settings.updateEditor({ researchDiaryFormat: "myst" })
+    const myst = await h.caller.diary.open({ projectId: project.id })
+
+    expect(myst.relPath).toBe("md/research-diary/diary.md")
+    expect(myst.content).toBe(`---\ntitle: Lab notes\n---\n\n${today}\n`)
+    await expect(stat(join(diaryDir(), "diary.qmd"))).rejects.toThrow()
+  })
 })
 
 describe("diary.save", () => {
