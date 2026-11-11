@@ -914,7 +914,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
 /**
  * A paper added with no project, through the real app: New paper… in the
  * LaTeX Editor picker, Start draft into a folder typed in the folder question,
- * then its own Dashboard card (only the paper button), then Link to project,
+ * then its own Dashboard card (only the paper button), then Add to project,
  * which moves the paper to the project and removes that card. The paper is
  * made from the built-in template; no Overleaf remote is used.
  */
@@ -962,7 +962,7 @@ test("LaTeX Editor adds a paper with no project, shows its own card, and links i
     await card.getByTestId("project-card-body").click()
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 30_000 })
 
-    // Link to project moves the paper to the project and removes the paper's own card.
+    // Add to project moves the paper to the project and removes the paper's own card.
     await page.getByTestId("latex-link-to-project").click()
     await page.getByRole("menuitem", { name: "project" }).click()
     await expect(page.getByTestId("latex-project-select")).toContainText("project")

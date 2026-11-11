@@ -242,6 +242,7 @@ describe("Analysis top bar shortcuts", () => {
       ["Analyze experiments", "true"],
       ["HTML report", "true"],
       ["Fetch experiments", "true"],
+      ["Research diary", "true"],
     ])
     fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "HTML report" }))
     await waitFor(() => expect(within(banner).queryByTestId("analysis-new-html-report")).toBeNull())
@@ -268,13 +269,14 @@ describe("Analysis top bar shortcuts", () => {
       ["Analyze experiments", "true"],
       ["HTML report", "true"],
       ["Fetch experiments", "true"],
+      ["Research diary", "true"],
     ])
 
     fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "HTML report" }))
     await waitFor(() => expect(within(banner).queryByTestId("analysis-new-html-report")).toBeNull())
     expect(
       JSON.parse(window.localStorage.getItem("pi-lab.analysis.headerShortcuts") ?? ""),
-    ).toEqual(["analyze-experiments", "fetch-experiments", "skill:review-notes"])
+    ).toEqual(["analyze-experiments", "fetch-experiments", "research-diary", "skill:review-notes"])
 
     cleanup()
     mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
@@ -286,6 +288,7 @@ describe("Analysis top bar shortcuts", () => {
       ["Analyze experiments", "true"],
       ["HTML report", "false"],
       ["Fetch experiments", "true"],
+      ["Research diary", "true"],
     ])
   })
 })

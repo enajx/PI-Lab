@@ -447,7 +447,7 @@ test("a paper-only project can be linked to a project without a paper", async ()
   )
 })
 
-test("a normal project has no Link to project button", async () => {
+test("a normal project has no Add to project button", async () => {
   renderWithProjects([{ id: "p1", name: "One", metadata: null }], {})
   await screen.findByTestId("paper-setup")
   expect(screen.queryByTestId("latex-link-to-project")).toBeNull()
