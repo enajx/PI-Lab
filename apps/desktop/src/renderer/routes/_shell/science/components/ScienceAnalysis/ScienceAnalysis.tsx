@@ -630,6 +630,9 @@ export function ScienceAnalysis({
                     kind={
                       allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"
                     }
+                    onOpenNotebook={(notebookRelPath) =>
+                      setSessionRequest({ projectId: selectedProjectId, notebookRelPath })
+                    }
                   />
                 ) : (
                   <NoSelectionState />

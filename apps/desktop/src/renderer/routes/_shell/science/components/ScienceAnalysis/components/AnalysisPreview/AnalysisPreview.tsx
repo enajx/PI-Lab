@@ -33,10 +33,13 @@ export function AnalysisPreview({
   projectId,
   relPath,
   kind,
+  onOpenNotebook,
 }: {
   projectId: string
   relPath: string
   kind: DataFileKind
+  /** Open this Jupyter or marimo notebook in a notebook tab on its own server. */
+  onOpenNotebook: (relPath: string) => void
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -75,6 +78,17 @@ export function AnalysisPreview({
           >
             {t("marimo notebook")}
           </span>
+        ) : null}
+        {kind === "notebook" || kind === "marimo" ? (
+          <button
+            type="button"
+            data-testid="analysis-open-notebook"
+            title={t("Run this notebook on its own server in a tab")}
+            onClick={() => onOpenNotebook(relPath)}
+            className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs"
+          >
+            {t("Open notebook")}
+          </button>
         ) : null}
         {renderTool ? (
           <RenderControl

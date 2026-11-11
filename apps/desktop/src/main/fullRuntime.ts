@@ -41,6 +41,8 @@ import { getDb, initDatabase } from "./db/db"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelFromAppName } from "./identity/channel"
 import { tectonicCacheDir } from "./latex/runtime"
+import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
+import { NotebookServers } from "./notebooks/notebookServers"
 import {
   createElectronAppFocusAdapter,
   createElectronNativeNotificationAdapter,
@@ -109,6 +111,12 @@ export class FullRuntime {
   )
   private readonly processFinalizers = new Set<Promise<void>>()
   private readonly analysisInteractive = new AnalysisInteractiveController()
+  // A first uvx run downloads marimo or JupyterLab, so a server may take minutes to start.
+  private readonly notebookServers = new NotebookServers(
+    { start: 42_700, end: 42_799 },
+    5 * 60_000,
+    (url) => shell.openExternal(url),
+  )
   private readonly agentCatalog = buildAgentCatalog(isTestMode)
   private readonly notificationBrokers = createNotificationBrokers()
   private readonly notificationService: NotificationService
@@ -164,6 +172,7 @@ export class FullRuntime {
       if (saveNativeLanguage(app.getPath("userData"), language)) installAppMenu()
     })
     this.analysisInteractive.installProtocolHandler()
+    installNotebookFrameHeaders((port) => this.notebookServers.servesPort(port))
     console.log(
       `[pi-lab] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
     )
@@ -523,6 +532,7 @@ export class FullRuntime {
     this.managedProcesses.dispose()
     this.terminalSupervisor.dispose()
     this.analysisInteractive.dispose()
+    this.notebookServers.dispose()
   }
 
   private startAutomationScheduler(): void {
@@ -589,6 +599,7 @@ export class FullRuntime {
       discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
       resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
       analysisInteractive: this.analysisInteractive,
+      notebookServers: this.notebookServers,
       notifications: this.notificationBrokers,
       activityStatus: this.activityStatus,
       activityMonitor: this.activityMonitor,

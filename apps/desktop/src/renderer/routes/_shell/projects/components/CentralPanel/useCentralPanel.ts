@@ -15,9 +15,13 @@ import { resolveLaunchAgentId, useDefaultAgentId } from "../../../../../preferen
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { useTRPC } from "../../../../../trpc/react"
 import { useLatexBuild } from "./useLatexBuild"
+import { type NotebookPane, useNotebookTabs } from "./useNotebookTabs"
 
 /** Which kind of pane the central panel is currently showing. */
-export type ActiveRef = { type: "file"; relPath: string } | { type: "session"; id: string }
+export type ActiveRef =
+  | { type: "file"; relPath: string }
+  | { type: "session"; id: string }
+  | { type: "notebook"; id: string }
 
 /** Enough information to recreate a tab after the PTY daemon was lost on restart. */
 export type SessionLaunchConfig =
@@ -78,6 +82,13 @@ export interface CentralPanelController {
   selectFile: (relPath: string) => void
   /** Focus a session tab. */
   selectSession: (id: string) => void
+  /** Open marimo and Jupyter notebooks, each on its own server. */
+  notebooks: NotebookPane[]
+  /** Open a notebook file in a notebook tab (starting its server) and focus it. */
+  openNotebook: (relPath: string) => void
+  selectNotebook: (id: string) => void
+  /** Close a notebook tab and stop its server. */
+  closeNotebook: (id: string) => void
   /** Attach or select an existing live session targeted outside this view. */
   attachSession: (session: Omit<SessionPane, "id">) => void
   /** Open a file (from the Files panel / quick-open) and make it active. */
@@ -213,7 +224,8 @@ export function useCentralPanel({
       buffers: editor.bufferAccess.read(),
       activeRelPath: editor.activeRelPath,
       sessions,
-      active,
+      // Notebook tabs are not restored, so a focused one is not saved.
+      active: active?.type === "notebook" ? null : active,
       belowEditorRun,
       layout,
     })
@@ -457,13 +469,30 @@ export function useCentralPanel({
     [killTerminal],
   )
 
+  const notebookTabs = useNotebookTabs(client, workspaceId)
+  const openNotebookTab = notebookTabs.open
+  const closeNotebookTab = notebookTabs.close
+  const openNotebook = useCallback(
+    (relPath: string) => setActive({ type: "notebook", id: openNotebookTab(relPath) }),
+    [openNotebookTab],
+  )
+  const selectNotebook = useCallback((id: string) => setActive({ type: "notebook", id }), [])
+  const closeNotebook = useCallback(
+    (id: string) => {
+      closeNotebookTab(id)
+      setActive((cur) => (cur?.type === "notebook" && cur.id === id ? null : cur))
+    },
+    [closeNotebookTab],
+  )
+
   // Close the active tab (bound to Ctrl+W in the project view). Routes to the same
   // close path the tab's "x" button uses; no-op when nothing is active.
   const closeActiveTab = useCallback(() => {
     if (!active) return
     if (active.type === "file") closeFile(active.relPath)
+    else if (active.type === "notebook") closeNotebook(active.id)
     else closeSession(active.id)
-  }, [active, closeFile, closeSession])
+  }, [active, closeFile, closeNotebook, closeSession])
 
   // Monotonic pane ids (no Math.random / Date.now needed for uniqueness).
   const nextPaneId = useCallback(() => {
@@ -640,6 +669,10 @@ export function useCentralPanel({
     setLayout,
     selectFile,
     selectSession,
+    notebooks: notebookTabs.notebooks,
+    openNotebook,
+    selectNotebook,
+    closeNotebook,
     attachSession,
     openFile,
     closeFile,

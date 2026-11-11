@@ -1,4 +1,5 @@
 import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
+import { isMarimoNotebookSource } from "@pi-lab/shared/analysis/file-kind"
 import { cn } from "@pi-lab/ui"
 import type { AddPanelPositionOptions } from "dockview-react"
 import {
@@ -7,6 +8,7 @@ import {
   CircleHelp,
   FileText,
   MessageSquare,
+  NotebookPen,
   PanelLeft,
   PanelLeftOpen,
   PanelRight,
@@ -46,6 +48,7 @@ import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../S
 import { CloseFilePrompt, useCloseFilePrompt } from "./CloseFilePrompt"
 import { CloseSessionPrompt, useCloseSessionPrompt } from "./CloseSessionPrompt"
 import { CollapsibleSection } from "./CollapsibleSection"
+import { NotebookSurface } from "./NotebookSurface"
 import { useNewSessionShortcut, useOpenNewSession } from "./newSessionShortcut"
 import { pdfBesideSource } from "./pdfBesideSource"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
@@ -189,6 +192,10 @@ export function CentralPanel({
     }
     if (active?.type === "file") {
       closeFilePrompt.requestClose(active.relPath)
+      return true
+    }
+    if (active?.type === "notebook") {
+      controller.closeNotebook(active.id)
       return true
     }
     const session =
@@ -335,6 +342,21 @@ export function CentralPanel({
         ),
       }),
     ),
+    ...controller.notebooks.map(
+      (notebook): DockItem => ({
+        id: `notebook:${notebook.id}`,
+        tab: ({ visible, activate }) => (
+          <CentralTab
+            kind="notebook"
+            label={basename(notebook.relPath)}
+            active={visible}
+            onSelect={activate}
+            onClose={() => controller.closeNotebook(notebook.id)}
+          />
+        ),
+        content: () => <NotebookSurface pane={notebook} workspaceId={workspaceId} />,
+      }),
+    ),
     ...editor.tabs.map(
       (tab): DockItem => ({
         id: fileItemId(tab.relPath),
@@ -379,6 +401,7 @@ export function CentralPanel({
               editor={editor}
               settings={settings}
               onRunPython={() => controller.runPython(runDestination)}
+              onOpenNotebook={() => controller.openNotebook(tab.relPath)}
               client={client}
               workspaceId={workspaceId}
               onSaveUntitled={onSaveUntitled}
@@ -483,11 +506,14 @@ export function CentralPanel({
         ? fileItemId(active.relPath)
         : active?.type === "session"
           ? `session:${active.id}`
-          : null
+          : active?.type === "notebook"
+            ? `notebook:${active.id}`
+            : null
   const activateDockItem = (id: string): void => {
     setRunFocused(id.startsWith("run:"))
     if (id.startsWith("file:")) controller.selectFile(id.slice("file:".length))
     else if (id.startsWith("session:")) controller.selectSession(id.slice("session:".length))
+    else if (id.startsWith("notebook:")) controller.selectNotebook(id.slice("notebook:".length))
   }
   // Run output opens below the split showing the file that ran.
   const dockPlacement = (id: string): AddPanelPositionOptions | undefined => {
@@ -1107,6 +1133,7 @@ function FileSurface({
   editor,
   settings,
   onRunPython,
+  onOpenNotebook,
   client,
   workspaceId,
   onSaveUntitled,
@@ -1126,6 +1153,8 @@ function FileSurface({
   editor: EditorBuffersApi
   settings: EditorSettings
   onRunPython: () => void
+  /** Open this file in a notebook tab (shown for Jupyter and marimo notebooks). */
+  onOpenNotebook: () => void
   client: PiLabTrpcClient
   workspaceId: string
   onSaveUntitled?: (relPath: string) => void
@@ -1169,6 +1198,25 @@ function FileSurface({
             }}
           >
             {t("Reload from disk")}
+          </button>
+        </div>
+      ) : null}
+
+      {active && isNotebookSource(active.relPath, active.content) ? (
+        <div
+          data-testid="editor-notebook-bar"
+          className="flex shrink-0 items-center gap-2 border-border border-b px-4 py-1.5 text-muted-foreground text-xs"
+        >
+          <span className="min-w-0 flex-1 truncate">
+            {/\.ipynb$/i.test(active.relPath) ? t("Jupyter notebook") : t("marimo notebook")}
+          </span>
+          <button
+            type="button"
+            data-testid="editor-open-notebook"
+            onClick={onOpenNotebook}
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-foreground"
+          >
+            {t("Open notebook")}
           </button>
         </div>
       ) : null}
@@ -1221,6 +1269,12 @@ function FileSurface({
   )
 }
 
+/** A Jupyter notebook, or a Python file that is a marimo notebook. */
+function isNotebookSource(relPath: string, content: string): boolean {
+  if (/\.ipynb$/i.test(relPath)) return true
+  return isPythonPath(relPath) && isMarimoNotebookSource(content)
+}
+
 function isTexPath(relPath: string): boolean {
   return /\.tex$/i.test(relPath)
 }
@@ -1230,7 +1284,7 @@ function isMarkdownPath(relPath: string): boolean {
 }
 
 interface CentralTabProps {
-  kind: SessionPane["kind"] | "file"
+  kind: SessionPane["kind"] | "file" | "notebook"
   label: string
   active: boolean
   dirty?: boolean
@@ -1243,13 +1297,22 @@ interface CentralTabProps {
 /** One central-panel tab: kind icon, label, a dirty dot for files, close button. */
 function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: CentralTabProps) {
   const t = useTranslate()
-  const Icon = kind === "agent" ? Bot : kind === "terminal" ? TerminalSquare : FileText
+  const Icon =
+    kind === "agent"
+      ? Bot
+      : kind === "terminal"
+        ? TerminalSquare
+        : kind === "notebook"
+          ? NotebookPen
+          : FileText
   const description =
     kind === "agent"
       ? t("Switch to this coding agent session.")
       : kind === "terminal"
         ? t("Switch to this interactive shell terminal.")
-        : t("Switch to this open file in the built-in editor.")
+        : kind === "notebook"
+          ? t("Switch to this live notebook.")
+          : t("Switch to this open file in the built-in editor.")
   return (
     <div
       data-testid="central-tab"
@@ -1290,7 +1353,9 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
             ? "Close this editor file tab"
             : kind === "agent"
               ? "Close this agent session tab"
-              : "Close this terminal session tab",
+              : kind === "notebook"
+                ? "Close this notebook tab and stop its server"
+                : "Close this terminal session tab",
         )}
         onClick={onClose}
         className="flex size-4 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent hover:text-foreground"

@@ -16,6 +16,7 @@ import type {
   NonInteractiveProcessRunner,
 } from "../../automations/nonInteractiveRunner"
 import { AutomationScheduler } from "../../automations/scheduler"
+import { NotebookServers } from "../../notebooks/notebookServers"
 import { createNotificationBrokers } from "../../notifications"
 import type { AppContext } from "../context"
 import { createHarness, FAKE_AGENT, type Harness } from "../testHarness"
@@ -110,6 +111,7 @@ function harnessContext(): AppContext {
       runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
     }),
     analysisInteractive: h.analysisInteractive,
+    notebookServers: new NotebookServers({ start: 42_800, end: 42_899 }, 10_000, async () => {}),
     notifications: createNotificationBrokers(),
     activityStatus: { subscribe: () => () => {}, projectsChanged: () => {} },
     activityMonitor: h.activityMonitor,

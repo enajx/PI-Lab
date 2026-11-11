@@ -17,6 +17,7 @@ import type { CaffeineControllerPort } from "../caffeine"
 import { livePyToolsExec, type PyToolsExec } from "../diagnostics"
 import type { PiLabChannel } from "../identity/channel"
 import { liveSshExec, type SshExec } from "../lib/ssh-config"
+import type { NotebookServerPort } from "../notebooks/notebookServers"
 import type { NotificationBrokers, NotificationService } from "../notifications"
 import {
   livePythonEnvironmentDiscoverer,
@@ -69,6 +70,8 @@ export interface AppContext {
   discoverPythonEnvironments: PythonEnvironmentDiscoverer
   resolvePythonRuntime: PythonRuntimeResolver
   analysisInteractive: AnalysisInteractivePort
+  /** marimo and Jupyter servers shown in notebook tabs, stopped on tab close and app quit. */
+  notebookServers: NotebookServerPort
   notifications: NotificationBrokers
   activityStatus: Pick<ActivityStatusFeed, "subscribe" | "projectsChanged">
   activityMonitor: ActivityMonitorPort
