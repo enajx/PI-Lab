@@ -197,7 +197,7 @@ export function ScienceLatex({
 const NEW_PAPER = "__new-paper__"
 
 /**
- * Link to project, for a paper-only project: a menu of the projects with no
+ * Add to project, for a paper-only project: a menu of the projects with no
  * paper folder; choosing one moves the paper there (`paper.moveToProject`,
  * which removes the paper-only project) and opens that project.
  */
@@ -230,8 +230,8 @@ function LinkToProject({
       <button
         type="button"
         data-testid="latex-link-to-project"
-        aria-label={t("Link to project")}
-        title={t("Link to project")}
+        aria-label={t("Add to project")}
+        title={t("Add to project")}
         data-feature-help={t(
           "Move this paper to a project. The paper's own card is removed; its files stay where they are.",
         )}
@@ -240,7 +240,7 @@ function LinkToProject({
         className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
       >
         <Link2 className="size-3.5" aria-hidden />
-        {t("Link to project")}
+        {t("Add to project")}
       </button>
       {open ? (
         <div
