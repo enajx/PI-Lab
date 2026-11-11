@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, realpath, rm, writeFile } from "node:fs/promises"
-import { basename, delimiter, dirname, join, relative, sep } from "node:path"
+import { basename, dirname, join, relative, sep } from "node:path"
 import { isGitRepo, repoRoot } from "../git"
 import { addLocalExclude } from "../git/remote"
 import type { DocumentTool } from "./tools"
@@ -10,7 +10,8 @@ import type { DocumentTool } from "./tools"
  * Render a Quarto (.qmd) or MyST (.md) file to HTML with the real CLI. The
  * output goes to `_render/<file name>/` next to the file; that `_render` folder
  * is added to the repo's local `.git/info/exclude`. Code blocks run during
- * render (`quarto render` runs them by default; MyST gets `--execute`).
+ * render (`quarto render` runs them by default; MyST gets `--execute`); the
+ * Python for them is chosen in `documentPython.ts`.
  */
 
 /** The build folder made next to a rendered file. */
@@ -64,24 +65,6 @@ export function renderPlan(tool: DocumentTool, toolPath: string, absFile: string
     cwd: outputDir,
     setupFiles: [{ path: join(outputDir, "myst.yml"), content: config }],
     outputPath: join(outputDir, "_build", "html", "index.html"),
-  }
-}
-
-/**
- * Python for code blocks: the project's `.venv/bin/python` when it exists
- * (set as QUARTO_PYTHON, with `.venv/bin` first on PATH so MyST finds its
- * Jupyter too); otherwise `env` is returned unchanged and the tool picks Python.
- */
-export function withProjectPython(
-  projectDir: string,
-  env: Record<string, string>,
-): Record<string, string> {
-  const venvBin = join(projectDir, ".venv", "bin")
-  if (!existsSync(join(venvBin, "python"))) return env
-  return {
-    ...env,
-    QUARTO_PYTHON: join(venvBin, "python"),
-    PATH: `${venvBin}${delimiter}${env.PATH ?? ""}`,
   }
 }
 

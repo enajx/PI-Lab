@@ -75,16 +75,19 @@ describe("documents.render", () => {
     expect(exclude.split("\n")).toContain("/results/_render/")
   })
 
-  test("sets QUARTO_PYTHON to the project's .venv Python when it exists", async () => {
+  test("runs python blocks with the project's .venv when it has Jupyter (stand-in python)", async () => {
     await standInQuarto()
     const project = await h.caller.projects.open({ path: h.repoDir })
-    await script(join(h.repoDir, ".venv", "bin", "python"), "exit 0")
-    await writeProjectFile("a.qmd", "# A\n")
+    const python = join(h.repoDir, ".venv", "bin", "python")
+    const modules = ["jupyterlab", "notebook", "jupyter_core", "ipykernel", "jupyter_server"]
+    await script(python, `echo '${JSON.stringify(modules)}'`)
+    await writeProjectFile("a.qmd", "# A\n\n```{python}\nprint(1)\n```\n")
 
     const result = await h.caller.documents.render({ projectId: project.id, relPath: "a.qmd" })
 
     const html = await readFile(join(h.repoDir, String(result.outputRelPath)), "utf8")
-    expect(html).toContain(`python=${join(h.repoDir, ".venv", "bin", "python")}`)
+    expect(html).toContain(`python=${python}`)
+    expect(result.log).toContain(`Python for code blocks: Project environment (.venv), ${python}`)
   })
 
   test("renders a MyST file with myst build --html from a generated myst.yml", async () => {

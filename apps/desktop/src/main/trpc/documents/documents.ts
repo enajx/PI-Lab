@@ -1,8 +1,15 @@
+import { readFile } from "node:fs/promises"
 import { join, relative, sep } from "node:path"
 import { type PiLabDatabase, projects, resolveDataDir } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import {
+  documentPython,
+  hasPythonCode,
+  PI_LAB_JUPYTER_VENV,
+  withDocumentPython,
+} from "../../documents/documentPython"
 import {
   type DocumentToolInstallStage,
   downloadArtifact,
@@ -10,12 +17,7 @@ import {
   installQuarto,
   QUARTO_MACOS_ARTIFACT,
 } from "../../documents/install"
-import {
-  excludeRenderFolder,
-  renderPlan,
-  runRender,
-  withProjectPython,
-} from "../../documents/render"
+import { excludeRenderFolder, renderPlan, runRender } from "../../documents/render"
 import {
   type DocumentTool,
   type FoundDocumentTool,
@@ -192,12 +194,22 @@ export const documentsRouter = router({
         message: `${TOOL_NAMES[tool]} was not found. Install it from the Render button or Settings > Document tools.`,
       })
     await excludeRenderFolder(absFile)
-    const env = withProjectPython(folder, await ctx.getAgentLaunchEnvironment())
+    const launchEnv = await ctx.getAgentLaunchEnvironment()
+    const python = hasPythonCode(tool, await readFile(absFile, "utf8"))
+      ? await documentPython({
+          projectDir: folder,
+          venvDir: join(toolsDir(), PI_LAB_JUPYTER_VENV),
+          searchPath: launchEnv.PATH ?? "",
+          platform: process.platform,
+          env: launchEnv,
+        })
+      : { python: null, log: "" }
+    const env = withDocumentPython(launchEnv, python.python)
     const outcome = await runRender(renderPlan(tool, found.path, absFile), env, RENDER_TIMEOUT_MS)
     return {
       tool,
       ok: outcome.ok,
-      log: outcome.log,
+      log: python.log ? `${python.log}\n\n${outcome.log}` : outcome.log,
       outputRelPath: outcome.outputPath
         ? relative(folder, outcome.outputPath).split(sep).join("/")
         : null,

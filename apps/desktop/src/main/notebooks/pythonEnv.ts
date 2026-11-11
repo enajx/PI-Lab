@@ -160,7 +160,12 @@ function relativeName(projectDir: string, path: string): string {
   return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path
 }
 
-function importableModules(python: string, modules: string[], cwd: string): Promise<string[]> {
+/** The modules of `modules` that `python` can import (empty when `python` fails to run). */
+export function importableModules(
+  python: string,
+  modules: string[],
+  cwd: string,
+): Promise<string[]> {
   return new Promise((resolveModules) => {
     execFile(
       python,
