@@ -5,6 +5,7 @@ import { EditorView, keymap } from "@codemirror/view"
 import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { vim } from "@replit/codemirror-vim"
 import { type CSSProperties, useEffect, useRef, useState } from "react"
+import { registerDictationTarget } from "../../../dictation/targets"
 import { useTranslate } from "../../../i18n/language"
 import {
   editorFontFamilyCss,
@@ -496,6 +497,18 @@ export function CodeMirrorBuffer({
 
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
+    // Dictated text replaces the selection as one undoable change.
+    const unregisterDictation = registerDictationTarget({
+      kind: "editor",
+      element: host,
+      insert: (text) => {
+        view.dispatch(view.state.replaceSelection(text), {
+          userEvent: "input.dictation",
+          scrollIntoView: true,
+        })
+      },
+      focus: () => view.focus(),
+    })
     // A file opened from the file tree leaves focus on the tree row that opened it.
     focusPending.current = autoFocus && !focusHeldOnOpen()
     reportCursor(view)
@@ -503,6 +516,7 @@ export function CodeMirrorBuffer({
     if (markdown) updateMarkdownOverlay(view)
 
     return () => {
+      unregisterDictation()
       view.destroy()
       viewRef.current = null
     }

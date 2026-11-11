@@ -15,6 +15,7 @@ import {
 } from "../automations/nonInteractiveRunner"
 import type { CaffeineControllerPort } from "../caffeine"
 import { livePyToolsExec, type PyToolsExec } from "../diagnostics"
+import type { DictationService } from "../dictation/service"
 import type { PiLabChannel } from "../identity/channel"
 import { liveSshExec, type SshExec } from "../lib/ssh-config"
 import type { NotificationBrokers, NotificationService } from "../notifications"
@@ -48,6 +49,8 @@ export interface AppContext {
   latexDataDir?: string
   /** User home for discovering a shared TinyTeX installation. */
   latexUserHome?: string
+  /** Local dictation (models, whisper.cpp engine, history); absent in isolated callers. */
+  dictation?: DictationService
   getDaemonClient: () => Promise<DaemonClient>
   agentCatalog: readonly TerminalAgent[]
   resolveAgentExecutable: AgentExecutableResolver

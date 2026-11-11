@@ -2,6 +2,7 @@ import { FitAddon } from "@xterm/addon-fit"
 import { type ITheme, Terminal as XTerm } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { type CSSProperties, useEffect, useRef } from "react"
+import { registerDictationTarget } from "../dictation/targets"
 import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
 
@@ -112,6 +113,7 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     let unsubscribe: (() => void) | null = null
     let inputDisposable: { dispose: () => void } | null = null
     let resizeObserver: ResizeObserver | null = null
+    let unregisterDictation: (() => void) | null = null
     const failedTransports = new Set<"write" | "resize">()
     const reportTransportFailure = (operation: "write" | "resize", error: unknown): void => {
       if (cancelled || failedTransports.has(operation)) return
@@ -216,6 +218,14 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       // Forward keystrokes (and pasted text) to the PTY's stdin.
       inputDisposable = xterm.onData(forwardInput)
 
+      // Dictated text is typed like a dropped path: no Enter, so line breaks become spaces.
+      unregisterDictation = registerDictationTarget({
+        kind: "terminal",
+        element: container,
+        insert: (text) => forwardInput(text.replace(/\s*[\r\n]+\s*/gu, " ")),
+        focus: () => xterm.focus(),
+      })
+
       // Keep the PTY grid matched to the viewport.
       resizeObserver = new ResizeObserver(() => syncSize())
       resizeObserver.observe(container)
@@ -265,6 +275,7 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       container.removeEventListener("drop", onDrop)
       resizeObserver?.disconnect()
       inputDisposable?.dispose()
+      unregisterDictation?.()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
       // session (it is NOT killed), so the PTY persists across reload.
       unsubscribe?.()

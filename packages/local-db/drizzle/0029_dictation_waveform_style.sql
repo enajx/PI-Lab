@@ -1,0 +1,1 @@
+ALTER TABLE `dictation_settings` ADD `waveform_style` text DEFAULT 'dots' NOT NULL;

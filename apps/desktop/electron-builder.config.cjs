@@ -153,6 +153,7 @@ const config = {
     { from: "resources", to: ".", filter: ["skills/**/*"] },
     { from: "resources/Credits.html", to: "Credits.html" },
     { from: "resources/latex", to: "latex", filter: ["manifest.json", "LICENSE", "NOTICE"] },
+    { from: "resources/whisper", to: "whisper", filter: ["manifest.json", "LICENSE"] },
     { from: "resources/bin/pilab", to: "bin/pilab" },
     // Runtime window/Dock/notification identity. `build:icons` stages the
     // selected channel icon here before every package command.
@@ -191,6 +192,7 @@ const config = {
   beforePack: async (context) => {
     await require("./scripts/electron-builder-before-pack.cjs").default(context)
     await require("./scripts/prepare-latex-runtime.cjs").prepareForPack(context)
+    await require("./scripts/prepare-whisper-runtime.cjs").prepareForPack(context)
   },
   afterPack: "./scripts/electron-builder-after-pack.cjs",
   mac: {
@@ -198,9 +200,16 @@ const config = {
     extraResources: [
       { from: "build/Assets.car", to: "Assets.car" },
       { from: "resources/latex/darwin-${arch}", to: "latex/darwin-${arch}" },
+      {
+        from: "resources/whisper/darwin-${arch}",
+        to: "whisper/darwin-${arch}",
+        filter: ["whisper-server"],
+      },
     ],
     extendInfo: {
       CFBundleIconName: "AppIcon",
+      NSMicrophoneUsageDescription:
+        "PI Lab uses the microphone for dictation. Audio stays on this Mac and is transcribed by a local model.",
       ...(channel === "stable"
         ? {
             CFBundleDocumentTypes: [

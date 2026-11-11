@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest"
-import { findShortcutConflict, formatBinding, SHORTCUTS } from "./shortcuts"
+import {
+  bindingFromEvent,
+  findShortcutConflict,
+  formatBinding,
+  matchesBinding,
+  SHORTCUTS,
+} from "./shortcuts"
 
 const defaults = (id: string): string =>
   SHORTCUTS.find((shortcut) => shortcut.id === id)?.defaultBinding ?? ""
@@ -25,5 +31,36 @@ describe("formatBinding", () => {
     expect(formatBinding("Mod+Shift+p")).toBe("⇧⌘P")
     expect(formatBinding("Mod+Alt+Shift+k")).toBe("⌥⇧⌘K")
     expect(formatBinding("Mod+,")).toBe("⌘,")
+  })
+})
+
+describe("dictation shortcut", () => {
+  test("registers a rebindable Alt+d that conflicts with no other default", () => {
+    expect(SHORTCUTS.find((shortcut) => shortcut.id === "dictation-toggle")).toMatchObject({
+      defaultBinding: "Alt+d",
+      editable: true,
+    })
+    expect(findShortcutConflict("dictation-toggle", "Alt+d", defaults)).toBeNull()
+    expect(defaults("split-right")).toBe("Mod+d")
+  })
+
+  test("matches macOS Option+D by physical key, although the key event reports ∂", () => {
+    const optionD = new KeyboardEvent("keydown", { key: "∂", code: "KeyD", altKey: true })
+    expect(matchesBinding(optionD, "Alt+d")).toBe(true)
+    expect(matchesBinding(optionD, "Mod+d")).toBe(false)
+    const plainD = new KeyboardEvent("keydown", { key: "d", code: "KeyD" })
+    expect(matchesBinding(plainD, "Alt+d")).toBe(false)
+  })
+
+  test("records Option+letter as the letter, not the macOS dead-key character", () => {
+    const optionD = new KeyboardEvent("keydown", { key: "∂", code: "KeyD", altKey: true })
+    expect(bindingFromEvent(optionD)).toBe("Alt+d")
+    const optionShift7 = new KeyboardEvent("keydown", {
+      key: "‡",
+      code: "Digit7",
+      altKey: true,
+      shiftKey: true,
+    })
+    expect(bindingFromEvent(optionShift7)).toBe("Shift+Alt+7")
   })
 })

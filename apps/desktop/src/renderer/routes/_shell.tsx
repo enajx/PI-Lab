@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderGit2 } from "lucide-react"
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { DictationController } from "../dictation/DictationController"
 import { useTranslate } from "../i18n/language"
 import { NotificationBridge } from "../notifications/NotificationBridge"
 import {
@@ -164,6 +165,7 @@ function ShellLayout() {
         <NewFileControllerProvider>
           <WorkspaceRecoveryController />
           <NotificationBridge />
+          <DictationController />
           {redirectToSetup || awaitingSetupDecision ? (
             <div
               data-testid="setup-gate-loading"

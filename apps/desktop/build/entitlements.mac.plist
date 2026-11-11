@@ -7,6 +7,7 @@
   pty-daemon, CLI agents, git), so `allow-dyld-environment-variables` +
   `disable-library-validation` let it launch helpers (e.g. the unpacked
   node-pty spawn-helper) that aren't signed by the same team.
+  `device.audio-input` lets the hardened runtime use the microphone for dictation.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -20,6 +21,8 @@
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
     <key>com.apple.security.inherit</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
     <true/>
   </dict>
 </plist>

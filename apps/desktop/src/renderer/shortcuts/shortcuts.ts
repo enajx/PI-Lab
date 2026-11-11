@@ -66,6 +66,13 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     editable: true,
   },
   {
+    id: "dictation-toggle",
+    label: "Dictation",
+    description: "Start dictation in the focused terminal or editor; press again to stop",
+    defaultBinding: "Alt+d",
+    editable: true,
+  },
+  {
     id: "save-file",
     label: "Save file",
     description: "Save the active editor buffer (CodeMirror)",
@@ -121,7 +128,17 @@ export function matchesBinding(event: KeyboardEvent, binding: string): boolean {
   if (parts.includes("Mod") !== hasMod) return false
   if (parts.includes("Shift") !== event.shiftKey) return false
   if (parts.includes("Alt") !== event.altKey) return false
-  return event.key.toLowerCase() === key
+  if (event.key.toLowerCase() === key) return true
+  // macOS Option turns letters and digits into other characters (Option+D is "∂"), so an
+  // Alt binding also matches the physical key.
+  return event.altKey && physicalKey(event.code) === key
+}
+
+/** The letter or digit of a physical key code (`"KeyD"` → `"d"`), or null for other keys. */
+function physicalKey(code: string): string | null {
+  const match = /^(?:Key([A-Z])|Digit([0-9]))$/u.exec(code)
+  if (!match) return null
+  return (match[1] ?? match[2] ?? "").toLowerCase()
 }
 
 /** Whether a keydown matches a registered shortcut's current binding. */
@@ -220,6 +237,7 @@ export function bindingFromEvent(event: KeyboardEvent): string | null {
   if (event.metaKey || event.ctrlKey) parts.push("Mod")
   if (event.shiftKey) parts.push("Shift")
   if (event.altKey) parts.push("Alt")
-  parts.push(key.length === 1 ? key.toLowerCase() : key)
+  const physical = event.altKey ? physicalKey(event.code) : null
+  parts.push(physical ?? (key.length === 1 ? key.toLowerCase() : key))
   return parts.join("+")
 }

@@ -95,6 +95,14 @@ test("builder metadata and direct output stay channel-specific", () => {
       assert.equal(config.fileAssociations.length > 0, channel === "stable")
       assert.equal(Boolean(config.mac.extendInfo.CFBundleDocumentTypes), channel === "stable")
       assert.equal(config.mac.extendInfo.CFBundleIconName, "AppIcon")
+      assert.match(config.mac.extendInfo.NSMicrophoneUsageDescription, /stays on this Mac/)
+      assert.ok(
+        config.mac.extraResources.some(
+          (entry) =>
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: electron-builder expands ${arch}.
+            entry.to === "whisper/darwin-${arch}" && entry.filter[0] === "whisper-server",
+        ),
+      )
       assert.ok(
         config.mac.extraResources.some(
           (entry) => entry.from === "build/Assets.car" && entry.to === "Assets.car",
