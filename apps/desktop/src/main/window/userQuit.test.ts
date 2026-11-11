@@ -8,7 +8,7 @@ import {
 
 const idle: QuitWork = { agents: 0, terminals: [] }
 const agents = (count: number): QuitWork => ({ agents: count, terminals: [] })
-/** A first-dialog answer without "Remember Move to background" ticked. */
+/** A first-dialog answer without "Remember option" ticked. */
 const pick = <C extends "quit" | "background" | "cancel">(choice: C) => ({
   choice,
   remember: false,
@@ -47,7 +47,7 @@ test("a remembered Move to background skips the dialog and moves to the backgrou
   expect(h.quit).not.toHaveBeenCalled()
 })
 
-test("ticking Remember Move to background with Move to background saves it", async () => {
+test("ticking Remember option with Move to background saves it", async () => {
   const h = rememberHarness("ask", { choice: "background", remember: true }, "cancel", agents(1))
   await h.request()
   expect(h.remember).toHaveBeenCalledExactlyOnceWith("background")
