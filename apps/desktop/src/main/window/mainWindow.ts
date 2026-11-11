@@ -96,6 +96,11 @@ export function createMainWindow(
     }
     return { action: "deny" }
   })
+  // A notebook page in a tab (JupyterLab, marimo) asks before it is unloaded. PI Lab
+  // asks itself instead: closing a notebook tab asks first, and the quit dialog names
+  // open notebooks. So the window always closes or reloads instead of silently
+  // staying open.
+  window.webContents.on("will-prevent-unload", (event) => event.preventDefault())
   const trustedEntries = rendererDevServerUrl
     ? [rendererDevServerUrl]
     : ["index", "quick"].map(

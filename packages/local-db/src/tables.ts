@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
-import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "./editorSettings"
+import { type AnalysisFormat, DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "./editorSettings"
 
 export { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "./editorSettings"
 
@@ -280,6 +280,8 @@ export interface ProjectDetails {
   agentId: string | null
   emojiTags?: string[]
   textTags?: ProjectTextTag[]
+  /** The project's own analysis format; null clears it (Settings default applies), absent keeps it. */
+  analysisFormat?: AnalysisFormat | null
 }
 
 /** The LaTeX paper folder linked to a project (LaTeX Editor page). */
@@ -336,6 +338,11 @@ export interface ProjectMetadata {
    * separators). Absent: the default folder from Settings is used.
    */
   resultsFolder?: string
+  /**
+   * The format agents write this project's analysis in, set in Edit project.
+   * Absent: the `analysisFormat` editor setting is used.
+   */
+  analysisFormat?: AnalysisFormat
 }
 
 /** A locally-known v2 Team. */

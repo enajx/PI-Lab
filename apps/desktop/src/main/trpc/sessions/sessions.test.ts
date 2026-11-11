@@ -8,6 +8,7 @@ import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { agentSessions, settings, worktrees } from "@pi-lab/local-db"
+import { ANALYSIS_FORMATS } from "@pi-lab/local-db/editor-settings"
 import { DaemonClient } from "@pi-lab/pty-daemon"
 import type { TerminalAgent } from "@pi-lab/shared"
 import { eq } from "drizzle-orm"
@@ -609,11 +610,23 @@ describe("sessions.startSkill — header skill shortcut", () => {
   })
 })
 
+/** PI Lab's bundled skills folder (apps/desktop/resources/skills). */
+const bundledSkills = join(__dirname, "..", "..", "..", "..", "resources", "skills")
+
+/** Put a stand-in `<name>` skill in the user's skills folder; returns its SKILL.md path. */
+async function writeUserSkill(name: string): Promise<string> {
+  const dir = join(h.skillsHomeDir, ".agents", "skills", name)
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, "SKILL.md"), `# ${name}\n`)
+  return join(dir, "SKILL.md")
+}
+
 describe("sessions.startAnalyzeExperiments — Analysis button", () => {
   test("starts the project's agent as an Analysis agent with the analyze-experiments skill", async () => {
     const skillDir = join(h.skillsHomeDir, ".agents", "skills", "analyze-experiments")
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), "# Analyze experiments\nUSER SKILL TEXT\n")
+    await writeUserSkill("analysis-format")
     await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
 
     const result = await h.caller.sessions.startAnalyzeExperiments({ projectId })
@@ -637,8 +650,75 @@ describe("sessions.startAnalyzeExperiments — Analysis button", () => {
     expect(chunks.join("").replace(/\r?\n/g, "")).toContain(join(skillDir, "SKILL.md"))
   })
 
+  /** Start Analyze experiments and return the agent's output (the prompt), line breaks removed. */
+  async function analyzePrompt(): Promise<string> {
+    const skillDir = join(h.skillsHomeDir, ".agents", "skills", "analyze-experiments")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Analyze experiments\n")
+    await writeUserSkill("analysis-format")
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
+    const result = await h.caller.sessions.startAnalyzeExperiments({ projectId })
+    const chunks: string[] = []
+    const stream = await h.caller.terminal.onData({ sessionId: result.sessionId })
+    const sub = stream.subscribe({
+      next: (event) => {
+        if (event.type === "data") chunks.push(event.chunk)
+      },
+    })
+    await waitFor(() =>
+      chunks.join("").replace(/\r?\n/g, "").includes("Follow their instructions."),
+    )
+    sub.unsubscribe()
+    return chunks.join("").replace(/\r?\n/g, "")
+  }
+
+  test("tells the agent the analysis format from Settings when the project has no override", async () => {
+    await h.caller.settings.updateEditor({ analysisFormat: "qmd" })
+
+    const prompt = await analyzePrompt()
+
+    expect(prompt).toContain("The analysis format is qmd.")
+    expect(prompt).toContain(
+      join(h.skillsHomeDir, ".agents", "skills", "analysis-format", "SKILL.md"),
+    )
+    expect(prompt).not.toContain("ipynb")
+  })
+
+  test("tells the agent the project's own analysis format over the Settings default", async () => {
+    await h.caller.settings.updateEditor({ analysisFormat: "qmd" })
+    const project = await h.caller.projects.get({ id: projectId })
+    await h.caller.projects.updateDetails({
+      id: projectId,
+      details: {
+        name: project.name,
+        typeId: "general",
+        deadline: null,
+        agentId: null,
+        analysisFormat: "ipynb",
+      },
+    })
+
+    const prompt = await analyzePrompt()
+
+    expect(prompt).toContain("The analysis format is ipynb.")
+    expect(prompt).not.toContain("qmd")
+  })
+
+  test("PI Lab ships the analysis-format placeholder skill, with a section for each analysis format", async () => {
+    const skill = await findSkill(
+      "analysis-format",
+      "Analysis format",
+      "/missing",
+      "/missing",
+      bundledSkills,
+    )
+    expect(skill.path).toBe(join(bundledSkills, "analysis-format", "SKILL.md"))
+    expect(skill.content).toContain("placeholder")
+    for (const format of ANALYSIS_FORMATS) expect(skill.content).toContain(`## ${format}`)
+  })
+
   test("PI Lab ships the analyze-experiments placeholder skill", async () => {
-    const bundled = join(__dirname, "..", "..", "..", "..", "resources", "skills")
+    const bundled = bundledSkills
     const skill = await findSkill(
       "analyze-experiments",
       "Analyze experiments",

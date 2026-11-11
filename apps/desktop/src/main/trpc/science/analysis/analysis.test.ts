@@ -81,6 +81,24 @@ function makeRawNpy(shape: string, descr: string, fortran: boolean, data: Buffer
 }
 
 describe("science.analysis.listFiles", () => {
+  test("leaves out render output (_render) and Quarto's .quarto folder", async () => {
+    await writeRepoFile("results/report.qmd", "# R\n")
+    await writeRepoFile("results/_render/report.qmd/report.html", "<h1>R</h1>")
+    await writeRepoFile("results/_render/report.qmd/report_files/fig.png", TINY_PNG)
+    await writeRepoFile("results/.quarto/xref/a.json", "{}")
+    await writeRepoFile("results/metrics.csv", "a\n1\n")
+
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+
+    const paths = listing.groups.flatMap((group) => group.files.map((file) => file.relPath))
+    expect(paths).toContain("results/metrics.csv")
+    expect(paths.filter((path) => path.includes("_render") || path.includes(".quarto"))).toEqual([])
+  })
+
   test("discovers and classifies data files, grouped by kind", async () => {
     await writeRepoFile("results/data/metrics.csv", "a,b\n1,2\n")
     await writeRepoFile("results/data/series.tsv", "x\ty\n1\t2\n")
@@ -726,6 +744,62 @@ describe("science.analysis.preview", () => {
     if (preview.type !== "text") throw new Error("expected text")
     expect(preview.text).toBe("line1\nline2\n")
     expect(preview.truncated).toBe(false)
+  })
+
+  test(".ipynb → its cells with the stored outputs", async () => {
+    const notebook = {
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [
+        { cell_type: "markdown", metadata: {}, source: "# Loss" },
+        {
+          cell_type: "code",
+          metadata: {},
+          execution_count: 1,
+          source: "print(0.3)",
+          outputs: [{ output_type: "stream", name: "stdout", text: "0.3\n" }],
+        },
+      ],
+    }
+    await writeRepoFile("results/run/analysis.ipynb", JSON.stringify(notebook))
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "results/run/analysis.ipynb",
+    })
+    expect(preview).toEqual({
+      type: "notebook",
+      cells: [
+        { type: "markdown", source: "# Loss", outputs: [] },
+        { type: "code", source: "print(0.3)", outputs: [{ type: "text", text: "0.3\n" }] },
+      ],
+    })
+  })
+
+  test(".qmd → text, like Markdown", async () => {
+    await writeRepoFile("results/run/analysis.qmd", "---\ntitle: Run\n---\n\n# Result\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "results/run/analysis.qmd",
+    })
+    expect(preview).toEqual({
+      type: "text",
+      text: "---\ntitle: Run\n---\n\n# Result\n",
+      truncated: false,
+    })
+  })
+
+  test("a marimo notebook → its Python source as text", async () => {
+    const source = "import marimo\n\napp = marimo.App()\n"
+    await writeRepoFile("results/run/notebook.py", source)
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "results/run/notebook.py",
+    })
+    expect(preview).toEqual({ type: "text", text: source, truncated: false })
   })
 
   test("unpreviewable kind → metadata", async () => {

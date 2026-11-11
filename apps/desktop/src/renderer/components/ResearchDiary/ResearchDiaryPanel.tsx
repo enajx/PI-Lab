@@ -1,4 +1,5 @@
 import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
+import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
@@ -12,14 +13,23 @@ import {
   useResearchDiaryWidth,
 } from "../../preferences/preferences"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
+import { InteractivePreview } from "../../routes/_shell/science/components/ScienceAnalysis/components/AnalysisPreview/AnalysisPreview"
 import { useTRPC } from "../../trpc/react"
+import {
+  type DocumentRenderResult,
+  RenderControl,
+  RenderedDocument,
+} from "../DocumentRender/DocumentRender"
 import { EdgeResizeHandle } from "../EdgeResizeHandle"
 
 /**
  * Research diary panel, shown on the right of the project view and the Analysis
  * view. On mount (and on a project change) it calls `diary.open`, which creates
  * the diary file and today's `## YYYY-MM-DD` heading when needed, and shows the
- * diary rendered as Markdown. Edit switches to the Markdown source editor; Save
+ * diary rendered as Markdown (a leading YAML front matter is not shown). A
+ * Quarto diary (diary.qmd), or the diary in MyST mode, also gets a Render button
+ * that renders it with quarto or mystmd and shows the HTML page in the panel,
+ * until Show source. Edit switches to the Markdown source editor; Save
  * (or ⌘S) writes the file through `diary.save` and goes back to the rendered
  * view. A save refused because the file changed on disk shows the error and
  * keeps the edit open. The panel is resizable from its left edge; the width is
@@ -43,6 +53,17 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
   const [openError, setOpenError] = useState<string | null>(null)
   // The Markdown source being edited, or null while the rendered view is shown.
   const [draft, setDraft] = useState<string | null>(null)
+  // The last render of the diary, shown instead of the Markdown view until Show source.
+  const [rendered, setRendered] = useState<{ result: DocumentRenderResult; at: number } | null>(
+    null,
+  )
+  const renderTool = !loaded
+    ? null
+    : loaded.relPath.endsWith(".qmd")
+      ? "quarto"
+      : editorSettings.researchDiaryFormat === "myst"
+        ? "myst"
+        : null
 
   useEffect(() => {
     // Only the still-active run applies its result (StrictMode runs effects twice;
@@ -51,6 +72,7 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
     setLoaded(null)
     setOpenError(null)
     setDraft(null)
+    setRendered(null)
     openDiaryRef.current({ projectId }).then(
       (file) => {
         if (active) setLoaded(file)
@@ -67,6 +89,7 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
   const startEdit = () => {
     if (!loaded) return
     saveDiary.reset()
+    setRendered(null)
     setDraft(loaded.content)
   }
 
@@ -87,8 +110,8 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
   return (
     <aside
       data-testid="research-diary-panel"
-      className="relative flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
-      style={{ width }}
+      className="relative flex min-h-0 shrink flex-col overflow-hidden rounded-lg border border-border"
+      style={{ width, minWidth: RESEARCH_DIARY_MIN_WIDTH }}
     >
       <EdgeResizeHandle
         side="left"
@@ -106,33 +129,43 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
         >
           {t("Research diary")}
         </span>
-        {draft === null ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-testid="research-diary-edit"
-            className="h-6 px-2 text-xs"
-            disabled={!loaded}
-            data-feature-help={t("Edit the diary's Markdown source")}
-            onClick={startEdit}
-          >
-            {t("Edit")}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-testid="research-diary-save"
-            className="h-6 px-2 text-xs"
-            disabled={saveDiary.isPending}
-            data-feature-help={t("Save the diary and show it rendered")}
-            onClick={save}
-          >
-            {t("Save")}
-          </Button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {draft === null && loaded && renderTool ? (
+            <RenderControl
+              projectId={projectId}
+              relPath={loaded.relPath}
+              tool={renderTool}
+              onRendered={(result) => setRendered({ result, at: Date.now() })}
+            />
+          ) : null}
+          {draft === null ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="research-diary-edit"
+              className="h-6 px-2 text-xs"
+              disabled={!loaded}
+              data-feature-help={t("Edit the diary's Markdown source")}
+              onClick={startEdit}
+            >
+              {t("Edit")}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="research-diary-save"
+              className="h-6 px-2 text-xs"
+              disabled={saveDiary.isPending}
+              data-feature-help={t("Save the diary and show it rendered")}
+              onClick={save}
+            >
+              {t("Save")}
+            </Button>
+          )}
+        </div>
       </div>
       {saveDiary.error ? (
         <p
@@ -166,12 +199,29 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
             customThemes={editorSettings.customEditorThemes}
           />
         </div>
+      ) : rendered ? (
+        <div className="min-h-0 flex-1">
+          <RenderedDocument
+            projectId={projectId}
+            result={rendered.result}
+            onClose={() => setRendered(null)}
+          >
+            {rendered.result.outputRelPath ? (
+              <InteractivePreview
+                key={rendered.at}
+                projectId={projectId}
+                relPath={rendered.result.outputRelPath}
+                kind="report"
+              />
+            ) : null}
+          </RenderedDocument>
+        </div>
       ) : (
         <div
           data-testid="research-diary-rendered"
           className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
         >
-          <Markdown content={loaded.content} />
+          <Markdown content={splitFrontMatter(loaded.content).body} />
         </div>
       )}
     </aside>

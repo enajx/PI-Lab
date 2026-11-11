@@ -4,9 +4,11 @@ import { automationsRouter } from "./automations"
 import { caffeineRouter } from "./caffeine"
 import { diagnosticsRouter } from "./diagnostics"
 import { diaryRouter } from "./diary/diary"
+import { documentsRouter } from "./documents/documents"
 import { filesRouter } from "./files"
 import { healthRouter } from "./health/health"
 import { latexRouter } from "./latex/latex"
+import { notebooksRouter } from "./notebooks/notebooks"
 import { notificationsRouter } from "./notifications"
 import { paperRouter } from "./paper/paper"
 import { pdfRouter } from "./pdf/pdf"
@@ -48,6 +50,8 @@ export const appRouter = router({
   diagnostics: diagnosticsRouter,
   science: scienceRouter,
   diary: diaryRouter,
+  documents: documentsRouter,
+  notebooks: notebooksRouter,
   agents: agentsRouter,
   automations: automationsRouter,
   settings: settingsRouter,

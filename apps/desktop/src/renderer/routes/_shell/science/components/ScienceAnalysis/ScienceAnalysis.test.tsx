@@ -1000,3 +1000,92 @@ describe("ScienceAnalysis", () => {
     expect(screen.queryByTestId("analysis-file")).toBeNull()
   })
 })
+
+describe("Analysis preview formats (mocked server)", () => {
+  /** Render one listed file, select it, and serve `preview` for it. */
+  async function selectFile(
+    file: { relPath: string; name: string; kind: string },
+    handlers: FakeHandlers,
+  ) {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => listing([file]),
+      ...handlers,
+    })
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+    return screen.findByTestId("analysis-preview")
+  }
+
+  test.each([
+    ["results/run/analysis.md", "MyST"],
+    ["results/run/analysis.qmd", "Quarto"],
+  ])("%s renders as Markdown with its %s front matter hidden", async (relPath) => {
+    const pane = await selectFile(
+      { relPath, name: relPath.split("/").at(-1) ?? relPath, kind: "markdown" },
+      {
+        "science.analysis.preview": () => ({
+          type: "text",
+          text: "---\ntitle: Run 1\n---\n\n# Loss went down\n\nBy **10%**.\n",
+          truncated: false,
+        }),
+      },
+    )
+    expect(await within(pane).findByRole("heading", { name: "Loss went down" })).toBeTruthy()
+    expect(within(pane).getByText("10%").tagName).toBe("STRONG")
+    expect(within(pane).queryByText(/title: Run 1/)).toBeNull()
+  })
+
+  test("a Jupyter notebook shows Markdown cells, code cells and their stored outputs", async () => {
+    const pane = await selectFile(
+      { relPath: "results/run/analysis.ipynb", name: "analysis.ipynb", kind: "notebook" },
+      {
+        "science.analysis.preview": () => ({
+          type: "notebook",
+          cells: [
+            { type: "markdown", source: "# Loss curve", outputs: [] },
+            {
+              type: "code",
+              source: "plot(loss)",
+              outputs: [
+                { type: "text", text: "final loss 0.3" },
+                { type: "image", dataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+                { type: "unsupported", outputType: "display_data" },
+              ],
+            },
+          ],
+        }),
+      },
+    )
+    expect(await within(pane).findByRole("heading", { name: "Loss curve" })).toBeTruthy()
+    const cells = within(pane).getAllByTestId("analysis-notebook-cell")
+    expect(cells.map((cell) => cell.dataset.cellType)).toEqual(["markdown", "code"])
+    const code = cells[1] as HTMLElement
+    expect(within(code).getByTestId("analysis-notebook-code").textContent).toBe("plot(loss)")
+    expect(within(code).getByText("final loss 0.3")).toBeTruthy()
+    expect(within(code).getByRole("img").getAttribute("src")).toBe(
+      "data:image/png;base64,iVBORw0KGgo=",
+    )
+    expect(within(code).getByText("Output not shown (display_data)")).toBeTruthy()
+  })
+
+  test("a marimo notebook is labelled, and shows its Python code when marimo cannot start", async () => {
+    const pane = await selectFile(
+      { relPath: "results/run/notebook.py", name: "notebook.py", kind: "marimo" },
+      {
+        "science.analysis.openInteractive": () =>
+          Promise.reject(new Error("marimo is not installed")),
+        "science.analysis.closeInteractive": () => undefined,
+        "science.analysis.preview": () => ({
+          type: "text",
+          text: "import marimo\n\napp = marimo.App()\n",
+          truncated: false,
+        }),
+      },
+    )
+    expect(screen.getByTestId("analysis-preview-label").textContent).toBe("marimo notebook")
+    expect(await within(pane).findByTestId("analysis-interactive-error")).toBeTruthy()
+    expect((await within(pane).findByTestId("analysis-preview-code")).textContent).toBe(
+      "import marimo\n\napp = marimo.App()\n",
+    )
+  })
+})

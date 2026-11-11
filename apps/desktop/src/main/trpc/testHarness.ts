@@ -31,6 +31,7 @@ import type { CaffeineControllerPort, CaffeineSettings, CaffeineStatus } from ".
 import type { PyToolsExec } from "../diagnostics"
 import type { PiLabChannel } from "../identity/channel"
 import type { SshExec } from "../lib/ssh-config"
+import { NotebookServers } from "../notebooks/notebookServers"
 import {
   createNotificationBrokers,
   type NativeNotificationHandlers,
@@ -410,6 +411,12 @@ export async function createHarness(
     discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
     resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,
     analysisInteractive,
+    notebookServers: new NotebookServers(
+      { start: 42_800, end: 42_899 },
+      10_000,
+      null,
+      async () => {},
+    ),
     notifications,
     activityMonitor,
     activityStatus: new ActivityStatusFeed(db, activityRegistry),

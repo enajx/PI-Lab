@@ -15,8 +15,31 @@ export type LatexProvider = "auto" | "bundled" | "system"
 
 export type PythonRunDestination = "central" | "below-editor"
 
-/** File format of the research diary: Markdown (`diary.md`) or Quarto Markdown (`diary.qmd`). */
-export type ResearchDiaryFormat = "md" | "qmd"
+/**
+ * File format of the research diary: Markdown (`diary.md`), Quarto Markdown
+ * (`diary.qmd`), or MyST Markdown (`diary.md` with a MyST front matter).
+ */
+export type ResearchDiaryFormat = "md" | "qmd" | "myst"
+
+/**
+ * Format agents write analysis in: Markdown (`.md`), Quarto (`.qmd`), MyST
+ * (`.md` with MyST front matter), HTML (`.html`), a marimo notebook (`.py`) or a
+ * Jupyter notebook (`.ipynb`).
+ */
+export type AnalysisFormat = (typeof ANALYSIS_FORMATS)[number]
+
+/** Every {@link AnalysisFormat}, in the order the Settings and Edit project choices list them. */
+export const ANALYSIS_FORMATS = ["md", "qmd", "myst", "html", "marimo", "ipynb"] as const
+
+/** Display names of the analysis formats. */
+export const ANALYSIS_FORMAT_LABELS: Readonly<Record<AnalysisFormat, string>> = {
+  md: "Markdown",
+  qmd: "Quarto",
+  myst: "MyST Markdown",
+  html: "HTML",
+  marimo: "marimo notebook",
+  ipynb: "Jupyter notebook",
+}
 
 export interface EditorSettings {
   /** Save on debounce/blur instead of requiring an explicit ⌘S (default off). */
@@ -60,6 +83,8 @@ export interface EditorSettings {
   askPapersFolder: boolean
   /** Research diary file format; switching renames the diary when its panel next opens (default `md`). */
   researchDiaryFormat: ResearchDiaryFormat
+  /** Default format agents write analysis in; a project can override it (default `md`). */
+  analysisFormat: AnalysisFormat
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -80,4 +105,5 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   papersFolder: "~/Papers",
   askPapersFolder: true,
   researchDiaryFormat: "md",
+  analysisFormat: "md",
 }

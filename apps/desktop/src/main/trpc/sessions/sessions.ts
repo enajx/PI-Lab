@@ -22,6 +22,7 @@ import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { isGitRepo } from "../../git"
 import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
+import { effectiveAnalysisFormat } from "../science/analysis/format"
 import { discoverSkills } from "../science/skills/skills"
 import { publicProcedure, router } from "../trpc"
 import { findSkill } from "../workflows/planResearchSkill"
@@ -435,7 +436,9 @@ export interface StartAnalyzeExperimentsResult extends StartSessionResult {
  * The Analysis view's Analyze experiments button: start the project's agent
  * (remembered choice, else the default) as an Analysis agent, with a prompt
  * that triggers the `analyze-experiments` skill (PI Lab's bundled copy first,
- * then project and user skills). Throws, starting nothing, when the skill
+ * then project and user skills). The prompt names the project's analysis format
+ * (see {@link effectiveAnalysisFormat}) and the `analysis-format` skill, which
+ * says how to write each format. Throws, starting nothing, when either skill
  * cannot be found.
  */
 export async function startAnalyzeExperiments(
@@ -453,13 +456,21 @@ export async function startAnalyzeExperiments(
     ctx.skillsHomeDir,
     ctx.bundledSkillsDir,
   )
+  const formatSkill = await findSkill(
+    "analysis-format",
+    "Analysis format",
+    project.repoPath,
+    ctx.skillsHomeDir,
+    ctx.bundledSkillsDir,
+  )
+  const format = effectiveAnalysisFormat(project.metadata, getSettingsOrDefaults(ctx.db).editor)
   const agentId = await projectAgentId(ctx, project)
   const result = await startAgentSession(ctx, {
     projectId: project.id,
     agentId,
     origin: "analysis",
     workspaceMode: "policy",
-    prompt: `Use the analyze-experiments skill to analyze this project's experiments. Its SKILL.md is at ${skill.path}. Follow its instructions.`,
+    prompt: `Use the analyze-experiments skill to analyze this project's experiments. Its SKILL.md is at ${skill.path}. The analysis format is ${format}. Write the analysis as the analysis-format skill at ${formatSkill.path} says for ${format}. Follow their instructions.`,
   })
   return { ...result, agentId }
 }

@@ -6,8 +6,8 @@ import {
   runningWorkDialog,
 } from "./userQuit"
 
-const idle: QuitWork = { agents: 0, terminals: [] }
-const agents = (count: number): QuitWork => ({ agents: count, terminals: [] })
+const idle: QuitWork = { agents: 0, terminals: [], notebooks: 0 }
+const agents = (count: number): QuitWork => ({ agents: count, terminals: [], notebooks: 0 })
 /** A first-dialog answer without "Remember option" ticked. */
 const pick = <C extends "quit" | "background" | "cancel">(choice: C) => ({
   choice,
@@ -209,7 +209,11 @@ test("Quit label uses the initial count but newly started work still gets its se
 })
 
 test("a busy terminal alone gets the running-work confirmation; idle shells do not", async () => {
-  const busy: QuitWork = { agents: 0, terminals: [{ project: "Alpha", command: "sleep" }] }
+  const busy: QuitWork = {
+    agents: 0,
+    terminals: [{ project: "Alpha", command: "sleep" }],
+    notebooks: 0,
+  }
   const confirmRunning = vi.fn(async () => "cancel" as const)
   const quit = vi.fn()
   const request = createUserQuitAction({
@@ -233,7 +237,7 @@ test("the running-work dialog names busy terminals and keeps the agent wording",
     { project: "Alpha", command: "sleep" },
     { project: "Beta", command: "python" },
   ]
-  const onlyTerminals = runningWorkDialog({ agents: 0, terminals })
+  const onlyTerminals = runningWorkDialog({ agents: 0, terminals, notebooks: 0 })
   expect(onlyTerminals.message).toBe("2 terminals are still running a command.")
   expect(onlyTerminals.detail).toContain("Alpha: sleep")
   expect(onlyTerminals.detail).toContain("Beta: python")
@@ -242,7 +246,7 @@ test("the running-work dialog names busy terminals and keeps the agent wording",
     "Keep running in background",
     "Cancel",
   ])
-  const withAgent = runningWorkDialog({ agents: 1, terminals: terminals.slice(0, 1) })
+  const withAgent = runningWorkDialog({ agents: 1, terminals: terminals.slice(0, 1), notebooks: 0 })
   expect(withAgent.message).toBe("1 agent is still running.")
   expect(withAgent.detail).toContain("Agents or results fetching are currently running.")
   expect(withAgent.detail).toContain("Alpha: sleep")
@@ -258,14 +262,63 @@ test("the running-work dialog names busy terminals and keeps the agent wording",
 
 test("a logout or other quit asks with the same wording but only Quit and stop or Cancel", () => {
   const terminals = [{ project: "Alpha", command: "sleep" }]
-  const onlyTerminals = confirmStopDialog({ agents: 0, terminals })
+  const onlyTerminals = confirmStopDialog({ agents: 0, terminals, notebooks: 0 })
   expect(onlyTerminals.message).toBe("1 terminal is still running a command.")
   expect(onlyTerminals.detail).toContain("Alpha: sleep")
   expect(onlyTerminals.buttons).toEqual(["Quit and stop terminals", "Cancel"])
-  const withAgents = confirmStopDialog({ agents: 2, terminals })
+  const withAgents = confirmStopDialog({ agents: 2, terminals, notebooks: 0 })
   expect(withAgents.message).toBe("2 agents are still running.")
   expect(withAgents.detail).toContain("Agents or results fetching are currently running.")
   expect(withAgents.detail).not.toContain("background")
   expect(withAgents.detail).toContain("Alpha: sleep")
   expect(withAgents.buttons).toEqual(["Quit and stop agents", "Cancel"])
+})
+
+test("open notebooks alone get the running-work confirmation", async () => {
+  const notebooks: QuitWork = { agents: 0, terminals: [], notebooks: 2 }
+  const confirmRunning = vi.fn(async () => "cancel" as const)
+  const quit = vi.fn()
+  const request = createUserQuitAction({
+    pending: () => false,
+    remembered: () => "ask",
+    remember: vi.fn(),
+    work: async () => notebooks,
+    choose: async () => pick("quit"),
+    confirmRunning,
+    quit,
+    background: vi.fn(),
+    error: vi.fn(),
+  })
+  await request()
+  expect(confirmRunning).toHaveBeenCalledWith(notebooks)
+  expect(quit).not.toHaveBeenCalled()
+})
+
+test("the quit dialogs name open notebooks and say to save them first", () => {
+  const onlyNotebooks = runningWorkDialog({ agents: 0, terminals: [], notebooks: 1 })
+  expect(onlyNotebooks.message).toBe("1 notebook is still open.")
+  expect(onlyNotebooks.detail).toContain(
+    "Quitting also stops the server of 1 open notebook. Save the notebook in its tab first.",
+  )
+  expect(onlyNotebooks.buttons).toEqual([
+    "Quit and stop notebooks",
+    "Keep running in background",
+    "Cancel",
+  ])
+  const withTerminal = runningWorkDialog({
+    agents: 0,
+    terminals: [{ project: "Alpha", command: "sleep" }],
+    notebooks: 2,
+  })
+  expect(withTerminal.message).toBe("1 terminal is still running a command.")
+  expect(withTerminal.detail).toContain("Alpha: sleep")
+  expect(withTerminal.detail).toContain(
+    "Quitting also stops the servers of 2 open notebooks. Save each notebook in its tab first.",
+  )
+  const logout = confirmStopDialog({ agents: 1, terminals: [], notebooks: 1 })
+  expect(logout.detail).toContain("Save the notebook in its tab first.")
+  expect(confirmStopDialog({ agents: 0, terminals: [], notebooks: 3 }).buttons).toEqual([
+    "Quit and stop notebooks",
+    "Cancel",
+  ])
 })

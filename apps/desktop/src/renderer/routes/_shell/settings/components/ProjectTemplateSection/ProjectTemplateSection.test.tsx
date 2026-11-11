@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   papersFolder: "~/Papers",
   askPapersFolder: true,
   researchDiaryFormat: "md",
+  analysisFormat: "md",
 }
 
 let store: Record<string, string>

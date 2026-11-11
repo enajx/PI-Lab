@@ -38,9 +38,12 @@ import { AutomationScheduler } from "./automations/scheduler"
 import { trayProjectSnapshot } from "./background/projectSnapshot"
 import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
 import { getDb, initDatabase } from "./db/db"
+import { stopRunningRenders } from "./documents/render"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelFromAppName } from "./identity/channel"
 import { tectonicCacheDir } from "./latex/runtime"
+import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
+import { NotebookServers, stopNotebooksWithWindow } from "./notebooks/notebookServers"
 import {
   createElectronAppFocusAdapter,
   createElectronNativeNotificationAdapter,
@@ -50,7 +53,7 @@ import {
 import { livePythonProbe, liveQuickPythonRuntimeResolver } from "./python"
 import { liveStandalonePythonDiscoverer } from "./python/standaloneInterpreters"
 import { QuickPythonRunner } from "./quickEdit/pythonRun"
-import { isTestMode, skillsHomeDirOverride } from "./runtime/env"
+import { isTestMode, rendererDevServerUrl, skillsHomeDirOverride } from "./runtime/env"
 import { testSetupProbe } from "./setup/testProbe"
 import { busyTerminals } from "./terminal/busyTerminals"
 import { TerminalSupervisor } from "./terminal/supervisor"
@@ -109,6 +112,13 @@ export class FullRuntime {
   )
   private readonly processFinalizers = new Set<Promise<void>>()
   private readonly analysisInteractive = new AnalysisInteractiveController()
+  // A first uvx run downloads marimo or JupyterLab, so a server may take minutes to start.
+  private readonly notebookServers = new NotebookServers(
+    { start: 42_700, end: 42_799 },
+    5 * 60_000,
+    rendererDevServerUrl ? new URL(rendererDevServerUrl).origin : null,
+    (url) => shell.openExternal(url),
+  )
   private readonly agentCatalog = buildAgentCatalog(isTestMode)
   private readonly notificationBrokers = createNotificationBrokers()
   private readonly notificationService: NotificationService
@@ -138,6 +148,7 @@ export class FullRuntime {
 
   /** Attach the single tRPC handler to a newly created or reopened window. */
   boot(window: BrowserWindow): void {
+    stopNotebooksWithWindow(window, window.webContents, () => this.notebookServers.stopAll())
     if (this.ipcHandler) {
       this.ipcHandler.attachWindow(window)
       return
@@ -164,6 +175,7 @@ export class FullRuntime {
       if (saveNativeLanguage(app.getPath("userData"), language)) installAppMenu()
     })
     this.analysisInteractive.installProtocolHandler()
+    installNotebookFrameHeaders((port) => this.notebookServers.servesPort(port), isAppPageUrl)
     console.log(
       `[pi-lab] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
     )
@@ -405,7 +417,11 @@ export class FullRuntime {
         .all(),
     ]
     const sessions = await this.terminalSupervisor.listSessionsIfRunning()
-    return { agents, terminals: busyTerminals(sessions, await this.agentSessionIds(), roots) }
+    return {
+      agents,
+      terminals: busyTerminals(sessions, await this.agentSessionIds(), roots),
+      notebooks: this.notebookServers.runningCount(),
+    }
   }
 
   /**
@@ -438,7 +454,12 @@ export class FullRuntime {
         },
         stop: async () => {
           this.automationScheduler?.stop()
-          await Promise.all([this.stopTerminalAgents(), this.managedProcesses.stopAll()])
+          await Promise.all([
+            this.stopTerminalAgents(),
+            this.managedProcesses.stopAll(),
+            this.notebookServers.stopAll(),
+            stopRunningRenders(),
+          ])
           await Promise.all([...this.processFinalizers])
           // Bounded: a missing or late daemon confirmation warns and quit goes on.
           await this.terminalSupervisor.shutdownDaemon(3_000, (message) => console.warn(message))
@@ -523,6 +544,7 @@ export class FullRuntime {
     this.managedProcesses.dispose()
     this.terminalSupervisor.dispose()
     this.analysisInteractive.dispose()
+    this.notebookServers.dispose()
   }
 
   private startAutomationScheduler(): void {
@@ -589,6 +611,7 @@ export class FullRuntime {
       discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
       resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
       analysisInteractive: this.analysisInteractive,
+      notebookServers: this.notebookServers,
       notifications: this.notificationBrokers,
       activityStatus: this.activityStatus,
       activityMonitor: this.activityMonitor,
@@ -596,6 +619,12 @@ export class FullRuntime {
       caffeine: this.caffeineController,
     }
   }
+}
+
+/** PI Lab's own page: the dev server in development, the packaged file:// page otherwise. */
+function isAppPageUrl(url: string): boolean {
+  if (rendererDevServerUrl) return url.startsWith(`${new URL(rendererDevServerUrl).origin}/`)
+  return url.startsWith("file:")
 }
 
 /** Keep the existing native migration error when the deferred boot fails. */

@@ -28,12 +28,14 @@ import type {
 } from "../../../projects/components/CentralPanel/useCentralPanel"
 import type { FocusSessionRequest } from "./sessionViewSearch"
 
-/** A session started outside the panel (a top bar button) for the panel to open as a tab. */
-export interface ScienceSessionRequest {
-  /** The project it was started in; the panel opens it only while showing that project. */
-  projectId: string
-  pane: Omit<SessionPane, "id">
-}
+/**
+ * A tab for the panel to open, asked for outside it: a session a top bar button
+ * started, or a notebook (Open notebook in the Analysis preview). The panel opens it
+ * only while showing `projectId`.
+ */
+export type ScienceSessionRequest =
+  | { projectId: string; pane: Omit<SessionPane, "id"> }
+  | { projectId: string; notebookRelPath: string }
 
 /**
  * Turn an agent to focus into a session request for the panel, once per session:
@@ -96,7 +98,7 @@ export function ScienceSessionPanel({
       className={
         collapsed
           ? "flex w-9 shrink-0 flex-col items-center border-border border-l py-2"
-          : "flex w-[520px] min-w-0 shrink-0 flex-col border-border border-l"
+          : "flex w-[520px] min-w-[22rem] shrink flex-col border-border border-l"
       }
     >
       {collapsed ? (
@@ -134,7 +136,7 @@ export function ScienceSessionPanel({
           project={project}
           collapsed={collapsed}
           onExpand={expand}
-          openSession={openSession?.projectId === project.id ? openSession.pane : null}
+          openSession={openSession?.projectId === project.id ? openSession : null}
           onSessionOpened={onSessionOpened}
         />
       ) : (
@@ -150,7 +152,7 @@ interface SessionsBodyProps {
 }
 
 interface OpenSessionProps {
-  openSession: Omit<SessionPane, "id"> | null
+  openSession: ScienceSessionRequest | null
   onSessionOpened: () => void
 }
 
@@ -285,25 +287,34 @@ function SessionsBody({
     if (controller.agentChooserOpen || controller.launchError) onExpand()
   }, [controller.agentChooserOpen, controller.launchError, onExpand])
 
-  // A session a top bar button started opens here as a tab and shows the panel.
+  // A session a top bar button started, or a notebook to open, opens here as a tab
+  // and shows the panel.
   const attachSession = controller.attachSession
+  const openNotebook = controller.openNotebook
   useEffect(() => {
     if (!openSession) return
-    attachSession(openSession)
+    if ("pane" in openSession) attachSession(openSession.pane)
+    else openNotebook(openSession.notebookRelPath)
     onExpand()
     onSessionOpened()
-  }, [attachSession, onExpand, onSessionOpened, openSession])
+  }, [attachSession, onExpand, onSessionOpened, openNotebook, openSession])
 
-  // While collapsed the central panel is not mounted, so ⌘T is handled here.
+  // While collapsed the central panel is not mounted (or hidden, with its shortcuts
+  // off), so ⌘T is handled here.
   const openNewSession = useOpenNewSession(controller)
   useNewSessionShortcut(() => {
     if (!collapsed || overlayIsOpen()) return false
     return openNewSession()
   })
 
-  if (collapsed) return null
+  // Collapsed, the central panel is not shown. With notebook tabs it stays mounted
+  // (hidden), so the notebook pages keep their unsaved edits and their servers run.
+  if (collapsed && controller.notebooks.length === 0) return null
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      hidden={collapsed}
+      className={collapsed ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col"}
+    >
       <CentralPanel
         controller={controller}
         client={client}
@@ -317,6 +328,7 @@ function SessionsBody({
         onExpandRightSidebar={() => undefined}
         filesPanelOpen={filesPanelOpen}
         onFilesPanelOpenChange={setFilesPanelOpen}
+        hidden={collapsed}
       />
     </div>
   )

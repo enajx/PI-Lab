@@ -2,8 +2,12 @@ import { expect, test, vi } from "vitest"
 import type { QuitWork } from "../window/userQuit"
 import { prepareAgentQuit, type QuitMode } from "./quitPolicy"
 
-const idle: QuitWork = { agents: 0, terminals: [] }
-const busy: QuitWork = { agents: 0, terminals: [{ project: "Alpha", command: "sleep" }] }
+const idle: QuitWork = { agents: 0, terminals: [], notebooks: 0 }
+const busy: QuitWork = {
+  agents: 0,
+  terminals: [{ project: "Alpha", command: "sleep" }],
+  notebooks: 0,
+}
 
 function dependencies(mode: QuitMode, work: QuitWork, choice: "stop" | "cancel") {
   return {
@@ -43,7 +47,7 @@ test("a system or other quit asks only when work is running, then ends everythin
   expect(cancelled.stop).not.toHaveBeenCalled()
   expect(cancelled.resume).toHaveBeenCalledOnce()
 
-  const confirmed = dependencies("confirm-end", { agents: 2, terminals: [] }, "stop")
+  const confirmed = dependencies("confirm-end", { agents: 2, terminals: [], notebooks: 0 }, "stop")
   expect(await prepareAgentQuit(confirmed)).toBe(true)
   expect(confirmed.stop).toHaveBeenCalledOnce()
 })
@@ -71,4 +75,12 @@ test("quit waits for the stop and a failed stop cancels quit and resumes launche
   failing.stop.mockRejectedValue(new Error("unable to stop"))
   await expect(prepareAgentQuit(failing)).rejects.toThrow("unable to stop")
   expect(failing.resume).toHaveBeenCalledOnce()
+})
+
+test("a system or other quit also asks when notebooks are open", async () => {
+  const notebooks: QuitWork = { agents: 0, terminals: [], notebooks: 1 }
+  const cancelled = dependencies("confirm-end", notebooks, "cancel")
+  expect(await prepareAgentQuit(cancelled)).toBe(false)
+  expect(cancelled.confirm).toHaveBeenCalledWith(notebooks)
+  expect(cancelled.stop).not.toHaveBeenCalled()
 })

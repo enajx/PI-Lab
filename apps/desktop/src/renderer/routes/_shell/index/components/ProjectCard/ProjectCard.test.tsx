@@ -517,6 +517,8 @@ describe("ProjectCard metadata", () => {
         typeId: "research",
         deadline: null,
         agentId: null,
+        // "Use default from Settings" clears any per-project analysis format.
+        analysisFormat: null,
         emojiTags: [],
         textTags: [],
       },

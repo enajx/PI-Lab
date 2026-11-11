@@ -13,6 +13,7 @@ import type { PiLabDatabase } from "@pi-lab/local-db"
 import { DaemonClient, DaemonServer } from "@pi-lab/pty-daemon"
 import type { Unsubscribable } from "@trpc/server/observable"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { NotebookServers } from "../../notebooks/notebookServers"
 import { createNotificationBrokers, NotificationService } from "../../notifications"
 import { appRouter } from "../appRouter"
 import { type AppContext, DEFAULT_AGENT_CATALOG } from "../context"
@@ -78,6 +79,12 @@ beforeEach(async () => {
       close: async () => {},
       dispose: () => {},
     },
+    notebookServers: new NotebookServers(
+      { start: 42_800, end: 42_899 },
+      10_000,
+      null,
+      async () => {},
+    ),
     notifications,
     activityStatus: { subscribe: () => () => {}, projectsChanged: () => {} },
     activityMonitor: {

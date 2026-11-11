@@ -17,6 +17,7 @@ import {
   type Settings,
   settings,
 } from "@pi-lab/local-db"
+import { ANALYSIS_FORMATS } from "@pi-lab/local-db/editor-settings"
 import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
@@ -84,7 +85,8 @@ const editorPatch = z.object({
   confirmOverleafCommit: z.boolean().optional(),
   papersFolder: z.string().trim().min(1).max(1024).optional(),
   askPapersFolder: z.boolean().optional(),
-  researchDiaryFormat: z.enum(["md", "qmd"]).optional(),
+  researchDiaryFormat: z.enum(["md", "qmd", "myst"]).optional(),
+  analysisFormat: z.enum(ANALYSIS_FORMATS).optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */
