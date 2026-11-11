@@ -11,6 +11,6 @@ This is a placeholder skill. It will be designed later.
    in the project. Each sub folder of the results folder is one experiment.
 2. Read `EXPERIMENTS.md` in the project, if it exists, for what each experiment was meant to test.
 3. For each experiment, read its files and summarise what it shows. Make plots where they help.
-4. Write the analysis in the format PI Lab names in the prompt (Markdown, Quarto, MyST, HTML,
-   a marimo notebook, or a Jupyter notebook). When the prompt names none, use Markdown.
+4. Write the analysis in the format PI Lab names in the prompt, as the `analysis-format`
+   skill says for that format. When the prompt names none, use Markdown.
 5. Tell the user the summary, and ask what they want to look at next.
