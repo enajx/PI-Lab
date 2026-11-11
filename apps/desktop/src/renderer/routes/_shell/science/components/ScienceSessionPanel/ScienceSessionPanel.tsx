@@ -98,7 +98,7 @@ export function ScienceSessionPanel({
       className={
         collapsed
           ? "flex w-9 shrink-0 flex-col items-center border-border border-l py-2"
-          : "flex w-[520px] min-w-0 shrink-0 flex-col border-border border-l"
+          : "flex w-[520px] min-w-[22rem] shrink flex-col border-border border-l"
       }
     >
       {collapsed ? (
@@ -299,16 +299,22 @@ function SessionsBody({
     onSessionOpened()
   }, [attachSession, onExpand, onSessionOpened, openNotebook, openSession])
 
-  // While collapsed the central panel is not mounted, so ⌘T is handled here.
+  // While collapsed the central panel is not mounted (or hidden, with its shortcuts
+  // off), so ⌘T is handled here.
   const openNewSession = useOpenNewSession(controller)
   useNewSessionShortcut(() => {
     if (!collapsed || overlayIsOpen()) return false
     return openNewSession()
   })
 
-  if (collapsed) return null
+  // Collapsed, the central panel is not shown. With notebook tabs it stays mounted
+  // (hidden), so the notebook pages keep their unsaved edits and their servers run.
+  if (collapsed && controller.notebooks.length === 0) return null
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      hidden={collapsed}
+      className={collapsed ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col"}
+    >
       <CentralPanel
         controller={controller}
         client={client}
@@ -322,6 +328,7 @@ function SessionsBody({
         onExpandRightSidebar={() => undefined}
         filesPanelOpen={filesPanelOpen}
         onFilesPanelOpenChange={setFilesPanelOpen}
+        hidden={collapsed}
       />
     </div>
   )

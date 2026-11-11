@@ -396,7 +396,7 @@ const requestUserQuit = createUserQuitAction({
   pending: () => shutdownGuard.isQuitPending(),
   work: async () => {
     await fullBootScheduler.startNow()
-    return fullRuntime ? fullRuntime.quitWork() : { agents: 0, terminals: [] }
+    return fullRuntime ? fullRuntime.quitWork() : { agents: 0, terminals: [], notebooks: 0 }
   },
   // `work()` has started the full runtime; without it there is no saved choice.
   remembered: () => (fullRuntime ? fullRuntime.quitChoice() : "ask"),

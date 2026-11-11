@@ -28,8 +28,10 @@ export const MAX_MARIMO_SOURCE_BYTES = 64 * 1024
 /**
  * Analysis-only noise directories. Research artifacts in build/out/dist remain
  * visible, while the shared walker excludes dependency, cache, and VCS trees.
+ * `_render` holds PI Lab's Quarto and MyST render output and `.quarto` Quarto's
+ * own files; neither is an analysis result.
  */
-const EXTRA_IGNORED_DIRS = [".next", ".idea", ".vscode"] as const
+const EXTRA_IGNORED_DIRS = [".next", ".idea", ".vscode", "_render", ".quarto"] as const
 
 export interface DataFileEntry {
   /** Repo-relative path (POSIX separators), the stable id / preview key. */

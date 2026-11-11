@@ -1,10 +1,10 @@
-import type { QuitWork } from "../window/userQuit"
+import { hasRunningWork, type QuitWork } from "../window/userQuit"
 
 /**
  * How one approved quit treats running work:
  * - `end`: explicit Quit (Cmd+Q, menu, tray, last-window close), already confirmed; stop everything.
  * - `confirm-end`: any other quit, such as macOS logout or shutdown; ask only when
- *   agents, fetching or busy terminals run, then stop everything.
+ *   agents, fetching, busy terminals or notebooks run, then stop everything.
  * - `keep`: Restart to Update; agents, shells and Python runs keep running and reattach.
  */
 export type QuitMode = "end" | "confirm-end" | "keep"
@@ -30,11 +30,7 @@ export async function prepareAgentQuit(dependencies: AgentQuitDependencies): Pro
     }
     if (dependencies.mode === "confirm-end") {
       const work = await dependencies.work()
-      if (
-        (work.agents > 0 || work.terminals.length > 0) &&
-        (await dependencies.confirm(work)) !== "stop"
-      )
-        return false
+      if (hasRunningWork(work) && (await dependencies.confirm(work)) !== "stop") return false
     }
     await dependencies.stop()
     approved = true

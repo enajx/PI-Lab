@@ -71,6 +71,11 @@ export async function documentPython(input: DocumentPythonInput): Promise<Docume
     platform: input.platform,
   })
   const notes: string[] = []
+  if (
+    (environment.kind === "uv-run" || environment.kind === "pi-lab") &&
+    environment.fallbackReason
+  )
+    notes.push(`The project's Python was not used: ${environment.fallbackReason}`)
   if (environment.kind === "project") {
     if (await hasKernel(environment.python, input.projectDir)) {
       return { python: environment.python, log: chosenLine(environment.label, environment.python) }
@@ -156,7 +161,7 @@ function chosenLine(label: string, python: string): string {
 
 async function hasKernel(python: string, cwd: string): Promise<boolean> {
   const found = await importableModules(python, KERNEL_MODULES, cwd)
-  return KERNEL_MODULES.every((name) => found.includes(name))
+  return KERNEL_MODULES.every((name) => found.modules.includes(name))
 }
 
 interface RunResult {

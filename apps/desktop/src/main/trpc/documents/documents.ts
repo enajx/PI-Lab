@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises"
-import { join, relative, sep } from "node:path"
+import { readFile, realpath } from "node:fs/promises"
+import { dirname, join, relative, sep } from "node:path"
 import { type PiLabDatabase, projects, resolveDataDir } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
@@ -17,7 +17,13 @@ import {
   installQuarto,
   QUARTO_MACOS_ARTIFACT,
 } from "../../documents/install"
-import { excludeRenderFolder, renderPlan, runRender } from "../../documents/render"
+import {
+  excludeRenderFolder,
+  findQuartoProject,
+  RENDER_FOLDER,
+  renderPlan,
+  runRender,
+} from "../../documents/render"
 import {
   type DocumentTool,
   type FoundDocumentTool,
@@ -26,6 +32,7 @@ import {
 } from "../../documents/tools"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
+import { assertPathInside } from "../science/analysis/interactive"
 import { publicProcedure, router } from "../trpc"
 
 /**
@@ -94,6 +101,21 @@ function projectFolder(db: PiLabDatabase, projectId: string): string {
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get()
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: `No project ${projectId}` })
   return project.repoPath
+}
+
+/**
+ * The project folder and the real path of `relPath` in it (symlinks resolved),
+ * refused when that real path is outside the project folder.
+ */
+async function realFileInProject(
+  db: PiLabDatabase,
+  projectId: string,
+  relPath: string,
+): Promise<{ folder: string; abs: string }> {
+  const folder = await realpath(projectFolder(db, projectId))
+  const abs = await realpath(resolveInsideDir(folder, relPath))
+  assertPathInside(folder, abs)
+  return { folder, abs }
 }
 
 const STAGE_MESSAGES: Readonly<Record<DocumentToolInstallStage, string>> = {
@@ -185,15 +207,18 @@ export const documentsRouter = router({
    */
   render: publicProcedure.input(fileInput).mutation(async ({ ctx, input }) => {
     const tool = toolForFile(input.relPath)
-    const folder = projectFolder(ctx.db, input.projectId)
-    const absFile = resolveInsideDir(folder, input.relPath)
+    const { folder, abs: absFile } = await realFileInProject(ctx.db, input.projectId, input.relPath)
+    const quartoProject = tool === "quarto" ? findQuartoProject(absFile, folder) : null
     const found = await findTool(ctx, tool)
     if (!found)
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: `${TOOL_NAMES[tool]} was not found. Install it from the Render button or Settings > Document tools.`,
       })
-    await excludeRenderFolder(absFile)
+    await excludeRenderFolder(
+      absFile,
+      tool === "quarto" ? (quartoProject ?? dirname(absFile)) : null,
+    )
     const launchEnv = await ctx.getAgentLaunchEnvironment()
     const python = hasPythonCode(tool, await readFile(absFile, "utf8"))
       ? await documentPython({
@@ -205,7 +230,11 @@ export const documentsRouter = router({
         })
       : { python: null, log: "" }
     const env = withDocumentPython(launchEnv, python.python)
-    const outcome = await runRender(renderPlan(tool, found.path, absFile), env, RENDER_TIMEOUT_MS)
+    const outcome = await runRender(
+      renderPlan(tool, found.path, absFile, quartoProject),
+      env,
+      RENDER_TIMEOUT_MS,
+    )
     return {
       tool,
       ok: outcome.ok,
@@ -216,9 +245,19 @@ export const documentsRouter = router({
     }
   }),
 
-  /** Open a rendered HTML file of the project with the system's default app (the browser). */
+  /**
+   * Open a rendered page of the project with the system's default app (the
+   * browser): only an .html file inside a `_render` folder (where renders write).
+   */
   openInBrowser: publicProcedure.input(fileInput).mutation(async ({ ctx, input }) => {
-    const abs = resolveInsideDir(projectFolder(ctx.db, input.projectId), input.relPath)
+    const { folder, abs } = await realFileInProject(ctx.db, input.projectId, input.relPath)
+    const parts = relative(folder, abs).split(sep)
+    if (!abs.toLowerCase().endsWith(".html") || !parts.slice(0, -1).includes(RENDER_FOLDER)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Only rendered .html pages in a ${RENDER_FOLDER} folder can be opened: ${input.relPath}`,
+      })
+    }
     const error = await ctx.openPath(abs)
     if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error })
   }),

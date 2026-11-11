@@ -6,6 +6,20 @@ describe("splitFrontMatter", () => {
     expect(splitFrontMatter("---\ntitle: Diary\n---\n\n## 2026-11-11\n")).toEqual({
       frontMatter: "title: Diary",
       body: "\n## 2026-11-11\n",
+      block: "---\ntitle: Diary\n---\n",
+    })
+  })
+
+  test("reads a front matter with Windows line endings or blank lines before it", () => {
+    expect(splitFrontMatter("---\r\ntitle: D\r\n---\r\n\r\nBody\r\n")).toEqual({
+      frontMatter: "title: D",
+      body: "\r\nBody\r\n",
+      block: "---\r\ntitle: D\r\n---\r\n",
+    })
+    expect(splitFrontMatter("\n\n---\ntitle: D\n---")).toEqual({
+      frontMatter: "title: D",
+      body: "",
+      block: "\n\n---\ntitle: D\n---",
     })
   })
 
@@ -13,6 +27,7 @@ describe("splitFrontMatter", () => {
     expect(splitFrontMatter("# Title\n\n---\n\nText\n")).toEqual({
       frontMatter: null,
       body: "# Title\n\n---\n\nText\n",
+      block: "",
     })
   })
 
@@ -20,6 +35,7 @@ describe("splitFrontMatter", () => {
     expect(splitFrontMatter("---\ntitle: x\n")).toEqual({
       frontMatter: null,
       body: "---\ntitle: x\n",
+      block: "",
     })
   })
 })

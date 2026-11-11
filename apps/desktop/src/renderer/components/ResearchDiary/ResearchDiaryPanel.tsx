@@ -110,8 +110,8 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
   return (
     <aside
       data-testid="research-diary-panel"
-      className="relative flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
-      style={{ width }}
+      className="relative flex min-h-0 shrink flex-col overflow-hidden rounded-lg border border-border"
+      style={{ width, minWidth: RESEARCH_DIARY_MIN_WIDTH }}
     >
       <EdgeResizeHandle
         side="left"

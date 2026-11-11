@@ -21,10 +21,25 @@ export type JupyterApp = "lab" | "notebook"
 export type PythonToolEnvironment =
   /** An interpreter in the project's environment that imports the tool. */
   | { kind: "project"; python: string; label: string; jupyterApp: JupyterApp | null }
-  /** The uv project's environment, run with `uv run`. */
-  | { kind: "uv-run"; uv: string; label: string; jupyterApp: JupyterApp | null }
+  /**
+   * The uv project's environment, run with `uv run`. `fallbackReason` says why a
+   * project interpreter was not used when it failed to run, else null.
+   */
+  | {
+      kind: "uv-run"
+      uv: string
+      label: string
+      jupyterApp: JupyterApp | null
+      fallbackReason: string | null
+    }
   /** A PI Lab copy of the tool run through `uvx`; nothing is installed in the project. */
-  | { kind: "pi-lab"; uvx: string; label: string; jupyterApp: JupyterApp | null }
+  | {
+      kind: "pi-lab"
+      uvx: string
+      label: string
+      jupyterApp: JupyterApp | null
+      fallbackReason: string | null
+    }
   /** No project environment has the tool and uv is not installed. */
   | { kind: "no-uv"; message: string }
 
@@ -58,10 +73,15 @@ export async function resolvePythonToolEnvironment(
   input: PythonToolEnvironmentInput,
 ): Promise<PythonToolEnvironment> {
   const wanted = TOOL_MODULES[input.tool]
+  const failures: string[] = []
   for (const candidate of projectInterpreters(input)) {
     if (!(await isExecutableFile(candidate.python))) continue
-    const found = await importableModules(candidate.python, wanted, input.projectDir)
-    const app = pickApp(input.tool, found)
+    const probe = await importableModules(candidate.python, wanted, input.projectDir)
+    if (probe.error !== null) {
+      failures.push(`${candidate.python} could not run: ${probe.error}`)
+      continue
+    }
+    const app = pickApp(input.tool, probe.modules)
     if (app === undefined) continue
     return {
       kind: "project",
@@ -71,6 +91,9 @@ export async function resolvePythonToolEnvironment(
     }
   }
 
+  const fallbackReason = failures.length > 0 ? failures.join("\n") : null
+  if (fallbackReason) console.warn(`[pi-lab] project Python skipped: ${fallbackReason}`)
+
   const locked = await lockedPackages(input.projectDir)
   const lockedApp = pickApp(
     input.tool,
@@ -79,7 +102,13 @@ export async function resolvePythonToolEnvironment(
   if (lockedApp !== undefined) {
     const uv = await findExecutable("uv", input.searchPath, input.platform)
     if (uv) {
-      return { kind: "uv-run", uv, label: "Project uv environment (uv run)", jupyterApp: lockedApp }
+      return {
+        kind: "uv-run",
+        uv,
+        label: "Project uv environment (uv run)",
+        jupyterApp: lockedApp,
+        fallbackReason,
+      }
     }
   }
 
@@ -88,7 +117,7 @@ export async function resolvePythonToolEnvironment(
     const name = input.tool === "marimo" ? "marimo" : "Jupyter"
     return {
       kind: "no-uv",
-      message: `${name} is not installed in this project's environment, and uv was not found to run a PI Lab copy. ${UV_INSTALL_HINT}`,
+      message: `${name} is not installed in this project's environment, and uv was not found to run a PI Lab copy. ${UV_INSTALL_HINT}${fallbackReason ? `\n${fallbackReason}` : ""}`,
     }
   }
   return {
@@ -96,6 +125,7 @@ export async function resolvePythonToolEnvironment(
     uvx,
     label: "PI Lab copy (uvx)",
     jupyterApp: input.tool === "jupyter" ? "lab" : null,
+    fallbackReason,
   }
 }
 
@@ -160,23 +190,33 @@ function relativeName(projectDir: string, path: string): string {
   return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path
 }
 
-/** The modules of `modules` that `python` can import (empty when `python` fails to run). */
+/** What a module probe found: the importable modules, or why `python` failed to run. */
+export interface ModuleProbe {
+  modules: string[]
+  /** The run error and stderr when `python` failed, else null. */
+  error: string | null
+}
+
+/** The modules of `modules` that `python` can import, or the error when `python` fails to run. */
 export function importableModules(
   python: string,
   modules: string[],
   cwd: string,
-): Promise<string[]> {
+): Promise<ModuleProbe> {
   return new Promise((resolveModules) => {
     execFile(
       python,
       ["-c", MODULE_PROBE_SCRIPT, ...modules],
       { cwd, timeout: PROBE_TIMEOUT_MS, maxBuffer: 64 * 1024 },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (error) {
-          resolveModules([])
+          resolveModules({
+            modules: [],
+            error: [error.message.split("\n")[0], stderr.trim()].filter(Boolean).join("\n"),
+          })
           return
         }
-        resolveModules(parseModuleList(stdout))
+        resolveModules({ modules: parseModuleList(stdout), error: null })
       },
     )
   })

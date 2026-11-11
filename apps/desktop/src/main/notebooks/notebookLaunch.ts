@@ -17,15 +17,23 @@ export interface NotebookLaunchInput {
   relPath: string
   port: number
   token: string
+  /** The renderer's dev server origin (development only), or null. */
+  devServerOrigin: string | null
 }
 
 export const NOTEBOOK_HOST = "127.0.0.1"
 
 /**
  * Jupyter refuses to be shown in a frame from another origin by default. PI Lab's
- * window is a file:// page (or the localhost dev server), so those are allowed.
+ * packaged window is a file:// page, so `file:` is allowed, plus the renderer's dev
+ * server origin in development. `'self'` keeps Jupyter's own frames working.
  */
-const JUPYTER_FRAME_POLICY = `{"headers":{"Content-Security-Policy":"frame-ancestors 'self' file: http://localhost:* http://127.0.0.1:*"}}`
+function jupyterFramePolicy(devServerOrigin: string | null): string {
+  const ancestors = ["'self'", "file:", ...(devServerOrigin ? [devServerOrigin] : [])]
+  return JSON.stringify({
+    headers: { "Content-Security-Policy": `frame-ancestors ${ancestors.join(" ")}` },
+  })
+}
 
 /** Build the command that starts the notebook's server, bound to 127.0.0.1 with a token. */
 export function buildNotebookLaunch(input: NotebookLaunchInput): NotebookLaunch {
@@ -60,7 +68,7 @@ export function buildNotebookLaunch(input: NotebookLaunchInput): NotebookLaunch 
     "--ServerApp.port_retries=0",
     `--ServerApp.token=${input.token}`,
     `--ServerApp.root_dir=${input.cwd}`,
-    `--ServerApp.tornado_settings=${JUPYTER_FRAME_POLICY}`,
+    `--ServerApp.tornado_settings=${jupyterFramePolicy(input.devServerOrigin)}`,
   ]
   const path = input.relPath.split("/").map(encodeURIComponent).join("/")
   const route = app === "lab" ? "lab/tree" : "notebooks"

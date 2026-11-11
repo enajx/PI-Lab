@@ -89,6 +89,23 @@ describe("diary.open", () => {
     expect(myst.content).toBe(`---\ntitle: Lab notes\n---\n\n${today}\n`)
     await expect(stat(join(diaryDir(), "diary.qmd"))).rejects.toThrow()
   })
+
+  test("MyST with Windows line endings and blank lines before the front matter: no second front matter, heading below it", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const today = localDateHeading(new Date())
+    await mkdir(diaryDir(), { recursive: true })
+    await writeFile(
+      join(diaryDir(), "diary.md"),
+      "\r\n---\r\ntitle: Lab notes\r\n---\r\n\r\n# Diary\r\n\r\n## 2020-01-01\r\n\r\nOld.\r\n",
+    )
+
+    await h.caller.settings.updateEditor({ researchDiaryFormat: "myst" })
+    const myst = await h.caller.diary.open({ projectId: project.id })
+
+    expect(myst.content).toBe(
+      `\r\n---\r\ntitle: Lab notes\r\n---\r\n\r\n# Diary\r\n\r\n${today}\r\n\r\n## 2020-01-01\r\n\r\nOld.\r\n`,
+    )
+  })
 })
 
 describe("diary.save", () => {

@@ -89,6 +89,7 @@ describe("resolvePythonToolEnvironment", () => {
       uvx: join(binDir, "uvx"),
       label: "PI Lab copy (uvx)",
       jupyterApp: "lab",
+      fallbackReason: null,
     })
   })
 
@@ -104,7 +105,21 @@ describe("resolvePythonToolEnvironment", () => {
       uv: join(binDir, "uv"),
       label: "Project uv environment (uv run)",
       jupyterApp: null,
+      fallbackReason: null,
     })
+  })
+
+  test("says why it fell back to a PI Lab copy when the project's Python fails to run (stand-in python)", async () => {
+    const python = await writeScript(
+      join(projectDir, ".venv", "bin", "python"),
+      "echo 'dyld: Library not loaded: libpython3.12.dylib' >&2\nexit 6",
+    )
+    await standInUv()
+    const result = await resolve("jupyter")
+    expect(result.kind).toBe("pi-lab")
+    const reason = result.kind === "pi-lab" ? (result.fallbackReason ?? "") : ""
+    expect(reason).toContain(python)
+    expect(reason).toContain("dyld: Library not loaded: libpython3.12.dylib")
   })
 
   test("reports a missing uv with how to install it", async () => {

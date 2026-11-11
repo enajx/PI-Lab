@@ -113,6 +113,11 @@ interface CentralPanelProps {
    * it out. With it, the status bar shows even when no tab is focused.
    */
   paperFolderItem?: ReactNode
+  /**
+   * The panel is kept mounted but not shown (a collapsed Sessions panel with
+   * notebook tabs, whose pages must stay loaded). Its keyboard shortcuts are off.
+   */
+  hidden?: boolean
 }
 
 /**
@@ -144,6 +149,7 @@ export function CentralPanel({
   sourceRequest,
   leftColumn,
   paperFolderItem,
+  hidden,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -174,12 +180,23 @@ export function CentralPanel({
   // Tab × closes a file tab, asking first when it has unsaved changes.
   const closeFilePrompt = useCloseFilePrompt({ controller, onSaveUntitled })
   const closeSessionPrompt = useCloseSessionPrompt()
+  // Closing a notebook tab stops its server and loses edits not saved in the page.
+  const requestCloseNotebook = (id: string): void => {
+    const notebook = controller.notebooks.find((pane) => pane.id === id)
+    if (!notebook) return
+    closeSessionPrompt.requestClose({
+      kind: "notebook",
+      label: basename(notebook.relPath),
+      close: () => controller.closeNotebook(id),
+    })
+  }
 
   // Ctrl+W and macOS Cmd+W (from the native menu) close the active tab: a dirty
   // file, an agent, a terminal or the Run tab asks first. Returns false when no
   // tab is active, so Cmd+W does nothing; it never hides the app.
   const closeActiveTabRef = useRef<() => boolean>(() => false)
   closeActiveTabRef.current = () => {
+    if (hidden) return false
     // A close prompt is already asking: the shortcut does nothing more.
     if (closeFilePrompt.prompt || closeSessionPrompt.prompt) return true
     if (runFocusedNow && belowEditorRun) {
@@ -195,7 +212,7 @@ export function CentralPanel({
       return true
     }
     if (active?.type === "notebook") {
-      controller.closeNotebook(active.id)
+      requestCloseNotebook(active.id)
       return true
     }
     const session =
@@ -208,7 +225,11 @@ export function CentralPanel({
     })
     return true
   }
-  useEffect(() => registerCloseTabHandler(() => closeActiveTabRef.current()), [])
+  // A hidden panel leaves Cmd+W to the view that is shown.
+  useEffect(
+    () => (hidden ? undefined : registerCloseTabHandler(() => closeActiveTabRef.current())),
+    [hidden],
+  )
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -233,7 +254,7 @@ export function CentralPanel({
   /** Split the focused terminal; returns false (doing nothing) when no terminal has focus. */
   const splitFocusedRef = useRef<(direction: "right" | "below") => boolean>(() => false)
   // The finder or agent chooser is open: the shortcut would split behind it.
-  const splitBlocked = quickOpen || controller.agentChooserOpen
+  const splitBlocked = hidden || quickOpen || controller.agentChooserOpen
   splitFocusedRef.current = (direction) => {
     if (splitBlocked || runFocusedNow || active?.type !== "session") return false
     const session = sessions.find((pane) => pane.id === active.id)
@@ -268,7 +289,7 @@ export function CentralPanel({
   // finder, the agent chooser or another dialog, menu or popover is open.
   const openNewSession = useOpenNewSession(controller)
   useNewSessionShortcut(() => {
-    if (quickOpen || controller.agentChooserOpen || overlayIsOpen()) return false
+    if (hidden || quickOpen || controller.agentChooserOpen || overlayIsOpen()) return false
     return openNewSession()
   })
 
@@ -351,7 +372,7 @@ export function CentralPanel({
             label={basename(notebook.relPath)}
             active={visible}
             onSelect={activate}
-            onClose={() => controller.closeNotebook(notebook.id)}
+            onClose={() => requestCloseNotebook(notebook.id)}
           />
         ),
         content: () => <NotebookSurface pane={notebook} workspaceId={workspaceId} />,

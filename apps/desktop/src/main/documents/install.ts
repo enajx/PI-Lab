@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process"
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -27,6 +28,25 @@ export const QUARTO_MACOS_ARTIFACT: ReleaseArtifact = {
   url: "https://github.com/quarto-dev/quarto-cli/releases/download/v1.11.9/quarto-1.11.9-macos.tar.gz",
   size: 236802854,
   sha256: "9fc24881f637612d80edbf16d62f01001fc7945a9a0c6ac247199002901e0a6d",
+}
+
+/** The mystmd npm version PI Lab installs (the latest release when this was pinned). */
+export const MYSTMD_VERSION = "1.12.0"
+
+/**
+ * Move the folder `staged` to `target`. An old `target` is first renamed to a
+ * temporary name and removed only after the move worked; when the move fails it
+ * is put back, so a failed update keeps the old install.
+ */
+export async function swapInto(staged: string, target: string): Promise<void> {
+  const backup = `${target}.pi-lab-old-${randomBytes(4).toString("hex")}`
+  const hadOld = existsSync(target)
+  if (hadOld) await rename(target, backup)
+  await rename(staged, target).catch(async (error: unknown) => {
+    if (hadOld) await rename(backup, target)
+    throw error
+  })
+  if (hadOld) await rm(backup, { recursive: true, force: true })
 }
 
 /** Download `artifact` with a timeout and a size limit, reporting the downloaded fraction. */
@@ -100,9 +120,7 @@ export async function installQuarto(options: QuartoInstallOptions): Promise<stri
     await run("tar", ["-xzf", archive, "-C", extracted], { timeout: 300_000 })
     options.onProgress("validating", null)
     await run(join(extracted, "bin", "quarto"), ["--version"], { timeout: 60_000 })
-    const target = join(toolsDir, "quarto")
-    await rm(target, { recursive: true, force: true })
-    await rename(extracted, target)
+    await swapInto(extracted, join(toolsDir, "quarto"))
     return piLabToolPath(toolsDir, "quarto")
   })()
   return installed.finally(finish)
@@ -117,29 +135,37 @@ export interface MystInstallOptions {
 }
 
 /**
- * Install the mystmd npm package into `<toolsDir>/mystmd` with
- * `npm install --prefix`, never globally. Needs Node.js. Returns the path of
- * the `myst` command, after checking that `myst --version` runs.
+ * Install mystmd {@link MYSTMD_VERSION} into `<toolsDir>/mystmd` with
+ * `npm install --prefix`, never globally: npm installs into a staging folder,
+ * `myst --version` is checked there, and only then it replaces an older install.
+ * Needs Node.js. Returns the path of the `myst` command.
  */
 export async function installMystmd(options: MystInstallOptions): Promise<string> {
-  if (!options.npmPath)
+  const npm = options.npmPath
+  if (!npm)
     throw new Error(
       "Installing MyST needs Node.js (the npm command), which was not found. Install Node.js from https://nodejs.org, then try again.",
     )
-  const prefix = join(options.toolsDir, "mystmd")
-  await mkdir(prefix, { recursive: true })
-  options.onProgress("installing", null)
-  await run(options.npmPath, ["install", "--prefix", prefix, "mystmd", "--no-audit", "--no-fund"], {
-    env: options.env,
-    timeout: 600_000,
-    maxBuffer: 16 * 1024 ** 2,
-  }).catch((error: Error & { stdout?: string; stderr?: string }) => {
-    throw new Error(
-      `npm could not install mystmd.\n${error.stderr ?? ""}${error.stdout ?? ""}`.trim(),
-    )
-  })
-  options.onProgress("validating", null)
-  const path = piLabToolPath(options.toolsDir, "myst")
-  await run(path, ["--version"], { env: options.env, timeout: 60_000 })
-  return path
+  await mkdir(options.toolsDir, { recursive: true })
+  const staging = await mkdtemp(join(options.toolsDir, "mystmd.pi-lab-stage-"))
+  const installed = (async () => {
+    options.onProgress("installing", null)
+    await run(
+      npm,
+      ["install", "--prefix", staging, `mystmd@${MYSTMD_VERSION}`, "--no-audit", "--no-fund"],
+      { env: options.env, timeout: 600_000, maxBuffer: 16 * 1024 ** 2 },
+    ).catch((error: Error & { stdout?: string; stderr?: string }) => {
+      throw new Error(
+        `npm could not install mystmd.\n${error.stderr ?? ""}${error.stdout ?? ""}`.trim(),
+      )
+    })
+    options.onProgress("validating", null)
+    await run(join(staging, "node_modules", ".bin", "myst"), ["--version"], {
+      env: options.env,
+      timeout: 60_000,
+    })
+    await swapInto(staging, join(options.toolsDir, "mystmd"))
+    return piLabToolPath(options.toolsDir, "myst")
+  })()
+  return installed.finally(() => rm(staging, { recursive: true, force: true }))
 }

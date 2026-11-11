@@ -443,8 +443,10 @@ export function ScienceAnalysis({
         </>
       }
     >
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* The file list and preview keep 36rem; the diary and Sessions panels narrow
+          first, and the diary hides when even their minimum widths do not fit. */}
+      <div className="group/analysis @container/analysis flex min-h-0 flex-1 overflow-x-auto">
+        <div className="flex min-h-0 min-w-[36rem] flex-1 flex-col">
           {projects.length === 0 ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
               <NoProjectsState />
@@ -622,7 +624,7 @@ export function ScienceAnalysis({
               </div>
 
               {/* Right column: preview pane for the selected file. */}
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="flex min-h-0 min-w-64 flex-1 flex-col overflow-hidden">
                 {selectedProjectId && selectedRelPath ? (
                   <AnalysisPreview
                     projectId={selectedProjectId}
@@ -642,7 +644,12 @@ export function ScienceAnalysis({
           )}
         </div>
         {researchDiaryOpen && selectedProjectId ? (
-          <ResearchDiaryPanel key={selectedProjectId} projectId={selectedProjectId} />
+          <div
+            data-testid="analysis-research-diary-slot"
+            className="flex min-h-0 min-w-0 shrink @max-[53.5rem]/analysis:hidden @max-[73rem]/analysis:group-has-[[data-testid=science-sessions][data-collapsed=false]]/analysis:hidden"
+          >
+            <ResearchDiaryPanel key={selectedProjectId} projectId={selectedProjectId} />
+          </div>
         ) : null}
         <ScienceSessionPanel
           view="analysis"

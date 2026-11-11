@@ -1,4 +1,6 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { piLabToolPath } from "../../documents/tools"
@@ -73,6 +75,46 @@ describe("documents.render", () => {
     expect(html).toContain("rendered render report.qmd --to html --output-dir _render/report.qmd")
     const exclude = await readFile(join(h.repoDir, ".git", "info", "exclude"), "utf8")
     expect(exclude.split("\n")).toContain("/results/_render/")
+    expect(exclude.split("\n")).toContain("/results/.quarto/")
+  })
+
+  test.skipIf(!existsSync("/usr/local/bin/quarto"))(
+    "renders a .qmd inside a Quarto project (_quarto.yml above it) and finds the output (real quarto)",
+    async () => {
+      const project = await h.caller.projects.open({ path: h.repoDir })
+      await writeProjectFile("book/_quarto.yml", "project:\n  type: website\n  output-dir: _site\n")
+      await writeProjectFile("book/ch/a.qmd", "---\ntitle: Chapter A\n---\n\nHello from A\n")
+
+      const result = await h.caller.documents.render({
+        projectId: project.id,
+        relPath: "book/ch/a.qmd",
+      })
+
+      expect(result.log).toContain("Output created")
+      expect(result.ok).toBe(true)
+      expect(result.outputRelPath).toBe("book/ch/_render/a.qmd/ch/a.html")
+      const html = await readFile(join(h.repoDir, String(result.outputRelPath)), "utf8")
+      expect(html).toContain("Hello from A")
+      expect(existsSync(join(h.repoDir, "book", "_site"))).toBe(false)
+      const exclude = (await readFile(join(h.repoDir, ".git", "info", "exclude"), "utf8")).split(
+        "\n",
+      )
+      expect(exclude).toContain("/book/ch/_render/")
+      expect(exclude).toContain("/book/.quarto/")
+    },
+    120_000,
+  )
+
+  test("refuses a file whose real path is outside the project (a symlink)", async () => {
+    await standInQuarto()
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const outside = await mkdtemp(join(tmpdir(), "pi-lab-outside-"))
+    await writeFile(join(outside, "secret.qmd"), "# Secret\n")
+    await symlink(join(outside, "secret.qmd"), join(h.repoDir, "linked.qmd"))
+    await expect(
+      h.caller.documents.render({ projectId: project.id, relPath: "linked.qmd" }),
+    ).rejects.toThrow(/escapes its allowed directory/)
+    await rm(outside, { recursive: true, force: true })
   })
 
   test("runs python blocks with the project's .venv when it has Jupyter (stand-in python)", async () => {
@@ -168,5 +210,23 @@ describe("documents.openInBrowser", () => {
     })
 
     expect(opened).toEqual([join(h.repoDir, "_render/a.qmd/a.html")])
+  })
+
+  test("only opens .html files under a _render folder of the project", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await writeProjectFile("notes/page.html", "<h1>not rendered by PI Lab</h1>")
+    await writeProjectFile("_render/a.qmd/run.sh", "echo hi")
+    const outside = await mkdtemp(join(tmpdir(), "pi-lab-outside-"))
+    await writeFile(join(outside, "x.html"), "<h1>x</h1>")
+    await mkdir(join(h.repoDir, "_render", "b.qmd"), { recursive: true })
+    await symlink(join(outside, "x.html"), join(h.repoDir, "_render", "b.qmd", "x.html"))
+
+    for (const relPath of ["notes/page.html", "_render/a.qmd/run.sh", "_render/b.qmd/x.html"]) {
+      await expect(
+        h.caller.documents.openInBrowser({ projectId: project.id, relPath }),
+      ).rejects.toThrow()
+    }
+    expect(opened).toEqual([])
+    await rm(outside, { recursive: true, force: true })
   })
 })

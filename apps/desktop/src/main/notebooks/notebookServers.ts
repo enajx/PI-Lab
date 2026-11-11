@@ -1,9 +1,10 @@
-import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { isPortInUse } from "@pi-lab/port-scanner"
+import { ProcessGroup } from "../runtime/processGroup"
 import { buildNotebookLaunch, NOTEBOOK_HOST, type NotebookLaunchInput } from "./notebookLaunch"
 
-export interface StartNotebookInput extends Omit<NotebookLaunchInput, "port" | "token"> {
+export interface StartNotebookInput
+  extends Omit<NotebookLaunchInput, "port" | "token" | "devServerOrigin"> {
   /** Chosen by the renderer for its tab; stop and Open in browser name the server by it. */
   serverId: string
   /** Environment for the server process (PATH must reach uv for marimo's sandbox mode). */
@@ -25,16 +26,24 @@ export interface NotebookServerPort {
   openInBrowser(serverId: string): Promise<void>
   /** True when a notebook server (running or starting) uses this port. */
   servesPort(port: number): boolean
-  /** Stop every server at once (app quit). */
+  /** How many servers run or start (the quit dialog names them). */
+  runningCount(): number
+  /**
+   * Stop every server (SIGTERM, then SIGKILL after a grace) and cancel starts in
+   * progress: the window reloaded or closed, or PI Lab quits.
+   */
+  stopAll(): Promise<void>
+  /**
+   * Last call at app exit: SIGTERM every server and refuse new starts. The process
+   * group watcher sends SIGKILL after a grace once PI Lab has exited.
+   */
   dispose(): void
 }
 
 interface ManagedServer {
   port: number
-  child: ChildProcess
-  exited: Promise<void>
+  group: ProcessGroup
   output: string
-  ended: boolean
   ready: boolean
   stopped: boolean
   url: string
@@ -49,50 +58,54 @@ export class NotebookServers implements NotebookServerPort {
   readonly #closed = new Set<string>()
   readonly #ports: { start: number; end: number }
   readonly #startTimeoutMs: number
+  readonly #devServerOrigin: string | null
   readonly #openUrl: (url: string) => Promise<void>
+  /** Raised by stopAll and dispose; a start that sees it change spawns nothing. */
+  #generation = 0
+  #disposed = false
 
   /**
    * @param ports the port range servers are started on.
-   * @param startTimeoutMs how long a server may take to print its URL (a first
-   *   uvx run downloads the tool, which can take minutes).
+   * @param startTimeoutMs how long a server may take to print its URL and answer
+   *   (a first uvx run downloads the tool, which can take minutes).
+   * @param devServerOrigin the renderer's dev server origin, which may show Jupyter
+   *   in a frame besides the packaged `file:` page; null in a packaged build.
    * @param openUrl opens a URL in the system browser (Electron's shell.openExternal).
    */
   constructor(
     ports: { start: number; end: number },
     startTimeoutMs: number,
+    devServerOrigin: string | null,
     openUrl: (url: string) => Promise<void>,
   ) {
     this.#ports = ports
     this.#startTimeoutMs = startTimeoutMs
+    this.#devServerOrigin = devServerOrigin
     this.#openUrl = openUrl
   }
 
   async start(input: StartNotebookInput): Promise<{ url: string }> {
     if (this.#servers.has(input.serverId)) throw new Error("This notebook server is already open")
+    const generation = this.#generation
+    const cancelled = (): boolean =>
+      this.#disposed || generation !== this.#generation || this.#closed.has(input.serverId)
+    if (cancelled()) throw new Error("The notebook was closed while its server was starting")
     const port = await this.#freePort()
-    if (this.#closed.has(input.serverId)) {
-      throw new Error("The notebook was closed while its server was starting")
-    }
+    if (cancelled()) throw new Error("The notebook was closed while its server was starting")
     const token = randomBytes(24).toString("hex")
     const { serverId, env, ...launchInput } = input
-    const launch = buildNotebookLaunch({ ...launchInput, port, token })
-    const child = spawn(launch.command, launch.args, {
-      cwd: input.cwd,
-      env,
-      detached: process.platform !== "win32",
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+    const launch = buildNotebookLaunch({
+      ...launchInput,
+      port,
+      token,
+      devServerOrigin: this.#devServerOrigin,
     })
-    let resolveExited: () => void = () => {}
-    const exited = new Promise<void>((resolveExit) => {
-      resolveExited = resolveExit
-    })
+    const group = new ProcessGroup(launch.command, launch.args, { cwd: input.cwd, env })
+    const child = group.child
     const managed: ManagedServer = {
       port,
-      child,
-      exited,
+      group,
       output: "",
-      ended: false,
       ready: false,
       stopped: false,
       url: launch.url,
@@ -107,18 +120,12 @@ export class NotebookServers implements NotebookServerPort {
           resolveReady()
         }
       }
-      child.stdout?.on("data", onOutput)
-      child.stderr?.on("data", onOutput)
-      void exited.then(resolveReady)
-    })
-    child.once("exit", () => {
-      managed.ended = true
-      resolveExited()
+      child.stdout.on("data", onOutput)
+      child.stderr.on("data", onOutput)
+      void group.exited.then(resolveReady)
     })
     child.once("error", (error) => {
       managed.output = `${managed.output}\n${error.message}`
-      managed.ended = true
-      resolveExited()
     })
 
     // marimo's sandbox mode prints the URL before its server listens, so a printed
@@ -131,11 +138,15 @@ export class NotebookServers implements NotebookServerPort {
     if (managed.stopped) {
       throw new Error("The notebook was closed while its server was starting")
     }
-    if (!managed.ready || managed.ended) {
+    // A printed URL is not enough: the server must also answer before the timeout.
+    if (timedOut || !managed.ready || group.ended) {
+      managed.stopped = true
       if (this.#servers.get(serverId) === managed) this.#servers.delete(serverId)
-      await terminate(managed)
+      await group.stop(STOP_GRACE_MS)
       const reason = timedOut
-        ? `The notebook server did not start within ${Math.round(this.#startTimeoutMs / 1000)} seconds.`
+        ? managed.ready
+          ? `The notebook server printed its address but did not start within ${Math.round(this.#startTimeoutMs / 1000)} seconds.`
+          : `The notebook server did not start within ${Math.round(this.#startTimeoutMs / 1000)} seconds.`
         : "The notebook server stopped before it was ready."
       const detail = managed.output.trim()
       throw new Error(detail ? `${reason}\n${detail}` : reason)
@@ -149,16 +160,20 @@ export class NotebookServers implements NotebookServerPort {
     if (!managed) return
     this.#servers.delete(serverId)
     managed.stopped = true
-    await terminate(managed)
+    await managed.group.stop(STOP_GRACE_MS)
   }
 
   urlOf(serverId: string): string | null {
     const managed = this.#servers.get(serverId)
-    return managed?.ready && !managed.ended ? managed.url : null
+    return managed?.ready && !managed.group.ended ? managed.url : null
   }
 
   servesPort(port: number): boolean {
-    return [...this.#servers.values()].some((server) => server.port === port && !server.ended)
+    return [...this.#servers.values()].some((server) => server.port === port && !server.group.ended)
+  }
+
+  runningCount(): number {
+    return [...this.#servers.values()].filter((server) => !server.group.ended).length
   }
 
   async openInBrowser(serverId: string): Promise<void> {
@@ -167,10 +182,24 @@ export class NotebookServers implements NotebookServerPort {
     await this.#openUrl(url)
   }
 
+  async stopAll(): Promise<void> {
+    this.#generation += 1
+    const running = [...this.#servers.values()]
+    this.#servers.clear()
+    await Promise.all(
+      running.map((managed) => {
+        managed.stopped = true
+        return managed.group.stop(STOP_GRACE_MS)
+      }),
+    )
+  }
+
   dispose(): void {
+    this.#disposed = true
+    this.#generation += 1
     for (const managed of this.#servers.values()) {
       managed.stopped = true
-      killTree(managed.child, "SIGKILL")
+      managed.group.signal("SIGTERM")
     }
     this.#servers.clear()
   }
@@ -191,7 +220,7 @@ const ANSWER_POLL_MS = 200
 
 /** Poll the server's root until it answers, or until it ends. Marks it not ready if it ends. */
 async function waitUntilAnswering(managed: ManagedServer, port: number): Promise<void> {
-  while (managed.ready && !managed.ended && !managed.stopped) {
+  while (managed.ready && !managed.group.ended && !managed.stopped) {
     const answered = await fetch(`http://${NOTEBOOK_HOST}:${port}/`, { redirect: "manual" }).then(
       () => true,
       () => false,
@@ -205,30 +234,37 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
 }
 
-/** SIGTERM the server's process group, then SIGKILL it if it is still running. */
-async function terminate(managed: ManagedServer): Promise<void> {
-  if (managed.ended) return
-  killTree(managed.child, "SIGTERM")
-  const graceful = await Promise.race([
-    managed.exited.then(() => true),
-    delay(STOP_GRACE_MS).then(() => false),
-  ])
-  if (!graceful) {
-    killTree(managed.child, "SIGKILL")
-    await managed.exited
-  }
+/** The events of a BrowserWindow and its webContents that {@link stopNotebooksWithWindow} uses. */
+interface WindowEvents {
+  on(event: "closed", listener: () => void): unknown
+}
+interface WindowContentsEvents {
+  on(
+    event: "did-start-navigation",
+    listener: (details: { isMainFrame: boolean; isSameDocument: boolean }) => void,
+  ): unknown
+  on(event: "render-process-gone", listener: () => void): unknown
 }
 
-function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  const pid = child.pid
-  if (!pid) return
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true })
-    return
+/**
+ * The notebook tabs live in the window's page, so stop every server when that page
+ * goes away: a new main-frame page load (reload, or a switch to the quick editor),
+ * a renderer crash, or the window closing (also when PI Lab moves to the
+ * background). A frame's own navigation (a notebook page loading) does not count.
+ */
+export function stopNotebooksWithWindow(
+  window: WindowEvents,
+  contents: WindowContentsEvents,
+  stopAll: () => Promise<void>,
+): void {
+  const stop = (): void => {
+    stopAll().catch((error: unknown) => {
+      console.error("[pi-lab] could not stop the notebook servers", error)
+    })
   }
-  try {
-    process.kill(-pid, signal)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
-  }
+  contents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) stop()
+  })
+  contents.on("render-process-gone", stop)
+  window.on("closed", stop)
 }

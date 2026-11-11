@@ -111,7 +111,12 @@ function harnessContext(): AppContext {
       runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
     }),
     analysisInteractive: h.analysisInteractive,
-    notebookServers: new NotebookServers({ start: 42_800, end: 42_899 }, 10_000, async () => {}),
+    notebookServers: new NotebookServers(
+      { start: 42_800, end: 42_899 },
+      10_000,
+      null,
+      async () => {},
+    ),
     notifications: createNotificationBrokers(),
     activityStatus: { subscribe: () => () => {}, projectsChanged: () => {} },
     activityMonitor: h.activityMonitor,

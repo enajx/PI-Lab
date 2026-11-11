@@ -79,7 +79,12 @@ beforeEach(async () => {
       close: async () => {},
       dispose: () => {},
     },
-    notebookServers: new NotebookServers({ start: 42_800, end: 42_899 }, 10_000, async () => {}),
+    notebookServers: new NotebookServers(
+      { start: 42_800, end: 42_899 },
+      10_000,
+      null,
+      async () => {},
+    ),
     notifications,
     activityStatus: { subscribe: () => () => {}, projectsChanged: () => {} },
     activityMonitor: {

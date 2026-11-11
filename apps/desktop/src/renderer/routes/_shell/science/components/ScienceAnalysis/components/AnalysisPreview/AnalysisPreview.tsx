@@ -63,7 +63,7 @@ export function AnalysisPreview({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-border border-b px-4 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-border border-b px-4 py-2">
         <span
           data-testid="analysis-preview-path"
           className="min-w-0 flex-1 truncate font-mono text-foreground text-xs"

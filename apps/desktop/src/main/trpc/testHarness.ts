@@ -411,7 +411,12 @@ export async function createHarness(
     discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
     resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,
     analysisInteractive,
-    notebookServers: new NotebookServers({ start: 42_800, end: 42_899 }, 10_000, async () => {}),
+    notebookServers: new NotebookServers(
+      { start: 42_800, end: 42_899 },
+      10_000,
+      null,
+      async () => {},
+    ),
     notifications,
     activityMonitor,
     activityStatus: new ActivityStatusFeed(db, activityRegistry),

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { afterEach, describe, expect, test } from "vitest"
-import { installMystmd, installQuarto } from "./install"
+import { installMystmd, installQuarto, MYSTMD_VERSION, swapInto } from "./install"
 import { piLabToolPath } from "./tools"
 
 /**
@@ -94,6 +94,27 @@ describe("installQuarto", () => {
   })
 })
 
+describe("swapInto", () => {
+  test("replaces the old install with the new one", async () => {
+    const dir = await tempDir()
+    await mkdir(join(dir, "new"))
+    await writeFile(join(dir, "new", "version"), "2")
+    await mkdir(join(dir, "tool"))
+    await writeFile(join(dir, "tool", "version"), "1")
+    await swapInto(join(dir, "new"), join(dir, "tool"))
+    expect(await readFile(join(dir, "tool", "version"), "utf8")).toBe("2")
+  })
+
+  test("a failed move keeps the old install in place", async () => {
+    const dir = await tempDir()
+    await mkdir(join(dir, "tool"))
+    await writeFile(join(dir, "tool", "version"), "1")
+    // The staged folder is missing, so moving it in fails.
+    await expect(swapInto(join(dir, "missing"), join(dir, "tool"))).rejects.toThrow()
+    expect(await readFile(join(dir, "tool", "version"), "utf8")).toBe("1")
+  })
+})
+
 describe("installMystmd", () => {
   test("runs npm install with the PI Lab tools folder as its prefix", async () => {
     const toolsDir = join(await tempDir(), "tools")
@@ -114,10 +135,33 @@ describe("installMystmd", () => {
     })
 
     expect(path).toBe(piLabToolPath(toolsDir, "myst"))
-    expect((await readFile(join(bin, "args"), "utf8")).trim()).toBe(
-      `install --prefix ${join(toolsDir, "mystmd")} mystmd --no-audit --no-fund`,
-    )
+    const args = (await readFile(join(bin, "args"), "utf8")).trim().split(" ")
+    expect(args[0]).toBe("install")
+    expect(args[1]).toBe("--prefix")
+    expect(args[2]?.startsWith(join(toolsDir, "mystmd.pi-lab-stage-"))).toBe(true)
+    expect(args.slice(3)).toEqual([`mystmd@${MYSTMD_VERSION}`, "--no-audit", "--no-fund"])
+    expect(MYSTMD_VERSION).toBe("1.12.0")
     expect((await run(path, ["--version"])).stdout.trim()).toBe("v1.12.0")
+  })
+
+  test("a failed npm install keeps the previous install", async () => {
+    const toolsDir = join(await tempDir(), "tools")
+    const old = piLabToolPath(toolsDir, "myst")
+    await mkdir(join(old, ".."), { recursive: true })
+    await writeFile(old, "#!/bin/sh\necho v1.0.0\n", { mode: 0o755 })
+    const bin = await tempDir()
+    const npm = join(bin, "npm")
+    await writeFile(npm, "#!/bin/sh\necho 'npm ERR! network down' >&2\nexit 1\n")
+    await chmod(npm, 0o755)
+    await expect(
+      installMystmd({
+        toolsDir,
+        npmPath: npm,
+        env: { PATH: `${bin}:/usr/bin:/bin` },
+        onProgress: () => {},
+      }),
+    ).rejects.toThrow(/network down/)
+    expect((await run(old, ["--version"])).stdout.trim()).toBe("v1.0.0")
   })
 
   test("says Node.js is needed when npm is not found", async () => {

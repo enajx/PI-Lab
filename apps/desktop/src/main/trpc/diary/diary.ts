@@ -64,27 +64,25 @@ export function localDateHeading(date: Date): string {
 
 /**
  * Put `heading` at the top of `content` unless a line already equals it. The
- * heading goes below a leading YAML front matter block and a leading `# ` title
- * line, when present.
+ * heading goes below a leading YAML front matter block (see splitFrontMatter) and
+ * a leading `# ` title line, when present. Keeps the file's `\r\n` line endings.
  */
 export function withTodayHeading(content: string, heading: string): string {
-  const lines = content.split("\n")
-  if (lines.some((line) => line.trimEnd() === heading)) return content
+  if (content.split("\n").some((line) => line.trimEnd() === heading)) return content
+  const eol = content.includes("\r\n") ? "\r\n" : "\n"
+  const { block, body } = splitFrontMatter(content)
+  const lines = body.split(/\r?\n/)
   let index = 0
   while (index < lines.length && lines[index]?.trim() === "") index += 1
-  if (lines[index] === "---") {
-    const close = lines.findIndex((line, at) => at > index && line === "---")
-    if (close !== -1) index = close + 1
-    while (index < lines.length && lines[index]?.trim() === "") index += 1
-  }
   if (lines[index]?.startsWith("# ")) index += 1
-  const head = lines.slice(0, index).join("\n").trimEnd()
+  else index = 0
+  const head = `${block}${lines.slice(0, index).join(eol)}`.trimEnd()
   const rest = lines
     .slice(index)
-    .join("\n")
+    .join(eol)
     .replace(/^\s*\n/, "")
-  const top = head === "" ? "" : `${head}\n\n`
-  return `${top}${heading}\n\n${rest}`
+  const top = head.trim() === "" ? "" : `${head}${eol}${eol}`
+  return `${top}${heading}${eol}${eol}${rest}`
 }
 
 /** The project's folder, or a clean NOT_FOUND. */

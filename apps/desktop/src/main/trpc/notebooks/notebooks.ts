@@ -122,7 +122,10 @@ export const notebooksRouter = router({
       return {
         url,
         tool,
-        environmentLabel: environment.label,
+        environmentLabel:
+          environment.kind !== "project" && environment.fallbackReason
+            ? `${environment.label}. The project's Python was not used: ${environment.fallbackReason}`
+            : environment.label,
         canAddToProject: environment.kind === "pi-lab" && (await canAddToolToProject(cwd)),
       }
     }),

@@ -141,9 +141,50 @@ describe("Open notebook in Analysis", () => {
       "Resolved 90 packages",
     )
 
+    // Closing asks first, since the server stops and unsaved edits in the page are lost.
     fireEvent.click(within(tab).getByTestId("central-tab-close"))
+    const prompt = await screen.findByTestId("close-session-prompt")
+    expect(prompt.textContent).toContain(
+      "Save the notebook in its tab first; closing stops its server.",
+    )
+    fireEvent.click(within(prompt).getByText("Cancel"))
+    expect(screen.queryByTestId("close-session-prompt")).toBeNull()
+    expect(stop).not.toHaveBeenCalled()
+    expect(screen.getByTestId("notebook-frame")).toBe(frame)
+
+    fireEvent.click(within(tab).getByTestId("central-tab-close"))
+    fireEvent.click(within(await screen.findByTestId("close-session-prompt")).getByText("Close"))
     await waitFor(() => expect(stop).toHaveBeenCalledWith({ serverId }))
     expect(screen.queryByTestId("notebook-frame")).toBeNull()
+  })
+
+  test("collapsing the Sessions panel keeps the notebook page and its server", async () => {
+    const stop = vi.fn((_input: unknown) => undefined)
+    renderAnalysis(
+      handlers({
+        "notebooks.start": () => ({
+          url: "http://127.0.0.1:42700/lab/tree/results/run/analysis.ipynb?token=t",
+          tool: "jupyter",
+          environmentLabel: "PI Lab copy (uvx)",
+          canAddToProject: false,
+        }),
+        "notebooks.stop": stop,
+      }),
+    )
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+    fireEvent.click(await screen.findByTestId("analysis-open-notebook"))
+    const frame = await screen.findByTestId("notebook-frame")
+
+    fireEvent.click(screen.getByTestId("science-sessions-collapse"))
+    expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("true")
+    // The page stays loaded (hidden), so its unsaved edits are kept.
+    expect(screen.getByTestId("notebook-frame")).toBe(frame)
+    expect(frame.closest("[hidden]")).not.toBeNull()
+    expect(stop).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId("science-sessions-expand"))
+    expect(screen.getByTestId("notebook-frame")).toBe(frame)
+    expect(frame.closest("[hidden]")).toBeNull()
   })
 
   test("a notebook server that cannot start shows why in its tab", async () => {

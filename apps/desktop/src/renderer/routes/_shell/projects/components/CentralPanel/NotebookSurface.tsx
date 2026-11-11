@@ -48,6 +48,7 @@ export function NotebookSurface({
       <div className="flex shrink-0 items-center gap-2 border-border border-b px-3 py-1.5 text-xs">
         <span
           data-testid="notebook-environment"
+          title={pane.environmentLabel ?? undefined}
           className="min-w-0 flex-1 truncate text-muted-foreground"
         >
           {toolName}

@@ -55,6 +55,13 @@ test.beforeEach(async () => {
     join(repoDir, "results", "run", "analysis.ipynb"),
     JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells: [] }),
   )
+  // An HTML report whose script tries to reach a server: probe(url) answers "reached" or "blocked".
+  await writeFile(
+    join(repoDir, "results", "run", "probe.html"),
+    `<!doctype html><p id="ready">Probe report</p><script>
+window.probe = (url) => fetch(url, { mode: "no-cors", credentials: "include" }).then(() => "reached", () => "blocked")
+</script>`,
+  )
   // Stand-in uvx: runs the stand-in server with the arguments PI Lab passes to uvx.
   const uvx = join(binDir, "uvx")
   await writeFile(uvx, `#!/bin/sh\nexec "${process.execPath}" "${SERVER_FIXTURE}" "$@"\n`)
@@ -76,6 +83,8 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
+  // PI Lab ignores a notebook page's beforeunload; leave Playwright's dialog alone.
+  if (!appClosed) (await app.firstWindow()).on("dialog", () => undefined)
   if (!appClosed) await app?.close()
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
@@ -111,6 +120,65 @@ test("quitting PI Lab stops a notebook tab's server, even when the notebook page
   await closed
   appClosed = true
   await expect.poll(() => alive(pid)).toBe(false)
+  // Stopped with SIGTERM first, so the server could shut down by itself.
+  expect(await readFile(markerPath, "utf8")).toContain(`stop:${pid}`)
+})
+
+test("reloading the window stops its notebook servers (stand-in uvx)", async () => {
+  const pid = await openNotebookTab()
+  const window = await app.firstWindow()
+  window.on("dialog", () => undefined)
+  await window.reload()
+  await expect.poll(() => alive(pid), { timeout: 10_000 }).toBe(false)
+})
+
+test("an HTML report in the same window cannot reach a notebook server; the notebook tab can (stand-in uvx)", async () => {
+  await openNotebookTab()
+  const window = await app.firstWindow()
+  const notebookUrl = await window.getByTestId("notebook-frame").getAttribute("src")
+  const origin = new URL(String(notebookUrl)).origin
+  const notebook = window.frames().find((each) => each.url().startsWith(origin))
+  expect(await notebook?.evaluate(async () => (await fetch("/api/contents")).ok)).toBe(true)
+
+  await window
+    .locator('[data-testid="analysis-file"][data-rel-path="results/run/probe.html"]')
+    .click()
+  await expect(
+    window.frameLocator('[data-testid="analysis-preview-html"]').locator("#ready"),
+  ).toBeVisible()
+  const report = window.frames().find((each) => each.url().startsWith("pi-lab-report:"))
+  const probe = (url: string) =>
+    report?.evaluate(
+      (target) => (window as unknown as { probe: (u: string) => Promise<string> }).probe(target),
+      url,
+    )
+  expect(await probe(`${origin}/api/contents`)).toBe("blocked")
+})
+
+test("with the research diary and Sessions panels open, the preview's Open notebook button is not covered", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1200, 800))
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await window
+    .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
+    .click()
+  const diaryToggle = window.getByTestId("analysis-research-diary")
+  if ((await diaryToggle.getAttribute("aria-pressed")) !== "true") await diaryToggle.click()
+  await expect(diaryToggle).toHaveAttribute("aria-pressed", "true")
+  await window.getByTestId("science-sessions-expand").click()
+  const button = window.getByTestId("analysis-open-notebook")
+  await expect(button).toBeVisible()
+  const uncovered = await button.evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    const points = [
+      [box.left + 2, box.top + box.height / 2],
+      [box.left + box.width / 2, box.top + box.height / 2],
+      [box.right - 2, box.top + box.height / 2],
+    ]
+    return points.every(([x, y]) => element.contains(document.elementFromPoint(x ?? 0, y ?? 0)))
+  })
+  expect(uncovered).toBe(true)
 })
 
 test("Open notebook runs a Jupyter server in a tab, and closing the tab stops it (stand-in uvx)", async () => {
@@ -140,7 +208,33 @@ test("Open notebook runs a Jupyter server in a tab, and closing the tab stops it
   expect(args.slice(0, 4)).toEqual(["--from", "jupyterlab", "jupyter", "lab"])
   expect(args).toContain("--ServerApp.ip=127.0.0.1")
 
+  // Closing asks first; Cancel keeps the tab and its server.
   await tab.getByTestId("central-tab-close").click()
+  const prompt = window.getByTestId("close-session-prompt")
+  await expect(prompt).toContainText(
+    "Save the notebook in its tab first; closing stops its server.",
+  )
+  await prompt.getByRole("button", { name: "Cancel" }).click()
+  await expect(tab).toHaveCount(1)
+  expect(alive(pid)).toBe(true)
+
+  // Collapsing the Sessions panel keeps the page (with its unsaved state) and its server.
+  const notebookFrame = () =>
+    window.frames().find((each) => each.url().startsWith("http://127.0.0.1:427"))
+  await notebookFrame()?.evaluate(() => {
+    ;(window as unknown as { unsaved: string }).unsaved = "edit"
+  })
+  await window.getByTestId("science-sessions-collapse").click()
+  await window.getByTestId("science-sessions-expand").click()
+  await expect(page.locator("#notebook-stand-in")).toBeVisible()
+  expect(
+    await notebookFrame()?.evaluate(() => (window as unknown as { unsaved?: string }).unsaved),
+  ).toBe("edit")
+  expect(alive(pid)).toBe(true)
+  expect(await readFile(markerPath, "utf8")).not.toContain(`stop:${pid}`)
+
+  await tab.getByTestId("central-tab-close").click()
+  await prompt.getByTestId("close-session-confirm").click()
   await expect(tab).toHaveCount(0)
   await expect.poll(async () => readFile(markerPath, "utf8")).toContain(`stop:${pid}`)
   await expect.poll(() => alive(pid)).toBe(false)

@@ -1,8 +1,8 @@
 // Stand-in for a Jupyter or marimo server, used by tests in place of the real tools.
 // It reads the port and token from the same arguments PI Lab passes to the real
 // tools, serves a small page on 127.0.0.1, and prints its URL the way the real tool
-// does. Like JupyterLab, the page asks before it is unloaded. With PI_LAB_TEST_NOTEBOOK_MARKER set it appends "start:<pid>", "args:<json>"
-// and "stop:<pid>" lines to that file.
+// does. Like JupyterLab, the page asks before it is unloaded. With PI_LAB_TEST_NOTEBOOK_MARKER set it appends "launch:<pid>" (on start),
+// "start:<pid>" (once listening), "args:<json>" and "stop:<pid>" lines to that file.
 const { appendFileSync } = require("node:fs")
 const { createServer } = require("node:http")
 
@@ -21,6 +21,8 @@ function option(name) {
   }
   return undefined
 }
+
+mark(`launch:${process.pid}`)
 
 if (process.env.PI_LAB_TEST_NOTEBOOK_FAIL) {
   process.stderr.write(`${process.env.PI_LAB_TEST_NOTEBOOK_FAIL}\n`)
