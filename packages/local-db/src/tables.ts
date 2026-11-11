@@ -670,7 +670,7 @@ export const settings = sqliteTable("settings", {
     .notNull()
     .default(true),
   /**
-   * The Quit dialog's "Remember Move to background": "ask" shows the dialog,
+   * The Quit dialog's "Remember option": "ask" shows the dialog,
    * "background" moves PI Lab to the background without asking. Quit cannot be
    * remembered (0034 moved a saved "quit" to "ask"). Settings resets it to "ask".
    */

@@ -16,7 +16,7 @@ export function hasRunningWork(work: QuitWork): boolean {
 type QuitChoice = "quit" | "background" | "cancel"
 
 /**
- * The Quit dialog choice saved with "Remember Move to background", or "ask" (the
+ * The Quit dialog choice saved with "Remember option", or "ask" (the
  * default). Quit is never remembered.
  */
 export type RememberedQuitChoice = "ask" | "background"
@@ -26,7 +26,7 @@ interface UserQuitDependencies {
   work(): Promise<QuitWork>
   /** Read after `work()`, which starts the full runtime that holds the setting. */
   remembered(): RememberedQuitChoice
-  /** The first Quit dialog: the chosen button and whether "Remember Move to background" is ticked. */
+  /** The first Quit dialog: the chosen button and whether "Remember option" is ticked. */
   choose(work: QuitWork): Promise<{ choice: QuitChoice; remember: boolean }>
   confirmRunning(work: QuitWork): Promise<QuitChoice>
   /** Save a ticked Move to background so later quits skip the dialogs. */

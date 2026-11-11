@@ -316,7 +316,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
     }
   })
 
-  test("Remember Move to background: the next quit skips the dialog, and Settings Ask every time brings it back", async () => {
+  test("Remember option: the next quit skips the dialog, and Settings Ask every time brings it back", async () => {
     test.setTimeout(150_000)
     let fixture: Fixture | null = null
     let closed = false
@@ -340,7 +340,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
 
       await requestQuit()
       await waitForDialog(pid, "Move to background")
-      await tick(pid, "Remember Move to background")
+      await tick(pid, "Remember option")
       await click(pid, "Move to background")
       await waitForDialogGone(pid, "Move to background")
       await expect.poll(isHidden).toBe(true)
