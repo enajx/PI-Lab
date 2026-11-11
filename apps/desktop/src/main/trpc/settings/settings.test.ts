@@ -70,6 +70,9 @@ describe("settings.get", () => {
       showHiddenFiles: true,
       confirmFileDelete: true,
       confirmOverleafCommit: true,
+      papersFolder: "~/Papers",
+      askPapersFolder: true,
+      researchDiaryFormat: "md",
     })
   })
 })
@@ -198,6 +201,9 @@ describe("settings.updateEditor", () => {
       showHiddenFiles: true,
       confirmFileDelete: true,
       confirmOverleafCommit: true,
+      papersFolder: "~/Papers",
+      askPapersFolder: true,
+      researchDiaryFormat: "md",
     })
 
     // The patch persisted and `get` reflects it.
@@ -222,6 +228,9 @@ describe("settings.updateEditor", () => {
       showHiddenFiles: true,
       confirmFileDelete: true,
       confirmOverleafCommit: true,
+      papersFolder: "~/Papers",
+      askPapersFolder: true,
+      researchDiaryFormat: "md",
     })
   })
 

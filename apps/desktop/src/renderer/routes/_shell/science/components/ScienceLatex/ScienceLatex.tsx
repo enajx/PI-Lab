@@ -1,7 +1,9 @@
 import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
+import { Link2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
 import { useLatexEditorProject } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
@@ -17,14 +19,20 @@ import { type CreatedPaper, PaperSetup } from "./PaperSetup"
  * setup to choose the project's paper folder or the paper workspace. With a
  * paper folder set, the workspace puts its Sync button next to the picker. A
  * saved paper folder that was moved or deleted shows a message with buttons to
- * choose it again or clear it instead. `focusSession`
+ * choose it again or clear it instead. With no projects, or with New paper…
+ * chosen in the picker, the setup cards add a paper with no project (a
+ * paper-only project, then chosen); a paper-only project has a Link to
+ * project button that moves its paper to a project with none. `focusSession`
  * focuses one agent tab of the initial project (see the Project Agents box).
  */
 export function ScienceLatex({
   initialProjectId,
   focusSession,
+  newPaper,
 }: {
   initialProjectId?: string
+  /** True when New paper… was chosen (the `newPaper` address value): show the cards for a paper with no project. */
+  newPaper: boolean
   /** An agent session of the initial project to focus, or null. */
   focusSession: FocusSessionRequest | null
 }) {
@@ -37,7 +45,12 @@ export function ScienceLatex({
   const navigate = useNavigate()
   // The picker always wins over a project in the address: it remembers the
   // choice and replaces the address (dropping any agent to focus).
+  // New paper… in the picker goes in the address, so opening any project afterwards clears it.
   const chooseProject = (projectId: string): void => {
+    if (projectId === NEW_PAPER) {
+      void navigate({ to: "/science/latex", search: { newPaper: true }, replace: true })
+      return
+    }
     setSavedProjectId(projectId)
     void navigate({ to: "/science/latex", search: { projectId }, replace: true })
   }
@@ -69,6 +82,8 @@ export function ScienceLatex({
     ...trpc.paper.get.queryOptions({ projectId: selected?.id ?? "" }),
     enabled: selected !== null,
   })
+  const standaloneSetup = newPaper || (projectsQuery.isSuccess && projects.length === 0)
+  const paperOnly = !standaloneSetup && selected?.metadata?.paperOnly === true
 
   return (
     <ScienceTabShell
@@ -80,11 +95,23 @@ export function ScienceLatex({
             testId="latex-project-select"
             label={t("LaTeX Editor project")}
             help={null}
-            value={selected?.id ?? ""}
-            projects={projects.map((project) => ({ id: project.id, name: project.name }))}
+            value={standaloneSetup ? NEW_PAPER : (selected?.id ?? "")}
+            projects={[
+              ...projects.map((project) => ({ id: project.id, name: project.name })),
+              { id: NEW_PAPER, name: t("New paper…") },
+            ]}
             allLabel={null}
             onChange={chooseProject}
           />
+          {paperOnly && selected ? (
+            <LinkToProject
+              paperProjectId={selected.id}
+              projects={projects.filter(
+                (project) => !project.metadata?.paper && !project.metadata?.paperOnly,
+              )}
+              onLinked={chooseProject}
+            />
+          ) : null}
           <div ref={setSyncSlot} data-testid="latex-sync-slot" className="contents" />
         </>
       }
@@ -98,6 +125,15 @@ export function ScienceLatex({
         <p role="alert" className="p-6 text-destructive text-sm">
           {projectsQuery.error.message}
         </p>
+      ) : standaloneSetup ? (
+        <PaperSetup
+          key="new-paper"
+          projectId={null}
+          autoDetect={false}
+          onCreateStart={() => undefined}
+          onCreated={setCreated}
+          onAdded={chooseProject}
+        />
       ) : !selected ? (
         <p className="p-6 text-muted-foreground text-sm">
           {projectsQuery.isPending ? t("Loading…") : t("No open projects")}
@@ -150,8 +186,97 @@ export function ScienceLatex({
             setCreatingFor(null)
             setCreated(paper)
           }}
+          onAdded={chooseProject}
         />
       )}
     </ScienceTabShell>
+  )
+}
+
+/** The picker entry that shows the setup cards for a paper with no project. */
+const NEW_PAPER = "__new-paper__"
+
+/**
+ * Link to project, for a paper-only project: a menu of the projects with no
+ * paper folder; choosing one moves the paper there (`paper.moveToProject`,
+ * which removes the paper-only project) and opens that project.
+ */
+function LinkToProject({
+  paperProjectId,
+  projects,
+  onLinked,
+}: {
+  paperProjectId: string
+  projects: { id: string; name: string }[]
+  onLinked: (projectId: string) => void
+}) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
+  const move = useMutation(
+    trpc.paper.moveToProject.mutationOptions({
+      onSuccess: (_state, input) => {
+        void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+        void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey() })
+        onLinked(input.toProjectId)
+      },
+    }),
+  )
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        data-testid="latex-link-to-project"
+        aria-label={t("Link to project")}
+        title={t("Link to project")}
+        data-feature-help={t(
+          "Move this paper to a project. The paper's own card is removed; its files stay where they are.",
+        )}
+        disabled={move.isPending}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+      >
+        <Link2 className="size-3.5" aria-hidden />
+        {t("Link to project")}
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground text-xs shadow-md"
+        >
+          {projects.length === 0 ? (
+            <p className="px-2 py-1.5 text-muted-foreground">
+              {t("Every project already has a paper folder.")}
+            </p>
+          ) : (
+            projects.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                role="menuitem"
+                className="flex w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+                onClick={() => {
+                  setOpen(false)
+                  move.mutate({ fromProjectId: paperProjectId, toProjectId: project.id })
+                }}
+              >
+                {project.name}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+      {move.isError ? (
+        <p
+          role="alert"
+          className="absolute right-0 mt-1 w-72 cursor-text select-text rounded-md border border-destructive/30 bg-card p-2 text-destructive text-xs"
+        >
+          {move.error.message}
+        </p>
+      ) : null}
+    </div>
   )
 }

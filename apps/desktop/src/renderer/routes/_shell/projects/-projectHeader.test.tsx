@@ -50,7 +50,7 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
 describe("Project header", () => {
   afterEach(() => window.localStorage.clear())
 
-  test("header orders Tasks, Paper, Auto research, Plan research, Project status, agents, and Caffeine and prevents duplicate launches", async () => {
+  test("header orders Tasks, Paper, Auto research, Plan research, Project status, Research diary, agents, and Caffeine and prevents duplicate launches", async () => {
     const calls: unknown[] = []
     let rejectLaunch!: (error: Error) => void
     renderWorkspace({
@@ -74,8 +74,13 @@ describe("Project header", () => {
     expect(status.getAttribute("title")).toBe("Project status")
     expect(status.getAttribute("aria-label")).toContain("Project status")
     expect(status.querySelector("svg")).toBeTruthy()
+    // Project status → Research diary, an icon-only toggle.
+    const diary = screen.getByTestId("project-view-research-diary")
+    expect(status.nextElementSibling).toBe(diary)
+    expect(diary.textContent).toBe("")
+    expect(diary.getAttribute("title")).toBe("Research diary")
     // A short divider sets the agents and caffeine buttons apart from the view's own.
-    const divider = status.nextElementSibling
+    const divider = diary.nextElementSibling
     expect(divider?.getAttribute("data-testid")).toBe("title-bar-controls-divider")
     expect(
       divider?.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
@@ -452,17 +457,20 @@ describe("Project header shortcuts menu", () => {
       "project-view-auto-research",
       "project-view-plan-research",
       "project-view-status",
+      "project-view-research-diary",
     ])
     const menu = await openShortcutMenu()
-    const items = within(menu).getAllByRole("menuitemcheckbox").slice(0, 5)
+    const items = within(menu).getAllByRole("menuitemcheckbox").slice(0, 6)
     expect(items.map((item) => item.textContent)).toEqual([
       "Tasks",
       "Paper",
       "Auto research",
       "Plan research",
       "Project status",
+      "Research diary",
     ])
     expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual([
+      "true",
       "true",
       "true",
       "true",
@@ -481,7 +489,7 @@ describe("Project header shortcuts menu", () => {
     ).toBe("false")
     expect(
       JSON.parse(window.localStorage.getItem("pi-lab.projectView.headerShortcuts") ?? ""),
-    ).toEqual(["tasks", "paper", "auto-research", "project-status"])
+    ).toEqual(["tasks", "paper", "auto-research", "project-status", "research-diary"])
   })
 
   test("a list saved before the Paper button gets Paper at its default place, and a removed Paper stays removed", async () => {
@@ -499,6 +507,7 @@ describe("Project header shortcuts menu", () => {
       "project-view-tasks",
       "project-header-paper",
       "project-view-auto-research",
+      "project-view-research-diary",
       "project-view-shortcut-skill-review-notes",
     ])
     const menu = await openShortcutMenu()
@@ -506,7 +515,7 @@ describe("Project header shortcuts menu", () => {
     await waitFor(() => expect(screen.queryByTestId("project-header-paper")).toBeNull())
     expect(
       JSON.parse(window.localStorage.getItem("pi-lab.projectView.headerShortcuts") ?? ""),
-    ).toEqual(["tasks", "auto-research", "skill:review-notes"])
+    ).toEqual(["tasks", "auto-research", "research-diary", "skill:review-notes"])
     view.unmount()
     renderWorkspace({ "science.skills.list": skillsCatalog, "automations.list": () => [] })
     await screen.findByTestId("project-view-tasks")

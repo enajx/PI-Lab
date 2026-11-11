@@ -910,3 +910,68 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     await rm(root, { recursive: true, force: true })
   }
 })
+
+/**
+ * A paper added with no project, through the real app: New paper… in the
+ * LaTeX Editor picker, Start draft into a folder typed in the folder question,
+ * then its own Dashboard card (only the paper button), then Link to project,
+ * which moves the paper to the project and removes that card. The paper is
+ * made from the built-in template; no Overleaf remote is used.
+ */
+test("LaTeX Editor adds a paper with no project, shows its own card, and links it to a project later", async () => {
+  test.setTimeout(240_000)
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-latex-standalone-e2e-")))
+  const project = join(root, "project")
+  await mkdir(project)
+  const paperDir = join(root, "Papers", "thesis")
+  await mkdir(PERSISTENT_CACHE, { recursive: true })
+  await mkdir(join(root, "data", "latex"), { recursive: true })
+  await symlink(PERSISTENT_CACHE, join(root, "data", "latex", "cache"), "dir")
+  const gitConfig = join(root, "gitconfig")
+  await writeFile(gitConfig, "[user]\n\tname = PI Lab Test\n\temail = test@example.invalid\n")
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, root, {
+      GIT_CONFIG_GLOBAL: gitConfig,
+      GIT_CONFIG_NOSYSTEM: "1",
+    })
+    const page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await page.locator('[data-testid="science-nav-item"][data-science-tab="latex"]').click()
+    await expect(page.getByTestId("science-latex")).toBeVisible()
+    await page.getByTestId("latex-project-select").click()
+    await page.getByRole("option", { name: "New paper…" }).click()
+    await expectSetupCards(page)
+    await page.getByTestId("paper-create").click()
+    const field = page.getByTestId("paper-destination-dir")
+    await expect(field).toHaveValue(/Papers\/paper$/)
+    await page.screenshot({ path: test.info().outputPath("latex-standalone-destination.png") })
+    await field.fill(paperDir)
+    await page.getByTestId("paper-destination-ok").click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 200_000 })
+    await expect(page.getByTestId("latex-project-select")).toContainText("thesis")
+    expect(existsSync(join(paperDir, "main.tex"))).toBe(true)
+
+    // Its own Dashboard card offers only the paper and opens it in the LaTeX Editor.
+    await page.getByTestId("nav-dashboard").click()
+    const card = page.getByTestId("project-card").filter({ hasText: "thesis" })
+    await expect(card).toBeVisible()
+    await expect(card.getByTestId("project-card-tasks")).toHaveCount(0)
+    await expect(card.getByTestId("project-card-auto-research")).toHaveCount(0)
+    await page.screenshot({ path: test.info().outputPath("latex-standalone-card.png") })
+    await card.getByTestId("project-card-body").click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 30_000 })
+
+    // Link to project moves the paper to the project and removes the paper's own card.
+    await page.getByTestId("latex-link-to-project").click()
+    await page.getByRole("menuitem", { name: "project" }).click()
+    await expect(page.getByTestId("latex-project-select")).toContainText("project")
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 30_000 })
+    await page.getByTestId("nav-dashboard").click()
+    await expect(page.getByTestId("project-card")).toHaveCount(1)
+    expect(existsSync(join(paperDir, "main.tex"))).toBe(true)
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -320,6 +320,11 @@ export interface ProjectMetadata {
   /** Linked LaTeX paper folder; absent when none is linked. */
   paper?: ProjectPaper
   /**
+   * True for a paper added in the LaTeX Editor with no project: the project
+   * folder is the paper folder, and its card offers only the paper.
+   */
+  paperOnly?: true
+  /**
    * False after the user cleared the paper folder: the LaTeX Editor then does
    * not look for Overleaf clones until a folder is chosen again. Absent: it does.
    */

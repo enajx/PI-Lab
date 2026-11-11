@@ -1166,12 +1166,19 @@ function ProjectItem({
     workspaceState?.buffers.some(
       (buffer) => buffer.externalChange || buffer.content !== buffer.savedContent,
     ) ?? false
+  // A paper added in the LaTeX Editor with no project opens there, not in a project view.
+  const paperOnly = project.metadata?.paperOnly === true
+  const target = paperOnly
+    ? ({ to: "/science/latex", search: { projectId: project.id } } as const)
+    : ({ to: "/projects/$projectId", params: { projectId: project.id } } as const)
+  const openHelp = paperOnly
+    ? `${t("Open ")}${project.name}${t(" in the LaTeX Editor")}`
+    : `${t("Open the ")}${project.name}${t(" project workspace")}`
 
   if (collapsed) {
     return (
       <Link
-        to="/projects/$projectId"
-        params={{ projectId: project.id }}
+        {...target}
         data-testid="project-item"
         data-project-id={project.id}
         data-active={isActive}
@@ -1184,7 +1191,7 @@ function ProjectItem({
         )}
         title={project.name}
         data-feature-label={project.name}
-        data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace")}`}
+        data-feature-help={openHelp}
       >
         <span className="relative">
           <ProjectBadge project={project} isActive={isActive} />
@@ -1211,7 +1218,7 @@ function ProjectItem({
         data-testid="project-row"
         onClick={(event) => {
           if (event.target instanceof Element && event.target.closest("a, button")) return
-          void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+          void navigate(target)
         }}
         onContextMenu={onContextMenu}
         className={cn(
@@ -1241,8 +1248,7 @@ function ProjectItem({
           />
         </button>
         <Link
-          to="/projects/$projectId"
-          params={{ projectId: project.id }}
+          {...target}
           data-testid="project-item"
           data-project-id={project.id}
           data-active={isActive}
@@ -1253,7 +1259,11 @@ function ProjectItem({
           )}
           title={project.repoPath}
           data-feature-label={project.name}
-          data-feature-help={`${t("Open the ")}${project.name}${t(" project workspace at ")}${toDisplayPath(project.repoPath)}`}
+          data-feature-help={
+            paperOnly
+              ? `${openHelp}: ${toDisplayPath(project.repoPath)}`
+              : `${t("Open the ")}${project.name}${t(" project workspace at ")}${toDisplayPath(project.repoPath)}`
+          }
         >
           {project.name}
         </Link>

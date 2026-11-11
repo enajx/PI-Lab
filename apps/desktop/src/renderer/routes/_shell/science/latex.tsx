@@ -9,6 +9,8 @@ export interface LatexSearch {
   sessionId?: string
   agentId?: string
   agentLabel?: string
+  /** Show the setup cards for a paper with no project (New paper… in the picker). */
+  newPaper?: true
 }
 
 /** A non-empty string search value, or undefined. */
@@ -23,18 +25,20 @@ export const Route = createFileRoute("/_shell/science/latex")({
     sessionId: text(search.sessionId),
     agentId: text(search.agentId),
     agentLabel: text(search.agentLabel),
+    ...(search.newPaper === true || search.newPaper === "true" ? { newPaper: true as const } : {}),
   }),
   component: LatexRoute,
 })
 
 function LatexRoute() {
-  const { projectId, sessionId, agentId, agentLabel } = Route.useSearch()
+  const { projectId, sessionId, agentId, agentLabel, newPaper } = Route.useSearch()
   const focusSession =
     sessionId && agentId ? { sessionId, agentId, agentLabel: agentLabel ?? agentId } : null
   return (
     <ScienceLatex
-      key={projectId ?? "default"}
+      key={newPaper ? "new-paper" : (projectId ?? "default")}
       initialProjectId={projectId}
+      newPaper={newPaper === true}
       focusSession={focusSession}
     />
   )

@@ -33,6 +33,7 @@ function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
         autoDetect={autoDetect}
         onCreateStart={() => created.push("start")}
         onCreated={(paper) => created.push(paper)}
+        onAdded={() => undefined}
       />
     </AppProviders>,
   )

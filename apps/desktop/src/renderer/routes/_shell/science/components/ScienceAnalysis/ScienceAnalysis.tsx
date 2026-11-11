@@ -11,17 +11,27 @@ import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { ChartArea, CloudDownload, FileCode2, FileText, Microscope, Search } from "lucide-react"
+import {
+  ChartArea,
+  CloudDownload,
+  FileCode2,
+  FileText,
+  Microscope,
+  NotebookPen,
+  Search,
+} from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
 import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
+import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { useTranslate } from "../../../../../i18n/language"
 import {
   DEFAULT_RESULTS_FOLDER,
   useAnalysisProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
+  useResearchDiaryOpen,
 } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
@@ -88,6 +98,7 @@ export function ScienceAnalysis({
   const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
   const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
+  const [researchDiaryOpen, setResearchDiaryOpen] = useResearchDiaryOpen()
   const capabilities = useQuery({
     ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
     enabled: Boolean(selectedProject),
@@ -405,6 +416,28 @@ export function ScienceAnalysis({
                   </button>
                 ),
               },
+              {
+                id: "research-diary",
+                label: t("Research diary"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="analysis-research-diary"
+                    aria-label={t("Research diary")}
+                    aria-pressed={researchDiaryOpen}
+                    title={t("Research diary")}
+                    data-feature-label={t("Research diary")}
+                    data-feature-help={t("Show or hide the chosen project's research diary")}
+                    onClick={() => setResearchDiaryOpen(!researchDiaryOpen)}
+                    className={cn(
+                      "inline-flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                      researchDiaryOpen && "text-foreground",
+                    )}
+                  >
+                    <NotebookPen className="size-3.5" aria-hidden />
+                  </button>
+                ),
+              },
             ]}
           />
         </>
@@ -605,6 +638,9 @@ export function ScienceAnalysis({
             </div>
           )}
         </div>
+        {researchDiaryOpen && selectedProjectId ? (
+          <ResearchDiaryPanel key={selectedProjectId} projectId={selectedProjectId} />
+        ) : null}
         <ScienceSessionPanel
           view="analysis"
           project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}

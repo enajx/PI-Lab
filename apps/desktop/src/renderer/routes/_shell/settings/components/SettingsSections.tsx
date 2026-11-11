@@ -507,6 +507,19 @@ export function EditorSection() {
         onChange={(value) => patch({ pythonRunDestination: value as PythonRunDestination })}
       />
       <SelectField
+        testId="settings-research-diary-format"
+        label="Research diary format"
+        description="File format of each project's research diary (md/research-diary). Switching renames the diary file when its panel next opens."
+        value={editor.researchDiaryFormat}
+        options={[
+          { value: "md", label: ".md" },
+          { value: "qmd", label: ".qmd (Quarto Markdown)" },
+        ]}
+        onChange={(value) =>
+          patch({ researchDiaryFormat: value as EditorSettings["researchDiaryFormat"] })
+        }
+      />
+      <SelectField
         testId="settings-editor-theme"
         label="Editor theme"
         description="Color theme for the code editor."

@@ -502,6 +502,17 @@ describe("Sidebar", () => {
     expect(row.className).toContain("cursor-pointer")
   })
 
+  test("a paper-only project's row opens it in the LaTeX Editor", async () => {
+    const { router } = renderSidebar({
+      "projects.list": () => [
+        { id: "solo", name: "My paper", repoPath: "/p", metadata: { paperOnly: true } },
+      ],
+    })
+    fireEvent.click(await screen.findByTestId("project-agent-status"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/science/latex"))
+    expect(router.state.location.search).toEqual({ projectId: "solo" })
+  })
+
   test("a project’s sidebar ring reflects its active agent state", async () => {
     renderSidebar({
       "projects.list": () => [{ id: "a", name: "Alpha", repoPath: "/a" }],

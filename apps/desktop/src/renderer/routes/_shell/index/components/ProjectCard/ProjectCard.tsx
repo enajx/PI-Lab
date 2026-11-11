@@ -154,8 +154,11 @@ export function ProjectCard({ project }: ProjectCardProps) {
     }),
   )
 
+  // A paper added in the LaTeX Editor with no project: its card offers only the paper.
+  const paperOnly = project.metadata?.paperOnly === true
   const openProject = () => {
-    void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+    if (paperOnly) void navigate({ to: "/science/latex", search: { projectId: project.id } })
+    else void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
   }
 
   // Auto-research: record the launch intent and open the project **immediately** —
@@ -480,28 +483,34 @@ export function ProjectCard({ project }: ProjectCardProps) {
         data-testid="project-card-actions"
         className="mt-auto flex items-center gap-1.5 border-border border-t p-1.5 transition-[filter] group-hover:brightness-105"
       >
-        <ProjectStatusControl
-          projectId={project.id}
-          projectName={project.name}
-          lastOpenedAt={project.lastOpenedAt}
-          variant="compact"
-          testId="project-card-status-button"
-          gitAvailable={gitAvailable}
-          gitDisabledReason={gitDisabledReason}
-        />
-        <button
-          type="button"
-          data-testid="project-card-tasks"
-          aria-label={`${t("Tasks")} ${project.name}`}
-          title={t("Tasks")}
-          data-feature-label={t("Tasks")}
-          data-feature-help={t("Open this project's tasks")}
-          className={CARD_ACTION_CLASS}
-          onClick={() => void navigate({ to: "/science/tasks", search: { projectId: project.id } })}
-        >
-          <ListTodo className="size-4 shrink-0" aria-hidden />
-        </button>
-        {showAnalysis ? (
+        {paperOnly ? null : (
+          <ProjectStatusControl
+            projectId={project.id}
+            projectName={project.name}
+            lastOpenedAt={project.lastOpenedAt}
+            variant="compact"
+            testId="project-card-status-button"
+            gitAvailable={gitAvailable}
+            gitDisabledReason={gitDisabledReason}
+          />
+        )}
+        {paperOnly ? null : (
+          <button
+            type="button"
+            data-testid="project-card-tasks"
+            aria-label={`${t("Tasks")} ${project.name}`}
+            title={t("Tasks")}
+            data-feature-label={t("Tasks")}
+            data-feature-help={t("Open this project's tasks")}
+            className={CARD_ACTION_CLASS}
+            onClick={() =>
+              void navigate({ to: "/science/tasks", search: { projectId: project.id } })
+            }
+          >
+            <ListTodo className="size-4 shrink-0" aria-hidden />
+          </button>
+        )}
+        {showAnalysis && !paperOnly ? (
           <button
             type="button"
             data-testid="project-card-analysis"
@@ -529,23 +538,27 @@ export function ProjectCard({ project }: ProjectCardProps) {
         >
           <ScrollText className="size-4 shrink-0" aria-hidden />
         </button>
-        <button
-          type="button"
-          data-testid="project-card-auto-research"
-          aria-label={`${t("Auto-research")} ${project.name}`}
-          title={gitAvailable ? t("Auto-research") : gitDisabledReason}
-          data-feature-label={`${t("Auto-research")} ${project.name}`}
-          data-feature-help={
-            gitAvailable
-              ? t("Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md")
-              : gitDisabledReason
-          }
-          disabled={!gitAvailable}
-          onClick={onAutoResearch}
-          className={CARD_ACTION_CLASS}
-        >
-          <Telescope className="size-4 shrink-0" aria-hidden />
-        </button>
+        {paperOnly ? null : (
+          <button
+            type="button"
+            data-testid="project-card-auto-research"
+            aria-label={`${t("Auto-research")} ${project.name}`}
+            title={gitAvailable ? t("Auto-research") : gitDisabledReason}
+            data-feature-label={`${t("Auto-research")} ${project.name}`}
+            data-feature-help={
+              gitAvailable
+                ? t(
+                    "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
+                  )
+                : gitDisabledReason
+            }
+            disabled={!gitAvailable}
+            onClick={onAutoResearch}
+            className={CARD_ACTION_CLASS}
+          >
+            <Telescope className="size-4 shrink-0" aria-hidden />
+          </button>
+        )}
       </div>
 
       <ProjectStageRow

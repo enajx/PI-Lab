@@ -43,6 +43,7 @@ test("after arriving with a project in the address, the picker still switches pr
     <AppProviders client={client} queryClient={queryClient}>
       <ScienceLatex
         initialProjectId="p1"
+        newPaper={false}
         focusSession={{ sessionId: "s1", agentId: "codex", agentLabel: "Codex" }}
       />
     </AppProviders>,
@@ -90,7 +91,7 @@ function renderPageWith(paperGet: FakeHandlers[string], extra: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceLatex initialProjectId="p1" focusSession={null} />
+      <ScienceLatex initialProjectId="p1" newPaper={false} focusSession={null} />
     </AppProviders>,
   )
 }
@@ -340,4 +341,114 @@ test("subfolders that could not be read are listed as skipped", async () => {
   expect((await screen.findByTestId("paper-skipped-folders")).textContent).toBe(
     "Skipped folders that could not be read: locked, private/data",
   )
+})
+
+/** Mount the page with these projects and no paper linked anywhere. */
+function renderWithProjects(projects: unknown[], extra: FakeHandlers) {
+  return renderWithProjectsNew(projects, extra, false)
+}
+
+/** {@link renderWithProjects} with New paper… chosen (`newPaper` in the address) or not. */
+function renderWithProjectsNew(projects: unknown[], extra: FakeHandlers, newPaper: boolean) {
+  const client = createFakeTrpcClient({
+    "projects.list": () => projects,
+    "settings.get": () => ({}),
+    "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null, autoDetect: false }),
+    "paper.detect": () => ({ clones: [], stoppedEarly: false }),
+    "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper" }),
+    "paper.standaloneTarget": () => ({ dir: "/Users/me/Papers/paper" }),
+    "paper.token.status": () => ({ configured: true, source: "saved" }),
+    ...extra,
+  })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <AppProviders client={client} queryClient={queryClient}>
+      <ScienceLatex newPaper={newPaper} focusSession={null} />
+    </AppProviders>,
+  )
+}
+
+test("with no projects, the page shows the paper cards to add a paper with no project", async () => {
+  const addStandalone = vi.fn(() => ({ projectId: "new" }))
+  renderWithProjects([], {
+    "system.pickDirectory": () => "/Users/me/my-paper",
+    "paper.addStandalone": addStandalone,
+  })
+  fireEvent.click(await screen.findByTestId("paper-use-folder"))
+  await waitFor(() =>
+    expect(addStandalone).toHaveBeenCalledWith({ source: "folder", dir: "/Users/me/my-paper" }),
+  )
+  // The new paper-only project is chosen.
+  await waitFor(() =>
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/latex",
+      search: { projectId: "new" },
+      replace: true,
+    }),
+  )
+  expect(screen.queryByText("No open projects")).toBeNull()
+})
+
+test("New paper… in the picker puts newPaper in the address, so opening a project later clears it", async () => {
+  renderWithProjects([{ id: "p1", name: "One" }], {})
+  fireEvent.click(await screen.findByTestId("latex-project-select"))
+  fireEvent.click(screen.getByRole("option", { name: "New paper…" }))
+  expect(mocks.navigate).toHaveBeenCalledWith({
+    to: "/science/latex",
+    search: { newPaper: true },
+    replace: true,
+  })
+})
+
+test("with newPaper in the address, the page shows the cards for a paper with no project", async () => {
+  const addStandalone = vi.fn(() => ({ projectId: "new" }))
+  renderWithProjectsNew(
+    [{ id: "p1", name: "One" }],
+    {
+      "system.pickDirectory": () => "/Users/me/my-paper",
+      "paper.addStandalone": addStandalone,
+    },
+    true,
+  )
+  expect((await screen.findByTestId("paper-setup-overleaf")).textContent).toContain(
+    "into a new folder",
+  )
+  expect((screen.getByTestId("latex-project-select") as HTMLButtonElement).value).toBe(
+    "__new-paper__",
+  )
+  fireEvent.click(screen.getByTestId("paper-use-folder"))
+  await waitFor(() =>
+    expect(addStandalone).toHaveBeenCalledWith({ source: "folder", dir: "/Users/me/my-paper" }),
+  )
+})
+
+test("a paper-only project can be linked to a project without a paper", async () => {
+  const moveToProject = vi.fn(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
+  renderWithProjects(
+    [
+      { id: "solo", name: "My paper", metadata: { paperOnly: true } },
+      { id: "p1", name: "One", metadata: null },
+      { id: "p2", name: "Has paper", metadata: { paper: { dir: "/x" } } },
+    ],
+    { "paper.moveToProject": moveToProject },
+  )
+  fireEvent.click(await screen.findByTestId("latex-link-to-project"))
+  expect(screen.queryByRole("menuitem", { name: "Has paper" })).toBeNull()
+  fireEvent.click(screen.getByRole("menuitem", { name: "One" }))
+  await waitFor(() =>
+    expect(moveToProject).toHaveBeenCalledWith({ fromProjectId: "solo", toProjectId: "p1" }),
+  )
+  await waitFor(() =>
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/science/latex",
+      search: { projectId: "p1" },
+      replace: true,
+    }),
+  )
+})
+
+test("a normal project has no Link to project button", async () => {
+  renderWithProjects([{ id: "p1", name: "One", metadata: null }], {})
+  await screen.findByTestId("paper-setup")
+  expect(screen.queryByTestId("latex-link-to-project")).toBeNull()
 })

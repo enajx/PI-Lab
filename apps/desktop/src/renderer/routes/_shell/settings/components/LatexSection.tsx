@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../../trpc/react"
 import { LatexTemplateSettings } from "./LatexTemplateSettings"
 import { OverleafSettings } from "./OverleafSettings"
+import { PapersFolderSettings } from "./PapersFolderSettings"
 import { SelectField, SettingsSection } from "./SettingsControls"
 
 /** Global compiler preferences and an explicit, shared PDFLaTeX installation. */
@@ -176,6 +177,7 @@ export function LatexSection() {
         </>
       ) : null}
       <LatexTemplateSettings />
+      <PapersFolderSettings />
       <OverleafSettings />
       {update.error ? (
         <p role="alert" className="px-4 py-3 text-destructive text-sm">

@@ -104,6 +104,9 @@ const DEFAULT_SETTINGS: EditorSettings = {
   showHiddenFiles: true,
   confirmFileDelete: true,
   confirmOverleafCommit: true,
+  papersFolder: "~/Papers",
+  askPapersFolder: true,
+  researchDiaryFormat: "md",
 }
 
 const PY_DIAGNOSTIC = {

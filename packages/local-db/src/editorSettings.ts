@@ -15,6 +15,9 @@ export type LatexProvider = "auto" | "bundled" | "system"
 
 export type PythonRunDestination = "central" | "below-editor"
 
+/** File format of the research diary: Markdown (`diary.md`) or Quarto Markdown (`diary.qmd`). */
+export type ResearchDiaryFormat = "md" | "qmd"
+
 export interface EditorSettings {
   /** Save on debounce/blur instead of requiring an explicit ⌘S (default off). */
   autosave: boolean
@@ -48,6 +51,15 @@ export interface EditorSettings {
   confirmFileDelete: boolean
   /** Ask before committing unsent paper edits when syncing with Overleaf (default on). */
   confirmOverleafCommit: boolean
+  /**
+   * Folder where papers added in the LaTeX Editor with no project go, one
+   * folder per paper ("~" is the home folder; default `~/Papers`).
+   */
+  papersFolder: string
+  /** Ask where to put such a paper, proposing a folder in {@link papersFolder} (default on). */
+  askPapersFolder: boolean
+  /** Research diary file format; switching renames the diary when its panel next opens (default `md`). */
+  researchDiaryFormat: ResearchDiaryFormat
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -65,4 +77,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   showHiddenFiles: true,
   confirmFileDelete: true,
   confirmOverleafCommit: true,
+  papersFolder: "~/Papers",
+  askPapersFolder: true,
+  researchDiaryFormat: "md",
 }

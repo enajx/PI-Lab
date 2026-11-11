@@ -4,7 +4,9 @@ import { FilePlus, FolderOpen, GitBranch } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import type { BuildResult } from "../../../../../../main/trpc/pdf/pdf"
 import { useTranslate } from "../../../../../i18n/language"
+import { useDisplayPath } from "../../../../../trpc/displayPath"
 import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
+import { usePaperDestination } from "./PaperDestination"
 import { usePaperFolderPicker } from "./PaperFolder"
 
 /** Overleaf's account settings, where a Git token is created. */
@@ -40,20 +42,29 @@ export interface CreatedPaper {
  * asked for only when none is available (it is sent with the clone and saved
  * only when the clone works); the token and docs links are shown only then. Choosing the project folder when it is not an Overleaf clone asks
  * first whether Sync stays on (Sync would commit and push the whole project).
+ *
+ * With `projectId` null (the LaTeX Editor with no project, or New paper… in
+ * its picker) the same cards add a paper with no project: a paper-only project
+ * (`paper.addStandalone`). A clone or draft goes into a new folder asked for by
+ * {@link usePaperDestination}; `onAdded` gets the new project.
  */
 export function PaperSetup({
   projectId,
   autoDetect,
   onCreateStart,
   onCreated,
+  onAdded,
 }: {
-  projectId: string
+  /** The project to set the paper folder of, or null to add a paper with no project. */
+  projectId: string | null
   /** False after the user cleared the paper folder: no search for Overleaf clones. */
   autoDetect: boolean
   /** Start draft started; the page keeps the setup shown until `onCreated`. */
   onCreateStart: () => void
   /** Start draft finished: the new paper with its PDF build, or null when creating it failed. */
   onCreated: (paper: CreatedPaper | null) => void
+  /** A paper with no project was added as the paper-only project with this id. */
+  onAdded: (projectId: string) => void
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -65,13 +76,19 @@ export function PaperSetup({
   const tokenStatus = useQuery(trpc.paper.token.status.queryOptions())
   const needsToken = tokenStatus.data?.configured === false
   const tokenFromGit = tokenStatus.data?.source === "git"
+  const standalone = projectId === null
+  const display = useDisplayPath()
+  const destination = usePaperDestination()
   const detect = useQuery({
-    ...trpc.paper.detect.queryOptions({ projectId }),
-    enabled: autoDetect,
+    ...trpc.paper.detect.queryOptions({ projectId: projectId ?? "" }),
+    enabled: autoDetect && !standalone,
   })
 
   const linked = (): void => {
-    void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+    if (standalone) void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+    void queryClient.invalidateQueries({
+      queryKey: trpc.paper.get.queryKey(projectId === null ? undefined : { projectId }),
+    })
     void queryClient.invalidateQueries({ queryKey: trpc.paper.token.status.queryKey() })
   }
   const onError = (cause: { message: string }): void => setError(cause.message)
@@ -80,11 +97,50 @@ export function PaperSetup({
   )
   const link = useMutation(trpc.paper.link.mutationOptions({ onSuccess: linked, onError }))
   const picker = usePaperFolderPicker(
-    projectId,
-    (chosen) => link.mutate({ projectId, dir: chosen.dir, rootChoice: chosen.rootChoice }),
+    projectId ?? "",
+    (chosen) => {
+      if (projectId !== null) {
+        link.mutate({ projectId, dir: chosen.dir, rootChoice: chosen.rootChoice })
+      }
+    },
     onError,
   )
-  const createTarget = useQuery(trpc.paper.createTarget.queryOptions({ projectId }))
+  // With no project: add the paper (clone, folder, or nothing when the folder question is cancelled).
+  const addStandalone = useMutation({
+    mutationFn: async (
+      input: { source: "folder" } | { source: "overleaf"; url: string; token: string | null },
+    ): Promise<string | null> => {
+      if (input.source === "folder") {
+        const dir = await client.system.pickDirectory.mutate()
+        if (!dir) return null
+        return (await client.paper.addStandalone.mutate({ source: "folder", dir })).projectId
+      }
+      const dir = await destination.ask(input.url)
+      if (dir === null) return null
+      return (
+        await client.paper.addStandalone.mutate({
+          source: "overleaf",
+          url: input.url,
+          dir,
+          ...(input.token === null ? {} : { token: input.token }),
+        })
+      ).projectId
+    },
+    onSuccess: (added) => {
+      if (added === null) return
+      linked()
+      onAdded(added)
+    },
+    onError,
+  })
+  const createTarget = useQuery({
+    ...trpc.paper.createTarget.queryOptions({ projectId: projectId ?? "" }),
+    enabled: !standalone,
+  })
+  const standaloneTarget = useQuery({
+    ...trpc.paper.standaloneTarget.queryOptions({ url: null }),
+    enabled: standalone,
+  })
   // The folder the user chose for Start draft, or null for the default from `paper.createTarget`.
   const [createDir, setCreateDir] = useState<string | null>(null)
   // A chosen folder with files in it is not used: the previous choice stays and the user is told why.
@@ -110,20 +166,7 @@ export function PaperSetup({
     mutationFn: async (input: { projectId: string; dir: string }): Promise<CreatedPaper> => {
       setCreateStep("creating")
       const state = await client.paper.create.mutate(input)
-      if (!state.workspaceId || !state.rootRelPath) {
-        return { workspaceId: state.workspaceId, build: null }
-      }
-      setCreateStep("building")
-      const build = client.pdf.build.mutate({
-        workspaceId: state.workspaceId,
-        relPath: state.rootRelPath,
-      })
-      // A failed build still opens the paper; the editor shows the failure and its log.
-      await build.then(
-        () => undefined,
-        () => undefined,
-      )
-      return { workspaceId: state.workspaceId, build }
+      return buildCreated(state)
     },
     onMutate: onCreateStart,
     onSuccess: (paper) => {
@@ -135,12 +178,52 @@ export function PaperSetup({
       onError(cause)
     },
   })
+  // Start draft with no project: ask for the folder (unless one was chosen with Change…), add, then build.
+  const createStandalone = useMutation({
+    mutationFn: async (): Promise<{ projectId: string; paper: CreatedPaper } | null> => {
+      const dir = createDir ?? (await destination.ask(null))
+      if (dir === null) return null
+      setCreateStep("creating")
+      const { projectId: added } = await client.paper.addStandalone.mutate({ source: "draft", dir })
+      const paper = await buildCreated(await client.paper.get.query({ projectId: added }))
+      return { projectId: added, paper }
+    },
+    onSuccess: (result) => {
+      if (result === null) return
+      onCreated(result.paper)
+      linked()
+      onAdded(result.projectId)
+    },
+    onError,
+  })
+  /** Build the new paper's main .tex, so the editor opens with its PDF beside it. */
+  const buildCreated = async (state: {
+    workspaceId: string | null
+    rootRelPath: string | null
+  }): Promise<CreatedPaper> => {
+    if (!state.workspaceId || !state.rootRelPath) {
+      return { workspaceId: state.workspaceId, build: null }
+    }
+    setCreateStep("building")
+    const build = client.pdf.build.mutate({
+      workspaceId: state.workspaceId,
+      relPath: state.rootRelPath,
+    })
+    // A failed build still opens the paper; the editor shows the failure and its log.
+    await build.then(
+      () => undefined,
+      () => undefined,
+    )
+    return { workspaceId: state.workspaceId, build }
+  }
   const createInto = createDir ?? createTarget.data?.dir ?? null
+  const creating = create.isPending || createStandalone.isPending
   const busy =
     addOverleaf.isPending ||
+    addStandalone.isPending ||
     link.isPending ||
     picker.busy ||
-    create.isPending ||
+    creating ||
     pickCreateDir.isPending
 
   // Exactly one Overleaf clone in the project: link it once, without asking.
@@ -152,7 +235,7 @@ export function PaperSetup({
   const autoLinked = useRef(false)
   const { mutate: linkMutate } = link
   useEffect(() => {
-    if (!onlyClone || autoLinked.current) return
+    if (!onlyClone || autoLinked.current || projectId === null) return
     autoLinked.current = true
     linkMutate({ projectId, dir: onlyClone.dir, rootChoice: null })
   }, [onlyClone, linkMutate, projectId])
@@ -161,12 +244,21 @@ export function PaperSetup({
   /** Ask for a folder, check it (see {@link usePaperFolderPicker}), then use it. */
   const chooseFolder = (): void => {
     setError(null)
-    picker.choose()
+    if (standalone) addStandalone.mutate({ source: "folder" })
+    else picker.choose()
   }
 
   // A typed token is used for this clone and saved by the server only when it works.
   const submit = (): void => {
     setError(null)
+    if (projectId === null) {
+      addStandalone.mutate({
+        source: "overleaf",
+        url: url.trim(),
+        token: needsToken ? token.trim() : null,
+      })
+      return
+    }
     addOverleaf.mutate({
       projectId,
       url: url.trim(),
@@ -219,7 +311,9 @@ export function PaperSetup({
                       disabled={busy}
                       onClick={() => {
                         setError(null)
-                        link.mutate({ projectId, dir: clone.dir, rootChoice: null })
+                        if (projectId !== null) {
+                          link.mutate({ projectId, dir: clone.dir, rootChoice: null })
+                        }
                       }}
                       className="rounded border border-border px-3 py-1.5 font-mono text-xs hover:bg-accent disabled:opacity-50"
                     >
@@ -236,7 +330,11 @@ export function PaperSetup({
                   <GitBranch className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Add Overleaf project")}</h3>
                 </div>
-                <p className={cardTextClass}>{t("Clone your Overleaf project into paper/.")}</p>
+                <p className={cardTextClass}>
+                  {standalone
+                    ? t("Clone your Overleaf project into a new folder.")
+                    : t("Clone your Overleaf project into paper/.")}
+                </p>
                 <Input
                   data-testid="paper-overleaf-url"
                   aria-label={t("Overleaf Git URL")}
@@ -277,7 +375,9 @@ export function PaperSetup({
                     disabled={!canSubmit}
                     onClick={submit}
                   >
-                    {addOverleaf.isPending ? t("Cloning…") : t("Add Overleaf project")}
+                    {addOverleaf.isPending || (addStandalone.isPending && url.trim() !== "")
+                      ? t("Cloning…")
+                      : t("Add Overleaf project")}
                   </Button>
                 </div>
               </section>
@@ -311,10 +411,17 @@ export function PaperSetup({
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
                   <span
                     data-testid="paper-create-folder"
-                    title={createDir ?? createTarget.data?.dir}
+                    title={createDir ?? createTarget.data?.dir ?? standaloneTarget.data?.dir}
                     className="min-w-0 font-mono wrap-anywhere"
                   >
-                    {createDir ?? (createTarget.data ? `${createTarget.data.displayDir}/` : "")}
+                    {createDir ??
+                      (standalone
+                        ? standaloneTarget.data
+                          ? `${display(standaloneTarget.data.dir)}/`
+                          : ""
+                        : createTarget.data
+                          ? `${createTarget.data.displayDir}/`
+                          : "")}
                   </span>
                   <button
                     type="button"
@@ -334,14 +441,14 @@ export function PaperSetup({
                     type="button"
                     size="sm"
                     data-testid="paper-create"
-                    disabled={busy || createInto === null}
+                    disabled={busy || (!standalone && createInto === null)}
                     onClick={() => {
-                      if (createInto === null) return
                       setError(null)
-                      create.mutate({ projectId, dir: createInto })
+                      if (projectId === null) createStandalone.mutate()
+                      else if (createInto !== null) create.mutate({ projectId, dir: createInto })
                     }}
                   >
-                    {create.isPending
+                    {creating
                       ? createStep === "building"
                         ? t("Building PDF…")
                         : t("Starting…")
@@ -370,6 +477,7 @@ export function PaperSetup({
         ) : null}
       </div>
       {picker.dialog}
+      {destination.dialog}
     </div>
   )
 }

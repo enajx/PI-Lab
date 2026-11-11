@@ -800,3 +800,14 @@ test("the LaTeX Editor button opens LaTeX Editor with this project chosen", asyn
   fireEvent.click(await screen.findByTestId("project-card-latex"))
   expect((await screen.findByTestId("on-latex-route")).textContent).toBe("paper-project")
 })
+
+test("a paper-only project's card offers only the paper and opens in LaTeX Editor", async () => {
+  renderCard(project({ id: "solo", name: "My paper", metadata: { paperOnly: true } }))
+  expect(await screen.findByTestId("project-card-latex")).toBeTruthy()
+  expect(screen.queryByTestId("project-card-tasks")).toBeNull()
+  expect(screen.queryByTestId("project-card-analysis")).toBeNull()
+  expect(screen.queryByTestId("project-card-auto-research")).toBeNull()
+  expect(screen.queryByTestId("project-card-status-button")).toBeNull()
+  fireEvent.click(screen.getByTestId("project-card-body"))
+  expect((await screen.findByTestId("on-latex-route")).textContent).toBe("solo")
+})

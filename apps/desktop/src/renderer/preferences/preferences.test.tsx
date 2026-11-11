@@ -48,7 +48,7 @@ test("legacy agent preference migrates once and configured changes reach mounted
 })
 
 test("saved header shortcut lists get each later built-in once, and keep earlier removals", () => {
-  // Project view list from version 1: Paper is added after Tasks.
+  // Project view list from version 1: Paper is added after Tasks, Research diary at the end.
   window.localStorage.setItem(
     "pi-lab.projectView.headerShortcuts",
     JSON.stringify(["tasks", "project-status"]),
@@ -61,7 +61,7 @@ test("saved header shortcut lists get each later built-in once, and keep earlier
   window.localStorage.setItem("pi-lab.latexEditor.headerShortcutsVersion", "2")
   const project = renderHook(() => useHeaderShortcuts("project"))
   const latex = renderHook(() => useHeaderShortcuts("latex"))
-  expect(project.result.current[0]).toEqual(["tasks", "paper", "project-status"])
+  expect(project.result.current[0]).toEqual(["tasks", "paper", "project-status", "research-diary"])
   expect(latex.result.current[0]).toEqual(["update-paper"])
   project.unmount()
   latex.unmount()

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { mkdir, readdir, realpath, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, isAbsolute, join, relative, sep } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
   getSettingsOrDefaults,
   type PiLabDatabase,
@@ -76,6 +76,7 @@ import {
   writeTemplate,
 } from "../../paper/template"
 import type { AppContext } from "../context"
+import { addPaperOnlyProject, projectsRouter } from "../projects/projects"
 import { publicProcedure, router } from "../trpc"
 import { type StartUpdatePaperResult, startUpdatePaper } from "./updatePaper"
 
@@ -364,7 +365,9 @@ export async function linkPaper(
   }
   const ownRepo = await isOwnRepo(canonical)
   const origin = ownRepo ? await remoteUrl(canonical) : null
-  const askRoot = isProjectFolder && !(await isOverleafClone(canonical))
+  // A paper-only project's folder is the paper, so Sync never reaches other files.
+  const askRoot =
+    isProjectFolder && !project.metadata?.paperOnly && !(await isOverleafClone(canonical))
   if (askRoot && rootChoice === null) {
     throw new TRPCError({ code: "BAD_REQUEST", message: ROOT_CHOICE_REQUIRED })
   }
@@ -497,6 +500,157 @@ export async function createPaper(
     },
   )
   return linkPaper(db, projectId, target, null)
+}
+
+/** `path` with a leading "~" replaced by the home folder, made absolute. */
+function expandHome(path: string): string {
+  if (path === "~") return homedir()
+  if (path.startsWith("~/")) return join(homedir(), path.slice(2))
+  return resolve(path)
+}
+
+/** True when a paper folder can be made at `dir`: it is missing, or an empty folder. */
+async function isFreeFolder(dir: string): Promise<boolean> {
+  if (!existsSync(dir)) return true
+  return (await stat(dir)).isDirectory() && (await isEmptyFolder(dir))
+}
+
+/** The last path part of an Overleaf Git URL (the Overleaf project id), or null. */
+function overleafProjectId(url: string): string | null {
+  const id = url.trim().replace(/\/+$/, "").split("/").pop() ?? ""
+  return /^[A-Za-z0-9_-]+$/.test(id) ? id : null
+}
+
+/**
+ * Where a paper added with no project goes by default: `<papers folder>/<name>`
+ * (the papers folder from Settings), where the name is the Overleaf project id
+ * of `url`, or `paper`, `paper-2`, … (the first free one) with no URL.
+ */
+async function standaloneTarget(db: PiLabDatabase, url: string | null): Promise<{ dir: string }> {
+  const root = expandHome(getSettingsOrDefaults(db).editor.papersFolder)
+  const id = url === null ? null : overleafProjectId(url)
+  if (id !== null) return { dir: join(root, id) }
+  let name = "paper"
+  for (let n = 2; !(await isFreeFolder(join(root, name))); n++) name = `paper-${n}`
+  return { dir: join(root, name) }
+}
+
+/** How a paper with no project is added; see {@link addStandalonePaper}. */
+export type StandaloneSource =
+  | { source: "folder"; dir: string }
+  | { source: "draft"; dir: string }
+  | { source: "overleaf"; dir: string; url: string; token?: string }
+
+/** Remove the project row `projectId` (used to undo a paper-only project that could not be set up). */
+function dropProject(db: PiLabDatabase, projectId: string): void {
+  db.delete(projects).where(eq(projects.id, projectId)).run()
+}
+
+/**
+ * Add a paper with no project as a paper-only project (see
+ * `addPaperOnlyProject`) whose paper folder is its own folder: an existing
+ * paper folder, a new draft from the LaTeX template, or a clone of an
+ * Overleaf project. A draft or clone goes into `dir`, which must be missing
+ * or empty; missing parent folders are made. When a step fails, the project
+ * row (and a folder made here) is removed again.
+ */
+async function addStandalonePaper(
+  ctx: AppContext,
+  input: StandaloneSource,
+): Promise<{ projectId: string }> {
+  if (input.source === "folder") {
+    const canonical = await requireFolder(input.dir)
+    if (!(await isPaperFolder(canonical))) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: NOT_A_PAPER })
+    }
+    const project = await addPaperOnlyProject(ctx, canonical)
+    await linkPaper(ctx.db, project.id, canonical, null).then(undefined, (error: unknown) => {
+      dropProject(ctx.db, project.id)
+      throw error
+    })
+    return { projectId: project.id }
+  }
+  const dir = expandHome(input.dir)
+  if (!(await isFreeFolder(dir))) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Choose an empty folder for the new paper: ${dir} has files in it.`,
+    })
+  }
+  if (input.source === "overleaf") {
+    requireOverleafUrl(input.url)
+    await mkdir(dirname(dir), { recursive: true })
+    await withOverleafAuth(ctx, input.url, input.token, (options) =>
+      clone(dirname(dir), input.url, dir, options),
+    )
+    const project = await addPaperOnlyProject(ctx, dir)
+    await linkPaper(ctx.db, project.id, dir, null).then(undefined, (error: unknown) => {
+      dropProject(ctx.db, project.id)
+      throw error
+    })
+    return { projectId: project.id }
+  }
+  await requireCommitIdentity()
+  const madeFolder = !existsSync(dir)
+  await mkdir(dir, { recursive: true })
+  const project = await addPaperOnlyProject(ctx, dir)
+  await createPaper(ctx.db, project.id, dir, resolveDataDir()).then(
+    undefined,
+    async (error: unknown) => {
+      dropProject(ctx.db, project.id)
+      if (madeFolder) await rm(dir, { recursive: true, force: true })
+      throw error
+    },
+  )
+  return { projectId: project.id }
+}
+
+/**
+ * Link the paper of the paper-only project `fromProjectId` to the project
+ * `toProjectId` (which must have no paper folder), keeping its build output
+ * folder, Sync choice and last sync time, then remove the paper-only project.
+ * Its files are never touched. When the removal is refused (its agents are
+ * still running), the link to `toProjectId` is undone.
+ */
+async function movePaperToProject(
+  ctx: AppContext,
+  fromProjectId: string,
+  toProjectId: string,
+): Promise<PaperState> {
+  const from = requireProject(ctx.db, fromProjectId)
+  if (!from.metadata?.paperOnly) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Only a paper added with no project can be linked to a project.",
+    })
+  }
+  const paper = requirePaper(from)
+  const to = requireProject(ctx.db, toProjectId)
+  if (to.metadata?.paper) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `"${to.name}" already has a paper folder. Clear it in the LaTeX Editor first.`,
+    })
+  }
+  await linkPaper(ctx.db, toProjectId, paper.dir, null)
+  changePaper(ctx.db, toProjectId, (current) => {
+    const next: ProjectPaper = { ...current, lastSyncAt: paper.lastSyncAt }
+    if (paper.outputDir !== undefined) next.outputDir = paper.outputDir
+    if (paper.syncEnabled !== undefined) next.syncEnabled = paper.syncEnabled
+    return next
+  })
+  await projectsRouter
+    .createCaller(ctx)
+    .remove({ id: fromProjectId })
+    .then(undefined, (error: unknown) => {
+      ctx.db
+        .delete(workspaces)
+        .where(and(eq(workspaces.projectId, toProjectId), eq(workspaces.kind, "paper")))
+        .run()
+      writePaper(ctx.db, toProjectId, null)
+      throw error
+    })
+  return paperState(ctx.db, toProjectId)
 }
 
 /** Error message when Git has no name and email to commit with. */
@@ -1020,6 +1174,38 @@ export const paperRouter = router({
   createTarget: publicProcedure
     .input(projectIdInput)
     .query(({ ctx, input }): Promise<CreateTarget> => createTarget(ctx.db, input.projectId)),
+
+  /**
+   * Where a paper added with no project goes by default; `url` is the
+   * Overleaf Git URL for Add Overleaf project, or null for Start draft.
+   */
+  standaloneTarget: publicProcedure
+    .input(z.object({ url: z.string().nullable() }))
+    .query(({ ctx, input }): Promise<{ dir: string }> => standaloneTarget(ctx.db, input.url)),
+
+  /** Add a paper with no project as a paper-only project; see {@link addStandalonePaper}. */
+  addStandalone: publicProcedure
+    .input(
+      z.discriminatedUnion("source", [
+        z.object({ source: z.literal("folder"), dir: z.string().min(1) }),
+        z.object({ source: z.literal("draft"), dir: z.string().min(1) }),
+        z.object({
+          source: z.literal("overleaf"),
+          dir: z.string().min(1),
+          url: z.string().trim().min(1),
+          token: tokenInput.optional(),
+        }),
+      ]),
+    )
+    .mutation(({ ctx, input }): Promise<{ projectId: string }> => addStandalonePaper(ctx, input)),
+
+  /** Link a paper-only project's paper to a project; see {@link movePaperToProject}. */
+  moveToProject: publicProcedure
+    .input(z.object({ fromProjectId: z.string().min(1), toProjectId: z.string().min(1) }))
+    .mutation(
+      ({ ctx, input }): Promise<PaperState> =>
+        movePaperToProject(ctx, input.fromProjectId, input.toProjectId),
+    ),
 
   /** Whether "Start draft" can use a folder the user chose; see {@link canCreateIn}. */
   canCreateIn: publicProcedure

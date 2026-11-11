@@ -58,6 +58,9 @@ const DEFAULT_SETTINGS: EditorSettings = {
   showHiddenFiles: true,
   confirmFileDelete: true,
   confirmOverleafCommit: true,
+  papersFolder: "~/Papers",
+  askPapersFolder: true,
+  researchDiaryFormat: "md",
 }
 
 let store: Record<string, string>

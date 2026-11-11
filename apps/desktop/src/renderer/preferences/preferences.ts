@@ -368,6 +368,16 @@ export const RIGHT_SIDEBAR_DEFAULT_WIDTH = 320
 export const useRightSidebarWidth = (): [number, (next: number) => void] =>
   useNumberPref(RIGHT_SIDEBAR_WIDTH_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH)
 
+// --- Research diary panel (project view and Analysis): shown or hidden, and width (px)
+// One shared value for both views: hiding it in one view hides it in the other too.
+export const useResearchDiaryOpen = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.researchDiary.open", true)
+export const RESEARCH_DIARY_MIN_WIDTH = 240
+export const RESEARCH_DIARY_MAX_WIDTH = 720
+export const RESEARCH_DIARY_DEFAULT_WIDTH = 340
+export const useResearchDiaryWidth = (): [number, (next: number) => void] =>
+  useNumberPref("pi-lab.researchDiary.width", RESEARCH_DIARY_DEFAULT_WIDTH)
+
 // --- Project view: left Files panel width (px), continuously resizable ---------
 const FILES_PANEL_WIDTH_KEY = "pi-lab.projectView.filesPanelWidth"
 export const FILES_PANEL_MIN_WIDTH = 160
@@ -498,16 +508,17 @@ export type HeaderShortcutsView = "project" | "latex" | "tasks" | "analysis"
 /**
  * Default top bar shortcuts per view, in top bar order. Built-in ids are the
  * view's own buttons (Project view: `tasks`, `paper`, `auto-research`,
- * `plan-research`, `project-status`; LaTeX Editor: `update-paper`, `sync`; Analysis:
- * `analyze-experiments`, `html-report`, `fetch-experiments`; Tasks has none);
+ * `plan-research`, `project-status`, `research-diary`; LaTeX Editor: `update-paper`,
+ * `sync`; Analysis: `analyze-experiments`, `html-report`, `fetch-experiments`,
+ * `research-diary`; Tasks has none);
  * added skills and routines are stored as `skill:<slug>` and
  * `routine:<automation id>`.
  */
 export const DEFAULT_HEADER_SHORTCUTS: Record<HeaderShortcutsView, string[]> = {
-  project: ["tasks", "paper", "auto-research", "plan-research", "project-status"],
+  project: ["tasks", "paper", "auto-research", "plan-research", "project-status", "research-diary"],
   latex: ["update-paper", "sync"],
   tasks: [],
-  analysis: ["analyze-experiments", "html-report", "fetch-experiments"],
+  analysis: ["analyze-experiments", "html-report", "fetch-experiments", "research-diary"],
 }
 const HEADER_SHORTCUTS_KEYS: Record<HeaderShortcutsView, string> = {
   project: "pi-lab.projectView.headerShortcuts",
@@ -532,8 +543,12 @@ const HEADER_SHORTCUTS_ADDED: { version: number; ids: Record<HeaderShortcutsView
     },
   },
   { version: 3, ids: { project: ["paper"], latex: [], tasks: [], analysis: [] } },
+  {
+    version: 4,
+    ids: { project: ["research-diary"], latex: [], tasks: [], analysis: ["research-diary"] },
+  },
 ]
-const HEADER_SHORTCUTS_VERSION = "3"
+const HEADER_SHORTCUTS_VERSION = "4"
 /** `saved` with each id of `added` that it lacks put after its nearest default predecessor. */
 function withAddedShortcuts(saved: string[], defaults: string[], added: string[]): string[] {
   const next = [...saved]

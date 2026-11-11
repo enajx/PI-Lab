@@ -3,13 +3,14 @@ import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { ListTodo, ScrollText, Telescope, X } from "lucide-react"
+import { ListTodo, NotebookPen, ScrollText, Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
 import { HeaderShortcuts } from "../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectStageRow } from "../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
+import { ResearchDiaryPanel } from "../../../components/ResearchDiary/ResearchDiaryPanel"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { translateKnownError } from "../../../i18n/errors"
@@ -20,6 +21,7 @@ import {
   RIGHT_SIDEBAR_MIN_WIDTH,
   readRestoreProjectTabs,
   useNonGitNoticeDismissed,
+  useResearchDiaryOpen,
   useRightSidebarWidth,
   useShowFilesPanel,
   useSidebarCollapsed,
@@ -191,6 +193,7 @@ export function ProjectWorkspace({
   // When the left sidebar is collapsed, the traffic lights ride this view's title-bar
   // strip, so the header clears + drags around them (the path text stays selectable).
   const [collapsed] = useSidebarCollapsed()
+  const [researchDiaryOpen, setResearchDiaryOpen] = useResearchDiaryOpen()
 
   // Ensure the project's main-checkout (branch) workspace exists, once on mount
   // (this component is keyed by project, so a switch remounts and re-ensures).
@@ -518,6 +521,25 @@ export function ProjectWorkspace({
                   />
                 ),
               },
+              {
+                id: "research-diary",
+                label: t("Research diary"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="project-view-research-diary"
+                    aria-label={t("Research diary")}
+                    aria-pressed={researchDiaryOpen}
+                    title={t("Research diary")}
+                    data-feature-label={t("Research diary")}
+                    data-feature-help={t("Show or hide this project's research diary")}
+                    onClick={() => setResearchDiaryOpen(!researchDiaryOpen)}
+                    className={cn(headerIconButtonClass, researchDiaryOpen && "text-foreground")}
+                  >
+                    <NotebookPen className="size-3.5 shrink-0" aria-hidden />
+                  </button>
+                ),
+              },
             ]}
           />
           <TitleBarSystemControls />
@@ -670,6 +692,7 @@ export function ProjectWorkspace({
               />
             </div>
           )}
+          {researchDiaryOpen ? <ResearchDiaryPanel projectId={projectId} /> : null}
           <ProjectPalette
             controller={controller}
             workspaceId={workspaceId}

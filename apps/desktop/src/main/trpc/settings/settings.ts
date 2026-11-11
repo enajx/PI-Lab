@@ -82,6 +82,9 @@ const editorPatch = z.object({
   showHiddenFiles: z.boolean().optional(),
   confirmFileDelete: z.boolean().optional(),
   confirmOverleafCommit: z.boolean().optional(),
+  papersFolder: z.string().trim().min(1).max(1024).optional(),
+  askPapersFolder: z.boolean().optional(),
+  researchDiaryFormat: z.enum(["md", "qmd"]).optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */

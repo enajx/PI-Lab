@@ -454,6 +454,31 @@ async function sampleDigitalRainCharacters(repoPath: string): Promise<string> {
   return characters || DIGITAL_RAIN_FALLBACK_CHARACTERS
 }
 
+/**
+ * Add `dir` (an existing folder) as a paper-only project: a project marked
+ * `paperOnly` whose folder is the paper (see the LaTeX Editor). CONFLICT when
+ * the folder is already in PI Lab, with the same messages as `projects.add`.
+ */
+export async function addPaperOnlyProject(ctx: AppContext, dir: string): Promise<Project> {
+  const root = await realpath(dir)
+  const existing = ctx.db.select().from(projects).where(eq(projects.repoPath, root)).get()
+  if (existing) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: existing.archivedAt
+        ? `"${existing.name}" is already in PI Lab, hidden. Use Show hidden on the Projects Dashboard to restore it.`
+        : `"${existing.name}" is already in PI Lab.`,
+    })
+  }
+  const project = await upsertProjectFromDirectory(ctx, root, false, undefined)
+  return ctx.db
+    .update(projects)
+    .set({ metadata: { paperOnly: true } })
+    .where(eq(projects.id, project.id))
+    .returning()
+    .get()
+}
+
 export const projectsRouter = router({
   ...planningProcedures,
   /**
@@ -878,8 +903,8 @@ export const projectsRouter = router({
    * row so the dashboard re-renders from the mutation result.
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
-    // The linked paper folder, the paper auto-detect choice, the stage and the
-    // results folder are not part of the card dialog; keep them.
+    // The linked paper folder, the paper auto-detect choice, the paper-only
+    // mark, the stage and the results folder are not part of the card dialog; keep them.
     const stored = ctx.db
       .select({ metadata: projects.metadata })
       .from(projects)
@@ -890,6 +915,7 @@ export const projectsRouter = router({
     if (stored?.stage !== undefined) kept.stage = stored.stage
     if (stored?.resultsFolder !== undefined) kept.resultsFolder = stored.resultsFolder
     if (stored?.paperAutoDetect !== undefined) kept.paperAutoDetect = stored.paperAutoDetect
+    if (stored?.paperOnly !== undefined) kept.paperOnly = stored.paperOnly
     const metadata: ProjectMetadata | null =
       Object.keys(kept).length === 0 ? input.metadata : { ...input.metadata, ...kept }
     const row = ctx.db
