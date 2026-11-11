@@ -189,10 +189,10 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
       </header>
 
       <div data-testid="first-run-setup-scroll" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-6 py-4">
-          <section className="rounded-lg border border-border bg-card p-4">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 py-3">
+          <section className="rounded-lg border border-border bg-card p-3">
             <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
-            <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
               <label className="flex flex-col gap-1 text-xs">
                 <span>{t("Language")}</span>
                 <select
@@ -309,8 +309,8 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             </div>
           </section>
 
-          <section className="rounded-lg border border-border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between gap-4">
+          <section className="rounded-lg border border-border bg-card p-3">
+            <div className="mb-2 flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-baseline gap-3">
                 <h2 className="shrink-0 font-medium text-sm">{t("Coding agents")}</h2>
                 <p className="truncate text-muted-foreground text-xs">
@@ -332,7 +332,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 {t("Recheck")}
               </Button>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               {(harnessCheck.data?.harnesses ?? PLACEHOLDER_HARNESSES).map((harness) => (
                 <HarnessCard
                   key={harness.id}
@@ -359,9 +359,9 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             ) : null}
           </section>
 
-          <section className="rounded-lg border border-border bg-card p-4">
+          <section className="rounded-lg border border-border bg-card p-3">
             <h2 className="font-medium text-sm">{t("Local integrations")}</h2>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <IntegrationCard
                 title="GitHub"
                 checking={githubCheck.isFetching}
@@ -474,7 +474,7 @@ function HarnessCard({
   return (
     <div
       className={cn(
-        "rounded-lg border p-3",
+        "rounded-lg border px-3 py-2",
         selected ? "border-primary bg-primary/5" : "border-border",
       )}
     >
@@ -576,7 +576,7 @@ function IntegrationCard({
 }) {
   const t = useTranslate()
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="rounded-lg border border-border px-3 py-2">
       <div className="flex items-center gap-2">
         <span className="font-medium text-sm">{title}</span>
         {checking ? null : <StateIcon state={state} />}
