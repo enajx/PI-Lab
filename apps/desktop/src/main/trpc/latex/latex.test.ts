@@ -10,7 +10,8 @@ vi.mock("../../latex/runtime", () => ({ probeLatexRuntimes: mocks.probe }))
 let h: Harness | undefined
 afterEach(async () => {
   await h?.dispose()
-  vi.clearAllMocks()
+  // Reset implementations too: an install left pending by one test must not hang the next.
+  vi.resetAllMocks()
 })
 
 /** Mocked installer boundary: public router retains failures and only selects a validated install. */
@@ -64,14 +65,19 @@ test("reports typed install stages and rejects duplicate starts", async () => {
   )
 })
 
-/** Mocked probe: an existing usable system installation is selected without another download. */
-test("preserves an existing system installation", async () => {
+/** Mocked installer: Install TinyTeX downloads it even when a system LaTeX is already installed. */
+test("installs TinyTeX even when a system LaTeX is already installed", async () => {
   mocks.probe.mockResolvedValue({ bundled: { available: true }, system: { available: true } })
+  mocks.install.mockResolvedValueOnce({ binDir: "/tmp/validated/bin" })
   h = await createHarness([], { git: false, daemon: "lazy" })
-  await h.caller.settings.updateEditor({ latexProvider: "bundled" })
-  await h.caller.latex.install()
-  expect(mocks.install).not.toHaveBeenCalled()
-  expect((await h.caller.settings.get()).editor.latexProvider).toBe("system")
+  const caller = h.caller
+  await caller.settings.updateEditor({ latexProvider: "bundled" })
+  await caller.latex.install()
+  await vi.waitFor(async () =>
+    expect((await caller.latex.status()).installation.state).toBe("complete"),
+  )
+  expect(mocks.install).toHaveBeenCalledTimes(1)
+  expect((await caller.settings.get()).editor.latexProvider).toBe("system")
 })
 
 /** Mocked slow probe: completion cannot leave the settings chooser showing the old provider. */

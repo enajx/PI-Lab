@@ -330,11 +330,6 @@ export function PaperSetup({
                   <GitBranch className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Add Overleaf project")}</h3>
                 </div>
-                <p className={cardTextClass}>
-                  {standalone
-                    ? t("Clone your Overleaf project into a new folder.")
-                    : t("Clone your Overleaf project into paper/.")}
-                </p>
                 <Input
                   data-testid="paper-overleaf-url"
                   aria-label={t("Overleaf Git URL")}
@@ -387,7 +382,6 @@ export function PaperSetup({
                   <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Use an existing folder")}</h3>
                 </div>
-                <p className={cardTextClass}>{t("Open a paper folder you already cloned.")}</p>
                 <div className="mt-auto">
                   <Button
                     type="button"
@@ -396,7 +390,7 @@ export function PaperSetup({
                     disabled={busy}
                     onClick={chooseFolder}
                   >
-                    {t("Choose folder…")}
+                    {t("Open folder…")}
                   </Button>
                 </div>
               </section>
@@ -406,7 +400,6 @@ export function PaperSetup({
                   <FilePlus className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Start draft")}</h3>
                 </div>
-                <p className={cardTextClass}>{t("Start a new paper from your LaTeX template.")}</p>
                 {/* The folder wraps onto more lines when it is long; it is never cut. */}
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
                   <span

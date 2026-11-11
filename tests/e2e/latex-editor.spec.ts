@@ -654,9 +654,7 @@ test("LaTeX Editor changes and clears the paper folder from the footer, and Edit
     await item.click()
     await page.getByTestId("paper-folder-clear").click()
     await expect(page.getByTestId("paper-setup-overleaf")).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByTestId("paper-setup-folder")).toContainText(
-      "Open a paper folder you already cloned.",
-    )
+    await expect(page.getByTestId("paper-use-folder")).toHaveText("Open folder…")
     await expect(page.getByTestId("paper-detecting")).toHaveCount(0)
     await page.waitForTimeout(1_000)
     await expect(page.getByTestId("paper-editor")).toHaveCount(0)
@@ -866,16 +864,18 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     await expect(editor).toBeVisible()
     if (!process.env.CI) await expectPdfBeside()
 
-    // The footer shows the LaTeX engine in use; its menu has Auto chosen by default.
+    // The footer shows the LaTeX engine in use; its menu has no Auto and ticks that engine.
     const engine = page.getByTestId("editor-status-bar").getByTestId("latex-engine")
     await expect(engine).toHaveText(/TeX Live|MiKTeX|System LaTeX|Tectonic/, { timeout: 15_000 })
+    const inUse = /Tectonic/.test((await engine.textContent()) ?? "") ? "bundled" : "system"
     await engine.click()
-    await expect(page.getByTestId("latex-engine-auto")).toHaveAttribute("aria-checked", "true")
+    await expect(page.getByTestId("latex-engine-auto")).toHaveCount(0)
+    await expect(page.getByTestId(`latex-engine-${inUse}`)).toHaveAttribute("aria-checked", "true")
     await expect(page.getByTestId("latex-engine-bundled")).toBeVisible()
-    await expect(page.getByTestId("latex-engine-install")).toBeVisible()
+    await expect(page.getByTestId("latex-engine-install")).toBeEnabled()
     await page.screenshot({ path: test.info().outputPath("latex-engine-menu.png") })
     await page.keyboard.press("Escape")
-    await expect(page.getByTestId("latex-engine-auto")).toHaveCount(0)
+    await expect(page.getByTestId("latex-engine-bundled")).toHaveCount(0)
 
     // Update paper (top bar) starts a write-research agent as a focused tab.
     await page.getByTestId("paper-update").click()
@@ -914,7 +914,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
 /**
  * A paper added with no project, through the real app: New paper… in the
  * LaTeX Editor picker, Start draft into a folder typed in the folder question,
- * then its own Dashboard card (only the paper button), then Add to project,
+ * then its own Dashboard card (only the paper button), then Link to project,
  * which moves the paper to the project and removes that card. The paper is
  * made from the built-in template; no Overleaf remote is used.
  */
@@ -962,7 +962,7 @@ test("LaTeX Editor adds a paper with no project, shows its own card, and links i
     await card.getByTestId("project-card-body").click()
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 30_000 })
 
-    // Add to project moves the paper to the project and removes the paper's own card.
+    // Link to project moves the paper to the project and removes the paper's own card.
     await page.getByTestId("latex-link-to-project").click()
     await page.getByRole("menuitem", { name: "project" }).click()
     await expect(page.getByTestId("latex-project-select")).toContainText("project")

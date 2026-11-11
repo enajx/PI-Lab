@@ -410,9 +410,7 @@ test("with newPaper in the address, the page shows the cards for a paper with no
     },
     true,
   )
-  expect((await screen.findByTestId("paper-setup-overleaf")).textContent).toContain(
-    "into a new folder",
-  )
+  await screen.findByTestId("paper-setup-overleaf")
   expect((screen.getByTestId("latex-project-select") as HTMLButtonElement).value).toBe(
     "__new-paper__",
   )
@@ -432,7 +430,9 @@ test("a paper-only project can be linked to a project without a paper", async ()
     ],
     { "paper.moveToProject": moveToProject },
   )
-  fireEvent.click(await screen.findByTestId("latex-link-to-project"))
+  const button = await screen.findByTestId("latex-link-to-project")
+  expect(button.textContent).toBe("Link to project")
+  fireEvent.click(button)
   expect(screen.queryByRole("menuitem", { name: "Has paper" })).toBeNull()
   fireEvent.click(screen.getByRole("menuitem", { name: "One" }))
   await waitFor(() =>
@@ -447,7 +447,7 @@ test("a paper-only project can be linked to a project without a paper", async ()
   )
 })
 
-test("a normal project has no Add to project button", async () => {
+test("a normal project has no Link to project button", async () => {
   renderWithProjects([{ id: "p1", name: "One", metadata: null }], {})
   await screen.findByTestId("paper-setup")
   expect(screen.queryByTestId("latex-link-to-project")).toBeNull()
