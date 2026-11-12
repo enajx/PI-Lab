@@ -200,7 +200,7 @@ export class FullRuntime {
       initialSettings: getSettingsOrDefaults(getDb()).caffeine,
     })
     this.activityStatus = new ActivityStatusFeed(getDb(), this.activityRegistry)
-    const whisperServer = await resolveWhisperServer(
+    const whisperServer = resolveWhisperServer(
       app.isPackaged
         ? join(process.resourcesPath, "whisper")
         : join(__dirname, "..", "..", "resources", "whisper"),
@@ -217,8 +217,10 @@ export class FullRuntime {
       enginePidFile,
       downloadStallMs: 30_000,
     })
-    // Before the window loads, so no new engine or download can start during the cleanup.
-    await this.dictation.start()
+    // Runs while the window opens; the engine waits for it, and a failure also fails dictation.
+    void this.dictation.start().catch((error) => {
+      console.warn(`[pi-lab] dictation cleanup failed: ${String(error)}`)
+    })
     this.startupReady = this.ensureAgentRecovery().catch((error) => {
       console.warn(`[pi-lab] activity reconciliation skipped: ${String(error)}`)
     })

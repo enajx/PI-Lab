@@ -11,7 +11,7 @@ import { createHarness, type Harness } from "../testHarness"
 const repoRoot = join(import.meta.dirname, "..", "..", "..", "..", "..", "..")
 const resourcesDir = join(repoRoot, "apps", "desktop", "resources", "whisper")
 const modelsDir = join(repoRoot, ".cache", "whisper-test-models")
-const binary = await resolveWhisperServer(resourcesDir)
+const binary = resolveWhisperServer(resourcesDir)
 const skipReason = `skipped: no whisper-server in ${resourcesDir}; run \`bun run prepare:whisper\` in apps/desktop`
 const title = binary
   ? "transcribes a real recording with the bundled engine and the tiny.en model"
