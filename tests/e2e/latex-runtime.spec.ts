@@ -89,7 +89,7 @@ async function saveChapter(
   text: string,
   buildTimeout: number,
 ): Promise<void> {
-  const editor = page.getByTestId("editor-buffer")
+  const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
   await expect(editor).toBeVisible()
   await editor.locator(".cm-content").click()
   await page.keyboard.press("ControlOrMeta+a")
@@ -134,7 +134,7 @@ test("global LaTeX choice survives restart and bundled compilation refreshes and
     app = await launch(root, first)
     let page = await latexSettings(app)
     const section = page.getByTestId("settings-section-latex")
-    await expect(page.getByLabel("LaTeX compiler")).toHaveValue("bundled")
+    await expect(page.getByLabel("LaTeX compiler")).toHaveValue("auto")
     await expect(section).toContainText("applies to all projects")
     await expect(section).toContainText(/tectonic.*\d/iu)
     const systemPath = section.getByText(/^PDFLaTeX:/)

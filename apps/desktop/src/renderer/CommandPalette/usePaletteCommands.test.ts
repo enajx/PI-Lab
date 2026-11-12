@@ -23,6 +23,7 @@ const project: Project = {
   gradient: null,
   digitalRain: false,
   sortIndex: 0,
+  sortOrder: null,
   archivedAt: null,
   createdAt: 0,
   updatedAt: 0,

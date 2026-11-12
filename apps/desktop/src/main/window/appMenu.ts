@@ -12,14 +12,15 @@ interface ReadyUpdateMenuItem {
 
 let readyUpdate: ReadyUpdateMenuItem | null = null
 let userQuitAction: () => void = () => app.quit()
-let closeTabAction: () => void = () => app.hide()
+// Cmd+W never hides the app; until main installs the close-tab action it does nothing.
+let closeTabAction: () => void = () => {}
 
 /** Keep explicit quit behavior when the native menu is rebuilt for updates or language. */
 export function setUserQuitAction(action: () => void): void {
   userQuitAction = action
 }
 
-/** Route Cmd+W to the focused file tab first; the action hides the app when no tab closes. */
+/** Route Cmd+W to the active tab of the focused panel; it never hides or closes the app. */
 export function setCloseTabAction(action: () => void): void {
   closeTabAction = action
 }
@@ -30,7 +31,7 @@ export function setReadyUpdateMenuItem(item: ReadyUpdateMenuItem | null): void {
   installAppMenu()
 }
 
-/** Install native app actions, including Cmd+W to close a file tab or move the app to the background. */
+/** Install native app actions, including Cmd+W to close the active tab (never the window). */
 export function installAppMenu(): void {
   const isMac = process.platform === "darwin"
   const appName = app.getName()

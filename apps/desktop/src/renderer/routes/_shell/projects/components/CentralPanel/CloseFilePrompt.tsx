@@ -1,18 +1,10 @@
 import { Button } from "@pi-lab/ui"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useTranslate } from "../../../../../i18n/language"
-import { registerCloseTabHandler } from "../../../../../shortcuts/closeTab"
-import type { ActiveRef, CentralPanelController } from "./useCentralPanel"
-
-/** The file tab Cmd+W closes: the focused file, unless the Run tab or a session has focus. */
-export function fileTabToClose(active: ActiveRef | null, runFocused: boolean): string | null {
-  if (runFocused || active?.type !== "file") return null
-  return active.relPath
-}
+import type { CentralPanelController } from "./useCentralPanel"
 
 interface CloseFilePromptArgs {
   controller: CentralPanelController
-  runFocused: boolean
   /** Opens the save-location chooser for an untitled buffer. */
   onSaveUntitled: ((relPath: string) => void) | undefined
 }
@@ -24,22 +16,16 @@ export interface CloseFilePromptState {
 }
 
 /**
- * User close actions for project-view file tabs (tab ×, Ctrl+W, and macOS Cmd+W
- * from the native menu): a saved file closes at once, a dirty one opens the
- * unsaved-changes prompt. For Cmd+W, anything other than a focused file tab is
- * left to main, which moves the app to the background. Closes that the user
- * already confirmed elsewhere (deleting the file) call `controller.closeFile`
- * directly and never prompt.
+ * User close actions for project-view file tabs (tab ×, and Ctrl+W / macOS Cmd+W
+ * through CentralPanel): a saved file closes at once, a dirty one opens the
+ * unsaved-changes prompt. Closes that the user already confirmed elsewhere
+ * (deleting the file) call `controller.closeFile` directly and never prompt.
  */
-export function useCloseFilePrompt({
-  controller,
-  runFocused,
-  onSaveUntitled,
-}: CloseFilePromptArgs) {
-  const { editor, active, closeFile } = controller
+export function useCloseFilePrompt({ controller, onSaveUntitled }: CloseFilePromptArgs) {
+  const { editor, closeFile } = controller
   const [prompt, setPrompt] = useState<CloseFilePromptState | null>(null)
-  const latest = useRef({ active, runFocused, tabs: editor.tabs, closeFile, prompt })
-  latest.current = { active, runFocused, tabs: editor.tabs, closeFile, prompt }
+  const latest = useRef({ tabs: editor.tabs, closeFile, prompt })
+  latest.current = { tabs: editor.tabs, closeFile, prompt }
 
   /** Close one file tab, asking first when it has unsaved changes. */
   const requestClose = useCallback((relPath: string): void => {
@@ -52,20 +38,6 @@ export function useCloseFilePrompt({
       current.closeFile(relPath)
     }
   }, [])
-
-  useEffect(
-    () =>
-      registerCloseTabHandler(() => {
-        const current = latest.current
-        // The prompt is already asking about a file: Cmd+W does nothing more.
-        if (current.prompt) return true
-        const relPath = fileTabToClose(current.active, current.runFocused)
-        if (!relPath) return false
-        requestClose(relPath)
-        return true
-      }),
-    [requestClose],
-  )
 
   const choose = async (choice: "save" | "discard" | "cancel"): Promise<void> => {
     if (!prompt || prompt.busy) return

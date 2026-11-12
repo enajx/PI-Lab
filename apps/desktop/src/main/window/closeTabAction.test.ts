@@ -19,13 +19,11 @@ function harness(withWindow: boolean) {
     webContents,
     isDestroyed: () => destroyed.window,
   } as unknown as BrowserWindow
-  const hide = vi.fn()
   const warn = vi.fn()
   let sequence = 0
   const action = installCloseTabAction({
     ipcMain: ipc as IpcMain,
     targetWindow: () => (withWindow ? window : null),
-    hide,
     warn,
     createRequestId: () => `request-${++sequence}`,
     timeoutMs: 1_000,
@@ -33,28 +31,30 @@ function harness(withWindow: boolean) {
   const respond = (value: unknown, sender: unknown, senderFrame: unknown): void => {
     ipc.emit(CLOSE_TAB_RESPONSE_CHANNEL, { sender, senderFrame }, value)
   }
-  return { ipc, webContents, mainFrame, destroyed, hide, warn, action, respond }
+  return { ipc, webContents, mainFrame, destroyed, warn, action, respond }
 }
 
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 
+// Cmd+W never hides or closes the app: the options have no hide callback, so
+// each test only checks what was sent to the renderer and what was logged.
 describe("Cmd+W close-tab action through mocked Electron", () => {
-  test("hides the app at once when there is no PI Lab window to ask", () => {
+  test("does nothing when there is no PI Lab window to ask", () => {
     const h = harness(false)
     h.action.request()
-    expect(h.hide).toHaveBeenCalledOnce()
+    expect(h.webContents.send).not.toHaveBeenCalled()
+    expect(h.warn).not.toHaveBeenCalled()
   })
 
-  test("hides the app at once when the focused renderer is gone", () => {
+  test("does nothing when the focused renderer is gone", () => {
     const h = harness(true)
     h.destroyed.contents = true
     h.action.request()
-    expect(h.hide).toHaveBeenCalledOnce()
     expect(h.webContents.send).not.toHaveBeenCalled()
   })
 
-  test("asks the focused renderer and keeps the app visible when it closes a tab", () => {
+  test("asks the focused renderer, which closes its tab", () => {
     const h = harness(true)
     h.action.request()
     expect(h.webContents.send).toHaveBeenCalledExactlyOnceWith(CLOSE_TAB_REQUEST_CHANNEL, {
@@ -62,28 +62,31 @@ describe("Cmd+W close-tab action through mocked Electron", () => {
     })
     h.respond({ requestId: "request-1", handled: true }, h.webContents, h.mainFrame)
     vi.advanceTimersByTime(5_000)
-    expect(h.hide).not.toHaveBeenCalled()
+    expect(h.warn).not.toHaveBeenCalled()
   })
 
-  test("hides the app when the renderer has no tab to close", () => {
+  test("a renderer with no tab to close ends the request without a warning", () => {
     const h = harness(true)
     h.action.request()
     h.respond({ requestId: "request-1", handled: false }, h.webContents, h.mainFrame)
-    expect(h.hide).toHaveBeenCalledOnce()
     vi.advanceTimersByTime(5_000)
-    expect(h.hide).toHaveBeenCalledOnce()
+    expect(h.warn).not.toHaveBeenCalled()
+    h.action.request()
+    expect(h.webContents.send).toHaveBeenCalledTimes(2)
   })
 
-  test("hides the app and warns when the renderer does not answer, ignoring a late answer", () => {
+  test("warns when the renderer does not answer, then accepts the next press", () => {
     const h = harness(true)
     h.action.request()
     vi.advanceTimersByTime(999)
-    expect(h.hide).not.toHaveBeenCalled()
+    expect(h.warn).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
-    expect(h.hide).toHaveBeenCalledOnce()
     expect(h.warn).toHaveBeenCalledOnce()
     h.respond({ requestId: "request-1", handled: false }, h.webContents, h.mainFrame)
-    expect(h.hide).toHaveBeenCalledOnce()
+    h.action.request()
+    expect(h.webContents.send).toHaveBeenLastCalledWith(CLOSE_TAB_REQUEST_CHANNEL, {
+      requestId: "request-2",
+    })
   })
 
   test("ignores answers from another sender, frame or request, and repeated presses while waiting", () => {
@@ -95,7 +98,8 @@ describe("Cmd+W close-tab action through mocked Electron", () => {
     h.respond({ requestId: "request-1", handled: false }, h.webContents, {})
     h.respond({ requestId: "other", handled: false }, h.webContents, h.mainFrame)
     h.respond({ requestId: "request-1" }, h.webContents, h.mainFrame)
-    expect(h.hide).not.toHaveBeenCalled()
+    h.action.request()
+    expect(h.webContents.send).toHaveBeenCalledOnce()
     h.respond({ requestId: "request-1", handled: true }, h.webContents, h.mainFrame)
     h.action.request()
     expect(h.webContents.send).toHaveBeenLastCalledWith(CLOSE_TAB_REQUEST_CHANNEL, {
@@ -103,12 +107,12 @@ describe("Cmd+W close-tab action through mocked Electron", () => {
     })
   })
 
-  test("dispose stops listening and cancels a pending fallback", () => {
+  test("dispose stops listening and cancels a pending timeout", () => {
     const h = harness(true)
     h.action.request()
     h.action.dispose()
     expect(h.ipc.listenerCount(CLOSE_TAB_RESPONSE_CHANNEL)).toBe(0)
     vi.advanceTimersByTime(5_000)
-    expect(h.hide).not.toHaveBeenCalled()
+    expect(h.warn).not.toHaveBeenCalled()
   })
 })

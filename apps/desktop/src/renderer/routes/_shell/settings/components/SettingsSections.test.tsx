@@ -1,7 +1,6 @@
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { APP_ICON_DEFAULT_SELECTION } from "../../../../../shared/appIcon"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
 import {
@@ -85,6 +84,46 @@ describe("Settings sections", () => {
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
+  test("Shortcuts lists the Dashboard and waiting-agent shortcuts and rebinds them", async () => {
+    renderSection(<ShortcutsSection />)
+
+    expect(screen.getByTestId("shortcut-go-to-dashboard").textContent).toBe("⌘ESCAPE")
+    expect(screen.getByTestId("shortcut-next-waiting-agent").textContent).toBe("⌥TAB")
+    expect(screen.getByTestId("shortcut-next-waiting-agent-in-project").textContent).toBe("⌥⇧TAB")
+
+    fireEvent.click(screen.getByTestId("shortcut-next-waiting-agent-rebind"))
+    fireEvent.keyDown(window, { key: "j", metaKey: true })
+    await waitFor(() =>
+      expect(screen.getByTestId("shortcut-next-waiting-agent").textContent).toBe("⌘J"),
+    )
+    expect(window.localStorage.getItem("pi-lab.shortcuts")).toContain(
+      '"next-waiting-agent":"Mod+j"',
+    )
+
+    fireEvent.click(screen.getByTestId("shortcut-go-to-dashboard-rebind"))
+    fireEvent.keyDown(window, { key: "Tab", altKey: true, shiftKey: true })
+    const conflict = await screen.findByRole("alert")
+    expect(conflict.textContent).toContain("Next waiting agent in project")
+    fireEvent.click(screen.getByTestId("shortcut-go-to-dashboard-rebind"))
+
+    fireEvent.click(screen.getByTestId("shortcut-next-waiting-agent-reset"))
+    expect(screen.getByTestId("shortcut-next-waiting-agent").textContent).toBe("⌥TAB")
+  })
+
+  test("Shortcuts lists the new-session shortcut and saves what it opens", () => {
+    renderSection(<ShortcutsSection />)
+
+    expect(screen.getByTestId("shortcut-new-session").textContent).toBe("⌘T")
+    const kind = screen.getByTestId<HTMLSelectElement>("settings-new-session-kind")
+    expect(kind.value).toBe("terminal-agent")
+    const chat = [...kind.options].find((option) => option.value === "chat-agent")
+    expect(chat?.disabled).toBe(true)
+
+    fireEvent.change(kind, { target: { value: "terminal" } })
+    expect(window.localStorage.getItem("pi-lab.shortcuts.newSessionKind")).toBe("terminal")
+    expect(kind.value).toBe("terminal")
+  })
+
   test("Shortcuts refuses a reset when another action uses the default chord", async () => {
     renderSection(<ShortcutsSection />)
 
@@ -114,56 +153,6 @@ describe("Settings sections", () => {
 
     fireEvent.change(screen.getByTestId("settings-theme-mode"), { target: { value: "dark" } })
     await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true))
-  })
-
-  test("Appearance offers icon choices only in Alpha", async () => {
-    const getChannel = vi.fn(async () => "stable" as const)
-    const previous = window.piLab
-    window.piLab = {
-      platform: "darwin",
-      shutdown: {} as NonNullable<typeof window.piLab>["shutdown"],
-      appIcon: {
-        getChannel,
-        get: async () => APP_ICON_DEFAULT_SELECTION,
-        set: async (selection) => selection,
-        preview: async () => "data:image/png;base64,preview",
-      },
-    } as NonNullable<typeof window.piLab>
-    try {
-      renderSection(<AppearanceSection />)
-      await waitFor(() => expect(getChannel).toHaveBeenCalledOnce())
-      expect(screen.queryByText("App icon")).toBeNull()
-    } finally {
-      window.piLab = previous
-    }
-  })
-
-  test("Appearance shows the icon picker in Alpha", async () => {
-    const previous = window.piLab
-    window.piLab = {
-      platform: "darwin",
-      shutdown: {} as NonNullable<typeof window.piLab>["shutdown"],
-      appIcon: {
-        getChannel: async () => "alpha",
-        get: async () => ({
-          ...APP_ICON_DEFAULT_SELECTION,
-          alphaWhiteBackground: true,
-          piPalette: "viridis",
-        }),
-        set: async (selection) => selection,
-        preview: async () => "data:image/png;base64,preview",
-      },
-    } as NonNullable<typeof window.piLab>
-    try {
-      renderSection(<AppearanceSection />)
-      expect(await screen.findByText("App icon")).toBeTruthy()
-      expect(await screen.findByTestId("settings-app-icon-font")).toHaveProperty(
-        "value",
-        "gill-sans-regular",
-      )
-    } finally {
-      window.piLab = previous
-    }
   })
 
   test("Appearance gallery selects and applies a named app theme", async () => {
@@ -228,6 +217,57 @@ describe("Settings sections", () => {
     await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"))
     fireEvent.click(toggle)
     await waitFor(() => expect(patches).toEqual([{ showHiddenFiles: false }]))
+  })
+
+  test("Editor offers MyST for the diary and the six analysis formats, and saves the choices", async () => {
+    const patches: unknown[] = []
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({ editor: { researchDiaryFormat: "md", analysisFormat: "md" } }),
+      "settings.updateEditor": (input) => {
+        patches.push(input)
+        return null
+      },
+    })
+
+    const diary = await screen.findByTestId<HTMLSelectElement>("settings-research-diary-format")
+    expect([...diary.options].map((option) => option.value)).toEqual(["md", "qmd", "myst"])
+    const analysis = await screen.findByTestId<HTMLSelectElement>("settings-analysis-format")
+    expect(analysis.value).toBe("md")
+    expect([...analysis.options].map((option) => option.textContent)).toEqual([
+      "Markdown",
+      "Quarto",
+      "MyST Markdown",
+      "HTML",
+      "marimo notebook",
+      "Jupyter notebook",
+    ])
+
+    fireEvent.change(diary, { target: { value: "myst" } })
+    fireEvent.change(analysis, { target: { value: "ipynb" } })
+    await waitFor(() =>
+      expect(patches).toEqual([{ researchDiaryFormat: "myst" }, { analysisFormat: "ipynb" }]),
+    )
+  })
+
+  test("Editor shows the report skill, experiment-report by default, and saves a new name", async () => {
+    const patches: unknown[] = []
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({ editor: { reportSkill: "experiment-report" } }),
+      "settings.updateEditor": (input) => {
+        patches.push(input)
+        return null
+      },
+    })
+
+    const field = await screen.findByTestId<HTMLInputElement>("settings-report-skill")
+    expect(field.value).toBe("experiment-report")
+    const save = screen.getByTestId<HTMLButtonElement>("settings-report-skill-save")
+    expect(save.disabled).toBe(true)
+    fireEvent.change(field, { target: { value: "  " } })
+    expect(save.disabled).toBe(true)
+    fireEvent.change(field, { target: { value: " lab-report " } })
+    fireEvent.click(save)
+    await waitFor(() => expect(patches).toEqual([{ reportSkill: "lab-report" }]))
   })
 
   test("Editor confirms file deletes by default and persists turning it back on", async () => {
@@ -312,6 +352,34 @@ describe("Settings sections", () => {
       expect(generalPatches).toContainEqual({ keepRunningAfterClose: false })
       expect(loginPatches).toContainEqual({ enabled: true })
     })
+  })
+
+  test("General shows the remembered quit choice and Ask every time resets it", async () => {
+    const patches: unknown[] = []
+    let quitChoice = "background"
+    renderSection(<GeneralSection />, {
+      "settings.get": () => ({ quitChoice }),
+      "settings.updateGeneral": (input) => {
+        patches.push(input)
+        quitChoice = (input as { quitChoice: string }).quitChoice
+        return { quitChoice }
+      },
+    })
+    const choice = await screen.findByTestId("settings-quit-choice")
+    await waitFor(() => expect(choice.textContent).toContain("Move to background"))
+    fireEvent.click(screen.getByTestId("settings-quit-choice-reset"))
+    await waitFor(() => expect(patches).toEqual([{ quitChoice: "ask" }]))
+    await waitFor(() => expect(choice.textContent).toContain("Ask every time"))
+    expect(screen.queryByTestId("settings-quit-choice-reset")).toBeNull()
+  })
+
+  test("General shows only Move to background or Ask every time, never a remembered Quit", async () => {
+    // "quit" is a value saved before Quit stopped being rememberable.
+    renderSection(<GeneralSection />, { "settings.get": () => ({ quitChoice: "quit" }) })
+    const choice = await screen.findByTestId("settings-quit-choice")
+    await waitFor(() => expect(choice.textContent).toBe("Ask every time"))
+    expect(document.body.textContent).not.toContain("Remembered: Quit")
+    expect(screen.queryByTestId("settings-quit-choice-reset")).toBeNull()
   })
 
   test("General does not offer a switch to hide the always-visible menu-bar icon", async () => {
@@ -698,6 +766,16 @@ describe("Settings sections", () => {
     expect(window.localStorage.getItem("pi-lab.sections.showAnalysis")).toBe("false")
   })
 
+  test("Sections has an Editor toggle, off by default, that shows the Editor row", () => {
+    renderSection(<SectionsSection />)
+    const editor = screen.getByTestId("settings-show-editor-section")
+    expect(editor.getAttribute("aria-checked")).toBe("false")
+    expect((editor as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(editor)
+    expect(window.localStorage.getItem("pi-lab.sections.showEditor")).toBe("true")
+    expect(editor.getAttribute("aria-checked")).toBe("true")
+  })
+
   test("Editor section round-trips an autosave patch through settings.updateEditor", async () => {
     const patches: unknown[] = []
     renderSection(<EditorSection />, {
@@ -823,8 +901,26 @@ describe("Settings sections", () => {
     for (const option of lightOptions) expect(option.textContent?.endsWith("(Light)")).toBe(true)
     for (const option of darkOptions) expect(option.textContent?.endsWith("(Dark)")).toBe(true)
 
-    // A legacy/unknown stored id normalizes to the default light theme for display.
-    expect(select.value).toBe("solarized-light")
+    // The stored "default" shows GitHub for the current (light) appearance.
+    expect(select.value).toBe("github-light")
+  })
+
+  test("Editor theme picker shows GitHub (Dark) for the stored default in dark appearance", async () => {
+    window.localStorage.setItem("pi-lab.theme", "dark")
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({
+        editor: {
+          autosave: false,
+          vim: false,
+          diagnosticsEnabled: false,
+          typeChecker: "ty",
+          formatOnSave: false,
+          editorTheme: "default",
+        },
+      }),
+    })
+    const select = await screen.findByTestId<HTMLSelectElement>("settings-editor-theme")
+    expect(select.value).toBe("github-dark")
   })
 
   test("Editor custom-theme gallery selects/removes persisted themes and shows import errors", async () => {
@@ -867,7 +963,7 @@ describe("Settings sections", () => {
     await waitFor(() =>
       expect(patches).toContainEqual({
         customEditorThemes: [],
-        editorTheme: "solarized-light",
+        editorTheme: "default",
       }),
     )
     await waitFor(() =>

@@ -100,8 +100,15 @@ const DEFAULT_SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  latexOutputDir: "build",
   showHiddenFiles: true,
   confirmFileDelete: true,
+  confirmOverleafCommit: true,
+  papersFolder: "~/Papers",
+  askPapersFolder: true,
+  researchDiaryFormat: "md",
+  analysisFormat: "md",
+  reportSkill: "experiment-report",
 }
 
 const PY_DIAGNOSTIC = {
@@ -243,6 +250,7 @@ function Harness({
   activatedSession,
   initialState,
   onPinFile,
+  leftColumn,
 }: {
   client: ReturnType<typeof createFakeTrpcClient>
   settings: EditorSettings
@@ -261,8 +269,10 @@ function Harness({
   }
   initialState?: CentralPanelRestoreState
   onPinFile?: (relPath: string) => void
+  leftColumn?: import("./CentralPanel").CentralPanelLeftColumn
 }) {
   const controller = useCentralPanel({
+    origin: "project",
     client,
     workspaceId: "ws-1",
     projectId: "p-1",
@@ -295,6 +305,7 @@ function Harness({
         filesPanelOpen={filesPanelOpen}
         onFilesPanelOpenChange={setFilesPanelOpen}
         onPinFile={onPinFile}
+        leftColumn={leftColumn}
       />
     </div>
   )
@@ -618,6 +629,71 @@ describe("CentralPanel — panel", () => {
     expect(container.querySelectorAll(".dv-groupview")).toHaveLength(1)
   })
 
+  /** ⌘T does what the robot button does: it starts the remembered terminal agent. */
+  test("the new-session shortcut opens a terminal agent like the New agent button", async () => {
+    renderPanel()
+    await waitFor(() =>
+      expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
+    )
+
+    const event = new KeyboardEvent("keydown", {
+      key: "t",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    await screen.findByTestId("terminal")
+    expect(launchedAgents).toEqual(["claude-code"])
+    expect(launchedWorkspaceModes).toEqual(["policy"])
+  })
+
+  /** ⌘T pressed while the agent list is still loading opens the agent once it loads. */
+  test("the new-session shortcut pressed before the agents load opens the agent when they load", async () => {
+    renderPanel()
+    expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(true)
+
+    const event = new KeyboardEvent("keydown", {
+      key: "t",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    await screen.findByTestId("terminal")
+    expect(launchedAgents).toEqual(["claude-code"])
+  })
+
+  /** With "Terminal" chosen in Settings → Shortcuts, ⌘T opens a plain terminal. */
+  test("the new-session shortcut opens a plain terminal when Settings chooses Terminal", async () => {
+    window.localStorage.setItem("pi-lab.shortcuts.newSessionKind", "terminal")
+    renderPanel()
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true })
+
+    const terminal = await screen.findByTestId("terminal")
+    expect(terminal.getAttribute("data-input-kind")).toBe("terminal")
+    expect(launchedAgents).toEqual([])
+  })
+
+  /** An open dialog keeps the key: ⌘T does not start a session behind it. */
+  test("the new-session shortcut does nothing while the agent chooser is open", async () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId("central-add-menu"))
+    fireEvent.click(screen.getByTestId("central-add-agent"))
+    await screen.findByTestId("new-agent-dialog")
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true })
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(launchedAgents).toEqual([])
+    expect(screen.queryByTestId("terminal")).toBeNull()
+  })
+
   test("closing a terminal tab terminates its PTY instead of leaving a hidden session", async () => {
     const killed: string[] = []
     renderPanel(
@@ -694,7 +770,12 @@ describe("CentralPanel — panel", () => {
     })
     expect(spawned).toEqual([])
     expect(launched).toEqual([
-      { projectId: "p-1", agentId: "claude-code", workspaceMode: "worktree" },
+      {
+        projectId: "p-1",
+        origin: "project",
+        agentId: "claude-code",
+        workspaceMode: "worktree",
+      },
     ])
     const activeTab = screen
       .getAllByTestId("central-tab")
@@ -957,13 +1038,148 @@ describe("CentralPanel — Cmd+W through the close-tab responder (fake bridge)",
     await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
   })
 
-  test("a focused terminal or an empty panel leaves Cmd+W to the background action", async () => {
+  test("an empty panel has no tab to close, so Cmd+W is not handled", () => {
     renderPanel()
     expect(pressCmdW()).toBe(false)
+  })
+
+  test("Cmd+W on a terminal tab asks first; Cancel keeps it, Close terminal stops it", async () => {
+    const killed: string[] = []
+    renderPanel(
+      baseHandlers("main.py", {
+        "terminal.kill": (input) => {
+          killed.push((input as { sessionId: string }).sessionId)
+          return { ok: true }
+        },
+      }),
+    )
     fireEvent.click(screen.getByTestId("launcher-terminal"))
     await screen.findByTestId("terminal")
-    expect(pressCmdW()).toBe(false)
+
+    expect(pressCmdW()).toBe(true)
+    const prompt = await screen.findByTestId("close-session-prompt")
+    expect(prompt.textContent).toContain("Close terminal?")
+    // A second press while the prompt is open does nothing more.
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(within(prompt).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("close-session-prompt")).toBeNull())
     expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("terminal")
+    expect(killed).toEqual([])
+
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(
+      within(await screen.findByTestId("close-session-prompt")).getByRole("button", {
+        name: "Close terminal",
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(killed).toEqual(["term-1"])
+    expect(pressCmdW()).toBe(false)
+  })
+
+  test("Cmd+W on an agent tab asks before stopping the agent", async () => {
+    const killed: string[] = []
+    renderPanel(
+      baseHandlers("main.py", {
+        "terminal.kill": (input) => {
+          killed.push((input as { sessionId: string }).sessionId)
+          return { ok: true }
+        },
+      }),
+      DEFAULT_SETTINGS,
+      () => {},
+      { kind: "agent", sessionId: "task-agent-1", label: "Implement parser", wsKind: "worktree" },
+    )
+    await screen.findByTestId("terminal")
+    expect(pressCmdW()).toBe(true)
+    const prompt = await screen.findByTestId("close-session-prompt")
+    expect(prompt.textContent).toContain("Stop agent?")
+    expect(prompt.textContent).toContain("Implement parser")
+    expect(killed).toEqual([])
+    fireEvent.click(within(prompt).getByRole("button", { name: "Stop agent" }))
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+    expect(killed).toEqual(["task-agent-1"])
+  })
+
+  test("with a file and a terminal open, Cmd+W closes only the active terminal, then the file", async () => {
+    renderPanel()
+    await openFile()
+    fireEvent.click(screen.getByTestId("central-new-terminal"))
+    await screen.findByTestId("terminal")
+    expect(screen.getAllByTestId("central-tab")).toHaveLength(2)
+
+    expect(pressCmdW()).toBe(true)
+    fireEvent.click(
+      within(await screen.findByTestId("close-session-prompt")).getByRole("button", {
+        name: "Close terminal",
+      }),
+    )
+    await waitFor(() => expect(screen.getAllByTestId("central-tab")).toHaveLength(1))
+    expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("file")
+
+    expect(pressCmdW()).toBe(true)
+    await waitFor(() => expect(screen.getByTestId("central-launcher")).toBeTruthy())
+  })
+
+  test("Ctrl+W on a terminal tab asks first, like Cmd+W", async () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId("launcher-terminal"))
+    await screen.findByTestId("terminal")
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true })
+    const prompt = await screen.findByTestId("close-session-prompt")
+    fireEvent.click(within(prompt).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("close-session-prompt")).toBeNull())
+    expect(screen.getByTestId("central-tab").getAttribute("data-tab-kind")).toBe("terminal")
+  })
+})
+
+describe("CentralPanel — LaTeX Editor left column", () => {
+  /** Stands in for the LaTeX Editor, which owns the Files section's collapsed state. */
+  function LeftColumnHarness({ client }: { client: ReturnType<typeof createFakeTrpcClient> }) {
+    const [filesOpen, setFilesOpen] = useState(true)
+    return (
+      <Harness
+        client={client}
+        settings={DEFAULT_SETTINGS}
+        onUpdate={() => {}}
+        leftColumn={{
+          bottom: <div data-testid="outline-stub">Outline</div>,
+          filesOpen,
+          onFilesOpenChange: setFilesOpen,
+        }}
+      />
+    )
+  }
+
+  test("shows the given content below the file tree, and the Files section collapses", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = createFakeTrpcClient(baseHandlers())
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        <LeftColumnHarness client={client} />
+      </AppProviders>,
+    )
+    fireEvent.click(screen.getByTestId("central-files-toggle"))
+    const column = screen.getByTestId("central-files-panel")
+    const outline = within(column).getByTestId("outline-stub")
+    const tree = await within(column).findByTestId("panel-files")
+    expect(tree.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // One "Files" header: the tree's own header carries the collapse chevron.
+    expect(within(column).getAllByText("Files")).toHaveLength(1)
+    const header = within(column).getByTestId("central-files-section")
+    expect(header.getAttribute("aria-expanded")).toBe("true")
+    fireEvent.click(header)
+    expect(within(column).getByTestId("central-files-section").getAttribute("aria-expanded")).toBe(
+      "false",
+    )
+    expect(within(column).queryByTestId("panel-files")).toBeNull()
+    expect(within(column).getByTestId("outline-stub")).toBeTruthy()
+  })
+
+  test("the project view's column has no Files section header", () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId("central-files-toggle"))
+    expect(screen.queryByTestId("central-files-section")).toBeNull()
   })
 })
 

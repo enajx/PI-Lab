@@ -217,6 +217,7 @@ export function ScienceCluster() {
 
   return (
     <ScienceTabShell
+      layout="flush"
       testId="science-cluster"
       title={t("Cluster")}
       subtitle={t("Monitor compute machines from your ssh config")}

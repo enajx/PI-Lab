@@ -1,8 +1,13 @@
 import { cn } from "@pi-lab/ui"
 import type { ReactNode } from "react"
-import { CaffeineControl } from "../../../../../caffeine"
+import { LatexText } from "../../../../../components/LatexText"
 import { useSidebarCollapsed } from "../../../../../preferences/preferences"
-import { AgentStatusControl, titleBarControlClass, titleBarHeaderClass } from "../../../titleBar"
+import {
+  TitleBarSystemControls,
+  titleBarControlClass,
+  titleBarHeaderClass,
+  titleBarInsetHeaderClass,
+} from "../../../titleBar"
 
 interface ScienceTabShellProps {
   /** Tab title, rendered in the fixed header. */
@@ -13,6 +18,12 @@ interface ScienceTabShellProps {
   actions?: ReactNode
   /** Stable test id on the shell root (e.g. `science-cluster`). */
   testId?: string
+  /**
+   * `flush`: a full-width header line over a body that fills the view edge to edge.
+   * `cards`: like the project view, no header line and a 12px margin and gap, so
+   * the body's panels sit as separate rounded cards on the window background.
+   */
+  layout: "flush" | "cards"
   children: ReactNode
 }
 
@@ -23,31 +34,40 @@ interface ScienceTabShellProps {
  * via a native `min-h-0 flex-1 overflow-y-auto` child — never a nested Radix
  * ScrollArea. This is the single seam where science-tab layout evolves, so all
  * tabs (Cluster now; Analysis / Skills / Library later) stay visually consistent.
+ * `layout` picks the frame (see {@link ScienceTabShellProps.layout}).
  */
 export function ScienceTabShell({
   title,
   subtitle,
   actions,
   testId,
+  layout,
   children,
 }: ScienceTabShellProps) {
   const [collapsed] = useSidebarCollapsed()
+  const cards = layout === "cards"
   return (
-    <div data-testid={testId} className="flex h-full w-full flex-col overflow-hidden">
+    <div
+      data-testid={testId}
+      className={cn("flex h-full w-full flex-col overflow-hidden", cards && "gap-3 p-3")}
+    >
       <header
         className={cn(
-          "flex shrink-0 items-center justify-between gap-4 border-border border-b py-3",
-          titleBarHeaderClass(collapsed),
+          "flex shrink-0 items-center justify-between gap-4",
+          cards
+            ? titleBarInsetHeaderClass(collapsed)
+            : cn("border-border border-b py-3", titleBarHeaderClass(collapsed)),
         )}
       >
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">{title}</h1>
+          <h1 className="truncate text-foreground text-sm tracking-tight">
+            <LatexText text={title} />
+          </h1>
           {subtitle ? <p className="truncate text-muted-foreground text-xs">{subtitle}</p> : null}
         </div>
         <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
           {actions}
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>

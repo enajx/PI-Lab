@@ -3,11 +3,15 @@ import { alphaTestingRouter } from "./alphaTesting/alphaTesting"
 import { automationsRouter } from "./automations"
 import { caffeineRouter } from "./caffeine"
 import { diagnosticsRouter } from "./diagnostics"
+import { diaryRouter } from "./diary/diary"
 import { dictationRouter } from "./dictation/dictation"
+import { documentsRouter } from "./documents/documents"
 import { filesRouter } from "./files"
 import { healthRouter } from "./health/health"
 import { latexRouter } from "./latex/latex"
+import { notebooksRouter } from "./notebooks/notebooks"
 import { notificationsRouter } from "./notifications"
+import { paperRouter } from "./paper/paper"
 import { pdfRouter } from "./pdf/pdf"
 import { projectsRouter } from "./projects"
 import { pythonRouter } from "./python"
@@ -43,9 +47,13 @@ export const appRouter = router({
   files: filesRouter,
   pdf: pdfRouter,
   latex: latexRouter,
+  paper: paperRouter,
   diagnostics: diagnosticsRouter,
   dictation: dictationRouter,
   science: scienceRouter,
+  diary: diaryRouter,
+  documents: documentsRouter,
+  notebooks: notebooksRouter,
   agents: agentsRouter,
   automations: automationsRouter,
   settings: settingsRouter,

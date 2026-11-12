@@ -1,0 +1,104 @@
+\documentclass{article}
+
+% natbib options; to skip natbib, use \usepackage[nonatbib]{style}
+\PassOptionsToPackage{numbers,sort&compress}{natbib}
+% A4 by default; use \usepackage[letter]{style} for US Letter
+\usepackage{style}
+
+% Line numbers: uncomment the next two lines to switch them on.
+% \usepackage{lineno}
+% \linenumbers
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsmath}        % maths environments
+\usepackage{amssymb}        % maths symbols, incl. blackboard bold
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{graphicx}       % figures
+\usepackage{orcidlink}      % ORCID icons in the author block
+\usepackage{hyperref}       % hyperlinks
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, citecolor=blue!50!black, urlcolor=blue!50!black}
+\usepackage{cleveref}       % \cref; load after hyperref
+
+\graphicspath{{figures/}}
+
+\title{Paper Title}
+
+
+% Separate authors with \And (LaTeX decides line breaks) or \AND (forces a
+% line break).
+\author{%
+  Author Name\,\orcidlink{0000-0000-0000-0000}\thanks{Footnote with further information about the author.} \\
+  Affiliation \\
+  Address \\
+  \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+\begin{document}
+
+
+\maketitle
+
+
+\begin{abstract}
+  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+\end{abstract}
+
+
+\section{Introduction}
+\label{sec:introduction}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit \citep{placeholder}. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.
+
+
+\section{Background}
+\label{sec:background}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+
+
+\section{Method}
+\label{sec:method}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+
+
+\section{Results}
+\label{sec:results}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.
+
+
+\section{Conclusions}
+\label{sec:conclusions}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.
+
+
+\begin{ack}
+Acknowledgments.
+\end{ack}
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+
+\appendix
+
+\section{Appendix}
+\label{sec:appendix}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+
+
+\end{document}

@@ -83,9 +83,7 @@ test("folder add and right-click Edit preserve project details and opens the sel
     await startAdd()
     await expect(window.getByTestId("project-card")).toHaveCount(2)
     await card.getByTestId("project-card-analysis").click()
-    await expect(
-      window.getByTestId("analysis-project-select").locator("option:checked"),
-    ).toHaveText("Project Renamed")
+    await expect(window.getByTestId("analysis-project-select")).toHaveText("Project Renamed")
   } finally {
     await app?.close()
     await rm(dataDir, { recursive: true, force: true })

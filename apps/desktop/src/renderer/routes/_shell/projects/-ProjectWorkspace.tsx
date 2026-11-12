@@ -2,10 +2,16 @@ import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Telescope, X } from "lucide-react"
+import { useNavigate } from "@tanstack/react-router"
+import { ListTodo, NotebookPen, ScrollText, Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { CaffeineControl } from "../../../caffeine"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
+import {
+  HeaderShortcuts,
+  headerIconButtonClass,
+} from "../../../components/HeaderShortcuts/HeaderShortcuts"
+import { ProjectStageRow } from "../../../components/ProjectStage"
+import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
@@ -22,9 +28,10 @@ import {
   useSidebarCollapsed,
 } from "../../../preferences/preferences"
 import { stripOuterQuery } from "../../../QuickEditor/routeTarget"
+import { useDisplayPath } from "../../../trpc/displayPath"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { useOptionalNewFileController } from "../components/NewFileController"
-import { AgentStatusControl, titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
+import { TitleBarSystemControls, titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
 import { clearPendingLaunch, readPendingLaunch } from "./-pendingLaunch"
 import { clearPendingOpenFile, usePendingOpenFile } from "./-pendingOpenFile"
 import { clearPendingTaskSession, readPendingTaskSession } from "./-pendingTaskSession"
@@ -37,8 +44,9 @@ import {
 } from "./-workspaceState"
 import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
+import { ProjectAgentsBox } from "./components/ProjectAgents/ProjectAgentsBox"
 import { ProjectPalette } from "./components/ProjectPalette"
-import { FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
+import { DIARY_TAB_ID, FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
 
 /**
  * Everything binds to the project's **main checkout** — a `kind:"branch"`
@@ -55,6 +63,7 @@ export function ProjectWorkspace({
   activation: ProjectNotificationSearch
 }) {
   const t = useTranslate()
+  const toDisplayPath = useDisplayPath()
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const newFileController = useOptionalNewFileController()
@@ -90,6 +99,7 @@ export function ProjectWorkspace({
     markOpened({ id: projectId })
   }, [markOpened, projectId])
 
+  const navigate = useNavigate()
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
   const capabilitiesQuery = useQuery(trpc.projects.capabilities.queryOptions({ id: projectId }))
   const initializeGit = useMutation(
@@ -180,6 +190,7 @@ export function ProjectWorkspace({
   // When the left sidebar is collapsed, the traffic lights ride this view's title-bar
   // strip, so the header clears + drags around them (the path text stays selectable).
   const [collapsed] = useSidebarCollapsed()
+  const diaryShown = !rightSidebarCollapsed && rightSidebarActiveId === DIARY_TAB_ID
 
   // Ensure the project's main-checkout (branch) workspace exists, once on mount
   // (this component is keyed by project, so a switch remounts and re-ensures).
@@ -241,6 +252,7 @@ export function ProjectWorkspace({
   // Hooks are unconditional; the central panel does no file I/O until a workspace
   // id is set and the panel is rendered, so an empty id pre-resolve is inert.
   const controller = useCentralPanel({
+    origin: "project",
     client,
     workspaceId: workspaceId ?? "",
     projectId,
@@ -319,11 +331,13 @@ export function ProjectWorkspace({
 
   // Card-triggered and in-view auto-research launch failures surface here (no
   // silent failure — AGENTS.md), so a failed launch never leaves the view stuck.
-  const launchError = startAutoResearch.error?.message ?? null
+  const [shortcutError, setShortcutError] = useState<string | null>(null)
+  const launchError = startAutoResearch.error?.message ?? shortcutError
 
   const handledActivation = useRef<string | null>(null)
   useEffect(() => {
     if (
+      !workspaceId ||
       !activation.notificationId ||
       !activation.notificationSessionId ||
       !activation.notificationKind ||
@@ -352,6 +366,7 @@ export function ProjectWorkspace({
     activation.notificationLabel,
     activation.notificationSessionId,
     controller.attachSession,
+    workspaceId,
   ])
 
   if (projectQuery.isError) {
@@ -379,42 +394,156 @@ export function ProjectWorkspace({
           titleBarInsetHeaderClass(collapsed),
         )}
       >
-        <div className={cn("flex min-w-0 flex-col", titleBarControlClass(collapsed))}>
-          <h1 className="truncate font-semibold text-foreground text-sm tracking-tight">
-            {project?.name ?? t("Loading…")}
-          </h1>
+        <div className={cn("flex min-w-0 items-center gap-3", titleBarControlClass(collapsed))}>
+          <div className="flex min-w-0 flex-col">
+            <h1 className="truncate text-foreground text-sm tracking-tight">
+              {project?.name ?? t("Loading…")}
+            </h1>
+            {project ? (
+              <p
+                title={project.repoPath}
+                className="cursor-text select-text truncate text-muted-foreground text-xs"
+              >
+                {toDisplayPath(project.repoPath)}
+              </p>
+            ) : null}
+          </div>
           {project ? (
-            <p className="cursor-text select-text truncate text-muted-foreground text-xs">
-              {project.repoPath}
-            </p>
+            <ProjectStageRow
+              projectId={projectId}
+              stage={project.metadata?.stage ?? null}
+              testId="project-view-stage"
+              className="shrink-0"
+            />
           ) : null}
         </div>
         <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
-          <button
-            type="button"
-            data-testid="project-view-auto-research"
-            aria-busy={startAutoResearch.isPending}
-            title={!gitAvailable ? gitDisabledReason : t("Auto research")}
-            data-feature-label={t("Auto research")}
-            data-feature-help={t(
-              "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
-            )}
-            disabled={!gitAvailable || !workspaceId || startAutoResearch.isPending}
-            onClick={onAutoResearch}
-            className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Telescope className="size-3.5 shrink-0" aria-hidden />
-            <span>{t("Auto research")}</span>
-          </button>
-          <ProjectWorkflowControl
+          <HeaderShortcuts
+            view="project"
             projectId={projectId}
-            projectName={project?.name ?? t("Project")}
-            task="plan-research"
-            variant="labeled"
-            testId="project-view-plan-research"
+            picker={null}
+            onError={setShortcutError}
+            onSkillSessionStarted={(session) =>
+              controller.attachSession({
+                kind: "agent",
+                sessionId: session.sessionId,
+                label: session.label,
+                wsKind: session.kind,
+                launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
+              })
+            }
+            builtins={[
+              {
+                id: "tasks",
+                label: t("Tasks"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="project-view-tasks"
+                    aria-label={t("Tasks")}
+                    title={t("Tasks")}
+                    data-feature-label={t("Tasks")}
+                    data-feature-help={t("Open this project's tasks")}
+                    onClick={() => void navigate({ to: "/science/tasks", search: { projectId } })}
+                    className={headerIconButtonClass}
+                  >
+                    <ListTodo className="size-3.5 shrink-0" aria-hidden />
+                  </button>
+                ),
+              },
+              {
+                id: "paper",
+                label: t("Paper"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="project-header-paper"
+                    aria-label={t("Paper")}
+                    title={t("Paper")}
+                    data-feature-label={t("Paper")}
+                    data-feature-help={t("Open this project's paper in the LaTeX Editor")}
+                    onClick={() => void navigate({ to: "/science/latex", search: { projectId } })}
+                    className={headerIconButtonClass}
+                  >
+                    <ScrollText className="size-3.5 shrink-0" aria-hidden />
+                  </button>
+                ),
+              },
+              {
+                id: "auto-research",
+                label: t("Auto research"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="project-view-auto-research"
+                    aria-busy={startAutoResearch.isPending}
+                    aria-label={t("Auto research")}
+                    title={!gitAvailable ? gitDisabledReason : t("Auto research")}
+                    data-feature-label={t("Auto research")}
+                    data-feature-help={t(
+                      "Open an isolated worktree agent session and seed a placeholder AUTORESEARCH.md",
+                    )}
+                    disabled={!gitAvailable || !workspaceId || startAutoResearch.isPending}
+                    onClick={onAutoResearch}
+                    className={headerIconButtonClass}
+                  >
+                    <Telescope className="size-3.5 shrink-0" aria-hidden />
+                  </button>
+                ),
+              },
+              {
+                id: "plan-research",
+                label: t("Plan research"),
+                node: (
+                  <ProjectWorkflowControl
+                    projectId={projectId}
+                    projectName={project?.name ?? t("Project")}
+                    task="plan-research"
+                    variant="icon"
+                    testId="project-view-plan-research"
+                  />
+                ),
+              },
+              {
+                id: "project-status",
+                label: t("Project status"),
+                node: (
+                  <ProjectStatusControl
+                    projectId={projectId}
+                    projectName={project?.name ?? t("Project")}
+                    lastOpenedAt={project?.lastOpenedAt ?? 0}
+                    variant="icon"
+                    testId="project-view-status"
+                    gitAvailable={gitAvailable}
+                    gitDisabledReason={gitDisabledReason}
+                  />
+                ),
+              },
+              {
+                id: "research-diary",
+                label: t("Research diary"),
+                node: (
+                  <button
+                    type="button"
+                    data-testid="project-view-research-diary"
+                    aria-label={t("Research diary")}
+                    aria-pressed={diaryShown}
+                    title={t("Research diary")}
+                    data-feature-label={t("Research diary")}
+                    data-feature-help={t("Open the right panel on this project's research diary")}
+                    onClick={() => {
+                      setRightSidebarActiveId(DIARY_TAB_ID)
+                      setRightSidebarCollapsed(false)
+                    }}
+                    className={cn(headerIconButtonClass, diaryShown && "text-foreground")}
+                  >
+                    <NotebookPen className="size-3.5 shrink-0" aria-hidden />
+                  </button>
+                ),
+              },
+            ]}
           />
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
 
@@ -522,8 +651,17 @@ export function ProjectWorkspace({
               }
             />
           </div>
-          {rightSidebarCollapsed ? null : (
-            <div className="relative flex min-h-0 shrink-0" style={{ width: rightSidebarWidth }}>
+          {rightSidebarCollapsed ? (
+            <ProjectAgentsBox
+              projectId={projectId}
+              projectName={project?.name ?? t("Project")}
+              className="w-64 shrink-0 self-start"
+            />
+          ) : (
+            <div
+              className="relative flex min-h-0 shrink-0 flex-col gap-3"
+              style={{ width: rightSidebarWidth }}
+            >
               <EdgeResizeHandle
                 side="left"
                 width={rightSidebarWidth}
@@ -531,7 +669,13 @@ export function ProjectWorkspace({
                 onResizeEnd={persistRightSidebarWidth}
                 min={RIGHT_SIDEBAR_MIN_WIDTH}
                 max={RIGHT_SIDEBAR_MAX_WIDTH}
+                onCollapse={() => setRightSidebarCollapsed(true)}
                 testId="right-sidebar-edge-drag"
+              />
+              <ProjectAgentsBox
+                projectId={projectId}
+                projectName={project?.name ?? t("Project")}
+                className="shrink-0"
               />
               <RightSidebar
                 projectId={projectId}

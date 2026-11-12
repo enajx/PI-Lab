@@ -98,6 +98,43 @@ afterEach(async () => {
   await h.dispose()
 })
 
+describe("projects.add", () => {
+  test("adds a new folder, and refuses a folder that is already a project without changing it", async () => {
+    const path = join(h.repoDir, "already-here")
+    await mkdir(path)
+    const details = {
+      name: "already-here",
+      typeId: "general" as const,
+      deadline: null,
+      agentId: null,
+    }
+    const added = await h.caller.projects.add({ path, details })
+    const before = (await h.caller.projects.list()).find((project) => project.id === added.id)
+    await expect(h.caller.projects.add({ path, details })).rejects.toThrow(
+      '"already-here" is already in PI Lab.',
+    )
+    const after = (await h.caller.projects.list()).find((project) => project.id === added.id)
+    expect(after).toEqual(before)
+    expect(await h.caller.projects.list()).toHaveLength(1)
+  })
+
+  test("a hidden project says so, and how to bring it back", async () => {
+    const path = join(h.repoDir, "hidden-one")
+    await mkdir(path)
+    const details = {
+      name: "hidden-one",
+      typeId: "general" as const,
+      deadline: null,
+      agentId: null,
+    }
+    const added = await h.caller.projects.add({ path, details })
+    await h.caller.projects.setArchived({ id: added.id, archived: true })
+    await expect(h.caller.projects.add({ path, details })).rejects.toThrow(
+      '"hidden-one" is already in PI Lab, hidden. Use Show hidden on the Projects Dashboard to restore it.',
+    )
+  })
+})
+
 describe("projects.open", () => {
   test("selected sibling folders in one Git repo remain distinct projects and reopen without changing details", async () => {
     const names = ["paper-latex", "python-research", "cpp-research"] as const
@@ -619,6 +656,67 @@ describe("projects.list / get / touch / remove", () => {
   })
 })
 
+describe("project order", () => {
+  /** Open sub-folders of the harness repo as projects, in the given order. */
+  async function openProjects(names: string[]): Promise<(name: string) => string> {
+    const ids = new Map<string, string>()
+    for (const name of names) {
+      const path = join(h.repoDir, name)
+      await mkdir(path)
+      ids.set(name, (await h.caller.projects.open({ path })).id)
+    }
+    return (name) => {
+      const id = ids.get(name)
+      if (id === undefined) throw new Error(`No test project ${name}`)
+      return id
+    }
+  }
+
+  async function listedNames(): Promise<string[]> {
+    return (await h.caller.projects.list()).map((project) => project.name)
+  }
+
+  test("a new project goes first", async () => {
+    await openProjects(["alpha", "beta", "gamma"])
+    expect(await listedNames()).toEqual(["gamma", "beta", "alpha"])
+  })
+
+  test("reorder saves the order that list returns", async () => {
+    const id = await openProjects(["alpha", "beta", "gamma"])
+    await h.caller.projects.reorder({ ids: [id("alpha"), id("gamma"), id("beta")] })
+    expect(await listedNames()).toEqual(["alpha", "gamma", "beta"])
+  })
+
+  test("opening or touching a project keeps the saved order", async () => {
+    const id = await openProjects(["alpha", "beta", "gamma"])
+    await h.caller.projects.reorder({ ids: [id("alpha"), id("beta"), id("gamma")] })
+    await h.caller.projects.open({ path: join(h.repoDir, "gamma") })
+    await h.caller.projects.touch({ id: id("beta") })
+    expect(await listedNames()).toEqual(["alpha", "beta", "gamma"])
+  })
+
+  test("a project added after a reorder goes before all others", async () => {
+    const id = await openProjects(["alpha", "beta"])
+    await h.caller.projects.reorder({ ids: [id("alpha"), id("beta")] })
+    await openProjects(["gamma"])
+    expect(await listedNames()).toEqual(["gamma", "alpha", "beta"])
+  })
+
+  test("projects left out of a reorder follow it in their current order", async () => {
+    const id = await openProjects(["alpha", "beta", "gamma"])
+    await h.caller.projects.reorder({ ids: [id("alpha")] })
+    expect(await listedNames()).toEqual(["alpha", "gamma", "beta"])
+  })
+
+  test("reorder refuses an unknown project and changes nothing", async () => {
+    const id = await openProjects(["alpha", "beta"])
+    await expect(h.caller.projects.reorder({ ids: [id("alpha"), "missing"] })).rejects.toThrow(
+      "No project missing",
+    )
+    expect(await listedNames()).toEqual(["beta", "alpha"])
+  })
+})
+
 describe("projects.setThumbnail", () => {
   const DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA="
 
@@ -866,9 +964,57 @@ describe("projects.setMetadata", () => {
     expect((await h.caller.projects.get({ id: project.id })).metadata).toBeNull()
   })
 
+  test("keeps the paper auto-detect choice the card dialog does not carry", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    h.db
+      .update(projects)
+      .set({ metadata: { paperAutoDetect: false } })
+      .where(eq(projects.id, project.id))
+      .run()
+    const updated = await h.caller.projects.setMetadata({
+      id: project.id,
+      metadata: { venue: "ICML" },
+    })
+    expect(updated.metadata).toEqual({ venue: "ICML", paperAutoDetect: false })
+  })
+
   test("throws NOT_FOUND for an unknown project", async () => {
     await expect(
       h.caller.projects.setMetadata({ id: "missing", metadata: METADATA }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+})
+
+describe("projects.setStage", () => {
+  test("sets, reads back, and clears the project stage, keeping other metadata", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "NeurIPS" } })
+
+    const updated = await h.caller.projects.setStage({ id: project.id, stage: "experiments" })
+    expect(updated.metadata).toEqual({ venue: "NeurIPS", stage: "experiments" })
+    expect((await h.caller.projects.get({ id: project.id })).metadata?.stage).toBe("experiments")
+    const listed = (await h.caller.projects.list()).find((p) => p.id === project.id)
+    expect(listed?.metadata?.stage).toBe("experiments")
+
+    // The card's metadata dialog does not carry the stage; saving it keeps the stage.
+    await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "ICML" } })
+    expect((await h.caller.projects.get({ id: project.id })).metadata).toEqual({
+      venue: "ICML",
+      stage: "experiments",
+    })
+
+    const cleared = await h.caller.projects.setStage({ id: project.id, stage: null })
+    expect(cleared.metadata).toEqual({ venue: "ICML" })
+  })
+
+  test("refuses an unknown stage and an unknown project", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await expect(
+      h.caller.projects.setStage({ id: project.id, stage: "done" as never }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await h.caller.projects.get({ id: project.id })).metadata).toBeNull()
+    await expect(
+      h.caller.projects.setStage({ id: "missing", stage: "planning" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 })
@@ -907,6 +1053,19 @@ test("project details survive reopen and preserve hidden metadata", async () => 
   const reopened = await h.caller.projects.open({ path: h.repoDir })
   expect(reopened.name).toBe("Edited name")
   expect(reopened.typeId).toBe("software")
+})
+
+test("saving details keeps metadata written while the agent config file is written", async () => {
+  await h.caller.settings.updateAgents({ projectConfigStorage: "project" })
+  const project = await h.caller.projects.open({ path: h.repoDir })
+  const details = { name: "Edited", typeId: "software" as const, deadline: null, agentId: null }
+  // The stage is set while updateDetails waits on the agent config file write.
+  const saving = h.caller.projects.updateDetails({ id: project.id, details })
+  await h.caller.projects.setStage({ id: project.id, stage: "experiments" })
+  const saved = await saving
+  expect(saved.name).toBe("Edited")
+  expect(saved.metadata?.stage).toBe("experiments")
+  expect((await h.caller.projects.get({ id: project.id })).metadata?.stage).toBe("experiments")
 })
 
 test("adding details accepts symlinked project Markdown and leaves no row after config failure", async () => {
@@ -950,4 +1109,26 @@ test("explicit unselected type stays general on add and can clear an edited type
   const cleared = await h.caller.projects.updateDetails({ id: added.id, details })
   expect(cleared.typeId).toBe("general")
   expect((await h.caller.projects.open({ path: h.repoDir })).typeId).toBe("general")
+})
+
+test("Edit project's analysis format override is saved, kept by setMetadata, and cleared with null", async () => {
+  const project = await h.caller.projects.open({ path: h.repoDir })
+  const details = { name: "Project", typeId: "software" as const, deadline: null, agentId: null }
+
+  await h.caller.projects.updateDetails({
+    id: project.id,
+    details: { ...details, analysisFormat: "ipynb" },
+  })
+  await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "Journal" } })
+  expect((await h.caller.projects.get({ id: project.id })).metadata?.analysisFormat).toBe("ipynb")
+
+  // Details saved without the field leave the override as it is.
+  await h.caller.projects.updateDetails({ id: project.id, details })
+  expect((await h.caller.projects.get({ id: project.id })).metadata?.analysisFormat).toBe("ipynb")
+
+  const cleared = await h.caller.projects.updateDetails({
+    id: project.id,
+    details: { ...details, analysisFormat: null },
+  })
+  expect(cleared.metadata?.analysisFormat).toBeUndefined()
 })

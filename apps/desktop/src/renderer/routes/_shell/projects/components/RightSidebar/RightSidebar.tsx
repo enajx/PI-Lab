@@ -10,6 +10,8 @@ import {
   useRef,
   useState,
 } from "react"
+import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import type { FileTreeEditorTabs } from "../../../../../Editor/components/FileTree"
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import { useTranslate } from "../../../../../i18n/language"
@@ -50,6 +52,9 @@ function basename(relPath: string): string {
   return relPath.split("/").pop() ?? relPath
 }
 
+/** Id of the right-sidebar Diary tab, which the top bar's Research diary button opens. */
+export const DIARY_TAB_ID = "diary"
+
 /** A tab in the right sidebar: a label + the panel it reveals. */
 interface PanelTab {
   id: string
@@ -59,7 +64,7 @@ interface PanelTab {
 }
 
 /**
- * The right-sidebar tab set for the project view. **Research / TODOs / Files** are
+ * The right-sidebar tab set for the project view. **Research / TODOs / Files / Diary** are
  * the default panels (shown Files first by default, see {@link orderTabs}); **Code changes** (the git working-tree diff) is hidden by
  * default and toggled on via the gear (persisted in `projectView.showCodeChanges`,
  * also editable in Settings → Project view). The old Status panel was dropped — its
@@ -89,6 +94,14 @@ const BASE_TABS: readonly PanelTab[] = [
     description: "View the project's selected task Markdown file.",
     render: ({ projectId, workspaceId }) => (
       <TodosPanel projectId={projectId} workspaceId={workspaceId} />
+    ),
+  },
+  {
+    id: DIARY_TAB_ID,
+    label: "Diary",
+    description: "Read and edit the project's research diary.",
+    render: ({ projectId }) => (
+      <ResearchDiaryPanel key={projectId} projectId={projectId} headerActions={null} />
     ),
   },
 ]
@@ -226,6 +239,19 @@ function buildPanelTabs(options: {
   )
 }
 
+/**
+ * A tab a view adds before the built-in tabs (Sessions in Analysis and Tasks). It is
+ * not reordered or saved in the tab order, and its content stays mounted (hidden)
+ * while another tab shows, so its sessions keep running. `label` and `description`
+ * are already translated.
+ */
+export interface RightSidebarLeadingTab {
+  id: string
+  label: string
+  description: string
+  content: ReactNode
+}
+
 /** A right-sidebar panel's identity, for the project palette's "switch panel" list. */
 export interface RightSidebarPanel {
   id: string
@@ -261,7 +287,7 @@ export function useRightSidebarPanels(
  * Stacked, bounded-flex sidebar: a tab strip on top (plus a collapse button and a
  * gear opening a view-options menu; tabs reorder by native drag-and-drop or
  * Alt+Left/Right on a focused tab, saved as one global order), the active panel below in a `min-h-0 flex-1`
- * region so each panel's own `overflow-y-auto` body scrolls without a nested Radix ScrollArea. The collapse button calls `onCollapse`; the project route
+ * region so each panel's own `overflow-y-auto` body scrolls without a nested Radix ScrollArea. The collapse button calls `onCollapse` (no button when it is null); the project route
  * owns the collapse state (session state, defaulting to EXPANDED on each project open —
  * not persisted), dropping the right column and showing an expand affordance when collapsed.
  */
@@ -280,6 +306,7 @@ export function RightSidebar({
   gitAvailable,
   editorTabs,
   filesPanelOpen,
+  leadingTab,
 }: {
   projectId: string
   workspaceId: string
@@ -291,7 +318,9 @@ export function RightSidebar({
   activeId?: string | null
   initialActiveId?: string
   onActiveIdChange?: (id: string) => void
-  onCollapse: () => void
+  /** The collapse button's action, or null for no collapse button (a view whose panel
+   * has its collapse button elsewhere). */
+  onCollapse: (() => void) | null
   /** Working-dir-relative `.md` paths pinned as persistent panels (owned by the route). */
   pinnedPanels?: string[]
   /** Pin a `.md` file as a panel. */
@@ -304,6 +333,8 @@ export function RightSidebar({
   editorTabs?: FileTreeEditorTabs
   /** Whether this project's left Files column is open; Files then leaves this sidebar. */
   filesPanelOpen: boolean
+  /** A tab shown first, whose content stays mounted; the project view leaves it out. */
+  leadingTab?: RightSidebarLeadingTab | null
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -405,10 +436,13 @@ export function RightSidebar({
   // The selected tab can vanish (Files toggled to the left, Code changes hidden, a
   // pinned panel unpinned) or be unset in controlled mode, so fall back to Files, or to
   // the first tab when Files is in the left column, whenever the stored id no longer resolves.
-  const active =
-    tabs.find((tab) => tab.id === activeId) ??
-    tabs.find((tab) => tab.id === FILES_TAB_ID) ??
-    tabs[0]
+  // While the leading tab is selected no built-in tab is.
+  const leadingActive = leadingTab != null && activeId === leadingTab.id
+  const active = leadingActive
+    ? null
+    : (tabs.find((tab) => tab.id === activeId) ??
+      tabs.find((tab) => tab.id === FILES_TAB_ID) ??
+      tabs[0])
 
   // Pinning is a no-op unless the route wired a handler; guard so the "+" picker and
   // the Files tree's right-click menu never silently drop a selection.
@@ -425,6 +459,26 @@ export function RightSidebar({
           aria-label={t("Project panels")}
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
         >
+          {leadingTab ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={leadingActive}
+              data-testid={`panel-tab-${leadingTab.id}`}
+              data-active={leadingActive}
+              data-feature-label={leadingTab.label}
+              data-feature-help={leadingTab.description}
+              onClick={() => selectTab(leadingTab.id)}
+              className={cn(
+                "min-w-0 flex-auto truncate rounded-md px-1.5 py-1 text-xs transition-colors",
+                leadingActive
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+              )}
+            >
+              {leadingTab.label}
+            </button>
+          ) : null}
           {tabs.map((tab) => {
             const selected = tab.id === active?.id
             const relPath = pinnedRelPath(tab.id)
@@ -449,7 +503,7 @@ export function RightSidebar({
                 onKeyDown={(event) => onTabKeyDown(tab.id, event)}
                 {...(relPath === null ? dragProps(tab.id) : {})}
                 className={cn(
-                  "min-w-0 flex-1 truncate rounded-md px-2 py-1 text-xs transition-colors",
+                  "min-w-0 flex-auto truncate rounded-md px-1.5 py-1 text-xs transition-colors",
                   selected
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -505,23 +559,34 @@ export function RightSidebar({
           onToggleCodeChanges={() => setShowCodeChanges(!showCodeChanges)}
           onToggleSkills={() => setShowSkills(!showSkills)}
         />
-        <button
-          type="button"
-          data-testid="right-sidebar-collapse"
-          aria-label={t("Collapse panel")}
-          title={t("Collapse panel")}
-          data-feature-help={t("Hide the project details sidebar to give the editor more room")}
-          onClick={onCollapse}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <PanelRightClose className="size-3.5" aria-hidden />
-        </button>
+        {onCollapse ? (
+          <button
+            type="button"
+            data-testid="right-sidebar-collapse"
+            aria-label={t("Collapse panel")}
+            title={t("Collapse panel")}
+            data-feature-help={t("Hide the project details sidebar to give the editor more room")}
+            onClick={onCollapse}
+            className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <PanelRightClose className="size-3.5" aria-hidden />
+          </button>
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {setMain.error ? (
           <p role="alert" className="px-4 py-2 text-destructive text-xs">
             {setMain.error.message}
           </p>
+        ) : null}
+        {leadingTab ? (
+          <div
+            data-testid={`panel-${leadingTab.id}`}
+            hidden={!leadingActive}
+            className={leadingActive ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}
+          >
+            {leadingTab.content}
+          </div>
         ) : null}
         {active?.render({
           projectId,
@@ -572,22 +637,7 @@ function ViewOptionsMenu({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const labelId = useId()
 
-  // Close on outside click or Escape so the menu behaves like a real popover.
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    window.addEventListener("mousedown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   return (
     <div ref={rootRef} className="relative">

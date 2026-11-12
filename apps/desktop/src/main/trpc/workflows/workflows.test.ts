@@ -8,7 +8,8 @@
 // immediately (running=true); the run finishes asynchronously (persisting the
 // record + emitting a terminal stream event). Tests therefore start a run and
 // then wait for it to settle via `status`.
-import { existsSync, writeFileSync } from "node:fs"
+import { execFileSync, spawnSync } from "node:child_process"
+import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -25,6 +26,17 @@ import type {
 import { computeGitStateHash } from "../../git"
 import { createHarness, type Harness } from "../testHarness"
 import type { ProjectWorkflowRecord, WorkflowOutputEvent } from "./workflows"
+
+/**
+ * Give a test paper folder a `main.tex` when it has no .tex file at its top level,
+ * since PI Lab only accepts folders that can be a paper. Returns the link input unchanged.
+ */
+function withTex<T extends { dir: string }>(input: T): T {
+  if (!readdirSync(input.dir).some((name) => name.endsWith(".tex"))) {
+    writeFileSync(join(input.dir, "main.tex"), "\\documentclass{article}\n")
+  }
+  return input
+}
 
 // A non-interactive-capable agent (buildNonInteractiveLaunchArgv supports codex).
 const CODEX_AGENT: TerminalAgent = {
@@ -97,6 +109,7 @@ async function recordFor(
   task: WorkflowTask,
 ): Promise<ProjectWorkflowRecord | null> {
   const status = await harness.caller.workflows.status({ projectId })
+  if (task === "latex-merge") return status.latexMerge
   return task === "summary"
     ? status.summary
     : task === "plan-research"
@@ -524,6 +537,8 @@ describe("workflows.run — persistence + status", () => {
         result: "Photon drift on track.",
         inputHash: expectedHash,
         errorMessage: null,
+        // Which agent wrote the stored result, shown in the Project status card.
+        agentLabel: "Codex",
       })
       expect(status.fetchExperiments).toBeNull()
     } finally {
@@ -536,7 +551,12 @@ describe("workflows.run — persistence + status", () => {
     const { harness, projectId } = await openProject(runner)
     try {
       const status = await harness.caller.workflows.status({ projectId })
-      expect(status).toEqual({ summary: null, fetchExperiments: null, planResearch: null })
+      expect(status).toEqual({
+        summary: null,
+        fetchExperiments: null,
+        planResearch: null,
+        latexMerge: null,
+      })
     } finally {
       await harness.dispose()
     }
@@ -556,6 +576,7 @@ describe("workflows.run — failures surface as an error record", () => {
       const failed = await settle(harness, projectId, "summary")
       expect(failed.errorMessage).toMatch(/code 3.*model unavailable/i)
       expect(failed.result).toBe("")
+      expect(failed.agentLabel).toBeNull()
 
       // status reflects the error; the record is not treated as a valid cache, so
       // the next run re-executes despite the unchanged git state.
@@ -647,6 +668,117 @@ describe("Plan research skill", () => {
       await harness.caller.workflows.run({ projectId, task: "plan-research" })
       await settle(harness, projectId, "plan-research")
       expect(calls).toHaveLength(2)
+    } finally {
+      await harness.dispose()
+    }
+  })
+})
+
+/**
+ * Create a Git repo in `dir` whose main.tex is left in a merge conflict. With
+ * `figure`, the binary plot.png conflicts too.
+ */
+function conflictedPaperRepo(dir: string, figure: boolean): void {
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe" })
+  const write = (side: string): void => {
+    writeFileSync(join(dir, "main.tex"), `${side}\n`)
+    if (figure) writeFileSync(join(dir, "plot.png"), `\0${side}`)
+  }
+  execFileSync("git", ["init", "-b", "main", dir], { stdio: "pipe" })
+  git(["config", "user.email", "test@pi-lab.local"])
+  git(["config", "user.name", "PI Lab Test"])
+  write("base")
+  git(["add", "."])
+  git(["commit", "-m", "base"])
+  git(["checkout", "-b", "other"])
+  write("other")
+  git(["commit", "-am", "other"])
+  git(["checkout", "main"])
+  write("mine")
+  git(["commit", "-am", "mine"])
+  // The merge stops on the conflict (non-zero exit), which is the state this fixture wants.
+  const merge = spawnSync("git", ["-C", dir, "merge", "other"], { stdio: "pipe" })
+  if (merge.status === 0) throw new Error("expected a merge conflict")
+}
+
+describe("LaTeX merge (latex-merge)", () => {
+  test("runs the agent in the paper folder with the conflicted files, every time", async () => {
+    const { calls, runner } = makeRunner(() => ok("Merged main.tex"))
+    const { harness, projectId } = await openProject(runner)
+    try {
+      const paperDir = join(harness.dataDir, "paper-outside")
+      await mkdir(paperDir)
+      conflictedPaperRepo(paperDir, false)
+      await harness.caller.paper.link(withTex({ projectId, dir: paperDir, rootChoice: null }))
+
+      await harness.caller.workflows.run({ projectId, task: "latex-merge" })
+      expect((await settle(harness, projectId, "latex-merge")).result).toBe("Merged main.tex")
+      await harness.caller.workflows.run({ projectId, task: "latex-merge" })
+      await settle(harness, projectId, "latex-merge")
+
+      // Never served from the git-state cache.
+
+      expect(calls).toHaveLength(2)
+      expect(calls[0]?.cwd).toBe(paperDir)
+      const prompt = calls[0]?.args.at(-1) ?? ""
+      expect(prompt).toContain("main.tex")
+      expect(prompt).toContain("Do not commit")
+    } finally {
+      await harness.dispose()
+    }
+  })
+
+  test("gives the agent only the text files, not a conflicted figure", async () => {
+    const { calls, runner } = makeRunner(() => ok("Merged main.tex"))
+    const { harness, projectId } = await openProject(runner)
+    try {
+      const paperDir = join(harness.dataDir, "paper-outside")
+      await mkdir(paperDir)
+      conflictedPaperRepo(paperDir, true)
+      await harness.caller.paper.link(withTex({ projectId, dir: paperDir, rootChoice: null }))
+      await harness.caller.workflows.run({ projectId, task: "latex-merge" })
+      await settle(harness, projectId, "latex-merge")
+      const prompt = calls[0]?.args.at(-1) ?? ""
+      expect(prompt).toContain("- main.tex")
+      expect(prompt).not.toContain("plot.png")
+    } finally {
+      await harness.dispose()
+    }
+  })
+
+  test("refuses when Sync is off for the paper", async () => {
+    const { calls, runner } = makeRunner(() => ok("must not run"))
+    const { harness, projectId } = await openProject(runner)
+    try {
+      await harness.caller.paper.link(
+        withTex({ projectId, dir: harness.repoDir, rootChoice: "no-sync" }),
+      )
+      await expect(
+        harness.caller.workflows.run({ projectId, task: "latex-merge" }),
+      ).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: expect.stringContaining("Sync is off for this paper"),
+      })
+      expect(calls).toHaveLength(0)
+    } finally {
+      await harness.dispose()
+    }
+  })
+
+  test("refuses when the paper folder has no conflict", async () => {
+    const { calls, runner } = makeRunner(() => ok("must not run"))
+    const { harness, projectId } = await openProject(runner)
+    try {
+      await expect(
+        harness.caller.workflows.run({ projectId, task: "latex-merge" }),
+      ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
+      const plainPaper = join(harness.repoDir, "paper")
+      await mkdir(plainPaper)
+      await harness.caller.paper.link(withTex({ projectId, dir: plainPaper, rootChoice: null }))
+      await expect(
+        harness.caller.workflows.run({ projectId, task: "latex-merge" }),
+      ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
+      expect(calls).toHaveLength(0)
     } finally {
       await harness.dispose()
     }

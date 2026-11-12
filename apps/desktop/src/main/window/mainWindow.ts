@@ -1,8 +1,8 @@
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { BrowserWindow } from "electron"
+import { BrowserWindow, shell } from "electron"
 import { isTestMode, rendererDevServerUrl, testFirstRun } from "../runtime/env"
-import { isTrustedNavigation } from "./mainWindowNavigation"
+import { browserUrlForNewWindow, isTrustedNavigation } from "./mainWindowNavigation"
 import { buildMainWindowOptions } from "./windowOptions"
 
 /**
@@ -86,7 +86,21 @@ export function createMainWindow(
     if (isTestMode) window.showInactive()
     else window.show()
   })
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  // New windows are never opened in the app; https links go to the user's browser.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const browserUrl = browserUrlForNewWindow(url)
+    if (browserUrl) {
+      shell
+        .openExternal(browserUrl)
+        .catch((cause: unknown) => console.error(`Could not open ${browserUrl}:`, cause))
+    }
+    return { action: "deny" }
+  })
+  // A notebook page in a tab (JupyterLab, marimo) asks before it is unloaded. PI Lab
+  // asks itself instead: closing a notebook tab asks first, and the quit dialog names
+  // open notebooks. So the window always closes or reloads instead of silently
+  // staying open.
+  window.webContents.on("will-prevent-unload", (event) => event.preventDefault())
   const trustedEntries = rendererDevServerUrl
     ? [rendererDevServerUrl]
     : ["index", "quick"].map(

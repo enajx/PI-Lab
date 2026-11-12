@@ -58,6 +58,8 @@ export class ActivityStatusFeed {
           projectId: session.projectId,
           projectName,
           agentId: session.agentId,
+          workspaceId: session.workspaceId,
+          origin: session.origin,
           state: session.state,
         },
       ]

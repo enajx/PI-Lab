@@ -1,0 +1,1 @@
+ALTER TABLE `project_workflow_runs` ADD `agent_label` text;

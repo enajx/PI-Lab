@@ -18,6 +18,7 @@ test("status subscribers get initial state, changed fields and names without out
     workspaceId: null,
     agentId: "codex",
     workflowRunId: null,
+    origin: "project",
     turnArmed: true,
   })
   const feed = new ActivityStatusFeed(db, registry)
@@ -30,6 +31,8 @@ test("status subscribers get initial state, changed fields and names without out
       projectId: "p1",
       projectName: "Original",
       agentId: "codex",
+      workspaceId: null,
+      origin: "project",
       state: "working",
     },
   ])
@@ -50,6 +53,7 @@ test("status subscribers get initial state, changed fields and names without out
     workspaceId: null,
     agentId: "codex",
     workflowRunId: null,
+    origin: "project",
     turnArmed: true,
   })
   expect(emitted).toHaveLength(3)

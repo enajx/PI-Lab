@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
   type ElectronApplication,
@@ -73,6 +73,39 @@ test("first launch finishes with Silent, stays complete after restart, and can r
   await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
 })
 
+test("first-run setup window fits the wizard content and is restored after Finish", async () => {
+  if (!app) throw new Error("Electron app did not launch")
+  const window = await app.firstWindow()
+
+  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByText("Checking your local environment…")).toHaveCount(0, {
+    timeout: 30_000,
+  })
+  const finish = window.getByTestId("first-run-setup-finish")
+  await expect(finish).toBeInViewport({ ratio: 1 })
+  // The window follows the content: narrow, and little blank space under the buttons.
+  await expect
+    .poll(async () => window.evaluate(() => innerWidth), { timeout: 10_000 })
+    .toBeLessThanOrEqual(800)
+  const gap = await finish.evaluate(
+    (element) => innerHeight - element.getBoundingClientRect().bottom,
+  )
+  expect(gap).toBeLessThanOrEqual(40)
+  const scroll = await window.getByTestId("first-run-setup-scroll").evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  }))
+  expect(scroll.scrollHeight).toBeLessThanOrEqual(scroll.clientHeight)
+  await window.screenshot({ path: resolve(".cache", "screens", "setup-wizard.png") })
+
+  await finish.click()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  await expect
+    .poll(async () => window.evaluate(() => innerWidth), { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1270)
+  expect(await window.evaluate(() => innerHeight)).toBeGreaterThanOrEqual(760)
+})
+
 test("first-launch setup is skippable", async () => {
   if (!app) throw new Error("Electron app did not launch")
   const window = await app.firstWindow()
@@ -100,6 +133,8 @@ test("language selection persists through setup and can change in Settings", asy
   await window.locator('[data-science-tab="tasks"]').click()
   await expect(window.getByRole("heading", { name: "Tareas" })).toBeVisible()
   await expect(window.getByRole("button", { name: "Nueva tarea" })).toBeVisible()
+  // Tasks opens on the Kanban board; the list view says when there are no tasks.
+  await window.getByRole("button", { name: "Vista de lista" }).click()
   await expect(window.getByText("No se encontraron tareas")).toBeVisible()
 
   await window.keyboard.press("ControlOrMeta+Comma")

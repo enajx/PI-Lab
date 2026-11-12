@@ -1,5 +1,13 @@
 import { EditorView } from "@codemirror/view"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  type RenderResult,
+  render as renderBare,
+  screen,
+  waitFor,
+} from "@testing-library/react"
+import type { ReactElement } from "react"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { setInterfaceLanguage } from "../../../i18n/language"
 import {
@@ -7,7 +15,13 @@ import {
   useEditorFontFamily,
   useEditorFontSize,
 } from "../../../preferences/preferences"
+import { ThemeProvider } from "../../../providers/ThemeProvider"
 import { CodeMirrorBuffer } from "./CodeMirrorBuffer"
+
+/** Render under the app's ThemeProvider, which the editor reads for its default theme. */
+function render(ui: ReactElement): RenderResult {
+  return renderBare(ui, { wrapper: ThemeProvider })
+}
 
 if (typeof Range.prototype.getClientRects !== "function") {
   Object.defineProperty(Range.prototype, "getClientRects", {
@@ -24,6 +38,34 @@ function findEditor(container: HTMLElement): EditorView {
 }
 
 describe("CodeMirrorBuffer theme reconfiguration", () => {
+  afterEach(() => window.localStorage.clear())
+
+  test("the default theme is GitHub Light or Dark following the app appearance", () => {
+    const props = {
+      relPath: "main.py",
+      initialDoc: "print('hi')\n",
+      onChange: vi.fn(),
+      onSave: vi.fn(),
+      customThemes: [],
+    }
+    // The color theme's classes, without the last class: that one belongs to the
+    // structural theme each mount creates afresh, so it differs on every render.
+    const editorClass = (theme: string | undefined): string | undefined => {
+      const view = render(<CodeMirrorBuffer autoFocus {...props} theme={theme} />)
+      const className = view.container.querySelector(".cm-editor")?.className
+      view.unmount()
+      return className?.split(" ").slice(0, -1).join(" ")
+    }
+    for (const mode of ["light", "dark"] as const) {
+      window.localStorage.setItem("pi-lab.theme", mode)
+      const github = editorClass(`github-${mode}`)
+      expect(editorClass(undefined)).toBe(github)
+      expect(editorClass("default")).toBe(github)
+      // An explicit choice is kept.
+      expect(editorClass("solarized-light")).not.toBe(github)
+    }
+  })
+
   test("changes built-in and imported themes live without remounting the editor view", () => {
     const props = {
       relPath: "main.py",

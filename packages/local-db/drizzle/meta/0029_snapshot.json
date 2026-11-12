@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "60adde7d-0fc0-4812-b18f-3d689f2c6519",
-  "prevId": "d7fc7c37-c388-41db-86b9-2731aa64e213",
+  "id": "e3d14fab-6379-4055-bfb0-679e5a3327b7",
+  "prevId": "df18655e-0e78-406e-9040-0792e9c41118",
   "tables": {
     "agent_credentials": {
       "name": "agent_credentials",
@@ -79,6 +79,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'project'"
         },
         "state": {
           "name": "state",
@@ -682,100 +690,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "dictation_history": {
-      "name": "dictation_history",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "model_key": {
-          "name": "model_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "ix_dictation_history_created": {
-          "name": "ix_dictation_history_created",
-          "columns": [
-            "created_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "dictation_settings": {
-      "name": "dictation_settings",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "selected_model": {
-          "name": "selected_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "output_action": {
-          "name": "output_action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'insert'"
-        },
-        "waveform_style": {
-          "name": "waveform_style",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'dots'"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "machines": {
       "name": "machines",
       "columns": {
@@ -1167,6 +1081,37 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "service_credentials": {
+      "name": "service_credentials",
+      "columns": {
+        "service": {
+          "name": "service",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "encrypted_value": {
+          "name": "encrypted_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "settings": {
       "name": "settings",
       "columns": {
@@ -1260,7 +1205,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'{\"autosave\":false,\"vim\":false,\"diagnosticsEnabled\":false,\"typeChecker\":\"ty\",\"formatOnSave\":false,\"editorTheme\":\"default\",\"customEditorThemes\":[],\"pythonRunDestination\":\"central\",\"latexProvider\":\"bundled\",\"showHiddenFiles\":true,\"confirmFileDelete\":true}'"
+          "default": "'{\"autosave\":false,\"vim\":false,\"diagnosticsEnabled\":false,\"typeChecker\":\"ty\",\"formatOnSave\":false,\"editorTheme\":\"default\",\"customEditorThemes\":[],\"pythonRunDestination\":\"central\",\"latexProvider\":\"bundled\",\"latexOutputDir\":\"build\",\"showHiddenFiles\":true,\"confirmFileDelete\":true,\"confirmOverleafCommit\":true}'"
         },
         "notifications": {
           "name": "notifications",

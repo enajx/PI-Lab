@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../providers/AppProviders"
@@ -164,14 +164,31 @@ describe("RightSidebar", () => {
     expect(screen.getByTestId("right-sidebar-settings-menu").textContent).toContain("Visningsvalg")
   })
 
-  test("shows Research / TODOs / Files, with no Status and no Code changes by default", () => {
+  test("shows Research / TODOs / Files / Diary, with no Status and no Code changes by default", () => {
     renderSidebar()
     expect(screen.getByTestId("panel-tab-research")).toBeTruthy()
     expect(screen.getByTestId("panel-tab-todos")).toBeTruthy()
     expect(screen.getByTestId("panel-tab-files")).toBeTruthy()
+    expect(screen.getByTestId("panel-tab-diary")).toBeTruthy()
     expect(screen.queryByTestId("panel-tab-status")).toBeNull()
     expect(screen.queryByTestId("panel-tab-changes")).toBeNull()
     expect(screen.queryByTestId("panel-tab-skills")).toBeNull()
+  })
+
+  test("Diary is the tab after TODOs and shows the project's research diary", async () => {
+    renderSidebar(vi.fn(), {
+      "settings.get": () => ({}),
+      "diary.open": () => ({
+        relPath: "md/research-diary/diary.md",
+        content: "## 2026-11-12\n\nFirst entry.\n",
+        baseline: { exists: true, mtimeMs: 1, size: 27 },
+      }),
+    })
+    expect(tabOrder()).toEqual(["files", "research", "todos", "diary"])
+    expect(screen.getByTestId("panel-tab-diary").textContent).toBe("Diary")
+    fireEvent.click(screen.getByTestId("panel-tab-diary"))
+    const panel = await screen.findByTestId("research-diary-panel")
+    expect(await within(panel).findByText("First entry.")).toBeTruthy()
   })
 
   test("a selected tab that no longer exists falls back to Files, not the first tab", () => {
@@ -182,7 +199,7 @@ describe("RightSidebar", () => {
 
   test("Files is the first tab and the tab shown by default", () => {
     renderSidebar()
-    expect(tabOrder()).toEqual(["files", "research", "todos"])
+    expect(tabOrder()).toEqual(["files", "research", "todos", "diary"])
     expect(screen.getByTestId("panel-tab-files").getAttribute("data-active")).toBe("true")
     expect(screen.getByTestId("panel-files")).toBeTruthy()
   })
@@ -190,11 +207,12 @@ describe("RightSidebar", () => {
   test("dragging a tab reorders it, persists the global order, and applies it to another project", () => {
     const first = renderSidebar()
     dragTab("todos", "files")
-    expect(tabOrder()).toEqual(["todos", "files", "research"])
+    expect(tabOrder()).toEqual(["todos", "files", "research", "diary"])
     expect(JSON.parse(window.localStorage.getItem(TAB_ORDER_KEY) ?? "null")).toEqual([
       "todos",
       "files",
       "research",
+      "diary",
     ])
     // The drag did not change the selection; a plain click still selects.
     expect(screen.getByTestId("panel-tab-files").getAttribute("data-active")).toBe("true")
@@ -203,7 +221,7 @@ describe("RightSidebar", () => {
 
     first.unmount()
     renderSidebar(vi.fn(), {}, { projectId: "p2" })
-    expect(tabOrder()).toEqual(["todos", "files", "research"])
+    expect(tabOrder()).toEqual(["todos", "files", "research", "diary"])
   })
 
   test("tabs missing from the saved order go after the known ones in their natural order", () => {
@@ -215,6 +233,7 @@ describe("RightSidebar", () => {
       "todos",
       "research",
       "files",
+      "diary",
       "skills",
       "changes",
       "pinned:notes.md",
@@ -226,15 +245,16 @@ describe("RightSidebar", () => {
     const research = screen.getByTestId("panel-tab-research")
     research.focus()
     fireEvent.keyDown(research, { key: "ArrowRight", altKey: true })
-    expect(tabOrder()).toEqual(["files", "todos", "research"])
+    expect(tabOrder()).toEqual(["files", "todos", "research", "diary"])
     expect(document.activeElement).toBe(screen.getByTestId("panel-tab-research"))
     fireEvent.keyDown(screen.getByTestId("panel-tab-research"), { key: "ArrowLeft", altKey: true })
     fireEvent.keyDown(screen.getByTestId("panel-tab-research"), { key: "ArrowLeft", altKey: true })
-    expect(tabOrder()).toEqual(["research", "files", "todos"])
+    expect(tabOrder()).toEqual(["research", "files", "todos", "diary"])
     expect(JSON.parse(window.localStorage.getItem(TAB_ORDER_KEY) ?? "null")).toEqual([
       "research",
       "files",
       "todos",
+      "diary",
     ])
   })
 
@@ -430,6 +450,55 @@ describe("RightSidebar", () => {
     fireEvent.click(screen.getByTestId("right-sidebar-collapse"))
 
     expect(onCollapse).toHaveBeenCalledTimes(1)
+  })
+
+  test("a leading tab shows first, and its content stays mounted while another tab shows", () => {
+    function LeadingHarness() {
+      const [activeId, setActiveId] = useState("sessions")
+      return (
+        <RightSidebar
+          projectId="p1"
+          workspaceId="ws-1"
+          onOpenFile={vi.fn()}
+          onCollapse={null}
+          filesPanelOpen={false}
+          activeId={activeId}
+          onActiveIdChange={setActiveId}
+          leadingTab={{
+            id: "sessions",
+            label: "Sessions",
+            description: "Agent and terminal sessions.",
+            content: <div data-testid="leading-content" />,
+          }}
+        />
+      )
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = createFakeTrpcClient({
+      "projects.get": () => ({ mainRelPath: null, taskRelPath: null }),
+      "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
+      "files.tree": () => [],
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        <LeadingHarness />
+      </AppProviders>,
+    )
+    expect(tabOrder()[0]).toBe("sessions")
+    expect(screen.getByTestId("panel-tab-sessions").getAttribute("aria-selected")).toBe("true")
+    // No built-in tab is selected or drawn while the leading tab shows.
+    expect(screen.getByTestId("panel-tab-files").getAttribute("aria-selected")).toBe("false")
+    const content = screen.getByTestId("leading-content")
+    expect(content.closest("[hidden]")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("panel-tab-research"))
+    expect(screen.getByTestId("panel-tab-sessions").getAttribute("aria-selected")).toBe("false")
+    expect(screen.getByTestId("leading-content")).toBe(content)
+    expect(content.closest("[hidden]")).not.toBeNull()
+
+    fireEvent.click(screen.getByTestId("panel-tab-sessions"))
+    expect(screen.getByTestId("leading-content")).toBe(content)
+    expect(content.closest("[hidden]")).toBeNull()
   })
 
   test("collapsing hides the sidebar and the expand affordance brings it back", () => {

@@ -48,10 +48,14 @@ describe("AgentStatusControl", () => {
       </AppProviders>,
     )
 
-    const control = screen.getByRole("button", { name: "Agent status" })
+    const control = screen.getByRole("button", { name: "Agents status" })
+    // Hovering shows "Agents status", like the other header buttons.
+    expect(control.getAttribute("title")).toBe("Agents status")
+    expect(control.getAttribute("data-feature-label")).toBe("Agents status")
+    expect(control.getAttribute("data-feature-help")).toBeTruthy()
     await waitFor(() => expect(control.getAttribute("data-attention")).toBe("true"))
     fireEvent.click(control)
-    const panel = screen.getByRole("dialog", { name: "Agent status" })
+    const panel = screen.getByRole("dialog", { name: "Agents status" })
     expect(panel.textContent).toContain("Claude Code")
     expect(panel.textContent).toContain("Sign in needed")
     expect(panel.textContent).toContain("Codex")

@@ -22,6 +22,12 @@ export interface TerminalAgent {
   defaultArgs?: string[]
   /** Arguments before the prompt for agents that support a one-shot draft. */
   oneShotArgs?: string[]
+  /**
+   * Flag that gives the agent access to one more folder outside its working
+   * directory (e.g. `--add-dir`), repeated once per folder. Agents without it
+   * get no extra folder.
+   */
+  addDirArg?: string
   /** Extra environment variables to set for the launched process. */
   env?: Record<string, string>
 }
@@ -43,6 +49,7 @@ export const BUILTIN_AGENTS: readonly TerminalAgent[] = [
     command: "claude",
     detect: "claude",
     defaultArgs: ["--dangerously-skip-permissions"],
+    addDirArg: "--add-dir",
   },
   {
     id: "codex",
@@ -50,6 +57,7 @@ export const BUILTIN_AGENTS: readonly TerminalAgent[] = [
     command: "codex",
     detect: "codex",
     defaultArgs: ["--dangerously-bypass-approvals-and-sandbox"],
+    addDirArg: "--add-dir",
   },
 ] as const
 

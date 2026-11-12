@@ -396,8 +396,10 @@ const requestUserQuit = createUserQuitAction({
   pending: () => shutdownGuard.isQuitPending(),
   work: async () => {
     await fullBootScheduler.startNow()
-    return fullRuntime ? fullRuntime.quitWork() : { agents: 0, terminals: [] }
+    return fullRuntime ? fullRuntime.quitWork() : { agents: 0, terminals: [], notebooks: 0 }
   },
+  // `work()` has started the full runtime; without it there is no saved choice.
+  remembered: () => (fullRuntime ? fullRuntime.quitChoice() : "ask"),
   choose: async ({ agents: count }) => {
     const result = await dialog.showMessageBox({
       type: "question",
@@ -405,11 +407,18 @@ const requestUserQuit = createUserQuitAction({
       message: `Quit ${app.getName()}?`,
       detail: "Move to background keeps PI Lab and its work running.",
       buttons: ["Cancel", "Move to background", count > 0 ? "Quit and stop all agents" : "Quit"],
+      checkboxLabel: "Remember option",
+      checkboxChecked: false,
       defaultId: 0,
       cancelId: 0,
       noLink: true,
     })
-    return result.response === 2 ? "quit" : result.response === 1 ? "background" : "cancel"
+    const choice = result.response === 2 ? "quit" : result.response === 1 ? "background" : "cancel"
+    return { choice, remember: result.checkboxChecked }
+  },
+  remember: (choice) => {
+    if (!fullRuntime) throw new Error("Cannot remember the quit choice before PI Lab has started")
+    fullRuntime.rememberQuitChoice(choice)
   },
   confirmRunning: async (work) => {
     const result = await dialog.showMessageBox({
@@ -432,8 +441,9 @@ const requestUserQuit = createUserQuitAction({
 })
 setUserQuitAction(() => void requestUserQuit())
 
-// Cmd+W closes the focused file tab in the user window; otherwise the app hides.
-// The tray popover (or another focused window) and a hidden user window get no request.
+// Cmd+W closes the active tab of the focused panel in the user window. It never
+// hides or closes the app. The tray popover (or another focused window) and a
+// hidden user window get no request.
 const closeTabAction = installCloseTabAction({
   ipcMain,
   targetWindow: () => {
@@ -441,7 +451,6 @@ const closeTabAction = installCloseTabAction({
     if (focused !== null && focused !== userWindow) return null
     return userWindow && !userWindow.isDestroyed() && userWindow.isVisible() ? userWindow : null
   },
-  hide: () => app.hide(),
   warn: (message) => console.warn(message),
   createRequestId: randomUUID,
   timeoutMs: 1_500,

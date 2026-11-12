@@ -89,6 +89,8 @@ interface FileTreeProps {
    * rename moves them. Omitted only where no editor tabs exist.
    */
   editorTabs?: FileTreeEditorTabs
+  /** When given, the header starts with a chevron that collapses the tree (LaTeX Editor column). */
+  onCollapse?: () => void
 }
 
 /**
@@ -140,6 +142,7 @@ export function FileTree({
   onPinFile,
   onSetMainFile,
   editorTabs,
+  onCollapse,
 }: FileTreeProps) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -380,11 +383,25 @@ export function FileTree({
       className="flex min-h-0 flex-1 flex-col"
     >
       <div className="flex shrink-0 items-center gap-1 border-border border-b px-2 py-1.5">
+        {onCollapse ? (
+          <button
+            type="button"
+            data-testid="central-files-section"
+            aria-expanded={true}
+            aria-label={t("Collapse files")}
+            data-feature-help={t("Hide the file list to give the panes more room.")}
+            onClick={onCollapse}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ChevronDown className="size-3.5" aria-hidden />
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="file-tree-root"
           data-selected={isSelected(selection, "dir", "")}
           title={t("Use project root for new files and folders")}
+          data-feature-label={t("Files")}
           onClick={() => setSelection(ROOT_SELECTION)}
           className="mr-auto rounded px-1 font-medium text-muted-foreground text-xs uppercase tracking-wide hover:text-foreground"
         >

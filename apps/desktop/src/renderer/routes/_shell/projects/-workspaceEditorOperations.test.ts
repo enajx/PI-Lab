@@ -79,6 +79,7 @@ describe("inactive project saves through shared editor operations (mocked IPC)",
     const view = renderHook(
       () =>
         useCentralPanel({
+          origin: "project",
           client,
           workspaceId: "source-ws",
           projectId: "source",
@@ -237,6 +238,7 @@ test("delayed cross-project Save As selects a still-open tab after another tab c
   const view = renderHook(
     () =>
       useCentralPanel({
+        origin: "project",
         client,
         workspaceId: "source-ws",
         projectId: "source",

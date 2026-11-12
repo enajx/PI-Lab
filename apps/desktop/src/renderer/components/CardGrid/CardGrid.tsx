@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  type Ref,
   useContext,
   useEffect,
   useMemo,
@@ -31,39 +32,93 @@ export interface CardSpan {
 const DEFAULT_SCALE = 1
 const MIN_SCALE = 0.7
 const MAX_SCALE = 1.6
-const KEYBOARD_STEP = 0.05
-const PIXELS_PER_SCALE_STEP = 320
+/** Card sizes snap to 10% steps of the surface's base size, on each axis. */
+const SIZE_STEP = 0.1
+
+/** Shared card size on a surface, as multiples of the base column width and row height. */
+export interface CardGridSize {
+  width: number
+  height: number
+}
+
+const DEFAULT_SIZE: CardGridSize = { width: DEFAULT_SCALE, height: DEFAULT_SCALE }
 
 interface CardGridContextValue {
-  scale: number
-  setScale: (scale: number) => void
+  size: CardGridSize
+  baseColumnPx: number
+  baseRowPx: number
+  setSize: (size: CardGridSize) => void
 }
 
 const CardGridContext = createContext<CardGridContextValue | null>(null)
 
 function storageKey(surface: CardGridSurface): string {
+  return `pi-lab.cardGrid.${surface}.size`
+}
+
+/** The key of the old single shared scale, migrated to width and height on first read. */
+function legacyScaleKey(surface: CardGridSurface): string {
   return `pi-lab.cardGrid.${surface}.scale`
 }
 
-function clampScale(value: number): number {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(value * 100) / 100))
+/** Snap a scale to the nearest 10% step and keep it within the allowed range. */
+function snapScale(value: number): number {
+  const snapped = Math.round(value * 10) / 10
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, snapped))
 }
 
-function readStoredScale(surface: CardGridSurface): number {
-  if (typeof window === "undefined") return DEFAULT_SCALE
-  const raw = window.localStorage.getItem(storageKey(surface))
-  if (raw === null) return DEFAULT_SCALE
-  const value = Number(raw)
-  return Number.isFinite(value) ? clampScale(value) : DEFAULT_SCALE
+function snapSize(size: CardGridSize): CardGridSize {
+  return { width: snapScale(size.width), height: snapScale(size.height) }
 }
 
-function writeStoredScale(surface: CardGridSurface, scale: number): void {
+function writeStoredSize(surface: CardGridSurface, size: CardGridSize): void {
   if (typeof window === "undefined") return
-  if (scale === DEFAULT_SCALE) {
+  if (size.width === DEFAULT_SCALE && size.height === DEFAULT_SCALE) {
     window.localStorage.removeItem(storageKey(surface))
     return
   }
-  window.localStorage.setItem(storageKey(surface), String(scale))
+  window.localStorage.setItem(storageKey(surface), JSON.stringify(size))
+}
+
+/** A finite number from stored JSON, or null when the value is missing or malformed. */
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+/**
+ * Read the stored card size. An old single `scale` value is moved to both width
+ * and height (snapped to 10%), saved under the new key, and the old key removed.
+ * A malformed stored value falls back to the base size.
+ */
+function readStoredSize(surface: CardGridSurface): CardGridSize {
+  if (typeof window === "undefined") return DEFAULT_SIZE
+  const legacy = window.localStorage.getItem(legacyScaleKey(surface))
+  if (legacy !== null) {
+    window.localStorage.removeItem(legacyScaleKey(surface))
+    const value = Number(legacy)
+    if (Number.isFinite(value)) {
+      const migrated = snapSize({ width: value, height: value })
+      writeStoredSize(surface, migrated)
+      return migrated
+    }
+  }
+  const raw = window.localStorage.getItem(storageKey(surface))
+  if (raw === null) return DEFAULT_SIZE
+  const parsed: unknown = JSON.parse(raw)
+  const record =
+    typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {}
+  const width = finiteOrNull(record.width)
+  const height = finiteOrNull(record.height)
+  if (width === null || height === null) return DEFAULT_SIZE
+  return snapSize({ width, height })
+}
+
+/**
+ * The shared card height as a multiple of the base row height, or 1 outside a
+ * CardGrid. Cards use it to scale inner parts (e.g. a thumbnail) with the card.
+ */
+export function useCardGridHeightScale(): number {
+  return useContext(CardGridContext)?.size.height ?? DEFAULT_SCALE
 }
 
 interface CardGridProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
@@ -75,7 +130,7 @@ interface CardGridProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
   testId?: string
 }
 
-/** Shared responsive grid with one smooth, persisted scale for every card on a surface. */
+/** Shared responsive grid with one persisted width and height for every card on a surface. */
 export function CardGrid({
   surface,
   cardIds: _cardIds,
@@ -87,21 +142,23 @@ export function CardGrid({
   ...elementProps
 }: CardGridProps) {
   const config = CARD_GRID_SURFACES[surface]
-  const [scale, setScaleState] = useState(() => readStoredScale(surface))
+  const [size, setSizeState] = useState(() => readStoredSize(surface))
   const context = useMemo(
     () => ({
-      scale,
-      setScale: (next: number) => {
-        const normalized = clampScale(next)
-        setScaleState(normalized)
-        writeStoredScale(surface, normalized)
+      size,
+      baseColumnPx: config.baseColumnPx,
+      baseRowPx: config.baseRowPx,
+      setSize: (next: CardGridSize) => {
+        const normalized = snapSize(next)
+        setSizeState(normalized)
+        writeStoredSize(surface, normalized)
       },
     }),
-    [scale, surface],
+    [size, surface, config],
   )
   const Element = as
-  const columnPx = Math.round(config.baseColumnPx * scale)
-  const rowPx = Math.round(config.baseRowPx * scale)
+  const columnPx = Math.round(config.baseColumnPx * size.width)
+  const rowPx = Math.round(config.baseRowPx * size.height)
   const boundedColumns = surface === "dashboard"
 
   useEffect(() => {
@@ -114,19 +171,24 @@ export function CardGrid({
         {...elementProps}
         data-testid={testId}
         data-card-grid-surface={surface}
-        data-card-grid-scale={scale}
+        data-card-grid-width={size.width}
+        data-card-grid-height={size.height}
         data-card-grid-base-column={config.baseColumnPx}
         data-card-grid-base-row={config.baseRowPx}
         className={cn("card-grid grid", className)}
-        style={{
-          gridTemplateColumns: boundedColumns
-            ? `repeat(auto-fill, minmax(min(100%, ${columnPx}px), ${columnPx}px))`
-            : `repeat(auto-fit, minmax(min(100%, ${columnPx}px), 1fr))`,
-          gridAutoRows: `minmax(${rowPx}px, auto)`,
-          gridAutoFlow: "row",
-          justifyContent: boundedColumns ? "start" : undefined,
-          ...style,
-        }}
+        style={
+          {
+            gridTemplateColumns: boundedColumns
+              ? `repeat(auto-fill, minmax(min(100%, ${columnPx}px), ${columnPx}px))`
+              : `repeat(auto-fit, minmax(min(100%, ${columnPx}px), 1fr))`,
+            gridAutoRows: `minmax(${rowPx}px, auto)`,
+            gridAutoFlow: "row",
+            "--card-grid-column": `${columnPx}px`,
+            "--card-grid-row": `${rowPx}px`,
+            justifyContent: boundedColumns ? "start" : undefined,
+            ...style,
+          } as CSSProperties
+        }
       >
         {children}
       </Element>
@@ -135,6 +197,8 @@ export function CardGrid({
 }
 
 interface ResizableCardGridItemProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
+  /** The grid item element, e.g. for a sortable list that moves the card. */
+  ref?: Ref<HTMLDivElement & HTMLLIElement>
   cardId: string
   label: string
   children: ReactNode
@@ -142,16 +206,19 @@ interface ResizableCardGridItemProps extends Omit<HTMLAttributes<HTMLElement>, "
   testId?: string
 }
 
-function scaleLabel(label: string, scale: number, t: (english: string) => string): string {
-  return `${t("Resize all cards from")} ${label}, ${t("currently")} ${Math.round(scale * 100)} ${t("percent")}`
+function sizeLabel(label: string, size: CardGridSize, t: (english: string) => string): string {
+  const width = `${t("width")} ${Math.round(size.width * 100)} ${t("percent")}`
+  const height = `${t("height")} ${Math.round(size.height * 100)} ${t("percent")}`
+  return `${t("Resize all cards from")} ${label}, ${t("currently")} ${width}, ${height}`
 }
 
 /**
- * A card supplies an invisible corner drag target. Horizontal and vertical movement
- * both change the shared scale, so the Dashboard card grows in both dimensions
- * rather than feeling like a width-only resize.
+ * A card supplies an invisible corner drag target. Horizontal movement changes the
+ * shared card width and vertical movement the shared height, each snapping to 10%
+ * steps of the base size, so the corner follows the pointer in visible steps.
  */
 export function ResizableCardGridItem({
+  ref,
   cardId,
   label,
   children,
@@ -167,7 +234,7 @@ export function ResizableCardGridItem({
 
   const cleanupRef = useRef<() => void>(() => undefined)
   const Element = as
-  const accessibleLabel = scaleLabel(label, context.scale, t)
+  const accessibleLabel = sizeLabel(label, context.size, t)
 
   useEffect(() => () => cleanupRef.current(), [])
 
@@ -181,7 +248,8 @@ export function ResizableCardGridItem({
     const startX = event.clientX
     const startY = event.clientY
     const direction = document.documentElement.dir === "rtl" ? -1 : 1
-    const startScale = context.scale
+    const startSize = context.size
+    const { baseColumnPx, baseRowPx, setSize } = context
     const target = event.currentTarget
     target.setPointerCapture?.(pointerId)
 
@@ -194,8 +262,10 @@ export function ResizableCardGridItem({
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return
       move.preventDefault()
-      const distance = (direction * (move.clientX - startX) + move.clientY - startY) / 2
-      context.setScale(startScale + distance / PIXELS_PER_SCALE_STEP)
+      setSize({
+        width: startSize.width + (direction * (move.clientX - startX)) / baseColumnPx,
+        height: startSize.height + (move.clientY - startY) / baseRowPx,
+      })
     }
     const onUp = (up: PointerEvent) => {
       if (up.pointerId !== pointerId) return
@@ -204,7 +274,7 @@ export function ResizableCardGridItem({
     const onCancel = (cancel: PointerEvent) => {
       if (cancel.pointerId !== pointerId) return
       cleanup()
-      context.setScale(startScale)
+      setSize(startSize)
     }
 
     cleanupRef.current = cleanup
@@ -214,30 +284,26 @@ export function ResizableCardGridItem({
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    let next = context.scale
     const rtl = document.documentElement.dir === "rtl"
-    if (
-      (event.key === "ArrowRight" && !rtl) ||
-      (event.key === "ArrowLeft" && rtl) ||
-      event.key === "ArrowDown"
-    )
-      next += KEYBOARD_STEP
-    if (
-      (event.key === "ArrowLeft" && !rtl) ||
-      (event.key === "ArrowRight" && rtl) ||
-      event.key === "ArrowUp"
-    )
-      next -= KEYBOARD_STEP
-    if (event.key === "Home") next = DEFAULT_SCALE
-    if (next === context.scale) return
+    const { width, height } = context.size
+    const wider = (event.key === "ArrowRight" && !rtl) || (event.key === "ArrowLeft" && rtl)
+    const narrower = (event.key === "ArrowLeft" && !rtl) || (event.key === "ArrowRight" && rtl)
+    let next: CardGridSize | null = null
+    if (wider) next = { width: width + SIZE_STEP, height }
+    if (narrower) next = { width: width - SIZE_STEP, height }
+    if (event.key === "ArrowDown") next = { width, height: height + SIZE_STEP }
+    if (event.key === "ArrowUp") next = { width, height: height - SIZE_STEP }
+    if (event.key === "Home") next = DEFAULT_SIZE
+    if (next === null) return
     event.preventDefault()
     event.stopPropagation()
-    context.setScale(next)
+    context.setSize(next)
   }
 
   return (
     <Element
       {...elementProps}
+      ref={ref}
       data-testid={testId}
       data-card-grid-item={cardId}
       data-card-span="1x1"

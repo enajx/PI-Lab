@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
   type ElectronApplication,
@@ -60,6 +60,8 @@ test("library tab shows the source chooser (three sources) when unconfigured", a
   await expect(window.getByTestId("zotero-chooser-local")).toBeVisible()
   await expect(window.getByTestId("zotero-chooser-web")).toBeVisible()
   await expect(window.getByTestId("library-source-folder")).toBeVisible()
+  // For comparison with the LaTeX Editor setup page (latex-setup-cards.png), which uses the same layout.
+  await window.screenshot({ path: resolve(".cache", "screens", "library-setup.png") })
 
   // The Cloud card reveals the API key form on demand.
   await window.getByTestId("zotero-use-web").click()

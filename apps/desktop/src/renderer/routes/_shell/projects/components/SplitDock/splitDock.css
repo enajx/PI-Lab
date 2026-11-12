@@ -3,7 +3,7 @@
   color-scheme: inherit;
   --dv-paneview-active-outline-color: var(--ring);
   --dv-tabs-and-actions-container-font-size: 12px;
-  --dv-tabs-and-actions-container-height: 36px;
+  --dv-tabs-and-actions-container-height: 28px;
   --dv-tabs-and-actions-container-background-color: color-mix(
     in oklab,
     var(--muted) 30%,

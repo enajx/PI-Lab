@@ -1,3 +1,7 @@
 export { LoadingDots } from "./LoadingDots"
-export { ProjectWorkflowControl } from "./ProjectWorkflowControl"
+export {
+  ProjectWorkflowControl,
+  ProjectWorkflowDialog,
+  workflowTaskLabel,
+} from "./ProjectWorkflowControl"
 export { formatRelativeTime } from "./relativeTime"

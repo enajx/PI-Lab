@@ -5,7 +5,12 @@ import {
 } from "./-workspaceRecovery"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 
-export type { ProjectWorkspaceState } from "./-workspaceRecovery"
+export {
+  latexWorkspaceKey,
+  type ProjectWorkspaceState,
+  type SessionPanelView,
+  sessionPanelWorkspaceKey,
+} from "./-workspaceRecovery"
 
 let store: WorkspaceRecoveryStore | undefined
 
@@ -35,6 +40,16 @@ export function writeProjectWorkspaceViewState(
   view: ProjectWorkspaceViewState,
 ): void {
   workspaceRecovery().writeView(projectId, view)
+}
+
+/** The project's pinned right-sidebar panels, shared by the project view and the science views. */
+export function readProjectPinnedPanels(projectId: string): string[] {
+  return workspaceRecovery().read(projectId, true)?.pinnedPanels ?? []
+}
+
+/** Save the project's pinned right-sidebar panels from a science view. */
+export function writeProjectPinnedPanels(projectId: string, pinnedPanels: string[]): void {
+  workspaceRecovery().writePinnedPanels(projectId, pinnedPanels)
 }
 
 export function subscribeProjectWorkspaceState(onChange: () => void): () => void {

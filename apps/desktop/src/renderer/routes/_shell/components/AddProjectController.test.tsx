@@ -22,6 +22,7 @@ const project: Project = {
   gradient: null,
   digitalRain: false,
   sortIndex: 0,
+  sortOrder: null,
   archivedAt: null,
   createdAt: 0,
   updatedAt: 0,
@@ -63,7 +64,7 @@ describe("AddProjectControllerProvider", () => {
     const openProject = vi.fn()
     renderController(onAdded, {
       "system.pickDirectory": () => null,
-      "projects.open": openProject,
+      "projects.add": openProject,
     })
 
     expect(screen.queryByTestId("add-project-menu")).toBeNull()
@@ -88,7 +89,7 @@ describe("AddProjectControllerProvider", () => {
     const onAdded = vi.fn()
     renderController(onAdded, {
       "system.pickDirectory": () => null,
-      "projects.open": vi.fn(),
+      "projects.add": vi.fn(),
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Open controlled chooser" }))
@@ -107,7 +108,7 @@ describe("AddProjectControllerProvider", () => {
       .mockResolvedValue(project)
     renderController(onAdded, {
       "system.pickDirectory": () => "/tmp/project-added",
-      "projects.open": openProject,
+      "projects.add": openProject,
     })
     fireEvent.click(screen.getByRole("button", { name: "Open controlled chooser" }))
     fireEvent.click(screen.getByTestId("add-project-folder"))

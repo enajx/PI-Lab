@@ -1,3 +1,24 @@
+/*
+ * Card sizes snap in 10% steps. Each card animates to its new size with a short
+ * transition so a snap looks smooth. The grid sets --card-grid-column and
+ * --card-grid-row from the shared card size.
+ */
 .card-grid-item {
   min-width: 0;
+  min-height: var(--card-grid-row);
+  transition:
+    width 120ms ease-out,
+    min-height 120ms ease-out;
+}
+
+/* Dashboard columns have a fixed width, so the card width can animate too. */
+.card-grid[data-card-grid-surface="dashboard"] > .card-grid-item {
+  width: var(--card-grid-column);
+  max-width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-grid-item {
+    transition: none;
+  }
 }

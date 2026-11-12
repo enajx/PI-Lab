@@ -54,6 +54,8 @@ export interface ActivityMonitorPort {
   trackTerminal: (input: TrackTerminalSession) => Promise<void>
   reconcile: () => Promise<void>
   liveAgentCount: (projectId: string) => number
+  /** The project's agent sessions that have not exited, oldest first. */
+  liveAgents: (projectId: string) => AgentActivityRecord[]
   userInput: (sessionId: string, data: string) => void
   resize: (sessionId: string, cols: number, rows: number) => void
   dispose: () => void
@@ -159,6 +161,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
         workspaceId: input.workspaceId,
         agentId: input.agentId,
         workflowRunId: input.workflowRunId,
+        origin: input.origin,
         state: "working",
         turnArmed: input.turnArmed,
         updatedAt: at,
@@ -170,6 +173,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
           workspaceId: input.workspaceId,
           agentId: input.agentId,
           workflowRunId: input.workflowRunId,
+          origin: input.origin,
           state: "working",
           turnArmed: input.turnArmed,
           waitingReason: null,
@@ -255,10 +259,13 @@ export class ActivityMonitor implements ActivityMonitorPort {
   }
 
   liveAgentCount(projectId: string): number {
+    return this.liveAgents(projectId).length
+  }
+
+  liveAgents(projectId: string): AgentActivityRecord[] {
     return this.options.registry
       .snapshot()
       .sessions.filter((session) => session.projectId === projectId && session.state !== "exited")
-      .length
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
@@ -686,6 +693,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
         workspaceId: record.workspaceId,
         sessionId: record.sessionId,
         agentId: record.agentId,
+        origin: record.origin,
       },
     })
   }
@@ -702,6 +710,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
         workspaceId: record.workspaceId,
         sessionId: record.sessionId,
         agentId: record.agentId,
+        origin: record.origin,
       },
     })
   }
@@ -745,6 +754,7 @@ export class ActivityMonitor implements ActivityMonitorPort {
       workspaceId: row.workspaceId,
       agentId: row.agentId,
       workflowRunId: row.workflowRunId,
+      origin: row.origin,
       state: row.state,
       waitingReason: row.waitingReason,
       waitingSince: row.waitingSince,

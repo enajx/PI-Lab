@@ -9,6 +9,7 @@ import {
   type ElectronApplication,
   _electron as electron,
   expect,
+  type Page,
   test,
 } from "./fixtures/playwright"
 
@@ -29,6 +30,36 @@ const packagedBinary =
     "MacOS",
     "PI Lab Alpha",
   )
+
+/** Editor backgrounds of the default GitHub theme, by app appearance. */
+const GITHUB_LIGHT_BACKGROUND = "rgb(255, 255, 255)"
+const GITHUB_DARK_BACKGROUND = "rgb(13, 17, 23)"
+
+/** Read the computed background of the first CodeMirror editor in the window. */
+function editorBackground(window: Page): Promise<string | null> {
+  return window.evaluate(() => {
+    const editor = document.querySelector(".cm-editor")
+    return editor ? getComputedStyle(editor).backgroundColor : null
+  })
+}
+
+/** Open the full-app Editor through the command palette ("Go to Editor"). */
+async function goToEditor(window: Page): Promise<void> {
+  await window.keyboard.press("ControlOrMeta+p")
+  await window.getByTestId("command-palette-input").fill("Go to Editor")
+  await window.locator('[data-command-id="nav-editor"]').click()
+}
+
+/** Turn on Settings > Sections > Editor so the sidebar always shows the Editor row. */
+async function showEditorRow(window: Page): Promise<void> {
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-sections").click()
+  const toggle = window.getByTestId("settings-show-editor-section")
+  await expect(toggle).toHaveAttribute("aria-checked", "false")
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await window.getByTestId("settings-back").click()
+}
 
 test("packaged quick and full views share the Vim choice", async () => {
   test.skip(!existsSync(packagedBinary), "Packaged app is unavailable")
@@ -643,18 +674,8 @@ test("quick edit opens a local file before the full app, saves it, and keeps it 
     const editor = window.getByTestId("quick-editor").locator(".cm-content")
     await expect(editor).toContainText("value = 1", { timeout: 30_000 })
     await expect(editor).toBeFocused()
-    await expect
-      .poll(() =>
-        window.evaluate(() => {
-          const editor = document.querySelector(".cm-editor")
-          const surface = document.querySelector('[data-testid="quick-editor"]')
-          if (!editor || !surface) return false
-          return (
-            getComputedStyle(editor).backgroundColor === getComputedStyle(surface).backgroundColor
-          )
-        }),
-      )
-      .toBe(true)
+    // The default editor theme is GitHub, Light or Dark following the app appearance.
+    await expect.poll(() => editorBackground(window)).toBe(GITHUB_LIGHT_BACKGROUND)
     await editor.press("ControlOrMeta+End")
     await window.keyboard.type("value = 2\n")
     await editor.press("ControlOrMeta+s")
@@ -668,32 +689,15 @@ test("quick edit opens a local file before the full app, saves it, and keeps it 
       "value = 2",
     )
     await expect
-      .poll(() =>
-        window.evaluate(() => {
-          const editor = document.querySelector(".cm-editor")
-          const surface = document.querySelector('[data-testid="quick-editor"]')
-          if (!editor || !surface) return false
-          return (
-            document.documentElement.classList.contains("dark") &&
-            getComputedStyle(editor).backgroundColor === getComputedStyle(surface).backgroundColor
-          )
-        }),
-      )
+      .poll(() => window.evaluate(() => document.documentElement.classList.contains("dark")))
       .toBe(true)
+    await expect.poll(() => editorBackground(window)).toBe(GITHUB_DARK_BACKGROUND)
 
     await window.getByRole("button", { name: "Open PI Lab" }).click()
     await expect(window.getByTestId("quick-editor-full-app")).toBeVisible({ timeout: 30_000 })
     await expect(window.getByTestId("quick-editor-full-app")).toContainText("value = 2")
-    expect(
-      await window.evaluate(() => {
-        const editor = document.querySelector(".cm-editor")
-        const surface = document.querySelector('[data-testid="quick-editor-full-app"]')
-        if (!editor || !surface) return false
-        return (
-          getComputedStyle(editor).backgroundColor === getComputedStyle(surface).backgroundColor
-        )
-      }),
-    ).toBe(true)
+    await expect.poll(() => editorBackground(window)).toBe(GITHUB_DARK_BACKGROUND)
+    // A file outside any project is open, so the hidden-by-default Editor row shows.
     await expect(window.getByTestId("nav-editor")).toHaveAttribute("data-active", "true")
     await expect(
       window.getByTestId("quick-editor-full-app").getByRole("button", { name: "Open PI Lab" }),
@@ -762,7 +766,7 @@ test("quick editor keeps its header visible and opens PI Lab with Command Enter"
   }
 })
 
-test("Editor leads the sidebar and opens an Untitled tab or chosen file", async () => {
+test("Editor row hides by default, shows at the bottom from Settings, and opens an Untitled tab or chosen file", async () => {
   test.setTimeout(120_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-editor-nav-"))
   const firstFile = join(dataDir, "first.py")
@@ -795,10 +799,11 @@ test("Editor leads the sidebar and opens an Untitled tab or chosen file", async 
     await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
     const nav = window.getByTestId("science-nav")
     const editorNav = nav.getByTestId("nav-editor")
+    // With no outside file open and the setting off, the Editor row is hidden.
+    await expect(editorNav).toHaveCount(0)
+    await showEditorRow(window)
     await expect(editorNav).toBeVisible()
-    expect(
-      await editorNav.evaluate((element) => element.nextElementSibling?.textContent),
-    ).toContain("Analysis")
+    expect(await editorNav.evaluate((element) => element.nextElementSibling)).toBeNull()
     await editorNav.click()
     await expect(window.getByTestId("quick-editor-tab")).toContainText("Untitled")
     await expect(window.getByTestId("quick-editor-full-app").locator(".cm-content")).toBeVisible()
@@ -853,7 +858,7 @@ test("Untitled asks before closing and saves to a chosen path", async () => {
     })
     const window = await app.firstWindow()
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-    await window.getByTestId("nav-editor").click()
+    await goToEditor(window)
     const editor = window.getByTestId("quick-editor-full-app").locator(".cm-content")
     await expect(window.getByTestId("quick-editor-tab")).toContainText("Untitled")
     await editor.fill("answer = 42\n")
@@ -900,7 +905,7 @@ test("Untitled saves inside a project and opens there", async () => {
     })
     const window = await app.firstWindow()
     await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
-    await window.getByTestId("nav-editor").click()
+    await goToEditor(window)
     const editor = window.getByTestId("quick-editor-full-app").locator(".cm-content")
     await editor.fill("value = 7\n")
     await window.getByTestId("quick-editor-full-app").getByRole("button", { name: "Save" }).click()
@@ -939,7 +944,7 @@ test("quitting with a dirty Untitled file asks before closing", async () => {
     })
     const window = await app.firstWindow()
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-    await window.getByTestId("nav-editor").click()
+    await goToEditor(window)
     await window.getByTestId("quick-editor-full-app").locator(".cm-content").fill("not saved\n")
     await app.evaluate(({ app: electronApp }) => electronApp.quit())
     const prompt = window.getByRole("dialog", { name: "Unsaved quick edit" })
@@ -977,7 +982,7 @@ test("a hidden Untitled draft can be saved during quit", async () => {
     })
     const window = await app.firstWindow()
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-    await window.getByTestId("nav-editor").click()
+    await goToEditor(window)
     await window.getByTestId("quick-editor-full-app").locator(".cm-content").fill("kept = True\n")
     await window.getByTestId("nav-dashboard").click()
     await expect(window.getByTestId("dashboard")).toBeVisible()
@@ -1047,7 +1052,8 @@ test("full-app Editor has one closable file tab and protects unsaved edits", asy
     await expect(closeDialog).toBeVisible()
     await closeDialog.getByRole("button", { name: "Save" }).click()
     await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
-    await expect(window.getByTestId("nav-editor")).toHaveAttribute("data-active", "false")
+    // No outside file is open any more, so the Editor row hides again.
+    await expect(window.getByTestId("nav-editor")).toHaveCount(0)
     await expect.poll(() => readFile(filePath, "utf8")).toContain("value = 4")
     expect(await app.windows()).toHaveLength(1)
 
@@ -1062,7 +1068,7 @@ test("full-app Editor has one closable file tab and protects unsaved edits", asy
     await window.getByTestId("quick-editor-tab-close").click()
     await closeDialog.getByRole("button", { name: "Discard" }).click()
     await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
-    await expect(window.getByTestId("nav-editor")).toHaveAttribute("data-active", "false")
+    await expect(window.getByTestId("nav-editor")).toHaveCount(0)
     expect(await readFile(filePath, "utf8")).not.toContain("value = 3")
   } finally {
     await app?.close()

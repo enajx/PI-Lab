@@ -32,6 +32,33 @@ test("one-shot launches place saved defaults before the prompt and after Codex e
 })
 
 describe("buildLaunchArgv", () => {
+  test("adds each extra folder with the agent's extra-folder flag, and -- so the prompt is never read as a folder", () => {
+    for (const id of ["claude-code", "codex"]) {
+      const agent = getAgent(id)
+      if (!agent) throw new Error(`Missing built-in agent ${id}`)
+      expect(buildLaunchArgv(agent, { extraDirs: ["/papers/my paper"], args: ["hello"] })).toEqual([
+        agent.command,
+        ...(agent.defaultArgs ?? []),
+        "--add-dir",
+        "/papers/my paper",
+        "--",
+        "hello",
+      ])
+      expect(buildLaunchArgv(agent, { extraDirs: ["/p"] })).toEqual([
+        agent.command,
+        ...(agent.defaultArgs ?? []),
+        "--add-dir",
+        "/p",
+      ])
+    }
+  })
+  test("an agent without an extra-folder flag gets no extra folder", () => {
+    const agent: TerminalAgent = { id: "plain", label: "Plain", command: "plain", detect: "plain" }
+    expect(buildLaunchArgv(agent, { extraDirs: ["/papers/p"], args: ["hello"] })).toEqual([
+      "plain",
+      "hello",
+    ])
+  })
   test("applies provider model and effort before the prompt without shell interpolation", () => {
     const codex = getAgent("codex")
     const claude = getAgent("claude-code")

@@ -46,6 +46,7 @@ function defaultSettings(): Settings {
     agentPresets: [],
     confirmOnQuit: true,
     keepRunningAfterClose: true,
+    quitChoice: "ask",
     publicUpdateChannel: "stable",
     knownTeams: [],
     worktreePerAgent: false,

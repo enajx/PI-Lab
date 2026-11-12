@@ -3,7 +3,6 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands"
 import {
   bracketMatching,
   defaultHighlightStyle,
-  foldGutter,
   foldKeymap,
   indentOnInput,
   syntaxHighlighting,
@@ -29,7 +28,6 @@ export const editorSetup = [
   highlightActiveLineGutter(),
   highlightSpecialChars(),
   history(),
-  foldGutter(),
   drawSelection(),
   dropCursor(),
   EditorState.allowMultipleSelections.of(true),

@@ -34,6 +34,7 @@ import type { DictationEngine } from "../dictation/engine"
 import { DictationService } from "../dictation/service"
 import type { PiLabChannel } from "../identity/channel"
 import type { SshExec } from "../lib/ssh-config"
+import { NotebookServers } from "../notebooks/notebookServers"
 import {
   createNotificationBrokers,
   type NativeNotificationHandlers,
@@ -235,7 +236,7 @@ export const FAKE_PYTHON_RUNTIME_RESOLVER: PythonRuntimeResolver = async () => (
 
 export interface HarnessOptions {
   latexResourcesDir?: string
-  latexDataDir?: string
+  latexCacheDir?: string
   latexUserHome?: string
   resolveAgentExecutable?: AgentExecutableResolver
   appChannel?: PiLabChannel
@@ -306,7 +307,7 @@ export async function createHarness(
   options: Pick<
     HarnessOptions,
     | "latexResourcesDir"
-    | "latexDataDir"
+    | "latexCacheDir"
     | "latexUserHome"
     | "resolveAgentExecutable"
     | "sshExec"
@@ -422,7 +423,7 @@ export async function createHarness(
     appChannel: options.appChannel ?? "alpha",
     skillsHomeDir,
     latexResourcesDir: options.latexResourcesDir,
-    latexDataDir: options.latexDataDir ?? join(dataDir, "latex"),
+    latexCacheDir: options.latexCacheDir ?? join(dataDir, "latex", "cache"),
     latexUserHome: options.latexUserHome,
     dictation,
     getDaemonClient: async () => {
@@ -450,6 +451,12 @@ export async function createHarness(
     discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
     resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,
     analysisInteractive,
+    notebookServers: new NotebookServers(
+      { start: 42_800, end: 42_899 },
+      10_000,
+      null,
+      async () => {},
+    ),
     notifications,
     activityMonitor,
     activityStatus: new ActivityStatusFeed(db, activityRegistry),

@@ -65,9 +65,16 @@ describe("settings.get", () => {
       diagnosticsEnabled: false,
       customEditorThemes: [],
       pythonRunDestination: "central",
-      latexProvider: "bundled",
+      latexProvider: "auto",
+      latexOutputDir: "build",
       showHiddenFiles: true,
       confirmFileDelete: true,
+      confirmOverleafCommit: true,
+      papersFolder: "~/Papers",
+      askPapersFolder: true,
+      researchDiaryFormat: "md",
+      analysisFormat: "md",
+      reportSkill: "experiment-report",
     })
   })
 })
@@ -191,9 +198,16 @@ describe("settings.updateEditor", () => {
       editorTheme: "default",
       customEditorThemes: [],
       pythonRunDestination: "central",
-      latexProvider: "bundled",
+      latexProvider: "auto",
+      latexOutputDir: "build",
       showHiddenFiles: true,
       confirmFileDelete: true,
+      confirmOverleafCommit: true,
+      papersFolder: "~/Papers",
+      askPapersFolder: true,
+      researchDiaryFormat: "md",
+      analysisFormat: "md",
+      reportSkill: "experiment-report",
     })
 
     // The patch persisted and `get` reflects it.
@@ -213,9 +227,16 @@ describe("settings.updateEditor", () => {
       editorTheme: "default",
       customEditorThemes: [],
       pythonRunDestination: "central",
-      latexProvider: "bundled",
+      latexProvider: "auto",
+      latexOutputDir: "build",
       showHiddenFiles: true,
       confirmFileDelete: true,
+      confirmOverleafCommit: true,
+      papersFolder: "~/Papers",
+      askPapersFolder: true,
+      researchDiaryFormat: "md",
+      analysisFormat: "md",
+      reportSkill: "experiment-report",
     })
   })
 
@@ -295,6 +316,22 @@ describe("settings.updateGeneral", () => {
     expect((await harness.caller.settings.get()).keepRunningAfterClose).toBe(false)
     await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
     expect((await harness.caller.settings.get()).keepRunningAfterClose).toBe(false)
+  })
+
+  it("asks on quit by default, persists a remembered quit choice, and resets it", async () => {
+    expect((await harness.caller.settings.get()).quitChoice).toBe("ask")
+    const updated = await harness.caller.settings.updateGeneral({ quitChoice: "background" })
+    expect(updated.quitChoice).toBe("background")
+    await harness.caller.settings.updateGeneral({ confirmOnQuit: false })
+    expect((await harness.caller.settings.get()).quitChoice).toBe("background")
+    await expect(
+      harness.caller.settings.updateGeneral({ quitChoice: "quit" as "ask" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await harness.caller.settings.updateGeneral({ quitChoice: "ask" })
+    expect((await harness.caller.settings.get()).quitChoice).toBe("ask")
+    await expect(
+      harness.caller.settings.updateGeneral({ quitChoice: "never" as "ask" }),
+    ).rejects.toThrow()
   })
 
   it("round-trips worktreePerAgent and confirmOnQuit", async () => {
@@ -391,8 +428,20 @@ describe("global LaTeX provider", () => {
     expect((await harness.caller.settings.get()).confirmOnQuit).toBe(false)
     await harness.caller.settings.updateEditor({ latexProvider: "bundled" })
     expect((await harness.caller.settings.get()).editor.latexProvider).toBe("bundled")
+    await harness.caller.settings.updateEditor({ latexProvider: "auto" })
+    expect((await harness.caller.settings.get()).editor.latexProvider).toBe("auto")
     await expect(
       harness.caller.settings.updateEditor({ latexProvider: "managed" as never }),
     ).rejects.toThrow()
+  })
+})
+
+describe("confirm Overleaf commit", () => {
+  it("defaults on and persists turning it off and back on", async () => {
+    expect((await harness.caller.settings.get()).editor.confirmOverleafCommit).toBe(true)
+    await harness.caller.settings.updateEditor({ confirmOverleafCommit: false })
+    expect((await harness.caller.settings.get()).editor.confirmOverleafCommit).toBe(false)
+    await harness.caller.settings.updateEditor({ confirmOverleafCommit: true })
+    expect((await harness.caller.settings.get()).editor.confirmOverleafCommit).toBe(true)
   })
 })

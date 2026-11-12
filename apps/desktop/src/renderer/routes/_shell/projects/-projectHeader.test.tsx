@@ -1,4 +1,12 @@
 import { QueryClient } from "@tanstack/react-query"
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../test/fakeTrpcClient"
@@ -42,7 +50,7 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
 describe("Project header", () => {
   afterEach(() => window.localStorage.clear())
 
-  test("header orders Auto research, Plan research, agents, and Caffeine and prevents duplicate launches", async () => {
+  test("header orders Tasks, Paper, Auto research, Plan research, Project status, Research diary, agents, and Caffeine and prevents duplicate launches", async () => {
     const calls: unknown[] = []
     let rejectLaunch!: (error: Error) => void
     renderWorkspace({
@@ -58,9 +66,32 @@ describe("Project header", () => {
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
     const plan = screen.getByTestId("project-view-plan-research")
     expect(button.nextElementSibling).toBe(plan)
+    // Plan research → Project status → Agents status.
+    const status = screen.getByTestId("project-view-status")
+    expect(plan.nextElementSibling).toBe(status)
+    // In the header the Project status button shows only its icon.
+    expect(status.textContent).toBe("")
+    expect(status.getAttribute("title")).toBe("Project status")
+    expect(status.getAttribute("aria-label")).toContain("Project status")
+    expect(status.querySelector("svg")).toBeTruthy()
+    // Project status → Research diary, an icon-only toggle.
+    const diary = screen.getByTestId("project-view-research-diary")
+    expect(status.nextElementSibling).toBe(diary)
+    expect(diary.textContent).toBe("")
+    expect(diary.getAttribute("title")).toBe("Research diary")
+    // A short divider sets the agents and caffeine buttons apart from the view's own.
+    const divider = diary.nextElementSibling
+    expect(divider?.getAttribute("data-testid")).toBe("title-bar-controls-divider")
     expect(
-      plan.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
+      divider?.nextElementSibling?.querySelector("[data-testid=agent-status-control]"),
     ).toBeTruthy()
+    // The "+" shortcut menu, then Tasks, open the row of header actions.
+    const shortcuts = screen.getByTestId("project-view-shortcuts")
+    expect(shortcuts.parentElement?.firstElementChild).toBe(shortcuts)
+    expect(shortcuts.nextElementSibling).toBe(screen.getByTestId("project-view-tasks"))
+    const paper = screen.getByTestId("project-header-paper")
+    expect(screen.getByTestId("project-view-tasks").nextElementSibling).toBe(paper)
+    expect(paper.nextElementSibling).toBe(button)
     const caffeine = screen.getByTestId("caffeine-control")
     expect(
       button.parentElement?.lastElementChild === caffeine ||
@@ -78,6 +109,142 @@ describe("Project header", () => {
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
   })
 
+  test("the Research diary button opens the right sidebar on the Diary tab", async () => {
+    renderWorkspace({
+      "workspaces.ensureMain": () => ({ id: "w1" }),
+      "files.tree": () => [],
+      "diary.open": () => ({
+        relPath: "md/research-diary/diary.md",
+        content: "## 2026-11-12\n\n",
+        baseline: { exists: true, mtimeMs: 1, size: 15 },
+      }),
+    })
+    fireEvent.click(await screen.findByTestId("right-sidebar-collapse"))
+    expect(screen.queryByTestId("right-sidebar")).toBeNull()
+    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("project-view-research-diary"))
+    expect(screen.getByTestId("panel-tab-diary").getAttribute("data-active")).toBe("true")
+    const panel = await screen.findByTestId("research-diary-panel")
+    expect(screen.getByTestId("right-sidebar").contains(panel)).toBe(true)
+  })
+
+  test("the Tasks button opens Tasks with this project chosen", async () => {
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
+      "projects.touch": () => ({}),
+      "projects.capabilities": () => ({ git: true }),
+      "settings.get": () => ({}),
+      "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
+      "workspaces.ensureMain": () => new Promise(() => {}),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: Outlet })
+    const projectRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => <ProjectWorkspace projectId="p1" activation={{}} />,
+    })
+    const tasksRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/science/tasks",
+      validateSearch: (search: Record<string, unknown>) => ({
+        projectId: typeof search.projectId === "string" ? search.projectId : "",
+      }),
+      component: () => (
+        <div data-testid="on-tasks-route">
+          {(tasksRoute.useSearch() as { projectId: string }).projectId}
+        </div>
+      ),
+    })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([projectRoute, tasksRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </AppProviders>,
+    )
+    const tasks = await screen.findByTestId("project-view-tasks")
+    expect(tasks.getAttribute("title")).toBe("Tasks")
+    fireEvent.click(tasks)
+    expect((await screen.findByTestId("on-tasks-route")).textContent).toBe("p1")
+  })
+
+  test("Tasks, Paper, Auto research and Plan research show only their icon, named in aria-label, title and helper text", async () => {
+    renderWorkspace({ "workspaces.ensureMain": () => ({ id: "w1" }) })
+    const autoResearch = await screen.findByTestId("project-view-auto-research")
+    await waitFor(() => expect(autoResearch.hasAttribute("disabled")).toBe(false))
+    const status = screen.getByTestId("project-view-status")
+    const iconButtons: [string, string][] = [
+      ["project-view-tasks", "Tasks"],
+      ["project-header-paper", "Paper"],
+      ["project-view-auto-research", "Auto research"],
+      ["project-view-plan-research", "Plan research"],
+    ]
+    for (const [testId, name] of iconButtons) {
+      const button = screen.getByTestId(testId)
+      expect(button.textContent, testId).toBe("")
+      expect(button.querySelector("svg"), testId).toBeTruthy()
+      expect(button.getAttribute("aria-label"), testId).toContain(name)
+      expect(button.getAttribute("title"), testId).toBe(name)
+      expect(button.getAttribute("data-feature-label"), testId).toBe(name)
+      const help = button.getAttribute("data-feature-help") ?? ""
+      expect(help, testId).not.toBe("")
+      expect(help, testId).not.toBe(name)
+      // Same square size and style as the Project status button.
+      expect(button.className, testId).toContain("size-7")
+      expect(button.className, testId).not.toContain("px-2")
+    }
+    expect(status.className).toContain("size-7")
+  })
+
+  test("the Paper button opens the LaTeX Editor with this project chosen", async () => {
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
+      "projects.touch": () => ({}),
+      "projects.capabilities": () => ({ git: true }),
+      "settings.get": () => ({}),
+      "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
+      "workspaces.ensureMain": () => new Promise(() => {}),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: Outlet })
+    const projectRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => <ProjectWorkspace projectId="p1" activation={{}} />,
+    })
+    const latexRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/science/latex",
+      validateSearch: (search: Record<string, unknown>) => ({
+        projectId: typeof search.projectId === "string" ? search.projectId : "",
+      }),
+      component: () => (
+        <div data-testid="on-latex-route">
+          {(latexRoute.useSearch() as { projectId: string }).projectId}
+        </div>
+      ),
+    })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([projectRoute, latexRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </AppProviders>,
+    )
+    fireEvent.click(await screen.findByTestId("project-header-paper"))
+    expect((await screen.findByTestId("on-latex-route")).textContent).toBe("p1")
+  })
+
   test("records opening a project for the recent-project menu", async () => {
     const touched: unknown[] = []
     renderWorkspace({
@@ -89,10 +256,38 @@ describe("Project header", () => {
     await waitFor(() => expect(touched).toEqual([{ id: "p1" }]))
   })
 
+  test("shows the project stage row right after the project name, before the shortcuts", async () => {
+    renderWorkspace({
+      "projects.get": () => ({
+        id: "p1",
+        name: "Photon Drift",
+        repoPath: "/tmp/photon-drift",
+        metadata: { stage: "paperWriting" },
+      }),
+    })
+    const stage = await screen.findByTestId("project-view-stage")
+    const title = screen.getByRole("heading", { level: 1, name: "Photon Drift" })
+    expect(title.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const shortcuts = screen.getByTestId("project-view-shortcuts")
+    expect(stage.compareDocumentPosition(shortcuts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      within(stage)
+        .getByTestId("project-view-stage-step-paperWriting")
+        .getAttribute("aria-current"),
+    ).toBe("step")
+  })
+
   test("keeps project type editing out of the project header", async () => {
     renderWorkspace()
     await screen.findByRole("heading", { name: "Photon Drift" })
     expect(screen.queryByTestId("project-view-type")).toBeNull()
+  })
+
+  test("the project title in the top bar is not bold and keeps its size", async () => {
+    renderWorkspace()
+    const title = await screen.findByRole("heading", { level: 1, name: "Photon Drift" })
+    expect(title.className).not.toMatch(/font-(semibold|bold|medium)/)
+    expect(title.className).toContain("text-sm")
   })
 
   test("translates the Git notice while preserving the project name", async () => {
@@ -231,6 +426,253 @@ describe("Project header", () => {
       "model unavailable",
     )
     expect(within(dialog).queryByTestId("workflow-result-text")).toBeNull()
+  })
+})
+
+/** Open the header's "+" shortcut menu and return it. */
+async function openShortcutMenu(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByTestId("project-view-shortcuts-add"))
+  return screen.findByRole("menu", { name: "Header shortcuts" })
+}
+
+/** The data-testids of the header shortcut buttons, in header order. */
+function headerShortcutIds(): string[] {
+  const shortcuts = screen.getByTestId("project-view-shortcuts")
+  const ids: string[] = []
+  let next = shortcuts.nextElementSibling
+  while (
+    next?.getAttribute("data-testid")?.startsWith("project-view-") ||
+    next?.getAttribute("data-testid") === "project-header-paper"
+  ) {
+    ids.push(next.getAttribute("data-testid") ?? "")
+    next = next.nextElementSibling
+  }
+  return ids
+}
+
+describe("Project header shortcuts menu", () => {
+  afterEach(() => window.localStorage.clear())
+
+  const skillsCatalog = () => ({
+    skills: [
+      {
+        name: "Review notes",
+        description: "Review the lab notes",
+        slug: "review-notes",
+        path: "/tmp/photon-drift/.claude/skills/review-notes/SKILL.md",
+        source: "Project Claude",
+        harness: "claude",
+        scope: "project",
+      },
+    ],
+    roots: [],
+  })
+
+  test("lists the current shortcuts as added, and removing one removes its button for every project", async () => {
+    renderWorkspace({ "science.skills.list": skillsCatalog, "automations.list": () => [] })
+    await screen.findByTestId("project-view-tasks")
+    expect(headerShortcutIds()).toEqual([
+      "project-view-tasks",
+      "project-header-paper",
+      "project-view-auto-research",
+      "project-view-plan-research",
+      "project-view-status",
+      "project-view-research-diary",
+    ])
+    const menu = await openShortcutMenu()
+    const items = within(menu).getAllByRole("menuitemcheckbox").slice(0, 6)
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Tasks",
+      "Paper",
+      "Auto research",
+      "Plan research",
+      "Project status",
+      "Research diary",
+    ])
+    expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual([
+      "true",
+      "true",
+      "true",
+      "true",
+      "true",
+      "true",
+    ])
+    // Skills and routines are folded into their own sections, not listed at the top level.
+    expect(within(menu).queryByText("Review notes")).toBeNull()
+
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Plan research" }))
+    await waitFor(() => expect(screen.queryByTestId("project-view-plan-research")).toBeNull())
+    expect(
+      within(menu)
+        .getByRole("menuitemcheckbox", { name: "Plan research" })
+        .getAttribute("aria-checked"),
+    ).toBe("false")
+    expect(
+      JSON.parse(window.localStorage.getItem("pi-lab.projectView.headerShortcuts") ?? ""),
+    ).toEqual(["tasks", "paper", "auto-research", "project-status", "research-diary"])
+  })
+
+  test("a list saved before the Paper button gets Paper at its default place, and a removed Paper stays removed", async () => {
+    window.localStorage.setItem(
+      "pi-lab.projectView.headerShortcuts",
+      JSON.stringify(["tasks", "auto-research", "skill:review-notes"]),
+    )
+    window.localStorage.setItem("pi-lab.projectView.headerShortcutsVersion", "2")
+    const view = renderWorkspace({
+      "science.skills.list": skillsCatalog,
+      "automations.list": () => [],
+    })
+    await screen.findByTestId("project-header-paper")
+    expect(headerShortcutIds()).toEqual([
+      "project-view-tasks",
+      "project-header-paper",
+      "project-view-auto-research",
+      "project-view-research-diary",
+      "project-view-shortcut-skill-review-notes",
+    ])
+    const menu = await openShortcutMenu()
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Paper" }))
+    await waitFor(() => expect(screen.queryByTestId("project-header-paper")).toBeNull())
+    expect(
+      JSON.parse(window.localStorage.getItem("pi-lab.projectView.headerShortcuts") ?? ""),
+    ).toEqual(["tasks", "auto-research", "research-diary", "skill:review-notes"])
+    view.unmount()
+    renderWorkspace({ "science.skills.list": skillsCatalog, "automations.list": () => [] })
+    await screen.findByTestId("project-view-tasks")
+    expect(screen.queryByTestId("project-header-paper")).toBeNull()
+  })
+
+  test("adding a skill puts a button in the header that starts an agent with that skill", async () => {
+    const calls: unknown[] = []
+    renderWorkspace({
+      "workspaces.ensureMain": () => ({ id: "w1" }),
+      "agents.list": () => [],
+      "agents.projectChoice": () => ({ agentId: null }),
+      "science.skills.list": skillsCatalog,
+      "automations.list": () => [],
+      "sessions.startSkill": (input) => {
+        calls.push(input)
+        return {
+          sessionId: "skill-1",
+          workspaceId: "w1",
+          kind: "branch",
+          agentId: "codex",
+          label: "Review notes",
+        }
+      },
+    })
+    const menu = await openShortcutMenu()
+    const skills = within(menu).getByRole("button", { name: "Skills" })
+    expect(skills.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(skills)
+    fireEvent.click(await within(menu).findByRole("menuitemcheckbox", { name: "Review notes" }))
+
+    const button = await screen.findByTestId("project-view-shortcut-skill-review-notes")
+    expect(button.textContent).toContain("Review notes")
+    expect(headerShortcutIds().at(-1)).toBe("project-view-shortcut-skill-review-notes")
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
+    fireEvent.click(button)
+    await waitFor(() =>
+      expect(calls).toEqual([{ projectId: "p1", skillSlug: "review-notes", origin: "project" }]),
+    )
+    const tab = await waitFor(() => {
+      const found = screen
+        .getAllByTestId("central-tab")
+        .find((entry) => entry.textContent?.includes("Review notes"))
+      if (!found) throw new Error("No Review notes tab yet")
+      return found
+    })
+    expect(tab?.getAttribute("data-tab-kind")).toBe("agent")
+    expect((await screen.findByTestId("terminal")).getAttribute("data-session-id")).toBe("skill-1")
+  })
+
+  test("a skill shortcut the project does not have is disabled with the reason", async () => {
+    window.localStorage.setItem(
+      "pi-lab.projectView.headerShortcuts",
+      JSON.stringify(["tasks", "skill:other-skill"]),
+    )
+    renderWorkspace({ "science.skills.list": skillsCatalog, "automations.list": () => [] })
+    const button = await screen.findByTestId("project-view-shortcut-skill-other-skill")
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true))
+    expect(button.getAttribute("title")).toContain("other-skill")
+  })
+
+  test("the Routines section says when there are no routines yet", async () => {
+    renderWorkspace({ "science.skills.list": skillsCatalog, "automations.list": () => [] })
+    const menu = await openShortcutMenu()
+    fireEvent.click(within(menu).getByRole("button", { name: "Routines" }))
+    expect((await within(menu).findByText("No routines yet")).textContent).toBe("No routines yet")
+  })
+
+  test("adding a routine puts a button that runs it now and opens it on the Routines page", async () => {
+    window.localStorage.setItem("pi-lab.projectView.headerShortcuts", JSON.stringify(["tasks"]))
+    const runs: unknown[] = []
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
+      "projects.touch": () => ({}),
+      "projects.capabilities": () => ({ git: true }),
+      "settings.get": () => ({}),
+      "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
+      "workspaces.ensureMain": () => new Promise(() => {}),
+      "science.skills.list": skillsCatalog,
+      "automations.list": () => [
+        {
+          id: "a1",
+          name: "Nightly sweep check",
+          agentId: "codex",
+          executionMode: "interactive",
+          projectId: "p1",
+          recurrenceRule: "FREQ=DAILY",
+          scheduleSummary: "Daily",
+          timezone: "UTC",
+          enabled: true,
+          nextRunAt: null,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+      "automations.runNow": (input) => {
+        runs.push(input)
+        return { runId: "r1" }
+      },
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: Outlet })
+    const projectRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => <ProjectWorkspace projectId="p1" activation={{}} />,
+    })
+    const automationsRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/automations",
+      validateSearch: (search: Record<string, unknown>) => search,
+      component: () => (
+        <div data-testid="on-automations-route">{JSON.stringify(automationsRoute.useSearch())}</div>
+      ),
+    })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([projectRoute, automationsRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </AppProviders>,
+    )
+    const menu = await openShortcutMenu()
+    fireEvent.click(within(menu).getByRole("button", { name: "Routines" }))
+    fireEvent.click(
+      await within(menu).findByRole("menuitemcheckbox", { name: "Nightly sweep check" }),
+    )
+    const button = await screen.findByTestId("project-view-shortcut-routine-a1")
+    expect(button.textContent).toContain("Nightly sweep check")
+    fireEvent.click(button)
+    await waitFor(() => expect(runs).toEqual([{ id: "a1" }]))
+    const search = JSON.parse((await screen.findByTestId("on-automations-route")).textContent ?? "")
+    expect(search).toMatchObject({ notificationWorkflowId: "a1", notificationRunId: "r1" })
   })
 })
 

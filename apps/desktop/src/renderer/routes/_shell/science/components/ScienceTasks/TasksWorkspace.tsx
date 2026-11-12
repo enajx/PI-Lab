@@ -18,7 +18,8 @@ import {
   Ungroup,
   X,
 } from "lucide-react"
-import { type DragEvent, type FormEvent, type ReactNode, useMemo, useState } from "react"
+import { type DragEvent, type FormEvent, type ReactNode, useMemo, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { translateKnownError } from "../../../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 
@@ -77,6 +78,8 @@ export interface AgentChoice {
 interface TasksWorkspaceProps {
   tasks: TaskRecord[]
   sources: TaskSource[]
+  /** The project chosen in the top bar picker, or "" for all projects. */
+  projectId: string
   agents: AgentChoice[]
   defaultAgentId: string
   busy?: boolean
@@ -89,6 +92,8 @@ interface TasksWorkspaceProps {
     target: { kind: "status"; status: TaskStatus } | { kind: "heading"; headingKey: string },
   ) => Promise<void>
   onRun: (task: TaskRecord, agentId: string, prompt: string) => Promise<void>
+  /** Shown at the right end of the toolbar row (the collapsed right panel's expand button). */
+  toolbarEnd: ReactNode
 }
 
 type ViewMode = "list" | "board"
@@ -165,6 +170,7 @@ function taskMatches(
 export function TasksWorkspace({
   tasks,
   sources,
+  projectId,
   agents,
   defaultAgentId,
   busy = false,
@@ -174,14 +180,14 @@ export function TasksWorkspace({
   onDelete,
   onMove,
   onRun,
+  toolbarEnd,
 }: TasksWorkspaceProps) {
   const t = useTranslate()
   const [language] = useInterfaceLanguage()
-  const [view, setView] = useState<ViewMode>("list")
+  const [view, setView] = useState<ViewMode>("board")
   const [listMode, setListMode] = useState<ListMode>("plain")
   const [boardMode, setBoardMode] = useState<BoardMode>("headings")
   const [query, setQuery] = useState("")
-  const [projectId, setProjectId] = useState("")
   const [status, setStatus] = useState("")
   const [priority, setPriority] = useState("")
   const [owner, setOwner] = useState("")
@@ -193,6 +199,7 @@ export function TasksWorkspace({
   const [draggedKey, setDraggedKey] = useState<string | null>(null)
   const [headingSelections, setHeadingSelections] = useState<Record<string, string[]>>({})
 
+  const shownSources = sources.filter((source) => !projectId || source.projectId === projectId)
   const writableSources = sources.filter(
     (source) => source.state === "ready" || source.state === "missing",
   )
@@ -223,22 +230,6 @@ export function TasksWorkspace({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="tasks-workspace">
       <div className="flex flex-wrap items-center gap-2 border-border border-b px-4 py-2">
-        <select
-          data-testid="tasks-project-filter"
-          aria-label={t("Project filter")}
-          title={t("Filter tasks by project")}
-          data-feature-help={t("Filter tasks by project")}
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
-          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
-        >
-          <option value="">{t("All projects")}</option>
-          {sources.map((source) => (
-            <option key={source.projectId} value={source.projectId}>
-              {source.projectName}
-            </option>
-          ))}
-        </select>
         <div className="relative min-w-44 flex-1 sm:max-w-xs">
           <Search
             aria-hidden
@@ -384,10 +375,11 @@ export function TasksWorkspace({
           <Plus className="size-4" />
           {t("New task")}
         </Button>
+        {toolbarEnd ? <div className="-me-2 flex shrink-0">{toolbarEnd}</div> : null}
       </div>
 
       {error ? <ErrorBanner message={translateKnownError(language, error)} /> : null}
-      <SourceNotices sources={sources} />
+      <SourceNotices sources={shownSources} />
 
       <div className="min-h-0 flex-1 overflow-auto">
         {filtered.length === 0 && view === "list" ? (
@@ -414,7 +406,7 @@ export function TasksWorkspace({
         ) : view === "list" ? (
           <HeadingTaskList
             tasks={filtered}
-            sources={sources.filter((source) => !projectId || source.projectId === projectId)}
+            sources={shownSources}
             showProjectHeadings={!projectId}
             onEdit={setEditing}
             onRun={setRunning}
@@ -436,7 +428,7 @@ export function TasksWorkspace({
         ) : (
           <HeadingBoard
             tasks={filtered}
-            sources={sources.filter((source) => !projectId || source.projectId === projectId)}
+            sources={shownSources}
             selections={headingSelections}
             onSelectionChange={(selectedProjectId, keys) =>
               setHeadingSelections((current) => ({ ...current, [selectedProjectId]: keys }))
@@ -707,7 +699,7 @@ function AdaptiveBoardGrid({ children }: { children: ReactNode }) {
   return (
     <div
       data-testid="adaptive-board-grid"
-      className="grid max-w-[92.25rem] justify-start gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),22.5rem))]"
+      className="grid max-w-[67.25rem] justify-start gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),16.25rem))]"
     >
       {children}
     </div>
@@ -729,6 +721,8 @@ function ColumnPicker({
 }) {
   const t = useTranslate()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
   const hiddenTaskCount = columns
     .filter((column) => !visibleKeys.includes(column.key))
     .reduce((sum, column) => sum + column.count, 0)
@@ -738,7 +732,7 @@ function ColumnPicker({
       ? ""
       : `, ${hiddenTaskCount} ${t(hiddenTaskCount === 1 ? "task" : "tasks")} ${t("in hidden columns")}`
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         aria-label={
@@ -979,7 +973,7 @@ function BoardColumn({
           </Button>
         ) : null}
       </header>
-      <div className="flex flex-col gap-2 p-2">
+      <div className="flex flex-col gap-1.5 p-1.5">
         {tasks.map((task) => (
           <button
             key={task.key}
@@ -994,13 +988,13 @@ function BoardColumn({
             onDragStart={() => onDrag(task.key)}
             onDragEnd={() => onDrag(null)}
             onClick={() => onEdit(task)}
-            className="min-w-0 rounded-md border border-border bg-background p-3 text-left shadow-sm data-[dragging=true]:opacity-50"
+            className="min-w-0 rounded-md border border-border bg-background p-2 text-left shadow-sm data-[dragging=true]:opacity-50"
           >
-            <span className="block break-words font-medium text-sm">{task.title}</span>
-            <span className="mt-2 flex flex-wrap gap-1">
+            <span className="line-clamp-2 break-words font-medium text-xs">{task.title}</span>
+            <span className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden text-[11px] text-muted-foreground">
               <TaskBadges task={task} />
+              <span className="min-w-0 truncate">{task.projectName}</span>
             </span>
-            <span className="mt-2 block text-muted-foreground text-xs">{task.projectName}</span>
           </button>
         ))}
       </div>
@@ -1024,7 +1018,7 @@ function TaskBadges({ task }: { task: TaskRecord }) {
 
 function Badge({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-[10px]">
+    <span className="shrink-0 whitespace-nowrap rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-[10px]">
       {children}
     </span>
   )

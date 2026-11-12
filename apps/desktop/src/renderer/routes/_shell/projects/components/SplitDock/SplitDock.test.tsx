@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { act, render, waitFor } from "@testing-library/react"
 import type { SerializedDockview } from "dockview-react"
 import { createRef } from "react"
@@ -150,4 +152,9 @@ test("an empty split closes when another split gets focus", () => {
   expect(groupCount(dock.container)).toBe(2)
   act(() => dock.rerender([item("file:a.md")], [], "file:a.md"))
   expect(groupCount(dock.container)).toBe(1)
+})
+
+test("the split tab row is 28px tall, no taller than the 28px toolbar buttons above it", () => {
+  const css = readFileSync(resolve(__dirname, "splitDock.css"), "utf8")
+  expect(css).toMatch(/--dv-tabs-and-actions-container-height:\s*28px;/)
 })

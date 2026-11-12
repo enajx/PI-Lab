@@ -1,0 +1,37 @@
+/*
+ * The research diary's Render mode reads like a compact notes panel: smaller text
+ * and headings than a Markdown file in the main editor. Scoped to the diary panel;
+ * the extra `.cm-editor` beats the specificity of CodeMirror's generated theme.
+ */
+.research-diary-compact .cm-editor.cm-md-render,
+.research-diary-compact .cm-editor.cm-md-render .cm-content {
+  font-size: 13px;
+}
+.research-diary-compact .cm-editor.cm-md-render .cm-content {
+  padding: 0.75rem 1rem 2rem;
+}
+.research-diary-compact .cm-editor.cm-md-render .cm-md-paragraph {
+  line-height: 1.6;
+}
+.research-diary-compact .cm-editor.cm-md-render .cm-md-list,
+.research-diary-compact .cm-editor.cm-md-render .cm-md-quote {
+  line-height: 1.5;
+}
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-1,
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-2,
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-3,
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-4,
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-5,
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-6 {
+  font-size: 13px;
+  font-weight: 600;
+  padding-top: 0.5rem;
+  padding-bottom: 0.1rem;
+}
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-1 {
+  font-size: 16px;
+  font-weight: 700;
+}
+.research-diary-compact .cm-editor.cm-md-render .cm-md-heading-2 {
+  font-size: 14px;
+}

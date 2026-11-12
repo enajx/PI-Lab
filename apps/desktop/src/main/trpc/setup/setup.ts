@@ -18,7 +18,7 @@ import {
   type HarnessSetupStatus,
 } from "../../setup/status"
 import { detectLocalZotero, type LocalZoteroState, liveSetupPathExists } from "../../setup/zotero"
-import { DEFAULT_SETUP_PROBE } from "../context"
+import { type AppContext, DEFAULT_SETUP_PROBE } from "../context"
 import { writeAgentSettings } from "../settings/settings"
 import { publicProcedure, router } from "../trpc"
 
@@ -27,6 +27,50 @@ export interface SetupEnvironmentStatus {
   github: GitHubSetupStatus
   zotero: LocalZoteroState
   apiConfigured: Record<"claude-code" | "codex", boolean>
+}
+
+/** The coding agent rows of the setup wizard: CLI status and whether an API key is saved. */
+export interface SetupHarnessesStatus {
+  harnesses: HarnessSetupStatus[]
+  apiConfigured: Record<"claude-code" | "codex", boolean>
+}
+
+/** What the status probes need: executable lookup, the probe and the agent launch environment. */
+async function probeDependencies(ctx: AppContext) {
+  return {
+    resolveExecutable: ctx.resolveAgentExecutable,
+    probe: ctx.setupProbe ?? DEFAULT_SETUP_PROBE,
+    environment: await ctx.getAgentLaunchEnvironment(),
+  }
+}
+
+async function checkHarnesses(ctx: AppContext): Promise<SetupHarnessesStatus> {
+  const settings = getAgentSettingsOrDefaults(ctx.db)
+  const harnesses = await detectHarnesses(
+    ctx.agentCatalog,
+    settings.executableOverrides,
+    await probeDependencies(ctx),
+  )
+  const credentials = ctx.db
+    .select({ agentId: agentCredentials.agentId })
+    .from(agentCredentials)
+    .all()
+  const configured = new Set(credentials.map((credential) => credential.agentId))
+  return {
+    harnesses,
+    apiConfigured: {
+      "claude-code": configured.has("claude-code"),
+      codex: configured.has("codex"),
+    },
+  }
+}
+
+async function checkGitHub(ctx: AppContext): Promise<GitHubSetupStatus> {
+  return detectGitHub(await probeDependencies(ctx))
+}
+
+function checkZotero(ctx: AppContext): Promise<LocalZoteroState> {
+  return detectLocalZotero(ctx.httpFetch, process.platform, homedir(), liveSetupPathExists)
 }
 
 const completeInput = z.object({
@@ -92,32 +136,21 @@ export function persistSetupCompletion(db: PiLabDatabase, sound: NotificationSou
 export const setupRouter = router({
   /** Local-only, bounded status probes; raw command output never crosses this boundary. */
   environment: publicProcedure.query(async ({ ctx }): Promise<SetupEnvironmentStatus> => {
-    const settings = getAgentSettingsOrDefaults(ctx.db)
-    const environment = await ctx.getAgentLaunchEnvironment()
-    const dependencies = {
-      resolveExecutable: ctx.resolveAgentExecutable,
-      probe: ctx.setupProbe ?? DEFAULT_SETUP_PROBE,
-      environment,
-    }
-    const [harnesses, github, zotero, credentials] = await Promise.all([
-      detectHarnesses(ctx.agentCatalog, settings.executableOverrides, dependencies),
-      detectGitHub(dependencies),
-      detectLocalZotero(ctx.httpFetch, process.platform, homedir(), liveSetupPathExists),
-      Promise.resolve(
-        ctx.db.select({ agentId: agentCredentials.agentId }).from(agentCredentials).all(),
-      ),
+    const [harnesses, github, zotero] = await Promise.all([
+      checkHarnesses(ctx),
+      checkGitHub(ctx),
+      checkZotero(ctx),
     ])
-    const configured = new Set(credentials.map((credential) => credential.agentId))
-    return {
-      harnesses,
-      github,
-      zotero,
-      apiConfigured: {
-        "claude-code": configured.has("claude-code"),
-        codex: configured.has("codex"),
-      },
-    }
+    return { ...harnesses, github, zotero }
   }),
+
+  /**
+   * The same checks one row at a time, so the setup wizard shows each row's
+   * result when its own check finishes.
+   */
+  harnesses: publicProcedure.query(({ ctx }) => checkHarnesses(ctx)),
+  github: publicProcedure.query(({ ctx }) => checkGitHub(ctx)),
+  zotero: publicProcedure.query(({ ctx }) => checkZotero(ctx)),
 
   /** Store a key encrypted by Electron safeStorage; never return key material over tRPC. */
   saveApiKey: publicProcedure.input(apiKeyInput).mutation(({ ctx, input }) => {

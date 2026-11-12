@@ -187,3 +187,38 @@ export function SelectField({
     </div>
   )
 }
+
+/** A labelled single-line text row. The value is committed on change (controlled). */
+export function TextField({
+  testId,
+  label,
+  description,
+  value,
+  placeholder,
+  onChange,
+}: {
+  testId: string
+  label: ReactNode
+  description?: ReactNode
+  value: string
+  placeholder?: string
+  onChange: (next: string) => void
+}) {
+  const t = useTranslate()
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3">
+      <FieldLabel label={label} description={description} />
+      <input
+        type="text"
+        data-testid={testId}
+        aria-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-label={typeof label === "string" ? t(label) : undefined}
+        data-feature-help={typeof description === "string" ? t(description) : undefined}
+        value={value}
+        placeholder={placeholder ? t(placeholder) : undefined}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-56 shrink-0 rounded-md border border-border bg-background px-2 py-1 text-foreground text-sm outline-none"
+      />
+    </div>
+  )
+}

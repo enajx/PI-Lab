@@ -123,6 +123,20 @@ test("Add project opens the shared chooser and enters the folder returned by the
 
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByRole("heading", { name: "added-repo" })).toBeVisible()
+
+  // Adding the same folder again says it is already in PI Lab and adds nothing.
+  await window.getByTestId("nav-dashboard").click()
+  const cards = window.getByTestId("project-card")
+  const count = await cards.count()
+  await window.keyboard.press("ControlOrMeta+p")
+  await window.getByTestId("command-palette-input").fill("add project")
+  await window.locator('[data-command-id="add-project"]').click()
+  await window.getByTestId("add-project-folder").click()
+  await expect(window.getByTestId("add-project-error")).toContainText(
+    '"added-repo" is already in PI Lab.',
+  )
+  await expect(window.getByTestId("add-project-menu")).toBeVisible()
+  await expect(cards).toHaveCount(count)
 })
 
 test("New file chooses a project and path, then opens the created file in that project", async () => {

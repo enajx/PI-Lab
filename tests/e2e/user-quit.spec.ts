@@ -537,13 +537,19 @@ test("idle explicit Quit always asks, Background preserves a draft, and draft ca
     expect(
       await app.evaluate(() => (globalThis as unknown as { buttons: string[] }).buttons),
     ).toEqual(["Cancel", "Move to background", "Quit"])
-    await window.getByTestId("nav-editor").click()
+    // The Editor row is hidden by default; reach the Untitled editor through the palette.
+    await window.keyboard.press("ControlOrMeta+p")
+    await window.getByTestId("command-palette-input").fill("Go to Editor")
+    await window.locator('[data-command-id="nav-editor"]').click()
     const editor = window.getByTestId("quick-editor-full-app").locator(".cm-content")
     await editor.fill("keep_this_draft = True\n")
     await window.getByTestId("nav-dashboard").click()
     await request(1)
     await expect.poll(() => app?.evaluate(({ app }) => app.isHidden())).toBe(true)
-    await window.getByTestId("nav-editor").click()
+    // Back to the Untitled draft.
+    await window.keyboard.press("ControlOrMeta+p")
+    await window.getByTestId("command-palette-input").fill("Go to Editor")
+    await window.locator('[data-command-id="nav-editor"]').click()
     await expect(editor).toContainText("keep_this_draft = True")
     await window.getByTestId("nav-dashboard").click()
     await request(2)

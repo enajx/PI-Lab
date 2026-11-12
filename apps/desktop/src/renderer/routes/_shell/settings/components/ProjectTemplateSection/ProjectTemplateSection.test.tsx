@@ -54,8 +54,15 @@ const DEFAULT_SETTINGS: EditorSettings = {
   customEditorThemes: [],
   pythonRunDestination: "central",
   latexProvider: "bundled",
+  latexOutputDir: "build",
   showHiddenFiles: true,
   confirmFileDelete: true,
+  confirmOverleafCommit: true,
+  papersFolder: "~/Papers",
+  askPapersFolder: true,
+  researchDiaryFormat: "md",
+  analysisFormat: "md",
+  reportSkill: "experiment-report",
 }
 
 let store: Record<string, string>

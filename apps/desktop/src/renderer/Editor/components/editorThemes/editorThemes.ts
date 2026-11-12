@@ -36,58 +36,14 @@ export interface EditorTheme {
 }
 
 /**
- * The id used when no theme has been picked yet, or when a stored/legacy id is no
- * longer in the curated set. It is a *real* member of {@link EDITOR_THEMES} (a light
- * theme) and doubles as the fallback for both {@link editorThemeExtension} and the
- * Settings picker, so the editor always renders a defined, styled theme rather than
- * an unstyled buffer.
+ * The theme used when no theme has been picked yet (the stored `"default"` value),
+ * or when a stored id is no longer in the registry: GitHub, Light or Dark matching
+ * the app's resolved light/dark appearance. Both ids are real members of
+ * {@link EDITOR_THEMES}, so the editor always renders a styled palette.
  */
-export const DEFAULT_EDITOR_THEME_ID = "solarized-light"
-
-/** The quick editor follows the current PI Lab appearance without reading settings on launch. */
-function piLabEditorTheme(mode: "light" | "dark"): Extension {
-  return createTheme({
-    theme: mode,
-    settings: {
-      background: "var(--background)",
-      foreground: "var(--foreground)",
-      caret: "var(--foreground)",
-      selection: "var(--accent)",
-      selectionMatch: "var(--secondary)",
-      lineHighlight: "var(--muted)",
-      gutterBackground: "var(--background)",
-      gutterForeground: "var(--muted-foreground)",
-    },
-    styles: [
-      {
-        tag: [t.keyword, t.moduleKeyword, t.controlKeyword],
-        color: mode === "dark" ? "#d2a8df" : "#7b4b91",
-      },
-      { tag: [t.string, t.special(t.string)], color: mode === "dark" ? "#a9c49a" : "#4b7547" },
-      {
-        tag: [t.comment, t.lineComment, t.blockComment],
-        color: "var(--muted-foreground)",
-        fontStyle: "italic",
-      },
-      { tag: [t.number, t.bool, t.null], color: mode === "dark" ? "#d6ae87" : "#9a5b30" },
-      {
-        tag: [t.function(t.variableName), t.function(t.propertyName)],
-        color: mode === "dark" ? "#9abfe0" : "#366d9d",
-      },
-      {
-        tag: [t.typeName, t.className, t.namespace],
-        color: mode === "dark" ? "#d6ae87" : "#9a5b30",
-      },
-      { tag: [t.propertyName, t.attributeName], color: mode === "dark" ? "#9abfe0" : "#366d9d" },
-      { tag: [t.operator, t.punctuation], color: "var(--foreground)" },
-      { tag: [t.variableName, t.definition(t.variableName)], color: "var(--foreground)" },
-      { tag: t.invalid, color: "var(--destructive)" },
-    ],
-  })
+export function defaultEditorThemeId(mode: "light" | "dark"): "github-light" | "github-dark" {
+  return mode === "dark" ? "github-dark" : "github-light"
 }
-
-const piLabLight = piLabEditorTheme("light")
-const piLabDark = piLabEditorTheme("dark")
 
 /** One Dark — the Atom palette. */
 const oneDark = createTheme({
@@ -529,29 +485,27 @@ export const EDITOR_THEMES: readonly EditorTheme[] = [
 /** Id of any registered editor theme (kept as a string in the DB, narrowed here). */
 export type EditorThemeId = (typeof EDITOR_THEMES)[number]["id"]
 
-/**
- * Resolve a stored theme id to its CodeMirror extension. A known id resolves to its
- * own palette; an undefined/empty/unknown or legacy id (rows predating this field,
- * the retired "default" sentinel, or an id removed from the registry) falls back to
- * the {@link DEFAULT_EDITOR_THEME_ID} theme so the editor always renders a defined,
- * styled palette rather than failing or going unstyled.
- */
+/** Every selectable theme: the built-ins followed by the user's imported themes. */
 export function allEditorThemes(customThemes: ImportedEditorTheme[]): readonly EditorTheme[] {
   return [...EDITOR_THEMES, ...customThemes.map(importedEditorTheme)]
 }
 
+/**
+ * Resolve a stored theme id to its CodeMirror extension. A known id (built-in or
+ * imported) resolves to its own palette, so an explicit choice is always kept. An
+ * undefined/empty/unknown id or the stored `"default"` value resolves to
+ * {@link defaultEditorThemeId} for the app's current light/dark `mode`.
+ */
 export function editorThemeExtension(
   id: string | undefined,
-  customThemes?: ImportedEditorTheme[],
+  customThemes: ImportedEditorTheme[],
+  mode: "light" | "dark",
 ): Extension {
-  if (id === "pi-lab-light") return piLabLight
-  if (id === "pi-lab-dark") return piLabDark
-  return (
-    (
-      allEditorThemes(customThemes ?? []).find((theme) => theme.id === id) ??
-      EDITOR_THEMES.find((theme) => theme.id === DEFAULT_EDITOR_THEME_ID)
-    )?.extension ?? []
-  )
+  const chosen = allEditorThemes(customThemes).find((theme) => theme.id === id)
+  if (chosen) return chosen.extension
+  const fallback = EDITOR_THEMES.find((theme) => theme.id === defaultEditorThemeId(mode))
+  if (!fallback) throw new Error(`Default editor theme ${defaultEditorThemeId(mode)} is missing`)
+  return fallback.extension
 }
 
 function importedEditorTheme(theme: ImportedEditorTheme): EditorTheme {

@@ -4,19 +4,19 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  CodeXml,
-  Eye,
   FolderOpen,
   Info,
   RefreshCw,
   TerminalSquare,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
+import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { useTranslate } from "../../../i18n/language"
 import type { RouterOutputs } from "../../../trpc/types"
 import type { PythonRuntimeState } from "../../hooks/useEditorBuffers/useEditorBuffers"
 import type { DiagnosticCounts } from "../../utils/pythonDiagnostics"
 import { LatexBuildStatus, type LatexBuildStatusData } from "../LatexBuildStatus/LatexBuildStatus"
+import { MarkdownModeToggle } from "../MarkdownModeToggle"
 
 interface EditorStatusBarProps {
   /** Name of the focused tab, shown on the left so the bar is never empty. */
@@ -56,6 +56,8 @@ interface EditorStatusBarProps {
   /** Markdown buffers can switch their source/render presentation from the lower status bar. */
   markdownMode?: "render" | "source"
   onMarkdownModeChange?: (mode: "render" | "source") => void
+  /** The LaTeX Editor's footer items (Sync status, output folder, paper folder); the project view leaves it out. */
+  paperFolderItem?: ReactNode
 }
 
 /**
@@ -88,6 +90,7 @@ export function EditorStatusBar({
   markdownMode,
   onMarkdownModeChange,
   latexBuildStatus,
+  paperFolderItem,
 }: EditorStatusBarProps) {
   const t = useTranslate()
   return (
@@ -95,7 +98,7 @@ export function EditorStatusBar({
       data-testid="editor-status-bar"
       className="flex h-6 shrink-0 items-center justify-end gap-3 border-border border-t bg-muted/30 px-3 text-[11px] text-muted-foreground"
     >
-      <span data-testid="editor-status-label" className="mr-auto min-w-0 truncate">
+      <span data-testid="editor-status-label" className="mr-auto min-w-16 truncate">
         {label}
       </span>
       {latexBuildStatus ? (
@@ -112,13 +115,16 @@ export function EditorStatusBar({
         <button
           type="button"
           data-testid="latex-show-pdf"
-          className="shrink-0 rounded px-1 hover:bg-accent hover:text-foreground"
+          className="min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground"
           onClick={onShowInPdf}
           title="Show current source position in PDF. You can also double-click LaTeX text."
+          data-feature-label="Show in PDF"
+          data-feature-help="Show current source position in PDF. You can also double-click LaTeX text."
         >
           Show in PDF
         </button>
       ) : null}
+      {paperFolderItem}
       <div className="flex shrink-0 items-center gap-3">
         {isPython ? (
           <>
@@ -158,38 +164,7 @@ export function EditorStatusBar({
         ) : null}
       </div>
       {markdownMode && onMarkdownModeChange ? (
-        <fieldset
-          data-testid="markdown-mode-toggle"
-          aria-label={t("Markdown view")}
-          className="flex shrink-0 items-center rounded border border-border bg-background p-0.5"
-        >
-          <button
-            type="button"
-            aria-label={t("Render Markdown")}
-            aria-pressed={markdownMode === "render"}
-            onClick={() => onMarkdownModeChange("render")}
-            className={
-              markdownMode === "render"
-                ? "flex size-4 items-center justify-center rounded-sm bg-accent text-foreground"
-                : "flex size-4 items-center justify-center rounded-sm hover:bg-accent/60"
-            }
-          >
-            <Eye className="size-3" aria-hidden />
-          </button>
-          <button
-            type="button"
-            aria-label={t("Source Markdown")}
-            aria-pressed={markdownMode === "source"}
-            onClick={() => onMarkdownModeChange("source")}
-            className={
-              markdownMode === "source"
-                ? "flex size-4 items-center justify-center rounded-sm bg-accent text-foreground"
-                : "flex size-4 items-center justify-center rounded-sm hover:bg-accent/60"
-            }
-          >
-            <CodeXml className="size-3" aria-hidden />
-          </button>
-        </fieldset>
+        <MarkdownModeToggle mode={markdownMode} onChange={onMarkdownModeChange} />
       ) : null}
       {pdfMessage ? (
         <span data-testid="pdf-status" role="status" className="shrink-0 truncate">
@@ -220,21 +195,7 @@ function PythonRuntimeSummary({
   const [menuError, setMenuError] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    const dismiss = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", dismiss)
-    document.addEventListener("keydown", dismissOnEscape)
-    return () => {
-      document.removeEventListener("mousedown", dismiss)
-      document.removeEventListener("keydown", dismissOnEscape)
-    }
-  }, [open])
+  usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   const toggle = async (): Promise<void> => {
     if (open) {
@@ -280,6 +241,8 @@ function PythonRuntimeSummary({
         type="button"
         data-testid="editor-python-runtime"
         title={tooltip}
+        data-feature-label={t("Python environment")}
+        data-feature-help={`${label}: ${tooltip}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => void toggle()}

@@ -18,6 +18,7 @@ import { livePyToolsExec, type PyToolsExec } from "../diagnostics"
 import type { DictationService } from "../dictation/service"
 import type { PiLabChannel } from "../identity/channel"
 import { liveSshExec, type SshExec } from "../lib/ssh-config"
+import type { NotebookServerPort } from "../notebooks/notebookServers"
 import type { NotificationBrokers, NotificationService } from "../notifications"
 import {
   livePythonEnvironmentDiscoverer,
@@ -45,8 +46,8 @@ export interface AppContext {
   bundledSkillsDir?: string
   /** Read-only directory containing platform-specific bundled LaTeX tools. */
   latexResourcesDir?: string
-  /** Writable channel-specific LaTeX support cache. */
-  latexDataDir?: string
+  /** Writable Tectonic package cache, outside the data folder (see tectonicCacheDir). */
+  latexCacheDir?: string
   /** User home for discovering a shared TinyTeX installation. */
   latexUserHome?: string
   /** Local dictation (models, whisper.cpp engine, history); absent in isolated callers. */
@@ -72,6 +73,8 @@ export interface AppContext {
   discoverPythonEnvironments: PythonEnvironmentDiscoverer
   resolvePythonRuntime: PythonRuntimeResolver
   analysisInteractive: AnalysisInteractivePort
+  /** marimo and Jupyter servers shown in notebook tabs, stopped on tab close and app quit. */
+  notebookServers: NotebookServerPort
   notifications: NotificationBrokers
   activityStatus: Pick<ActivityStatusFeed, "subscribe" | "projectsChanged">
   activityMonitor: ActivityMonitorPort
@@ -167,12 +170,56 @@ export const TEST_PLAN_AGENT: TerminalAgent = {
 }
 
 /**
+ * A test-only agent that prints a permission prompt and stays alive, so the
+ * activity monitor marks it as waiting for input (for the waiting-agent
+ * shortcut E2E).
+ */
+export const TEST_WAITING_AGENT_ID = "test-waiting"
+
+export const TEST_WAITING_AGENT: TerminalAgent = {
+  id: TEST_WAITING_AGENT_ID,
+  label: "Test Waiting",
+  command: process.execPath,
+  detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+  defaultArgs: [
+    "-e",
+    "process.stdout.write('Do you want to proceed? (yes/no)\\n');setInterval(()=>{},1000)",
+  ],
+}
+
+/**
+ * A test-only merge agent for the LaTeX Editor "Ask agent to merge" E2E: in its
+ * working folder it replaces every Git conflict block in `.tex` files with both
+ * sides, mine first, so the review shows a real, deterministic merge.
+ */
+export const TEST_MERGE_AGENT: TerminalAgent = {
+  id: "test-merge",
+  label: "Test Merge",
+  command: process.execPath,
+  detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+  defaultArgs: ["-e", "process.stdout.write('MERGE-AGENT\\n')"],
+  oneShotArgs: [
+    "-e",
+    String.raw`const fs=require('fs');for(const f of fs.readdirSync('.',{recursive:true})){if(!String(f).endsWith('.tex'))continue;const t=fs.readFileSync(f,'utf8');const m=t.replace(/^<{7} .*\n([\s\S]*?)^={7}\n([\s\S]*?)^>{7} .*\n/gm,'$1$2');if(m!==t)fs.writeFileSync(f,m)}process.stdout.write('merged\n')`,
+  ],
+}
+
+/**
  * Build the launchable agent catalog for an app instance. In test mode the
  * deterministic {@link TEST_AGENT} is appended so the E2E has an assertable agent
  * to launch; in normal use it's just the built-ins.
  */
 export function buildAgentCatalog(testMode: boolean): readonly TerminalAgent[] {
   return testMode
-    ? [...BUILTIN_AGENTS, TEST_AGENT, TEST_ACTIVITY_AGENT, TEST_PLAN_AGENT]
+    ? [
+        ...BUILTIN_AGENTS,
+        TEST_AGENT,
+        TEST_ACTIVITY_AGENT,
+        TEST_WAITING_AGENT,
+        TEST_PLAN_AGENT,
+        TEST_MERGE_AGENT,
+      ]
     : BUILTIN_AGENTS
 }

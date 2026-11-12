@@ -4,18 +4,21 @@ import type {
   NotificationSettings,
   ProjectConfigStorage,
 } from "@pi-lab/local-db"
-import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
-import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
+import {
+  ANALYSIS_FORMAT_LABELS,
+  ANALYSIS_FORMATS,
+  type AnalysisFormat,
+  DEFAULT_EDITOR_SETTINGS,
+  type EditorSettings,
+  type PythonRunDestination,
+} from "@pi-lab/local-db/editor-settings"
 import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useState } from "react"
 import { type CaffeineMode, type CaffeineScope, useCaffeine } from "../../../../caffeine"
 import { ProjectMarkdownChoice } from "../../../../components/ProjectMarkdownChoice"
-import {
-  allEditorThemes,
-  DEFAULT_EDITOR_THEME_ID,
-} from "../../../../Editor/components/editorThemes"
+import { allEditorThemes, defaultEditorThemeId } from "../../../../Editor/components/editorThemes"
 import {
   type InterfaceLanguage,
   LANGUAGES,
@@ -32,17 +35,23 @@ import {
   EDITOR_FONT_DEFAULT_SIZE,
   EDITOR_FONT_MAX_SIZE,
   EDITOR_FONT_MIN_SIZE,
+  type NewSessionKind,
   useDefaultAgentId,
+  useDefaultResultsFolder,
   useDigitalRainDensity,
   useDigitalRainSpeed,
   useEditorFontFamily,
   useEditorFontSize,
   useExperimentalV2,
+  useExperimentRunsFile,
+  useExperimentRunsSource,
   useFetchExperimentsInstructions,
+  useNewSessionKind,
   useRestoreProjectTabs,
   useShowAnalysisSection,
   useShowClusterSection,
   useShowCodeChanges,
+  useShowEditorSection,
   useShowExperimentsSection,
   useShowFilesPanel,
   useShowResearchHeartbeatSection,
@@ -61,29 +70,14 @@ import { requestUpdateCheck } from "../../../../updates/UpdateFeedback"
 import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
 import { AlphaTestingResets } from "./AlphaTestingResets"
-import { AppIconGallery } from "./AppIconGallery"
 import { AppThemeGallery } from "./AppThemeGallery"
-import { SelectField, SettingsSection, TextAreaField, ToggleField } from "./SettingsControls"
-
-/** The icon workshop belongs to the separate Alpha app. */
-function AlphaAppIconGallery() {
-  const [show, setShow] = useState(false)
-  useEffect(() => {
-    let active = true
-    void window.piLab?.appIcon
-      ?.getChannel()
-      .then((channel) => {
-        if (active) setShow(channel === "alpha")
-      })
-      .catch((error: unknown) => {
-        console.warn("[pi-lab] Could not determine app icon channel:", error)
-      })
-    return () => {
-      active = false
-    }
-  }, [])
-  return show ? <AppIconGallery /> : null
-}
+import {
+  SelectField,
+  SettingsSection,
+  TextAreaField,
+  TextField,
+  ToggleField,
+} from "./SettingsControls"
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   muted: false,
@@ -102,7 +96,9 @@ export function GeneralSection() {
   const [language, setLanguage] = useInterfaceLanguage()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const settingsQuery = useQuery(trpc.settings.get.queryOptions())
+  // The main process saves the remembered quit choice without the renderer, so read the
+  // settings again each time General opens.
+  const settingsQuery = useQuery({ ...trpc.settings.get.queryOptions(), refetchOnMount: "always" })
   const startAtLoginQuery = useQuery(trpc.system.startAtLogin.queryOptions())
   const updateGeneral = useMutation(
     trpc.settings.updateGeneral.mutationOptions({
@@ -117,6 +113,7 @@ export function GeneralSection() {
     }),
   )
   const keepRunningAfterClose = settingsQuery.data?.keepRunningAfterClose ?? true
+  const quitChoice = settingsQuery.data?.quitChoice ?? "ask"
   const publicUpdateChannel = settingsQuery.data?.publicUpdateChannel ?? "stable"
   const [restoreProjectTabs, setRestoreProjectTabs] = useRestoreProjectTabs()
 
@@ -165,6 +162,27 @@ export function GeneralSection() {
         checked={keepRunningAfterClose}
         onChange={(value) => updateGeneral.mutate({ keepRunningAfterClose: value })}
       />
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div>
+          <p className="text-sm">{t("When quitting")}</p>
+          <p className="text-muted-foreground text-xs" data-testid="settings-quit-choice">
+            {quitChoice === "background"
+              ? t("Remembered: Move to background")
+              : t("Ask every time")}
+          </p>
+        </div>
+        {quitChoice === "background" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="settings-quit-choice-reset"
+            onClick={() => updateGeneral.mutate({ quitChoice: "ask" })}
+          >
+            {t("Ask every time")}
+          </Button>
+        ) : null}
+      </div>
       <ToggleField
         testId="settings-start-at-login"
         label="Start at login"
@@ -240,7 +258,6 @@ export function AppearanceSection() {
         onChange={(value) => setMode(value as ThemeMode)}
       />
       <AppThemeGallery />
-      <AlphaAppIconGallery />
       <div
         id="appearance-advanced"
         data-testid="appearance-advanced"
@@ -371,12 +388,69 @@ function EditorTypography() {
 }
 
 /** Editor preferences persisted in the DB, including the in-editor gear controls. */
+/**
+ * The skill the Analysis view's Report button starts an agent with, by its
+ * folder name in the project or user skills folders. Typed, then saved with Save.
+ */
+function ReportSkillField({ saved }: { saved: string }) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  // The typed name, or null while it shows the saved one.
+  const [draft, setDraft] = useState<string | null>(null)
+  const update = useMutation(
+    trpc.settings.updateEditor.mutationOptions({
+      onSuccess: () => {
+        setDraft(null)
+        void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
+      },
+    }),
+  )
+  const typed = draft?.trim() ?? ""
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3 text-sm">
+      <span>{t("Report skill")}</span>
+      <p className="text-muted-foreground text-xs">
+        {t(
+          "Skill the Report button in Analysis starts an agent with: its folder name in the project or user skills folders.",
+        )}
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          data-testid="settings-report-skill"
+          aria-label={t("Report skill")}
+          value={draft ?? saved}
+          placeholder={DEFAULT_EDITOR_SETTINGS.reportSkill}
+          onChange={(event) => setDraft(event.target.value)}
+          className="w-56 rounded-md border border-border bg-background px-2 py-1 font-mono text-foreground text-xs outline-none"
+        />
+        <Button
+          data-testid="settings-report-skill-save"
+          variant="outline"
+          size="sm"
+          disabled={typed === "" || typed === saved || update.isPending}
+          onClick={() => update.mutate({ reportSkill: typed })}
+        >
+          {t("Save")}
+        </Button>
+      </div>
+      {update.error ? (
+        <p role="alert" className="cursor-text select-text text-destructive text-xs">
+          {update.error.message}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export function EditorSection() {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editor: EditorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
+  const { resolvedMode } = useTheme()
   const customEditorThemes = editor.customEditorThemes ?? []
   const pythonRunDestination = editor.pythonRunDestination ?? "central"
   const update = useMutation(
@@ -418,7 +492,8 @@ export function EditorSection() {
   const removeCustomTheme = (id: string) => {
     patch({
       customEditorThemes: customEditorThemes.filter((theme) => theme.id !== id),
-      ...(editor.editorTheme === id ? { editorTheme: DEFAULT_EDITOR_THEME_ID } : {}),
+      // Back to the stored default, which follows the app's light/dark appearance.
+      ...(editor.editorTheme === id ? { editorTheme: DEFAULT_EDITOR_SETTINGS.editorTheme } : {}),
     })
   }
 
@@ -494,13 +569,39 @@ export function EditorSection() {
         onChange={(value) => patch({ pythonRunDestination: value as PythonRunDestination })}
       />
       <SelectField
+        testId="settings-research-diary-format"
+        label="Research diary format"
+        description="File format of each project's research diary (md/research-diary). Switching to or from Quarto renames the diary file when its panel next opens."
+        value={editor.researchDiaryFormat}
+        options={[
+          { value: "md", label: ".md" },
+          { value: "qmd", label: ".qmd (Quarto Markdown)" },
+          { value: "myst", label: ".md (MyST Markdown)" },
+        ]}
+        onChange={(value) =>
+          patch({ researchDiaryFormat: value as EditorSettings["researchDiaryFormat"] })
+        }
+      />
+      <SelectField
+        testId="settings-analysis-format"
+        label="Analysis format"
+        description="Format agents write analysis in. A project can choose its own in Edit project."
+        value={editor.analysisFormat}
+        options={ANALYSIS_FORMATS.map((format) => ({
+          value: format,
+          label: ANALYSIS_FORMAT_LABELS[format],
+        }))}
+        onChange={(value) => patch({ analysisFormat: value as AnalysisFormat })}
+      />
+      <ReportSkillField saved={editor.reportSkill ?? DEFAULT_EDITOR_SETTINGS.reportSkill} />
+      <SelectField
         testId="settings-editor-theme"
         label="Editor theme"
         description="Color theme for the code editor."
         value={
           themes.some((theme) => theme.id === editor.editorTheme)
-            ? (editor.editorTheme ?? DEFAULT_EDITOR_THEME_ID)
-            : DEFAULT_EDITOR_THEME_ID
+            ? editor.editorTheme
+            : defaultEditorThemeId(resolvedMode)
         }
         groups={[
           {
@@ -711,6 +812,7 @@ function AgentLaunchDefaultsField({
         <input
           data-testid={`settings-agent-model-${agent.id}`}
           aria-label={`${agent.label} model`}
+          data-feature-help="The model new agents use. Leave empty to use the CLI default."
           placeholder="CLI default"
           value={model}
           onChange={(event) => setModel(event.target.value)}
@@ -759,6 +861,11 @@ function AgentExecutableField({
       <input
         data-testid={`settings-agent-executable-${agent.id}`}
         aria-label={`${agent.label} executable path`}
+        data-feature-help={
+          agent.available
+            ? `${t("Detected:")} ${agent.executable}`
+            : `${t("Not found:")} ${agent.executable}`
+        }
         value={value}
         placeholder={agent.id === "claude-code" ? "claude" : "codex"}
         onChange={(event) => setValue(event.target.value)}
@@ -873,6 +980,9 @@ export function NotificationsSection() {
                 role="switch"
                 aria-checked={value.enabled}
                 aria-label={`${t(event.label)} ${t("notifications")}`}
+                data-feature-help={
+                  value.enabled ? t("On. Click to turn off.") : t("Off. Click to turn on.")
+                }
                 data-testid={`settings-notification-${event.key}-enabled`}
                 onClick={() => patchEvent(event.key, { enabled: !value.enabled })}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -887,6 +997,7 @@ export function NotificationsSection() {
               </button>
               <select
                 aria-label={`${t(event.label)} ${t("sound")}`}
+                data-feature-help={t("The sound played with this notification.")}
                 data-testid={`settings-notification-${event.key}-sound`}
                 value={value.sound}
                 onChange={(change) =>
@@ -905,6 +1016,7 @@ export function NotificationsSection() {
                 variant="ghost"
                 size="sm"
                 aria-label={`${t("Preview")} ${t(event.label)} ${t("sound")}`}
+                data-feature-help={t("Play the chosen sound once.")}
                 data-testid={`settings-notification-${event.key}-preview`}
                 onClick={() => void preview(event.label, value.sound)}
               >
@@ -1161,6 +1273,7 @@ export function ProjectViewSection() {
 export function SectionsSection() {
   const [showCluster, setShowCluster] = useShowClusterSection()
   const [showAnalysis, setShowAnalysis] = useShowAnalysisSection()
+  const [showEditor, setShowEditor] = useShowEditorSection()
   const [showExperiments] = useShowExperimentsSection()
   const [showResearchHeartbeat] = useShowResearchHeartbeatSection()
   return (
@@ -1182,6 +1295,13 @@ export function SectionsSection() {
         description="Show the Analysis section for browsing and previewing data files."
         checked={showAnalysis}
         onChange={setShowAnalysis}
+      />
+      <ToggleField
+        testId="settings-show-editor-section"
+        label="Editor"
+        description="Always show the Editor section for files outside your projects. When off, it shows only while such a file is open."
+        checked={showEditor}
+        onChange={setShowEditor}
       />
       <ToggleField
         testId="settings-show-experiments-section"
@@ -1212,6 +1332,9 @@ export function SectionsSection() {
  */
 export function ExperimentsSection() {
   const [instructions, setInstructions] = useFetchExperimentsInstructions()
+  const [runsSource, setRunsSource] = useExperimentRunsSource()
+  const [runsFile, setRunsFile] = useExperimentRunsFile()
+  const [resultsFolder, setResultsFolder] = useDefaultResultsFolder()
   return (
     <SettingsSection
       testId="settings-section-experiments"
@@ -1225,6 +1348,32 @@ export function ExperimentsSection() {
         value={instructions}
         placeholder="e.g. Only pull the latest run's metrics into results/."
         onChange={setInstructions}
+      />
+      <SelectField
+        testId="settings-experiment-runs-source"
+        label="Experiment runs source"
+        description="Where the Project status card reads experiment runs from."
+        value={runsSource}
+        options={[{ value: "experiments-md", label: "EXPERIMENTS.md file" }]}
+        onChange={(next) => {
+          if (next === "experiments-md") setRunsSource(next)
+        }}
+      />
+      <TextField
+        testId="settings-experiment-runs-file"
+        label="Experiments file"
+        description="Path relative to each project. Its table's status column gives the running, finished and failed counts."
+        value={runsFile}
+        placeholder="EXPERIMENTS.md"
+        onChange={setRunsFile}
+      />
+      <TextField
+        testId="settings-results-folder"
+        label="Results folder"
+        description="Folder relative to each project that Analysis lists. Each folder inside it is one experiment. A project can choose its own folder in Analysis."
+        value={resultsFolder}
+        placeholder="results"
+        onChange={setResultsFolder}
       />
     </SettingsSection>
   )
@@ -1254,6 +1403,7 @@ export function ExperimentalSection() {
 export function ShortcutsSection() {
   const t = useTranslate()
   const { bindingFor, setBinding, resetBinding } = useShortcutBindings()
+  const [newSessionKind, setNewSessionKind] = useNewSessionKind()
   const [recording, setRecording] = useState<string | null>(null)
   const [conflict, setConflict] = useState<{
     binding: string
@@ -1370,6 +1520,29 @@ export function ShortcutsSection() {
           </div>
         </div>
       ))}
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div className="flex min-w-0 flex-col">
+          <label htmlFor="settings-new-session-kind" className="text-foreground text-sm">
+            {t("New session opens")}
+          </label>
+          <span className="text-muted-foreground text-xs">
+            {t("What the New session shortcut opens")}
+          </span>
+        </div>
+        <select
+          id="settings-new-session-kind"
+          data-testid="settings-new-session-kind"
+          value={newSessionKind}
+          onChange={(event) => setNewSessionKind(event.target.value as NewSessionKind)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-foreground text-sm outline-none"
+        >
+          <option value="chat-agent" disabled>
+            {t("Chat agent (not available yet)")}
+          </option>
+          <option value="terminal-agent">{t("Terminal agent")}</option>
+          <option value="terminal">{t("Terminal")}</option>
+        </select>
+      </div>
     </SettingsSection>
   )
 }

@@ -13,6 +13,7 @@ import type { PiLabDatabase } from "@pi-lab/local-db"
 import { DaemonClient, DaemonServer } from "@pi-lab/pty-daemon"
 import type { Unsubscribable } from "@trpc/server/observable"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { NotebookServers } from "../../notebooks/notebookServers"
 import { createNotificationBrokers, NotificationService } from "../../notifications"
 import { appRouter } from "../appRouter"
 import { type AppContext, DEFAULT_AGENT_CATALOG } from "../context"
@@ -54,7 +55,7 @@ beforeEach(async () => {
     runNonInteractiveProcess: async () => {
       throw new Error("runNonInteractiveProcess unused in terminal tests")
     },
-    credentialCipher: { encrypt: (value) => value },
+    credentialCipher: { encrypt: (value) => value, decrypt: (value) => value },
     sshExec: async () => ({ ok: true, detail: "stub" }),
     httpFetch: async () => {
       throw new Error("httpFetch unused in terminal tests")
@@ -78,6 +79,12 @@ beforeEach(async () => {
       close: async () => {},
       dispose: () => {},
     },
+    notebookServers: new NotebookServers(
+      { start: 42_800, end: 42_899 },
+      10_000,
+      null,
+      async () => {},
+    ),
     notifications,
     activityStatus: { subscribe: () => () => {}, projectsChanged: () => {} },
     activityMonitor: {
@@ -85,6 +92,7 @@ beforeEach(async () => {
       trackTerminal: async () => {},
       reconcile: async () => {},
       liveAgentCount: () => 0,
+      liveAgents: () => [],
       userInput: () => {},
       resize: () => {},
       dispose: () => {},

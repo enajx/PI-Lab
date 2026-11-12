@@ -2,14 +2,14 @@ import { Button, cn } from "@pi-lab/ui"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
-import { CaffeineControl } from "../../../caffeine"
 import { useTranslate } from "../../../i18n/language"
 import { useSidebarFeatureHelp } from "../../../preferences/preferences"
 import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
 import { FeatureHelpPanel, FeatureHelpRestoreButton } from "../components/Sidebar"
-import { AgentStatusControl } from "../titleBar"
+import { TitleBarSystemControls } from "../titleBar"
 import { DictationSection } from "./components/DictationSection"
+import { DocumentToolsSection } from "./components/DocumentToolsSection"
 import { LatexSection } from "./components/LatexSection"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
 import { QuickEditorSection } from "./components/QuickEditorSection"
@@ -73,6 +73,12 @@ const SECTIONS = [
     label: "Dictation",
     description: "Install local speech models and choose what happens with dictated text.",
     render: () => <DictationSection />,
+  },
+  {
+    id: "document-tools",
+    label: "Document tools",
+    description: "Find or install Quarto and MyST for the Render button.",
+    render: () => <DocumentToolsSection />,
   },
   {
     id: "quick-editor",
@@ -215,8 +221,7 @@ export function SettingsView() {
           {t("Back")}
         </Button>
         <div className="ms-auto flex items-center gap-2">
-          <AgentStatusControl />
-          <CaffeineControl />
+          <TitleBarSystemControls />
         </div>
       </header>
 

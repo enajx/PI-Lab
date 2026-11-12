@@ -39,6 +39,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
     typeId: "general",
     agentConfig: null,
     sortIndex: 0,
+    sortOrder: null,
     archivedAt: null,
     createdAt: 0,
     updatedAt: 0,
@@ -118,7 +119,7 @@ describe("ScienceSkills", () => {
     await waitFor(() => {
       expect(screen.getByTestId("skills-project-select")).toBeTruthy()
     })
-    const select = screen.getByTestId("skills-project-select") as HTMLSelectElement
+    const select = screen.getByTestId("skills-project-select") as HTMLButtonElement
     expect(select.value).toBe("recent")
   })
 
@@ -201,7 +202,8 @@ describe("ScienceSkills", () => {
     })
 
     await screen.findByText("alpha-skill")
-    fireEvent.change(screen.getByTestId("skills-project-select"), { target: { value: "p2" } })
+    fireEvent.click(screen.getByTestId("skills-project-select"))
+    fireEvent.click(screen.getByRole("option", { name: "beta" }))
     await screen.findByText("beta-skill")
 
     expect(requested).toContain("p1")

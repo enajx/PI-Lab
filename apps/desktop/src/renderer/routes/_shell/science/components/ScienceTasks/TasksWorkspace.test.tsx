@@ -81,6 +81,7 @@ function renderWorkspace(overrides: Partial<ComponentProps<typeof TasksWorkspace
       }),
     ],
     sources,
+    projectId: "",
     agents: [
       { id: "claude-code", label: "Claude Code" },
       { id: "codex", label: "Codex" },
@@ -91,6 +92,7 @@ function renderWorkspace(overrides: Partial<ComponentProps<typeof TasksWorkspace
     onDelete: vi.fn(async () => {}),
     onMove: vi.fn(async () => {}),
     onRun: vi.fn(async () => {}),
+    toolbarEnd: null,
     ...overrides,
   }
   const rendered = render(<TasksWorkspace {...props} />)
@@ -103,7 +105,6 @@ describe("TasksWorkspace", () => {
   test("shows task controls in the selected interface language", () => {
     setInterfaceLanguage("es")
     renderWorkspace()
-    expect(screen.getByText("Todos los proyectos")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Nueva tarea" })).toBeTruthy()
   })
 
@@ -113,8 +114,15 @@ describe("TasksWorkspace", () => {
     expect(screen.getByText("El Markdown de TODO cambió desde que se cargó")).toBeTruthy()
   })
 
-  test("defaults to a searchable all-project list", () => {
+  test("defaults to the Kanban board", () => {
     renderWorkspace()
+    expect(screen.getByTestId("tasks-heading-board")).toBeTruthy()
+    expect(screen.queryByTestId("tasks-list")).toBeNull()
+  })
+
+  test("the list view is a searchable all-project list", () => {
+    renderWorkspace()
+    fireEvent.click(screen.getByRole("button", { name: "List view" }))
     expect(screen.getByTestId("tasks-list")).toBeTruthy()
     expect(screen.getAllByTestId("task-row")).toHaveLength(2)
 
@@ -183,6 +191,7 @@ describe("TasksWorkspace", () => {
       ],
     })
 
+    fireEvent.click(screen.getByRole("button", { name: "List view" }))
     expect(screen.getByTestId("tasks-list")).toBeTruthy()
     expect(screen.queryByTestId("tasks-heading-list")).toBeNull()
 
@@ -212,6 +221,7 @@ describe("TasksWorkspace", () => {
 
   test("switches between heading and status-grouped Kanban views", () => {
     renderWorkspace()
+    fireEvent.click(screen.getByRole("button", { name: "List view" }))
     const toolbarControls = screen.getByTestId("tasks-toolbar-controls")
     expect(screen.queryByText("Group by")).toBeNull()
     expect(within(toolbarControls).getByRole("group", { name: "Grouping" })).toBeTruthy()
@@ -322,6 +332,10 @@ describe("TasksWorkspace", () => {
 
     expect(within(project).queryByRole("group", { name: "TODO / One" })).toBeNull()
     expect(within(project).getByRole("group", { name: "TODO / Five" })).toBeTruthy()
+    // A click outside the open column menu closes it.
+    expect(within(project).getByRole("menu")).toBeTruthy()
+    fireEvent.mouseDown(document.body)
+    expect(within(project).queryByRole("menu")).toBeNull()
   })
 
   test("always shows three Kanban lanes and maps existing statuses without rewriting them", () => {
@@ -444,6 +458,7 @@ describe("TasksWorkspace", () => {
   test("runs the configured default agent with an editable prompt", async () => {
     const onRun = vi.fn(async () => {})
     renderWorkspace({ onRun })
+    fireEvent.click(screen.getByRole("button", { name: "List view" }))
     fireEvent.click(screen.getByRole("button", { name: "Run agent for Build parser" }))
 
     expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe("codex")

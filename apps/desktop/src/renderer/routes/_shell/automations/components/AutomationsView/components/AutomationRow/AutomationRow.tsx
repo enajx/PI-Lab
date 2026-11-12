@@ -132,6 +132,9 @@ export function AutomationRow({
               <select
                 data-testid="automation-row-execution-mode"
                 aria-label={`${t("Execution mode for")} ${automation.name}`}
+                data-feature-help={t(
+                  "Interactive opens a session you can follow. Run to completion works in the background.",
+                )}
                 value={automation.executionMode}
                 disabled={setExecutionMode.isPending}
                 onChange={(event) =>

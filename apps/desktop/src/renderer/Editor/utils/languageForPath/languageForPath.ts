@@ -1,6 +1,11 @@
 import { cpp } from "@codemirror/lang-cpp"
 import { python } from "@codemirror/lang-python"
+import { StreamLanguage } from "@codemirror/language"
+import { stex } from "@codemirror/legacy-modes/mode/stex"
 import type { Extension } from "@codemirror/state"
+
+/** LaTeX/BibTeX highlighting, shared by every .tex/.sty/.cls/.bib buffer. */
+const latex = StreamLanguage.define(stex)
 
 /**
  * Pick a CodeMirror language extension from a file's path. Unsupported
@@ -24,6 +29,11 @@ export function languageForPath(relPath: string): Extension | null {
     case "cxx":
     case "hxx":
       return cpp()
+    case "tex":
+    case "sty":
+    case "cls":
+    case "bib":
+      return latex
     default:
       return null
   }

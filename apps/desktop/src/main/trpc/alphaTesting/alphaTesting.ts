@@ -59,6 +59,7 @@ export const alphaTestingRouter = router({
           agentPresets: [],
           confirmOnQuit: true,
           keepRunningAfterClose: true,
+          quitChoice: "ask",
           publicUpdateChannel: "stable",
           worktreePerAgent: false,
           editor: DEFAULT_EDITOR_SETTINGS,

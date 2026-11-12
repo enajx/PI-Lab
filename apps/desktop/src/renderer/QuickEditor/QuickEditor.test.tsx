@@ -8,9 +8,14 @@ import { readQuickBuffer } from "./quickEditorState"
 
 // Exercise the component's async lifecycle through injected IPC; editor rendering is mocked.
 vi.mock("../Editor/components/CodeMirrorBuffer", () => ({
-  CodeMirrorBuffer: (props: { initialDoc: string; onChange: (content: string) => void }) => (
+  CodeMirrorBuffer: (props: {
+    initialDoc: string
+    theme?: string
+    onChange: (content: string) => void
+  }) => (
     <textarea
       aria-label="Document"
+      data-theme={props.theme ?? "unset"}
       value={props.initialDoc}
       onChange={(event) => props.onChange(event.target.value)}
     />
@@ -184,7 +189,7 @@ test("Cmd+W in the full-app Editor closes a saved file and asks before closing a
   expect(pressCmdW()).toBe(false)
 })
 
-test("Cmd+W in an empty full-app Editor or the standalone quick editor backgrounds the app", async () => {
+test("Cmd+W in an empty full-app Editor or the standalone quick editor has no tab to close", async () => {
   const { bridge } = installBridge({ id: "cmd-w-quick", path: "/tmp/cmd-w-quick.txt" }, async () =>
     text("abc"),
   )
@@ -213,4 +218,27 @@ test("the full-app Editor tab × asks before closing a dirty file and closes a c
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "abc" } })
   fireEvent.click(screen.getByTestId("quick-editor-tab-close"))
   await waitFor(() => expect(close).toHaveBeenCalledWith(target.id))
+})
+
+test("the full-app Editor passes the stored theme through, so the default follows the app appearance", async () => {
+  const target = { id: "theme-editor", path: "/tmp/theme-editor.txt" }
+  const { bridge } = installBridge(target, async () => text("abc"))
+  Object.assign(bridge, { subscribeRoute: () => () => {} })
+  for (const stored of [undefined, "default", "solarized-light"]) {
+    const view = render(<QuickEditor fullApp targetId={target.id} editorTheme={stored} />)
+    const editor = await screen.findByRole("textbox")
+    expect(editor.getAttribute("data-theme")).toBe(stored ?? "unset")
+    view.unmount()
+  }
+})
+
+test("the full-app Editor title in the top bar is not bold", async () => {
+  const { bridge } = installBridge({ id: "title-editor", path: "/tmp/title.txt" }, async () =>
+    text("abc"),
+  )
+  Object.assign(bridge, { subscribeRoute: () => () => {} })
+  render(<QuickEditor fullApp />)
+  const title = await screen.findByRole("heading", { level: 1, name: "Editor" })
+  expect(title.className).not.toMatch(/font-(semibold|bold|medium)/)
+  expect(title.className).toContain("text-sm")
 })

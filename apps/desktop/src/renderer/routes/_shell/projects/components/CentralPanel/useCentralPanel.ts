@@ -1,7 +1,9 @@
+import type { AgentSessionOrigin } from "@pi-lab/local-db"
 import type { EditorSettings, PythonRunDestination } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { SerializedDockview } from "dockview-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { BuildResult } from "../../../../../../main/trpc/pdf/pdf"
 import type { PdfBuildState } from "../../../../../Editor/components/PdfViewer/PdfViewer"
 import {
   type EditorBuffersApi,
@@ -13,9 +15,13 @@ import { resolveLaunchAgentId, useDefaultAgentId } from "../../../../../preferen
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
 import { useTRPC } from "../../../../../trpc/react"
 import { useLatexBuild } from "./useLatexBuild"
+import { type NotebookPane, useNotebookTabs } from "./useNotebookTabs"
 
 /** Which kind of pane the central panel is currently showing. */
-export type ActiveRef = { type: "file"; relPath: string } | { type: "session"; id: string }
+export type ActiveRef =
+  | { type: "file"; relPath: string }
+  | { type: "session"; id: string }
+  | { type: "notebook"; id: string }
 
 /** Enough information to recreate a tab after the PTY daemon was lost on restart. */
 export type SessionLaunchConfig =
@@ -76,6 +82,13 @@ export interface CentralPanelController {
   selectFile: (relPath: string) => void
   /** Focus a session tab. */
   selectSession: (id: string) => void
+  /** Open marimo and Jupyter notebooks, each on its own server. */
+  notebooks: NotebookPane[]
+  /** Open a notebook file in a notebook tab (starting its server) and focus it. */
+  openNotebook: (relPath: string) => void
+  selectNotebook: (id: string) => void
+  /** Close a notebook tab and stop its server. */
+  closeNotebook: (id: string) => void
   /** Attach or select an existing live session targeted outside this view. */
   attachSession: (session: Omit<SessionPane, "id">) => void
   /** Open a file (from the Files panel / quick-open) and make it active. */
@@ -100,16 +113,26 @@ export interface CentralPanelController {
   pendingTerminal: boolean
   pendingPython: boolean
   launchError: string | null
+  /** A limit reported by the last agent start (e.g. no access to the paper folder), or null. */
+  launchWarning: string | null
   latexBuildStatus?: { message: string; log: string } | null
   pdfBuildState?: PdfBuildState | null
+  /** Build a saved .tex file as Cmd+S does (status, log, and `onBuilt` after a successful build). */
+  buildLatex: (relPath: string) => void
+  /** Show a build of a root .tex started elsewhere (e.g. by Start draft) as `buildLatex` shows its own. */
+  showLatexBuild: (relPath: string, build: Promise<BuildResult>) => void
 }
 
 interface UseCentralPanelArgs {
   client: PiLabTrpcClient
   workspaceId: string
   projectId: string
+  /** The view this panel belongs to; agents it starts record it as their origin. */
+  origin: AgentSessionOrigin
   settings: EditorSettings
   onSaved?: (relPath: string) => void
+  /** After a successful LaTeX build: the built PDF (as returned by `pdf.build`) and the saved source. */
+  onBuilt?: (pdfRelPath: string, sourceRelPath: string) => void
   /** A session launched immediately before navigating here (for example from Tasks). */
   initialSession?: Omit<SessionPane, "id"> | null
   /** State retained after temporarily navigating away from this project. */
@@ -132,8 +155,10 @@ export function useCentralPanel({
   client,
   workspaceId,
   projectId,
+  origin,
   settings,
   onSaved,
+  onBuilt,
   initialSession,
   initialState,
   onStateChange,
@@ -144,9 +169,10 @@ export function useCentralPanel({
   const [defaultAgentId, , defaultAgentError, defaultAgentPending] = useDefaultAgentId()
   const {
     saved,
+    track,
     status: latexBuildStatus,
     pdfBuildState,
-  } = useLatexBuild(client, workspaceId, onSaved)
+  } = useLatexBuild(client, workspaceId, onSaved, onBuilt)
   const editor = useEditorBuffers({
     client,
     workspaceId,
@@ -167,6 +193,7 @@ export function useCentralPanel({
     () => initialState?.belowEditorRun ?? null,
   )
   const [agentChooserOpen, setAgentChooserOpen] = useState(false)
+  const [launchWarning, setLaunchWarning] = useState<string | null>(null)
   const [initialLayout] = useState<SerializedDockview | null>(() => initialState?.layout ?? null)
   const [layout, setLayout] = useState<SerializedDockview | null>(initialLayout)
   const [restoringRelPaths, setRestoringRelPaths] = useState<string[]>(() =>
@@ -197,7 +224,8 @@ export function useCentralPanel({
       buffers: editor.bufferAccess.read(),
       activeRelPath: editor.activeRelPath,
       sessions,
-      active,
+      // Notebook tabs are not restored, so a focused one is not saved.
+      active: active?.type === "notebook" ? null : active,
       belowEditorRun,
       layout,
     })
@@ -305,10 +333,12 @@ export function useCentralPanel({
           }
           const result = await client.sessions.start.mutate({
             projectId,
+            origin,
             agentId: pane.launch.agentId,
             workspaceMode: pane.launch.workspaceMode,
           })
           createdSessionIds.add(result.sessionId)
+          if (result.warning && isCurrent()) setLaunchWarning(result.warning)
           return { ...pane, sessionId: result.sessionId, wsKind: result.kind }
         }
         const restored = await Promise.all(
@@ -391,7 +421,7 @@ export function useCentralPanel({
       if (isCurrent()) restorationGeneration.current += 1
       killUnclaimedSessions()
     }
-  }, [client, initialState?.belowEditorRun, initialState?.sessions, projectId, workspaceId])
+  }, [client, initialState?.belowEditorRun, initialState?.sessions, origin, projectId, workspaceId])
 
   const selectFile = useCallback(
     (relPath: string) => {
@@ -439,13 +469,30 @@ export function useCentralPanel({
     [killTerminal],
   )
 
+  const notebookTabs = useNotebookTabs(client, workspaceId)
+  const openNotebookTab = notebookTabs.open
+  const closeNotebookTab = notebookTabs.close
+  const openNotebook = useCallback(
+    (relPath: string) => setActive({ type: "notebook", id: openNotebookTab(relPath) }),
+    [openNotebookTab],
+  )
+  const selectNotebook = useCallback((id: string) => setActive({ type: "notebook", id }), [])
+  const closeNotebook = useCallback(
+    (id: string) => {
+      closeNotebookTab(id)
+      setActive((cur) => (cur?.type === "notebook" && cur.id === id ? null : cur))
+    },
+    [closeNotebookTab],
+  )
+
   // Close the active tab (bound to Ctrl+W in the project view). Routes to the same
   // close path the tab's "x" button uses; no-op when nothing is active.
   const closeActiveTab = useCallback(() => {
     if (!active) return
     if (active.type === "file") closeFile(active.relPath)
+    else if (active.type === "notebook") closeNotebook(active.id)
     else closeSession(active.id)
-  }, [active, closeFile, closeSession])
+  }, [active, closeFile, closeNotebook, closeSession])
 
   // Monotonic pane ids (no Math.random / Date.now needed for uniqueness).
   const nextPaneId = useCallback(() => {
@@ -472,9 +519,10 @@ export function useCentralPanel({
     (agentId: string, workspaceMode: "policy" | "main" | "worktree") => {
       const option = agentsQuery.data?.find((agent) => agent.id === agentId)
       startSession.mutate(
-        { projectId, agentId, workspaceMode },
+        { projectId, origin, agentId, workspaceMode },
         {
           onSuccess: (result) => {
+            setLaunchWarning(result.warning)
             const id = nextPaneId()
             updateSessions((prev) => [
               ...prev,
@@ -492,7 +540,7 @@ export function useCentralPanel({
         },
       )
     },
-    [agentsQuery.data, projectId, startSession, nextPaneId, updateSessions],
+    [agentsQuery.data, origin, projectId, startSession, nextPaneId, updateSessions],
   )
 
   const openAgent = useCallback(() => {
@@ -611,6 +659,8 @@ export function useCentralPanel({
   return {
     latexBuildStatus,
     pdfBuildState,
+    buildLatex: saved,
+    showLatexBuild: track,
     editor,
     sessions,
     active,
@@ -619,6 +669,10 @@ export function useCentralPanel({
     setLayout,
     selectFile,
     selectSession,
+    notebooks: notebookTabs.notebooks,
+    openNotebook,
+    selectNotebook,
+    closeNotebook,
     attachSession,
     openFile,
     closeFile,
@@ -643,6 +697,7 @@ export function useCentralPanel({
       projectChoiceQuery.isPending,
     pendingTerminal: spawnTerminal.isPending,
     pendingPython: runPythonFile.isPending,
+    launchWarning,
     launchError:
       restorationError ??
       defaultAgentError ??

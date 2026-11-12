@@ -14,3 +14,13 @@ export function isTrustedNavigation(navigationUrl: string, entryUrls: readonly s
     )
   })
 }
+
+/**
+ * The address to open in the user's browser when the page asks for a new
+ * window (a `target="_blank"` link), or null to only block it. Only `https:`
+ * addresses go to the browser; everything else stays blocked.
+ */
+export function browserUrlForNewWindow(url: string): string | null {
+  if (!URL.canParse(url)) return null
+  return new URL(url).protocol === "https:" ? url : null
+}

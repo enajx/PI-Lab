@@ -1,12 +1,24 @@
 import type { Project, ProjectDetails, ProjectTextTag } from "@pi-lab/local-db"
+import {
+  ANALYSIS_FORMAT_LABELS,
+  ANALYSIS_FORMATS,
+  type AnalysisFormat,
+} from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { ProjectStageRow } from "../../../../../components/ProjectStage"
 import { useTranslate } from "../../../../../i18n/language"
 import { useEmojiTagPalette } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { ConnectOverleafDialog } from "../../../science/components/ScienceLatex/ConnectOverleaf"
+import {
+  type ChosenPaperFolder,
+  paperFolderLabel,
+  usePaperFolderPicker,
+} from "../../../science/components/ScienceLatex/PaperFolder"
 
 const FIELD_CLASS =
   "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/40"
@@ -60,7 +72,25 @@ const EMOJI_PICKER_OPTIONS = [
   "☑️",
 ] as const
 
-/** Shared compact form for adding and editing project details. */
+/**
+ * A change to the paper folder made in the dialog, applied when it is saved:
+ * keep the current one, use a chosen folder, or clear it.
+ */
+type PaperFolderDraft = { kind: "keep" } | ({ kind: "set" } & ChosenPaperFolder) | { kind: "clear" }
+
+/**
+ * Shared compact form for adding and editing project details. When editing, a
+ * "Paper folder" row shows the LaTeX Editor's paper folder and can choose
+ * another one (same checks as the LaTeX Editor) or clear it. Like the other
+ * fields, the change is applied only when the dialog is saved, before the
+ * other details; if it fails, the error is shown and nothing else is saved.
+ * A saved paper folder with no Git remote also gets "Connect to Overleaf…",
+ * which acts at once (it opens the Connect to Overleaf dialog).
+ * When editing, a "Project status" row shows the project stage; clicking a step
+ * saves it at once, as in the project view top bar. An "Analysis format" choice
+ * sets the format agents write this project's analysis in, or leaves the
+ * default from Settings.
+ */
 export function EditProjectDialog({
   project,
   mode,
@@ -95,6 +125,10 @@ export function EditProjectDialog({
   const [agentChoice, setAgentChoice] = useState<string | null>(null)
   const agentId = agentChoice ?? choice.data?.agentId ?? ""
   const [deadline, setDeadline] = useState(existing?.deadline ?? "")
+  // "" means no override: the analysis format from Settings applies.
+  const [analysisFormat, setAnalysisFormat] = useState<AnalysisFormat | "">(
+    existing?.analysisFormat ?? "",
+  )
   const [emojiTags, setEmojiTags] = useState<string[]>(existing?.emojiTags ?? [])
   const [textTags, setTextTags] = useState<ProjectTextTag[]>(existing?.textTags ?? [])
   const [tagLabel, setTagLabel] = useState("")
@@ -116,6 +150,60 @@ export function EditProjectDialog({
   const paletteChips = [...palette, ...emojiTags.filter((emoji) => !palette.includes(emoji))]
 
   const rootRef = useRef<HTMLDivElement | null>(null)
+
+  const queryClient = useQueryClient()
+  const projectId = project.id ?? ""
+  const showPaperFolder = mode === "edit" && projectId !== ""
+  const paperState = useQuery({
+    ...trpc.paper.get.queryOptions({ projectId }),
+    enabled: showPaperFolder,
+  })
+  const [paperDraft, setPaperDraft] = useState<PaperFolderDraft>({ kind: "keep" })
+  const [paperError, setPaperError] = useState<string | null>(null)
+  const [connectOpen, setConnectOpen] = useState(false)
+  const savedPaper = paperState.data?.paper ?? null
+  const canConnect =
+    paperDraft.kind === "keep" &&
+    savedPaper !== null &&
+    savedPaper.remoteUrl === null &&
+    savedPaper.syncEnabled
+  const onPaperError = (cause: { message: string }): void => setPaperError(cause.message)
+  const paperPicker = usePaperFolderPicker(
+    projectId,
+    (chosen) => setPaperDraft({ kind: "set", ...chosen }),
+    onPaperError,
+  )
+  const linkPaper = useMutation(trpc.paper.link.mutationOptions())
+  const unlinkPaper = useMutation(trpc.paper.unlink.mutationOptions())
+  const paperPending = linkPaper.isPending || unlinkPaper.isPending
+  const shownPaperDir =
+    paperDraft.kind === "set"
+      ? paperDraft.displayDir
+      : paperDraft.kind === "clear"
+        ? null
+        : (paperState.data?.paper?.displayDir ?? null)
+
+  /** Apply the paper folder change, if any; resolves to false when it failed (the error is shown). */
+  const applyPaperDraft = (): Promise<boolean> => {
+    const change =
+      paperDraft.kind === "set"
+        ? linkPaper.mutateAsync({
+            projectId,
+            dir: paperDraft.dir,
+            rootChoice: paperDraft.rootChoice,
+          })
+        : unlinkPaper.mutateAsync({ projectId })
+    return change.then(
+      () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+        return true
+      },
+      (cause: { message: string }) => {
+        onPaperError(cause)
+        return false
+      },
+    )
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -153,14 +241,23 @@ export function EditProjectDialog({
   }
 
   const save = () => {
-    if (!name.trim() || pending || (choice.isLoading && mode === "edit")) return
-    onSave({
+    if (!name.trim() || pending || paperPending || (choice.isLoading && mode === "edit")) return
+    const details: ProjectDetails = {
       name: name.trim(),
       typeId: (typeId || "general") as ProjectDetails["typeId"],
       deadline: deadline || null,
       agentId: agentId || null,
       emojiTags,
       textTags,
+    }
+    if (mode === "edit") details.analysisFormat = analysisFormat === "" ? null : analysisFormat
+    if (paperDraft.kind === "keep") {
+      onSave(details)
+      return
+    }
+    setPaperError(null)
+    void applyPaperDraft().then((applied) => {
+      if (applied) onSave(details)
     })
   }
 
@@ -189,7 +286,10 @@ export function EditProjectDialog({
           <p className="truncate text-muted-foreground text-xs">{project.name}</p>
         </div>
 
-        <fieldset disabled={pending} className="flex flex-col gap-3.5 overflow-y-auto px-4 py-4">
+        <fieldset
+          disabled={pending || paperPending}
+          className="flex min-w-0 flex-col gap-3.5 overflow-y-auto px-4 py-4"
+        >
           <label className="flex flex-col gap-1 text-xs font-medium">
             {t("Project name")}
             <input
@@ -216,6 +316,17 @@ export function EditProjectDialog({
                 <option value="manuscript">{t("Manuscript")}</option>
               </select>
             </label>
+          ) : null}
+          {mode === "edit" && projectId !== "" ? (
+            <div className="flex flex-col gap-1">
+              <span className="font-medium text-foreground text-xs">{t("Project status")}</span>
+              <ProjectStageRow
+                projectId={projectId}
+                stage={project.metadata?.stage ?? null}
+                testId="edit-project-stage"
+                className="-ms-1"
+              />
+            </div>
           ) : null}
           <label className="flex flex-col gap-1 text-xs font-medium">
             {t("Agent")}
@@ -257,6 +368,24 @@ export function EditProjectDialog({
                   value={deadline}
                   onChange={(event) => setDeadline(event.target.value)}
                 />
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-foreground text-xs">{t("Analysis format")}</span>
+                <select
+                  data-testid="edit-project-analysis-format"
+                  className={FIELD_CLASS}
+                  value={analysisFormat}
+                  onChange={(event) => setAnalysisFormat(event.target.value as AnalysisFormat | "")}
+                  data-feature-help={t("Format agents write this project's analysis in.")}
+                >
+                  <option value="">{t("Use default from Settings")}</option>
+                  {ANALYSIS_FORMATS.map((format) => (
+                    <option key={format} value={format}>
+                      {t(ANALYSIS_FORMAT_LABELS[format])}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <div className="flex flex-col gap-1.5">
@@ -335,6 +464,7 @@ export function EditProjectDialog({
                     type="button"
                     data-testid="edit-project-tag-add"
                     aria-label={t("Add tag")}
+                    data-feature-help={t("Add the typed text as a tag on this project.")}
                     disabled={!tagLabel.trim()}
                     onClick={addTextTag}
                     className="p-2 rounded border border-border disabled:opacity-50"
@@ -345,9 +475,70 @@ export function EditProjectDialog({
               </div>
             </>
           ) : null}
-          {error ? (
+          {showPaperFolder ? (
+            <div className="flex flex-col gap-1">
+              <span className="font-medium text-foreground text-xs">{t("Paper folder")}</span>
+              <div className="flex items-center gap-2">
+                <span
+                  data-testid="edit-project-paper-folder"
+                  title={paperDraft.kind === "set" ? paperDraft.dir : paperState.data?.paper?.dir}
+                  className="min-w-0 flex-1 truncate text-sm"
+                >
+                  {shownPaperDir === null ? t("None") : paperFolderLabel(shownPaperDir, t)}
+                </span>
+                <button
+                  type="button"
+                  data-testid="edit-project-paper-choose"
+                  disabled={paperPicker.busy}
+                  onClick={() => {
+                    setPaperError(null)
+                    paperPicker.choose()
+                  }}
+                  className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60 disabled:opacity-50"
+                >
+                  {t("Choose…")}
+                </button>
+                {canConnect ? (
+                  <button
+                    type="button"
+                    data-testid="edit-project-paper-connect"
+                    title={t("Send this paper to a new Overleaf project")}
+                    data-feature-label={t("Connect to Overleaf")}
+                    onClick={() => {
+                      setPaperError(null)
+                      setConnectOpen(true)
+                    }}
+                    className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60"
+                  >
+                    {t("Connect to Overleaf…")}
+                  </button>
+                ) : null}
+                {shownPaperDir !== null ? (
+                  <button
+                    type="button"
+                    data-testid="edit-project-paper-clear"
+                    title={t("Forget this folder. No files are deleted.")}
+                    data-feature-label={t("Clear paper folder")}
+                    onClick={() => {
+                      setPaperError(null)
+                      setPaperDraft({ kind: "clear" })
+                    }}
+                    className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60"
+                  >
+                    {t("Clear")}
+                  </button>
+                ) : null}
+              </div>
+              {paperState.error ? (
+                <p role="alert" className="text-destructive text-xs">
+                  {paperState.error.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {error || paperError ? (
             <p role="alert" className="text-destructive text-xs">
-              {error}
+              {paperError ?? error}
             </p>
           ) : null}
         </fieldset>
@@ -358,6 +549,7 @@ export function EditProjectDialog({
               type="button"
               disabled
               title={t("Coming later")}
+              data-feature-label={t("Plan research")}
               className="mr-auto rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground opacity-50"
             >
               {t("Plan research")}
@@ -377,6 +569,7 @@ export function EditProjectDialog({
             data-testid={mode === "add" ? "add-project-confirm" : "edit-project-save"}
             disabled={
               pending ||
+              paperPending ||
               !name.trim() ||
               Boolean(choice.error) ||
               (mode === "edit" && choice.isLoading)
@@ -389,6 +582,10 @@ export function EditProjectDialog({
         </div>
       </div>
 
+      {paperPicker.dialog}
+      {connectOpen ? (
+        <ConnectOverleafDialog projectId={projectId} onClose={() => setConnectOpen(false)} />
+      ) : null}
       {emojiPickerOpen ? (
         // biome-ignore lint/a11y/noStaticElementInteractions: this is the picker backdrop; its visible dialog contains the keyboard-accessible choices, and Escape closes it.
         // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled at dialog level and provides the keyboard dismissal path.

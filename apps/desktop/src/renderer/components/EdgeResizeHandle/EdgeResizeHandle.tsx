@@ -8,6 +8,10 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, use
  * (so dragging *outward* always grows the panel), clamps to `[min, max]`, and
  * reports the new width live via `onResize`, then calls `onResizeEnd` once on
  * release after a width-changing drag. Cancellation does not commit the width.
+ * With `onCollapse`, dragging the panel below `min` (or below its start width,
+ * when it is drawn narrower than `min`) ends the drag and calls it
+ * (the panel's own collapse, as if its collapse button was clicked); the width is
+ * not committed then.
  * Pointer capture keeps the gesture
  * alive when the cursor leaves the 1.5px strip; the move/up/cancel listeners are
  * torn down on release, cancellation or unmount. Marked `app-no-drag` so it stays interactive over the
@@ -22,6 +26,7 @@ export function EdgeResizeHandle({
   max,
   onResize,
   onResizeEnd,
+  onCollapse,
   testId,
 }: {
   /** Which edge of the panel the handle sits on (and the grow direction). */
@@ -35,13 +40,15 @@ export function EdgeResizeHandle({
   onResize: (next: number) => void
   /** Persist the final clamped width after a completed drag. */
   onResizeEnd?: (next: number) => void
+  /** Collapse the panel when it is dragged below `min`. */
+  onCollapse?: () => void
   testId?: string
 }) {
-  const callbacks = useRef({ onResize, onResizeEnd })
+  const callbacks = useRef({ onResize, onResizeEnd, onCollapse })
   const activeCleanup = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
-    callbacks.current = { onResize, onResizeEnd }
-  }, [onResize, onResizeEnd])
+    callbacks.current = { onResize, onResizeEnd, onCollapse }
+  }, [onResize, onResizeEnd, onCollapse])
   useEffect(() => () => activeCleanup.current?.(), [])
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -54,12 +61,21 @@ export function EdgeResizeHandle({
     const pointerId = event.pointerId
     let nextWidth = startWidth
     let changedWidth = false
+    // A panel drawn narrower than `min` (squeezed by its row) collapses when dragged
+    // below the width it started at.
+    const collapseBelow = Math.min(min, startWidth)
     target.setPointerCapture(pointerId)
 
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return
       const delta = move.clientX - startX
       const next = side === "left" ? startWidth - delta : startWidth + delta
+      const collapse = callbacks.current.onCollapse
+      if (collapse && next < collapseBelow) {
+        cleanup()
+        collapse()
+        return
+      }
       nextWidth = Math.min(Math.max(next, min), max)
       changedWidth ||= nextWidth !== startWidth
       callbacks.current.onResize(nextWidth)

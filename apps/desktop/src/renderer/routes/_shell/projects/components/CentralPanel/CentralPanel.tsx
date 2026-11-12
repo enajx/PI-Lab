@@ -1,4 +1,5 @@
 import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
+import { isMarimoNotebookSource } from "@pi-lab/shared/analysis/file-kind"
 import { cn } from "@pi-lab/ui"
 import type { AddPanelPositionOptions } from "dockview-react"
 import {
@@ -7,6 +8,7 @@ import {
   CircleHelp,
   FileText,
   MessageSquare,
+  NotebookPen,
   PanelLeft,
   PanelLeftOpen,
   PanelRight,
@@ -17,6 +19,7 @@ import {
 } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
+import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { CodeMirrorBuffer } from "../../../../../Editor/components/CodeMirrorBuffer"
 import { EditorSettingsMenu } from "../../../../../Editor/components/EditorSettingsMenu"
 import { EditorStatusBar } from "../../../../../Editor/components/EditorStatusBar"
@@ -34,6 +37,8 @@ import {
   FILES_PANEL_MIN_WIDTH,
   useFilesPanelWidth,
 } from "../../../../../preferences/preferences"
+import { registerCloseTabHandler } from "../../../../../shortcuts/closeTab"
+import { overlayIsOpen } from "../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { Terminal } from "../../../../../Terminal"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
@@ -41,6 +46,11 @@ import { KindBadge } from "../KindBadge"
 import { FilesPanel } from "../RightSidebar/components/FilesPanel"
 import { type DockItem, fileItemId, SplitDock, type SplitDockHandle } from "../SplitDock/SplitDock"
 import { CloseFilePrompt, useCloseFilePrompt } from "./CloseFilePrompt"
+import { CloseSessionPrompt, useCloseSessionPrompt } from "./CloseSessionPrompt"
+import { CollapsibleSection } from "./CollapsibleSection"
+import { NotebookSurface } from "./NotebookSurface"
+import { useNewSessionShortcut, useOpenNewSession } from "./newSessionShortcut"
+import { pdfBesideSource } from "./pdfBesideSource"
 import type { CentralPanelController, SessionPane } from "./useCentralPanel"
 
 /** A new Run tab per run, so each run is placed below the split of the file that ran. */
@@ -54,6 +64,15 @@ const PdfViewer = lazy(() =>
     default: module.PdfViewer,
   })),
 )
+
+/** The LaTeX Editor's use of the left column: a collapsible Files section with extra content below it. */
+export interface CentralPanelLeftColumn {
+  /** Shown below the Files section (the paper outline). */
+  bottom: ReactNode
+  /** Whether the Files section is expanded (state kept by the caller). */
+  filesOpen: boolean
+  onFilesOpenChange: (open: boolean) => void
+}
 
 interface CentralPanelProps {
   controller: CentralPanelController
@@ -83,6 +102,32 @@ interface CentralPanelProps {
   onPinFile?: (relPath: string) => void
   onSetMainFile?: (relPath: string) => void
   onSaveUntitled?: (relPath: string) => void
+  /** LaTeX Editor layout: open PDFs to the right of the LaTeX source. */
+  pdfBesideSource?: boolean
+  /** Open a source file at a position (the LaTeX Editor outline); a new nonce repeats the jump. */
+  sourceRequest?: (SourceLocation & { nonce: number }) | null
+  /** LaTeX Editor layout of the left column; the project view leaves it out. */
+  leftColumn?: CentralPanelLeftColumn
+  /**
+   * The LaTeX Editor's status bar items (Sync status, output folder, paper folder); the project view leaves
+   * it out. With it, the status bar shows even when no tab is focused.
+   */
+  paperFolderItem?: ReactNode
+  /**
+   * The panel is kept mounted but not shown (the Analysis and Tasks Sessions tab
+   * while another tab shows or the panel is collapsed, so notebook pages and
+   * terminals stay loaded). Its keyboard shortcuts are off.
+   */
+  hidden?: boolean
+  /** Shown at the start of the toolbar's free middle space (the Sessions panel's title). */
+  toolbarTitle?: ReactNode
+  /** Shown at the end of the toolbar (the Sessions panel's collapse button). */
+  toolbarEnd?: ReactNode
+  /**
+   * Drawn inside another card (the Sessions tab of the Analysis and Tasks right
+   * panel): no rounded border of its own.
+   */
+  frameless?: boolean
 }
 
 /**
@@ -110,6 +155,14 @@ export function CentralPanel({
   onPinFile,
   onSetMainFile,
   onSaveUntitled,
+  pdfBesideSource: placePdfBesideSource,
+  sourceRequest,
+  leftColumn,
+  paperFolderItem,
+  hidden,
+  toolbarTitle,
+  toolbarEnd,
+  frameless,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -126,21 +179,7 @@ export function CentralPanel({
     onFileFinderOpened()
   }, [openFileFinder, onFileFinderOpened])
 
-  useEffect(() => {
-    if (!addMenuOpen) return
-    const onPointerDown = (event: PointerEvent) => {
-      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAddMenuOpen(false)
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    document.addEventListener("keydown", onKeyDown)
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown)
-      document.removeEventListener("keydown", onKeyDown)
-    }
-  }, [addMenuOpen])
+  usePopupDismiss(addMenuOpen, [addMenuRef], () => setAddMenuOpen(false))
 
   // The Run tab is not a controller tab, so the panel tracks when it has focus. Any
   // controller focus change (another tab selected or opened) moves focus off it.
@@ -151,22 +190,59 @@ export function CentralPanel({
   const belowEditorRun = controller.belowEditorRun
   const runFocusedNow = runFocused && belowEditorRun !== null
 
-  // Tab ×, Ctrl+W and macOS Cmd+W (from the native menu) close a file tab, asking
-  // first when it has unsaved changes. Cmd+W with no file tab focused moves the app
-  // to the background instead.
-  const closeFilePrompt = useCloseFilePrompt({
-    controller,
-    runFocused: runFocusedNow,
-    onSaveUntitled,
-  })
+  // Tab × closes a file tab, asking first when it has unsaved changes.
+  const closeFilePrompt = useCloseFilePrompt({ controller, onSaveUntitled })
+  const closeSessionPrompt = useCloseSessionPrompt()
+  // Closing a notebook tab stops its server and loses edits not saved in the page.
+  const requestCloseNotebook = (id: string): void => {
+    const notebook = controller.notebooks.find((pane) => pane.id === id)
+    if (!notebook) return
+    closeSessionPrompt.requestClose({
+      kind: "notebook",
+      label: basename(notebook.relPath),
+      close: () => controller.closeNotebook(id),
+    })
+  }
 
-  // Ctrl+W closes the active tab.
-  const closeActiveTabRef = useRef(controller.closeActiveTab)
-  closeActiveTabRef.current = runFocusedNow
-    ? controller.closeBelowEditorRun
-    : active?.type === "file"
-      ? () => closeFilePrompt.requestClose(active.relPath)
-      : controller.closeActiveTab
+  // Ctrl+W and macOS Cmd+W (from the native menu) close the active tab: a dirty
+  // file, an agent, a terminal or the Run tab asks first. Returns false when no
+  // tab is active, so Cmd+W does nothing; it never hides the app.
+  const closeActiveTabRef = useRef<() => boolean>(() => false)
+  closeActiveTabRef.current = () => {
+    if (hidden) return false
+    // A close prompt is already asking: the shortcut does nothing more.
+    if (closeFilePrompt.prompt || closeSessionPrompt.prompt) return true
+    if (runFocusedNow && belowEditorRun) {
+      closeSessionPrompt.requestClose({
+        kind: "terminal",
+        label: belowEditorRun.label,
+        close: controller.closeBelowEditorRun,
+      })
+      return true
+    }
+    if (active?.type === "file") {
+      closeFilePrompt.requestClose(active.relPath)
+      return true
+    }
+    if (active?.type === "notebook") {
+      requestCloseNotebook(active.id)
+      return true
+    }
+    const session =
+      active?.type === "session" ? sessions.find((pane) => pane.id === active.id) : undefined
+    if (!session) return false
+    closeSessionPrompt.requestClose({
+      kind: session.kind,
+      label: session.label,
+      close: () => controller.closeSession(session.id),
+    })
+    return true
+  }
+  // A hidden panel leaves Cmd+W to the view that is shown.
+  useEffect(
+    () => (hidden ? undefined : registerCloseTabHandler(() => closeActiveTabRef.current())),
+    [hidden],
+  )
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -191,7 +267,7 @@ export function CentralPanel({
   /** Split the focused terminal; returns false (doing nothing) when no terminal has focus. */
   const splitFocusedRef = useRef<(direction: "right" | "below") => boolean>(() => false)
   // The finder or agent chooser is open: the shortcut would split behind it.
-  const splitBlocked = quickOpen || controller.agentChooserOpen
+  const splitBlocked = hidden || quickOpen || controller.agentChooserOpen
   splitFocusedRef.current = (direction) => {
     if (splitBlocked || runFocusedNow || active?.type !== "session") return false
     const session = sessions.find((pane) => pane.id === active.id)
@@ -222,12 +298,27 @@ export function CentralPanel({
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [])
 
+  // The new-session shortcut (⌘T) does what the matching toolbar button does, unless the
+  // finder, the agent chooser or another dialog, menu or popover is open.
+  const openNewSession = useOpenNewSession(controller)
+  useNewSessionShortcut(() => {
+    if (hidden || quickOpen || controller.agentChooserOpen || overlayIsOpen()) return false
+    return openNewSession()
+  })
+
   const [pdfLocation, setPdfLocation] = useState<PdfLocation | null>(null)
   const [sourceLocation, setSourceLocation] = useState<SourceLocation | null>(null)
   const navigateSource = (location: SourceLocation): void => {
     setSourceLocation(location)
     void editor.openFile(location.relPath).then(() => controller.selectFile(location.relPath))
   }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a jump runs once per request nonce, not when the editor API changes identity.
+  useEffect(() => {
+    if (!sourceRequest) return
+    const { nonce: _nonce, ...location } = sourceRequest
+    setSourceLocation(location)
+    void editor.openFile(location.relPath).then(() => controller.selectFile(location.relPath))
+  }, [sourceRequest?.nonce])
   const navigatePdf = (location: PdfLocation): void => {
     setPdfLocation(location)
     controller.openFile(location.relPath)
@@ -285,6 +376,21 @@ export function CentralPanel({
         ),
       }),
     ),
+    ...controller.notebooks.map(
+      (notebook): DockItem => ({
+        id: `notebook:${notebook.id}`,
+        tab: ({ visible, activate }) => (
+          <CentralTab
+            kind="notebook"
+            label={basename(notebook.relPath)}
+            active={visible}
+            onSelect={activate}
+            onClose={() => requestCloseNotebook(notebook.id)}
+          />
+        ),
+        content: () => <NotebookSurface pane={notebook} workspaceId={workspaceId} />,
+      }),
+    ),
     ...editor.tabs.map(
       (tab): DockItem => ({
         id: fileItemId(tab.relPath),
@@ -329,6 +435,7 @@ export function CentralPanel({
               editor={editor}
               settings={settings}
               onRunPython={() => controller.runPython(runDestination)}
+              onOpenNotebook={() => controller.openNotebook(tab.relPath)}
               client={client}
               workspaceId={workspaceId}
               onSaveUntitled={onSaveUntitled}
@@ -384,9 +491,10 @@ export function CentralPanel({
       ? focusedFile.relPath
       : (focusedSession?.label ?? null)
   const statusBar =
-    focusedLabel === null ? null : (
+    focusedLabel === null && !paperFolderItem ? null : (
       <EditorStatusBar
-        label={focusedLabel}
+        label={focusedLabel ?? ""}
+        paperFolderItem={paperFolderItem}
         pdfMessage={focusedFile?.kind === "pdf" ? pdfMessages[focusedFile.relPath] : null}
         onShowInPdf={
           focusedFile && isTexPath(focusedFile.relPath)
@@ -432,14 +540,24 @@ export function CentralPanel({
         ? fileItemId(active.relPath)
         : active?.type === "session"
           ? `session:${active.id}`
-          : null
+          : active?.type === "notebook"
+            ? `notebook:${active.id}`
+            : null
   const activateDockItem = (id: string): void => {
     setRunFocused(id.startsWith("run:"))
     if (id.startsWith("file:")) controller.selectFile(id.slice("file:".length))
     else if (id.startsWith("session:")) controller.selectSession(id.slice("session:".length))
+    else if (id.startsWith("notebook:")) controller.selectNotebook(id.slice("notebook:".length))
   }
   // Run output opens below the split showing the file that ran.
   const dockPlacement = (id: string): AddPanelPositionOptions | undefined => {
+    if (placePdfBesideSource) {
+      const placement = pdfBesideSource(
+        id,
+        editor.tabs.map((tab) => tab.relPath),
+      )
+      if (placement) return placement
+    }
     const ranFrom = belowEditorRun?.relPath
     if (
       !belowEditorRun ||
@@ -452,18 +570,83 @@ export function CentralPanel({
     return { referencePanel: fileItemId(ranFrom), direction: "below" }
   }
 
+  const filesPanel = (
+    <FilesPanel
+      workspaceId={workspaceId}
+      onOpenFile={controller.openFile}
+      activeRelPath={editor.active?.relPath}
+      onPinFile={onPinFile}
+      onSetMainFile={onSetMainFile}
+      editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
+    />
+  )
+
+  const filesEdgeHandle = (
+    <EdgeResizeHandle
+      side="right"
+      width={filesWidth}
+      onResize={setFilesWidth}
+      onCollapse={() => setShowFilesPanel(false)}
+      min={FILES_PANEL_MIN_WIDTH}
+      max={FILES_PANEL_MAX_WIDTH}
+      testId="central-files-edge-drag"
+    />
+  )
+  // The LaTeX Editor's left column is its own rounded card beside the panel's card,
+  // resized from the 12px gap between them.
+  const leftColumnCard =
+    leftColumn && showFilesPanel ? (
+      <div className="relative flex min-h-0 shrink-0" style={{ width: filesWidth }}>
+        <div
+          data-testid="central-files-panel"
+          className="flex min-h-0 w-full flex-col overflow-y-auto rounded-lg border border-border"
+        >
+          {leftColumn.filesOpen ? (
+            // Open: the tree's own "Files" header carries the collapse chevron.
+            <FilesPanel
+              workspaceId={workspaceId}
+              onOpenFile={controller.openFile}
+              activeRelPath={editor.active?.relPath}
+              onPinFile={onPinFile}
+              onSetMainFile={onSetMainFile}
+              editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
+              onCollapse={() => leftColumn.onFilesOpenChange(false)}
+            />
+          ) : (
+            <CollapsibleSection
+              title={t("Files")}
+              open={false}
+              onOpenChange={leftColumn.onFilesOpenChange}
+              testId="central-files-section"
+              className="shrink-0"
+            >
+              {null}
+            </CollapsibleSection>
+          )}
+          {leftColumn.bottom}
+        </div>
+        {filesEdgeHandle}
+      </div>
+    ) : null
+
   const openFile = (relPath: string) => {
     setQuickOpen(false)
     controller.openFile(relPath)
   }
 
-  return (
+  const panel = (
     <section
       data-testid="central-panel"
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+      className={cn(
+        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+        !frameless && "rounded-lg border border-border",
+      )}
       onBlurCapture={editor.onBlurCapture}
     >
-      <div className="flex shrink-0 items-stretch border-border border-b bg-muted/30">
+      {/* Below 320px wide (the Analysis and Tasks Sessions card at its narrow widths) the
+          title is hidden and the New agent, New terminal and New markdown buttons are left
+          out (Add pane has them), so the toolbar fits down to 200px. */}
+      <div className="@container flex shrink-0 items-stretch border-border border-b bg-muted/30">
         {/* Files-panel toggle — upper left. */}
         <div className="flex shrink-0 items-center border-border border-r px-1">
           <button
@@ -490,16 +673,19 @@ export function CentralPanel({
         </div>
 
         {/* Tabs live in each split's own tab bar below; this row keeps the shared buttons. */}
-        <div className="min-w-0 flex-1" />
+        <div className="flex min-w-0 flex-1 items-center px-2 @max-[320px]:invisible @max-[320px]:px-0">
+          {toolbarTitle}
+        </div>
 
         {/* Pane creation, file run, and editor settings — intentionally grouped. */}
-        <div className="flex shrink-0 items-center gap-0.5 border-border border-s bg-muted/30 px-1">
+        <div className="flex shrink-0 items-center gap-0.5 px-1">
           <div ref={addMenuRef} className="relative">
             <button
               type="button"
               data-testid="central-add-menu"
               title={t("Add pane")}
               aria-label={t("Add pane")}
+              data-feature-help={t("Open an agent, a terminal, or a document in a new pane.")}
               aria-haspopup="menu"
               aria-expanded={addMenuOpen}
               onClick={() => setAddMenuOpen((open) => !open)}
@@ -552,7 +738,7 @@ export function CentralPanel({
             disabled={controller.pendingAgent}
             onClick={controller.openAgent}
             className={cn(
-              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden",
               controller.pendingAgent && "cursor-not-allowed opacity-50",
             )}
           >
@@ -567,7 +753,7 @@ export function CentralPanel({
             disabled={controller.pendingTerminal}
             onClick={controller.openTerminal}
             className={cn(
-              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden",
               controller.pendingTerminal && "cursor-not-allowed opacity-50",
             )}
           >
@@ -580,7 +766,7 @@ export function CentralPanel({
             aria-label={t("New markdown")}
             data-feature-help={t("Create an untitled Markdown file in the built-in editor")}
             onClick={controller.openNewMarkdown}
-            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden"
           >
             <FileText className="size-4" aria-hidden />
           </button>
@@ -621,6 +807,7 @@ export function CentralPanel({
               <PanelRight className="size-4" aria-hidden />
             </button>
           ) : null}
+          {toolbarEnd}
         </div>
       </div>
 
@@ -630,6 +817,16 @@ export function CentralPanel({
           className="shrink-0 cursor-text select-text border-border border-b bg-destructive/10 px-4 py-2 text-destructive text-xs"
         >
           {controller.launchError}
+        </p>
+      ) : null}
+
+      {controller.launchWarning ? (
+        <p
+          role="status"
+          data-testid="central-launch-warning"
+          className="shrink-0 cursor-text select-text border-border border-b bg-amber-500/10 px-4 py-2 text-amber-700 text-xs dark:text-amber-400"
+        >
+          {controller.launchWarning}
         </p>
       ) : null}
 
@@ -680,29 +877,15 @@ export function CentralPanel({
       <div className="flex min-h-0 flex-1">
         {/* Optional left Files column: the workspace tree beside the editor area
             instead of in the right sidebar. It has its own bounded scroll region. */}
-        {showFilesPanel ? (
+        {showFilesPanel && !leftColumn ? (
           <div className="relative flex min-h-0 shrink-0" style={{ width: filesWidth }}>
             <div
               data-testid="central-files-panel"
               className="flex min-h-0 w-full flex-col overflow-y-auto border-border border-r"
             >
-              <FilesPanel
-                workspaceId={workspaceId}
-                onOpenFile={controller.openFile}
-                activeRelPath={editor.active?.relPath}
-                onPinFile={onPinFile}
-                onSetMainFile={onSetMainFile}
-                editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
-              />
+              {filesPanel}
             </div>
-            <EdgeResizeHandle
-              side="right"
-              width={filesWidth}
-              onResize={setFilesWidth}
-              min={FILES_PANEL_MIN_WIDTH}
-              max={FILES_PANEL_MAX_WIDTH}
-              testId="central-files-edge-drag"
-            />
+            {filesEdgeHandle}
           </div>
         ) : null}
 
@@ -740,6 +923,12 @@ export function CentralPanel({
           onChoose={(choice) => void closeFilePrompt.choose(choice)}
         />
       ) : null}
+      {closeSessionPrompt.prompt ? (
+        <CloseSessionPrompt
+          prompt={closeSessionPrompt.prompt}
+          onChoose={closeSessionPrompt.choose}
+        />
+      ) : null}
       {quickOpen ? (
         <QuickOpen
           workspaceId={workspaceId}
@@ -761,6 +950,13 @@ export function CentralPanel({
         />
       ) : null}
     </section>
+  )
+  if (!leftColumn) return panel
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 gap-3">
+      {leftColumnCard}
+      {panel}
+    </div>
   )
 }
 
@@ -1000,6 +1196,7 @@ function FileSurface({
   editor,
   settings,
   onRunPython,
+  onOpenNotebook,
   client,
   workspaceId,
   onSaveUntitled,
@@ -1019,6 +1216,8 @@ function FileSurface({
   editor: EditorBuffersApi
   settings: EditorSettings
   onRunPython: () => void
+  /** Open this file in a notebook tab (shown for Jupyter and marimo notebooks). */
+  onOpenNotebook: () => void
   client: PiLabTrpcClient
   workspaceId: string
   onSaveUntitled?: (relPath: string) => void
@@ -1062,6 +1261,25 @@ function FileSurface({
             }}
           >
             {t("Reload from disk")}
+          </button>
+        </div>
+      ) : null}
+
+      {active && isNotebookSource(active.relPath, active.content) ? (
+        <div
+          data-testid="editor-notebook-bar"
+          className="flex shrink-0 items-center gap-2 border-border border-b px-4 py-1.5 text-muted-foreground text-xs"
+        >
+          <span className="min-w-0 flex-1 truncate">
+            {/\.ipynb$/i.test(active.relPath) ? t("Jupyter notebook") : t("marimo notebook")}
+          </span>
+          <button
+            type="button"
+            data-testid="editor-open-notebook"
+            onClick={onOpenNotebook}
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-foreground"
+          >
+            {t("Open notebook")}
           </button>
         </div>
       ) : null}
@@ -1114,6 +1332,12 @@ function FileSurface({
   )
 }
 
+/** A Jupyter notebook, or a Python file that is a marimo notebook. */
+function isNotebookSource(relPath: string, content: string): boolean {
+  if (/\.ipynb$/i.test(relPath)) return true
+  return isPythonPath(relPath) && isMarimoNotebookSource(content)
+}
+
 function isTexPath(relPath: string): boolean {
   return /\.tex$/i.test(relPath)
 }
@@ -1123,7 +1347,7 @@ function isMarkdownPath(relPath: string): boolean {
 }
 
 interface CentralTabProps {
-  kind: SessionPane["kind"] | "file"
+  kind: SessionPane["kind"] | "file" | "notebook"
   label: string
   active: boolean
   dirty?: boolean
@@ -1136,13 +1360,22 @@ interface CentralTabProps {
 /** One central-panel tab: kind icon, label, a dirty dot for files, close button. */
 function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: CentralTabProps) {
   const t = useTranslate()
-  const Icon = kind === "agent" ? Bot : kind === "terminal" ? TerminalSquare : FileText
+  const Icon =
+    kind === "agent"
+      ? Bot
+      : kind === "terminal"
+        ? TerminalSquare
+        : kind === "notebook"
+          ? NotebookPen
+          : FileText
   const description =
     kind === "agent"
       ? t("Switch to this coding agent session.")
       : kind === "terminal"
         ? t("Switch to this interactive shell terminal.")
-        : t("Switch to this open file in the built-in editor.")
+        : kind === "notebook"
+          ? t("Switch to this live notebook.")
+          : t("Switch to this open file in the built-in editor.")
   return (
     <div
       data-testid="central-tab"
@@ -1150,7 +1383,7 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
       data-active={active}
       data-dirty={dirty ?? false}
       className={cn(
-        "flex items-center gap-1.5 border-border border-r pr-1 pl-2.5 text-xs",
+        "flex h-full items-center gap-1.5 border-border border-r pr-1 pl-2.5 text-xs",
         active ? "bg-background text-foreground" : "text-muted-foreground hover:bg-accent/40",
       )}
     >
@@ -1161,7 +1394,7 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
         data-feature-label={label}
         data-feature-help={description}
         onClick={onSelect}
-        className="flex items-center gap-1.5 py-1.5"
+        className="flex items-center gap-1.5 py-1"
         title={label}
       >
         <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />
@@ -1183,7 +1416,9 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
             ? "Close this editor file tab"
             : kind === "agent"
               ? "Close this agent session tab"
-              : "Close this terminal session tab",
+              : kind === "notebook"
+                ? "Close this notebook tab and stop its server"
+                : "Close this terminal session tab",
         )}
         onClick={onClose}
         className="flex size-4 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent hover:text-foreground"

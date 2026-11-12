@@ -1,6 +1,6 @@
 import { DEFAULT_AGENT_ID } from "@pi-lab/shared/agents/catalog"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
 import { useTRPC } from "../trpc/react"
 
 /**
@@ -156,6 +156,30 @@ function useStringPref(key: string, fallback: string): [string, (next: string) =
   return [value, set]
 }
 
+/** The project last chosen in the LaTeX Editor tab ("" when none yet). */
+export const useLatexEditorProject = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.latexEditor.project", "")
+
+/** The project last chosen in the Tasks tab ("" for All projects, the default). */
+export const useTasksProject = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.tasks.project", "")
+
+/** The project last chosen in the Analysis tab ("" when none yet). */
+export const useAnalysisProject = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.analysis.project", "")
+
+/** Whether the LaTeX Editor shows its left column (Files and Outline); hidden by default. */
+export const useLatexEditorLeftColumn = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.latexEditor.leftColumn", false)
+
+/** Whether the LaTeX Editor's Outline section is expanded; open by default. */
+export const useLatexEditorOutlineOpen = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.latexEditor.outlineOpen", true)
+
+/** Whether the LaTeX Editor's Files section is expanded; open by default. */
+export const useLatexEditorFilesOpen = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.latexEditor.filesOpen", true)
+
 // --- Dashboard Digital Rain: global, renderer-only animation tuning --------
 // These settings deliberately don't belong to a project: every card uses the
 // same bounded rendering budget, while its character source remains project-owned.
@@ -192,8 +216,8 @@ export const readShowCodeChanges = (): boolean => readBoolean(SHOW_CODE_CHANGES_
 export const useShowCodeChanges = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_CODE_CHANGES_KEY, false)
 
-// --- Optional app sections: show/hide from Settings (all shown by default) ----
-// Cluster and Analysis are live surfaces: their pref gates the sidebar nav row
+// --- Optional app sections: show/hide from Settings ---------------------------
+// Cluster and Analysis are live surfaces, shown by default: their pref gates the sidebar nav row
 // and guards the route. Experiments and Research Heartbeat have no surface yet, so
 // Settings renders them as disabled, not-yet-available rows — their toggles are
 // no-ops today (they never write), and the pref simply stays at its default until
@@ -207,6 +231,74 @@ const SHOW_ANALYSIS_SECTION_KEY = "pi-lab.sections.showAnalysis"
 export const readShowAnalysisSection = (): boolean => readBoolean(SHOW_ANALYSIS_SECTION_KEY, true)
 export const useShowAnalysisSection = (): [boolean, (next: boolean) => void] =>
   useBooleanPref(SHOW_ANALYSIS_SECTION_KEY, true)
+
+// The Editor row is hidden by default; the sidebar also shows it while a file
+// outside every project is open in the Editor. The /quick-edit route stays open
+// either way (e.g. for "Open with PI Lab").
+const SHOW_EDITOR_SECTION_KEY = "pi-lab.sections.showEditor"
+export const useShowEditorSection = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_EDITOR_SECTION_KEY, false)
+
+// --- Sidebar view entries: shown or hidden -------------------------------------
+// One saved flag per sidebar view entry (by nav id). Cluster, Analysis and Editor
+// reuse the Sections flags above, so the Settings toggles and the sidebar's
+// right-click menu read and write the same values. Every entry is shown by
+// default except Editor.
+const NAV_ENTRY_SHOW_PREFS: Record<string, { key: string; fallback: boolean }> = {
+  tasks: { key: "pi-lab.sections.showTasks", fallback: true },
+  latex: { key: "pi-lab.sections.showLatex", fallback: true },
+  library: { key: "pi-lab.sections.showLibrary", fallback: true },
+  analysis: { key: SHOW_ANALYSIS_SECTION_KEY, fallback: true },
+  cluster: { key: SHOW_CLUSTER_SECTION_KEY, fallback: true },
+  skills: { key: "pi-lab.sections.showSkills", fallback: true },
+  workflows: { key: "pi-lab.sections.showRoutines", fallback: true },
+  editor: { key: SHOW_EDITOR_SECTION_KEY, fallback: false },
+}
+
+function navEntryShowPref(id: string): { key: string; fallback: boolean } {
+  const pref = NAV_ENTRY_SHOW_PREFS[id]
+  if (!pref) throw new Error(`Unknown sidebar view entry: ${id}`)
+  return pref
+}
+
+function subscribeNavEntries(callback: () => void): () => void {
+  const unsubscribes = Object.values(NAV_ENTRY_SHOW_PREFS).map(({ key }) =>
+    subscribePref(key, callback),
+  )
+  return () => {
+    for (const unsubscribe of unsubscribes) unsubscribe()
+  }
+}
+
+/** The shown ids as one string, so the snapshot is stable between writes. */
+function readShownNavEntriesKey(): string {
+  return Object.entries(NAV_ENTRY_SHOW_PREFS)
+    .filter(([, { key, fallback }]) => readBoolean(key, fallback))
+    .map(([id]) => id)
+    .join(",")
+}
+
+const DEFAULT_SHOWN_NAV_ENTRIES_KEY = Object.entries(NAV_ENTRY_SHOW_PREFS)
+  .filter(([, { fallback }]) => fallback)
+  .map(([id]) => id)
+  .join(",")
+
+/**
+ * Which sidebar view entries are shown (a set of nav ids) and a setter for one
+ * entry. Throws for an id that has no saved flag.
+ */
+export function useShownNavEntries(): [ReadonlySet<string>, (id: string, shown: boolean) => void] {
+  const key = useSyncExternalStore(
+    subscribeNavEntries,
+    readShownNavEntriesKey,
+    () => DEFAULT_SHOWN_NAV_ENTRIES_KEY,
+  )
+  const shown = useMemo(() => new Set(key === "" ? [] : key.split(",")), [key])
+  const set = useCallback((id: string, next: boolean) => {
+    writePref(navEntryShowPref(id).key, String(next))
+  }, [])
+  return [shown, set]
+}
 
 // --- Projects: one reveal state shared by Dashboard and sidebar ---------------
 // This controls only whether archived projects are temporarily visible; the
@@ -275,6 +367,35 @@ export const RIGHT_SIDEBAR_MAX_WIDTH = 560
 export const RIGHT_SIDEBAR_DEFAULT_WIDTH = 320
 export const useRightSidebarWidth = (): [number, (next: number) => void] =>
   useNumberPref(RIGHT_SIDEBAR_WIDTH_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH)
+
+// --- Analysis and Tasks right panel: whether it starts open (one value for both;
+// on by default; the top bar diary button turns it off when it hides the panel).
+// Also the width (px) of the LaTeX Editor documents column.
+export const useResearchDiaryOpen = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.researchDiary.open", true)
+export const RESEARCH_DIARY_MIN_WIDTH = 240
+export const RESEARCH_DIARY_MAX_WIDTH = 720
+export const RESEARCH_DIARY_DEFAULT_WIDTH = 340
+export const useResearchDiaryWidth = (): [number, (next: number) => void] =>
+  useNumberPref("pi-lab.researchDiary.width", RESEARCH_DIARY_DEFAULT_WIDTH)
+
+// --- Analysis and Tasks right panel width (px), resizable from its left line; one
+// value for both views. It starts at its minimum width; the key has a version so
+// widths saved before that default start at the minimum once ----------------------
+export const SCIENCE_PANEL_MIN_WIDTH = 235
+export const SCIENCE_PANEL_MAX_WIDTH = 800
+export const SCIENCE_PANEL_DEFAULT_WIDTH = SCIENCE_PANEL_MIN_WIDTH
+export const useSciencePanelWidth = (): [number, (next: number) => void] =>
+  useNumberPref("pi-lab.sciencePanel.width.v2", SCIENCE_PANEL_DEFAULT_WIDTH)
+
+// --- Analysis left file list width (px), resizable from its right line. It starts
+// at its minimum width; the key has a version so widths saved before that default
+// start at the minimum once -------------------------------------------------------
+export const ANALYSIS_FILES_MIN_WIDTH = 200
+export const ANALYSIS_FILES_MAX_WIDTH = 480
+export const ANALYSIS_FILES_DEFAULT_WIDTH = ANALYSIS_FILES_MIN_WIDTH
+export const useAnalysisFilesWidth = (): [number, (next: number) => void] =>
+  useNumberPref("pi-lab.analysis.filesWidth.v2", ANALYSIS_FILES_DEFAULT_WIDTH)
 
 // --- Project view: left Files panel width (px), continuously resizable ---------
 const FILES_PANEL_WIDTH_KEY = "pi-lab.projectView.filesPanelWidth"
@@ -393,9 +514,6 @@ function useOrderPref(key: string, fallback: string[]): [string[], (next: string
 /** Persisted drag order for the sidebar science/Workflows nav (by item id). */
 export const useNavOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.sidebar.navOrder", EMPTY_ORDER)
-/** Persisted drag order for the sidebar project list (by project id). */
-export const useProjectOrder = (): [string[], (next: string[]) => void] =>
-  useOrderPref("pi-lab.sidebar.projectOrder", EMPTY_ORDER)
 /** Persisted drag order for the cluster machine list (by machine id). */
 export const useClusterOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.cluster.machineOrder", EMPTY_ORDER)
@@ -404,6 +522,122 @@ const DEFAULT_RIGHT_SIDEBAR_TAB_ORDER: string[] = ["files", "research", "todos"]
 /** Persisted drag order for the project-view right-sidebar tabs (by tab id), shared by every project. */
 export const useRightSidebarTabOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.projectView.sidebarTabOrder", DEFAULT_RIGHT_SIDEBAR_TAB_ORDER)
+/** The views whose top bar has a "+" shortcut menu, each with its own saved list. */
+export type HeaderShortcutsView = "project" | "latex" | "tasks" | "analysis"
+/**
+ * Default top bar shortcuts per view, in top bar order. Built-in ids are the
+ * view's own buttons (Project view: `tasks`, `paper`, `auto-research`,
+ * `plan-research`, `project-status`, `research-diary`; LaTeX Editor: `update-paper`,
+ * `sync`, `research-diary`; Analysis: `analyze-experiments`, `report`,
+ * `fetch-experiments`, `research-diary`; Tasks: `research-diary`);
+ * added skills and routines are stored as `skill:<slug>` and
+ * `routine:<automation id>`.
+ */
+export const DEFAULT_HEADER_SHORTCUTS: Record<HeaderShortcutsView, string[]> = {
+  project: ["tasks", "paper", "auto-research", "plan-research", "project-status", "research-diary"],
+  latex: ["update-paper", "sync", "research-diary"],
+  tasks: ["research-diary"],
+  analysis: ["analyze-experiments", "report", "fetch-experiments", "research-diary"],
+}
+const HEADER_SHORTCUTS_KEYS: Record<HeaderShortcutsView, string> = {
+  project: "pi-lab.projectView.headerShortcuts",
+  latex: "pi-lab.latexEditor.headerShortcuts",
+  tasks: "pi-lab.tasks.headerShortcuts",
+  analysis: "pi-lab.analysis.headerShortcuts",
+}
+/**
+ * Built-in ids that became listable in each version of the saved lists. A list
+ * saved at an older `<key>Version` (none means "1") gets the ids of every later
+ * version added at their default positions; any write saves the current
+ * version, so a later removal stays.
+ */
+const HEADER_SHORTCUTS_ADDED: { version: number; ids: Record<HeaderShortcutsView, string[]> }[] = [
+  {
+    version: 2,
+    ids: {
+      project: [],
+      latex: ["sync"],
+      tasks: [],
+      analysis: ["report", "fetch-experiments"],
+    },
+  },
+  { version: 3, ids: { project: ["paper"], latex: [], tasks: [], analysis: [] } },
+  {
+    version: 4,
+    ids: { project: ["research-diary"], latex: [], tasks: [], analysis: ["research-diary"] },
+  },
+  {
+    version: 5,
+    ids: { project: [], latex: ["research-diary"], tasks: ["research-diary"], analysis: [] },
+  },
+]
+const HEADER_SHORTCUTS_VERSION = "5"
+/** Old built-in ids that a saved list may hold, with the id each one has now. */
+const RENAMED_HEADER_SHORTCUTS: Readonly<Record<string, string>> = { "html-report": "report" }
+/** `saved` with each id of `added` that it lacks put after its nearest default predecessor. */
+function withAddedShortcuts(saved: string[], defaults: string[], added: string[]): string[] {
+  const next = [...saved]
+  for (const id of added) {
+    if (next.includes(id)) continue
+    const before = defaults.slice(0, defaults.indexOf(id)).filter((entry) => next.includes(entry))
+    const anchor = before.at(-1)
+    next.splice(anchor === undefined ? 0 : next.indexOf(anchor) + 1, 0, id)
+  }
+  return next
+}
+/** One view's top bar shortcut buttons (by id, in order), shared by every project. */
+export const useHeaderShortcuts = (
+  view: HeaderShortcutsView,
+): [string[], (next: string[]) => void] => {
+  const key = HEADER_SHORTCUTS_KEYS[view]
+  const [saved, setSaved] = useOrderPref(key, DEFAULT_HEADER_SHORTCUTS[view])
+  const [version, setVersion] = useStringPref(`${key}Version`, "1")
+  const value = useMemo(
+    () =>
+      withAddedShortcuts(
+        saved.map((id) => RENAMED_HEADER_SHORTCUTS[id] ?? id),
+        DEFAULT_HEADER_SHORTCUTS[view],
+        HEADER_SHORTCUTS_ADDED.filter((entry) => entry.version > Number(version)).flatMap(
+          (entry) => entry.ids[view],
+        ),
+      ),
+    [saved, version, view],
+  )
+  const set = useCallback(
+    (next: string[]) => {
+      setVersion(HEADER_SHORTCUTS_VERSION)
+      setSaved(next)
+    },
+    [setSaved, setVersion],
+  )
+  return [value, set]
+}
+/** Where experiment runs are tracked. One kind for now: an EXPERIMENTS.md-style table file. */
+export type ExperimentRunsSource = "experiments-md"
+/** The default experiments file, relative to each project. */
+export const DEFAULT_EXPERIMENT_RUNS_FILE = "EXPERIMENTS.md"
+/** The experiment-runs source for the Project status card (app-wide). */
+export const useExperimentRunsSource = (): [
+  ExperimentRunsSource,
+  (next: ExperimentRunsSource) => void,
+] => {
+  const [stored, setStored] = useStringPref("pi-lab.experiments.runsSource", "experiments-md")
+  // EXPERIMENTS.md is the only kind so far; a stored value from a later build reads as it.
+  const value: ExperimentRunsSource = stored === "experiments-md" ? stored : "experiments-md"
+  return [value, setStored]
+}
+/** The experiments file path, relative to each project (app-wide; default EXPERIMENTS.md). */
+export const useExperimentRunsFile = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.experiments.runsFile", DEFAULT_EXPERIMENT_RUNS_FILE)
+/** The default Analysis results folder, relative to each project. */
+export const DEFAULT_RESULTS_FOLDER = "results"
+/**
+ * The default Analysis results folder, relative to each project (app-wide;
+ * default `results`). Each folder inside it is one experiment. A project can
+ * use its own folder instead (`metadata.resultsFolder`).
+ */
+export const useDefaultResultsFolder = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.experiments.resultsFolder", DEFAULT_RESULTS_FOLDER)
 
 // --- Global emoji-tag palette: shared across ALL projects ---------------------
 // The reusable set of emoji the "Edit project…" dialog offers as toggle chips.
@@ -492,4 +726,27 @@ export function resolveLaunchAgentId(defaultAgentId?: string): string {
     if (override && override.length > 0) return override
   }
   return defaultAgentId ?? readDefaultAgentId()
+}
+
+// --- New-session shortcut (⌘T): what it opens in the central panel ----------
+/** What the new-session shortcut opens. "chat-agent" is reserved until chat sessions exist. */
+export type NewSessionKind = "chat-agent" | "terminal-agent" | "terminal"
+const NEW_SESSION_KIND_KEY = "pi-lab.shortcuts.newSessionKind"
+/** Kinds the shortcut can open today; chat agents are not built yet. */
+const NEW_SESSION_KINDS = new Set<NewSessionKind>(["terminal-agent", "terminal"])
+const DEFAULT_NEW_SESSION_KIND: NewSessionKind = "terminal-agent"
+
+/** Parse a stored value; anything unknown or not yet available falls back to the default. */
+function toNewSessionKind(raw: string): NewSessionKind {
+  return NEW_SESSION_KINDS.has(raw as NewSessionKind)
+    ? (raw as NewSessionKind)
+    : DEFAULT_NEW_SESSION_KIND
+}
+
+/** Read at key time by the shortcut handler, so a change in Settings applies at once. */
+export const readNewSessionKind = (): NewSessionKind =>
+  toNewSessionKind(readString(NEW_SESSION_KIND_KEY, DEFAULT_NEW_SESSION_KIND))
+export const useNewSessionKind = (): [NewSessionKind, (next: NewSessionKind) => void] => {
+  const [stored, setStored] = useStringPref(NEW_SESSION_KIND_KEY, DEFAULT_NEW_SESSION_KIND)
+  return [toNewSessionKind(stored), setStored]
 }
