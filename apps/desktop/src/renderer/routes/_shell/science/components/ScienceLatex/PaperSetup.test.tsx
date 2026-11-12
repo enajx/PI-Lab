@@ -431,9 +431,9 @@ describe("PaperSetup (mocked server)", () => {
     })
     const overleaf = await screen.findByTestId("paper-setup-overleaf")
     const folder = screen.getByTestId("paper-setup-folder")
-    // No line under the card titles: the title says it.
+    // One short line at most: no line repeating the card title.
     expect(overleaf.textContent).not.toContain("Clone your Overleaf project")
-    expect(folder.textContent).not.toContain("Open a paper folder")
+    expect(folder.textContent).toContain("Open a paper folder.")
     expect(screen.getByTestId("paper-use-folder").textContent).toBe("Open folder…")
     await screen.findByTestId("paper-overleaf-token")
     expect(overleaf.textContent).not.toContain("keychain")
@@ -621,7 +621,7 @@ describe("PaperSetup (mocked server)", () => {
     })
     const card = await screen.findByTestId("paper-setup-create")
     expect(within(card).getByRole("heading", { level: 3 }).textContent).toBe("Start draft")
-    expect(card.textContent).not.toContain("Start a new paper")
+    expect(card.textContent).toContain("New paper from your LaTeX template.")
     expect(screen.getByTestId("paper-create").textContent).toBe("Start draft")
     expect(screen.getByTestId("paper-setup").textContent).not.toContain("Create paper")
   })

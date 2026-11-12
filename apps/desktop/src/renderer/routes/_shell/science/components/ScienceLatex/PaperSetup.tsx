@@ -382,7 +382,8 @@ export function PaperSetup({
                   <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Use an existing folder")}</h3>
                 </div>
-                <div className="mt-auto">
+                <div className="mt-auto flex flex-col items-start gap-3">
+                  <p className={cardTextClass}>{t("Open a paper folder.")}</p>
                   <Button
                     type="button"
                     size="sm"
@@ -429,7 +430,8 @@ export function PaperSetup({
                     {t("Change…")}
                   </button>
                 </div>
-                <div className="mt-auto">
+                <div className="mt-auto flex flex-col items-start gap-3">
+                  <p className={cardTextClass}>{t("New paper from your LaTeX template.")}</p>
                   <Button
                     type="button"
                     size="sm"

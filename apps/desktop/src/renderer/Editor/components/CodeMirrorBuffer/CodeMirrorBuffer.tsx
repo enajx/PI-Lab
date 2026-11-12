@@ -794,7 +794,12 @@ const editorTypographyExtension = EditorView.theme({
   },
   ".cm-lineNumbers .cm-gutterElement": {
     minWidth: "2ch",
-    padding: "0 6px 0 6px",
+    padding: "0 2px 0 6px",
+  },
+  // The fold arrows column right of the numbers: only as wide as its arrow.
+  ".cm-foldGutter .cm-gutterElement": {
+    width: "10px",
+    padding: "0 2px 0 0",
   },
 })
 
