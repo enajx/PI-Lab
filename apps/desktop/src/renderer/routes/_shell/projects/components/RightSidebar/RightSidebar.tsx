@@ -239,6 +239,19 @@ function buildPanelTabs(options: {
   )
 }
 
+/**
+ * A tab a view adds before the built-in tabs (Sessions in Analysis and Tasks). It is
+ * not reordered or saved in the tab order, and its content stays mounted (hidden)
+ * while another tab shows, so its sessions keep running. `label` and `description`
+ * are already translated.
+ */
+export interface RightSidebarLeadingTab {
+  id: string
+  label: string
+  description: string
+  content: ReactNode
+}
+
 /** A right-sidebar panel's identity, for the project palette's "switch panel" list. */
 export interface RightSidebarPanel {
   id: string
@@ -293,6 +306,7 @@ export function RightSidebar({
   gitAvailable,
   editorTabs,
   filesPanelOpen,
+  leadingTab,
 }: {
   projectId: string
   workspaceId: string
@@ -319,6 +333,8 @@ export function RightSidebar({
   editorTabs?: FileTreeEditorTabs
   /** Whether this project's left Files column is open; Files then leaves this sidebar. */
   filesPanelOpen: boolean
+  /** A tab shown first, whose content stays mounted; the project view leaves it out. */
+  leadingTab?: RightSidebarLeadingTab | null
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -420,10 +436,13 @@ export function RightSidebar({
   // The selected tab can vanish (Files toggled to the left, Code changes hidden, a
   // pinned panel unpinned) or be unset in controlled mode, so fall back to Files, or to
   // the first tab when Files is in the left column, whenever the stored id no longer resolves.
-  const active =
-    tabs.find((tab) => tab.id === activeId) ??
-    tabs.find((tab) => tab.id === FILES_TAB_ID) ??
-    tabs[0]
+  // While the leading tab is selected no built-in tab is.
+  const leadingActive = leadingTab != null && activeId === leadingTab.id
+  const active = leadingActive
+    ? null
+    : (tabs.find((tab) => tab.id === activeId) ??
+      tabs.find((tab) => tab.id === FILES_TAB_ID) ??
+      tabs[0])
 
   // Pinning is a no-op unless the route wired a handler; guard so the "+" picker and
   // the Files tree's right-click menu never silently drop a selection.
@@ -440,6 +459,26 @@ export function RightSidebar({
           aria-label={t("Project panels")}
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
         >
+          {leadingTab ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={leadingActive}
+              data-testid={`panel-tab-${leadingTab.id}`}
+              data-active={leadingActive}
+              data-feature-label={leadingTab.label}
+              data-feature-help={leadingTab.description}
+              onClick={() => selectTab(leadingTab.id)}
+              className={cn(
+                "min-w-0 flex-auto truncate rounded-md px-1.5 py-1 text-xs transition-colors",
+                leadingActive
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+              )}
+            >
+              {leadingTab.label}
+            </button>
+          ) : null}
           {tabs.map((tab) => {
             const selected = tab.id === active?.id
             const relPath = pinnedRelPath(tab.id)
@@ -539,6 +578,15 @@ export function RightSidebar({
           <p role="alert" className="px-4 py-2 text-destructive text-xs">
             {setMain.error.message}
           </p>
+        ) : null}
+        {leadingTab ? (
+          <div
+            data-testid={`panel-${leadingTab.id}`}
+            hidden={!leadingActive}
+            className={leadingActive ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}
+          >
+            {leadingTab.content}
+          </div>
         ) : null}
         {active?.render({
           projectId,

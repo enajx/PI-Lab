@@ -163,7 +163,7 @@ test("with the right panel open on Sessions and the research diary, the preview'
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
     .click()
-  // The right panel starts open with Sessions and the diary.
+  // The right panel starts open on the Diary tab.
   const diaryToggle = window.getByTestId("analysis-research-diary")
   await expect(diaryToggle).toHaveAttribute("aria-pressed", "true")
   await expect(window.getByTestId("science-sessions")).toHaveAttribute("data-collapsed", "false")
@@ -224,8 +224,12 @@ test("Open notebook runs a Jupyter server in a tab, and closing the tab stops it
   await notebookFrame()?.evaluate(() => {
     ;(window as unknown as { unsaved: string }).unsaved = "edit"
   })
-  await window.getByTestId("science-sessions-collapse").click()
+  await window.getByTestId("right-sidebar-collapse").click()
   await window.getByTestId("science-sessions-expand").click()
+  await expect(page.locator("#notebook-stand-in")).toBeVisible()
+  // Another tab of the panel hides the page without reloading it.
+  await window.getByTestId("panel-tab-diary").click()
+  await window.getByTestId("panel-tab-sessions").click()
   await expect(page.locator("#notebook-stand-in")).toBeVisible()
   expect(
     await notebookFrame()?.evaluate(() => (window as unknown as { unsaved?: string }).unsaved),

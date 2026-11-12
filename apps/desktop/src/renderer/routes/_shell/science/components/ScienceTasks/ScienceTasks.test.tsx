@@ -155,3 +155,18 @@ test("arriving with an agent to focus opens it as the active tab of the session 
   expect(tab.getAttribute("data-active")).toBe("true")
   expect(tab.textContent).toContain("Claude Code")
 })
+
+test("the right panel collapses to a thin bar card beside the board, and its button opens it again", async () => {
+  renderTasks("p1")
+  const aside = screen.getByTestId("science-sessions")
+  expect(aside.getAttribute("data-collapsed")).toBe("false")
+  expect(screen.queryByTestId("tasks-collapsed-bar")).toBeNull()
+  fireEvent.click(await within(aside).findByTestId("right-sidebar-collapse"))
+  expect(aside.getAttribute("data-collapsed")).toBe("true")
+  const bar = screen.getByTestId("tasks-collapsed-bar")
+  // The expand button is in the bar, not in the board's toolbar.
+  expect(screen.getByTestId("tasks-board").contains(bar)).toBe(false)
+  fireEvent.click(within(bar).getByTestId("science-sessions-expand"))
+  expect(aside.getAttribute("data-collapsed")).toBe("false")
+  expect(screen.queryByTestId("tasks-collapsed-bar")).toBeNull()
+})

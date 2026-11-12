@@ -394,34 +394,41 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
   const files = window.getByTestId("analysis-files-column")
   const panel = window.getByTestId("science-sessions")
   await expect(panel).toHaveAttribute("data-collapsed", "false")
-  await expect(panel.getByTestId("central-panel")).toBeVisible({ timeout: 30_000 })
+  const sidebar = panel.getByTestId("right-sidebar")
+  await expect(sidebar).toBeVisible({ timeout: 30_000 })
+  // The panel opens on the Diary tab, and both side columns start at their minimums.
+  await expect(panel.getByTestId("panel-tab-diary")).toHaveAttribute("aria-selected", "true")
   const filesBefore = await widthOf(files)
   const panelBefore = await widthOf(panel)
+  expect(filesBefore).toBe(200)
+  expect(panelBefore).toBe(235)
 
   await dragHandle(window, "analysis-files-edge-drag", 80)
   await expect.poll(() => widthOf(files)).toBe(filesBefore + 80)
   await dragHandle(window, "science-sessions-edge-drag", -100)
   await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
 
-  // Like the project view, the file list, the preview, Sessions and the diary are
-  // separate rounded cards 12px apart, with no line of their own outside a card; the
-  // Sessions title and collapse button sit in the Sessions card's toolbar row.
-  const box = await panel.getByTestId("central-panel").boundingBox()
+  // Like the project view, the file list, the preview and the right panel are
+  // separate rounded cards 12px apart, with no line of their own outside a card. The
+  // right panel is one card, the project view's right sidebar with a Sessions tab
+  // first; its tabs and its collapse button sit in its tab row.
+  const box = await sidebar.boundingBox()
   const aside = await panel.boundingBox()
   const filesBox = await files.boundingBox()
   const preview = await window.getByTestId("analysis-preview-column").boundingBox()
-  const header = await panel.getByTestId("science-sessions-header").boundingBox()
-  const collapse = await panel.getByTestId("science-sessions-collapse").boundingBox()
-  const diaryCard = await panel.getByTestId("science-panel-diary").boundingBox()
-  if (!box || !aside || !filesBox || !preview || !header || !collapse || !diaryCard) {
+  const sessionsTab = await panel.getByTestId("panel-tab-sessions").boundingBox()
+  const collapse = await panel.getByTestId("right-sidebar-collapse").boundingBox()
+  if (!box || !aside || !filesBox || !preview || !sessionsTab || !collapse) {
     throw new Error("No Analysis layout")
   }
   expect(Math.round(preview.x - (filesBox.x + filesBox.width))).toBe(12)
   expect(Math.round(aside.x - (preview.x + preview.width))).toBe(12)
   expect(Math.round(box.x)).toBe(Math.round(aside.x))
   expect(Math.round(box.x + box.width)).toBe(Math.round(aside.x + aside.width))
-  expect(Math.round(diaryCard.y - (box.y + box.height))).toBe(12)
-  for (const inner of [header, collapse]) {
+  expect(Math.round(box.y)).toBe(Math.round(aside.y))
+  expect(Math.round(box.y + box.height)).toBe(Math.round(aside.y + aside.height))
+  await expect(panel.getByTestId("right-sidebar")).toHaveCount(1)
+  for (const inner of [sessionsTab, collapse]) {
     expect(inner.y).toBeGreaterThanOrEqual(box.y)
     expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + 40)
     expect(inner.x + inner.width).toBeLessThanOrEqual(box.x + box.width)
@@ -434,11 +441,14 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
   for (const card of [
     files.locator(":scope > div.rounded-lg"),
     window.getByTestId("analysis-preview-column"),
-    panel.getByTestId("central-panel"),
-    panel.getByTestId("science-panel-diary").getByTestId("right-sidebar"),
+    sidebar,
   ]) {
     expect(await cardStyle(card)).toBe("8px 1px")
   }
+  // The Sessions tab shows the central panel inside the card, with no border of its own.
+  await panel.getByTestId("panel-tab-sessions").click()
+  await expect(panel.getByTestId("central-panel")).toBeVisible({ timeout: 30_000 })
+  expect(await cardStyle(panel.getByTestId("central-panel"))).toBe("0px 0px")
   for (const frame of [files, panel]) {
     expect(await frame.evaluate((element) => getComputedStyle(element).borderLeftWidth)).toBe("0px")
     expect(await frame.evaluate((element) => getComputedStyle(element).borderRightWidth)).toBe(
@@ -505,8 +515,7 @@ test("Analysis and Tasks cards fit narrow windows, collapsing the right panel wh
     window.getByTestId("analysis-files-column"),
     window.getByTestId("analysis-preview-column"),
     panel,
-    panel.getByTestId("central-panel"),
-    panel.getByTestId("science-panel-diary"),
+    panel.getByTestId("right-sidebar"),
   ]
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
@@ -514,7 +523,7 @@ test("Analysis and Tasks cards fit narrow windows, collapsing the right panel wh
 
   await setSize(1100, 800)
   await expect(panel).toHaveAttribute("data-collapsed", "false")
-  await expect(panel.getByTestId("central-panel")).toBeVisible({ timeout: 30_000 })
+  await expect(panel.getByTestId("right-sidebar")).toBeVisible({ timeout: 30_000 })
   await expectCardsInside(window, "science-analysis", analysisCards)
 
   await setSize(900, 700)
@@ -525,7 +534,7 @@ test("Analysis and Tasks cards fit narrow windows, collapsing the right panel wh
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await expectCardsInside(window, "science-analysis", analysisCards)
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-900-expanded.png") })
-  await panel.getByTestId("science-sessions-collapse").click()
+  await panel.getByTestId("right-sidebar-collapse").click()
   await expect(panel).toHaveAttribute("data-collapsed", "true")
   await window.getByTestId("science-sessions-expand").click()
   await setSize(1400, 900)

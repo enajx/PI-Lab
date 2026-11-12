@@ -219,7 +219,8 @@ test("⌘T in Tasks asks for a project, then opens a session in the Tasks sessio
 
   await window.getByTestId("tasks-project-select").click()
   await window.getByRole("listbox", { name: "Project filter" }).getByRole("option").nth(1).click()
-  await window.getByTestId("science-sessions-collapse").click()
+  // With a project the panel is the project view's right sidebar, with its own collapse button.
+  await panel.getByTestId("right-sidebar-collapse").click()
   await blurFocus(window)
   await window.keyboard.press("ControlOrMeta+t")
   // The robot button's own result: the remembered agent, or the chooser when it is not detected.
@@ -246,12 +247,14 @@ test("⌘T in Analysis opens a terminal in the session panel, kept after leaving
   const panel = window.getByTestId("science-sessions")
   // The panel starts open (the diary is on by default); collapse it first.
   await expect(panel).toHaveAttribute("data-collapsed", "false")
-  await panel.getByTestId("science-sessions-collapse").click()
+  await panel.getByTestId("right-sidebar-collapse").click()
   await expect(panel).toHaveAttribute("data-collapsed", "true")
 
   await blurFocus(window)
   await window.keyboard.press("ControlOrMeta+t")
   await expect(panel).toHaveAttribute("data-collapsed", "false", { timeout: 30_000 })
+  // The new session shows the Sessions tab.
+  await expect(panel.getByTestId("panel-tab-sessions")).toHaveAttribute("aria-selected", "true")
   await expect(panel.locator('[data-testid="central-tab"][data-tab-kind="terminal"]')).toHaveCount(
     1,
   )
@@ -279,8 +282,9 @@ test("an Analysis agent shows in the Project Agents box and opens back in Analys
   await analysisNav.click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
   const panel = window.getByTestId("science-sessions")
-  // The panel starts open (the diary is on by default).
+  // The panel starts open on the Diary tab (the diary is on by default).
   await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await panel.getByTestId("panel-tab-sessions").click()
   await panel.getByTestId("central-add-menu").click()
   await window.getByTestId("central-add-agent").click()
   const chooser = window.getByTestId("new-agent-dialog")

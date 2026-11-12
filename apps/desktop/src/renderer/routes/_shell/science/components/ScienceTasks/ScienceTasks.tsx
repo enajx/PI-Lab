@@ -14,8 +14,8 @@ import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
+  SciencePanelCollapsedBar,
   SciencePanelDiaryButton,
-  SciencePanelExpandButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
   useFocusSessionRequest,
@@ -88,7 +88,7 @@ export function ScienceTasks({
   useFocusSessionRequest(initialProjectId, focusSession, setSessionRequest)
   // The board and the right panel fit the row's width (no horizontal scroll).
   const row = useSciencePanelRow(
-    useSciencePanel(),
+    useSciencePanel("tasks"),
     useSciencePanelWidth(),
     PANEL_DRAWN_MIN_WIDTH,
     null,
@@ -321,11 +321,12 @@ export function ScienceTasks({
                 onDelete={remove}
                 onMove={move}
                 onRun={run}
-                toolbarEnd={<SciencePanelExpandButton panel={panel} />}
+                toolbarEnd={null}
               />
             </>
           )}
         </div>
+        <SciencePanelCollapsedBar testId="tasks-collapsed-bar" panel={panel} />
         <ScienceSessionPanel
           view="tasks"
           panel={panel}

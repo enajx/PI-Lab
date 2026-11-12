@@ -324,8 +324,15 @@ describe("ScienceAnalysis", () => {
     })
     const missing = await screen.findByTestId("analysis-results-missing")
     expect(missing.textContent).toContain("No results/ folder in this project")
+    expect(missing.textContent).toContain("Use Change… above")
+    // The notice is in the preview card; the file list card keeps the folder field.
+    expect(screen.getByTestId("analysis-preview-column").contains(missing)).toBe(true)
+    expect(screen.queryByTestId("analysis-no-selection")).toBeNull()
+    const files = screen.getByTestId("analysis-files-column")
+    expect(files.contains(missing)).toBe(false)
     expect(screen.queryByTestId("science-analysis-empty")).toBeNull()
-    expect(screen.getByTestId("analysis-results-folder-change")).toBeTruthy()
+    expect(within(files).getByTestId("analysis-results-folder-change")).toBeTruthy()
+    expect(within(files).getByTestId("analysis-search")).toBeTruthy()
   })
 
   test("Change… saves a picked folder for the project, and Reset to default clears it", async () => {

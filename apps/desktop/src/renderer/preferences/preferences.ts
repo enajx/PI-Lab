@@ -368,36 +368,34 @@ export const RIGHT_SIDEBAR_DEFAULT_WIDTH = 320
 export const useRightSidebarWidth = (): [number, (next: number) => void] =>
   useNumberPref(RIGHT_SIDEBAR_WIDTH_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH)
 
-// --- Project documents (the project view's right sidebar) in the Analysis and Tasks
-// right panel: on or off (one value for both; on by default, so the panels start
-// open with them), and their share of the panel height (0 to 1, below Sessions).
+// --- Analysis and Tasks right panel: whether it starts open (one value for both;
+// on by default; the top bar diary button turns it off when it hides the panel).
 // Also the width (px) of the LaTeX Editor documents column.
 export const useResearchDiaryOpen = (): [boolean, (next: boolean) => void] =>
   useBooleanPref("pi-lab.researchDiary.open", true)
-export const RESEARCH_DIARY_MIN_SHARE = 0.15
-export const RESEARCH_DIARY_MAX_SHARE = 0.85
-export const useResearchDiaryShare = (): [number, (next: number) => void] =>
-  useNumberPref("pi-lab.researchDiary.heightShare", 0.5)
 export const RESEARCH_DIARY_MIN_WIDTH = 240
 export const RESEARCH_DIARY_MAX_WIDTH = 720
 export const RESEARCH_DIARY_DEFAULT_WIDTH = 340
 export const useResearchDiaryWidth = (): [number, (next: number) => void] =>
   useNumberPref("pi-lab.researchDiary.width", RESEARCH_DIARY_DEFAULT_WIDTH)
 
-// --- Analysis and Tasks right panel (Sessions and diary) width (px), resizable
-// from its left line; one value for both views. It starts at its minimum width -----
+// --- Analysis and Tasks right panel width (px), resizable from its left line; one
+// value for both views. It starts at its minimum width; the key has a version so
+// widths saved before that default start at the minimum once ----------------------
 export const SCIENCE_PANEL_MIN_WIDTH = 235
 export const SCIENCE_PANEL_MAX_WIDTH = 800
 export const SCIENCE_PANEL_DEFAULT_WIDTH = SCIENCE_PANEL_MIN_WIDTH
 export const useSciencePanelWidth = (): [number, (next: number) => void] =>
-  useNumberPref("pi-lab.sciencePanel.width", SCIENCE_PANEL_DEFAULT_WIDTH)
+  useNumberPref("pi-lab.sciencePanel.width.v2", SCIENCE_PANEL_DEFAULT_WIDTH)
 
-// --- Analysis left file list width (px), resizable from its right line --------
-export const ANALYSIS_FILES_MIN_WIDTH = 240
+// --- Analysis left file list width (px), resizable from its right line. It starts
+// at its minimum width; the key has a version so widths saved before that default
+// start at the minimum once -------------------------------------------------------
+export const ANALYSIS_FILES_MIN_WIDTH = 200
 export const ANALYSIS_FILES_MAX_WIDTH = 480
-export const ANALYSIS_FILES_DEFAULT_WIDTH = 320
+export const ANALYSIS_FILES_DEFAULT_WIDTH = ANALYSIS_FILES_MIN_WIDTH
 export const useAnalysisFilesWidth = (): [number, (next: number) => void] =>
-  useNumberPref("pi-lab.analysis.filesWidth", ANALYSIS_FILES_DEFAULT_WIDTH)
+  useNumberPref("pi-lab.analysis.filesWidth.v2", ANALYSIS_FILES_DEFAULT_WIDTH)
 
 // --- Project view: left Files panel width (px), continuously resizable ---------
 const FILES_PANEL_WIDTH_KEY = "pi-lab.projectView.filesPanelWidth"

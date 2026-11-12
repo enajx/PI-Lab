@@ -205,37 +205,24 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await expect(diaryButton).toHaveAttribute("aria-pressed", "true")
   await expect(diary.locator(".cm-content")).toContainText(today(), { timeout: 30_000 })
-  const sessionsBox = await panel.getByTestId("science-panel-sessions").boundingBox()
-  const diaryBox = await panel.getByTestId("science-panel-diary").boundingBox()
-  expect(sessionsBox && diaryBox && sessionsBox.y < diaryBox.y).toBe(true)
+  // One card: the project view's right sidebar with a Sessions tab first, on the Diary tab.
+  await expect(panel.getByTestId("right-sidebar")).toHaveCount(1)
+  await expect(panel.getByRole("tab").first()).toHaveAttribute("data-testid", "panel-tab-sessions")
+  await expect(panel.getByTestId("panel-tab-diary")).toHaveAttribute("aria-selected", "true")
   await window.screenshot({ path: join(SCREENS, "analysis-right-panel.png") })
 
-  // Dragging the divider up grows the diary, and the share is saved.
-  const divider = panel.getByTestId("science-panel-divider")
-  const dividerBox = await divider.boundingBox()
-  if (!dividerBox || !diaryBox) throw new Error("No divider or diary box")
-  await window.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + 2)
-  await window.mouse.down()
-  await window.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y - 100, { steps: 5 })
-  await window.mouse.up()
-  const grown = await panel.getByTestId("science-panel-diary").boundingBox()
-  expect((grown?.height ?? 0) - diaryBox.height).toBeGreaterThan(60)
-  const share = await window.evaluate(() =>
-    Number(window.localStorage.getItem("pi-lab.researchDiary.heightShare")),
-  )
-  expect(share).toBeGreaterThan(0.55)
-
-  // The button hides and shows the diary part; the panel stays open.
-  await diaryButton.click()
-  await expect(window.getByTestId("research-diary-panel")).toHaveCount(0)
-  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  // The Sessions tab shows the sessions; the diary button shows the Diary tab again.
+  await panel.getByTestId("panel-tab-sessions").click()
+  await expect(panel.getByTestId("central-panel")).toBeVisible()
+  await expect(diaryButton).toHaveAttribute("aria-pressed", "false")
   await diaryButton.click()
   await expect(diary).toBeVisible()
+  await expect(diaryButton).toHaveAttribute("aria-pressed", "true")
 
-  // Collapsing the panel hides both parts.
-  await panel.getByTestId("science-sessions-collapse").click()
+  // The panel's one collapse button (the sidebar's own) collapses it to a thin bar.
+  await panel.getByTestId("right-sidebar-collapse").click()
   await expect(panel).toHaveAttribute("data-collapsed", "true")
-  await expect(window.getByTestId("research-diary-panel")).toHaveCount(0)
+  await expect(window.getByTestId("analysis-collapsed-bar")).toBeVisible()
   await expect(diaryButton).toHaveAttribute("aria-pressed", "false")
 
   // A collapsed panel does not turn the diary off: the next visit opens with it.
@@ -247,6 +234,12 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   await expect(window.getByTestId("science-tasks")).toBeVisible()
   await analysisNav.click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expect(diary).toBeVisible()
+
+  // While the Diary tab shows, the button hides the panel.
+  await diaryButton.click()
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await diaryButton.click()
   await expect(diary).toBeVisible()
 
   // Hiding the diary with the button is saved: the next visit starts collapsed.

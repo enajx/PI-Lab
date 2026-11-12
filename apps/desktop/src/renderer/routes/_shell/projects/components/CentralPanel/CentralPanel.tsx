@@ -114,14 +114,20 @@ interface CentralPanelProps {
    */
   paperFolderItem?: ReactNode
   /**
-   * The panel is kept mounted but not shown (a collapsed Sessions panel with
-   * notebook tabs, whose pages must stay loaded). Its keyboard shortcuts are off.
+   * The panel is kept mounted but not shown (the Analysis and Tasks Sessions tab
+   * while another tab shows or the panel is collapsed, so notebook pages and
+   * terminals stay loaded). Its keyboard shortcuts are off.
    */
   hidden?: boolean
   /** Shown at the start of the toolbar's free middle space (the Sessions panel's title). */
   toolbarTitle?: ReactNode
   /** Shown at the end of the toolbar (the Sessions panel's collapse button). */
   toolbarEnd?: ReactNode
+  /**
+   * Drawn inside another card (the Sessions tab of the Analysis and Tasks right
+   * panel): no rounded border of its own.
+   */
+  frameless?: boolean
 }
 
 /**
@@ -156,6 +162,7 @@ export function CentralPanel({
   hidden,
   toolbarTitle,
   toolbarEnd,
+  frameless,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -630,7 +637,10 @@ export function CentralPanel({
   const panel = (
     <section
       data-testid="central-panel"
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+      className={cn(
+        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+        !frameless && "rounded-lg border border-border",
+      )}
       onBlurCapture={editor.onBlurCapture}
     >
       {/* Below 320px wide (the Analysis and Tasks Sessions card at its narrow widths) the

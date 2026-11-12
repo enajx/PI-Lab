@@ -37,8 +37,8 @@ import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
+  SciencePanelCollapsedBar,
   SciencePanelDiaryButton,
-  SciencePanelExpandButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
   useFocusSessionRequest,
@@ -107,7 +107,7 @@ export function ScienceAnalysis({
   const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
   const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
-  const userPanel = useSciencePanel()
+  const userPanel = useSciencePanel("analysis")
   const [savedFilesWidth, persistFilesWidth] = useAnalysisFilesWidth()
   const [filesWidth, setFilesWidth] = useState(savedFilesWidth)
   useEffect(() => setFilesWidth(savedFilesWidth), [savedFilesWidth])
@@ -580,9 +580,8 @@ export function ScienceAnalysis({
                       >
                         {t("Could not read project data files:")} {listing.error.message}
                       </p>
-                    ) : resultsMissing && allFiles.length === 0 ? (
-                      <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
-                    ) : allFiles.length === 0 && !listing.isLoading ? (
+                    ) : resultsMissing && allFiles.length === 0 ? null : allFiles.length === 0 &&
+                      !listing.isLoading ? (
                       <EmptyState />
                     ) : (
                       <div className="flex flex-col gap-3 p-3">
@@ -682,6 +681,8 @@ export function ScienceAnalysis({
                     }
                     headerEnd={null}
                   />
+                ) : resultsMissing && allFiles.length === 0 && !listing.isError ? (
+                  <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
                 ) : (
                   <div className="relative h-full min-h-0">
                     <NoSelectionState />
@@ -691,15 +692,7 @@ export function ScienceAnalysis({
             </div>
           )}
         </div>
-        {/* Collapsed right panel: a thin bar card of its own holding the expand button. */}
-        {panel.collapsed ? (
-          <div
-            data-testid="analysis-collapsed-bar"
-            className="flex w-9 shrink-0 flex-col items-center rounded-lg border border-border py-1"
-          >
-            <SciencePanelExpandButton panel={panel} />
-          </div>
-        ) : null}
+        <SciencePanelCollapsedBar testId="analysis-collapsed-bar" panel={panel} />
         <ScienceSessionPanel
           view="analysis"
           project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
@@ -1011,7 +1004,10 @@ function ResultsFolderField({
   )
 }
 
-/** Shown when the results folder does not exist in the selected project. */
+/**
+ * Shown in the preview card when the results folder does not exist in the selected
+ * project and nothing else is listed; the file list card keeps the folder field.
+ */
 function ResultsMissingState({ resultsFolder }: { resultsFolder: string }) {
   const t = useTranslate()
   return (

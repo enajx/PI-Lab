@@ -22,8 +22,8 @@ vi.mock("../../../../../Terminal", () => ({
 
 const {
   ScienceSessionPanel,
+  SciencePanelCollapsedBar,
   SciencePanelDiaryButton,
-  SciencePanelExpandButton,
   useSciencePanel,
   useSciencePanelRow,
 } = await import("./ScienceSessionPanel")
@@ -78,7 +78,7 @@ function Harness({
   view: "tasks" | "analysis"
   project: { id: string; name: string } | null
 }) {
-  const row = useSciencePanelRow(useSciencePanel(), useSciencePanelWidth(), 300, null, {
+  const row = useSciencePanelRow(useSciencePanel(view), useSciencePanelWidth(), 300, null, {
     preferred: 320,
     min: 320,
   })
@@ -89,7 +89,7 @@ function Harness({
         panel={row.panel}
         disabled={project === null}
       />
-      <SciencePanelExpandButton panel={row.panel} />
+      <SciencePanelCollapsedBar testId="collapsed-bar" panel={row.panel} />
       <ScienceSessionPanel
         view={view}
         project={project}
@@ -118,18 +118,22 @@ function renderPanel(
 
 /** Wait until the agent button can act, so ⌘T is not ignored as "pending". */
 async function agentReady(): Promise<void> {
-  fireEvent.click(await screen.findByTestId("science-sessions-expand"))
   await waitFor(() =>
     expect(screen.getByTestId("central-new-agent").hasAttribute("disabled")).toBe(false),
   )
-  fireEvent.click(screen.getByTestId("science-sessions-collapse"))
+}
+
+/** Whether the right sidebar tab `id` is the selected one. */
+function tabSelected(id: string): string | null {
+  return screen.getByTestId(`panel-tab-${id}`).getAttribute("aria-selected")
 }
 
 describe("ScienceSessionPanel", () => {
-  test("starts collapsed, and ⌘T opens an agent in the project and shows the panel", async () => {
+  test("starts collapsed, and ⌘T opens an agent in the project and shows the Sessions tab", async () => {
     renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
     await agentReady()
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("true")
+    expect(screen.getByTestId("collapsed-bar")).toBeTruthy()
 
     fireEvent.keyDown(window, { key: "t", metaKey: true })
 
@@ -139,6 +143,8 @@ describe("ScienceSessionPanel", () => {
     ])
     expect(ensured).toContain("p-1")
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
+    expect(screen.queryByTestId("collapsed-bar")).toBeNull()
+    expect(tabSelected("sessions")).toBe("true")
   })
 
   test("keeps its tabs when the view is left and opened again", async () => {
@@ -162,6 +168,8 @@ describe("ScienceSessionPanel", () => {
     const terminal = await screen.findByTestId("terminal")
     expect(terminal.getAttribute("data-session-id")).toBe("agent-1")
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
+    // The last tab of the view is kept.
+    expect(tabSelected("sessions")).toBe("true")
   })
 
   test("with no project, ⌘T and the panel buttons ask to pick a project", async () => {
@@ -183,80 +191,90 @@ describe("ScienceSessionPanel", () => {
     expect(started).toEqual([])
   })
 
-  test("with the diary on (the default), the panel starts open with the diary below Sessions", async () => {
+  test("with the diary on (the default), the panel starts open on the Diary tab", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
     renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
     expect(screen.getByTestId("diary-button").getAttribute("aria-pressed")).toBe("true")
     expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
+    expect(tabSelected("diary")).toBe("true")
   })
 
-  test("the diary button opens the panel with the diary below Sessions, then hides and shows the diary; collapsing hides both", async () => {
-    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+  test("the diary button opens the panel on the Diary tab, and while it shows hides the panel", async () => {
+    // A project with no tabs saved by the tests above (restored tabs open the panel).
+    renderPanel("analysis", { id: "p-2", name: "Project 2" }, handlers())
     const aside = screen.getByTestId("science-sessions")
     const button = screen.getByTestId("diary-button")
     expect(aside.getAttribute("data-collapsed")).toBe("true")
-    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
 
     fireEvent.click(button)
     expect(aside.getAttribute("data-collapsed")).toBe("false")
     expect(button.getAttribute("aria-pressed")).toBe("true")
     const diary = await screen.findByTestId("research-diary-panel")
     expect(aside.contains(diary)).toBe(true)
-    expect(screen.getByTestId("science-panel-divider")).toBeTruthy()
-    // Sessions come first, the diary below the divider.
-    const sessions = screen.getByTestId("science-panel-sessions")
-    expect(sessions.compareDocumentPosition(diary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // One box: a single right sidebar in the panel.
+    expect(within(aside).getAllByTestId("right-sidebar")).toHaveLength(1)
 
     fireEvent.click(button)
-    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
-    expect(screen.queryByTestId("science-panel-divider")).toBeNull()
-    expect(aside.getAttribute("data-collapsed")).toBe("false")
-    expect(button.getAttribute("aria-pressed")).toBe("false")
-
-    fireEvent.click(button)
-    expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
-    fireEvent.click(screen.getByTestId("science-sessions-collapse"))
     expect(aside.getAttribute("data-collapsed")).toBe("true")
-    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
     expect(button.getAttribute("aria-pressed")).toBe("false")
 
-    // Opening the panel again shows the diary, still on.
-    fireEvent.click(screen.getByTestId("science-sessions-expand"))
-    expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
+    fireEvent.click(button)
+    expect(aside.getAttribute("data-collapsed")).toBe("false")
+    expect(tabSelected("diary")).toBe("true")
   })
 
-  test("the documents card is the project view's right sidebar: its tabs, no collapse button of its own, and the pins the project view saved", async () => {
+  test("the panel is the project view's right sidebar with Sessions first, one collapse button, and the pins the project view saved", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
     writeProjectPinnedPanels("p-1", ["notes/plan.md"])
     renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
-    const card = screen.getByTestId("science-panel-diary")
-    const sidebar = await within(card).findByTestId("right-sidebar")
+    const aside = screen.getByTestId("science-sessions")
+    const sidebar = await within(aside).findByTestId("right-sidebar")
+    const tabs = within(sidebar).getAllByRole("tab")
+    expect(tabs[0]?.getAttribute("data-testid")).toBe("panel-tab-sessions")
     expect(within(sidebar).getByTestId("panel-tab-research")).toBeTruthy()
     expect(within(sidebar).getByTestId("panel-tab-todos")).toBeTruthy()
     expect(within(sidebar).getByTestId("panel-tab-files")).toBeTruthy()
     expect(within(sidebar).getByTestId("panel-tab-pinned:notes/plan.md")).toBeTruthy()
-    expect(within(sidebar).queryByTestId("right-sidebar-collapse")).toBeNull()
-    expect(within(sidebar).getByTestId("panel-tab-diary").getAttribute("aria-selected")).toBe(
-      "true",
-    )
+    expect(tabSelected("diary")).toBe("true")
 
-    // On another tab the diary button shows the Diary tab again, then hides the documents.
+    // On another tab the diary button shows the Diary tab again.
     const button = screen.getByTestId("diary-button")
     fireEvent.click(within(sidebar).getByTestId("panel-tab-todos"))
     expect(button.getAttribute("aria-pressed")).toBe("false")
     fireEvent.click(button)
-    expect(within(sidebar).getByTestId("panel-tab-diary").getAttribute("aria-selected")).toBe(
-      "true",
-    )
+    expect(tabSelected("diary")).toBe("true")
     expect(button.getAttribute("aria-pressed")).toBe("true")
-    fireEvent.click(button)
-    expect(screen.queryByTestId("science-panel-diary")).toBeNull()
 
     // Unpinning here changes the project's own list.
-    fireEvent.click(button)
     fireEvent.click(await screen.findByTestId("right-sidebar-unpin:notes/plan.md"))
     expect(readProjectPinnedPanels("p-1")).toEqual([])
+
+    // The sidebar's collapse button collapses the whole panel.
+    fireEvent.click(within(sidebar).getByTestId("right-sidebar-collapse"))
+    expect(aside.getAttribute("data-collapsed")).toBe("true")
+    expect(screen.getByTestId("collapsed-bar")).toBeTruthy()
+  })
+
+  test("sessions stay mounted while another tab shows, and a new session shows the Sessions tab", async () => {
+    window.localStorage.removeItem("pi-lab.researchDiary.open")
+    renderPanel("analysis", { id: "p-3", name: "Project 3" }, handlers())
+    await agentReady()
+    expect(tabSelected("diary")).toBe("true")
+    const sessions = screen.getByTestId("panel-sessions")
+    expect(sessions.hidden).toBe(true)
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true })
+    const terminal = await screen.findByTestId("terminal")
+    expect(tabSelected("sessions")).toBe("true")
+    expect(sessions.hidden).toBe(false)
+
+    fireEvent.click(screen.getByTestId("panel-tab-diary"))
+    expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
+    expect(sessions.hidden).toBe(true)
+    // The same terminal node: hidden, not unmounted.
+    expect(screen.getByTestId("terminal")).toBe(terminal)
+    expect(terminal.isConnected).toBe(true)
   })
 
   test("with no project, the diary button is disabled and the panel shows only Sessions", async () => {
@@ -264,5 +282,6 @@ describe("ScienceSessionPanel", () => {
     expect(screen.getByTestId("diary-button").hasAttribute("disabled")).toBe(true)
     fireEvent.click(screen.getByTestId("science-sessions-expand"))
     expect(screen.queryByTestId("research-diary-panel")).toBeNull()
+    expect(screen.queryByTestId("right-sidebar")).toBeNull()
   })
 })

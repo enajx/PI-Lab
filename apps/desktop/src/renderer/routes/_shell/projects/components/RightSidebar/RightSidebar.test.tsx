@@ -452,6 +452,55 @@ describe("RightSidebar", () => {
     expect(onCollapse).toHaveBeenCalledTimes(1)
   })
 
+  test("a leading tab shows first, and its content stays mounted while another tab shows", () => {
+    function LeadingHarness() {
+      const [activeId, setActiveId] = useState("sessions")
+      return (
+        <RightSidebar
+          projectId="p1"
+          workspaceId="ws-1"
+          onOpenFile={vi.fn()}
+          onCollapse={null}
+          filesPanelOpen={false}
+          activeId={activeId}
+          onActiveIdChange={setActiveId}
+          leadingTab={{
+            id: "sessions",
+            label: "Sessions",
+            description: "Agent and terminal sessions.",
+            content: <div data-testid="leading-content" />,
+          }}
+        />
+      )
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = createFakeTrpcClient({
+      "projects.get": () => ({ mainRelPath: null, taskRelPath: null }),
+      "files.read": () => ({ status: "text", exists: true, content: "# Research\n" }),
+      "files.tree": () => [],
+    })
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        <LeadingHarness />
+      </AppProviders>,
+    )
+    expect(tabOrder()[0]).toBe("sessions")
+    expect(screen.getByTestId("panel-tab-sessions").getAttribute("aria-selected")).toBe("true")
+    // No built-in tab is selected or drawn while the leading tab shows.
+    expect(screen.getByTestId("panel-tab-files").getAttribute("aria-selected")).toBe("false")
+    const content = screen.getByTestId("leading-content")
+    expect(content.closest("[hidden]")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("panel-tab-research"))
+    expect(screen.getByTestId("panel-tab-sessions").getAttribute("aria-selected")).toBe("false")
+    expect(screen.getByTestId("leading-content")).toBe(content)
+    expect(content.closest("[hidden]")).not.toBeNull()
+
+    fireEvent.click(screen.getByTestId("panel-tab-sessions"))
+    expect(screen.getByTestId("leading-content")).toBe(content)
+    expect(content.closest("[hidden]")).toBeNull()
+  })
+
   test("collapsing hides the sidebar and the expand affordance brings it back", () => {
     renderCollapsible()
     expect(screen.getByTestId("right-sidebar")).toBeTruthy()

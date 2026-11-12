@@ -6,7 +6,10 @@ import {
   readProjectPinnedPanels,
   writeProjectPinnedPanels,
 } from "../../../projects/-workspaceState"
-import { RightSidebar } from "../../../projects/components/RightSidebar"
+import {
+  RightSidebar,
+  type RightSidebarLeadingTab,
+} from "../../../projects/components/RightSidebar"
 
 /**
  * The project's documents in a science view's right panel: the project view's right
@@ -14,7 +17,8 @@ import { RightSidebar } from "../../../projects/components/RightSidebar"
  * pin button), in the project's main folder. The pinned panels are the project's own
  * list, shared with the project view. `onCollapse` is the sidebar's collapse button,
  * or null for none (the panel has its collapse button elsewhere). Files the Files tab
- * opens go to `onOpenFile`. The parent keys it by project.
+ * opens go to `onOpenFile`. `leadingTab` is a tab shown first (the Sessions tab of
+ * Analysis and Tasks), or null. The parent keys it by project.
  */
 export function ProjectDocumentsCard({
   projectId,
@@ -22,12 +26,14 @@ export function ProjectDocumentsCard({
   onActiveIdChange,
   onCollapse,
   onOpenFile,
+  leadingTab,
 }: {
   projectId: string
   activeId: string
   onActiveIdChange: (id: string) => void
   onCollapse: (() => void) | null
   onOpenFile: (relPath: string) => void
+  leadingTab: RightSidebarLeadingTab | null
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -85,6 +91,7 @@ export function ProjectDocumentsCard({
       onUnpinFile={(relPath) => setPinnedPanels((prev) => prev.filter((path) => path !== relPath))}
       gitAvailable={capabilities.data?.git === true}
       filesPanelOpen={false}
+      leadingTab={leadingTab}
     />
   )
 }

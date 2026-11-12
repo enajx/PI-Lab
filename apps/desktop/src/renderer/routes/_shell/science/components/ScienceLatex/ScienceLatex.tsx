@@ -301,7 +301,6 @@ function useLatexDocumentsPanel(projectId: string | null): SciencePanelState {
   return {
     collapsed,
     setCollapsed: (next) => setOpenFor(next ? null : projectId),
-    documentsOpen: true,
     documentsTab,
     setDocumentsTab,
     showDiary,
@@ -358,6 +357,7 @@ function LatexDocumentsColumn({
         onActiveIdChange={panel.setDocumentsTab}
         onCollapse={() => panel.setCollapsed(true)}
         onOpenFile={onOpenFile}
+        leadingTab={null}
       />
     </aside>
   )
