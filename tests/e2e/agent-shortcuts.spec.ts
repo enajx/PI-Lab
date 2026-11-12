@@ -205,6 +205,9 @@ test("⌘T in Tasks asks for a project, then opens a session in the Tasks sessio
   await window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
   await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
   const panel = window.getByTestId("science-sessions")
+  // The panel starts open (the diary is on by default); collapse it first.
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await panel.getByTestId("science-sessions-collapse").click()
   await expect(panel).toHaveAttribute("data-collapsed", "true")
 
   // "All projects" has no project to start a session in.
@@ -241,6 +244,9 @@ test("⌘T in Analysis opens a terminal in the session panel, kept after leaving
   await analysisNav.click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
   const panel = window.getByTestId("science-sessions")
+  // The panel starts open (the diary is on by default); collapse it first.
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await panel.getByTestId("science-sessions-collapse").click()
   await expect(panel).toHaveAttribute("data-collapsed", "true")
 
   await blurFocus(window)
@@ -273,7 +279,8 @@ test("an Analysis agent shows in the Project Agents box and opens back in Analys
   await analysisNav.click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
   const panel = window.getByTestId("science-sessions")
-  await panel.getByTestId("science-sessions-expand").click()
+  // The panel starts open (the diary is on by default).
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
   await panel.getByTestId("central-add-menu").click()
   await window.getByTestId("central-add-agent").click()
   const chooser = window.getByTestId("new-agent-dialog")

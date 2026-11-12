@@ -368,8 +368,9 @@ export const RIGHT_SIDEBAR_DEFAULT_WIDTH = 320
 export const useRightSidebarWidth = (): [number, (next: number) => void] =>
   useNumberPref(RIGHT_SIDEBAR_WIDTH_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH)
 
-// --- Research diary in the Analysis and Tasks right panel: shown or hidden (one
-// shared value for both views), the LaTeX Editor diary column's
+// --- Research diary in the Analysis and Tasks right panel and the LaTeX Editor
+// diary column: on or off (one shared value; on by default, so the panels start
+// open with the diary), the LaTeX Editor diary column's
 // width (px), and the diary's share of the Analysis and Tasks panel height (0 to 1,
 // below Sessions). In the project view the diary is a right sidebar tab instead.
 export const useResearchDiaryOpen = (): [boolean, (next: boolean) => void] =>

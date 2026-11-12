@@ -91,7 +91,8 @@ export function useFocusSessionRequest(
 /**
  * Whether a view's right panel is collapsed, and whether its diary part is on.
  * The diary choice is one saved value for every view (`useResearchDiaryOpen`);
- * the collapsed state is the view's own and starts collapsed.
+ * the collapsed state is the view's own. The panel starts open while the diary
+ * is on (the default), else collapsed.
  */
 export interface SciencePanelState {
   collapsed: boolean
@@ -104,8 +105,9 @@ export interface SciencePanelState {
 
 /** The right panel state of Analysis or Tasks (see {@link SciencePanelState}). */
 export function useSciencePanel(): SciencePanelState {
-  const [collapsed, setCollapsed] = useState(true)
   const [diaryOpen, setDiaryOpen] = useResearchDiaryOpen()
+  // Open with the diary unless the user turned the diary off.
+  const [collapsed, setCollapsed] = useState(!diaryOpen)
   const toggleDiary = useCallback(() => {
     if (collapsed) {
       setCollapsed(false)
@@ -166,8 +168,8 @@ interface ScienceSessionPanelProps {
  * draggable divider between them whose position is saved as the diary's height
  * share. The sessions part is built from the same central panel as the LaTeX
  * Editor (with its "+", agent and terminal buttons), and its sessions start in the
- * selected project's main folder. The panel starts collapsed; collapsing hides
- * both parts. It opens when a session opens. ⌘T (Settings → Shortcuts) opens a
+ * selected project's main folder. The panel starts open with the diary while
+ * the diary is on (the default), else collapsed; collapsing hides both parts. It opens when a session opens. ⌘T (Settings → Shortcuts) opens a
  * session here, collapsed or not. Its tabs are kept per project and view, like the
  * LaTeX Editor's. With no project chosen, ⌘T and the buttons ask to pick one and
  * there is no diary. `openSession` (from a top bar button) opens as a tab and

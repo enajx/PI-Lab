@@ -116,7 +116,7 @@ export function EditorStatusBar({
         <button
           type="button"
           data-testid="latex-show-pdf"
-          className="shrink-0 rounded px-1 hover:bg-accent hover:text-foreground"
+          className="min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground"
           onClick={onShowInPdf}
           title="Show current source position in PDF. You can also double-click LaTeX text."
           data-feature-label="Show in PDF"

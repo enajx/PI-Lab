@@ -159,7 +159,9 @@ describe("ScienceAnalysis", () => {
       expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "p1"),
     )
     const button = await screen.findByTestId("analysis-report")
-    expect(button.textContent).toBe("Report")
+    // An icon-only top bar button, named in its hover tip.
+    expect(button.textContent).toBe("")
+    expect(button.getAttribute("data-feature-label")).toBe("Report")
     fireEvent.click(button)
     await waitFor(() => expect(startReport).toHaveBeenCalledWith({ projectId: "p1" }))
     expect(screen.queryByTestId("analysis-new-marimo-notebook")).toBeNull()

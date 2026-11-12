@@ -24,6 +24,8 @@ let started: Array<{ agentId: string; origin: string; projectId: string }>
 
 beforeEach(() => {
   window.localStorage.clear()
+  // Most tests start from a diary turned off, so the panel starts collapsed.
+  window.localStorage.setItem("pi-lab.researchDiary.open", "false")
   ensured = []
   started = []
 })
@@ -158,6 +160,14 @@ describe("ScienceSessionPanel", () => {
     expect(screen.getByTestId("science-sessions-notice")).toBeTruthy()
     expect(ensured).toEqual([])
     expect(started).toEqual([])
+  })
+
+  test("with the diary on (the default), the panel starts open with the diary below Sessions", async () => {
+    window.localStorage.removeItem("pi-lab.researchDiary.open")
+    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+    expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
+    expect(screen.getByTestId("diary-button").getAttribute("aria-pressed")).toBe("true")
+    expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
   })
 
   test("the diary button opens the panel with the diary below Sessions, then hides and shows the diary; collapsing hides both", async () => {

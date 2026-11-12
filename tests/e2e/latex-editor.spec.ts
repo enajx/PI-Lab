@@ -885,8 +885,11 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     const paper = join(project, "paper")
     expect(await readFile(join(paper, "refs.bib"), "utf8")).toBe("@misc{a}\n")
     expect((await git(paper, "ls-files")).trim().split("\n")).toEqual(["main.tex", "refs.bib"])
-    // The project repo does not see the paper folder.
-    expect((await git(project, "status", "--porcelain")).trim()).toBe("")
+    // The project repo does not see the paper folder; the only new file is the
+    // research diary, which the open diary column creates.
+    expect((await git(project, "status", "--porcelain", "-uall")).trim()).toBe(
+      "?? md/research-diary/diary.md",
+    )
 
     // No remote yet: Sync is disabled and the footer offers Connect to Overleaf.
     await expect(page.getByTestId("paper-sync")).toBeDisabled()

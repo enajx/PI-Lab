@@ -173,16 +173,47 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     }
     await expect(latexBar.getByTestId("paper-update")).toHaveAttribute("title", "Update paper")
     await page.screenshot({ path: resolve(".cache", "screens", "latex-top-bar.png") })
-    // The right diary column starts collapsed; the top bar diary button opens and closes it.
+    // The right diary column starts open; the top bar diary button closes and opens it.
     const diaryColumn = page.getByTestId("latex-diary")
-    await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
-    await latexBar.getByTestId("latex-research-diary").click()
     await expect(diaryColumn).toHaveAttribute("data-collapsed", "false")
     await expect(diaryColumn.getByTestId("research-diary-panel")).toBeVisible()
+    // With the diary open, the editor status bar items never overlap or run past the bar.
+    const statusBar = page.getByTestId("editor-status-bar")
+    await expect(statusBar.getByTestId("latex-engine")).toBeVisible()
+    await expect(statusBar.getByTestId("paper-connect-overleaf")).toBeVisible()
+    const overlaps = await statusBar.evaluate((bar) => {
+      const items = [...bar.querySelectorAll<HTMLElement>("button, span, [role=alert]")].filter(
+        (element) =>
+          element.getClientRects().length > 0 &&
+          element.parentElement?.closest("button, span, [role=alert]") === null,
+      )
+      const barBox = bar.getBoundingClientRect()
+      const boxes = items
+        .map((element) => ({ text: element.textContent, box: element.getBoundingClientRect() }))
+        .filter((entry) => entry.box.width > 0)
+        .sort((a, b) => a.box.left - b.box.left)
+      const problems: string[] = []
+      for (const [index, entry] of boxes.entries()) {
+        if (entry.box.right > barBox.right + 0.5) problems.push(`${entry.text} runs past the bar`)
+        const next = boxes[index + 1]
+        if (next && entry.box.right > next.box.left + 0.5)
+          problems.push(`${entry.text} overlaps ${next.text}`)
+      }
+      for (const element of items)
+        if (element.scrollWidth > element.clientWidth + 1 && !element.querySelector(".truncate"))
+          if (getComputedStyle(element).textOverflow !== "ellipsis")
+            problems.push(`${element.textContent} overflows its box`)
+      return problems
+    })
+    expect(overlaps).toEqual([])
     await page.screenshot({ path: resolve(".cache", "screens", "latex-diary.png") })
-    await diaryColumn.getByTestId("latex-diary-collapse").click()
+    await latexBar.getByTestId("latex-research-diary").click()
     await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
     await expect(page.getByTestId("research-diary-panel")).toHaveCount(0)
+    await latexBar.getByTestId("latex-research-diary").click()
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "false")
+    await diaryColumn.getByTestId("latex-diary-collapse").click()
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
 
     await page.getByTestId("latex-shortcuts-add").click()
     const menu = page.getByRole("menu", { name: "Header shortcuts" })

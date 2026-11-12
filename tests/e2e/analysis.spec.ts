@@ -258,7 +258,9 @@ test("Report shows an error without the report skill, then starts the project's 
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
   const report = window.getByTestId("analysis-report")
-  await expect(report).toHaveText("Report")
+  // An icon-only top bar button, named in its hover tip.
+  await expect(report).toHaveText("")
+  await expect(report).toHaveAttribute("data-feature-label", "Report")
   await expect(report).toBeEnabled({ timeout: 30_000 })
 
   // No experiment-report skill in the user skills folders yet: a clear error, no session.

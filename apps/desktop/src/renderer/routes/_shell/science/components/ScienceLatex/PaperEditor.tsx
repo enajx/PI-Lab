@@ -431,7 +431,7 @@ export function PaperEditor({
                   title={t("Send this paper to a new Overleaf project")}
                   data-feature-label={t("Connect to Overleaf")}
                   onClick={() => setConnectOpen(true)}
-                  className="shrink-0 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
+                  className="min-w-0 truncate rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
                 >
                   {t("Connect to Overleaf…")}
                 </button>

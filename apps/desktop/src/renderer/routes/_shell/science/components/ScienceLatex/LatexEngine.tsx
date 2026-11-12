@@ -115,10 +115,10 @@ export function LatexEngineStatusItem() {
         aria-expanded={open}
         disabled={!data}
         onClick={() => setOpen(!open)}
-        className="flex shrink-0 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        className="flex min-w-0 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
       >
-        {label}
-        <ChevronDown className="size-3" aria-hidden />
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronDown className="size-3 shrink-0" aria-hidden />
       </button>
       {open && data ? (
         <div

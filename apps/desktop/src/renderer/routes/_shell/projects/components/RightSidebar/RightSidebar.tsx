@@ -462,7 +462,7 @@ export function RightSidebar({
                 onKeyDown={(event) => onTabKeyDown(tab.id, event)}
                 {...(relPath === null ? dragProps(tab.id) : {})}
                 className={cn(
-                  "min-w-0 flex-1 truncate rounded-md px-2 py-1 text-xs transition-colors",
+                  "min-w-0 flex-auto truncate rounded-md px-1.5 py-1 text-xs transition-colors",
                   selected
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",

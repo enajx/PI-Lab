@@ -163,9 +163,8 @@ test("with the right panel open on Sessions and the research diary, the preview'
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
     .click()
-  // The diary button opens the right panel with Sessions and the diary.
+  // The right panel starts open with Sessions and the diary.
   const diaryToggle = window.getByTestId("analysis-research-diary")
-  await diaryToggle.click()
   await expect(diaryToggle).toHaveAttribute("aria-pressed", "true")
   await expect(window.getByTestId("science-sessions")).toHaveAttribute("data-collapsed", "false")
   const button = window.getByTestId("analysis-open-notebook")

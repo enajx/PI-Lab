@@ -12,6 +12,7 @@ import {
   RESEARCH_DIARY_MAX_WIDTH,
   RESEARCH_DIARY_MIN_WIDTH,
   useLatexEditorProject,
+  useResearchDiaryOpen,
   useResearchDiaryWidth,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
@@ -34,8 +35,8 @@ import { type CreatedPaper, PaperSetup } from "./PaperSetup"
  * project button that moves its paper to a project with none. With the paper
  * workspace shown, the top bar has the "+" shortcut menu left of the picker and
  * the right of the page a research diary column (not for a paper-only project),
- * collapsed at first, shown or hidden by the top bar diary button or its own
- * collapse and expand buttons.
+ * open while the diary is on (the default), shown or hidden by the top bar diary
+ * button or its own collapse and expand buttons.
  * `focusSession` focuses one agent tab of the initial project (see the Project
  * Agents box).
  */
@@ -240,17 +241,18 @@ export function ScienceLatex({
 }
 
 /**
- * The LaTeX Editor's right panel state: it holds only the research diary, so the
- * diary is always on and the top bar diary button opens or collapses the panel.
- * It starts collapsed, like the Analysis and Tasks panel.
+ * The LaTeX Editor's right panel state: it holds only the research diary, so it
+ * is open exactly while the diary is on (the saved choice shared with Analysis
+ * and Tasks, on by default). The top bar diary button and the column's collapse
+ * and expand buttons turn it on or off.
  */
 function useLatexDiaryPanel(): SciencePanelState {
-  const [collapsed, setCollapsed] = useState(true)
+  const [diaryOpen, setDiaryOpen] = useResearchDiaryOpen()
   return {
-    collapsed,
-    setCollapsed,
-    diaryOpen: true,
-    toggleDiary: () => setCollapsed(!collapsed),
+    collapsed: !diaryOpen,
+    setCollapsed: (next) => setDiaryOpen(!next),
+    diaryOpen,
+    toggleDiary: () => setDiaryOpen(!diaryOpen),
   }
 }
 

@@ -124,6 +124,8 @@ test("Tasks reads and surgically updates the project's TODO Markdown", async () 
     .click()
 
   // Kanban columns wrap at narrow widths, and cards stay inside their own non-overlapping column.
+  // The right panel starts open (the diary is on); collapse it to give the board the width.
+  await window.getByTestId("science-sessions-collapse").click()
   await window.setViewportSize({ width: 800, height: 700 })
   await window.getByRole("button", { name: "Group by Kanban" }).click()
   const stageLayout = await window.getByTestId("tasks-status-board").evaluate((board) => {
