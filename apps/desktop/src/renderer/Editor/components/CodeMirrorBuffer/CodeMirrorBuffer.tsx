@@ -792,14 +792,10 @@ const editorTypographyExtension = EditorView.theme({
     fontFamily: "var(--pi-lab-editor-font-family)",
     fontSize: "calc(var(--pi-lab-editor-font-size) * 0.78)",
   },
+  // No fold arrows column, so the numbers sit close to the text line.
   ".cm-lineNumbers .cm-gutterElement": {
     minWidth: "2ch",
-    padding: "0 2px 0 6px",
-  },
-  // The fold arrows column right of the numbers: only as wide as its arrow.
-  ".cm-foldGutter .cm-gutterElement": {
-    width: "10px",
-    padding: "0 2px 0 0",
+    padding: "0 4px 0 4px",
   },
 })
 
