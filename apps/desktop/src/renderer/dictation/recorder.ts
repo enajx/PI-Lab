@@ -1,5 +1,6 @@
-// no-inline: the CSP only allows same-origin scripts, so the worklet must not become a data: URL.
-import workletUrl from "./captureWorklet.js?url&no-inline"
+// Bundled like the worker scripts (minified, hidden sourcemap) and loaded from its own same-origin
+// file, because the CSP does not allow a data: URL.
+import workletUrl from "./captureWorklet.js?worker&url"
 import {
   bandLevels,
   base64FromBytes,

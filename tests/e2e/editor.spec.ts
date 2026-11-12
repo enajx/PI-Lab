@@ -277,8 +277,12 @@ test("sets global editor typography from the gear deep link and restores it afte
     .poll(() => content.evaluate((element) => getComputedStyle(element).fontFamily))
     .toContain("PI Lab Test Mono")
   await expect
-    .poll(() => gutters.evaluate((element) => getComputedStyle(element).fontSize))
+    .poll(() => content.evaluate((element) => getComputedStyle(element).fontSize))
     .toBe("18px")
+  // Line numbers are 0.78 of the editor font size (#8).
+  await expect
+    .poll(() => gutters.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe("14.04px")
 
   await app.close()
   await launchApp()
@@ -294,8 +298,12 @@ test("sets global editor typography from the gear deep link and restores it afte
     .poll(() => restoredContent.evaluate((element) => getComputedStyle(element).fontFamily))
     .toContain("PI Lab Test Mono")
   await expect
-    .poll(() => restoredGutters.evaluate((element) => getComputedStyle(element).fontSize))
+    .poll(() => restoredContent.evaluate((element) => getComputedStyle(element).fontSize))
     .toBe("18px")
+  // Line numbers are 0.78 of the editor font size (#8).
+  await expect
+    .poll(() => restoredGutters.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe("14.04px")
 })
 
 test("opening a Python file renders the status bar without crashing", async () => {
