@@ -15,6 +15,7 @@ import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
   SciencePanelDiaryButton,
+  SciencePanelExpandButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
   useFocusSessionRequest,
@@ -320,6 +321,7 @@ export function ScienceTasks({
                 onDelete={remove}
                 onMove={move}
                 onRun={run}
+                toolbarEnd={<SciencePanelExpandButton panel={panel} />}
               />
             </>
           )}

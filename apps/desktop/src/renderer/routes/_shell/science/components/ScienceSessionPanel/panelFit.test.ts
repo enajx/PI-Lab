@@ -45,14 +45,15 @@ describe("fitPanelRow", () => {
   })
 
   test("without room the panel is drawn collapsed, and the file list keeps what it can", () => {
-    // Collapsed: side + 12 + main + 12 + 30.
+    // Collapsed: side + 12 + main, with no strip for the panel.
     expect(fitPanelRow(analysis(700, false, false))).toEqual({
       open: false,
       forcedCollapsed: true,
       side: 300,
       panel: 0,
     })
-    expect(fitPanelRow(analysis(500, false, false))).toMatchObject({ open: false, side: 200 })
+    expect(fitPanelRow(analysis(500, false, false))).toMatchObject({ open: false, side: 232 })
+    expect(fitPanelRow(analysis(400, false, false))).toMatchObject({ open: false, side: 200 })
   })
 
   test("expanding while short of room squeezes the others to their minimums", () => {

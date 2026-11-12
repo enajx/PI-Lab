@@ -129,6 +129,7 @@ function renderEditor(
         createdBuild={createdBuild}
         picker={null}
         diaryButton={null}
+        toolbarEnd={null}
         projectId={projectId}
         projectName="Project"
         workspaceId="paper-ws"

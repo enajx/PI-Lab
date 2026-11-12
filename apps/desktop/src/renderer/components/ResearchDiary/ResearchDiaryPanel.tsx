@@ -10,6 +10,7 @@ import { useInterfaceLanguage, useTranslate } from "../../i18n/language"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
 import { InteractivePreview } from "../../routes/_shell/science/components/ScienceAnalysis/components/AnalysisPreview/AnalysisPreview"
 import { useTRPC, useTRPCClient } from "../../trpc/react"
+import "./researchDiary.css"
 import {
   type DocumentRenderResult,
   RenderControl,
@@ -128,7 +129,7 @@ export function ResearchDiaryPanel({
   return (
     <section
       data-testid="research-diary-panel"
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      className="research-diary-compact flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
       <div className="box-content flex h-7 shrink-0 items-center justify-between gap-2 border-border border-b pr-1 pl-3">
         <span

@@ -38,6 +38,7 @@ import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
   SciencePanelDiaryButton,
+  SciencePanelExpandButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
   useFocusSessionRequest,
@@ -474,7 +475,10 @@ export function ScienceAnalysis({
       <div ref={row.rowRef} className="flex min-h-0 flex-1 gap-3 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {projects.length === 0 ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
+              <div className="absolute top-1.5 right-1.5">
+                <SciencePanelExpandButton panel={panel} />
+              </div>
               <NoProjectsState />
             </div>
           ) : (
@@ -679,9 +683,15 @@ export function ScienceAnalysis({
                     onOpenNotebook={(notebookRelPath) =>
                       setSessionRequest({ projectId: selectedProjectId, notebookRelPath })
                     }
+                    headerEnd={<SciencePanelExpandButton panel={panel} />}
                   />
                 ) : (
-                  <NoSelectionState />
+                  <div className="relative h-full min-h-0">
+                    <div className="absolute top-1.5 right-1.5">
+                      <SciencePanelExpandButton panel={panel} />
+                    </div>
+                    <NoSelectionState />
+                  </div>
                 )}
               </div>
             </div>

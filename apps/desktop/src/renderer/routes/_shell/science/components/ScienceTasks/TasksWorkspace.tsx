@@ -92,6 +92,8 @@ interface TasksWorkspaceProps {
     target: { kind: "status"; status: TaskStatus } | { kind: "heading"; headingKey: string },
   ) => Promise<void>
   onRun: (task: TaskRecord, agentId: string, prompt: string) => Promise<void>
+  /** Shown at the right end of the toolbar row (the collapsed right panel's expand button). */
+  toolbarEnd: ReactNode
 }
 
 type ViewMode = "list" | "board"
@@ -178,6 +180,7 @@ export function TasksWorkspace({
   onDelete,
   onMove,
   onRun,
+  toolbarEnd,
 }: TasksWorkspaceProps) {
   const t = useTranslate()
   const [language] = useInterfaceLanguage()
@@ -372,6 +375,7 @@ export function TasksWorkspace({
           <Plus className="size-4" />
           {t("New task")}
         </Button>
+        {toolbarEnd ? <div className="-me-2 flex shrink-0">{toolbarEnd}</div> : null}
       </div>
 
       {error ? <ErrorBanner message={translateKnownError(language, error)} /> : null}

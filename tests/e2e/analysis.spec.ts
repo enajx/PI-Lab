@@ -521,13 +521,13 @@ test("Analysis and Tasks cards fit narrow windows, collapsing the right panel wh
   await expect(panel).toHaveAttribute("data-collapsed", "true")
   await expectCardsInside(window, "science-analysis", analysisCards)
   // Expanding makes room: the panel opens and every card still fits.
-  await panel.getByTestId("science-sessions-expand").click()
+  await window.getByTestId("science-sessions-expand").click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await expectCardsInside(window, "science-analysis", analysisCards)
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-900-expanded.png") })
   await panel.getByTestId("science-sessions-collapse").click()
   await expect(panel).toHaveAttribute("data-collapsed", "true")
-  await panel.getByTestId("science-sessions-expand").click()
+  await window.getByTestId("science-sessions-expand").click()
   await setSize(1400, 900)
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   // Short of room again, the panel is drawn collapsed; the saved choice is still open.

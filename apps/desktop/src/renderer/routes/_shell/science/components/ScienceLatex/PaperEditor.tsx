@@ -66,6 +66,8 @@ interface PaperEditorProps {
   picker: ReactNode
   /** The top bar Research diary button, or null for none (a paper-only project). */
   diaryButton: ReactNode
+  /** Shown at the right end of the editor card's toolbar (the collapsed diary's expand button). */
+  toolbarEnd: ReactNode
   /**
    * Right after Start draft: the build of the main .tex it ran before the
    * editor opened (its PDF then opens beside the source), else null.
@@ -153,6 +155,7 @@ export function PaperEditor({
   syncSlot,
   picker,
   diaryButton,
+  toolbarEnd,
   createdBuild,
 }: PaperEditorProps) {
   const t = useTranslate()
@@ -415,6 +418,7 @@ export function PaperEditor({
           onFilesPanelOpenChange={setLeftColumnOpen}
           pdfBesideSource={true}
           sourceRequest={sourceRequest}
+          toolbarEnd={toolbarEnd}
           leftColumn={{
             bottom: outlineSection,
             filesOpen,

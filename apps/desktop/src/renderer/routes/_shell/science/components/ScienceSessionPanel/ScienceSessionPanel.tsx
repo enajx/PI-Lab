@@ -221,6 +221,53 @@ export function useSciencePanelRow(
 }
 
 /**
+ * The button that shows a collapsed right panel again. A collapsed panel draws
+ * nothing, so like the project view's right sidebar the button sits at the right
+ * end of the toolbar of the card next to it.
+ */
+export function PanelExpandButton({
+  testId,
+  label,
+  help,
+  onClick,
+}: {
+  testId: string
+  label: string
+  help: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      title={label}
+      aria-label={label}
+      data-feature-help={help}
+      onClick={onClick}
+      className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <PanelRightOpen className="size-4" aria-hidden />
+    </button>
+  )
+}
+
+/** The expand button of the Analysis and Tasks right panel, or null while it is open. */
+export function SciencePanelExpandButton({ panel }: { panel: SciencePanelState }) {
+  const t = useTranslate()
+  if (!panel.collapsed) return null
+  return (
+    <PanelExpandButton
+      testId="science-sessions-expand"
+      label={t("Show sessions")}
+      help={t(
+        "Open the panel with this project's agent and terminal sessions and its research diary.",
+      )}
+      onClick={() => panel.setCollapsed(false)}
+    />
+  )
+}
+
+/**
  * The top bar Research diary button of a view with a right panel: icon-only,
  * pressed while the diary shows. `disabled` (no project chosen) asks to pick one.
  */
@@ -365,19 +412,17 @@ export function ScienceSessionPanel({
   }
 
   // Open: the Sessions card and the diary card, 12px apart, each with its own header;
-  // the panel resizes from the gap on its left, and the gap between the cards is the
-  // divider. Collapsed: only a small card with the expand button is left, at the top
-  // of the column. One tree for both, so the sessions part is not remounted (with
-  // notebook tabs it stays mounted, hidden, while collapsed).
+  // the panel resizes from the gap on its left (dragging it below the minimum width
+  // collapses the panel), and the gap between the cards is the divider. Collapsed:
+  // nothing is drawn (the expand button is in the next card's toolbar, see
+  // SciencePanelExpandButton). One tree for both, so the sessions part is not
+  // remounted (with notebook tabs it stays mounted, hidden, while collapsed).
   return (
     <aside
       data-testid="science-sessions"
       data-collapsed={collapsed}
-      className={
-        collapsed
-          ? "flex shrink-0 flex-col items-center self-start overflow-hidden rounded-lg border border-border bg-muted/30"
-          : "relative flex min-h-0 shrink-0 flex-col"
-      }
+      hidden={collapsed}
+      className={collapsed ? "hidden" : "relative flex min-h-0 shrink-0 flex-col"}
       style={collapsed ? undefined : { width: width.drawn }}
     >
       {collapsed ? null : (
@@ -386,26 +431,12 @@ export function ScienceSessionPanel({
           width={width.drawn}
           onResize={width.setWidth}
           onResizeEnd={width.persistWidth}
+          onCollapse={() => setCollapsed(true)}
           min={SCIENCE_PANEL_MIN_WIDTH}
           max={SCIENCE_PANEL_MAX_WIDTH}
           testId="science-sessions-edge-drag"
         />
       )}
-      {collapsed ? (
-        <button
-          type="button"
-          data-testid="science-sessions-expand"
-          title={t("Show sessions")}
-          aria-label={t("Show sessions")}
-          data-feature-help={t(
-            "Open the panel with this project's agent and terminal sessions and its research diary.",
-          )}
-          onClick={expand}
-          className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <PanelRightOpen className="size-4" aria-hidden />
-        </button>
-      ) : null}
       <div
         ref={bodyRef}
         className={collapsed ? "contents" : "flex min-h-0 min-w-0 flex-1 flex-col"}

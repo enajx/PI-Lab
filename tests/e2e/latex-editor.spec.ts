@@ -1023,16 +1023,12 @@ test("LaTeX Editor shows the editor and diary as separate cards, and keeps the d
     ).toBe("0px")
     await page.screenshot({ path: resolve(".cache", "screens", "latex-editor-panels.png") })
 
-    // Collapsed: a small card at the top right, level with the editor card.
+    // Collapsed: no card is left; the expand button is at the right end of the
+    // editor card's toolbar.
     await page.getByTestId("latex-diary-collapse").click()
     await expect(diary).toHaveAttribute("data-collapsed", "true")
-    const strip = await diary.boundingBox()
-    const wide = await latex.getByTestId("central-panel").boundingBox()
-    if (!strip || !wide) throw new Error("No collapsed diary layout")
-    expect(await style(diary)).toBe("8px 1px")
-    expect(Math.round(strip.y)).toBe(Math.round(wide.y))
-    expect(strip.height).toBeLessThan(40)
-    expect(Math.round(strip.x - (wide.x + wide.width))).toBe(12)
+    await expect(diary).toBeHidden()
+    await expect(latex.getByTestId("central-panel").getByTestId("latex-diary-expand")).toBeVisible()
     await page.getByTestId("latex-diary-expand").click()
     await expect(diary).toHaveAttribute("data-collapsed", "false")
 

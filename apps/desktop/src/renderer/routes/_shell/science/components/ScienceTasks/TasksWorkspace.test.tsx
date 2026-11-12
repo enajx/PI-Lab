@@ -92,6 +92,7 @@ function renderWorkspace(overrides: Partial<ComponentProps<typeof TasksWorkspace
     onDelete: vi.fn(async () => {}),
     onMove: vi.fn(async () => {}),
     onRun: vi.fn(async () => {}),
+    toolbarEnd: null,
     ...overrides,
   }
   const rendered = render(<TasksWorkspace {...props} />)

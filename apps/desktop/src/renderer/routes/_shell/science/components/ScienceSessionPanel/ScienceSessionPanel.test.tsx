@@ -16,8 +16,13 @@ vi.mock("../../../../../Terminal", () => ({
   ),
 }))
 
-const { ScienceSessionPanel, SciencePanelDiaryButton, useSciencePanel, useSciencePanelRow } =
-  await import("./ScienceSessionPanel")
+const {
+  ScienceSessionPanel,
+  SciencePanelDiaryButton,
+  SciencePanelExpandButton,
+  useSciencePanel,
+  useSciencePanelRow,
+} = await import("./ScienceSessionPanel")
 
 let ensured: string[]
 let started: Array<{ agentId: string; origin: string; projectId: string }>
@@ -77,6 +82,7 @@ function Harness({
         panel={row.panel}
         disabled={project === null}
       />
+      <SciencePanelExpandButton panel={row.panel} />
       <ScienceSessionPanel
         view={view}
         project={project}

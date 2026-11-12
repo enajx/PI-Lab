@@ -669,6 +669,7 @@ export function ProjectWorkspace({
                 onResizeEnd={persistRightSidebarWidth}
                 min={RIGHT_SIDEBAR_MIN_WIDTH}
                 max={RIGHT_SIDEBAR_MAX_WIDTH}
+                onCollapse={() => setRightSidebarCollapsed(true)}
                 testId="right-sidebar-edge-drag"
               />
               <ProjectAgentsBox

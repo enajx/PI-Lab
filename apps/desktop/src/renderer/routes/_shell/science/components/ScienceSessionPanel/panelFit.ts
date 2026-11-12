@@ -1,6 +1,5 @@
-/** The gap between cards, and the drawn width of a collapsed right panel. */
+/** The gap between cards. A collapsed right panel takes no width and no gap. */
 export const CARD_GAP = 12
-export const COLLAPSED_PANEL_WIDTH = 30
 
 /** The narrowest the right panel, the Analysis file list, the preview and the Tasks board are drawn. */
 export const PANEL_DRAWN_MIN_WIDTH = 300
@@ -52,7 +51,7 @@ export function fitPanelRow(input: PanelRowInput): PanelRowFit {
   const sideMin = side?.min ?? 0
   const gaps = (side ? 2 : 1) * CARD_GAP
   const collapsed = (forcedCollapsed: boolean): PanelRowFit => {
-    const room = input.available - gaps - COLLAPSED_PANEL_WIDTH
+    const room = input.available - (side ? CARD_GAP : 0)
     const sideWidth = Math.max(sideMin, Math.min(sideWanted, room - main.preferred))
     return { open: false, forcedCollapsed, side: sideWidth, panel: 0 }
   }

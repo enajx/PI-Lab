@@ -579,6 +579,7 @@ export function CentralPanel({
       side="right"
       width={filesWidth}
       onResize={setFilesWidth}
+      onCollapse={() => setShowFilesPanel(false)}
       min={FILES_PANEL_MIN_WIDTH}
       max={FILES_PANEL_MAX_WIDTH}
       testId="central-files-edge-drag"
@@ -662,7 +663,7 @@ export function CentralPanel({
         <div className="flex min-w-0 flex-1 items-center px-2">{toolbarTitle}</div>
 
         {/* Pane creation, file run, and editor settings — intentionally grouped. */}
-        <div className="flex shrink-0 items-center gap-0.5 border-border border-s bg-muted/30 px-1">
+        <div className="flex shrink-0 items-center gap-0.5 px-1">
           <div ref={addMenuRef} className="relative">
             <button
               type="button"

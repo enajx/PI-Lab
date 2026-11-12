@@ -1,5 +1,7 @@
 export {
+  PanelExpandButton,
   SciencePanelDiaryButton,
+  SciencePanelExpandButton,
   type SciencePanelRow,
   type SciencePanelState,
   type SciencePanelWidth,

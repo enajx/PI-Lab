@@ -1,7 +1,7 @@
 import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { Link2, PanelRightClose, PanelRightOpen } from "lucide-react"
+import { Link2, PanelRightClose } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
@@ -18,6 +18,7 @@ import {
 import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
 import {
+  PanelExpandButton,
   SciencePanelDiaryButton,
   type SciencePanelState,
   type SciencePanelWidth,
@@ -235,6 +236,16 @@ export function ScienceLatex({
                   />
                 )
               }
+              toolbarEnd={
+                paperOnly || !diaryPanel.collapsed ? null : (
+                  <PanelExpandButton
+                    testId="latex-diary-expand"
+                    label={t("Show research diary")}
+                    help={t("Show this project's research diary.")}
+                    onClick={() => diaryPanel.setCollapsed(false)}
+                  />
+                )
+              }
               createdBuild={
                 created && created.workspaceId === paper.data.workspaceId ? created.build : null
               }
@@ -280,8 +291,9 @@ function useLatexDiaryPanel(): SciencePanelState {
 /**
  * The LaTeX Editor's right column: the project's research diary as its own rounded
  * card, resizable from the gap on its left (the width is a saved preference; it is
- * drawn at `width.drawn`), with a collapse button; when collapsed, a small card with
- * a button to show it again.
+ * drawn at `width.drawn`; dragging it below the minimum width collapses it), with a
+ * collapse button. Collapsed, nothing is drawn: the button to show it again is at the
+ * right end of the editor card's toolbar.
  */
 function LatexDiaryColumn({
   projectId,
@@ -293,27 +305,9 @@ function LatexDiaryColumn({
   width: SciencePanelWidth
 }) {
   const t = useTranslate()
-  if (panel.collapsed) {
-    return (
-      <aside
-        data-testid="latex-diary"
-        data-collapsed="true"
-        className="flex shrink-0 flex-col items-center self-start overflow-hidden rounded-lg border border-border bg-muted/30"
-      >
-        <button
-          type="button"
-          data-testid="latex-diary-expand"
-          title={t("Show research diary")}
-          aria-label={t("Show research diary")}
-          data-feature-help={t("Show this project's research diary.")}
-          onClick={() => panel.setCollapsed(false)}
-          className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <PanelRightOpen className="size-4" aria-hidden />
-        </button>
-      </aside>
-    )
-  }
+  // Collapsed: nothing is drawn (an empty hidden column keeps its collapsed state
+  // readable); the expand button is in the editor card's toolbar.
+  if (panel.collapsed) return <aside data-testid="latex-diary" data-collapsed="true" hidden />
   return (
     <aside
       data-testid="latex-diary"
@@ -328,6 +322,7 @@ function LatexDiaryColumn({
         onResizeEnd={width.persistWidth}
         min={RESEARCH_DIARY_MIN_WIDTH}
         max={RESEARCH_DIARY_MAX_WIDTH}
+        onCollapse={() => panel.setCollapsed(true)}
         testId="research-diary-edge-drag"
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
