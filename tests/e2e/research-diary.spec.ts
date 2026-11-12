@@ -17,6 +17,7 @@ const DESKTOP_DIR = join(HERE, "..", "..", "apps", "desktop")
 const MAIN_ENTRY = join(DESKTOP_DIR, "out", "main", "index.js")
 const ELECTRON_PATH = createRequire(join(DESKTOP_DIR, "package.json"))("electron") as string
 const execFileAsync = promisify(execFile)
+const SCREENS = join(HERE, "..", "..", ".cache", "screens")
 
 let app: ElectronApplication
 let dataDir: string
@@ -53,15 +54,30 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
+/** Real app and IPC: in the project view the diary is the right sidebar's Diary tab. */
 test("research diary shows today's heading, edits, and saves the file on disk", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
 
+  // The diary is the tab after TODOs; the project opens on Files.
+  const sidebar = window.getByTestId("right-sidebar")
+  await expect(sidebar.getByRole("tab")).toHaveText(["Files", "Research", "TODOs", "Diary"], {
+    timeout: 30_000,
+  })
   const panel = window.getByTestId("research-diary-panel")
+  await expect(panel).toHaveCount(0)
+
+  // With the sidebar collapsed, the top bar diary button opens it on the Diary tab.
+  await window.getByTestId("right-sidebar-collapse").click()
+  await expect(sidebar).toHaveCount(0)
+  await window.getByTestId("project-view-research-diary").click()
+  await expect(window.getByTestId("panel-tab-diary")).toHaveAttribute("data-active", "true")
+  await expect(sidebar.getByTestId("research-diary-panel")).toBeVisible()
   await expect(panel.getByRole("heading", { name: today() })).toBeVisible({ timeout: 30_000 })
   const diaryPath = join(repoDir, "md", "research-diary", "diary.md")
   expect(await readFile(diaryPath, "utf8")).toBe(`## ${today()}\n\n`)
+  await window.screenshot({ path: join(SCREENS, "project-diary-tab.png") })
 
   await panel.getByTestId("research-diary-edit").click()
   const source = panel.locator(".cm-content")
@@ -76,9 +92,85 @@ test("research diary shows today's heading, edits, and saves the file on disk", 
   )
   expect(await readFile(diaryPath, "utf8")).toBe(`## ${today()}\n\nRan the first diary test.`)
 
-  // The top-bar button hides the panel and shows it again.
-  await window.getByTestId("project-view-research-diary").click()
+  // Another tab hides the diary; the top bar button brings it back.
+  await window.getByTestId("panel-tab-files").click()
   await expect(panel).toHaveCount(0)
   await window.getByTestId("project-view-research-diary").click()
   await expect(panel.getByRole("heading", { name: today() })).toBeVisible()
+})
+
+/**
+ * Real app and IPC: in Analysis the diary is the lower part of the one right
+ * panel, below Sessions. The top bar diary button opens the collapsed panel with
+ * the diary, then hides and shows the diary; the divider resizes the diary and
+ * its share is saved; collapsing the panel hides both parts.
+ */
+test("Analysis shows the diary below Sessions in one collapsible right panel", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1400, 900))
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+
+  const topBar = window.getByTestId("science-analysis").locator("header").first()
+  const add = topBar.getByTestId("analysis-shortcuts-add")
+  const picker = topBar.getByTestId("analysis-project-select")
+  const analyze = topBar.getByTestId("analysis-analyze-experiments")
+  const x = async (locator: typeof add) => (await locator.boundingBox())?.x ?? -1
+  await expect(analyze).toBeVisible()
+  // The "+" sits left of the project picker, and the buttons show only their icon.
+  expect(await x(add)).toBeLessThan(await x(picker))
+  expect(await x(picker)).toBeLessThan(await x(analyze))
+  for (const testId of [
+    "analysis-analyze-experiments",
+    "analysis-new-html-report",
+    "analysis-fetch-experiments",
+    "analysis-research-diary",
+  ]) {
+    await expect(topBar.getByTestId(testId)).toHaveText("")
+    expect((await topBar.getByTestId(testId).boundingBox())?.width ?? 0).toBeLessThanOrEqual(30)
+  }
+
+  const panel = window.getByTestId("science-sessions")
+  const diary = panel.getByTestId("research-diary-panel")
+  const diaryButton = topBar.getByTestId("analysis-research-diary")
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await expect(window.getByTestId("research-diary-panel")).toHaveCount(0)
+
+  await diaryButton.click()
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expect(diaryButton).toHaveAttribute("aria-pressed", "true")
+  await expect(diary.getByRole("heading", { name: today() })).toBeVisible({ timeout: 30_000 })
+  const sessionsBox = await panel.getByTestId("science-panel-sessions").boundingBox()
+  const diaryBox = await panel.getByTestId("science-panel-diary").boundingBox()
+  expect(sessionsBox && diaryBox && sessionsBox.y < diaryBox.y).toBe(true)
+  await window.screenshot({ path: join(SCREENS, "analysis-right-panel.png") })
+
+  // Dragging the divider up grows the diary, and the share is saved.
+  const divider = panel.getByTestId("science-panel-divider")
+  const dividerBox = await divider.boundingBox()
+  if (!dividerBox || !diaryBox) throw new Error("No divider or diary box")
+  await window.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + 2)
+  await window.mouse.down()
+  await window.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y - 100, { steps: 5 })
+  await window.mouse.up()
+  const grown = await panel.getByTestId("science-panel-diary").boundingBox()
+  expect((grown?.height ?? 0) - diaryBox.height).toBeGreaterThan(60)
+  const share = await window.evaluate(() =>
+    Number(window.localStorage.getItem("pi-lab.researchDiary.heightShare")),
+  )
+  expect(share).toBeGreaterThan(0.55)
+
+  // The button hides and shows the diary part; the panel stays open.
+  await diaryButton.click()
+  await expect(window.getByTestId("research-diary-panel")).toHaveCount(0)
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await diaryButton.click()
+  await expect(diary).toBeVisible()
+
+  // Collapsing the panel hides both parts.
+  await panel.getByTestId("science-sessions-collapse").click()
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await expect(window.getByTestId("research-diary-panel")).toHaveCount(0)
+  await expect(diaryButton).toHaveAttribute("aria-pressed", "false")
 })

@@ -10,9 +10,11 @@ import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
+  SciencePanelDiaryButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
   useFocusSessionRequest,
+  useSciencePanel,
 } from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type TaskDraft, type TaskRecord, type TaskStatus, TasksWorkspace } from "./TasksWorkspace"
@@ -77,6 +79,7 @@ export function ScienceTasks({
   const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
   const clearSessionRequest = useCallback(() => setSessionRequest(null), [])
   useFocusSessionRequest(initialProjectId, focusSession, setSessionRequest)
+  const panel = useSciencePanel()
   const [shortcutError, setShortcutError] = useState<string | null>(null)
 
   const tasks = (listing.data?.tasks ?? []) as TaskRecord[]
@@ -201,37 +204,52 @@ export function ScienceTasks({
       title={t("Tasks")}
       subtitle={t("Every project's TODO Markdown, in one place")}
       actions={
-        <>
-          <ProjectPicker
-            testId="tasks-project-select"
-            label={t("Project filter")}
-            help={t("Filter tasks by project")}
-            value={selectedProjectId}
-            projects={sources.map((source) => ({ id: source.projectId, name: source.projectName }))}
-            allLabel={t("All projects")}
-            onChange={chooseProject}
-          />
-          <HeaderShortcuts
-            view="tasks"
-            projectId={selectedSource?.projectId ?? null}
-            builtins={[]}
-            onError={setShortcutError}
-            onSkillSessionStarted={(session) =>
-              selectedSource
-                ? setSessionRequest({
-                    projectId: selectedSource.projectId,
-                    pane: {
-                      kind: "agent",
-                      sessionId: session.sessionId,
-                      label: session.label,
-                      wsKind: session.kind,
-                      launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
-                    },
-                  })
-                : undefined
-            }
-          />
-        </>
+        <HeaderShortcuts
+          view="tasks"
+          projectId={selectedSource?.projectId ?? null}
+          picker={
+            <ProjectPicker
+              testId="tasks-project-select"
+              label={t("Project filter")}
+              help={t("Filter tasks by project")}
+              value={selectedProjectId}
+              projects={sources.map((source) => ({
+                id: source.projectId,
+                name: source.projectName,
+              }))}
+              allLabel={t("All projects")}
+              onChange={chooseProject}
+            />
+          }
+          builtins={[
+            {
+              id: "research-diary",
+              label: t("Research diary"),
+              node: (
+                <SciencePanelDiaryButton
+                  testId="tasks-research-diary"
+                  panel={panel}
+                  disabled={!selectedSource}
+                />
+              ),
+            },
+          ]}
+          onError={setShortcutError}
+          onSkillSessionStarted={(session) =>
+            selectedSource
+              ? setSessionRequest({
+                  projectId: selectedSource.projectId,
+                  pane: {
+                    kind: "agent",
+                    sessionId: session.sessionId,
+                    label: session.label,
+                    wsKind: session.kind,
+                    launch: { type: "agent", agentId: session.agentId, workspaceMode: "policy" },
+                  },
+                })
+              : undefined
+          }
+        />
       }
     >
       <div className="flex min-h-0 flex-1">
@@ -286,6 +304,7 @@ export function ScienceTasks({
         </div>
         <ScienceSessionPanel
           view="tasks"
+          panel={panel}
           project={
             selectedSource
               ? { id: selectedSource.projectId, name: selectedSource.projectName }

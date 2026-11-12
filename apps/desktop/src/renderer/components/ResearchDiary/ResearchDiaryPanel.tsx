@@ -2,16 +2,11 @@ import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import type { DiaryFile } from "../../../main/trpc/diary/diary"
 import { CodeMirrorBuffer } from "../../Editor/components/CodeMirrorBuffer"
 import { translateKnownError } from "../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../i18n/language"
-import {
-  RESEARCH_DIARY_MAX_WIDTH,
-  RESEARCH_DIARY_MIN_WIDTH,
-  useResearchDiaryWidth,
-} from "../../preferences/preferences"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
 import { InteractivePreview } from "../../routes/_shell/science/components/ScienceAnalysis/components/AnalysisPreview/AnalysisPreview"
 import { useTRPC } from "../../trpc/react"
@@ -20,11 +15,11 @@ import {
   RenderControl,
   RenderedDocument,
 } from "../DocumentRender/DocumentRender"
-import { EdgeResizeHandle } from "../EdgeResizeHandle"
 
 /**
- * Research diary panel, shown on the right of the project view and the Analysis
- * view. On mount (and on a project change) it calls `diary.open`, which creates
+ * Research diary panel: a tab of the project view's right sidebar, and the lower
+ * part of the Analysis and Tasks right panel (the whole right column in the LaTeX
+ * Editor). It fills its container. On mount (and on a project change) it calls `diary.open`, which creates
  * the diary file and today's `## YYYY-MM-DD` heading when needed, and shows the
  * diary rendered as Markdown (a leading YAML front matter is not shown). A
  * Quarto diary (diary.qmd), or the diary in MyST mode, also gets a Render button
@@ -32,18 +27,21 @@ import { EdgeResizeHandle } from "../EdgeResizeHandle"
  * until Show source. Edit switches to the Markdown source editor; Save
  * (or ⌘S) writes the file through `diary.save` and goes back to the rendered
  * view. A save refused because the file changed on disk shows the error and
- * keeps the edit open. The panel is resizable from its left edge; the width is
- * a saved preference.
+ * keeps the edit open. `headerActions` go at the end of its header (e.g. a
+ * collapse button), or null for none.
  */
-export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
+export function ResearchDiaryPanel({
+  projectId,
+  headerActions,
+}: {
+  projectId: string
+  headerActions: ReactNode
+}) {
   const t = useTranslate()
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const editorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
-  const [savedWidth, persistWidth] = useResearchDiaryWidth()
-  const [width, setWidth] = useState(savedWidth)
-  useEffect(() => setWidth(savedWidth), [savedWidth])
 
   const openDiary = useMutation(trpc.diary.open.mutationOptions())
   const openDiaryRef = useRef(openDiary.mutateAsync)
@@ -108,20 +106,10 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
   }
 
   return (
-    <aside
+    <section
       data-testid="research-diary-panel"
-      className="relative flex min-h-0 shrink flex-col overflow-hidden rounded-lg border border-border"
-      style={{ width, minWidth: RESEARCH_DIARY_MIN_WIDTH }}
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
-      <EdgeResizeHandle
-        side="left"
-        width={width}
-        onResize={setWidth}
-        onResizeEnd={persistWidth}
-        min={RESEARCH_DIARY_MIN_WIDTH}
-        max={RESEARCH_DIARY_MAX_WIDTH}
-        testId="research-diary-edge-drag"
-      />
       <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-border border-b px-2">
         <span
           className="min-w-0 truncate text-muted-foreground text-xs"
@@ -165,6 +153,7 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
               {t("Save")}
             </Button>
           )}
+          {headerActions}
         </div>
       </div>
       {saveDiary.error ? (
@@ -224,6 +213,6 @@ export function ResearchDiaryPanel({ projectId }: { projectId: string }) {
           <Markdown content={splitFrontMatter(loaded.content).body} />
         </div>
       )}
-    </aside>
+    </section>
   )
 }

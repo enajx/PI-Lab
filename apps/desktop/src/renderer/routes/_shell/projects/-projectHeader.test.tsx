@@ -109,6 +109,26 @@ describe("Project header", () => {
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
   })
 
+  test("the Research diary button opens the right sidebar on the Diary tab", async () => {
+    renderWorkspace({
+      "workspaces.ensureMain": () => ({ id: "w1" }),
+      "files.tree": () => [],
+      "diary.open": () => ({
+        relPath: "md/research-diary/diary.md",
+        content: "## 2026-11-12\n\n",
+        baseline: { exists: true, mtimeMs: 1, size: 15 },
+      }),
+    })
+    fireEvent.click(await screen.findByTestId("right-sidebar-collapse"))
+    expect(screen.queryByTestId("right-sidebar")).toBeNull()
+    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("project-view-research-diary"))
+    expect(screen.getByTestId("panel-tab-diary").getAttribute("data-active")).toBe("true")
+    const panel = await screen.findByTestId("research-diary-panel")
+    expect(screen.getByTestId("right-sidebar").contains(panel)).toBe(true)
+  })
+
   test("the Tasks button opens Tasks with this project chosen", async () => {
     const client = createFakeTrpcClient({
       "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),

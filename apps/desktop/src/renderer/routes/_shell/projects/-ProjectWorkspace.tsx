@@ -6,11 +6,13 @@ import { useNavigate } from "@tanstack/react-router"
 import { ListTodo, NotebookPen, ScrollText, Telescope, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../components/EdgeResizeHandle"
-import { HeaderShortcuts } from "../../../components/HeaderShortcuts/HeaderShortcuts"
+import {
+  HeaderShortcuts,
+  headerIconButtonClass,
+} from "../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectStageRow } from "../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
-import { ResearchDiaryPanel } from "../../../components/ResearchDiary/ResearchDiaryPanel"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { translateKnownError } from "../../../i18n/errors"
@@ -21,7 +23,6 @@ import {
   RIGHT_SIDEBAR_MIN_WIDTH,
   readRestoreProjectTabs,
   useNonGitNoticeDismissed,
-  useResearchDiaryOpen,
   useRightSidebarWidth,
   useShowFilesPanel,
   useSidebarCollapsed,
@@ -45,11 +46,7 @@ import { CentralPanel, useCentralPanel } from "./components/CentralPanel"
 import type { CentralPanelRestoreState } from "./components/CentralPanel/useCentralPanel"
 import { ProjectAgentsBox } from "./components/ProjectAgents/ProjectAgentsBox"
 import { ProjectPalette } from "./components/ProjectPalette"
-import { FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
-
-/** The header's square icon-only buttons, styled like the Project status button. */
-const headerIconButtonClass =
-  "flex size-7 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+import { DIARY_TAB_ID, FILES_TAB_ID, RightSidebar } from "./components/RightSidebar"
 
 /**
  * Everything binds to the project's **main checkout** — a `kind:"branch"`
@@ -193,7 +190,7 @@ export function ProjectWorkspace({
   // When the left sidebar is collapsed, the traffic lights ride this view's title-bar
   // strip, so the header clears + drags around them (the path text stays selectable).
   const [collapsed] = useSidebarCollapsed()
-  const [researchDiaryOpen, setResearchDiaryOpen] = useResearchDiaryOpen()
+  const diaryShown = !rightSidebarCollapsed && rightSidebarActiveId === DIARY_TAB_ID
 
   // Ensure the project's main-checkout (branch) workspace exists, once on mount
   // (this component is keyed by project, so a switch remounts and re-ensures).
@@ -424,6 +421,7 @@ export function ProjectWorkspace({
           <HeaderShortcuts
             view="project"
             projectId={projectId}
+            picker={null}
             onError={setShortcutError}
             onSkillSessionStarted={(session) =>
               controller.attachSession({
@@ -529,12 +527,15 @@ export function ProjectWorkspace({
                     type="button"
                     data-testid="project-view-research-diary"
                     aria-label={t("Research diary")}
-                    aria-pressed={researchDiaryOpen}
+                    aria-pressed={diaryShown}
                     title={t("Research diary")}
                     data-feature-label={t("Research diary")}
-                    data-feature-help={t("Show or hide this project's research diary")}
-                    onClick={() => setResearchDiaryOpen(!researchDiaryOpen)}
-                    className={cn(headerIconButtonClass, researchDiaryOpen && "text-foreground")}
+                    data-feature-help={t("Open the right panel on this project's research diary")}
+                    onClick={() => {
+                      setRightSidebarActiveId(DIARY_TAB_ID)
+                      setRightSidebarCollapsed(false)
+                    }}
+                    className={cn(headerIconButtonClass, diaryShown && "text-foreground")}
                   >
                     <NotebookPen className="size-3.5 shrink-0" aria-hidden />
                   </button>
@@ -692,7 +693,6 @@ export function ProjectWorkspace({
               />
             </div>
           )}
-          {researchDiaryOpen ? <ResearchDiaryPanel projectId={projectId} /> : null}
           <ProjectPalette
             controller={controller}
             workspaceId={workspaceId}

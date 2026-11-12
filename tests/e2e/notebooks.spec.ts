@@ -155,7 +155,7 @@ test("an HTML report in the same window cannot reach a notebook server; the note
   expect(await probe(`${origin}/api/contents`)).toBe("blocked")
 })
 
-test("with the research diary and Sessions panels open, the preview's Open notebook button is not covered", async () => {
+test("with the right panel open on Sessions and the research diary, the preview's Open notebook button is not covered", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1200, 800))
@@ -163,10 +163,11 @@ test("with the research diary and Sessions panels open, the preview's Open noteb
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
     .click()
+  // The diary button opens the right panel with Sessions and the diary.
   const diaryToggle = window.getByTestId("analysis-research-diary")
-  if ((await diaryToggle.getAttribute("aria-pressed")) !== "true") await diaryToggle.click()
+  await diaryToggle.click()
   await expect(diaryToggle).toHaveAttribute("aria-pressed", "true")
-  await window.getByTestId("science-sessions-expand").click()
+  await expect(window.getByTestId("science-sessions")).toHaveAttribute("data-collapsed", "false")
   const button = window.getByTestId("analysis-open-notebook")
   await expect(button).toBeVisible()
   const uncovered = await button.evaluate((element) => {

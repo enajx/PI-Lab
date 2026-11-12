@@ -1,13 +1,22 @@
 import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { Link2 } from "lucide-react"
+import { Link2, PanelRightClose, PanelRightOpen } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
+import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
+import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
-import { useLatexEditorProject } from "../../../../../preferences/preferences"
+import {
+  RESEARCH_DIARY_MAX_WIDTH,
+  RESEARCH_DIARY_MIN_WIDTH,
+  useLatexEditorProject,
+  useResearchDiaryWidth,
+} from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
+import { SciencePanelDiaryButton, type SciencePanelState } from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type FocusSessionRequest, PaperEditor } from "./PaperEditor"
 import { MissingPaperFolder } from "./PaperFolder"
@@ -22,8 +31,13 @@ import { type CreatedPaper, PaperSetup } from "./PaperSetup"
  * choose it again or clear it instead. With no projects, or with New paper…
  * chosen in the picker, the setup cards add a paper with no project (a
  * paper-only project, then chosen); a paper-only project has a Link to
- * project button that moves its paper to a project with none. `focusSession`
- * focuses one agent tab of the initial project (see the Project Agents box).
+ * project button that moves its paper to a project with none. With the paper
+ * workspace shown, the top bar has the "+" shortcut menu left of the picker and
+ * the right of the page a research diary column (not for a paper-only project),
+ * collapsed at first, shown or hidden by the top bar diary button or its own
+ * collapse and expand buttons.
+ * `focusSession` focuses one agent tab of the initial project (see the Project
+ * Agents box).
  */
 export function ScienceLatex({
   initialProjectId,
@@ -84,36 +98,54 @@ export function ScienceLatex({
   })
   const standaloneSetup = newPaper || (projectsQuery.isSuccess && projects.length === 0)
   const paperOnly = !standaloneSetup && selected?.metadata?.paperOnly === true
+  const diaryPanel = useLatexDiaryPanel()
+  // The paper workspace puts the picker in its "+" shortcut row (in `syncSlot`).
+  const editorShown =
+    !projectsQuery.isError &&
+    !standaloneSetup &&
+    selected !== null &&
+    !paper.isError &&
+    paper.data !== undefined &&
+    !paper.data.paper?.missing &&
+    Boolean(paper.data.paper && paper.data.workspaceId) &&
+    creatingFor !== selected.id
+
+  const picker = (
+    <>
+      <ProjectPicker
+        testId="latex-project-select"
+        label={t("LaTeX Editor project")}
+        help={null}
+        value={standaloneSetup ? NEW_PAPER : (selected?.id ?? "")}
+        projects={[
+          ...projects.map((project) => ({ id: project.id, name: project.name })),
+          { id: NEW_PAPER, name: t("New paper…") },
+        ]}
+        allLabel={null}
+        onChange={chooseProject}
+      />
+      {paperOnly && selected ? (
+        <LinkToProject
+          paperProjectId={selected.id}
+          projects={projects.filter(
+            (project) => !project.metadata?.paper && !project.metadata?.paperOnly,
+          )}
+          onLinked={chooseProject}
+        />
+      ) : null}
+    </>
+  )
 
   return (
     <ScienceTabShell
       title={t("LaTeX Editor")}
       testId="science-latex"
       actions={
-        <>
-          <ProjectPicker
-            testId="latex-project-select"
-            label={t("LaTeX Editor project")}
-            help={null}
-            value={standaloneSetup ? NEW_PAPER : (selected?.id ?? "")}
-            projects={[
-              ...projects.map((project) => ({ id: project.id, name: project.name })),
-              { id: NEW_PAPER, name: t("New paper…") },
-            ]}
-            allLabel={null}
-            onChange={chooseProject}
-          />
-          {paperOnly && selected ? (
-            <LinkToProject
-              paperProjectId={selected.id}
-              projects={projects.filter(
-                (project) => !project.metadata?.paper && !project.metadata?.paperOnly,
-              )}
-              onLinked={chooseProject}
-            />
-          ) : null}
+        editorShown ? (
           <div ref={setSyncSlot} data-testid="latex-sync-slot" className="contents" />
-        </>
+        ) : (
+          picker
+        )
       }
     >
       {updateEditor.isError ? (
@@ -145,37 +177,51 @@ export function ScienceLatex({
       ) : paper.data === undefined ? null : paper.data.paper?.missing ? (
         <MissingPaperFolder key={selected.id} projectId={selected.id} dir={paper.data.paper.dir} />
       ) : paper.data.paper && paper.data.workspaceId && creatingFor !== selected.id ? (
-        <>
-          {paper.data.skippedFolders && paper.data.skippedFolders.length > 0 ? (
-            <p
-              data-testid="paper-skipped-folders"
-              className="cursor-text select-text px-6 pt-2 text-muted-foreground text-xs"
-            >
-              {t("Skipped folders that could not be read:")} {paper.data.skippedFolders.join(", ")}
-            </p>
-          ) : null}
-          <PaperEditor
-            key={paper.data.workspaceId}
-            projectId={selected.id}
-            projectName={selected.name}
-            workspaceId={paper.data.workspaceId}
-            paperDir={paper.data.paper.dir}
-            displayDir={paper.data.paper.displayDir}
-            rootRelPath={paper.data.rootRelPath}
-            lastSyncAt={paper.data.paper.lastSyncAt}
-            hasRemote={paper.data.paper.remoteUrl !== null}
-            syncEnabled={paper.data.paper.syncEnabled}
-            outputDir={paper.data.paper.outputDir}
-            effectiveOutputDir={paper.data.paper.effectiveOutputDir}
-            settings={settings}
-            onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
-            focusSession={selected.id === initialProjectId ? focusSession : null}
-            syncSlot={syncSlot}
-            createdBuild={
-              created && created.workspaceId === paper.data.workspaceId ? created.build : null
-            }
-          />
-        </>
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {paper.data.skippedFolders && paper.data.skippedFolders.length > 0 ? (
+              <p
+                data-testid="paper-skipped-folders"
+                className="cursor-text select-text px-6 pt-2 text-muted-foreground text-xs"
+              >
+                {t("Skipped folders that could not be read:")}{" "}
+                {paper.data.skippedFolders.join(", ")}
+              </p>
+            ) : null}
+            <PaperEditor
+              key={paper.data.workspaceId}
+              projectId={selected.id}
+              projectName={selected.name}
+              workspaceId={paper.data.workspaceId}
+              paperDir={paper.data.paper.dir}
+              displayDir={paper.data.paper.displayDir}
+              rootRelPath={paper.data.rootRelPath}
+              lastSyncAt={paper.data.paper.lastSyncAt}
+              hasRemote={paper.data.paper.remoteUrl !== null}
+              syncEnabled={paper.data.paper.syncEnabled}
+              outputDir={paper.data.paper.outputDir}
+              effectiveOutputDir={paper.data.paper.effectiveOutputDir}
+              settings={settings}
+              onUpdateEditorSettings={(patch) => updateEditor.mutate(patch)}
+              focusSession={selected.id === initialProjectId ? focusSession : null}
+              syncSlot={syncSlot}
+              picker={picker}
+              diaryButton={
+                paperOnly ? null : (
+                  <SciencePanelDiaryButton
+                    testId="latex-research-diary"
+                    panel={diaryPanel}
+                    disabled={false}
+                  />
+                )
+              }
+              createdBuild={
+                created && created.workspaceId === paper.data.workspaceId ? created.build : null
+              }
+            />
+          </div>
+          {paperOnly ? null : <LatexDiaryColumn projectId={selected.id} panel={diaryPanel} />}
+        </div>
       ) : (
         <PaperSetup
           key={selected.id}
@@ -190,6 +236,89 @@ export function ScienceLatex({
         />
       )}
     </ScienceTabShell>
+  )
+}
+
+/**
+ * The LaTeX Editor's right panel state: it holds only the research diary, so the
+ * diary is always on and the top bar diary button opens or collapses the panel.
+ * It starts collapsed, like the Analysis and Tasks panel.
+ */
+function useLatexDiaryPanel(): SciencePanelState {
+  const [collapsed, setCollapsed] = useState(true)
+  return {
+    collapsed,
+    setCollapsed,
+    diaryOpen: true,
+    toggleDiary: () => setCollapsed(!collapsed),
+  }
+}
+
+/**
+ * The LaTeX Editor's right column: the project's research diary, resizable from
+ * its left edge (the width is a saved preference), with a collapse button; when
+ * collapsed, a thin strip with a button to show it again.
+ */
+function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: SciencePanelState }) {
+  const t = useTranslate()
+  const [savedWidth, persistWidth] = useResearchDiaryWidth()
+  const [width, setWidth] = useState(savedWidth)
+  useEffect(() => setWidth(savedWidth), [savedWidth])
+  if (panel.collapsed) {
+    return (
+      <aside
+        data-testid="latex-diary"
+        data-collapsed="true"
+        className="flex w-9 shrink-0 flex-col items-center border-border border-l py-2"
+      >
+        <button
+          type="button"
+          data-testid="latex-diary-expand"
+          title={t("Show research diary")}
+          aria-label={t("Show research diary")}
+          data-feature-help={t("Show this project's research diary.")}
+          onClick={() => panel.setCollapsed(false)}
+          className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <PanelRightOpen className="size-4" aria-hidden />
+        </button>
+      </aside>
+    )
+  }
+  return (
+    <aside
+      data-testid="latex-diary"
+      data-collapsed="false"
+      className="relative flex min-h-0 shrink flex-col border-border border-l"
+      style={{ width, minWidth: RESEARCH_DIARY_MIN_WIDTH }}
+    >
+      <EdgeResizeHandle
+        side="left"
+        width={width}
+        onResize={setWidth}
+        onResizeEnd={persistWidth}
+        min={RESEARCH_DIARY_MIN_WIDTH}
+        max={RESEARCH_DIARY_MAX_WIDTH}
+        testId="research-diary-edge-drag"
+      />
+      <ResearchDiaryPanel
+        key={projectId}
+        projectId={projectId}
+        headerActions={
+          <button
+            type="button"
+            data-testid="latex-diary-collapse"
+            title={t("Hide research diary")}
+            aria-label={t("Hide research diary")}
+            data-feature-help={t("Collapse this panel to give the editor more room.")}
+            onClick={() => panel.setCollapsed(true)}
+            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <PanelRightClose className="size-4" aria-hidden />
+          </button>
+        }
+      />
+    </aside>
   )
 }
 
@@ -236,11 +365,11 @@ function LinkToProject({
           "Move this paper to a project. The paper's own card is removed; its files stay where they are.",
         )}
         disabled={move.isPending}
+        data-feature-label={t("Link to project")}
         onClick={() => setOpen((value) => !value)}
-        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+        className={headerIconButtonClass}
       >
-        <Link2 className="size-3.5" aria-hidden />
-        {t("Link to project")}
+        <Link2 className="size-3.5 shrink-0" aria-hidden />
       </button>
       {open ? (
         <div

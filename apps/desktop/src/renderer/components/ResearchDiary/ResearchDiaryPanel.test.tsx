@@ -50,7 +50,7 @@ function renderPanel(save: FakeHandlers[string], loaded: typeof LOADED, extra: F
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <AppProviders client={createFakeTrpcClient(handlers)} queryClient={queryClient}>
-      <ResearchDiaryPanel projectId="p1" />
+      <ResearchDiaryPanel projectId="p1" headerActions={null} />
     </AppProviders>,
   )
 }

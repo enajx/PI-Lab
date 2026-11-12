@@ -124,7 +124,7 @@ describe("Tasks top bar shortcuts", () => {
     },
   })
 
-  test("with All projects, the menu has no built-ins and skill buttons ask to pick a project", async () => {
+  test("with All projects, the menu lists only Research diary, and the diary and skill buttons ask to pick a project", async () => {
     window.localStorage.setItem(
       "pi-lab.tasks.headerShortcuts",
       JSON.stringify(["skill:review-notes"]),
@@ -134,10 +134,17 @@ describe("Tasks top bar shortcuts", () => {
     const button = await within(banner).findByTestId("tasks-shortcut-skill-review-notes")
     expect(button.hasAttribute("disabled")).toBe(true)
     expect(button.getAttribute("title")).toBe("Pick a project")
+    const diary = within(banner).getByTestId("tasks-research-diary")
+    expect(diary.hasAttribute("disabled")).toBe(true)
+    expect(diary.getAttribute("title")).toBe("Pick a project")
 
     fireEvent.click(within(banner).getByTestId("tasks-shortcuts-add"))
     const menu = await screen.findByRole("menu", { name: "Header shortcuts" })
-    expect(within(menu).queryAllByRole("menuitemcheckbox")).toEqual([])
+    expect(
+      within(menu)
+        .queryAllByRole("menuitemcheckbox")
+        .map((item) => item.textContent),
+    ).toEqual(["Research diary"])
     fireEvent.click(within(menu).getByRole("button", { name: "Skills" }))
     expect(within(menu).getByText("Pick a project to list its skills")).toBeTruthy()
   })
@@ -189,7 +196,6 @@ describe("Analysis top bar shortcuts", () => {
     })
     const banner = screen.getByRole("banner")
     const button = await within(banner).findByTestId("analysis-analyze-experiments")
-    expect(button.textContent).toContain("Analyze experiments")
 
     fireEvent.click(within(banner).getByTestId("analysis-shortcuts-add"))
     const menu = await screen.findByRole("menu", { name: "Header shortcuts" })
@@ -229,6 +235,43 @@ describe("Analysis top bar shortcuts", () => {
     within(menu)
       .getAllByRole("menuitemcheckbox")
       .map((item) => [item.textContent, item.getAttribute("aria-checked")])
+
+  test("the top bar has the + button, then the project picker, then icon-only buttons named in their hover tip", async () => {
+    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, {
+      ...sessionHandlers(),
+      "projects.list": () => [project("p1", "alpha")],
+      "projects.capabilities": () => ({ git: true }),
+      "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
+      "science.analysis.listFiles": () => ({ groups: [], total: 0, truncated: false }),
+    })
+    const banner = screen.getByRole("banner")
+    const analyze = await within(banner).findByTestId("analysis-analyze-experiments")
+    const add = within(banner).getByTestId("analysis-shortcuts-add")
+    const picker = within(banner).getByTestId("analysis-project-select")
+    const follows = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(follows(add, picker)).toBe(true)
+    expect(follows(picker, analyze)).toBe(true)
+    const names: Record<string, string> = {
+      "analysis-analyze-experiments": "Analyze experiments",
+      "analysis-new-html-report": "HTML report",
+      "analysis-fetch-experiments": "Fetch experiments",
+      "analysis-research-diary": "Research diary",
+    }
+    // Fetch experiments names itself once the Git check is done.
+    await waitFor(() =>
+      expect(within(banner).getByTestId("analysis-fetch-experiments").getAttribute("title")).toBe(
+        "Fetch experiments",
+      ),
+    )
+    for (const [testId, name] of Object.entries(names)) {
+      const button = within(banner).getByTestId(testId)
+      expect(button.textContent).toBe("")
+      expect(button.querySelector("svg")).toBeTruthy()
+      expect(button.getAttribute("data-feature-label")).toBe(name)
+      expect(button.getAttribute("title")).toBe(name)
+    }
+  })
 
   test("the menu lists Analyze experiments, HTML report and Fetch experiments, all checked; HTML report can be removed and added back", async () => {
     mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())

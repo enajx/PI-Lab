@@ -15,7 +15,9 @@ vi.mock("../../../../../Terminal", () => ({
   ),
 }))
 
-const { ScienceSessionPanel } = await import("./ScienceSessionPanel")
+const { ScienceSessionPanel, SciencePanelDiaryButton, useSciencePanel } = await import(
+  "./ScienceSessionPanel"
+)
 
 let ensured: string[]
 let started: Array<{ agentId: string; origin: string; projectId: string }>
@@ -46,7 +48,35 @@ function handlers(): FakeHandlers {
     "terminal.list": () => [],
     "terminal.kill": () => ({ ok: true }),
     "files.tree": () => [],
+    "diary.open": () => ({
+      relPath: "md/research-diary/diary.md",
+      content: "## 2026-11-12\n\n",
+      baseline: { exists: true, mtimeMs: 1, size: 15 },
+    }),
   }
+}
+
+/** The panel with the top bar diary button, as a view puts them. */
+function Harness({
+  view,
+  project,
+}: {
+  view: "tasks" | "analysis"
+  project: { id: string; name: string } | null
+}) {
+  const panel = useSciencePanel()
+  return (
+    <>
+      <SciencePanelDiaryButton testId="diary-button" panel={panel} disabled={project === null} />
+      <ScienceSessionPanel
+        view={view}
+        project={project}
+        panel={panel}
+        openSession={null}
+        onSessionOpened={() => undefined}
+      />
+    </>
+  )
 }
 
 function renderPanel(
@@ -58,12 +88,7 @@ function renderPanel(
   const client = createFakeTrpcClient(fake)
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceSessionPanel
-        view={view}
-        project={project}
-        openSession={null}
-        onSessionOpened={() => undefined}
-      />
+      <Harness view={view} project={project} />
     </AppProviders>,
   )
 }
@@ -133,5 +158,47 @@ describe("ScienceSessionPanel", () => {
     expect(screen.getByTestId("science-sessions-notice")).toBeTruthy()
     expect(ensured).toEqual([])
     expect(started).toEqual([])
+  })
+
+  test("the diary button opens the panel with the diary below Sessions, then hides and shows the diary; collapsing hides both", async () => {
+    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+    const aside = screen.getByTestId("science-sessions")
+    const button = screen.getByTestId("diary-button")
+    expect(aside.getAttribute("data-collapsed")).toBe("true")
+    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
+
+    fireEvent.click(button)
+    expect(aside.getAttribute("data-collapsed")).toBe("false")
+    expect(button.getAttribute("aria-pressed")).toBe("true")
+    const diary = await screen.findByTestId("research-diary-panel")
+    expect(aside.contains(diary)).toBe(true)
+    expect(screen.getByTestId("science-panel-divider")).toBeTruthy()
+    // Sessions come first, the diary below the divider.
+    const sessions = screen.getByTestId("science-panel-sessions")
+    expect(sessions.compareDocumentPosition(diary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(button)
+    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
+    expect(screen.queryByTestId("science-panel-divider")).toBeNull()
+    expect(aside.getAttribute("data-collapsed")).toBe("false")
+    expect(button.getAttribute("aria-pressed")).toBe("false")
+
+    fireEvent.click(button)
+    expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("science-sessions-collapse"))
+    expect(aside.getAttribute("data-collapsed")).toBe("true")
+    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
+    expect(button.getAttribute("aria-pressed")).toBe("false")
+
+    // Opening the panel again shows the diary, still on.
+    fireEvent.click(screen.getByTestId("science-sessions-expand"))
+    expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
+  })
+
+  test("with no project, the diary button is disabled and the panel shows only Sessions", async () => {
+    renderPanel("tasks", null, handlers())
+    expect(screen.getByTestId("diary-button").hasAttribute("disabled")).toBe(true)
+    fireEvent.click(screen.getByTestId("science-sessions-expand"))
+    expect(screen.queryByTestId("research-diary-panel")).toBeNull()
   })
 })

@@ -1,12 +1,37 @@
 import type { AgentSessionOrigin } from "@pi-lab/local-db"
 import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "@pi-lab/local-db/editor-settings"
+import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Bot, PanelRightClose, PanelRightOpen, Plus, TerminalSquare, X } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Bot,
+  NotebookPen,
+  PanelRightClose,
+  PanelRightOpen,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react"
+import {
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
+import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { useTranslate } from "../../../../../i18n/language"
-import { readRestoreProjectTabs } from "../../../../../preferences/preferences"
+import {
+  RESEARCH_DIARY_MAX_SHARE,
+  RESEARCH_DIARY_MIN_SHARE,
+  readRestoreProjectTabs,
+  useResearchDiaryOpen,
+  useResearchDiaryShare,
+} from "../../../../../preferences/preferences"
 import { overlayIsOpen } from "../../../../../shortcuts/keyGuards"
 import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
 import { registerProjectEditor } from "../../../projects/-workspaceEditorOperations"
@@ -63,10 +88,72 @@ export function useFocusSessionRequest(
   }, [agentId, agentLabel, projectId, sessionId, setRequest])
 }
 
+/**
+ * Whether a view's right panel is collapsed, and whether its diary part is on.
+ * The diary choice is one saved value for every view (`useResearchDiaryOpen`);
+ * the collapsed state is the view's own and starts collapsed.
+ */
+export interface SciencePanelState {
+  collapsed: boolean
+  setCollapsed: (next: boolean) => void
+  /** Whether the diary part is on; it shows only while the panel is open. */
+  diaryOpen: boolean
+  /** The top bar diary button: opens a collapsed panel with the diary, else shows or hides the diary. */
+  toggleDiary: () => void
+}
+
+/** The right panel state of Analysis or Tasks (see {@link SciencePanelState}). */
+export function useSciencePanel(): SciencePanelState {
+  const [collapsed, setCollapsed] = useState(true)
+  const [diaryOpen, setDiaryOpen] = useResearchDiaryOpen()
+  const toggleDiary = useCallback(() => {
+    if (collapsed) {
+      setCollapsed(false)
+      setDiaryOpen(true)
+    } else setDiaryOpen(!diaryOpen)
+  }, [collapsed, diaryOpen, setDiaryOpen])
+  return { collapsed, setCollapsed, diaryOpen, toggleDiary }
+}
+
+/**
+ * The top bar Research diary button of a view with a right panel: icon-only,
+ * pressed while the diary shows. `disabled` (no project chosen) asks to pick one.
+ */
+export function SciencePanelDiaryButton({
+  testId,
+  panel,
+  disabled,
+}: {
+  testId: string
+  panel: SciencePanelState
+  disabled: boolean
+}) {
+  const t = useTranslate()
+  const shown = !disabled && !panel.collapsed && panel.diaryOpen
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-label={t("Research diary")}
+      aria-pressed={shown}
+      title={disabled ? t("Pick a project") : t("Research diary")}
+      data-feature-label={t("Research diary")}
+      data-feature-help={t("Show or hide the chosen project's research diary in the right panel")}
+      disabled={disabled}
+      onClick={panel.toggleDiary}
+      className={cn(headerIconButtonClass, shown && "text-foreground")}
+    >
+      <NotebookPen className="size-3.5 shrink-0" aria-hidden />
+    </button>
+  )
+}
+
 interface ScienceSessionPanelProps {
   view: SessionPanelView
   /** The project sessions start in, or null when none is chosen (Tasks "All projects"). */
   project: { id: string; name: string } | null
+  /** Collapsed state and diary choice, from {@link useSciencePanel}. */
+  panel: SciencePanelState
   /** A started session to open as a tab, or null. */
   openSession: ScienceSessionRequest | null
   /** Called once `openSession` is open, so the caller can clear it. */
@@ -74,23 +161,73 @@ interface ScienceSessionPanelProps {
 }
 
 /**
- * Agent and terminal sessions beside the Tasks or Analysis content: a panel on the
- * right, built from the same central panel as the LaTeX Editor (with its "+", agent
- * and terminal buttons), whose sessions start in the selected project's main folder.
- * It starts collapsed and opens when a session opens. ⌘T (Settings → Shortcuts) opens
- * a session here, collapsed or not. Its tabs are kept per project and view, like the
- * LaTeX Editor's. With no project chosen, ⌘T and the buttons ask to pick one.
- * `openSession` (from a top bar button) opens as a tab and shows the panel.
+ * The right panel of Tasks and Analysis: agent and terminal sessions on top, and
+ * the chosen project's research diary below (when the diary is on), with a
+ * draggable divider between them whose position is saved as the diary's height
+ * share. The sessions part is built from the same central panel as the LaTeX
+ * Editor (with its "+", agent and terminal buttons), and its sessions start in the
+ * selected project's main folder. The panel starts collapsed; collapsing hides
+ * both parts. It opens when a session opens. ⌘T (Settings → Shortcuts) opens a
+ * session here, collapsed or not. Its tabs are kept per project and view, like the
+ * LaTeX Editor's. With no project chosen, ⌘T and the buttons ask to pick one and
+ * there is no diary. `openSession` (from a top bar button) opens as a tab and
+ * shows the panel.
  */
 export function ScienceSessionPanel({
   view,
   project,
+  panel,
   openSession,
   onSessionOpened,
 }: ScienceSessionPanelProps) {
   const t = useTranslate()
-  const [collapsed, setCollapsed] = useState(true)
-  const expand = useCallback(() => setCollapsed(false), [])
+  const { collapsed, setCollapsed } = panel
+  const expand = useCallback(() => setCollapsed(false), [setCollapsed])
+  const [savedShare, persistShare] = useResearchDiaryShare()
+  const [share, setShare] = useState(savedShare)
+  useEffect(() => setShare(savedShare), [savedShare])
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  // Removes a drag's window listeners; also run if the panel unmounts mid-drag.
+  const endDrag = useRef<(() => void) | null>(null)
+  useEffect(() => () => endDrag.current?.(), [])
+  const diaryProjectId = !collapsed && panel.diaryOpen && project ? project.id : null
+
+  // Dragging the divider sets the diary's share of the panel body's height.
+  const onDividerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const body = bodyRef.current
+    if (event.button !== 0 || !body) return
+    event.preventDefault()
+    const target = event.currentTarget
+    const pointerId = event.pointerId
+    target.setPointerCapture(pointerId)
+    let next = share
+    const onMove = (move: PointerEvent) => {
+      if (move.pointerId !== pointerId) return
+      const box = body.getBoundingClientRect()
+      if (box.height <= 0) return
+      const raw = (box.bottom - move.clientY) / box.height
+      next = Math.min(Math.max(raw, RESEARCH_DIARY_MIN_SHARE), RESEARCH_DIARY_MAX_SHARE)
+      setShare(next)
+    }
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onUp)
+      endDrag.current = null
+    }
+    const onUp = (up: PointerEvent) => {
+      if (up.pointerId !== pointerId) return
+      cleanup()
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
+      persistShare(next)
+    }
+    endDrag.current?.()
+    endDrag.current = cleanup
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onUp)
+  }
+
   return (
     <aside
       data-testid="science-sessions"
@@ -107,7 +244,9 @@ export function ScienceSessionPanel({
           data-testid="science-sessions-expand"
           title={t("Show sessions")}
           aria-label={t("Show sessions")}
-          data-feature-help={t("Open the panel with this project's agent and terminal sessions.")}
+          data-feature-help={t(
+            "Open the panel with this project's agent and terminal sessions and its research diary.",
+          )}
           onClick={expand}
           className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -129,19 +268,51 @@ export function ScienceSessionPanel({
           </button>
         </div>
       )}
-      {project ? (
-        <ProjectSessions
-          key={project.id}
-          view={view}
-          project={project}
-          collapsed={collapsed}
-          onExpand={expand}
-          openSession={openSession?.projectId === project.id ? openSession : null}
-          onSessionOpened={onSessionOpened}
-        />
-      ) : (
-        <NoProjectSessions collapsed={collapsed} onExpand={expand} />
-      )}
+      <div
+        ref={bodyRef}
+        className={collapsed ? "contents" : "flex min-h-0 min-w-0 flex-1 flex-col"}
+      >
+        <div
+          data-testid="science-panel-sessions"
+          className={collapsed ? "contents" : "flex min-h-0 min-w-0 flex-col"}
+          style={collapsed ? undefined : { flex: diaryProjectId ? `${1 - share} 1 0` : "1 1 0" }}
+        >
+          {project ? (
+            <ProjectSessions
+              key={project.id}
+              view={view}
+              project={project}
+              collapsed={collapsed}
+              onExpand={expand}
+              openSession={openSession?.projectId === project.id ? openSession : null}
+              onSessionOpened={onSessionOpened}
+            />
+          ) : (
+            <NoProjectSessions collapsed={collapsed} onExpand={expand} />
+          )}
+        </div>
+        {diaryProjectId ? (
+          <>
+            <div
+              data-testid="science-panel-divider"
+              aria-hidden
+              onPointerDown={onDividerDown}
+              className="app-no-drag h-1.5 shrink-0 cursor-row-resize border-border border-t transition-colors hover:bg-primary/30"
+            />
+            <div
+              data-testid="science-panel-diary"
+              className="flex min-h-0 min-w-0 flex-col"
+              style={{ flex: `${share} 1 0` }}
+            >
+              <ResearchDiaryPanel
+                key={diaryProjectId}
+                projectId={diaryProjectId}
+                headerActions={null}
+              />
+            </div>
+          </>
+        ) : null}
+      </div>
     </aside>
   )
 }

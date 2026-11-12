@@ -11,27 +11,20 @@ import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import {
-  ChartArea,
-  CloudDownload,
-  FileCode2,
-  FileText,
-  Microscope,
-  NotebookPen,
-  Search,
-} from "lucide-react"
+import { ChartArea, CloudDownload, FileCode2, FileText, Microscope, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
-import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
+import {
+  HeaderShortcuts,
+  headerIconButtonClass,
+} from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
-import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { useTranslate } from "../../../../../i18n/language"
 import {
   DEFAULT_RESULTS_FOLDER,
   useAnalysisProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
-  useResearchDiaryOpen,
 } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
@@ -39,9 +32,11 @@ import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
+  SciencePanelDiaryButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
   useFocusSessionRequest,
+  useSciencePanel,
 } from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
@@ -98,7 +93,7 @@ export function ScienceAnalysis({
   const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
   const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
-  const [researchDiaryOpen, setResearchDiaryOpen] = useResearchDiaryOpen()
+  const panel = useSciencePanel()
   const capabilities = useQuery({
     ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
     enabled: Boolean(selectedProject),
@@ -300,28 +295,20 @@ export function ScienceAnalysis({
       subtitle={t("Browse and preview the data files in a project's repo")}
       actions={
         <>
-          <ProjectPicker
-            testId="analysis-project-select"
-            label={t("Analysis project")}
-            help={t("Choose which project repository to scan for data files.")}
-            value={selectedProjectId ?? ""}
-            projects={projects}
-            allLabel={null}
-            onChange={chooseProject}
-          />
-          {shortcutError ? (
-            <span
-              role="alert"
-              data-testid="analysis-shortcut-error"
-              title={shortcutError}
-              className="max-w-56 cursor-text select-text truncate text-destructive text-xs"
-            >
-              {shortcutError}
-            </span>
-          ) : null}
           <HeaderShortcuts
             view="analysis"
             projectId={selectedProjectId}
+            picker={
+              <ProjectPicker
+                testId="analysis-project-select"
+                label={t("Analysis project")}
+                help={t("Choose which project repository to scan for data files.")}
+                value={selectedProjectId ?? ""}
+                projects={projects}
+                allLabel={null}
+                onChange={chooseProject}
+              />
+            }
             onError={setShortcutError}
             onSkillSessionStarted={(session) =>
               selectedProjectId
@@ -346,21 +333,20 @@ export function ScienceAnalysis({
                     type="button"
                     data-testid="analysis-analyze-experiments"
                     disabled={!selectedProjectId || analyzeExperiments.isPending}
+                    aria-label={t("Analyze experiments")}
                     data-feature-label={t("Analyze experiments")}
-                    title={
-                      selectedProjectId
-                        ? t("Start an agent that summarises what each experiment shows")
-                        : t("Select a project")
-                    }
+                    title={selectedProjectId ? t("Analyze experiments") : t("Select a project")}
+                    data-feature-help={t(
+                      "Start an agent that summarises what each experiment shows",
+                    )}
                     onClick={() => {
                       if (!selectedProjectId) return
                       setShortcutError(null)
                       analyzeExperiments.mutate({ projectId: selectedProjectId })
                     }}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className={headerIconButtonClass}
                   >
-                    <Microscope className="size-3.5" aria-hidden />
-                    {t("Analyze experiments")}
+                    <Microscope className="size-3.5 shrink-0" aria-hidden />
                   </button>
                 ),
               },
@@ -372,6 +358,9 @@ export function ScienceAnalysis({
                     type="button"
                     data-testid="analysis-new-html-report"
                     disabled={!selectedProjectId || createTemplate.isPending}
+                    aria-label={t("HTML report")}
+                    title={t("HTML report")}
+                    data-feature-label={t("HTML report")}
                     data-feature-help={
                       selectedProjectId
                         ? t("Add a new HTML report file to the project and show it.")
@@ -380,10 +369,9 @@ export function ScienceAnalysis({
                     onClick={() =>
                       createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
                     }
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className={headerIconButtonClass}
                   >
-                    <FileCode2 className="size-3.5" aria-hidden />
-                    {t("HTML report")}
+                    <FileCode2 className="size-3.5 shrink-0" aria-hidden />
                   </button>
                 ),
               },
@@ -396,7 +384,7 @@ export function ScienceAnalysis({
                     projectId={selectedProject.id}
                     projectName={selectedProject.name}
                     task="fetch-experiments"
-                    variant="labeled"
+                    variant="icon"
                     testId="analysis-fetch-experiments"
                     instructions={fetchInstructions}
                     disabled={!gitAvailable}
@@ -407,12 +395,12 @@ export function ScienceAnalysis({
                     type="button"
                     data-testid="analysis-fetch-experiments"
                     disabled
+                    aria-label={t("Fetch experiments")}
                     title={t("Select a project")}
                     data-feature-label={t("Fetch experiments")}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    className={headerIconButtonClass}
                   >
-                    <CloudDownload className="size-3.5" aria-hidden />
-                    {t("Fetch experiments")}
+                    <CloudDownload className="size-3.5 shrink-0" aria-hidden />
                   </button>
                 ),
               },
@@ -420,32 +408,30 @@ export function ScienceAnalysis({
                 id: "research-diary",
                 label: t("Research diary"),
                 node: (
-                  <button
-                    type="button"
-                    data-testid="analysis-research-diary"
-                    aria-label={t("Research diary")}
-                    aria-pressed={researchDiaryOpen}
-                    title={t("Research diary")}
-                    data-feature-label={t("Research diary")}
-                    data-feature-help={t("Show or hide the chosen project's research diary")}
-                    onClick={() => setResearchDiaryOpen(!researchDiaryOpen)}
-                    className={cn(
-                      "inline-flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-                      researchDiaryOpen && "text-foreground",
-                    )}
-                  >
-                    <NotebookPen className="size-3.5" aria-hidden />
-                  </button>
+                  <SciencePanelDiaryButton
+                    testId="analysis-research-diary"
+                    panel={panel}
+                    disabled={!selectedProjectId}
+                  />
                 ),
               },
             ]}
           />
+          {shortcutError ? (
+            <span
+              role="alert"
+              data-testid="analysis-shortcut-error"
+              title={shortcutError}
+              className="max-w-56 cursor-text select-text truncate text-destructive text-xs"
+            >
+              {shortcutError}
+            </span>
+          ) : null}
         </>
       }
     >
-      {/* The file list and preview keep 36rem; the diary and Sessions panels narrow
-          first, and the diary hides when even their minimum widths do not fit. */}
-      <div className="group/analysis @container/analysis flex min-h-0 flex-1 overflow-x-auto">
+      {/* The file list and preview keep 36rem; the right panel narrows first. */}
+      <div className="flex min-h-0 flex-1 overflow-x-auto">
         <div className="flex min-h-0 min-w-[36rem] flex-1 flex-col">
           {projects.length === 0 ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
@@ -643,17 +629,10 @@ export function ScienceAnalysis({
             </div>
           )}
         </div>
-        {researchDiaryOpen && selectedProjectId ? (
-          <div
-            data-testid="analysis-research-diary-slot"
-            className="flex min-h-0 min-w-0 shrink @max-[53.5rem]/analysis:hidden @max-[73rem]/analysis:group-has-[[data-testid=science-sessions][data-collapsed=false]]/analysis:hidden"
-          >
-            <ResearchDiaryPanel key={selectedProjectId} projectId={selectedProjectId} />
-          </div>
-        ) : null}
         <ScienceSessionPanel
           view="analysis"
           project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
+          panel={panel}
           openSession={sessionRequest}
           onSessionOpened={clearSessionRequest}
         />

@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import type { FileTreeEditorTabs } from "../../../../../Editor/components/FileTree"
 import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
@@ -51,6 +52,9 @@ function basename(relPath: string): string {
   return relPath.split("/").pop() ?? relPath
 }
 
+/** Id of the right-sidebar Diary tab, which the top bar's Research diary button opens. */
+export const DIARY_TAB_ID = "diary"
+
 /** A tab in the right sidebar: a label + the panel it reveals. */
 interface PanelTab {
   id: string
@@ -60,7 +64,7 @@ interface PanelTab {
 }
 
 /**
- * The right-sidebar tab set for the project view. **Research / TODOs / Files** are
+ * The right-sidebar tab set for the project view. **Research / TODOs / Files / Diary** are
  * the default panels (shown Files first by default, see {@link orderTabs}); **Code changes** (the git working-tree diff) is hidden by
  * default and toggled on via the gear (persisted in `projectView.showCodeChanges`,
  * also editable in Settings → Project view). The old Status panel was dropped — its
@@ -90,6 +94,14 @@ const BASE_TABS: readonly PanelTab[] = [
     description: "View the project's selected task Markdown file.",
     render: ({ projectId, workspaceId }) => (
       <TodosPanel projectId={projectId} workspaceId={workspaceId} />
+    ),
+  },
+  {
+    id: DIARY_TAB_ID,
+    label: "Diary",
+    description: "Read and edit the project's research diary.",
+    render: ({ projectId }) => (
+      <ResearchDiaryPanel key={projectId} projectId={projectId} headerActions={null} />
     ),
   },
 ]
