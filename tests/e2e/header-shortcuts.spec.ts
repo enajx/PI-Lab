@@ -99,7 +99,9 @@ test("a skill added from the header + menu starts an agent and the list persists
 
 /**
  * Real app, IPC, bundled skill lookup and fixture agent process: the LaTeX
- * Editor top bar has its own "+" menu listing Update paper, and Analysis shows
+ * Editor top bar has the "+" left of the project picker, icon-only buttons, a
+ * diary button for its collapsible diary column, and its own "+" menu listing
+ * Update paper, Sync and Research diary; Analysis shows
  * Analyze experiments by default, which starts the project's agent in the
  * Analysis session panel.
  */
@@ -158,11 +160,73 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     await expect(page.getByTestId("science-latex")).toBeVisible()
     await page.getByTestId("paper-use-folder").click()
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    // The "+" sits left of the project picker; the buttons show only their icon.
+    const latexBar = page.getByTestId("science-latex").locator("header").first()
+    const left = async (testId: string) =>
+      (await latexBar.getByTestId(testId).boundingBox())?.x ?? -1
+    await expect(latexBar.getByTestId("paper-sync")).toBeVisible()
+    expect(await left("latex-shortcuts-add")).toBeLessThan(await left("latex-project-select"))
+    expect(await left("latex-project-select")).toBeLessThan(await left("paper-update"))
+    for (const testId of ["paper-update", "paper-sync", "latex-research-diary"]) {
+      await expect(latexBar.getByTestId(testId)).toHaveText("")
+      expect((await latexBar.getByTestId(testId).boundingBox())?.width ?? 0).toBeLessThanOrEqual(30)
+    }
+    await expect(latexBar.getByTestId("paper-update")).toHaveAttribute("title", "Update paper")
+    await page.screenshot({ path: resolve(".cache", "screens", "latex-top-bar.png") })
+    // The right documents column starts collapsed; the top bar diary button opens it
+    // on the Diary tab and closes it again.
+    const diaryColumn = page.getByTestId("latex-diary")
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
+    await latexBar.getByTestId("latex-research-diary").click()
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "false")
+    await expect(diaryColumn.getByTestId("research-diary-panel")).toBeVisible()
+    // With the diary open, the editor status bar items never overlap or run past the bar.
+    const statusBar = page.getByTestId("editor-status-bar")
+    await expect(statusBar.getByTestId("latex-engine")).toBeVisible()
+    await expect(statusBar.getByTestId("paper-connect-overleaf")).toBeVisible()
+    const overlaps = await statusBar.evaluate((bar) => {
+      const items = [...bar.querySelectorAll<HTMLElement>("button, span, [role=alert]")].filter(
+        (element) =>
+          element.getClientRects().length > 0 &&
+          element.parentElement?.closest("button, span, [role=alert]") === null,
+      )
+      const barBox = bar.getBoundingClientRect()
+      const boxes = items
+        .map((element) => ({ text: element.textContent, box: element.getBoundingClientRect() }))
+        .filter((entry) => entry.box.width > 0)
+        .sort((a, b) => a.box.left - b.box.left)
+      const problems: string[] = []
+      for (const [index, entry] of boxes.entries()) {
+        if (entry.box.right > barBox.right + 0.5) problems.push(`${entry.text} runs past the bar`)
+        const next = boxes[index + 1]
+        if (next && entry.box.right > next.box.left + 0.5)
+          problems.push(`${entry.text} overlaps ${next.text}`)
+      }
+      for (const element of items)
+        if (element.scrollWidth > element.clientWidth + 1 && !element.querySelector(".truncate"))
+          if (getComputedStyle(element).textOverflow !== "ellipsis")
+            problems.push(`${element.textContent} overflows its box`)
+      return problems
+    })
+    expect(overlaps).toEqual([])
+    await page.screenshot({ path: resolve(".cache", "screens", "latex-diary.png") })
+    await latexBar.getByTestId("latex-research-diary").click()
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
+    await expect(page.getByTestId("research-diary-panel")).toHaveCount(0)
+    await latexBar.getByTestId("latex-research-diary").click()
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "false")
+    await diaryColumn.getByTestId("right-sidebar-collapse").click()
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
+
     await page.getByTestId("latex-shortcuts-add").click()
     const menu = page.getByRole("menu", { name: "Header shortcuts" })
     // The menu lists the LaTeX Editor's own top bar buttons, all shown.
-    await expect(menu.getByRole("menuitemcheckbox")).toHaveText(["Update paper", "Sync"])
-    for (const name of ["Update paper", "Sync"])
+    await expect(menu.getByRole("menuitemcheckbox")).toHaveText([
+      "Update paper",
+      "Sync",
+      "Research diary",
+    ])
+    for (const name of ["Update paper", "Sync", "Research diary"])
       await expect(menu.getByRole("menuitemcheckbox", { name })).toHaveAttribute(
         "aria-checked",
         "true",
@@ -185,16 +249,11 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     const analysisItems = menu.getByRole("menuitemcheckbox")
     await expect(analysisItems).toHaveText([
       "Analyze experiments",
-      "HTML report",
+      "Report",
       "Fetch experiments",
       "Research diary",
     ])
-    for (const name of [
-      "Analyze experiments",
-      "HTML report",
-      "Fetch experiments",
-      "Research diary",
-    ])
+    for (const name of ["Analyze experiments", "Report", "Fetch experiments", "Research diary"])
       await expect(menu.getByRole("menuitemcheckbox", { name })).toHaveAttribute(
         "aria-checked",
         "true",
@@ -301,12 +360,12 @@ test("a click on the top bar closes the + menu, and the project picker switches 
     await expect(menu).toHaveCount(0)
     expect(await appRegion()).toBe("drag")
 
-    // The project picker is the app's own dropdown; it lists both projects.
+    // The project picker is the app's own dropdown; it lists both projects, then New paper….
     const picker = page.getByTestId("latex-project-select")
     await expect(picker).toHaveText("alpha")
     await picker.click()
     const list = page.getByRole("listbox", { name: "LaTeX Editor project" })
-    await expect(list.getByRole("option")).toHaveCount(2)
+    await expect(list.getByRole("option")).toHaveText(["alpha", "beta", "New paper…"])
     await expect(list.getByRole("option", { name: "beta" })).toHaveAttribute(
       "aria-selected",
       "false",

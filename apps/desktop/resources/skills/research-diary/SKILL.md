@@ -16,3 +16,5 @@ This is a placeholder skill. It will be designed later.
 3. Append a short entry under today's heading: what was done, what was found, and what
    comes next. Keep it short and plain; the diary is less polished than RESEARCH.md.
 4. Do not change older entries.
+5. Only days with an entry have a heading. Do not add a heading for a day with nothing
+   under it; the app removes such headings when it saves the diary.

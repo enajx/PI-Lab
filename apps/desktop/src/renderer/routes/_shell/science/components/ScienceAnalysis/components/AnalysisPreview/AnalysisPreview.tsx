@@ -2,7 +2,7 @@ import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysi
 import type { NotebookCell, NotebookOutput } from "@pi-lab/shared/analysis/ipynb"
 import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import {
   type DocumentRenderResult,
@@ -34,12 +34,15 @@ export function AnalysisPreview({
   relPath,
   kind,
   onOpenNotebook,
+  headerEnd,
 }: {
   projectId: string
   relPath: string
   kind: DataFileKind
   /** Open this Jupyter or marimo notebook in a notebook tab on its own server. */
   onOpenNotebook: (relPath: string) => void
+  /** Shown at the right end of the header row (the collapsed right panel's expand button). */
+  headerEnd: ReactNode
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -98,6 +101,7 @@ export function AnalysisPreview({
             onRendered={(result) => setRendered({ relPath, result, at: Date.now() })}
           />
         ) : null}
+        {headerEnd ? <div className="-my-1 -me-2 flex shrink-0">{headerEnd}</div> : null}
       </div>
       <div
         data-testid="analysis-preview"

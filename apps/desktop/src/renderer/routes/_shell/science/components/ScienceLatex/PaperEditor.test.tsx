@@ -127,6 +127,9 @@ function renderEditor(
     <AppProviders client={client} queryClient={queryClient}>
       <PaperEditor
         createdBuild={createdBuild}
+        picker={null}
+        diaryButton={null}
+        toolbarEnd={null}
         projectId={projectId}
         projectName="Project"
         workspaceId="paper-ws"
@@ -441,7 +444,7 @@ describe("PaperEditor Start draft and Update paper (mocked server)", () => {
     await waitFor(() => expect(within(slot).queryByTestId("paper-update")).toBeNull())
     expect(
       JSON.parse(window.localStorage.getItem("pi-lab.latexEditor.headerShortcuts") ?? ""),
-    ).toEqual(["sync"])
+    ).toEqual(["sync", "research-diary"])
 
     fireEvent.click(within(menu).getByRole("button", { name: "Skills" }))
     fireEvent.click(await within(menu).findByRole("menuitemcheckbox", { name: "Review notes" }))

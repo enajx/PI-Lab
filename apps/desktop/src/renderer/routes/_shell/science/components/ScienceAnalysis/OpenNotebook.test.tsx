@@ -175,7 +175,7 @@ describe("Open notebook in Analysis", () => {
     fireEvent.click(await screen.findByTestId("analysis-open-notebook"))
     const frame = await screen.findByTestId("notebook-frame")
 
-    fireEvent.click(screen.getByTestId("science-sessions-collapse"))
+    fireEvent.click(screen.getByTestId("right-sidebar-collapse"))
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("true")
     // The page stays loaded (hidden), so its unsaved edits are kept.
     expect(screen.getByTestId("notebook-frame")).toBe(frame)
@@ -184,6 +184,13 @@ describe("Open notebook in Analysis", () => {
 
     fireEvent.click(screen.getByTestId("science-sessions-expand"))
     expect(screen.getByTestId("notebook-frame")).toBe(frame)
+    expect(frame.closest("[hidden]")).toBeNull()
+
+    // Another tab of the panel hides the page too, without reloading it.
+    fireEvent.click(screen.getByTestId("panel-tab-diary"))
+    expect(screen.getByTestId("notebook-frame")).toBe(frame)
+    expect(frame.closest("[hidden]")).not.toBeNull()
+    fireEvent.click(screen.getByTestId("panel-tab-sessions"))
     expect(frame.closest("[hidden]")).toBeNull()
   })
 

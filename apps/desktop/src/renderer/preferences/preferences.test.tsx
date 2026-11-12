@@ -53,7 +53,8 @@ test("saved header shortcut lists get each later built-in once, and keep earlier
     "pi-lab.projectView.headerShortcuts",
     JSON.stringify(["tasks", "project-status"]),
   )
-  // LaTeX list saved at version 2 with Sync removed: Sync must not come back.
+  // LaTeX list saved at version 2 with Sync removed: Sync must not come back;
+  // Research diary (version 5) is added.
   window.localStorage.setItem(
     "pi-lab.latexEditor.headerShortcuts",
     JSON.stringify(["update-paper"]),
@@ -62,8 +63,23 @@ test("saved header shortcut lists get each later built-in once, and keep earlier
   const project = renderHook(() => useHeaderShortcuts("project"))
   const latex = renderHook(() => useHeaderShortcuts("latex"))
   expect(project.result.current[0]).toEqual(["tasks", "paper", "project-status", "research-diary"])
-  expect(latex.result.current[0]).toEqual(["update-paper"])
+  expect(latex.result.current[0]).toEqual(["update-paper", "research-diary"])
   project.unmount()
+  latex.unmount()
+  window.localStorage.clear()
+})
+
+test("LaTeX Editor and Tasks top bars list Research diary by default and add it to older saved lists", () => {
+  const fresh = renderHook(() => useHeaderShortcuts("tasks"))
+  expect(fresh.result.current[0]).toEqual(["research-diary"])
+  fresh.unmount()
+  window.localStorage.setItem(
+    "pi-lab.latexEditor.headerShortcuts",
+    JSON.stringify(["update-paper", "sync"]),
+  )
+  window.localStorage.setItem("pi-lab.latexEditor.headerShortcutsVersion", "4")
+  const latex = renderHook(() => useHeaderShortcuts("latex"))
+  expect(latex.result.current[0]).toEqual(["update-paper", "sync", "research-diary"])
   latex.unmount()
   window.localStorage.clear()
 })

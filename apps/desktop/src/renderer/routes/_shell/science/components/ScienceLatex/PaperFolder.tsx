@@ -315,13 +315,13 @@ export function PaperFolderStatusItem({
         aria-expanded={open}
         disabled={busy}
         onClick={() => setOpen(!open)}
-        className="flex max-w-56 shrink-0 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        className="flex min-w-0 max-w-56 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
       >
         {/* Long paths are cut at the start so the folder name stays visible; full path on hover. */}
         <span className="min-w-0 truncate [direction:rtl]">
           <bdi>{paperFolderLabel(displayDir, t)}</bdi>
         </span>
-        <ChevronDown className="size-3" aria-hidden />
+        <ChevronDown className="size-3 shrink-0" aria-hidden />
       </button>
       {open ? (
         <div

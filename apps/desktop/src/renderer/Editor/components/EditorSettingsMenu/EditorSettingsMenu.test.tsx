@@ -36,6 +36,7 @@ const SETTINGS: EditorSettings = {
   askPapersFolder: true,
   researchDiaryFormat: "md",
   analysisFormat: "md",
+  reportSkill: "experiment-report",
 }
 
 describe("EditorSettingsMenu", () => {

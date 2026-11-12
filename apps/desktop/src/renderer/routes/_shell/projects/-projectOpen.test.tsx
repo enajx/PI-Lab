@@ -52,6 +52,7 @@ vi.mock("./components/CentralPanel", () => ({
   }),
 }))
 vi.mock("./components/RightSidebar", () => ({
+  DIARY_TAB_ID: "diary",
   FILES_TAB_ID: "files",
   RightSidebar: ({ activeId }: { activeId: string | null }) => (
     <div data-testid="right-sidebar-stub" data-active-id={activeId ?? ""} />

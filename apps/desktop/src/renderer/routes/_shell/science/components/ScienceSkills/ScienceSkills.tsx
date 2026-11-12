@@ -127,6 +127,7 @@ export function ScienceSkills() {
 
   return (
     <ScienceTabShell
+      layout="flush"
       testId="science-skills"
       title={t("Skills")}
       subtitle={t("Browse project-local and global agent skills")}

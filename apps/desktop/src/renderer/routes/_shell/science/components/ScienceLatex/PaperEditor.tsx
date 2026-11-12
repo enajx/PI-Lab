@@ -1,10 +1,13 @@
 import type { EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { PenLine } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import type { BuildResult } from "../../../../../../main/trpc/pdf/pdf"
-import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
+import {
+  HeaderShortcuts,
+  headerIconButtonClass,
+} from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { useTranslate } from "../../../../../i18n/language"
@@ -59,6 +62,12 @@ interface PaperEditorProps {
   focusSession: FocusSessionRequest | null
   /** The page top bar's element that holds the Update paper and Sync buttons, or null before it mounts. */
   syncSlot: HTMLElement | null
+  /** The page's project picker, shown in the top bar right of the "+" button. */
+  picker: ReactNode
+  /** The top bar Research diary button, or null for none (a paper-only project). */
+  diaryButton: ReactNode
+  /** Shown at the right end of the editor card's toolbar (the collapsed diary's expand button). */
+  toolbarEnd: ReactNode
   /**
    * Right after Start draft: the build of the main .tex it ran before the
    * editor opened (its PDF then opens beside the source), else null.
@@ -144,6 +153,9 @@ export function PaperEditor({
   onUpdateEditorSettings,
   focusSession,
   syncSlot,
+  picker,
+  diaryButton,
+  toolbarEnd,
   createdBuild,
 }: PaperEditorProps) {
   const t = useTranslate()
@@ -406,6 +418,7 @@ export function PaperEditor({
           onFilesPanelOpenChange={setLeftColumnOpen}
           pdfBesideSource={true}
           sourceRequest={sourceRequest}
+          toolbarEnd={toolbarEnd}
           leftColumn={{
             bottom: outlineSection,
             filesOpen,
@@ -422,7 +435,7 @@ export function PaperEditor({
                   title={t("Send this paper to a new Overleaf project")}
                   data-feature-label={t("Connect to Overleaf")}
                   onClick={() => setConnectOpen(true)}
-                  className="shrink-0 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
+                  className="min-w-0 truncate rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
                 >
                   {t("Connect to Overleaf…")}
                 </button>
@@ -437,6 +450,7 @@ export function PaperEditor({
             <HeaderShortcuts
               view="latex"
               projectId={projectId}
+              picker={picker}
               onError={setOpenError}
               onSkillSessionStarted={(session) =>
                 attachSession({
@@ -456,16 +470,19 @@ export function PaperEditor({
                       type="button"
                       data-testid="paper-update"
                       disabled={startUpdate.isPending}
-                      title={t("Start an agent that updates the paper from the project's results")}
+                      aria-label={t("Update paper")}
+                      title={t("Update paper")}
                       data-feature-label={t("Update paper")}
+                      data-feature-help={t(
+                        "Start an agent that updates the paper from the project's results",
+                      )}
                       onClick={() => {
                         setOpenError(null)
                         startUpdate.mutate({ projectId })
                       }}
-                      className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+                      className={headerIconButtonClass}
                     >
-                      <PenLine className="size-3.5" aria-hidden />
-                      {t("Update paper")}
+                      <PenLine className="size-3.5 shrink-0" aria-hidden />
                     </button>
                   ),
                 },
@@ -480,6 +497,9 @@ export function PaperEditor({
                     />
                   ),
                 },
+                ...(diaryButton === null
+                  ? []
+                  : [{ id: "research-diary", label: t("Research diary"), node: diaryButton }]),
               ]}
             />,
             syncSlot,

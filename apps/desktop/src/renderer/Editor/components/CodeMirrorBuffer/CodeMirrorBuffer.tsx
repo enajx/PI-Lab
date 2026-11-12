@@ -786,9 +786,19 @@ const editorTypographyExtension = EditorView.theme({
     fontFamily: "var(--pi-lab-editor-font-family)",
     fontSize: "var(--pi-lab-editor-font-size)",
   },
+  // Line numbers are smaller than the text, in a narrow gutter (every editor:
+  // files, LaTeX, research diary).
   ".cm-gutters": {
     fontFamily: "var(--pi-lab-editor-font-family)",
-    fontSize: "var(--pi-lab-editor-font-size)",
+    fontSize: "calc(var(--pi-lab-editor-font-size) * 0.78)",
+  },
+  // No fold arrows column, so the numbers sit close to the text line.
+  // Faded toward the background so they stand out less in every theme: lighter
+  // grey in light themes, darker in dark themes.
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "2ch",
+    padding: "0 4px 0 4px",
+    opacity: "0.55",
   },
 })
 

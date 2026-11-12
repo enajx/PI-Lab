@@ -5,7 +5,7 @@ import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 
-type Provider = "auto" | "bundled" | "system"
+type Provider = "bundled" | "system"
 
 /** Whether a TinyTeX installation is still running. */
 function installRunning(state: string | undefined): boolean {
@@ -16,8 +16,10 @@ function installRunning(state: string | undefined): boolean {
  * The LaTeX Editor footer item for the LaTeX engine. It shows the engine
  * builds use now (e.g. "TeX Live 2026" or "Tectonic"); its menu, styled like
  * the Python environment picker, sets the global engine (the same setting as
- * Settings > LaTeX): Auto, System LaTeX (disabled with a reason when not
- * installed), Bundled Tectonic, and Install TinyTeX….
+ * Settings > LaTeX). It ticks the engine builds use now (so Auto in Settings
+ * shows the engine it picked): System LaTeX (disabled with a reason when not
+ * installed), Bundled Tectonic, and Install TinyTeX…, which can also be used
+ * when a system LaTeX is already installed.
  */
 export function LatexEngineStatusItem() {
   const t = useTranslate()
@@ -76,7 +78,7 @@ export function LatexEngineStatusItem() {
       type="button"
       role="menuitemradio"
       data-testid={`latex-engine-${provider}`}
-      aria-checked={data?.provider === provider}
+      aria-checked={data?.engine?.kind === provider}
       disabled={disabledReason !== null}
       title={disabledReason ?? undefined}
       data-feature-label={name}
@@ -85,7 +87,7 @@ export function LatexEngineStatusItem() {
       className={itemClass}
     >
       <span className="mt-0.5 w-3 shrink-0">
-        {data?.provider === provider ? <Check className="size-3" aria-hidden /> : null}
+        {data?.engine?.kind === provider ? <Check className="size-3" aria-hidden /> : null}
       </span>
       <span className="min-w-0">
         <span className="block truncate text-xs">{name}</span>
@@ -113,10 +115,10 @@ export function LatexEngineStatusItem() {
         aria-expanded={open}
         disabled={!data}
         onClick={() => setOpen(!open)}
-        className="flex shrink-0 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        className="flex min-w-0 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
       >
-        {label}
-        <ChevronDown className="size-3" aria-hidden />
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronDown className="size-3 shrink-0" aria-hidden />
       </button>
       {open && data ? (
         <div
@@ -127,7 +129,6 @@ export function LatexEngineStatusItem() {
           <div className="px-2 py-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
             {t("LaTeX engine")}
           </div>
-          {option("auto", t("Auto"), t("System LaTeX when installed, else bundled Tectonic"), null)}
           {option(
             "system",
             data.system.available ? `${t("System LaTeX")}: ${data.system.name}` : t("System LaTeX"),
@@ -145,12 +146,8 @@ export function LatexEngineStatusItem() {
             type="button"
             role="menuitem"
             data-testid="latex-engine-install"
-            disabled={data.system.available || installing || install.isPending}
-            title={
-              data.system.available
-                ? t("System LaTeX is already installed.")
-                : t("Downloads TinyTeX, shared with VS Code and your terminal.")
-            }
+            disabled={installing || install.isPending}
+            title={t("Downloads TinyTeX, shared with VS Code and your terminal.")}
             data-feature-label={t("Install TinyTeX")}
             onClick={() => {
               setOpen(false)

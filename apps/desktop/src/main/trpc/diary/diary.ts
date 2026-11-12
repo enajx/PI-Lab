@@ -21,12 +21,14 @@ import { publicProcedure, router } from "../trpc"
  * format setting; MyST also uses `diary.md`), one `## YYYY-MM-DD` heading per
  * day, newest first.
  *
- * `open` prepares the file for the diary panel: it renames the diary to the
- * current format's extension when only the other one exists, creates it when
- * missing, adds a MyST front matter when the format is MyST and the file has
- * none, and adds today's heading at the top when today has none. `save` writes the panel's
- * edit unless the file changed on disk since it was loaded (same mtime + size
- * check as the editor's save).
+ * `open` loads the diary for the panel: it renames the diary to the current
+ * format's extension when only the other one exists, and otherwise writes
+ * nothing. The text it returns has today's heading at the top when today has
+ * none, and a MyST front matter when the format is MyST and the file has none,
+ * so the user can write under today's heading. `save` writes the panel's edit
+ * without the day headings that have nothing under them, unless the file
+ * changed on disk since it was loaded (same mtime + size check as the editor's
+ * save). So the file only has headings for days with an entry.
  */
 
 const DIARY_DIR = "md/research-diary"
@@ -85,6 +87,41 @@ export function withTodayHeading(content: string, heading: string): string {
   return `${top}${heading}${eol}${eol}${rest}`
 }
 
+/** A `## YYYY-MM-DD` day heading line (a trailing `\r` or spaces allowed). */
+const DAY_HEADING = /^## \d{4}-\d{2}-\d{2}\s*$/
+
+/**
+ * Remove each day heading that has nothing under it: only blank lines up to the
+ * next `# ` or `## ` heading or the end of the file. The heading goes together
+ * with the blank lines after it. A leading YAML front matter is kept as it is.
+ */
+export function withoutEmptyDayHeadings(content: string): string {
+  const { block, body } = splitFrontMatter(content)
+  const lines = body.split("\n")
+  const kept: string[] = []
+  let index = 0
+  while (index < lines.length) {
+    const line = lines[index] ?? ""
+    if (DAY_HEADING.test(line)) {
+      let next = index + 1
+      while (next < lines.length && lines[next]?.trim() === "") next += 1
+      const following = lines[next]
+      if (following === undefined || /^#{1,2} /.test(following)) {
+        // At the end of the file, end the text before the heading with one line break.
+        if (following === undefined && kept.length > 0) {
+          while (kept.length > 0 && kept[kept.length - 1]?.trim() === "") kept.pop()
+          kept.push("")
+        }
+        index = next
+        continue
+      }
+    }
+    kept.push(line)
+    index += 1
+  }
+  return `${block}${kept.join("\n")}`
+}
+
 /** The project's folder, or a clean NOT_FOUND. */
 function projectFolder(db: PiLabDatabase, projectId: string): string {
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get()
@@ -118,7 +155,7 @@ const fileStat = z.object({
 })
 
 export const diaryRouter = router({
-  /** Rename to the current format if needed, then ensure the file and today's heading exist. */
+  /** Rename to the current format if needed; return the text with today's heading, writing nothing. */
   open: publicProcedure
     .input(z.object({ projectId: z.string().min(1) }))
     .mutation(async ({ ctx, input }): Promise<DiaryFile> => {
@@ -133,13 +170,13 @@ export const diaryRouter = router({
       }
       const loaded = await readDiary(target, relPath)
       const marked = format === "myst" ? withMystFrontMatter(loaded.content) : loaded.content
-      const next = withTodayHeading(marked, localDateHeading(new Date()))
-      if (next === loaded.content && loaded.baseline.exists) return loaded
-      await writeTextFile(target, next)
-      return readDiary(target, relPath)
+      return { ...loaded, content: withTodayHeading(marked, localDateHeading(new Date())) }
     }),
 
-  /** Write the panel's edit; refuse (CONFLICT) when the file changed since `baseline`. */
+  /**
+   * Write the panel's edit without its empty day headings; refuse (CONFLICT) when
+   * the file changed since `baseline`.
+   */
   save: publicProcedure
     .input(
       z.object({
@@ -162,8 +199,9 @@ export const diaryRouter = router({
           message: `${input.relPath} changed on disk since it was loaded. Your edit was not saved. Copy it, then close and reopen the diary to load the new version.`,
         })
       }
-      await writeTextFile(target, input.content)
-      const verified = await verifyWrittenText(target, input.content)
+      const content = withoutEmptyDayHeadings(input.content)
+      await writeTextFile(target, content)
+      const verified = await verifyWrittenText(target, content)
       if (!verified.matchesWrittenContent) {
         throw new TRPCError({
           code: "CONFLICT",

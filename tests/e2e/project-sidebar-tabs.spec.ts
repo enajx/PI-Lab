@@ -107,7 +107,7 @@ test("remembers the tab and left Files column per project and keeps a global dra
   // left Files column collapsed (the global default is off).
   const first = await launch(alpha)
   await openProject(first, "alpha-tabs")
-  await expect.poll(() => tabOrder(first)).toEqual(["files", "research", "todos"])
+  await expect.poll(() => tabOrder(first)).toEqual(["files", "research", "todos", "diary"])
   await expect(first.getByTestId("panel-tab-files")).toHaveAttribute("aria-selected", "true")
   await expect(first.getByTestId("panel-files")).toBeVisible()
   await expect(first.getByTestId("central-files-toggle")).toHaveAttribute("aria-pressed", "false")
@@ -117,7 +117,7 @@ test("remembers the tab and left Files column per project and keeps a global dra
   await first
     .getByTestId("panel-tab-todos")
     .dragTo(first.getByTestId("panel-tab-files"), { targetPosition: { x: 2, y: 5 } })
-  await expect.poll(() => tabOrder(first)).toEqual(["todos", "files", "research"])
+  await expect.poll(() => tabOrder(first)).toEqual(["todos", "files", "research", "diary"])
   await expect(first.getByTestId("panel-tab-files")).toHaveAttribute("aria-selected", "true")
 
   // Select TODOs, then toggle alpha's left column on and off: alpha now has its own
@@ -125,7 +125,7 @@ test("remembers the tab and left Files column per project and keeps a global dra
   await first.getByTestId("panel-tab-todos").click()
   await first.getByTestId("central-files-toggle").click()
   await expect(first.getByTestId("central-files-panel")).toBeVisible()
-  await expect.poll(() => tabOrder(first)).toEqual(["todos", "research"])
+  await expect.poll(() => tabOrder(first)).toEqual(["todos", "research", "diary"])
   await first.getByTestId("central-files-toggle").click()
   await expect(first.getByTestId("central-files-panel")).toHaveCount(0)
   await expect.poll(() => savedViewState(first, false, "todos")).toBe(true)
@@ -135,7 +135,7 @@ test("remembers the tab and left Files column per project and keeps a global dra
   // opens on Files, and no left-column value of its own, so it follows the global default.
   const second = await launch(beta)
   await openProject(second, "beta-tabs")
-  await expect.poll(() => tabOrder(second)).toEqual(["todos", "files", "research"])
+  await expect.poll(() => tabOrder(second)).toEqual(["todos", "files", "research", "diary"])
   await expect(second.getByTestId("panel-tab-files")).toHaveAttribute("aria-selected", "true")
   await expect(second.getByTestId("central-files-panel")).toHaveCount(0)
 
@@ -148,9 +148,9 @@ test("remembers the tab and left Files column per project and keeps a global dra
   // Beta follows the new default; alpha keeps its own collapsed value and reopens on TODOs.
   await openProject(second, "beta-tabs")
   await expect(second.getByTestId("central-files-panel")).toBeVisible()
-  await expect.poll(() => tabOrder(second)).toEqual(["todos", "research"])
+  await expect.poll(() => tabOrder(second)).toEqual(["todos", "research", "diary"])
   await openProject(second, "alpha-tabs")
   await expect(second.getByTestId("central-files-panel")).toHaveCount(0)
   await expect(second.getByTestId("panel-tab-todos")).toHaveAttribute("aria-selected", "true")
-  await expect.poll(() => tabOrder(second)).toEqual(["todos", "files", "research"])
+  await expect.poll(() => tabOrder(second)).toEqual(["todos", "files", "research", "diary"])
 })

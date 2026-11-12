@@ -13,7 +13,11 @@ describe("ScienceTabShell", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <AppProviders client={client} queryClient={queryClient}>
-        <ScienceTabShell title="Analysis" actions={<button type="button">Refresh</button>}>
+        <ScienceTabShell
+          layout="flush"
+          title="Analysis"
+          actions={<button type="button">Refresh</button>}
+        >
           Content
         </ScienceTabShell>
       </AppProviders>,
@@ -35,7 +39,9 @@ describe("ScienceTabShell", () => {
         })}
         queryClient={queryClient}
       >
-        <ScienceTabShell title="LaTeX Editor">Content</ScienceTabShell>
+        <ScienceTabShell layout="flush" title="LaTeX Editor">
+          Content
+        </ScienceTabShell>
       </AppProviders>,
     )
     const heading = await screen.findByRole("heading", { level: 1 })
@@ -51,7 +57,9 @@ describe("ScienceTabShell", () => {
         })}
         queryClient={queryClient}
       >
-        <ScienceTabShell title="Analysis">Content</ScienceTabShell>
+        <ScienceTabShell layout="flush" title="Analysis">
+          Content
+        </ScienceTabShell>
       </AppProviders>,
     )
     const heading = await screen.findByRole("heading", { level: 1, name: "Analysis" })

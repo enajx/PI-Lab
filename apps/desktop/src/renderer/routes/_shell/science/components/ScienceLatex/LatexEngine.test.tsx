@@ -67,9 +67,14 @@ describe("LaTeX engine footer item (mocked server)", () => {
     await waitFor(() => expect(item.textContent).toContain("TeX Live 2026"))
     fireEvent.click(item)
     const menu = screen.getByRole("menu", { name: "LaTeX engine" })
-    const auto = within(menu).getByTestId("latex-engine-auto")
-    expect(auto.getAttribute("aria-checked")).toBe("true")
+    // The menu has no Auto: it ticks the engine builds use now.
+    expect(within(menu).queryByTestId("latex-engine-auto")).toBeNull()
+    expect(menu.textContent).not.toContain("Auto")
     const system = within(menu).getByTestId("latex-engine-system")
+    expect(system.getAttribute("aria-checked")).toBe("true")
+    expect(within(menu).getByTestId("latex-engine-bundled").getAttribute("aria-checked")).toBe(
+      "false",
+    )
     expect(system.textContent).toContain("TeX Live 2026")
     expect((system as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(within(menu).getByTestId("latex-engine-bundled"))
@@ -98,6 +103,27 @@ describe("LaTeX engine footer item (mocked server)", () => {
     expect(system.disabled).toBe(true)
     expect(system.textContent).toContain("Not installed")
     fireEvent.click(screen.getByTestId("latex-engine-install"))
+    await waitFor(() => expect(install).toHaveBeenCalledTimes(1))
+  })
+
+  it("lets the user install TinyTeX when a system LaTeX is already installed", async () => {
+    const install = vi.fn(() => ({ started: true }))
+    renderItem({
+      "latex.status": () => ({
+        provider: "auto",
+        bundled: tectonic,
+        system: texLive,
+        engine: { kind: "system", name: "TeX Live 2026" },
+        installation: idle,
+      }),
+      "latex.install": install,
+    })
+    const item = await screen.findByTestId("latex-engine")
+    await waitFor(() => expect(item.textContent).toContain("TeX Live 2026"))
+    fireEvent.click(item)
+    const button = screen.getByTestId("latex-engine-install") as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    fireEvent.click(button)
     await waitFor(() => expect(install).toHaveBeenCalledTimes(1))
   })
 })

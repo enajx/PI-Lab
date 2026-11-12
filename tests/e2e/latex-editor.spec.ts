@@ -314,7 +314,7 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     const topBar = page.getByTestId("science-latex").locator("header")
     await expect(topBar.getByTestId("paper-sync")).toBeVisible()
     await expect(topBar.getByTestId("latex-project-select")).toBeVisible()
-    const editor = page.getByTestId("editor-buffer")
+    const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
     await expect(editor.locator(".cm-content")).toContainText("Shared first line.")
     await expect(editor.locator(".cm-line span").first()).toBeVisible()
     await page.getByTestId("paper-outline-entry").filter({ hasText: "Method" }).click()
@@ -431,7 +431,7 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     await expect(footer.getByRole("alert")).toHaveCount(0)
 
     // Cmd+S builds and opens the PDF beside the source, without Show in PDF.
-    const editor = page.getByTestId("editor-buffer")
+    const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
     await editor.locator(".cm-content").click()
     await page.keyboard.press("ControlOrMeta+s")
     // The status already says complete from the build on open, so wait for the new PDF first.
@@ -654,9 +654,7 @@ test("LaTeX Editor changes and clears the paper folder from the footer, and Edit
     await item.click()
     await page.getByTestId("paper-folder-clear").click()
     await expect(page.getByTestId("paper-setup-overleaf")).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByTestId("paper-setup-folder")).toContainText(
-      "Open a paper folder you already cloned.",
-    )
+    await expect(page.getByTestId("paper-use-folder")).toHaveText("Open folder…")
     await expect(page.getByTestId("paper-detecting")).toHaveCount(0)
     await page.waitForTimeout(1_000)
     await expect(page.getByTestId("paper-editor")).toHaveCount(0)
@@ -842,7 +840,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     })
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 200_000 })
     // main.tex opens on the left with its built PDF already on the right: no save or click.
-    const editor = page.getByTestId("editor-buffer")
+    const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
     await expect(editor).toBeVisible()
     /** The PDF viewer shows a rendered page to the right of the source. */
     const expectPdfBeside = async (): Promise<void> => {
@@ -866,16 +864,18 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     await expect(editor).toBeVisible()
     if (!process.env.CI) await expectPdfBeside()
 
-    // The footer shows the LaTeX engine in use; its menu has Auto chosen by default.
+    // The footer shows the LaTeX engine in use; its menu has no Auto and ticks that engine.
     const engine = page.getByTestId("editor-status-bar").getByTestId("latex-engine")
     await expect(engine).toHaveText(/TeX Live|MiKTeX|System LaTeX|Tectonic/, { timeout: 15_000 })
+    const inUse = /Tectonic/.test((await engine.textContent()) ?? "") ? "bundled" : "system"
     await engine.click()
-    await expect(page.getByTestId("latex-engine-auto")).toHaveAttribute("aria-checked", "true")
+    await expect(page.getByTestId("latex-engine-auto")).toHaveCount(0)
+    await expect(page.getByTestId(`latex-engine-${inUse}`)).toHaveAttribute("aria-checked", "true")
     await expect(page.getByTestId("latex-engine-bundled")).toBeVisible()
-    await expect(page.getByTestId("latex-engine-install")).toBeVisible()
+    await expect(page.getByTestId("latex-engine-install")).toBeEnabled()
     await page.screenshot({ path: test.info().outputPath("latex-engine-menu.png") })
     await page.keyboard.press("Escape")
-    await expect(page.getByTestId("latex-engine-auto")).toHaveCount(0)
+    await expect(page.getByTestId("latex-engine-bundled")).toHaveCount(0)
 
     // Update paper (top bar) starts a write-research agent as a focused tab.
     await page.getByTestId("paper-update").click()
@@ -885,8 +885,9 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     const paper = join(project, "paper")
     expect(await readFile(join(paper, "refs.bib"), "utf8")).toBe("@misc{a}\n")
     expect((await git(paper, "ls-files")).trim().split("\n")).toEqual(["main.tex", "refs.bib"])
-    // The project repo does not see the paper folder.
-    expect((await git(project, "status", "--porcelain")).trim()).toBe("")
+    // The project repo does not see the paper folder, and the open diary column
+    // writes nothing until the user saves an entry.
+    expect((await git(project, "status", "--porcelain", "-uall")).trim()).toBe("")
 
     // No remote yet: Sync is disabled and the footer offers Connect to Overleaf.
     await expect(page.getByTestId("paper-sync")).toBeDisabled()
@@ -914,7 +915,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
 /**
  * A paper added with no project, through the real app: New paper… in the
  * LaTeX Editor picker, Start draft into a folder typed in the folder question,
- * then its own Dashboard card (only the paper button), then Add to project,
+ * then its own Dashboard card (only the paper button), then Link to project,
  * which moves the paper to the project and removes that card. The paper is
  * made from the built-in template; no Overleaf remote is used.
  */
@@ -962,7 +963,7 @@ test("LaTeX Editor adds a paper with no project, shows its own card, and links i
     await card.getByTestId("project-card-body").click()
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 30_000 })
 
-    // Add to project moves the paper to the project and removes the paper's own card.
+    // Link to project moves the paper to the project and removes the paper's own card.
     await page.getByTestId("latex-link-to-project").click()
     await page.getByRole("menuitem", { name: "project" }).click()
     await expect(page.getByTestId("latex-project-select")).toContainText("project")
@@ -970,6 +971,112 @@ test("LaTeX Editor adds a paper with no project, shows its own card, and links i
     await page.getByTestId("nav-dashboard").click()
     await expect(page.getByTestId("project-card")).toHaveCount(1)
     expect(existsSync(join(paperDir, "main.tex"))).toBe(true)
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Real app: like the project view, the editor and the diary are separate rounded
+ * cards with 12px gaps between them and from the view's edges, and no line of
+ * their own outside a card; collapsed, the diary leaves only a small card with the
+ * expand button. The gap left of the diary drags to resize it, and the width comes
+ * back after a reload.
+ */
+test("LaTeX Editor shows the editor and diary as separate cards, and keeps the diary width after reload", async () => {
+  test.setTimeout(120_000)
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-panels-e2e-"))
+  const { project, paper } = await setUp(root)
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, paper, {})
+    const page = await app.firstWindow()
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1400, 900))
+    await openAndLink(page, "test-echo")
+    const latex = page.getByTestId("science-latex")
+    const diary = page.getByTestId("latex-diary")
+    // The documents column starts collapsed when a paper is opened.
+    await expect(diary).toHaveAttribute("data-collapsed", "true")
+    await page.getByTestId("latex-diary-expand").click()
+    await expect(diary).toHaveAttribute("data-collapsed", "false")
+    const box = await latex.getByTestId("central-panel").boundingBox()
+    const header = await latex.locator("header").first().boundingBox()
+    const shell = await latex.boundingBox()
+    const column = await diary.boundingBox()
+    if (!box || !header || !shell || !column) throw new Error("No LaTeX Editor layout")
+    expect(Math.round(box.y - (header.y + header.height))).toBeGreaterThanOrEqual(12)
+    expect(Math.round(box.x - shell.x)).toBeGreaterThanOrEqual(12)
+    expect(Math.round(column.x - (box.x + box.width))).toBe(12)
+    expect(Math.round(shell.y + shell.height - (box.y + box.height))).toBe(12)
+    expect(Math.round(shell.x + shell.width - (column.x + column.width))).toBe(12)
+    const style = (locator: typeof diary) =>
+      locator.evaluate((element) => {
+        const css = getComputedStyle(element)
+        return `${css.borderTopLeftRadius} ${css.borderLeftWidth}`
+      })
+    expect(await style(diary)).toBe("0px 0px")
+    expect(await style(diary.getByTestId("right-sidebar"))).toBe("8px 1px")
+    expect(await style(latex.getByTestId("central-panel"))).toBe("8px 1px")
+    expect(
+      await latex
+        .locator("header")
+        .first()
+        .evaluate((el) => getComputedStyle(el).borderBottomWidth),
+    ).toBe("0px")
+    await page.screenshot({ path: resolve(".cache", "screens", "latex-editor-panels.png") })
+
+    // Collapsed: no card is left; the expand button is at the right end of the
+    // editor card's toolbar.
+    await diary.getByTestId("right-sidebar-collapse").click()
+    await expect(diary).toHaveAttribute("data-collapsed", "true")
+    await expect(diary).toBeHidden()
+    await expect(latex.getByTestId("central-panel").getByTestId("latex-diary-expand")).toBeVisible()
+    await page.getByTestId("latex-diary-expand").click()
+    await expect(diary).toHaveAttribute("data-collapsed", "false")
+
+    // Narrow windows: the editor and diary cards stay inside the view's 12px margin.
+    for (const [w, h] of [
+      [1100, 800],
+      [900, 700],
+    ]) {
+      await app.evaluate(
+        ({ BrowserWindow }, [width, height]) =>
+          BrowserWindow.getAllWindows()[0]?.setSize(width, height),
+        [w, h],
+      )
+      await expect
+        .poll(async () => {
+          const view = await latex.boundingBox()
+          const cards = await Promise.all(
+            [latex.getByTestId("central-panel"), diary].map((card) => card.boundingBox()),
+          )
+          if (!view || cards.some((card) => !card)) return "no layout"
+          const right = view.x + view.width - 12
+          return cards.every((card) => card && Math.round(card.x + card.width) <= Math.round(right))
+            ? "inside"
+            : "past the right edge"
+        })
+        .toBe("inside")
+    }
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1400, 900))
+
+    const handle = await page.getByTestId("research-diary-edge-drag").boundingBox()
+    if (!handle) throw new Error("No diary resize handle")
+    const before = column.width
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(handle.x + handle.width / 2 - 90, handle.y + handle.height / 2, {
+      steps: 8,
+    })
+    await page.mouse.up()
+    const width = () => diary.evaluate((element) => element.getBoundingClientRect().width)
+    await expect.poll(width).toBe(before + 90)
+    // The reload stays on the LaTeX Editor.
+    await page.reload()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId("latex-diary-expand").click()
+    await expect.poll(width).toBe(before + 90)
   } finally {
     if (app) await close(app)
     await rm(root, { recursive: true, force: true })

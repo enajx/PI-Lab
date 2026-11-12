@@ -3,6 +3,7 @@ import { ChevronDown, RefreshCw } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { elapsedSince } from "../../../../../components/elapsed"
+import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
@@ -156,13 +157,17 @@ export function PaperSyncBar({
               type="button"
               data-testid="paper-sync"
               disabled={!hasRemote || busy}
-              title={hasRemote ? t("Pull from and push to Overleaf") : t("No Git remote")}
+              aria-label={t("Sync")}
+              title={hasRemote ? t("Sync") : t("No Git remote")}
               data-feature-label={t("Sync")}
+              data-feature-help={t("Pull from and push to Overleaf")}
               onClick={() => void startSync(!confirmCommit)}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs hover:bg-accent disabled:opacity-50"
+              className={headerIconButtonClass}
             >
-              <RefreshCw className={busy ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
-              {t("Sync")}
+              <RefreshCw
+                className={busy ? "size-3.5 shrink-0 animate-spin" : "size-3.5 shrink-0"}
+                aria-hidden
+              />
             </button>,
             syncSlot,
           )
@@ -193,7 +198,7 @@ export function PaperSyncBar({
                 <span
                   data-testid="paper-last-sync"
                   title={lastSyncAt === null ? undefined : new Date(lastSyncAt).toLocaleString()}
-                  className="shrink-0"
+                  className="min-w-0 truncate"
                 >
                   {formatLastSync(lastSyncAt, now)}
                 </span>
@@ -297,7 +302,7 @@ function OutputFolderItem({
   usePopupDismiss(open, [rootRef], () => setOpen(false))
 
   return (
-    <div ref={rootRef} className="relative flex shrink-0 items-center">
+    <div ref={rootRef} className="relative flex min-w-0 items-center">
       <button
         type="button"
         data-testid="paper-output-folder"
@@ -308,12 +313,12 @@ function OutputFolderItem({
         onClick={() => setOpen(!open)}
         className={
           error
-            ? "flex items-center gap-0.5 rounded px-1 text-destructive transition-colors hover:bg-accent"
-            : "flex items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
+            ? "flex min-w-0 items-center gap-0.5 rounded px-1 text-destructive transition-colors hover:bg-accent"
+            : "flex min-w-0 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
         }
       >
-        {`${t("Output:")} ${outputDir ?? defaultOutputDir}`}
-        <ChevronDown className="size-3" aria-hidden />
+        <span className="min-w-0 truncate">{`${t("Output:")} ${outputDir ?? defaultOutputDir}`}</span>
+        <ChevronDown className="size-3 shrink-0" aria-hidden />
       </button>
       {open ? (
         <div

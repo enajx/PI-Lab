@@ -35,37 +35,35 @@ function jobFor(ctx: AppContext): InstallJob {
   return job
 }
 
-/** Download only after the explicit Settings action; report errors without changing provider. */
+/**
+ * Download only after the explicit Install action, also when a system LaTeX is
+ * already installed; report errors without changing provider.
+ */
 async function installFor(ctx: AppContext, job: InstallJob): Promise<void> {
-  const available = await probeLatexRuntimes(ctx)
-  if (!available.system.available) {
-    const userHome = ctx.latexUserHome ?? ctx.skillsHomeDir
-    await installPdfLatex({
-      userHome,
-      installDir: defaultPdfLatexInstallDir(userHome, process.platform),
-      platform: process.platform,
-      arch: process.arch,
-      onProgress: (stage) => {
-        const progress = { downloading: 10, extracting: 50, validating: 80, registering: 95 }[stage]
-        const message = {
-          downloading: "Downloading PDFLaTeX…",
-          extracting: "Extracting PDFLaTeX…",
-          validating: "Checking PDFLaTeX and latexmk…",
-          registering: "Making commands available to other apps…",
-        }[stage]
-        job.status = { state: stage, progress, message, error: null }
-      },
-    })
-  }
+  const userHome = ctx.latexUserHome ?? ctx.skillsHomeDir
+  await installPdfLatex({
+    userHome,
+    installDir: defaultPdfLatexInstallDir(userHome, process.platform),
+    platform: process.platform,
+    arch: process.arch,
+    onProgress: (stage) => {
+      const progress = { downloading: 10, extracting: 50, validating: 80, registering: 95 }[stage]
+      const message = {
+        downloading: "Downloading PDFLaTeX…",
+        extracting: "Extracting PDFLaTeX…",
+        validating: "Checking PDFLaTeX and latexmk…",
+        registering: "Making commands available to other apps…",
+      }[stage]
+      job.status = { state: stage, progress, message, error: null }
+    },
+  })
   // Auto already picks the installed LaTeX; Bundled switches to it after an explicit install.
   if (getSettingsOrDefaults(ctx.db).editor.latexProvider === "bundled")
     writeEditorSettings(ctx.db, { latexProvider: "system" })
   job.status = {
     state: "complete",
     progress: 100,
-    message: available.system.available
-      ? "Using your existing system LaTeX installation."
-      : "PDFLaTeX is ready. Restart other apps or open a new terminal to find its commands.",
+    message: "PDFLaTeX is ready. Restart other apps or open a new terminal to find its commands.",
     error: null,
   }
 }

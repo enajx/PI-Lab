@@ -46,6 +46,13 @@ const SKILL_ORIGIN: Record<HeaderShortcutsView, AgentSessionOrigin> = {
   analysis: "analysis",
 }
 
+/**
+ * The top bars' square icon-only buttons (project view, LaTeX Editor, Analysis,
+ * Tasks). Each names itself in `aria-label`, `title` and `data-feature-label`.
+ */
+export const headerIconButtonClass =
+  "flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+
 const shortcutButtonClass =
   "flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
 
@@ -57,6 +64,8 @@ const menuNoteClass = "px-1.5 py-1 text-[11px] text-muted-foreground"
 /**
  * A view's top bar shortcut buttons, led by a "+" menu that adds or removes
  * them. Each view (`view`) keeps its own list, the same for every project.
+ * `picker` (a science view's project picker, or null) goes between the "+" and
+ * the buttons.
  *
  * The menu shows the view's own buttons (`builtins`, checked when added), a
  * Skills section listing the project's skills, and a Routines section listing
@@ -71,12 +80,15 @@ const menuNoteClass = "px-1.5 py-1 text-[11px] text-muted-foreground"
 export function HeaderShortcuts({
   view,
   projectId,
+  picker,
   builtins,
   onSkillSessionStarted,
   onError,
 }: {
   view: HeaderShortcutsView
   projectId: string | null
+  /** Shown right of the "+" button, or null for nothing. */
+  picker: ReactNode
   builtins: BuiltinShortcut[]
   onSkillSessionStarted: (session: StartedSkillSession) => void
   onError: (message: string | null) => void
@@ -321,6 +333,7 @@ export function HeaderShortcuts({
           </div>
         ) : null}
       </div>
+      {picker}
       {shortcuts.map(renderShortcut)}
     </>
   )

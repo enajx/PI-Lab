@@ -92,6 +92,8 @@ interface TasksWorkspaceProps {
     target: { kind: "status"; status: TaskStatus } | { kind: "heading"; headingKey: string },
   ) => Promise<void>
   onRun: (task: TaskRecord, agentId: string, prompt: string) => Promise<void>
+  /** Shown at the right end of the toolbar row (the collapsed right panel's expand button). */
+  toolbarEnd: ReactNode
 }
 
 type ViewMode = "list" | "board"
@@ -178,10 +180,11 @@ export function TasksWorkspace({
   onDelete,
   onMove,
   onRun,
+  toolbarEnd,
 }: TasksWorkspaceProps) {
   const t = useTranslate()
   const [language] = useInterfaceLanguage()
-  const [view, setView] = useState<ViewMode>("list")
+  const [view, setView] = useState<ViewMode>("board")
   const [listMode, setListMode] = useState<ListMode>("plain")
   const [boardMode, setBoardMode] = useState<BoardMode>("headings")
   const [query, setQuery] = useState("")
@@ -372,6 +375,7 @@ export function TasksWorkspace({
           <Plus className="size-4" />
           {t("New task")}
         </Button>
+        {toolbarEnd ? <div className="-me-2 flex shrink-0">{toolbarEnd}</div> : null}
       </div>
 
       {error ? <ErrorBanner message={translateKnownError(language, error)} /> : null}
@@ -695,7 +699,7 @@ function AdaptiveBoardGrid({ children }: { children: ReactNode }) {
   return (
     <div
       data-testid="adaptive-board-grid"
-      className="grid max-w-[92.25rem] justify-start gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),22.5rem))]"
+      className="grid max-w-[67.25rem] justify-start gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),16.25rem))]"
     >
       {children}
     </div>
@@ -969,7 +973,7 @@ function BoardColumn({
           </Button>
         ) : null}
       </header>
-      <div className="flex flex-col gap-2 p-2">
+      <div className="flex flex-col gap-1.5 p-1.5">
         {tasks.map((task) => (
           <button
             key={task.key}
@@ -984,13 +988,13 @@ function BoardColumn({
             onDragStart={() => onDrag(task.key)}
             onDragEnd={() => onDrag(null)}
             onClick={() => onEdit(task)}
-            className="min-w-0 rounded-md border border-border bg-background p-3 text-left shadow-sm data-[dragging=true]:opacity-50"
+            className="min-w-0 rounded-md border border-border bg-background p-2 text-left shadow-sm data-[dragging=true]:opacity-50"
           >
-            <span className="block break-words font-medium text-sm">{task.title}</span>
-            <span className="mt-2 flex flex-wrap gap-1">
+            <span className="line-clamp-2 break-words font-medium text-xs">{task.title}</span>
+            <span className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden text-[11px] text-muted-foreground">
               <TaskBadges task={task} />
+              <span className="min-w-0 truncate">{task.projectName}</span>
             </span>
-            <span className="mt-2 block text-muted-foreground text-xs">{task.projectName}</span>
           </button>
         ))}
       </div>
@@ -1014,7 +1018,7 @@ function TaskBadges({ task }: { task: TaskRecord }) {
 
 function Badge({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-[10px]">
+    <span className="shrink-0 whitespace-nowrap rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-[10px]">
       {children}
     </span>
   )

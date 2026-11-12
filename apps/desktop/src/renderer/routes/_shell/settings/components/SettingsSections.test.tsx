@@ -249,6 +249,27 @@ describe("Settings sections", () => {
     )
   })
 
+  test("Editor shows the report skill, experiment-report by default, and saves a new name", async () => {
+    const patches: unknown[] = []
+    renderSection(<EditorSection />, {
+      "settings.get": () => ({ editor: { reportSkill: "experiment-report" } }),
+      "settings.updateEditor": (input) => {
+        patches.push(input)
+        return null
+      },
+    })
+
+    const field = await screen.findByTestId<HTMLInputElement>("settings-report-skill")
+    expect(field.value).toBe("experiment-report")
+    const save = screen.getByTestId<HTMLButtonElement>("settings-report-skill-save")
+    expect(save.disabled).toBe(true)
+    fireEvent.change(field, { target: { value: "  " } })
+    expect(save.disabled).toBe(true)
+    fireEvent.change(field, { target: { value: " lab-report " } })
+    fireEvent.click(save)
+    await waitFor(() => expect(patches).toEqual([{ reportSkill: "lab-report" }]))
+  })
+
   test("Editor confirms file deletes by default and persists turning it back on", async () => {
     const patches: unknown[] = []
     renderSection(<EditorSection />, {

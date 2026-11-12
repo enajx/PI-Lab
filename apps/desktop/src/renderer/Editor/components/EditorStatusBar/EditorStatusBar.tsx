@@ -4,8 +4,6 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  CodeXml,
-  Eye,
   FolderOpen,
   Info,
   RefreshCw,
@@ -18,6 +16,7 @@ import type { RouterOutputs } from "../../../trpc/types"
 import type { PythonRuntimeState } from "../../hooks/useEditorBuffers/useEditorBuffers"
 import type { DiagnosticCounts } from "../../utils/pythonDiagnostics"
 import { LatexBuildStatus, type LatexBuildStatusData } from "../LatexBuildStatus/LatexBuildStatus"
+import { MarkdownModeToggle } from "../MarkdownModeToggle"
 
 interface EditorStatusBarProps {
   /** Name of the focused tab, shown on the left so the bar is never empty. */
@@ -116,7 +115,7 @@ export function EditorStatusBar({
         <button
           type="button"
           data-testid="latex-show-pdf"
-          className="shrink-0 rounded px-1 hover:bg-accent hover:text-foreground"
+          className="min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground"
           onClick={onShowInPdf}
           title="Show current source position in PDF. You can also double-click LaTeX text."
           data-feature-label="Show in PDF"
@@ -165,40 +164,7 @@ export function EditorStatusBar({
         ) : null}
       </div>
       {markdownMode && onMarkdownModeChange ? (
-        <fieldset
-          data-testid="markdown-mode-toggle"
-          aria-label={t("Markdown view")}
-          className="flex shrink-0 items-center rounded border border-border bg-background p-0.5"
-        >
-          <button
-            type="button"
-            aria-label={t("Render Markdown")}
-            data-feature-help={t("Show the Markdown with its formatting applied.")}
-            aria-pressed={markdownMode === "render"}
-            onClick={() => onMarkdownModeChange("render")}
-            className={
-              markdownMode === "render"
-                ? "flex size-4 items-center justify-center rounded-sm bg-accent text-foreground"
-                : "flex size-4 items-center justify-center rounded-sm hover:bg-accent/60"
-            }
-          >
-            <Eye className="size-3" aria-hidden />
-          </button>
-          <button
-            type="button"
-            aria-label={t("Source Markdown")}
-            data-feature-help={t("Show the plain Markdown text for editing.")}
-            aria-pressed={markdownMode === "source"}
-            onClick={() => onMarkdownModeChange("source")}
-            className={
-              markdownMode === "source"
-                ? "flex size-4 items-center justify-center rounded-sm bg-accent text-foreground"
-                : "flex size-4 items-center justify-center rounded-sm hover:bg-accent/60"
-            }
-          >
-            <CodeXml className="size-3" aria-hidden />
-          </button>
-        </fieldset>
+        <MarkdownModeToggle mode={markdownMode} onChange={onMarkdownModeChange} />
       ) : null}
       {pdfMessage ? (
         <span data-testid="pdf-status" role="status" className="shrink-0 truncate">

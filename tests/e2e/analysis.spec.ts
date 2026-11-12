@@ -11,6 +11,8 @@ import {
   type ElectronApplication,
   _electron as electron,
   expect,
+  type Locator,
+  type Page,
   test,
 } from "./fixtures/playwright"
 
@@ -131,6 +133,8 @@ test.beforeEach(async () => {
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       // Open the temp repo as a project on load (renderer query seam).
       PI_LAB_TEST_OPEN_PROJECT: repoDir,
+      // User skills come from here, so the real home folder's skills stay out.
+      PI_LAB_TEST_SKILLS_HOME: join(dataDir, "home"),
       PI_LAB_TEST_PICK_DIRECTORY: join(repoDir, "outputs"),
       PI_LAB_TEST_MARIMO_FIXTURE: MARIMO_FIXTURE,
       PI_LAB_TEST_MARIMO_MARKER: markerPath,
@@ -244,34 +248,42 @@ test("Analysis lists the results folder grouped by experiment and Change… pick
   await expect(group("exp-a")).toBeVisible()
 })
 
-test("a new HTML report is saved in reports/, listed in the Reports group and stays selected", async () => {
+test("Report shows an error without the report skill, then starts the project's agent with it", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  // Seed the remembered fixture agent; the launch still crosses the real PTY boundary.
+  await execFileAsync("/usr/bin/sqlite3", [
+    join(dataDir, "local.db"),
+    `UPDATE projects SET agent_config='{"agentId":"test-echo"}'`,
+  ])
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
-  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/", {
-    timeout: 30_000,
-  })
-  // No reports/ folder yet: no Reports group.
-  await expect(window.getByTestId("analysis-reports-group")).toHaveCount(0)
+  const report = window.getByTestId("analysis-report")
+  // An icon-only top bar button, named in its hover tip.
+  await expect(report).toHaveText("")
+  await expect(report).toHaveAttribute("data-feature-label", "Report")
+  await expect(report).toBeEnabled({ timeout: 30_000 })
 
-  await window.getByTestId("analysis-new-html-report").click()
-  const row = window
-    .getByTestId("analysis-reports-group")
-    .locator('[data-testid="analysis-file"][data-rel-path="reports/report.html"]')
-  await expect(row).toBeVisible({ timeout: 30_000 })
-  await expect(row).toHaveAttribute("aria-pressed", "true")
-  await expect(window.getByTestId("analysis-preview-html")).toBeVisible({ timeout: 30_000 })
-  await expect(readFile(join(repoDir, "reports", "report.html"), "utf8")).resolves.toContain(
-    "Interactive report",
+  // No experiment-report skill in the user skills folders yet: a clear error, no session.
+  await report.click()
+  await expect(window.getByTestId("analysis-shortcut-error")).toContainText(
+    'The report skill "experiment-report" was not found',
+    { timeout: 30_000 },
   )
-  // The reports/ inside the results folder stays an experiment group.
-  await expect(
-    window.locator(
-      '[data-testid="analysis-experiment-group"][data-experiment="reports"] [data-rel-path="results/reports/interactive.html"]',
-    ),
-  ).toBeVisible()
+
+  const skillDir = join(dataDir, "home", ".agents", "skills", "experiment-report")
+  await mkdir(skillDir, { recursive: true })
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    "---\nname: experiment-report\ndescription: Build a report\n---\nBuild the report.\n",
+  )
+  await report.click()
+  const panel = window.getByTestId("science-sessions")
+  await expect(panel).toHaveAttribute("data-collapsed", "false", { timeout: 30_000 })
+  await expect(panel.getByTestId("terminal")).toContainText("AGENT-UI-OK", { timeout: 15_000 })
+  await expect(panel.getByTestId("central-tab-select").filter({ hasText: "Report" })).toBeVisible()
+  await expect(window.getByTestId("analysis-shortcut-error")).toHaveCount(0)
 })
 
 test("interactive HTML is sandboxed while scripts, relative assets, and network fetch work", async () => {
@@ -343,4 +355,211 @@ test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", asyn
   await window.getByTestId("analysis-fetch-experiments").click()
   await expect(window.getByTestId("workflow-result-dialog")).toBeVisible()
   await expect(window.getByTestId("workflow-result-text")).toBeVisible({ timeout: 30_000 })
+})
+
+/** Drag a resize handle horizontally by `dx` px with the real mouse. */
+async function dragHandle(window: Page, testId: string, dx: number): Promise<void> {
+  const box = await window.getByTestId(testId).boundingBox()
+  if (!box) throw new Error(`No ${testId} handle`)
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await window.mouse.move(x, y)
+  await window.mouse.down()
+  await window.mouse.move(x + dx, y, { steps: 8 })
+  await window.mouse.up()
+}
+
+/** A locator's rendered width in px. */
+async function widthOf(locator: Locator): Promise<number> {
+  return locator.evaluate((element) => element.getBoundingClientRect().width)
+}
+
+/**
+ * Real app: the gap between the file list and the preview, and the gap between
+ * the preview and the right panel, both drag to resize; each width is saved and
+ * comes back after a reload. Tasks uses the same right panel width. Like the
+ * project view, each part is its own rounded card with 12px gaps between them.
+ */
+test("Analysis file list and right panel resize from the gaps and keep the size after reload", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1600, 900))
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  const analysisNav = window.locator(
+    '[data-testid="science-nav-item"][data-science-tab="analysis"]',
+  )
+  await analysisNav.click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+
+  const files = window.getByTestId("analysis-files-column")
+  const panel = window.getByTestId("science-sessions")
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  const sidebar = panel.getByTestId("right-sidebar")
+  await expect(sidebar).toBeVisible({ timeout: 30_000 })
+  // The panel opens on the Diary tab, and both side columns start at their minimums.
+  await expect(panel.getByTestId("panel-tab-diary")).toHaveAttribute("aria-selected", "true")
+  const filesBefore = await widthOf(files)
+  const panelBefore = await widthOf(panel)
+  expect(filesBefore).toBe(200)
+  expect(panelBefore).toBe(235)
+
+  await dragHandle(window, "analysis-files-edge-drag", 80)
+  await expect.poll(() => widthOf(files)).toBe(filesBefore + 80)
+  await dragHandle(window, "science-sessions-edge-drag", -100)
+  await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
+
+  // Like the project view, the file list, the preview and the right panel are
+  // separate rounded cards 12px apart, with no line of their own outside a card. The
+  // right panel is one card, the project view's right sidebar with a Sessions tab
+  // first; its tabs and its collapse button sit in its tab row.
+  const box = await sidebar.boundingBox()
+  const aside = await panel.boundingBox()
+  const filesBox = await files.boundingBox()
+  const preview = await window.getByTestId("analysis-preview-column").boundingBox()
+  const sessionsTab = await panel.getByTestId("panel-tab-sessions").boundingBox()
+  const collapse = await panel.getByTestId("right-sidebar-collapse").boundingBox()
+  if (!box || !aside || !filesBox || !preview || !sessionsTab || !collapse) {
+    throw new Error("No Analysis layout")
+  }
+  expect(Math.round(preview.x - (filesBox.x + filesBox.width))).toBe(12)
+  expect(Math.round(aside.x - (preview.x + preview.width))).toBe(12)
+  expect(Math.round(box.x)).toBe(Math.round(aside.x))
+  expect(Math.round(box.x + box.width)).toBe(Math.round(aside.x + aside.width))
+  expect(Math.round(box.y)).toBe(Math.round(aside.y))
+  expect(Math.round(box.y + box.height)).toBe(Math.round(aside.y + aside.height))
+  await expect(panel.getByTestId("right-sidebar")).toHaveCount(1)
+  for (const inner of [sessionsTab, collapse]) {
+    expect(inner.y).toBeGreaterThanOrEqual(box.y)
+    expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + 40)
+    expect(inner.x + inner.width).toBeLessThanOrEqual(box.x + box.width)
+  }
+  const cardStyle = (locator: Locator) =>
+    locator.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return `${style.borderTopLeftRadius} ${style.borderLeftWidth}`
+    })
+  for (const card of [
+    files.locator(":scope > div.rounded-lg"),
+    window.getByTestId("analysis-preview-column"),
+    sidebar,
+  ]) {
+    expect(await cardStyle(card)).toBe("8px 1px")
+  }
+  // The Sessions tab shows the central panel inside the card, with no border of its own.
+  await panel.getByTestId("panel-tab-sessions").click()
+  await expect(panel.getByTestId("central-panel")).toBeVisible({ timeout: 30_000 })
+  expect(await cardStyle(panel.getByTestId("central-panel"))).toBe("0px 0px")
+  for (const frame of [files, panel]) {
+    expect(await frame.evaluate((element) => getComputedStyle(element).borderLeftWidth)).toBe("0px")
+    expect(await frame.evaluate((element) => getComputedStyle(element).borderRightWidth)).toBe(
+      "0px",
+    )
+  }
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-resized.png") })
+
+  // The reload stays on Analysis.
+  await window.reload()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expect.poll(() => widthOf(files)).toBe(filesBefore + 80)
+  await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
+
+  // Tasks shows the same right panel at the saved width.
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
+  await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
+})
+
+/**
+ * Every card's right edge, and the row's scroll width, stay inside the view minus
+ * its 12px margin: nothing is cut off and nothing scrolls sideways.
+ */
+async function expectCardsInside(window: Page, viewTestId: string, cards: Locator[]) {
+  const view = await window.getByTestId(viewTestId).boundingBox()
+  if (!view) throw new Error(`No ${viewTestId}`)
+  for (const card of cards) {
+    if ((await card.count()) === 0) continue
+    const box = await card.first().boundingBox()
+    if (!box) continue
+    expect(Math.round(box.x + box.width)).toBeLessThanOrEqual(Math.round(view.x + view.width - 12))
+  }
+  // The view and each card's row hold their content: nothing overflows sideways.
+  for (const element of [window.getByTestId(viewTestId), ...cards]) {
+    if ((await element.count()) === 0) continue
+    const overflow = await element.first().evaluate((node) => {
+      const holder =
+        node.hasAttribute("data-testid") && node.parentElement ? node.parentElement : node
+      return holder.scrollWidth - holder.clientWidth
+    })
+    expect(overflow).toBeLessThanOrEqual(1)
+  }
+}
+
+/**
+ * Real app: at 1100x800 and 900x700 the Analysis and Tasks cards fit the window.
+ * Short of room the right panel is drawn collapsed without changing the saved
+ * choice: expanding it squeezes the other cards to their minimums, and a wide
+ * window shows it open again.
+ */
+test("Analysis and Tasks cards fit narrow windows, collapsing the right panel when needed", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  const setSize = (width: number, height: number) =>
+    app.evaluate(
+      ({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]?.setSize(w, h),
+      [width, height],
+    )
+  const panel = window.getByTestId("science-sessions")
+  const analysisCards = [
+    window.getByTestId("analysis-files-column"),
+    window.getByTestId("analysis-preview-column"),
+    panel,
+    panel.getByTestId("right-sidebar"),
+  ]
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+
+  await setSize(1100, 800)
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expect(panel.getByTestId("right-sidebar")).toBeVisible({ timeout: 30_000 })
+  await expectCardsInside(window, "science-analysis", analysisCards)
+
+  await setSize(900, 700)
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await expectCardsInside(window, "science-analysis", analysisCards)
+  // Expanding makes room: the panel opens and every card still fits.
+  await window.getByTestId("science-sessions-expand").click()
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expectCardsInside(window, "science-analysis", analysisCards)
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-900-expanded.png") })
+  await panel.getByTestId("right-sidebar-collapse").click()
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await window.getByTestId("science-sessions-expand").click()
+  await setSize(1400, 900)
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  // Short of room again, the panel is drawn collapsed; the saved choice is still open.
+  await setSize(900, 700)
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await setSize(1400, 900)
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
+  await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  const tasksCards = [window.getByTestId("tasks-board"), panel]
+  for (const [width, height] of [
+    [1100, 800],
+    [900, 700],
+  ]) {
+    await setSize(width, height)
+    await expect(window.getByTestId("tasks-board")).toBeVisible()
+    await expect
+      .poll(async () => {
+        const board = await window.getByTestId("tasks-board").boundingBox()
+        return board ? Math.round(board.width) : 0
+      })
+      .toBeGreaterThanOrEqual(320)
+    await expectCardsInside(window, "science-tasks", tasksCards)
+  }
 })

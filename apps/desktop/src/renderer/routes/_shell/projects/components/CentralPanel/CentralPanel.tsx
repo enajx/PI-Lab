@@ -114,10 +114,20 @@ interface CentralPanelProps {
    */
   paperFolderItem?: ReactNode
   /**
-   * The panel is kept mounted but not shown (a collapsed Sessions panel with
-   * notebook tabs, whose pages must stay loaded). Its keyboard shortcuts are off.
+   * The panel is kept mounted but not shown (the Analysis and Tasks Sessions tab
+   * while another tab shows or the panel is collapsed, so notebook pages and
+   * terminals stay loaded). Its keyboard shortcuts are off.
    */
   hidden?: boolean
+  /** Shown at the start of the toolbar's free middle space (the Sessions panel's title). */
+  toolbarTitle?: ReactNode
+  /** Shown at the end of the toolbar (the Sessions panel's collapse button). */
+  toolbarEnd?: ReactNode
+  /**
+   * Drawn inside another card (the Sessions tab of the Analysis and Tasks right
+   * panel): no rounded border of its own.
+   */
+  frameless?: boolean
 }
 
 /**
@@ -150,6 +160,9 @@ export function CentralPanel({
   leftColumn,
   paperFolderItem,
   hidden,
+  toolbarTitle,
+  toolbarEnd,
+  frameless,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -568,18 +581,72 @@ export function CentralPanel({
     />
   )
 
+  const filesEdgeHandle = (
+    <EdgeResizeHandle
+      side="right"
+      width={filesWidth}
+      onResize={setFilesWidth}
+      onCollapse={() => setShowFilesPanel(false)}
+      min={FILES_PANEL_MIN_WIDTH}
+      max={FILES_PANEL_MAX_WIDTH}
+      testId="central-files-edge-drag"
+    />
+  )
+  // The LaTeX Editor's left column is its own rounded card beside the panel's card,
+  // resized from the 12px gap between them.
+  const leftColumnCard =
+    leftColumn && showFilesPanel ? (
+      <div className="relative flex min-h-0 shrink-0" style={{ width: filesWidth }}>
+        <div
+          data-testid="central-files-panel"
+          className="flex min-h-0 w-full flex-col overflow-y-auto rounded-lg border border-border"
+        >
+          {leftColumn.filesOpen ? (
+            // Open: the tree's own "Files" header carries the collapse chevron.
+            <FilesPanel
+              workspaceId={workspaceId}
+              onOpenFile={controller.openFile}
+              activeRelPath={editor.active?.relPath}
+              onPinFile={onPinFile}
+              onSetMainFile={onSetMainFile}
+              editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
+              onCollapse={() => leftColumn.onFilesOpenChange(false)}
+            />
+          ) : (
+            <CollapsibleSection
+              title={t("Files")}
+              open={false}
+              onOpenChange={leftColumn.onFilesOpenChange}
+              testId="central-files-section"
+              className="shrink-0"
+            >
+              {null}
+            </CollapsibleSection>
+          )}
+          {leftColumn.bottom}
+        </div>
+        {filesEdgeHandle}
+      </div>
+    ) : null
+
   const openFile = (relPath: string) => {
     setQuickOpen(false)
     controller.openFile(relPath)
   }
 
-  return (
+  const panel = (
     <section
       data-testid="central-panel"
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+      className={cn(
+        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+        !frameless && "rounded-lg border border-border",
+      )}
       onBlurCapture={editor.onBlurCapture}
     >
-      <div className="flex shrink-0 items-stretch border-border border-b bg-muted/30">
+      {/* Below 320px wide (the Analysis and Tasks Sessions card at its narrow widths) the
+          title is hidden and the New agent, New terminal and New markdown buttons are left
+          out (Add pane has them), so the toolbar fits down to 200px. */}
+      <div className="@container flex shrink-0 items-stretch border-border border-b bg-muted/30">
         {/* Files-panel toggle — upper left. */}
         <div className="flex shrink-0 items-center border-border border-r px-1">
           <button
@@ -606,10 +673,12 @@ export function CentralPanel({
         </div>
 
         {/* Tabs live in each split's own tab bar below; this row keeps the shared buttons. */}
-        <div className="min-w-0 flex-1" />
+        <div className="flex min-w-0 flex-1 items-center px-2 @max-[320px]:invisible @max-[320px]:px-0">
+          {toolbarTitle}
+        </div>
 
         {/* Pane creation, file run, and editor settings — intentionally grouped. */}
-        <div className="flex shrink-0 items-center gap-0.5 border-border border-s bg-muted/30 px-1">
+        <div className="flex shrink-0 items-center gap-0.5 px-1">
           <div ref={addMenuRef} className="relative">
             <button
               type="button"
@@ -669,7 +738,7 @@ export function CentralPanel({
             disabled={controller.pendingAgent}
             onClick={controller.openAgent}
             className={cn(
-              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden",
               controller.pendingAgent && "cursor-not-allowed opacity-50",
             )}
           >
@@ -684,7 +753,7 @@ export function CentralPanel({
             disabled={controller.pendingTerminal}
             onClick={controller.openTerminal}
             className={cn(
-              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden",
               controller.pendingTerminal && "cursor-not-allowed opacity-50",
             )}
           >
@@ -697,7 +766,7 @@ export function CentralPanel({
             aria-label={t("New markdown")}
             data-feature-help={t("Create an untitled Markdown file in the built-in editor")}
             onClick={controller.openNewMarkdown}
-            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden"
           >
             <FileText className="size-4" aria-hidden />
           </button>
@@ -738,6 +807,7 @@ export function CentralPanel({
               <PanelRight className="size-4" aria-hidden />
             </button>
           ) : null}
+          {toolbarEnd}
         </div>
       </div>
 
@@ -807,50 +877,15 @@ export function CentralPanel({
       <div className="flex min-h-0 flex-1">
         {/* Optional left Files column: the workspace tree beside the editor area
             instead of in the right sidebar. It has its own bounded scroll region. */}
-        {showFilesPanel ? (
+        {showFilesPanel && !leftColumn ? (
           <div className="relative flex min-h-0 shrink-0" style={{ width: filesWidth }}>
             <div
               data-testid="central-files-panel"
               className="flex min-h-0 w-full flex-col overflow-y-auto border-border border-r"
             >
-              {leftColumn ? (
-                <>
-                  {leftColumn.filesOpen ? (
-                    // Open: the tree's own "Files" header carries the collapse chevron.
-                    <FilesPanel
-                      workspaceId={workspaceId}
-                      onOpenFile={controller.openFile}
-                      activeRelPath={editor.active?.relPath}
-                      onPinFile={onPinFile}
-                      onSetMainFile={onSetMainFile}
-                      editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
-                      onCollapse={() => leftColumn.onFilesOpenChange(false)}
-                    />
-                  ) : (
-                    <CollapsibleSection
-                      title={t("Files")}
-                      open={false}
-                      onOpenChange={leftColumn.onFilesOpenChange}
-                      testId="central-files-section"
-                      className="shrink-0"
-                    >
-                      {null}
-                    </CollapsibleSection>
-                  )}
-                  {leftColumn.bottom}
-                </>
-              ) : (
-                filesPanel
-              )}
+              {filesPanel}
             </div>
-            <EdgeResizeHandle
-              side="right"
-              width={filesWidth}
-              onResize={setFilesWidth}
-              min={FILES_PANEL_MIN_WIDTH}
-              max={FILES_PANEL_MAX_WIDTH}
-              testId="central-files-edge-drag"
-            />
+            {filesEdgeHandle}
           </div>
         ) : null}
 
@@ -915,6 +950,13 @@ export function CentralPanel({
         />
       ) : null}
     </section>
+  )
+  if (!leftColumn) return panel
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 gap-3">
+      {leftColumnCard}
+      {panel}
+    </div>
   )
 }
 

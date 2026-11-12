@@ -211,8 +211,9 @@ function uiStrings(): string[] {
   )
 }
 
-test("LaTeX Editor UI text never says link, linked or unlink for the paper", () => {
+test("LaTeX Editor UI text never says link, linked or unlink for the paper (only Link to project)", () => {
   const strings = uiStrings()
   expect(strings.length).toBeGreaterThan(20)
-  expect(strings.filter((text) => /\b(un)?link(ed|ing|s)?\b/i.test(text))).toEqual([])
+  const linkWords = strings.filter((text) => /\b(un)?link(ed|ing|s)?\b/i.test(text))
+  expect(linkWords.filter((text) => text !== "Link to project")).toEqual([])
 })

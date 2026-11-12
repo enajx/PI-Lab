@@ -12,7 +12,7 @@ import {
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from "../notifications/sounds"
 import { useDefaultAgentId } from "../preferences/preferences"
 import { type ThemeMode, useTheme } from "../providers/ThemeProvider"
-import { useTRPC } from "../trpc/react"
+import { useTRPC, useTRPCClient } from "../trpc/react"
 
 interface FirstRunSetupProps {
   onClose: () => void
@@ -34,6 +34,29 @@ type HarnessStatus = {
 /** Compact local-only setup: detected subscriptions first, opt-in encrypted API keys second. */
 export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const trpc = useTRPC()
+  const client = useTRPCClient()
+  const headerRef = useRef<HTMLElement>(null)
+  const columnRef = useRef<HTMLDivElement>(null)
+
+  // Size the window to the wizard content while the wizard is shown, and restore it after.
+  useEffect(() => {
+    const header = headerRef.current
+    const column = columnRef.current
+    if (!header || !column) return
+    const fit = (): void => {
+      void client.system.fitWindowToContent.mutate({
+        width: Math.ceil(column.offsetWidth),
+        height: Math.ceil(header.offsetHeight + column.offsetHeight),
+      })
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(column)
+    return () => {
+      observer.disconnect()
+      void client.system.restoreWindowSize.mutate()
+    }
+  }, [client])
   const queryClient = useQueryClient()
   // Each row has its own check, so a fast row shows its result while a slow one
   // still says Checking….
@@ -169,7 +192,10 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
       aria-labelledby="first-run-setup-title"
       className="fixed inset-0 z-[100] flex flex-col overflow-hidden bg-background text-foreground"
     >
-      <header className="app-drag flex h-12 shrink-0 items-center border-border border-b pr-6 pl-24">
+      <header
+        ref={headerRef}
+        className="app-drag flex h-12 shrink-0 items-center border-border border-b pr-6 pl-24"
+      >
         <h1 id="first-run-setup-title" className="font-semibold text-sm">
           {t("Set up PI Lab")}
         </h1>
@@ -189,7 +215,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
       </header>
 
       <div data-testid="first-run-setup-scroll" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 py-3">
+        <div ref={columnRef} className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 py-3">
           <section className="rounded-lg border border-border bg-card p-3">
             <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
             <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">

@@ -546,7 +546,6 @@
   "e.g. NeurIPS 2026": "例: NeurIPS 2026",
   "e.g. https://www.overleaf.com/project/…": "例: https://www.overleaf.com/project/…",
   "Browse and preview the data files in a project's repo": "プロジェクトのリポジトリ内のデータファイルを閲覧・プレビュー",
-  "HTML report": "HTML レポート",
   "Marimo report": "Marimo レポート",
   "Analysis project": "分析するプロジェクト",
   "Choose which project repository to scan for data files.": "データファイルを調べるプロジェクトのリポジトリを選択します。",

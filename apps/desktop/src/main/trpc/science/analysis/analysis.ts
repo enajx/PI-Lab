@@ -81,26 +81,8 @@ const closeInteractiveInput = z.object({
 
 const createTemplateInput = z.object({
   projectId: z.string().min(1),
-  kind: z.enum(["html", "marimo"]),
+  kind: z.enum(["marimo"]),
 })
-
-const HTML_REPORT_TEMPLATE = `<!doctype html>
-<html lang="en">
-  <meta charset="utf-8" />
-  <title>PI Lab report</title>
-  <body>
-    <h1>Interactive report</h1>
-    <p>Edit this file, then refresh the preview.</p>
-    <button id="counter">0</button>
-    <script>
-      const counter = document.querySelector("#counter")
-      counter.addEventListener("click", () => {
-        counter.textContent = String(Number(counter.textContent) + 1)
-      })
-    </script>
-  </body>
-</html>
-`
 
 const MARIMO_NOTEBOOK_TEMPLATE = `import marimo
 
@@ -158,7 +140,7 @@ async function realPathInside(repoPath: string, dir: string, shown: string): Pro
   return relative(canonicalRepo, canonicalDir).replaceAll("\\", "/")
 }
 
-/** The project's reports folder, where "HTML report" creates its files. */
+/** The project's reports folder, which Analysis lists next to the results folder. */
 const REPORTS_FOLDER = "reports"
 
 const EMPTY_LISTING: DataFileListing = {
@@ -221,7 +203,7 @@ async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>
 
 export const analysisRouter = router({
   /**
-   * Create a ready-to-run interactive artifact under `reports/`. Existing
+   * Create a ready-to-run marimo notebook under `reports/`. Existing
    * files are never overwritten: a numeric suffix is selected atomically and
    * returned so the UI can state exactly what it created.
    */
@@ -229,16 +211,13 @@ export const analysisRouter = router({
     .input(createTemplateInput)
     .mutation(async ({ ctx, input }): Promise<{ relPath: string }> => {
       const repoPath = requireRepoPath(ctx.db, input.projectId)
-      const baseName = input.kind === "html" ? "report" : "notebook"
-      const extension = input.kind === "html" ? ".html" : ".py"
-      const content = input.kind === "html" ? HTML_REPORT_TEMPLATE : MARIMO_NOTEBOOK_TEMPLATE
       for (let suffix = 0; suffix < 10_000; suffix += 1) {
-        const name = `${baseName}${suffix === 0 ? "" : `-${suffix}`}${extension}`
+        const name = `notebook${suffix === 0 ? "" : `-${suffix}`}.py`
         const relPath = `reports/${name}`
         const target = resolveInsideDir(repoPath, relPath)
         await mkdir(dirname(target), { recursive: true })
         try {
-          await writeFile(target, content, { encoding: "utf8", flag: "wx" })
+          await writeFile(target, MARIMO_NOTEBOOK_TEMPLATE, { encoding: "utf8", flag: "wx" })
           return { relPath }
         } catch (error: unknown) {
           if ((error as NodeJS.ErrnoException).code === "EEXIST") continue
@@ -257,7 +236,7 @@ export const analysisRouter = router({
    * null when it sits directly in the results folder. Walks the tree (skipping
    * noise dirs), tags each file with its data-file kind, and returns them
    * grouped by kind with per-file metadata (size, mtime) and repo-relative
-   * paths. The project's `reports/` folder (where "HTML report" saves) is
+   * paths. The project's `reports/` folder is
    * listed too, marked `inReportsFolder`, each file once; no `reports/` folder
    * adds nothing. A missing results folder is `exists: false`; a folder outside the
    * project (or the project folder itself) is FORBIDDEN. The walk is capped,

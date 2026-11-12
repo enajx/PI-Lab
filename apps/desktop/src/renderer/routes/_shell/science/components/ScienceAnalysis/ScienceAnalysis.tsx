@@ -11,27 +11,25 @@ import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import {
-  ChartArea,
-  CloudDownload,
-  FileCode2,
-  FileText,
-  Microscope,
-  NotebookPen,
-  Search,
-} from "lucide-react"
+import { ChartArea, CloudDownload, FileCode2, FileText, Microscope, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
-import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
+import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
+import {
+  HeaderShortcuts,
+  headerIconButtonClass,
+} from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
-import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { useTranslate } from "../../../../../i18n/language"
 import {
+  ANALYSIS_FILES_MAX_WIDTH,
+  ANALYSIS_FILES_MIN_WIDTH,
   DEFAULT_RESULTS_FOLDER,
+  useAnalysisFilesWidth,
   useAnalysisProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
-  useResearchDiaryOpen,
+  useSciencePanelWidth,
 } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
@@ -39,12 +37,24 @@ import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
+  SciencePanelCollapsedBar,
+  SciencePanelDiaryButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
   useFocusSessionRequest,
+  useSciencePanel,
+  useSciencePanelRow,
 } from "../ScienceSessionPanel"
+import {
+  ANALYSIS_FILES_DRAWN_MIN_WIDTH,
+  ANALYSIS_PREVIEW_MIN_WIDTH,
+  ANALYSIS_PREVIEW_PREFERRED_WIDTH,
+  PANEL_DRAWN_MIN_WIDTH,
+} from "../ScienceSessionPanel/panelFit"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
+
+/** The preview column's smallest width in px, beside the resizable file list. */
 
 /**
  * Analysis science tab — a **read-only data
@@ -78,7 +88,6 @@ export function ScienceAnalysis({
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
-  const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
 
@@ -98,7 +107,20 @@ export function ScienceAnalysis({
   const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
   const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
-  const [researchDiaryOpen, setResearchDiaryOpen] = useResearchDiaryOpen()
+  const userPanel = useSciencePanel("analysis")
+  const [savedFilesWidth, persistFilesWidth] = useAnalysisFilesWidth()
+  const [filesWidth, setFilesWidth] = useState(savedFilesWidth)
+  useEffect(() => setFilesWidth(savedFilesWidth), [savedFilesWidth])
+  // The file list, preview and right panel fit the row's width (no horizontal scroll).
+  const row = useSciencePanelRow(
+    userPanel,
+    useSciencePanelWidth(),
+    PANEL_DRAWN_MIN_WIDTH,
+    projects.length === 0 ? null : { wanted: filesWidth, min: ANALYSIS_FILES_DRAWN_MIN_WIDTH },
+    { preferred: ANALYSIS_PREVIEW_PREFERRED_WIDTH, min: ANALYSIS_PREVIEW_MIN_WIDTH },
+  )
+  const panel = row.panel
+  const drawnFilesWidth = row.fit.side
   const capabilities = useQuery({
     ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
     enabled: Boolean(selectedProject),
@@ -140,14 +162,21 @@ export function ScienceAnalysis({
       onError: (cause) => setShortcutError(cause.message),
     }),
   )
-  const createTemplate = useMutation(
-    trpc.science.analysis.createTemplate.mutationOptions({
-      onSuccess: async (created) => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.science.analysis.listFiles.queryKey(),
-        })
-        setSelectedRelPath(created.relPath)
-      },
+  // Report starts the project's agent with the report skill named in Settings.
+  const report = useMutation(
+    trpc.sessions.startReport.mutationOptions({
+      onSuccess: (result, input) =>
+        setSessionRequest({
+          projectId: input.projectId,
+          pane: {
+            kind: "agent",
+            sessionId: result.sessionId,
+            label: t("Report"),
+            wsKind: result.kind,
+            launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
+          },
+        }),
+      onError: (cause) => setShortcutError(cause.message),
     }),
   )
   // The default results folder from Settings; an empty field means the built-in default.
@@ -295,33 +324,26 @@ export function ScienceAnalysis({
 
   return (
     <ScienceTabShell
+      layout="cards"
       testId="science-analysis"
       title={t("Analysis")}
       subtitle={t("Browse and preview the data files in a project's repo")}
       actions={
         <>
-          <ProjectPicker
-            testId="analysis-project-select"
-            label={t("Analysis project")}
-            help={t("Choose which project repository to scan for data files.")}
-            value={selectedProjectId ?? ""}
-            projects={projects}
-            allLabel={null}
-            onChange={chooseProject}
-          />
-          {shortcutError ? (
-            <span
-              role="alert"
-              data-testid="analysis-shortcut-error"
-              title={shortcutError}
-              className="max-w-56 cursor-text select-text truncate text-destructive text-xs"
-            >
-              {shortcutError}
-            </span>
-          ) : null}
           <HeaderShortcuts
             view="analysis"
             projectId={selectedProjectId}
+            picker={
+              <ProjectPicker
+                testId="analysis-project-select"
+                label={t("Analysis project")}
+                help={t("Choose which project repository to scan for data files.")}
+                value={selectedProjectId ?? ""}
+                projects={projects}
+                allLabel={null}
+                onChange={chooseProject}
+              />
+            }
             onError={setShortcutError}
             onSkillSessionStarted={(session) =>
               selectedProjectId
@@ -346,44 +368,49 @@ export function ScienceAnalysis({
                     type="button"
                     data-testid="analysis-analyze-experiments"
                     disabled={!selectedProjectId || analyzeExperiments.isPending}
+                    aria-label={t("Analyze experiments")}
                     data-feature-label={t("Analyze experiments")}
-                    title={
-                      selectedProjectId
-                        ? t("Start an agent that summarises what each experiment shows")
-                        : t("Select a project")
-                    }
+                    title={selectedProjectId ? t("Analyze experiments") : t("Select a project")}
+                    data-feature-help={t(
+                      "Start an agent that summarises what each experiment shows",
+                    )}
                     onClick={() => {
                       if (!selectedProjectId) return
                       setShortcutError(null)
                       analyzeExperiments.mutate({ projectId: selectedProjectId })
                     }}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className={headerIconButtonClass}
                   >
-                    <Microscope className="size-3.5" aria-hidden />
-                    {t("Analyze experiments")}
+                    <Microscope className="size-3.5 shrink-0" aria-hidden />
                   </button>
                 ),
               },
               {
-                id: "html-report",
-                label: t("HTML report"),
+                id: "report",
+                label: t("Report"),
                 node: (
                   <button
                     type="button"
-                    data-testid="analysis-new-html-report"
-                    disabled={!selectedProjectId || createTemplate.isPending}
+                    data-testid="analysis-report"
+                    disabled={!selectedProjectId || report.isPending}
+                    aria-label={t("Report")}
+                    title={t("Report")}
+                    data-feature-label={t("Report")}
                     data-feature-help={
                       selectedProjectId
-                        ? t("Add a new HTML report file to the project and show it.")
+                        ? t(
+                            "Start an agent that builds a report with the report skill set in Settings",
+                          )
                         : t("Select a project")
                     }
-                    onClick={() =>
-                      createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
-                    }
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => {
+                      if (!selectedProjectId) return
+                      setShortcutError(null)
+                      report.mutate({ projectId: selectedProjectId })
+                    }}
+                    className={headerIconButtonClass}
                   >
-                    <FileCode2 className="size-3.5" aria-hidden />
-                    {t("HTML report")}
+                    <FileCode2 className="size-3.5 shrink-0" aria-hidden />
                   </button>
                 ),
               },
@@ -396,7 +423,7 @@ export function ScienceAnalysis({
                     projectId={selectedProject.id}
                     projectName={selectedProject.name}
                     task="fetch-experiments"
-                    variant="labeled"
+                    variant="icon"
                     testId="analysis-fetch-experiments"
                     instructions={fetchInstructions}
                     disabled={!gitAvailable}
@@ -407,12 +434,12 @@ export function ScienceAnalysis({
                     type="button"
                     data-testid="analysis-fetch-experiments"
                     disabled
+                    aria-label={t("Fetch experiments")}
                     title={t("Select a project")}
                     data-feature-label={t("Fetch experiments")}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    className={headerIconButtonClass}
                   >
-                    <CloudDownload className="size-3.5" aria-hidden />
-                    {t("Fetch experiments")}
+                    <CloudDownload className="size-3.5 shrink-0" aria-hidden />
                   </button>
                 ),
               },
@@ -420,211 +447,228 @@ export function ScienceAnalysis({
                 id: "research-diary",
                 label: t("Research diary"),
                 node: (
-                  <button
-                    type="button"
-                    data-testid="analysis-research-diary"
-                    aria-label={t("Research diary")}
-                    aria-pressed={researchDiaryOpen}
-                    title={t("Research diary")}
-                    data-feature-label={t("Research diary")}
-                    data-feature-help={t("Show or hide the chosen project's research diary")}
-                    onClick={() => setResearchDiaryOpen(!researchDiaryOpen)}
-                    className={cn(
-                      "inline-flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-                      researchDiaryOpen && "text-foreground",
-                    )}
-                  >
-                    <NotebookPen className="size-3.5" aria-hidden />
-                  </button>
+                  <SciencePanelDiaryButton
+                    testId="analysis-research-diary"
+                    panel={panel}
+                    disabled={!selectedProjectId}
+                  />
                 ),
               },
             ]}
           />
+          {shortcutError ? (
+            <span
+              role="alert"
+              data-testid="analysis-shortcut-error"
+              title={shortcutError}
+              className="max-w-56 cursor-text select-text truncate text-destructive text-xs"
+            >
+              {shortcutError}
+            </span>
+          ) : null}
         </>
       }
     >
-      {/* The file list and preview keep 36rem; the diary and Sessions panels narrow
-          first, and the diary hides when even their minimum widths do not fit. */}
-      <div className="group/analysis @container/analysis flex min-h-0 flex-1 overflow-x-auto">
-        <div className="flex min-h-0 min-w-[36rem] flex-1 flex-col">
+      {/* Each column is its own rounded card, 12px apart, like the project view. They fit
+          the row's width: when it runs short the right panel narrows first, then the file
+          list, then the preview, and then the right panel is drawn collapsed. */}
+      <div ref={row.rowRef} className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {projects.length === 0 ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
               <NoProjectsState />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1">
-              {/* Left column: search + category filter + file list. */}
-              <div className="flex w-80 shrink-0 flex-col border-border border-r">
-                <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
-                  {selectedProjectId ? (
-                    <ResultsFolderField
-                      key={selectedProjectId}
-                      projectId={selectedProjectId}
-                      resultsFolder={listing.data?.resultsFolder ?? null}
-                      overridden={listing.data?.overridden === true}
-                    />
-                  ) : null}
-                  <div className="relative">
-                    <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
-                    <Input
-                      data-testid="analysis-search"
-                      aria-label={t("Search data files")}
-                      data-feature-label={t("Search data files")}
-                      data-feature-help={t(
-                        "Filter this project's discovered data files by name or path.",
-                      )}
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={t("Search files…")}
-                      className="h-8 pl-8"
-                      disabled={allFiles.length === 0}
-                    />
+            <div className="flex min-h-0 flex-1 gap-3">
+              {/* Left card: search + category filter + file list, resizable from the gap on its right. */}
+              <div
+                data-testid="analysis-files-column"
+                className="relative flex min-h-0 shrink-0"
+                style={{ width: drawnFilesWidth }}
+              >
+                <EdgeResizeHandle
+                  side="right"
+                  width={drawnFilesWidth}
+                  onResize={setFilesWidth}
+                  onResizeEnd={persistFilesWidth}
+                  min={ANALYSIS_FILES_MIN_WIDTH}
+                  max={ANALYSIS_FILES_MAX_WIDTH}
+                  testId="analysis-files-edge-drag"
+                />
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+                  <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
+                    {selectedProjectId ? (
+                      <ResultsFolderField
+                        key={selectedProjectId}
+                        projectId={selectedProjectId}
+                        resultsFolder={listing.data?.resultsFolder ?? null}
+                        overridden={listing.data?.overridden === true}
+                      />
+                    ) : null}
+                    <div className="relative">
+                      <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
+                      <Input
+                        data-testid="analysis-search"
+                        aria-label={t("Search data files")}
+                        data-feature-label={t("Search data files")}
+                        data-feature-help={t(
+                          "Filter this project's discovered data files by name or path.",
+                        )}
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder={t("Search files…")}
+                        className="h-8 pl-8"
+                        disabled={allFiles.length === 0}
+                      />
+                    </div>
+                    {categoriesPresent.length > 0 ? (
+                      <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                        <FilterChip
+                          label={t("All")}
+                          active={categoryFilter === "all"}
+                          onClick={() => selectCategory("all")}
+                          testId="analysis-category-all"
+                        />
+                        {categoriesPresent.map((category) => (
+                          <FilterChip
+                            key={category}
+                            label={t(DATA_FILE_CATEGORY_LABELS[category])}
+                            active={categoryFilter === category}
+                            onClick={() => selectCategory(category)}
+                            testId={`analysis-category-${category}`}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    {subKindsPresent.length > 1 ? (
+                      <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
+                        <FilterChip
+                          label={t("All")}
+                          active={kindFilter === null}
+                          onClick={() => setKindFilter(null)}
+                          testId="analysis-subkind-all"
+                        />
+                        {subKindsPresent.map((kind) => (
+                          <FilterChip
+                            key={kind}
+                            label={t(DATA_FILE_KIND_LABELS[kind])}
+                            active={kindFilter === kind}
+                            onClick={() => setKindFilter(kind)}
+                            testId={`analysis-subkind-${kind}`}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                  {categoriesPresent.length > 0 ? (
-                    <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
-                      <FilterChip
-                        label={t("All")}
-                        active={categoryFilter === "all"}
-                        onClick={() => selectCategory("all")}
-                        testId="analysis-category-all"
-                      />
-                      {categoriesPresent.map((category) => (
-                        <FilterChip
-                          key={category}
-                          label={t(DATA_FILE_CATEGORY_LABELS[category])}
-                          active={categoryFilter === category}
-                          onClick={() => selectCategory(category)}
-                          testId={`analysis-category-${category}`}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                  {subKindsPresent.length > 1 ? (
-                    <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
-                      <FilterChip
-                        label={t("All")}
-                        active={kindFilter === null}
-                        onClick={() => setKindFilter(null)}
-                        testId="analysis-subkind-all"
-                      />
-                      {subKindsPresent.map((kind) => (
-                        <FilterChip
-                          key={kind}
-                          label={t(DATA_FILE_KIND_LABELS[kind])}
-                          active={kindFilter === kind}
-                          onClick={() => setKindFilter(kind)}
-                          testId={`analysis-subkind-${kind}`}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  {listing.data?.partial ? (
-                    <p
-                      data-testid="analysis-partial"
-                      role="status"
-                      className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
-                      title={listing.data.skipped.join("\n")}
-                    >
-                      {t("Some project paths could not be read")} ({listing.data.skipped.length}).
-                    </p>
-                  ) : null}
-                  {listing.isError ? (
-                    <p
-                      data-testid="analysis-list-error"
-                      role="alert"
-                      className="p-4 text-destructive text-xs"
-                    >
-                      {t("Could not read project data files:")} {listing.error.message}
-                    </p>
-                  ) : resultsMissing && allFiles.length === 0 ? (
-                    <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
-                  ) : allFiles.length === 0 && !listing.isLoading ? (
-                    <EmptyState />
-                  ) : (
-                    <div className="flex flex-col gap-3 p-3">
-                      {resultsMissing ? (
-                        <p
-                          data-testid="analysis-results-missing"
-                          className="rounded border border-border border-dashed px-2 py-1.5 text-muted-foreground text-xs"
-                        >
-                          {t("No {folder} folder in this project").replace(
-                            "{folder}",
-                            `${listing.data?.resultsFolder ?? ""}/`,
-                          )}
-                        </p>
-                      ) : null}
-                      <div className="flex items-center justify-between px-1">
-                        <span
-                          data-testid="analysis-file-count"
-                          className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
-                        >
-                          {filtered.length} {t("of")} {allFiles.length} {t("files")}
-                        </span>
-                        {listing.data?.truncated ? (
-                          <span
-                            data-testid="analysis-truncated"
-                            className="text-[10px] text-amber-500"
-                            title={t("The repo has more data files than are shown")}
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {listing.data?.partial ? (
+                      <p
+                        data-testid="analysis-partial"
+                        role="status"
+                        className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
+                        title={listing.data.skipped.join("\n")}
+                      >
+                        {t("Some project paths could not be read")} ({listing.data.skipped.length}).
+                      </p>
+                    ) : null}
+                    {listing.isError ? (
+                      <p
+                        data-testid="analysis-list-error"
+                        role="alert"
+                        className="p-4 text-destructive text-xs"
+                      >
+                        {t("Could not read project data files:")} {listing.error.message}
+                      </p>
+                    ) : resultsMissing && allFiles.length === 0 ? null : allFiles.length === 0 &&
+                      !listing.isLoading ? (
+                      <EmptyState />
+                    ) : (
+                      <div className="flex flex-col gap-3 p-3">
+                        {resultsMissing ? (
+                          <p
+                            data-testid="analysis-results-missing"
+                            className="rounded border border-border border-dashed px-2 py-1.5 text-muted-foreground text-xs"
                           >
-                            {t("truncated")}
+                            {t("No {folder} folder in this project").replace(
+                              "{folder}",
+                              `${listing.data?.resultsFolder ?? ""}/`,
+                            )}
+                          </p>
+                        ) : null}
+                        <div className="flex items-center justify-between px-1">
+                          <span
+                            data-testid="analysis-file-count"
+                            className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                          >
+                            {filtered.length} {t("of")} {allFiles.length} {t("files")}
                           </span>
+                          {listing.data?.truncated ? (
+                            <span
+                              data-testid="analysis-truncated"
+                              className="text-[10px] text-amber-500"
+                              title={t("The repo has more data files than are shown")}
+                            >
+                              {t("truncated")}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {filteredGroups.map((group) => (
+                          <div
+                            key={group.experiment ?? ""}
+                            data-testid="analysis-experiment-group"
+                            data-experiment={group.experiment ?? ""}
+                            className="flex flex-col gap-1"
+                          >
+                            <div className="flex items-center gap-2 px-1">
+                              <span
+                                className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
+                                title={group.experiment ?? undefined}
+                              >
+                                {group.experiment ?? t("No experiment")}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground/50">
+                                {group.files.length}
+                              </span>
+                            </div>
+                            {fileRows(group.files)}
+                          </div>
+                        ))}
+
+                        {filteredReports.length > 0 ? (
+                          <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 px-1">
+                              <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+                                {t("Reports (reports/)")}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground/50">
+                                {filteredReports.length}
+                              </span>
+                            </div>
+                            {fileRows(filteredReports)}
+                          </div>
+                        ) : null}
+
+                        {filtered.length === 0 && allFiles.length > 0 ? (
+                          <p
+                            data-testid="analysis-no-matches"
+                            className="px-1 text-muted-foreground text-xs"
+                          >
+                            {t("No files match the current filter.")}
+                          </p>
                         ) : null}
                       </div>
-
-                      {filteredGroups.map((group) => (
-                        <div
-                          key={group.experiment ?? ""}
-                          data-testid="analysis-experiment-group"
-                          data-experiment={group.experiment ?? ""}
-                          className="flex flex-col gap-1"
-                        >
-                          <div className="flex items-center gap-2 px-1">
-                            <span
-                              className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
-                              title={group.experiment ?? undefined}
-                            >
-                              {group.experiment ?? t("No experiment")}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground/50">
-                              {group.files.length}
-                            </span>
-                          </div>
-                          {fileRows(group.files)}
-                        </div>
-                      ))}
-
-                      {filteredReports.length > 0 ? (
-                        <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2 px-1">
-                            <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                              {t("Reports (reports/)")}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground/50">
-                              {filteredReports.length}
-                            </span>
-                          </div>
-                          {fileRows(filteredReports)}
-                        </div>
-                      ) : null}
-
-                      {filtered.length === 0 && allFiles.length > 0 ? (
-                        <p
-                          data-testid="analysis-no-matches"
-                          className="px-1 text-muted-foreground text-xs"
-                        >
-                          {t("No files match the current filter.")}
-                        </p>
-                      ) : null}
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Right column: preview pane for the selected file. */}
-              <div className="flex min-h-0 min-w-64 flex-1 flex-col overflow-hidden">
+              {/* Middle card: preview pane for the selected file. */}
+              <div
+                data-testid="analysis-preview-column"
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+              >
                 {selectedProjectId && selectedRelPath ? (
                   <AnalysisPreview
                     projectId={selectedProjectId}
@@ -635,25 +679,25 @@ export function ScienceAnalysis({
                     onOpenNotebook={(notebookRelPath) =>
                       setSessionRequest({ projectId: selectedProjectId, notebookRelPath })
                     }
+                    headerEnd={null}
                   />
+                ) : resultsMissing && allFiles.length === 0 && !listing.isError ? (
+                  <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
                 ) : (
-                  <NoSelectionState />
+                  <div className="relative h-full min-h-0">
+                    <NoSelectionState />
+                  </div>
                 )}
               </div>
             </div>
           )}
         </div>
-        {researchDiaryOpen && selectedProjectId ? (
-          <div
-            data-testid="analysis-research-diary-slot"
-            className="flex min-h-0 min-w-0 shrink @max-[53.5rem]/analysis:hidden @max-[73rem]/analysis:group-has-[[data-testid=science-sessions][data-collapsed=false]]/analysis:hidden"
-          >
-            <ResearchDiaryPanel key={selectedProjectId} projectId={selectedProjectId} />
-          </div>
-        ) : null}
+        <SciencePanelCollapsedBar testId="analysis-collapsed-bar" panel={panel} />
         <ScienceSessionPanel
           view="analysis"
           project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
+          panel={panel}
+          width={row.width}
           openSession={sessionRequest}
           onSessionOpened={clearSessionRequest}
         />
@@ -960,7 +1004,10 @@ function ResultsFolderField({
   )
 }
 
-/** Shown when the results folder does not exist in the selected project. */
+/**
+ * Shown in the preview card when the results folder does not exist in the selected
+ * project and nothing else is listed; the file list card keeps the folder field.
+ */
 function ResultsMissingState({ resultsFolder }: { resultsFolder: string }) {
   const t = useTranslate()
   return (
