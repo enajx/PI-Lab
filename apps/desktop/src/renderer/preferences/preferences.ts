@@ -385,10 +385,10 @@ export const useResearchDiaryWidth = (): [number, (next: number) => void] =>
   useNumberPref("pi-lab.researchDiary.width", RESEARCH_DIARY_DEFAULT_WIDTH)
 
 // --- Analysis and Tasks right panel (Sessions and diary) width (px), resizable
-// from its left line; one value for both views ------------------------------------
-export const SCIENCE_PANEL_MIN_WIDTH = 352
+// from its left line; one value for both views. It starts at its minimum width -----
+export const SCIENCE_PANEL_MIN_WIDTH = 235
 export const SCIENCE_PANEL_MAX_WIDTH = 800
-export const SCIENCE_PANEL_DEFAULT_WIDTH = 520
+export const SCIENCE_PANEL_DEFAULT_WIDTH = SCIENCE_PANEL_MIN_WIDTH
 export const useSciencePanelWidth = (): [number, (next: number) => void] =>
   useNumberPref("pi-lab.sciencePanel.width", SCIENCE_PANEL_DEFAULT_WIDTH)
 

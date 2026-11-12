@@ -81,9 +81,9 @@ function renderTasks(initialProjectId: string | undefined, focusSession?: FocusS
   )
 }
 
-/** Titles of the task rows on screen. */
-function rowTitles(): string[] {
-  return screen.getAllByTestId("task-row").map((row) => row.textContent ?? "")
+/** Text of the Kanban task cards on screen (the default view). */
+function cardTitles(): string[] {
+  return screen.getAllByTestId("task-card").map((card) => card.textContent ?? "")
 }
 
 beforeEach(() => {
@@ -92,11 +92,11 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-test("the top bar picker defaults to All projects and narrows the list to the chosen project", async () => {
+test("the top bar picker defaults to All projects and narrows the tasks to the chosen project", async () => {
   renderTasks(undefined)
   const header = screen.getByRole("banner")
   const select = (await within(header).findByTestId("tasks-project-select")) as HTMLButtonElement
-  await waitFor(() => expect(screen.getAllByTestId("task-row")).toHaveLength(2))
+  await waitFor(() => expect(screen.getAllByTestId("task-card")).toHaveLength(2))
   expect(select.value).toBe("")
   fireEvent.click(select)
   const list = screen.getByRole("listbox", { name: "Project filter" })
@@ -113,10 +113,9 @@ test("the top bar picker defaults to All projects and narrows the list to the ch
     replace: true,
   })
   expect(window.localStorage.getItem(PREF_KEY)).toBe("p2")
-  await waitFor(() => expect(rowTitles()).toEqual([expect.stringContaining("Run benchmark")]))
+  await waitFor(() => expect(cardTitles()).toEqual([expect.stringContaining("Run benchmark")]))
 
-  // Kanban shows only the chosen project too, and a new task defaults to it.
-  fireEvent.click(screen.getByRole("button", { name: "Kanban view" }))
+  // Kanban shows only the chosen project, and a new task defaults to it.
   expect(screen.getAllByTestId("tasks-heading-project")).toHaveLength(1)
   fireEvent.click(screen.getByRole("button", { name: "New task" }))
   expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("p2")
@@ -126,7 +125,7 @@ test("arriving with ?projectId selects and remembers it; the picker then wins", 
   renderTasks("p2")
   const select = (await screen.findByTestId("tasks-project-select")) as HTMLButtonElement
   await waitFor(() => expect(select.value).toBe("p2"))
-  expect(rowTitles()).toEqual([expect.stringContaining("Run benchmark")])
+  expect(cardTitles()).toEqual([expect.stringContaining("Run benchmark")])
   expect(window.localStorage.getItem(PREF_KEY)).toBe("p2")
 
   fireEvent.click(select)
@@ -144,7 +143,7 @@ test("opens on the remembered project", async () => {
   renderTasks(undefined)
   const select = (await screen.findByTestId("tasks-project-select")) as HTMLButtonElement
   await waitFor(() => expect(select.value).toBe("p1"))
-  expect(rowTitles()).toEqual([expect.stringContaining("Build parser")])
+  expect(cardTitles()).toEqual([expect.stringContaining("Build parser")])
 })
 
 test("arriving with an agent to focus opens it as the active tab of the session panel", async () => {

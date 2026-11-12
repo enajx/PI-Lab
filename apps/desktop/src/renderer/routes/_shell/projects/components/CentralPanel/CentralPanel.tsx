@@ -633,7 +633,10 @@ export function CentralPanel({
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
       onBlurCapture={editor.onBlurCapture}
     >
-      <div className="flex shrink-0 items-stretch border-border border-b bg-muted/30">
+      {/* Below 320px wide (the Analysis and Tasks Sessions card at its narrow widths) the
+          title is hidden and the New agent, New terminal and New markdown buttons are left
+          out (Add pane has them), so the toolbar fits down to 200px. */}
+      <div className="@container flex shrink-0 items-stretch border-border border-b bg-muted/30">
         {/* Files-panel toggle — upper left. */}
         <div className="flex shrink-0 items-center border-border border-r px-1">
           <button
@@ -660,7 +663,9 @@ export function CentralPanel({
         </div>
 
         {/* Tabs live in each split's own tab bar below; this row keeps the shared buttons. */}
-        <div className="flex min-w-0 flex-1 items-center px-2">{toolbarTitle}</div>
+        <div className="flex min-w-0 flex-1 items-center px-2 @max-[320px]:invisible @max-[320px]:px-0">
+          {toolbarTitle}
+        </div>
 
         {/* Pane creation, file run, and editor settings — intentionally grouped. */}
         <div className="flex shrink-0 items-center gap-0.5 px-1">
@@ -723,7 +728,7 @@ export function CentralPanel({
             disabled={controller.pendingAgent}
             onClick={controller.openAgent}
             className={cn(
-              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden",
               controller.pendingAgent && "cursor-not-allowed opacity-50",
             )}
           >
@@ -738,7 +743,7 @@ export function CentralPanel({
             disabled={controller.pendingTerminal}
             onClick={controller.openTerminal}
             className={cn(
-              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden",
               controller.pendingTerminal && "cursor-not-allowed opacity-50",
             )}
           >
@@ -751,7 +756,7 @@ export function CentralPanel({
             aria-label={t("New markdown")}
             data-feature-help={t("Create an untitled Markdown file in the built-in editor")}
             onClick={controller.openNewMarkdown}
-            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @max-[320px]:hidden"
           >
             <FileText className="size-4" aria-hidden />
           </button>

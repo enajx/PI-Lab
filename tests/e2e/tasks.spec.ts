@@ -81,6 +81,9 @@ test("Tasks reads and surgically updates the project's TODO Markdown", async () 
   )
   await tasksNav.click()
   await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  // The Kanban board is the default view.
+  await expect(window.getByTestId("tasks-heading-board")).toBeVisible()
+  await window.getByRole("button", { name: "List view" }).click()
   await expect(window.getByTestId("task-row")).toHaveCount(2)
   await expect(window.getByText("Parse human Markdown")).toBeVisible()
   await expect(window.getByText("#ml")).toBeVisible()
@@ -171,7 +174,7 @@ test("Tasks reads and surgically updates the project's TODO Markdown", async () 
     }
   }
 
-  // Return to the default list and complete one task through the UI.
+  // Return to the list and complete one task through the UI.
   await window.getByRole("button", { name: "List" }).click()
   await window.getByRole("button", { name: "Mark done" }).first().click()
   await expect

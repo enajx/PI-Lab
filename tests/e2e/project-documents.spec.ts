@@ -72,7 +72,7 @@ test("selects nested task and main Markdown files through the real app", async (
   await expect(window.getByTestId("panel-todos")).toContainText("Nested task")
 
   await window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
-  await expect(window.getByTestId("task-row")).toContainText("Nested task")
+  await expect(window.getByTestId("task-card")).toContainText("Nested task")
 
   await window.getByTestId("project-item").click()
   await window.getByTestId("panel-tab-files").click()

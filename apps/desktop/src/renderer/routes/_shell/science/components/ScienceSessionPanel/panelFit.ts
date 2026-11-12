@@ -2,7 +2,7 @@
 export const CARD_GAP = 12
 
 /** The narrowest the right panel, the Analysis file list, the preview and the Tasks board are drawn. */
-export const PANEL_DRAWN_MIN_WIDTH = 300
+export const PANEL_DRAWN_MIN_WIDTH = 200
 export const ANALYSIS_FILES_DRAWN_MIN_WIDTH = 200
 export const ANALYSIS_PREVIEW_PREFERRED_WIDTH = 256
 export const ANALYSIS_PREVIEW_MIN_WIDTH = 220
