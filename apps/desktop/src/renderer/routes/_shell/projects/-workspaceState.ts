@@ -42,6 +42,16 @@ export function writeProjectWorkspaceViewState(
   workspaceRecovery().writeView(projectId, view)
 }
 
+/** The project's pinned right-sidebar panels, shared by the project view and the science views. */
+export function readProjectPinnedPanels(projectId: string): string[] {
+  return workspaceRecovery().read(projectId, true)?.pinnedPanels ?? []
+}
+
+/** Save the project's pinned right-sidebar panels from a science view. */
+export function writeProjectPinnedPanels(projectId: string, pinnedPanels: string[]): void {
+  workspaceRecovery().writePinnedPanels(projectId, pinnedPanels)
+}
+
 export function subscribeProjectWorkspaceState(onChange: () => void): () => void {
   return workspaceRecovery().subscribe(onChange)
 }

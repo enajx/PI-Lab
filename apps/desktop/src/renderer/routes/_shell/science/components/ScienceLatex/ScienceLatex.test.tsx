@@ -126,6 +126,50 @@ test("with a paper linked, the Sync button is in the page top bar and the other 
   expect(ids).toEqual(["paper-last-sync", "paper-output-folder", "editor-paper-folder"])
 })
 
+test("with a paper open, the documents column starts collapsed; its expand button and the diary button show the project view's right sidebar", async () => {
+  renderPageWith(
+    () => ({
+      paper: {
+        lastSyncAt: null,
+        remoteUrl: null,
+        outputDir: null,
+        effectiveOutputDir: "build",
+        syncEnabled: false,
+      },
+      workspaceId: "paper-ws",
+      rootRelPath: "main.tex",
+    }),
+    {
+      "paper.detect": () => [],
+      "workspaces.ensureMain": () => ({ id: "main-ws" }),
+      "projects.capabilities": () => ({ git: true }),
+      "projects.get": () => ({ id: "p1", name: "One" }),
+      "diary.open": () => ({
+        relPath: "md/research-diary/diary.md",
+        content: "## 2026-11-12\n\n",
+        baseline: { exists: true, mtimeMs: 1, size: 15 },
+      }),
+    },
+  )
+  const column = await screen.findByTestId("latex-diary")
+  expect(column.getAttribute("data-collapsed")).toBe("true")
+  fireEvent.click(await screen.findByTestId("latex-diary-expand"))
+  const sidebar = await within(screen.getByTestId("latex-diary")).findByTestId("right-sidebar")
+  fireEvent.click(within(sidebar).getByTestId("panel-tab-research"))
+  expect(within(sidebar).getByTestId("panel-tab-research").getAttribute("aria-selected")).toBe(
+    "true",
+  )
+  // The sidebar's own collapse button collapses the column; there is no second one.
+  expect(screen.getAllByTestId("right-sidebar-collapse")).toHaveLength(1)
+  fireEvent.click(within(sidebar).getByTestId("right-sidebar-collapse"))
+  expect(screen.getByTestId("latex-diary").getAttribute("data-collapsed")).toBe("true")
+  // The top bar diary button opens it on the Diary tab.
+  fireEvent.click(screen.getByTestId("latex-research-diary"))
+  const again = await within(screen.getByTestId("latex-diary")).findByTestId("right-sidebar")
+  expect(within(again).getByTestId("panel-tab-diary").getAttribute("aria-selected")).toBe("true")
+  expect(await within(again).findByTestId("research-diary-panel")).toBeTruthy()
+})
+
 test("without a paper there is no Sync button", async () => {
   renderPage(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
   await screen.findByTestId("paper-setup")

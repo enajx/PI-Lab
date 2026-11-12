@@ -996,6 +996,9 @@ test("LaTeX Editor shows the editor and diary as separate cards, and keeps the d
     await openAndLink(page, "test-echo")
     const latex = page.getByTestId("science-latex")
     const diary = page.getByTestId("latex-diary")
+    // The documents column starts collapsed when a paper is opened.
+    await expect(diary).toHaveAttribute("data-collapsed", "true")
+    await page.getByTestId("latex-diary-expand").click()
     await expect(diary).toHaveAttribute("data-collapsed", "false")
     const box = await latex.getByTestId("central-panel").boundingBox()
     const header = await latex.locator("header").first().boundingBox()
@@ -1013,7 +1016,7 @@ test("LaTeX Editor shows the editor and diary as separate cards, and keeps the d
         return `${css.borderTopLeftRadius} ${css.borderLeftWidth}`
       })
     expect(await style(diary)).toBe("0px 0px")
-    expect(await style(diary.locator(":scope > div.rounded-lg"))).toBe("8px 1px")
+    expect(await style(diary.getByTestId("right-sidebar"))).toBe("8px 1px")
     expect(await style(latex.getByTestId("central-panel"))).toBe("8px 1px")
     expect(
       await latex
@@ -1025,7 +1028,7 @@ test("LaTeX Editor shows the editor and diary as separate cards, and keeps the d
 
     // Collapsed: no card is left; the expand button is at the right end of the
     // editor card's toolbar.
-    await page.getByTestId("latex-diary-collapse").click()
+    await diary.getByTestId("right-sidebar-collapse").click()
     await expect(diary).toHaveAttribute("data-collapsed", "true")
     await expect(diary).toBeHidden()
     await expect(latex.getByTestId("central-panel").getByTestId("latex-diary-expand")).toBeVisible()
@@ -1072,6 +1075,7 @@ test("LaTeX Editor shows the editor and diary as separate cards, and keeps the d
     // The reload stays on the LaTeX Editor.
     await page.reload()
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId("latex-diary-expand").click()
     await expect.poll(width).toBe(before + 90)
   } finally {
     if (app) await close(app)

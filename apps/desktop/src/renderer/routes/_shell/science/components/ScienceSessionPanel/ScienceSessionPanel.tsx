@@ -22,7 +22,6 @@ import {
 } from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
-import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { useTranslate } from "../../../../../i18n/language"
@@ -54,6 +53,8 @@ import type {
   CentralPanelRestoreState,
   SessionPane,
 } from "../../../projects/components/CentralPanel/useCentralPanel"
+import { DIARY_TAB_ID } from "../../../projects/components/RightSidebar"
+import { ProjectDocumentsCard } from "./ProjectDocumentsCard"
 import { fitPanelRow, type PanelRowFit, type PanelRowInput } from "./panelFit"
 import type { FocusSessionRequest } from "./sessionViewSearch"
 
@@ -65,6 +66,7 @@ import type { FocusSessionRequest } from "./sessionViewSearch"
 export type ScienceSessionRequest =
   | { projectId: string; pane: Omit<SessionPane, "id"> }
   | { projectId: string; notebookRelPath: string }
+  | { projectId: string; fileRelPath: string }
 
 /**
  * Turn an agent to focus into a session request for the panel, once per session:
@@ -93,32 +95,53 @@ export function useFocusSessionRequest(
 }
 
 /**
- * Whether a view's right panel is collapsed, and whether its diary part is on.
- * The diary choice is one saved value for every view (`useResearchDiaryOpen`);
- * the collapsed state is the view's own. The panel starts open while the diary
- * is on (the default), else collapsed.
+ * Whether a view's right panel is collapsed, whether its documents part (the
+ * project view's right sidebar: Research, TODOs, Files, Diary, pinned panels) is on,
+ * and the documents tab shown. The collapsed state and the tab are the view's own.
  */
 export interface SciencePanelState {
   collapsed: boolean
   setCollapsed: (next: boolean) => void
-  /** Whether the diary part is on; it shows only while the panel is open. */
-  diaryOpen: boolean
-  /** The top bar diary button: opens a collapsed panel with the diary, else shows or hides the diary. */
+  /** Whether the documents part is on; it shows only while the panel is open. */
+  documentsOpen: boolean
+  /** The documents tab shown (a right sidebar tab id). */
+  documentsTab: string
+  setDocumentsTab: (id: string) => void
+  /** Open the panel with the documents on the Diary tab. */
+  showDiary: () => void
+  /** The top bar diary button: {@link showDiary}, or while the Diary tab shows, hide it. */
   toggleDiary: () => void
 }
 
-/** The right panel state of Analysis or Tasks (see {@link SciencePanelState}). */
+/**
+ * The right panel state of Analysis or Tasks (see {@link SciencePanelState}). The
+ * documents part is on or off by one saved value for both views
+ * (`useResearchDiaryOpen`); the panel starts open while it is on (the default), else
+ * collapsed, and the documents start on the Diary tab. The top bar diary button,
+ * pressed while the Diary tab shows, turns the documents part off.
+ */
 export function useSciencePanel(): SciencePanelState {
-  const [diaryOpen, setDiaryOpen] = useResearchDiaryOpen()
-  // Open with the diary unless the user turned the diary off.
-  const [collapsed, setCollapsed] = useState(!diaryOpen)
+  const [documentsOpen, setDocumentsOpen] = useResearchDiaryOpen()
+  const [collapsed, setCollapsed] = useState(!documentsOpen)
+  const [documentsTab, setDocumentsTab] = useState(DIARY_TAB_ID)
+  const showDiary = useCallback(() => {
+    setCollapsed(false)
+    setDocumentsOpen(true)
+    setDocumentsTab(DIARY_TAB_ID)
+  }, [setDocumentsOpen])
   const toggleDiary = useCallback(() => {
-    if (collapsed) {
-      setCollapsed(false)
-      setDiaryOpen(true)
-    } else setDiaryOpen(!diaryOpen)
-  }, [collapsed, diaryOpen, setDiaryOpen])
-  return { collapsed, setCollapsed, diaryOpen, toggleDiary }
+    if (!collapsed && documentsOpen && documentsTab === DIARY_TAB_ID) setDocumentsOpen(false)
+    else showDiary()
+  }, [collapsed, documentsOpen, documentsTab, setDocumentsOpen, showDiary])
+  return {
+    collapsed,
+    setCollapsed,
+    documentsOpen,
+    documentsTab,
+    setDocumentsTab,
+    showDiary,
+    toggleDiary,
+  }
 }
 
 /** A row's measured width in px (`Infinity` until measured or while not laid out), via a ref callback. */
@@ -195,7 +218,11 @@ export function useSciencePanelRow(
   useEffect(() => {
     if (squeezeOpen && natural.open) setSqueezeOpen(false)
   }, [natural.open, squeezeOpen])
-  const { setCollapsed: setUserCollapsed, toggleDiary: userToggleDiary, diaryOpen } = panel
+  const {
+    setCollapsed: setUserCollapsed,
+    toggleDiary: userToggleDiary,
+    showDiary: userShowDiary,
+  } = panel
   const setCollapsed = useCallback(
     (next: boolean) => {
       setSqueezeOpen(!next)
@@ -203,19 +230,19 @@ export function useSciencePanelRow(
     },
     [setUserCollapsed],
   )
+  const showDiary = useCallback(() => {
+    setSqueezeOpen(true)
+    userShowDiary()
+  }, [userShowDiary])
   const forced = fit.forcedCollapsed
   const toggleDiary = useCallback(() => {
-    if (!forced) {
-      userToggleDiary()
-      return
-    }
-    setSqueezeOpen(true)
-    if (!diaryOpen) userToggleDiary()
-  }, [diaryOpen, forced, userToggleDiary])
+    if (forced) showDiary()
+    else userToggleDiary()
+  }, [forced, showDiary, userToggleDiary])
   return {
     rowRef,
     fit,
-    panel: { collapsed: !fit.open, setCollapsed, diaryOpen, toggleDiary },
+    panel: { ...panel, collapsed: !fit.open, setCollapsed, showDiary, toggleDiary },
     width: { saved: width, drawn: fit.panel, setWidth, persistWidth },
   }
 }
@@ -259,9 +286,7 @@ export function SciencePanelExpandButton({ panel }: { panel: SciencePanelState }
     <PanelExpandButton
       testId="science-sessions-expand"
       label={t("Show sessions")}
-      help={t(
-        "Open the panel with this project's agent and terminal sessions and its research diary.",
-      )}
+      help={t("Open the panel with this project's agent and terminal sessions and its documents.")}
       onClick={() => panel.setCollapsed(false)}
     />
   )
@@ -269,7 +294,8 @@ export function SciencePanelExpandButton({ panel }: { panel: SciencePanelState }
 
 /**
  * The top bar Research diary button of a view with a right panel: icon-only,
- * pressed while the diary shows. `disabled` (no project chosen) asks to pick one.
+ * pressed while the documents show the Diary tab. It opens the panel on the Diary
+ * tab, or while that shows, hides it. `disabled` (no project chosen) asks to pick one.
  */
 export function SciencePanelDiaryButton({
   testId,
@@ -281,7 +307,8 @@ export function SciencePanelDiaryButton({
   disabled: boolean
 }) {
   const t = useTranslate()
-  const shown = !disabled && !panel.collapsed && panel.diaryOpen
+  const shown =
+    !disabled && !panel.collapsed && panel.documentsOpen && panel.documentsTab === DIARY_TAB_ID
   return (
     <button
       type="button"
@@ -290,7 +317,7 @@ export function SciencePanelDiaryButton({
       aria-pressed={shown}
       title={disabled ? t("Pick a project") : t("Research diary")}
       data-feature-label={t("Research diary")}
-      data-feature-help={t("Show or hide the chosen project's research diary in the right panel")}
+      data-feature-help={t("Open the right panel on the chosen project's research diary")}
       disabled={disabled}
       onClick={panel.toggleDiary}
       className={cn(headerIconButtonClass, shown && "text-foreground")}
@@ -316,11 +343,13 @@ interface ScienceSessionPanelProps {
 
 /**
  * The right panel of Tasks and Analysis: agent and terminal sessions on top, and
- * the chosen project's research diary below (when the diary is on), with a
- * draggable divider between them whose position is saved as the diary's height
- * share. Like the project view, the Sessions part and the diary part are each
+ * the chosen project's documents below (when they are on): the project view's right
+ * sidebar, with its tabs and pinned panels, but no collapse button of its own. A
+ * draggable divider between them has its position saved as the documents' height
+ * share. Like the project view, the Sessions part and the documents part are each
  * their own rounded card, 12px apart; the Sessions card's toolbar row holds its
- * title and collapse button, the diary card holds the diary's own header. The
+ * title and the collapse button of the whole panel. A file the Files tab opens
+ * opens as a tab in the Sessions card. The
  * panel resizes from the gap on its left, and the gap between the cards is the
  * divider. The width is one saved value for Analysis and Tasks. The sessions part is built from the same central panel as the LaTeX
  * Editor (with its "+", agent and terminal buttons), and its sessions start in the
@@ -349,7 +378,14 @@ export function ScienceSessionPanel({
   // Removes a drag's window listeners; also run if the panel unmounts mid-drag.
   const endDrag = useRef<(() => void) | null>(null)
   useEffect(() => () => endDrag.current?.(), [])
-  const diaryProjectId = !collapsed && panel.diaryOpen && project ? project.id : null
+  const diaryProjectId = !collapsed && panel.documentsOpen && project ? project.id : null
+  // A file the documents' Files tab opens, until the Sessions card has opened it.
+  const [fileRequest, setFileRequest] = useState<ScienceSessionRequest | null>(null)
+  const request = openSession ?? fileRequest
+  const requestOpened = useCallback(() => {
+    if (openSession) onSessionOpened()
+    else setFileRequest(null)
+  }, [onSessionOpened, openSession])
 
   // Dragging the divider sets the diary's share of the panel body's height.
   const onDividerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -454,8 +490,8 @@ export function ScienceSessionPanel({
               collapsed={collapsed}
               header={header}
               onExpand={expand}
-              openSession={openSession?.projectId === project.id ? openSession : null}
-              onSessionOpened={onSessionOpened}
+              openSession={request?.projectId === project.id ? request : null}
+              onSessionOpened={requestOpened}
             />
           ) : (
             <NoProjectSessions collapsed={collapsed} header={header} onExpand={expand} />
@@ -473,13 +509,18 @@ export function ScienceSessionPanel({
             </div>
             <div
               data-testid="science-panel-diary"
-              className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border"
+              className="flex min-h-0 min-w-0 flex-col"
               style={{ flex: `${share} 1 0` }}
             >
-              <ResearchDiaryPanel
+              <ProjectDocumentsCard
                 key={diaryProjectId}
                 projectId={diaryProjectId}
-                headerActions={null}
+                activeId={panel.documentsTab}
+                onActiveIdChange={panel.setDocumentsTab}
+                onCollapse={null}
+                onOpenFile={(relPath) =>
+                  setFileRequest({ projectId: diaryProjectId, fileRelPath: relPath })
+                }
               />
             </div>
           </>
@@ -662,13 +703,15 @@ function SessionsBody({
   // and shows the panel.
   const attachSession = controller.attachSession
   const openNotebook = controller.openNotebook
+  const openFile = controller.openFile
   useEffect(() => {
     if (!openSession) return
     if ("pane" in openSession) attachSession(openSession.pane)
-    else openNotebook(openSession.notebookRelPath)
+    else if ("notebookRelPath" in openSession) openNotebook(openSession.notebookRelPath)
+    else openFile(openSession.fileRelPath)
     onExpand()
     onSessionOpened()
-  }, [attachSession, onExpand, onSessionOpened, openNotebook, openSession])
+  }, [attachSession, onExpand, onSessionOpened, openFile, openNotebook, openSession])
 
   // While collapsed the central panel is not mounted (or hidden, with its shortcuts
   // off), so ⌘T is handled here.

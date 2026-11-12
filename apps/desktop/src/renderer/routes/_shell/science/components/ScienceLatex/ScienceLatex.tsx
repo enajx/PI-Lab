@@ -1,24 +1,25 @@
 import { DEFAULT_EDITOR_SETTINGS, type EditorSettings } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { Link2, PanelRightClose } from "lucide-react"
+import { Link2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
-import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
 import {
   RESEARCH_DIARY_MAX_WIDTH,
   RESEARCH_DIARY_MIN_WIDTH,
   useLatexEditorProject,
-  useResearchDiaryOpen,
   useResearchDiaryWidth,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { setPendingOpenFile } from "../../../projects/-pendingOpenFile"
+import { DIARY_TAB_ID } from "../../../projects/components/RightSidebar"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   PanelExpandButton,
+  ProjectDocumentsCard,
   SciencePanelDiaryButton,
   type SciencePanelState,
   type SciencePanelWidth,
@@ -44,9 +45,12 @@ import { type CreatedPaper, PaperSetup } from "./PaperSetup"
  * paper-only project, then chosen); a paper-only project has a Link to
  * project button that moves its paper to a project with none. With the paper
  * workspace shown, the top bar has the "+" shortcut menu left of the picker and
- * the right of the page a research diary column (not for a paper-only project),
- * open while the diary is on (the default), shown or hidden by the top bar diary
- * button or its own collapse and expand buttons.
+ * the right of the page the project's documents column (not for a paper-only
+ * project): the project view's right sidebar, with Research, TODOs, Files, Diary and
+ * the pinned panels. It starts collapsed each time a paper is opened; its expand
+ * button (at the right end of the editor card's toolbar) or the top bar diary button
+ * (which opens it on the Diary tab) shows it, and its own collapse button hides it.
+ * A file the Files tab opens opens in the project view.
  * `focusSession` focuses one agent tab of the initial project (see the Project
  * Agents box).
  */
@@ -109,10 +113,10 @@ export function ScienceLatex({
   })
   const standaloneSetup = newPaper || (projectsQuery.isSuccess && projects.length === 0)
   const paperOnly = !standaloneSetup && selected?.metadata?.paperOnly === true
-  // The editor and the diary fit the row's width: the diary narrows first, then the
-  // editor, and then the diary is drawn collapsed (see useSciencePanelRow).
+  // The editor and the documents fit the row's width: the documents narrow first, then
+  // the editor, and then the documents are drawn collapsed (see useSciencePanelRow).
   const diaryRow = useSciencePanelRow(
-    useLatexDiaryPanel(),
+    useLatexDocumentsPanel(selected?.id ?? null),
     useResearchDiaryWidth(),
     RESEARCH_DIARY_MIN_WIDTH,
     null,
@@ -240,8 +244,8 @@ export function ScienceLatex({
                 paperOnly || !diaryPanel.collapsed ? null : (
                   <PanelExpandButton
                     testId="latex-diary-expand"
-                    label={t("Show research diary")}
-                    help={t("Show this project's research diary.")}
+                    label={t("Show documents")}
+                    help={t("Show this project's documents: Research, TODOs, Files and Diary.")}
                     onClick={() => diaryPanel.setCollapsed(false)}
                   />
                 )
@@ -252,7 +256,15 @@ export function ScienceLatex({
             />
           </div>
           {paperOnly ? null : (
-            <LatexDiaryColumn projectId={selected.id} panel={diaryPanel} width={diaryRow.width} />
+            <LatexDocumentsColumn
+              projectId={selected.id}
+              panel={diaryPanel}
+              width={diaryRow.width}
+              onOpenFile={(relPath) => {
+                setPendingOpenFile(selected.id, relPath)
+                void navigate({ to: "/projects/$projectId", params: { projectId: selected.id } })
+              }}
+            />
           )}
         </div>
       ) : (
@@ -273,38 +285,52 @@ export function ScienceLatex({
 }
 
 /**
- * The LaTeX Editor's right panel state: it holds only the research diary, so it
- * is open exactly while the diary is on (the saved choice shared with Analysis
- * and Tasks, on by default). The top bar diary button and the column's collapse
- * and expand buttons turn it on or off.
+ * The LaTeX Editor's right panel state for the chosen project: the documents are
+ * always on, and the panel starts collapsed each time a paper (project) is opened.
+ * The top bar diary button opens it on the Diary tab, or while that shows, collapses it.
  */
-function useLatexDiaryPanel(): SciencePanelState {
-  const [diaryOpen, setDiaryOpen] = useResearchDiaryOpen()
+function useLatexDocumentsPanel(projectId: string | null): SciencePanelState {
+  // The project the panel was opened for; another project shows it collapsed.
+  const [openFor, setOpenFor] = useState<string | null>(null)
+  const [documentsTab, setDocumentsTab] = useState(DIARY_TAB_ID)
+  const collapsed = projectId === null || openFor !== projectId
+  const showDiary = (): void => {
+    setOpenFor(projectId)
+    setDocumentsTab(DIARY_TAB_ID)
+  }
   return {
-    collapsed: !diaryOpen,
-    setCollapsed: (next) => setDiaryOpen(!next),
-    diaryOpen,
-    toggleDiary: () => setDiaryOpen(!diaryOpen),
+    collapsed,
+    setCollapsed: (next) => setOpenFor(next ? null : projectId),
+    documentsOpen: true,
+    documentsTab,
+    setDocumentsTab,
+    showDiary,
+    toggleDiary: () => {
+      if (!collapsed && documentsTab === DIARY_TAB_ID) setOpenFor(null)
+      else showDiary()
+    },
   }
 }
 
 /**
- * The LaTeX Editor's right column: the project's research diary as its own rounded
- * card, resizable from the gap on its left (the width is a saved preference; it is
- * drawn at `width.drawn`; dragging it below the minimum width collapses it), with a
- * collapse button. Collapsed, nothing is drawn: the button to show it again is at the
- * right end of the editor card's toolbar.
+ * The LaTeX Editor's right column: the project's documents (the project view's right
+ * sidebar, its own rounded card), resizable from the gap on its left (the width is a
+ * saved preference; it is drawn at `width.drawn`; dragging it below the minimum width
+ * collapses it). The sidebar's collapse button collapses the column. Collapsed,
+ * nothing is drawn: the button to show it again is at the right end of the editor
+ * card's toolbar.
  */
-function LatexDiaryColumn({
+function LatexDocumentsColumn({
   projectId,
   panel,
   width,
+  onOpenFile,
 }: {
   projectId: string
   panel: SciencePanelState
   width: SciencePanelWidth
+  onOpenFile: (relPath: string) => void
 }) {
-  const t = useTranslate()
   // Collapsed: nothing is drawn (an empty hidden column keeps its collapsed state
   // readable); the expand button is in the editor card's toolbar.
   if (panel.collapsed) return <aside data-testid="latex-diary" data-collapsed="true" hidden />
@@ -325,25 +351,14 @@ function LatexDiaryColumn({
         onCollapse={() => panel.setCollapsed(true)}
         testId="research-diary-edge-drag"
       />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
-        <ResearchDiaryPanel
-          key={projectId}
-          projectId={projectId}
-          headerActions={
-            <button
-              type="button"
-              data-testid="latex-diary-collapse"
-              title={t("Hide research diary")}
-              aria-label={t("Hide research diary")}
-              data-feature-help={t("Collapse this panel to give the editor more room.")}
-              onClick={() => panel.setCollapsed(true)}
-              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <PanelRightClose className="size-4" aria-hidden />
-            </button>
-          }
-        />
-      </div>
+      <ProjectDocumentsCard
+        key={projectId}
+        projectId={projectId}
+        activeId={panel.documentsTab}
+        onActiveIdChange={panel.setDocumentsTab}
+        onCollapse={() => panel.setCollapsed(true)}
+        onOpenFile={onOpenFile}
+      />
     </aside>
   )
 }

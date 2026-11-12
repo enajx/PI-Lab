@@ -1,3 +1,4 @@
+export { ProjectDocumentsCard } from "./ProjectDocumentsCard"
 export {
   PanelExpandButton,
   SciencePanelDiaryButton,

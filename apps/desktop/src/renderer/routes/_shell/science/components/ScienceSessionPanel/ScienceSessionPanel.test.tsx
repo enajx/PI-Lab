@@ -1,9 +1,13 @@
 import { QueryClient } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { useSciencePanelWidth } from "../../../../../preferences/preferences"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
+import {
+  readProjectPinnedPanels,
+  writeProjectPinnedPanels,
+} from "../../../projects/-workspaceState"
 
 /**
  * The Tasks and Analysis session panel, driven through its public component with a
@@ -55,6 +59,9 @@ function handlers(): FakeHandlers {
     "terminal.list": () => [],
     "terminal.kill": () => ({ ok: true }),
     "files.tree": () => [],
+    "files.read": () => ({ content: "", exists: false }),
+    "projects.get": () => ({ id: "p-1", name: "Project 1" }),
+    "projects.capabilities": () => ({ git: true }),
     "diary.open": () => ({
       relPath: "md/research-diary/diary.md",
       content: "## 2026-11-12\n\n",
@@ -217,6 +224,39 @@ describe("ScienceSessionPanel", () => {
     // Opening the panel again shows the diary, still on.
     fireEvent.click(screen.getByTestId("science-sessions-expand"))
     expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
+  })
+
+  test("the documents card is the project view's right sidebar: its tabs, no collapse button of its own, and the pins the project view saved", async () => {
+    window.localStorage.removeItem("pi-lab.researchDiary.open")
+    writeProjectPinnedPanels("p-1", ["notes/plan.md"])
+    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+    const card = screen.getByTestId("science-panel-diary")
+    const sidebar = await within(card).findByTestId("right-sidebar")
+    expect(within(sidebar).getByTestId("panel-tab-research")).toBeTruthy()
+    expect(within(sidebar).getByTestId("panel-tab-todos")).toBeTruthy()
+    expect(within(sidebar).getByTestId("panel-tab-files")).toBeTruthy()
+    expect(within(sidebar).getByTestId("panel-tab-pinned:notes/plan.md")).toBeTruthy()
+    expect(within(sidebar).queryByTestId("right-sidebar-collapse")).toBeNull()
+    expect(within(sidebar).getByTestId("panel-tab-diary").getAttribute("aria-selected")).toBe(
+      "true",
+    )
+
+    // On another tab the diary button shows the Diary tab again, then hides the documents.
+    const button = screen.getByTestId("diary-button")
+    fireEvent.click(within(sidebar).getByTestId("panel-tab-todos"))
+    expect(button.getAttribute("aria-pressed")).toBe("false")
+    fireEvent.click(button)
+    expect(within(sidebar).getByTestId("panel-tab-diary").getAttribute("aria-selected")).toBe(
+      "true",
+    )
+    expect(button.getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(button)
+    expect(screen.queryByTestId("science-panel-diary")).toBeNull()
+
+    // Unpinning here changes the project's own list.
+    fireEvent.click(button)
+    fireEvent.click(await screen.findByTestId("right-sidebar-unpin:notes/plan.md"))
+    expect(readProjectPinnedPanels("p-1")).toEqual([])
   })
 
   test("with no project, the diary button is disabled and the panel shows only Sessions", async () => {

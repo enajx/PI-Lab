@@ -173,8 +173,11 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     }
     await expect(latexBar.getByTestId("paper-update")).toHaveAttribute("title", "Update paper")
     await page.screenshot({ path: resolve(".cache", "screens", "latex-top-bar.png") })
-    // The right diary column starts open; the top bar diary button closes and opens it.
+    // The right documents column starts collapsed; the top bar diary button opens it
+    // on the Diary tab and closes it again.
     const diaryColumn = page.getByTestId("latex-diary")
+    await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
+    await latexBar.getByTestId("latex-research-diary").click()
     await expect(diaryColumn).toHaveAttribute("data-collapsed", "false")
     await expect(diaryColumn.getByTestId("research-diary-panel")).toBeVisible()
     // With the diary open, the editor status bar items never overlap or run past the bar.
@@ -212,7 +215,7 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     await expect(page.getByTestId("research-diary-panel")).toHaveCount(0)
     await latexBar.getByTestId("latex-research-diary").click()
     await expect(diaryColumn).toHaveAttribute("data-collapsed", "false")
-    await diaryColumn.getByTestId("latex-diary-collapse").click()
+    await diaryColumn.getByTestId("right-sidebar-collapse").click()
     await expect(diaryColumn).toHaveAttribute("data-collapsed", "true")
 
     await page.getByTestId("latex-shortcuts-add").click()

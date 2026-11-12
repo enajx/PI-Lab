@@ -256,6 +256,29 @@ export class WorkspaceRecoveryStore {
     this.schedule(projectId)
   }
 
+  /**
+   * Save a project's pinned right-sidebar panels from a view other than the project
+   * view (the science views' document panels). A project the project view never
+   * saved gets a state with no tabs, so the pins are kept for it too.
+   */
+  writePinnedPanels(projectId: string, pinnedPanels: string[]): void {
+    this.hydrate()
+    const previous: ProjectWorkspaceState = this.states.get(projectId) ?? {
+      buffers: [],
+      activeRelPath: null,
+      sessions: [],
+      active: null,
+      belowEditorRun: null,
+      layout: null,
+      rightSidebarCollapsed: false,
+      rightSidebarActiveId: null,
+      pinnedPanels: [],
+    }
+    if (previous.pinnedPanels === pinnedPanels) return
+    this.states.set(projectId, { ...previous, pinnedPanels })
+    this.schedule(projectId)
+  }
+
   /** Editor operation adapters update buffers even after their route has unmounted. */
   updateBuffers(projectId: string, update: (buffers: OpenBuffer[]) => OpenBuffer[]): void {
     const state = this.read(projectId, true)

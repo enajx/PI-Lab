@@ -274,7 +274,7 @@ export function useRightSidebarPanels(
  * Stacked, bounded-flex sidebar: a tab strip on top (plus a collapse button and a
  * gear opening a view-options menu; tabs reorder by native drag-and-drop or
  * Alt+Left/Right on a focused tab, saved as one global order), the active panel below in a `min-h-0 flex-1`
- * region so each panel's own `overflow-y-auto` body scrolls without a nested Radix ScrollArea. The collapse button calls `onCollapse`; the project route
+ * region so each panel's own `overflow-y-auto` body scrolls without a nested Radix ScrollArea. The collapse button calls `onCollapse` (no button when it is null); the project route
  * owns the collapse state (session state, defaulting to EXPANDED on each project open —
  * not persisted), dropping the right column and showing an expand affordance when collapsed.
  */
@@ -304,7 +304,9 @@ export function RightSidebar({
   activeId?: string | null
   initialActiveId?: string
   onActiveIdChange?: (id: string) => void
-  onCollapse: () => void
+  /** The collapse button's action, or null for no collapse button (a view whose panel
+   * has its collapse button elsewhere). */
+  onCollapse: (() => void) | null
   /** Working-dir-relative `.md` paths pinned as persistent panels (owned by the route). */
   pinnedPanels?: string[]
   /** Pin a `.md` file as a panel. */
@@ -518,17 +520,19 @@ export function RightSidebar({
           onToggleCodeChanges={() => setShowCodeChanges(!showCodeChanges)}
           onToggleSkills={() => setShowSkills(!showSkills)}
         />
-        <button
-          type="button"
-          data-testid="right-sidebar-collapse"
-          aria-label={t("Collapse panel")}
-          title={t("Collapse panel")}
-          data-feature-help={t("Hide the project details sidebar to give the editor more room")}
-          onClick={onCollapse}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <PanelRightClose className="size-3.5" aria-hidden />
-        </button>
+        {onCollapse ? (
+          <button
+            type="button"
+            data-testid="right-sidebar-collapse"
+            aria-label={t("Collapse panel")}
+            title={t("Collapse panel")}
+            data-feature-help={t("Hide the project details sidebar to give the editor more room")}
+            onClick={onCollapse}
+            className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <PanelRightClose className="size-3.5" aria-hidden />
+          </button>
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {setMain.error ? (

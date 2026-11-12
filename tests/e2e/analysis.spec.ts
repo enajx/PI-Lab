@@ -435,7 +435,7 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
     files.locator(":scope > div.rounded-lg"),
     window.getByTestId("analysis-preview-column"),
     panel.getByTestId("central-panel"),
-    panel.getByTestId("science-panel-diary"),
+    panel.getByTestId("science-panel-diary").getByTestId("right-sidebar"),
   ]) {
     expect(await cardStyle(card)).toBe("8px 1px")
   }
