@@ -133,6 +133,8 @@ test("language selection persists through setup and can change in Settings", asy
   await window.locator('[data-science-tab="tasks"]').click()
   await expect(window.getByRole("heading", { name: "Tareas" })).toBeVisible()
   await expect(window.getByRole("button", { name: "Nueva tarea" })).toBeVisible()
+  // Tasks opens on the Kanban board; the list view says when there are no tasks.
+  await window.getByRole("button", { name: "Vista de lista" }).click()
   await expect(window.getByText("No se encontraron tareas")).toBeVisible()
 
   await window.keyboard.press("ControlOrMeta+Comma")
