@@ -476,9 +476,6 @@ export function ScienceAnalysis({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {projects.length === 0 ? (
             <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="absolute top-1.5 right-1.5">
-                <SciencePanelExpandButton panel={panel} />
-              </div>
               <NoProjectsState />
             </div>
           ) : (
@@ -683,13 +680,10 @@ export function ScienceAnalysis({
                     onOpenNotebook={(notebookRelPath) =>
                       setSessionRequest({ projectId: selectedProjectId, notebookRelPath })
                     }
-                    headerEnd={<SciencePanelExpandButton panel={panel} />}
+                    headerEnd={null}
                   />
                 ) : (
                   <div className="relative h-full min-h-0">
-                    <div className="absolute top-1.5 right-1.5">
-                      <SciencePanelExpandButton panel={panel} />
-                    </div>
                     <NoSelectionState />
                   </div>
                 )}
@@ -697,6 +691,15 @@ export function ScienceAnalysis({
             </div>
           )}
         </div>
+        {/* Collapsed right panel: a thin bar card of its own holding the expand button. */}
+        {panel.collapsed ? (
+          <div
+            data-testid="analysis-collapsed-bar"
+            className="flex w-9 shrink-0 flex-col items-center rounded-lg border border-border py-1"
+          >
+            <SciencePanelExpandButton panel={panel} />
+          </div>
+        ) : null}
         <ScienceSessionPanel
           view="analysis"
           project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
