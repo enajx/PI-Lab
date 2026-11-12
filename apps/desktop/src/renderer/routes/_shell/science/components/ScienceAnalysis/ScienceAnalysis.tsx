@@ -14,6 +14,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { ChartArea, CloudDownload, FileCode2, FileText, Microscope, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
+import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import {
   HeaderShortcuts,
   headerIconButtonClass,
@@ -21,7 +22,10 @@ import {
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
 import { useTranslate } from "../../../../../i18n/language"
 import {
+  ANALYSIS_FILES_MAX_WIDTH,
+  ANALYSIS_FILES_MIN_WIDTH,
   DEFAULT_RESULTS_FOLDER,
+  useAnalysisFilesWidth,
   useAnalysisProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
@@ -40,6 +44,9 @@ import {
 } from "../ScienceSessionPanel"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
+
+/** The preview column's smallest width in px, beside the resizable file list. */
+const PREVIEW_MIN_WIDTH = 256
 
 /**
  * Analysis science tab — a **read-only data
@@ -93,6 +100,9 @@ export function ScienceAnalysis({
   const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
   const panel = useSciencePanel()
+  const [savedFilesWidth, persistFilesWidth] = useAnalysisFilesWidth()
+  const [filesWidth, setFilesWidth] = useState(savedFilesWidth)
+  useEffect(() => setFilesWidth(savedFilesWidth), [savedFilesWidth])
   const capabilities = useQuery({
     ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
     enabled: Boolean(selectedProject),
@@ -440,17 +450,33 @@ export function ScienceAnalysis({
         </>
       }
     >
-      {/* The file list and preview keep 36rem; the right panel narrows first. */}
+      {/* The file list keeps its width and the preview 16rem; the right panel narrows first. */}
       <div className="flex min-h-0 flex-1 overflow-x-auto">
-        <div className="flex min-h-0 min-w-[36rem] flex-1 flex-col">
+        <div
+          className="flex min-h-0 flex-1 flex-col"
+          style={{ minWidth: filesWidth + PREVIEW_MIN_WIDTH }}
+        >
           {projects.length === 0 ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
               <NoProjectsState />
             </div>
           ) : (
             <div className="flex min-h-0 flex-1">
-              {/* Left column: search + category filter + file list. */}
-              <div className="flex w-80 shrink-0 flex-col border-border border-r">
+              {/* Left column: search + category filter + file list, resizable from its right line. */}
+              <div
+                data-testid="analysis-files-column"
+                className="relative flex shrink-0 flex-col border-border border-r"
+                style={{ width: filesWidth }}
+              >
+                <EdgeResizeHandle
+                  side="right"
+                  width={filesWidth}
+                  onResize={setFilesWidth}
+                  onResizeEnd={persistFilesWidth}
+                  min={ANALYSIS_FILES_MIN_WIDTH}
+                  max={ANALYSIS_FILES_MAX_WIDTH}
+                  testId="analysis-files-edge-drag"
+                />
                 <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
                   {selectedProjectId ? (
                     <ResultsFolderField
@@ -620,7 +646,10 @@ export function ScienceAnalysis({
               </div>
 
               {/* Right column: preview pane for the selected file. */}
-              <div className="flex min-h-0 min-w-64 flex-1 flex-col overflow-hidden">
+              <div
+                className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                style={{ minWidth: PREVIEW_MIN_WIDTH }}
+              >
                 {selectedProjectId && selectedRelPath ? (
                   <AnalysisPreview
                     projectId={selectedProjectId}

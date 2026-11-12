@@ -385,7 +385,7 @@ export function PaperEditor({
   )
 
   return (
-    <div data-testid="paper-editor" className="flex min-h-0 flex-1 flex-col">
+    <div data-testid="paper-editor" className="flex min-h-0 flex-1 flex-col p-3">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {openError ? (
           <p role="alert" className="cursor-text select-text px-3 py-1 text-destructive text-xs">

@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
@@ -29,8 +30,11 @@ import {
   RESEARCH_DIARY_MAX_SHARE,
   RESEARCH_DIARY_MIN_SHARE,
   readRestoreProjectTabs,
+  SCIENCE_PANEL_MAX_WIDTH,
+  SCIENCE_PANEL_MIN_WIDTH,
   useResearchDiaryOpen,
   useResearchDiaryShare,
+  useSciencePanelWidth,
 } from "../../../../../preferences/preferences"
 import { overlayIsOpen } from "../../../../../shortcuts/keyGuards"
 import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
@@ -166,7 +170,9 @@ interface ScienceSessionPanelProps {
  * The right panel of Tasks and Analysis: agent and terminal sessions on top, and
  * the chosen project's research diary below (when the diary is on), with a
  * draggable divider between them whose position is saved as the diary's height
- * share. The sessions part is built from the same central panel as the LaTeX
+ * share. The panel resizes from its left line; the width is one saved value for
+ * Analysis and Tasks. The rounded Sessions box keeps a gap from the lines around
+ * it. The sessions part is built from the same central panel as the LaTeX
  * Editor (with its "+", agent and terminal buttons), and its sessions start in the
  * selected project's main folder. The panel starts open with the diary while
  * the diary is on (the default), else collapsed; collapsing hides both parts. It opens when a session opens. ⌘T (Settings → Shortcuts) opens a
@@ -188,6 +194,9 @@ export function ScienceSessionPanel({
   const [savedShare, persistShare] = useResearchDiaryShare()
   const [share, setShare] = useState(savedShare)
   useEffect(() => setShare(savedShare), [savedShare])
+  const [savedWidth, persistWidth] = useSciencePanelWidth()
+  const [width, setWidth] = useState(savedWidth)
+  useEffect(() => setWidth(savedWidth), [savedWidth])
   const bodyRef = useRef<HTMLDivElement | null>(null)
   // Removes a drag's window listeners; also run if the panel unmounts mid-drag.
   const endDrag = useRef<(() => void) | null>(null)
@@ -237,9 +246,21 @@ export function ScienceSessionPanel({
       className={
         collapsed
           ? "flex w-9 shrink-0 flex-col items-center border-border border-l py-2"
-          : "flex w-[520px] min-w-[22rem] shrink flex-col border-border border-l"
+          : "relative flex shrink flex-col border-border border-l"
       }
+      style={collapsed ? undefined : { width, minWidth: SCIENCE_PANEL_MIN_WIDTH }}
     >
+      {collapsed ? null : (
+        <EdgeResizeHandle
+          side="left"
+          width={width}
+          onResize={setWidth}
+          onResizeEnd={persistWidth}
+          min={SCIENCE_PANEL_MIN_WIDTH}
+          max={SCIENCE_PANEL_MAX_WIDTH}
+          testId="science-sessions-edge-drag"
+        />
+      )}
       {collapsed ? (
         <button
           type="button"
@@ -255,7 +276,10 @@ export function ScienceSessionPanel({
           <PanelRightOpen className="size-4" aria-hidden />
         </button>
       ) : (
-        <div className="flex h-8 shrink-0 items-center justify-between border-border border-b px-2">
+        <div
+          data-testid="science-sessions-header"
+          className="flex h-8 shrink-0 items-center justify-between border-border border-b px-2"
+        >
           <span className="text-muted-foreground text-xs">{t("Sessions")}</span>
           <button
             type="button"
@@ -486,7 +510,7 @@ function SessionsBody({
   return (
     <div
       hidden={collapsed}
-      className={collapsed ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col"}
+      className={collapsed ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col p-3"}
     >
       <CentralPanel
         controller={controller}

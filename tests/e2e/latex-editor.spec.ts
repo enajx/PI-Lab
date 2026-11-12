@@ -978,3 +978,54 @@ test("LaTeX Editor adds a paper with no project, shows its own card, and links i
     await rm(root, { recursive: true, force: true })
   }
 })
+
+/**
+ * Real app: the rounded editor box keeps a 12px gap from the lines around it (the
+ * top bar line, the app sidebar and the diary column's line), like the project
+ * view's boxes; the diary column's line drags to resize it, and the width comes
+ * back after a reload.
+ */
+test("LaTeX Editor keeps the editor box clear of the diary line, and the diary width after reload", async () => {
+  test.setTimeout(120_000)
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-panels-e2e-"))
+  const { project, paper } = await setUp(root)
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, paper, {})
+    const page = await app.firstWindow()
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1400, 900))
+    await openAndLink(page, "test-echo")
+    const latex = page.getByTestId("science-latex")
+    const diary = page.getByTestId("latex-diary")
+    await expect(diary).toHaveAttribute("data-collapsed", "false")
+    const box = await latex.getByTestId("central-panel").boundingBox()
+    const header = await latex.locator("header").first().boundingBox()
+    const shell = await latex.boundingBox()
+    const column = await diary.boundingBox()
+    if (!box || !header || !shell || !column) throw new Error("No LaTeX Editor layout")
+    expect(Math.round(box.y - (header.y + header.height))).toBeGreaterThanOrEqual(12)
+    expect(Math.round(box.x - shell.x)).toBeGreaterThanOrEqual(12)
+    expect(Math.round(column.x - (box.x + box.width))).toBeGreaterThanOrEqual(12)
+    expect(Math.round(shell.y + shell.height - (box.y + box.height))).toBeGreaterThanOrEqual(12)
+    await page.screenshot({ path: resolve(".cache", "screens", "latex-editor-panels.png") })
+
+    const handle = await page.getByTestId("research-diary-edge-drag").boundingBox()
+    if (!handle) throw new Error("No diary resize handle")
+    const before = column.width
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(handle.x + handle.width / 2 - 90, handle.y + handle.height / 2, {
+      steps: 8,
+    })
+    await page.mouse.up()
+    const width = () => diary.evaluate((element) => element.getBoundingClientRect().width)
+    await expect.poll(width).toBe(before + 90)
+    // The reload stays on the LaTeX Editor.
+    await page.reload()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    await expect.poll(width).toBe(before + 90)
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
