@@ -95,6 +95,26 @@ test("first-run setup wizard fits the default window without scrolling", async (
   await window.screenshot({ path: resolve(".cache", "screens", "setup-wizard.png") })
 })
 
+test("first-run setup card is sized to its content, with no blank space inside it", async () => {
+  if (!app) throw new Error("Electron app did not launch")
+  const window = await app.firstWindow()
+
+  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByText("Checking your local environment…")).toHaveCount(0, {
+    timeout: 30_000,
+  })
+  const card = window.getByTestId("first-run-setup-card")
+  const box = await card.boundingBox()
+  if (!box) throw new Error("setup card has no box")
+  expect(box.width).toBeLessThanOrEqual(800)
+  const metrics = await window.getByTestId("first-run-setup-scroll").evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  }))
+  expect(metrics.clientHeight - metrics.scrollHeight).toBeLessThanOrEqual(2)
+  await window.screenshot({ path: resolve(".cache", "screens", "setup-wizard-fit.png") })
+})
+
 test("first-launch setup is skippable", async () => {
   if (!app) throw new Error("Electron app did not launch")
   const window = await app.firstWindow()

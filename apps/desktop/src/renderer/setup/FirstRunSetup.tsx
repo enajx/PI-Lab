@@ -167,265 +167,270 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="first-run-setup-title"
-      className="fixed inset-0 z-[100] flex flex-col overflow-hidden bg-background text-foreground"
+      className="app-drag fixed inset-0 z-[100] flex items-center justify-center bg-muted px-4 py-10 text-foreground"
     >
-      <header className="app-drag flex h-12 shrink-0 items-center border-border border-b pr-6 pl-24">
-        <h1 id="first-run-setup-title" className="font-semibold text-sm">
-          {t("Set up PI Lab")}
-        </h1>
-        <span className="ms-3 text-muted-foreground text-xs">
-          {t("Local-only · no PI Lab account")}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="app-no-drag ms-auto"
-          onClick={skipSetup}
-          disabled={skip.isPending || setStartAtLogin.isPending || updateGeneral.isPending}
-        >
-          {t("Skip setup")}
-        </Button>
-      </header>
+      <div
+        data-testid="first-run-setup-card"
+        className="app-no-drag flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-lg"
+      >
+        <header className="flex h-12 shrink-0 items-center border-border border-b px-4">
+          <h1 id="first-run-setup-title" className="font-semibold text-sm">
+            {t("Set up PI Lab")}
+          </h1>
+          <span className="ms-3 text-muted-foreground text-xs">
+            {t("Local-only · no PI Lab account")}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ms-auto"
+            onClick={skipSetup}
+            disabled={skip.isPending || setStartAtLogin.isPending || updateGeneral.isPending}
+          >
+            {t("Skip setup")}
+          </Button>
+        </header>
 
-      <div data-testid="first-run-setup-scroll" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 py-3">
-          <section className="rounded-lg border border-border bg-card p-3">
-            <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
-            <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
-              <label className="flex flex-col gap-1 text-xs">
-                <span>{t("Language")}</span>
-                <select
-                  aria-label={t("Language")}
-                  value={language}
-                  onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
-                  className={selectClass}
-                >
-                  {LANGUAGES.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                <span>{t("Theme")}</span>
-                <select
-                  aria-label={t("Theme mode")}
-                  value={mode === "system" ? "dark" : mode}
-                  onChange={(event) => setMode(event.target.value as ThemeMode)}
-                  className={selectClass}
-                >
-                  <option value="light">{t("Light")}</option>
-                  <option value="dark">{t("Dark")}</option>
-                </select>
-              </label>
-              <div className="flex flex-col gap-1 text-xs">
-                <span>{t("Completion sound")}</span>
-                <div className="flex items-center gap-2">
+        <div data-testid="first-run-setup-scroll" className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex w-full flex-col gap-2.5 px-4 py-3">
+            <section className="rounded-lg border border-border bg-card p-3">
+              <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
+              <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <label className="flex flex-col gap-1 text-xs">
+                  <span>{t("Language")}</span>
                   <select
-                    aria-label={t("Completion sound")}
-                    value={completionSound}
-                    onChange={(event) =>
-                      setCompletionSound(event.target.value as NotificationSound)
-                    }
-                    className={cn(selectClass, "min-w-0 flex-1")}
+                    aria-label={t("Language")}
+                    value={language}
+                    onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
+                    className={selectClass}
                   >
-                    {NOTIFICATION_SOUND_OPTIONS.map((sound) => (
-                      <option key={sound.id} value={sound.id}>
-                        {t(sound.label)}
+                    {LANGUAGES.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.label}
                       </option>
                     ))}
                   </select>
-                  <Button type="button" variant="outline" size="sm" onClick={previewSound}>
-                    {t("Preview sound")}
-                  </Button>
-                </div>
-                <span aria-live="polite" className="min-h-4 text-[11px] text-muted-foreground">
-                  {soundPreview}
-                </span>
-              </div>
-              <div className="flex flex-col gap-1 text-xs">
-                <span>{t("Start at login")}</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-label={t("Start at login")}
-                    aria-checked={startAtLogin.data?.enabled ?? false}
-                    data-testid="setup-start-at-login"
-                    disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
-                    onClick={() =>
-                      setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
-                    }
-                    className={cn(
-                      "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
-                      startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
-                    )}
+                </label>
+                <label className="flex flex-col gap-1 text-xs">
+                  <span>{t("Theme")}</span>
+                  <select
+                    aria-label={t("Theme mode")}
+                    value={mode === "system" ? "dark" : mode}
+                    onChange={(event) => setMode(event.target.value as ThemeMode)}
+                    className={selectClass}
                   >
-                    <span
-                      className={cn(
-                        "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
-                        startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
-                      )}
-                    />
-                  </button>
-                  <span className="text-[11px] text-muted-foreground">
-                    {startAtLogin.data?.available === false
-                      ? t("Start at login is available in packaged desktop builds.")
-                      : t("Launch PI Lab in the background when you sign in.")}
+                    <option value="light">{t("Light")}</option>
+                    <option value="dark">{t("Dark")}</option>
+                  </select>
+                </label>
+                <div className="flex flex-col gap-1 text-xs">
+                  <span>{t("Completion sound")}</span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      aria-label={t("Completion sound")}
+                      value={completionSound}
+                      onChange={(event) =>
+                        setCompletionSound(event.target.value as NotificationSound)
+                      }
+                      className={cn(selectClass, "min-w-0 flex-1")}
+                    >
+                      {NOTIFICATION_SOUND_OPTIONS.map((sound) => (
+                        <option key={sound.id} value={sound.id}>
+                          {t(sound.label)}
+                        </option>
+                      ))}
+                    </select>
+                    <Button type="button" variant="outline" size="sm" onClick={previewSound}>
+                      {t("Preview sound")}
+                    </Button>
+                  </div>
+                  <span aria-live="polite" className="min-h-4 text-[11px] text-muted-foreground">
+                    {soundPreview}
                   </span>
                 </div>
-              </div>
-              {appChannel.data && appChannel.data !== "alpha" ? (
-                <div className="col-span-2 flex flex-col gap-1 text-xs lg:col-span-4">
-                  <label className="flex items-center gap-2">
-                    <span className="shrink-0">{t("Update channel")}</span>
-                    <select
-                      aria-label={t("Update channel")}
-                      value={settings.data?.publicUpdateChannel ?? "stable"}
-                      disabled={!settings.data || updateGeneral.isPending}
-                      onChange={(event) =>
-                        updateGeneral.mutate({
-                          publicUpdateChannel: event.target.value as "stable" | "beta",
-                        })
+                <div className="flex flex-col gap-1 text-xs">
+                  <span>{t("Start at login")}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-label={t("Start at login")}
+                      aria-checked={startAtLogin.data?.enabled ?? false}
+                      data-testid="setup-start-at-login"
+                      disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
+                      onClick={() =>
+                        setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
                       }
-                      className={cn(selectClass, "w-40")}
+                      className={cn(
+                        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
+                        startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
+                      )}
                     >
-                      <option value="stable">{t("Stable")}</option>
-                      <option value="beta">{t("Beta")}</option>
-                    </select>
-                  </label>
-                  <p className="text-[11px] text-muted-foreground">
+                      <span
+                        className={cn(
+                          "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
+                          startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
+                        )}
+                      />
+                    </button>
+                    <span className="text-[11px] text-muted-foreground">
+                      {startAtLogin.data?.available === false
+                        ? t("Start at login is available in packaged desktop builds.")
+                        : t("Launch PI Lab in the background when you sign in.")}
+                    </span>
+                  </div>
+                </div>
+                {appChannel.data && appChannel.data !== "alpha" ? (
+                  <div className="col-span-2 flex flex-col gap-1 text-xs lg:col-span-4">
+                    <label className="flex items-center gap-2">
+                      <span className="shrink-0">{t("Update channel")}</span>
+                      <select
+                        aria-label={t("Update channel")}
+                        value={settings.data?.publicUpdateChannel ?? "stable"}
+                        disabled={!settings.data || updateGeneral.isPending}
+                        onChange={(event) =>
+                          updateGeneral.mutate({
+                            publicUpdateChannel: event.target.value as "stable" | "beta",
+                          })
+                        }
+                        className={cn(selectClass, "w-40")}
+                      >
+                        <option value="stable">{t("Stable")}</option>
+                        <option value="beta">{t("Beta")}</option>
+                      </select>
+                    </label>
+                    <p className="text-[11px] text-muted-foreground">
+                      {t(
+                        "Stable for everyday work; Beta for trying new features. Both use your projects and settings.",
+                      )}{" "}
+                      {t(
+                        "This selects future updates. Switching to Stable will not install an older version. You can change this later in Settings.",
+                      )}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-card p-3">
+              <div className="mb-2 flex items-center justify-between gap-4">
+                <div className="flex min-w-0 items-baseline gap-3">
+                  <h2 className="shrink-0 font-medium text-sm">{t("Coding agents")}</h2>
+                  <p className="truncate text-muted-foreground text-xs">
                     {t(
-                      "Stable for everyday work; Beta for trying new features. Both use your projects and settings.",
-                    )}{" "}
-                    {t(
-                      "This selects future updates. Switching to Stable will not install an older version. You can change this later in Settings.",
+                      "Detected CLI subscriptions are ready to use. Choose a default only if you want one.",
                     )}
                   </p>
                 </div>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-border bg-card p-3">
-            <div className="mb-2 flex items-center justify-between gap-4">
-              <div className="flex min-w-0 items-baseline gap-3">
-                <h2 className="shrink-0 font-medium text-sm">{t("Coding agents")}</h2>
-                <p className="truncate text-muted-foreground text-xs">
-                  {t(
-                    "Detected CLI subscriptions are ready to use. Choose a default only if you want one.",
-                  )}
-                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={recheckAll}
+                  disabled={
+                    harnessCheck.isFetching || githubCheck.isFetching || zoteroCheck.isFetching
+                  }
+                >
+                  <RefreshCw className="size-3.5" aria-hidden />
+                  {t("Recheck")}
+                </Button>
               </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(harnessCheck.data?.harnesses ?? PLACEHOLDER_HARNESSES).map((harness) => (
+                  <HarnessCard
+                    key={harness.id}
+                    harness={harness}
+                    checking={checkingHarnesses}
+                    selected={selectedAgent === harness.id}
+                    apiConfigured={harnessCheck.data?.apiConfigured[harness.id] ?? false}
+                    apiOpen={apiOpenFor === harness.id}
+                    apiKey={apiOpenFor === harness.id ? apiKey : ""}
+                    saving={saveApiKey.isPending}
+                    onSelect={() => chooseAgent(harness.id)}
+                    onOpenApi={() => {
+                      setApiOpenFor(harness.id)
+                      setApiKey("")
+                    }}
+                    onApiKeyChange={setApiKey}
+                    onSaveApi={() => saveApiKey.mutate({ agentId: harness.id, apiKey })}
+                    onRetry={() => void harnessCheck.refetch()}
+                  />
+                ))}
+              </div>
+              {selectedAgent === null && !checkingHarnesses ? (
+                <p className="mt-2 text-muted-foreground text-xs">{t("No default selected.")}</p>
+              ) : null}
+            </section>
+
+            <section className="rounded-lg border border-border bg-card p-3">
+              <h2 className="font-medium text-sm">{t("Local integrations")}</h2>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <IntegrationCard
+                  title="GitHub"
+                  checking={githubCheck.isFetching}
+                  detail={githubCheck.data?.account ?? compactState(githubCheck.data?.state)}
+                  description="Clone, push, and create pull requests."
+                  state={githubCheck.data?.state ?? "error"}
+                />
+                <IntegrationCard
+                  title="Zotero"
+                  checking={zoteroCheck.isFetching}
+                  detail={
+                    zoteroCheck.data === "running"
+                      ? t("Detected")
+                      : zoteroCheck.data === "installed"
+                        ? t("Installed")
+                        : t("Not found")
+                  }
+                  description="Use your local library as a research source."
+                  state={
+                    zoteroCheck.data === "running"
+                      ? "authenticated"
+                      : zoteroCheck.data === "installed"
+                        ? "unauthenticated"
+                        : "missing"
+                  }
+                />
+              </div>
+            </section>
+
+            {error ? (
+              <p
+                data-testid="first-run-setup-error"
+                className="cursor-text select-text rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-xs"
+              >
+                {error.message}
+              </p>
+            ) : null}
+
+            <footer className="flex items-center justify-end gap-2">
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                onClick={recheckAll}
+                onClick={skipSetup}
+                disabled={skip.isPending || setStartAtLogin.isPending || updateGeneral.isPending}
+              >
+                {t("Skip setup")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="first-run-setup-finish"
+                onClick={finish}
                 disabled={
-                  harnessCheck.isFetching || githubCheck.isFetching || zoteroCheck.isFetching
+                  defaultAgentPending ||
+                  complete.isPending ||
+                  saveApiKey.isPending ||
+                  updateGeneral.isPending ||
+                  setStartAtLogin.isPending
                 }
               >
-                <RefreshCw className="size-3.5" aria-hidden />
-                {t("Recheck")}
+                {t("Finish setup")}
               </Button>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {(harnessCheck.data?.harnesses ?? PLACEHOLDER_HARNESSES).map((harness) => (
-                <HarnessCard
-                  key={harness.id}
-                  harness={harness}
-                  checking={checkingHarnesses}
-                  selected={selectedAgent === harness.id}
-                  apiConfigured={harnessCheck.data?.apiConfigured[harness.id] ?? false}
-                  apiOpen={apiOpenFor === harness.id}
-                  apiKey={apiOpenFor === harness.id ? apiKey : ""}
-                  saving={saveApiKey.isPending}
-                  onSelect={() => chooseAgent(harness.id)}
-                  onOpenApi={() => {
-                    setApiOpenFor(harness.id)
-                    setApiKey("")
-                  }}
-                  onApiKeyChange={setApiKey}
-                  onSaveApi={() => saveApiKey.mutate({ agentId: harness.id, apiKey })}
-                  onRetry={() => void harnessCheck.refetch()}
-                />
-              ))}
-            </div>
-            {selectedAgent === null && !checkingHarnesses ? (
-              <p className="mt-2 text-muted-foreground text-xs">{t("No default selected.")}</p>
-            ) : null}
-          </section>
-
-          <section className="rounded-lg border border-border bg-card p-3">
-            <h2 className="font-medium text-sm">{t("Local integrations")}</h2>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <IntegrationCard
-                title="GitHub"
-                checking={githubCheck.isFetching}
-                detail={githubCheck.data?.account ?? compactState(githubCheck.data?.state)}
-                description="Clone, push, and create pull requests."
-                state={githubCheck.data?.state ?? "error"}
-              />
-              <IntegrationCard
-                title="Zotero"
-                checking={zoteroCheck.isFetching}
-                detail={
-                  zoteroCheck.data === "running"
-                    ? t("Detected")
-                    : zoteroCheck.data === "installed"
-                      ? t("Installed")
-                      : t("Not found")
-                }
-                description="Use your local library as a research source."
-                state={
-                  zoteroCheck.data === "running"
-                    ? "authenticated"
-                    : zoteroCheck.data === "installed"
-                      ? "unauthenticated"
-                      : "missing"
-                }
-              />
-            </div>
-          </section>
-
-          {error ? (
-            <p
-              data-testid="first-run-setup-error"
-              className="cursor-text select-text rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-xs"
-            >
-              {error.message}
-            </p>
-          ) : null}
-
-          <footer className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={skipSetup}
-              disabled={skip.isPending || setStartAtLogin.isPending || updateGeneral.isPending}
-            >
-              {t("Skip setup")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              data-testid="first-run-setup-finish"
-              onClick={finish}
-              disabled={
-                defaultAgentPending ||
-                complete.isPending ||
-                saveApiKey.isPending ||
-                updateGeneral.isPending ||
-                setStartAtLogin.isPending
-              }
-            >
-              {t("Finish setup")}
-            </Button>
-          </footer>
+            </footer>
+          </div>
         </div>
       </div>
     </div>
