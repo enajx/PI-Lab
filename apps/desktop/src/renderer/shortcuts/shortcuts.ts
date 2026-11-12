@@ -16,7 +16,7 @@ export interface ShortcutDef {
   id: string
   label: string
   description: string
-  /** Default binding, e.g. `"Mod+,"`. `Mod` = ⌘ on macOS / Ctrl elsewhere. */
+  /** Default binding, e.g. `"Mod+,"`; `""` means no default. `Mod` = ⌘ on macOS / Ctrl elsewhere. */
   defaultBinding: string
   /** App-global (rebindable) vs. reference-only (shown but not editable in v1). */
   editable: boolean
@@ -55,7 +55,8 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     id: "split-right",
     label: "Split right",
     description: "Split the focused terminal: a new terminal opens beside it",
-    defaultBinding: "Mod+d",
+    // No default: Cmd+D belongs to dictation. Users can set one in Settings > Shortcuts.
+    defaultBinding: "",
     editable: true,
   },
   {
@@ -69,7 +70,7 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     id: "dictation-toggle",
     label: "Dictation",
     description: "Start dictation in the focused terminal or editor; press again to stop",
-    defaultBinding: "Alt+d",
+    defaultBinding: "Mod+d",
     editable: true,
   },
   {
@@ -177,6 +178,7 @@ export function paletteForKeydown(event: KeyboardEvent): "global" | "project" | 
  * `"Mod+,"` → `"⌘,"`, `"Mod+Shift+p"` → `"⇧⌘P"`.
  */
 export function formatBinding(binding: string): string {
+  if (!binding) return "Not set"
   const parts = binding.split("+")
   const key = parts.at(-1) ?? ""
   const modifiers =
@@ -199,7 +201,8 @@ export function findShortcutConflict(
 ): ShortcutDef | null {
   return (
     SHORTCUTS.find(
-      (shortcut) => shortcut.id !== shortcutId && bindingFor(shortcut.id) === binding,
+      (shortcut) =>
+        binding !== "" && shortcut.id !== shortcutId && bindingFor(shortcut.id) === binding,
     ) ?? null
   )
 }

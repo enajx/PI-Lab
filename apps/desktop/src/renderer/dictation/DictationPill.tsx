@@ -27,6 +27,8 @@ interface DictationPillProps {
   waveformStyle: DictationWaveformStyle
   /** Live microphone loudness (RMS) while listening. */
   level: () => number
+  /** Live loudness of each speech band while listening, empty before audio arrives. */
+  bands: () => readonly number[]
   download: { receivedBytes: number; totalBytes: number } | null
   promptModel: PromptModel | null
   onDownload: () => void
@@ -85,7 +87,7 @@ function PillBody(props: DictationPillProps) {
     case "listening":
       return (
         <div className="flex items-center gap-3 py-2 ps-4 pe-3">
-          <Waveform style={props.waveformStyle} level={props.level} />
+          <Waveform style={props.waveformStyle} level={props.level} bands={props.bands} />
           <span className="sr-only">Listening</span>
           <kbd
             className="dictation-kbd"

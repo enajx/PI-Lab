@@ -20,7 +20,7 @@ import {
 
 /**
  * Whole-app dictation: Chromium's fake microphone plays a "hello world" recording, the
- * dictation shortcut (sent as macOS Option+D, which types "∂") starts and stops
+ * dictation shortcut (Cmd+D) starts and stops
  * recording, the bundled whisper.cpp engine transcribes it with the tiny.en model, and
  * the text lands in a terminal (no Enter) and in an editor (one undo step).
  *
@@ -183,24 +183,20 @@ async function useTinyModel(window: Page): Promise<void> {
   await closeSettings(window)
 }
 
-/** Press Option+D the way macOS sends it: Alt held, physical key D, character "∂". */
-async function pressOptionD(window: Page): Promise<void> {
-  const session = await window.context().newCDPSession(window)
-  const key = { key: "∂", code: "KeyD", windowsVirtualKeyCode: 68, modifiers: 1 }
-  await session.send("Input.dispatchKeyEvent", { type: "keyDown", text: "∂", ...key })
-  await session.send("Input.dispatchKeyEvent", { type: "keyUp", ...key })
-  await session.detach()
+/** Press the default dictation shortcut, Cmd+D. */
+async function pressDictationShortcut(window: Page): Promise<void> {
+  await window.keyboard.press("Meta+d")
 }
 
 /** Start dictation, let the fixture play, and stop with the shortcut. */
 async function record(window: Page): Promise<void> {
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   await expect(window.getByTestId("dictation-pill")).toHaveAttribute("data-phase", "listening", {
     timeout: 10_000,
   })
   await expect(window.getByTestId("dictation-wave")).toBeVisible()
   await window.waitForTimeout(2_500)
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
 }
 
 /** Dictate the fixture: record it and wait for the overlay to close. */
@@ -208,6 +204,24 @@ async function dictate(window: Page): Promise<void> {
   await record(window)
   await expect(window.getByTestId("dictation-pill")).toHaveCount(0, { timeout: 60_000 })
 }
+
+test("Cmd+D does not split the terminal and Ctrl+D still reaches it as end-of-input", async () => {
+  const window = await launch(TERMINAL_PROBE, [])
+  await focusTerminal(window)
+
+  await window.keyboard.press("Control+d")
+  await window.waitForTimeout(500)
+  await expect(window.getByTestId("dictation-pill")).toHaveCount(0)
+
+  await focusTerminal(window)
+  await pressDictationShortcut(window)
+  await expect(window.getByTestId("dictation-pill")).toHaveAttribute("data-phase", "listening", {
+    timeout: 10_000,
+  })
+  await expect(window.getByTestId("terminal")).toHaveCount(1)
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("dictation-pill")).toHaveCount(0)
+})
 
 test("dictation types the transcribed text into the focused terminal without Enter", async () => {
   const window = await launch(TERMINAL_PROBE, [])
@@ -241,7 +255,7 @@ test("Space while listening stops and transcribes, and the space is not typed in
   const window = await launch(TERMINAL_PROBE, [])
   const terminal = await focusTerminal(window)
 
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "listening", { timeout: 10_000 })
   await expect(pill.getByTitle("Press Enter to transcribe")).toHaveText("⏎")
@@ -265,7 +279,7 @@ test("clicking the listening pill cancels the recording and opens Settings > Dic
   await recordMicrophoneStreams(window)
   const terminal = await focusTerminal(window)
 
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "listening", { timeout: 10_000 })
   await pill.click()
@@ -279,12 +293,12 @@ test("clicking the listening pill cancels the recording and opens Settings > Dic
 test("the waveform style setting persists and changes the listening pill's waveform", async () => {
   const window = await launch(TERMINAL_PROBE, [])
   await focusTerminal(window)
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const wave = window.getByTestId("dictation-wave")
   await expect(wave).toHaveAttribute("data-style", "dots", { timeout: 10_000 })
   await window.keyboard.press("Escape")
 
-  for (const style of ["ascii", "ascii-art", "bars"]) {
+  for (const style of ["ascii-art", "lines"]) {
     await openDictationSettings(window)
     const select = window.getByTestId("settings-dictation-waveform-style")
     await select.selectOption(style)
@@ -294,7 +308,7 @@ test("the waveform style setting persists and changes the listening pill's wavef
     await expect(window.getByTestId("settings-dictation-waveform-style")).toHaveValue(style)
     await closeSettings(window)
     await focusTerminal(window)
-    await pressOptionD(window)
+    await pressDictationShortcut(window)
     await expect(wave).toHaveAttribute("data-style", style, { timeout: 10_000 })
     await window.keyboard.press("Escape")
   }
@@ -427,7 +441,7 @@ test("shows the loading model pill while the engine loads (mocked slow engine he
   })
   const terminal = await focusTerminal(window)
 
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "listening", { timeout: 10_000 })
   await window.waitForTimeout(2_500)
@@ -499,7 +513,7 @@ test("Esc while listening cancels: the microphone is released and nothing is ins
   await recordMicrophoneStreams(window)
   const terminal = await focusTerminal(window)
 
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "listening", { timeout: 10_000 })
   await window.waitForTimeout(2_500)
@@ -551,7 +565,7 @@ test("the shortcut in the review pill discards the text and starts a new dictati
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "review", { timeout: 60_000 })
   await expect(window.getByTestId("dictation-review-text")).toHaveValue(/hello,? world/i)
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   await expect(pill).toHaveAttribute("data-phase", "listening")
   await window.keyboard.press("Escape")
   await expect(pill).toHaveCount(0)
@@ -564,7 +578,7 @@ test("first use without a model: Download Small English, then listening starts a
   await serveModelsLocally(false)
   const terminal = await focusTerminal(window)
 
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "prompt", { timeout: 10_000 })
   const download = window.getByTestId("dictation-download-recommended")
@@ -572,7 +586,7 @@ test("first use without a model: Download Small English, then listening starts a
   await download.click()
   await expect(pill).toHaveAttribute("data-phase", "listening", { timeout: 60_000 })
   await window.waitForTimeout(2_500)
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   await expect(pill).toHaveCount(0, { timeout: 60_000 })
   await expect
     .poll(async () => latestTerminalInput((await terminal.textContent()) ?? ""), {
@@ -592,7 +606,7 @@ test("first use follows a Small English download already started in Settings (mo
   await closeSettings(window)
   const terminal = await focusTerminal(window)
 
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "prompt", { timeout: 10_000 })
   await window.getByTestId("dictation-download-recommended").click()
@@ -600,7 +614,7 @@ test("first use follows a Small English download already started in Settings (mo
   release()
   await expect(pill).toHaveAttribute("data-phase", "listening", { timeout: 60_000 })
   await window.waitForTimeout(2_500)
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   await expect(pill).toHaveCount(0, { timeout: 60_000 })
   await expect
     .poll(async () => latestTerminalInput((await terminal.textContent()) ?? ""), {
@@ -636,7 +650,7 @@ test("a model that fails to load shows the engine's error in Settings and in the
   const window = await launch(TERMINAL_PROBE, [{ file: "ggml-base.en.bin", sizeBytes: 147964211 }])
   await focusTerminal(window)
   // Start the engine with tiny.en, then cancel; the engine keeps running.
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "listening", { timeout: 10_000 })
   await window.keyboard.press("Escape")
@@ -677,7 +691,7 @@ test("denied microphone access shows Open System Settings, which opens the micro
   await useTinyModel(window)
   await focusTerminal(window)
 
-  await pressOptionD(window)
+  await pressDictationShortcut(window)
   const pill = window.getByTestId("dictation-pill")
   await expect(pill).toHaveAttribute("data-phase", "error", { timeout: 10_000 })
   await expect(pill).toContainText("microphone")

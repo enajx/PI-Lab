@@ -5,7 +5,7 @@ import { publicProcedure, router } from "../trpc"
 
 const keyInput = z.object({ key: z.string().min(1) })
 const outputAction = z.enum(["insert", "review", "insert-copy", "copy"])
-const waveformStyle = z.enum(["dots", "ascii", "ascii-art", "bars"])
+const waveformStyle = z.enum(["dots", "ascii-art", "lines"])
 
 function service(ctx: AppContext): DictationService {
   if (!ctx.dictation) throw new Error("Dictation is unavailable in this app context")

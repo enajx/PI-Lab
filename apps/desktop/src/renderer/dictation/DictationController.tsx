@@ -21,6 +21,8 @@ import { closeDictationHistory, useDictationHistoryOpen } from "./historyPicker"
 import { type Recording, startRecording } from "./recorder"
 import { type DictationTarget, focusedDictationTarget, lastFocusedDictationTarget } from "./targets"
 
+const IS_MAC = /Mac/.test(navigator.platform)
+
 const IDLE: DictationState = { phase: "idle" }
 const COPIED_MS = 1200
 const MICROPHONE_OFF =
@@ -298,7 +300,9 @@ export function DictationController() {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (document.querySelector('[data-shortcut-recording="true"]')) return
       const phase = stateRef.current.phase
-      if (eventMatchesShortcut(event, "dictation-toggle")) {
+      // On macOS Ctrl never counts as Mod here: Ctrl+D stays end-of-input in terminals.
+      const macCtrl = IS_MAC && event.ctrlKey && !event.metaKey
+      if (!macCtrl && eventMatchesShortcut(event, "dictation-toggle")) {
         if (phase === "idle") {
           const focused = focusedDictationTarget()
           if (!focused) return
@@ -354,6 +358,7 @@ export function DictationController() {
   })
 
   const level = useCallback((): number => recording.current?.level() ?? 0, [])
+  const bands = useCallback((): readonly number[] => recording.current?.bands() ?? [], [])
   const recommended = status.data?.models.find((model) => model.recommended) ?? null
 
   const openDictationSettings = (): void => {
@@ -428,6 +433,7 @@ export function DictationController() {
         anchor={anchor}
         waveformStyle={status.data?.waveformStyle ?? "dots"}
         level={level}
+        bands={bands}
         download={download ?? null}
         promptModel={recommended}
         onDownload={startDownload}

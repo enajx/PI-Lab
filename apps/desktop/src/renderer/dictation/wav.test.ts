@@ -2,11 +2,13 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, test } from "vitest"
 import {
+  bandLevels,
   base64FromBytes,
   encodeWav16,
   peakBlockLevel,
   resample,
   rmsLevel,
+  SPEECH_BANDS,
   SPEECH_LEVEL,
   speechDetected,
 } from "./wav"
@@ -103,5 +105,17 @@ describe("speech detection", () => {
     const samples = helloWorldSamples()
     expect(peakBlockLevel(samples)).toBeGreaterThan(SPEECH_LEVEL * 10)
     expect(speechDetected(samples)).toBe(true)
+  })
+})
+
+describe("bandLevels", () => {
+  test("splits the spectrum into speech bands, each the mean of its bins scaled to 0..1", () => {
+    // 48 kHz, FFT size 2048: one bin is 23.4 Hz, so bins 5 to 12 lie in 100 to 300 Hz.
+    const bytes = new Uint8Array(1024)
+    bytes.fill(255, 5, 13)
+    const bands = bandLevels(bytes, 48_000)
+    expect(bands).toHaveLength(SPEECH_BANDS.length)
+    expect(bands[0]).toBeGreaterThan(0.9)
+    expect(bands.slice(1).every((value) => value === 0)).toBe(true)
   })
 })

@@ -4,6 +4,7 @@ import { existsSync, readdirSync } from "node:fs"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { dictationSettings } from "@pi-lab/local-db"
 import { afterEach, expect, test, vi } from "vitest"
 import type { DictationModel } from "../../dictation/catalog"
 import { type DictationEngine, EngineHttpError, type EngineStatus } from "../../dictation/engine"
@@ -235,14 +236,20 @@ test("stores the waveform style, dots by default", async () => {
   h = await dictationHarness([], (async () => new Response("")) as typeof fetch, null)
   const caller = h.caller
   expect((await caller.dictation.status()).waveformStyle).toBe("dots")
-  await caller.dictation.setWaveformStyle({ style: "ascii" })
-  expect((await caller.dictation.status()).waveformStyle).toBe("ascii")
-  await caller.dictation.setOutputAction({ action: "copy" })
-  expect((await caller.dictation.status()).waveformStyle).toBe("ascii")
-  await caller.dictation.setWaveformStyle({ style: "bars" })
-  expect((await caller.dictation.status()).waveformStyle).toBe("bars")
   await caller.dictation.setWaveformStyle({ style: "ascii-art" })
   expect((await caller.dictation.status()).waveformStyle).toBe("ascii-art")
+  await caller.dictation.setOutputAction({ action: "copy" })
+  expect((await caller.dictation.status()).waveformStyle).toBe("ascii-art")
+  await caller.dictation.setWaveformStyle({ style: "lines" })
+  expect((await caller.dictation.status()).waveformStyle).toBe("lines")
+  await caller.dictation.setWaveformStyle({ style: "dots" })
+  expect((await caller.dictation.status()).waveformStyle).toBe("dots")
+  // A removed style left in the database is reported as "dots".
+  h.db
+    .update(dictationSettings)
+    .set({ waveformStyle: "bars" as "dots" })
+    .run()
+  expect((await caller.dictation.status()).waveformStyle).toBe("dots")
   await expect(caller.dictation.setWaveformStyle({ style: "sine" as "dots" })).rejects.toThrow()
 })
 

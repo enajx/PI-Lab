@@ -110,3 +110,27 @@ export function peakBlockLevel(samples: Float32Array): number {
 export function speechDetected(samples: Float32Array): boolean {
   return peakBlockLevel(samples) >= SPEECH_LEVEL
 }
+
+/** Frequency bands of speech in Hz, low to high, for the "lines" waveforms. */
+export const SPEECH_BANDS: ReadonlyArray<readonly [number, number]> = [
+  [100, 300],
+  [300, 800],
+  [800, 2000],
+  [2000, 5000],
+]
+
+/**
+ * Loudness of each {@link SPEECH_BANDS} band, 0..1: the mean of the band's bins in an
+ * AnalyserNode's byte spectrum (`getByteFrequencyData`, bins spread over 0 to half of
+ * `sampleRate`).
+ */
+export function bandLevels(bytes: Uint8Array, sampleRate: number): number[] {
+  const binHz = sampleRate / 2 / bytes.length
+  return SPEECH_BANDS.map(([low, high]) => {
+    const first = Math.ceil(low / binHz)
+    const end = Math.min(bytes.length, Math.ceil(high / binHz))
+    let sum = 0
+    for (let bin = first; bin < end; bin += 1) sum += bytes[bin] ?? 0
+    return end > first ? sum / (end - first) / 255 : 0
+  })
+}

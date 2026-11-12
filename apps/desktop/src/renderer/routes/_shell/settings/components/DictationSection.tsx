@@ -18,9 +18,8 @@ const OUTPUT_ACTIONS = [
 
 const WAVEFORM_STYLES = [
   { value: "dots", label: "Dots" },
-  { value: "ascii", label: "ASCII" },
-  { value: "ascii-art", label: "ASCII art" },
-  { value: "bars", label: "Bars" },
+  { value: "ascii-art", label: "ASCII" },
+  { value: "lines", label: "Lines" },
 ] as const
 
 const MICROPHONE_LABELS = {
@@ -93,7 +92,7 @@ export function DictationSection() {
     openMicrophoneSettings.error
 
   return (
-    <>
+    <div className="flex flex-col gap-10">
       <SettingsSection
         testId="settings-section-dictation"
         title="Dictation"
@@ -299,9 +298,12 @@ export function DictationSection() {
         ) : null}
       </SettingsSection>
       <DictationHistory />
-    </>
+    </div>
   )
 }
+
+/** How many past transcriptions the history shows before "Show all". */
+const HISTORY_PREVIEW = 3
 
 /** Past transcriptions: search, copy and delete each, or clear them all. */
 function DictationHistory() {
@@ -311,6 +313,7 @@ function DictationHistory() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
   const [copyError, setCopyError] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
   const trimmed = query.trim()
   const history = useQuery(
     trpc.dictation.history.list.queryOptions({ query: trimmed === "" ? null : trimmed }),
@@ -330,6 +333,7 @@ function DictationHistory() {
     }),
   )
   const entries = history.data ?? []
+  const shown = showAll ? entries : entries.slice(0, HISTORY_PREVIEW)
 
   const copy = (id: string, text: string): void => {
     void navigator.clipboard.writeText(text).then(
@@ -406,39 +410,52 @@ function DictationHistory() {
           {trimmed === "" ? "No dictations yet." : "No matching dictations."}
         </p>
       ) : null}
-      {entries.map((entry) => (
-        <div
-          key={entry.id}
-          data-testid="dictation-history-entry"
-          className="flex items-start gap-3 px-4 py-2.5"
-        >
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <p className="select-text whitespace-pre-wrap break-words text-sm">{entry.text}</p>
-            <span className="text-muted-foreground text-xs">
-              {new Date(entry.createdAt).toLocaleString()}
-            </span>
+      <div
+        className={
+          showAll ? "max-h-80 divide-y divide-border overflow-y-auto" : "divide-y divide-border"
+        }
+      >
+        {shown.map((entry) => (
+          <div
+            key={entry.id}
+            data-testid="dictation-history-entry"
+            className="flex items-start gap-3 px-4 py-2.5"
+          >
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <p className="select-text whitespace-pre-wrap break-words text-sm">{entry.text}</p>
+              <span className="text-muted-foreground text-xs">
+                {new Date(entry.createdAt).toLocaleString()}
+              </span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-label="Copy"
+              onClick={() => copy(entry.id, entry.text)}
+            >
+              {copied === entry.id ? "Copied" : <Copy className="size-3.5" aria-hidden />}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-label="Delete"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate({ id: entry.id })}
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+            </Button>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            aria-label="Copy"
-            onClick={() => copy(entry.id, entry.text)}
-          >
-            {copied === entry.id ? "Copied" : <Copy className="size-3.5" aria-hidden />}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            aria-label="Delete"
-            disabled={remove.isPending}
-            onClick={() => remove.mutate({ id: entry.id })}
-          >
-            <Trash2 className="size-3.5" aria-hidden />
+        ))}
+      </div>
+      {entries.length > HISTORY_PREVIEW ? (
+        <div className="px-4 py-2">
+          <Button type="button" size="sm" variant="ghost" onClick={() => setShowAll(!showAll)}>
+            {showAll ? "Show fewer" : `Show all ${entries.length}`}
           </Button>
         </div>
-      ))}
+      ) : null}
     </SettingsSection>
   )
 }

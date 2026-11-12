@@ -986,7 +986,7 @@ export const automationPromptVersions = sqliteTable(
 /** What happens to a finished transcription. */
 export type DictationOutputAction = "insert" | "review" | "insert-copy" | "copy"
 /** How the listening pill draws the microphone level. */
-export type DictationWaveformStyle = "dots" | "ascii" | "ascii-art" | "bars"
+export type DictationWaveformStyle = "dots" | "ascii-art" | "lines"
 
 export const dictationSettings = sqliteTable("dictation_settings", {
   /** Always 1: this table holds exactly one row. */

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import { startRecording } from "./recorder"
+import { SPEECH_BANDS } from "./wav"
 
 // Mocked Web Audio and microphone: jsdom has neither. The fake worklet node answers a
 // "flush" with `reply` (blocks, then "flushed"), or not at all when `reply` is null.
@@ -28,6 +29,17 @@ class FakeContext {
   }
   createGain() {
     return { gain: { value: 1 }, connect: () => {} }
+  }
+  createAnalyser() {
+    return {
+      fftSize: 2048,
+      frequencyBinCount: 1024,
+      minDecibels: -100,
+      maxDecibels: -30,
+      smoothingTimeConstant: 0.8,
+      getByteFrequencyData: (bytes: Uint8Array) => bytes.fill(255),
+      disconnect: () => {},
+    }
   }
   close(): Promise<void> {
     this.state = "closed"
@@ -98,5 +110,14 @@ test("cancel while stop waits for the worklet ends the stop and releases everyth
   const stopped = recording.stop()
   recording.cancel()
   await expect(stopped).rejects.toThrow(/cancelled/)
+  expect(released()).toBe(true)
+})
+
+test("bands reports the loudness of each speech band from the analyser (mocked Web Audio)", async () => {
+  const recording = await startRecording()
+  const bands = recording.bands()
+  expect(bands).toHaveLength(SPEECH_BANDS.length)
+  expect(bands.every((value) => value === 1)).toBe(true)
+  recording.cancel()
   expect(released()).toBe(true)
 })

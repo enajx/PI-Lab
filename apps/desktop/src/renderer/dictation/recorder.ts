@@ -1,6 +1,7 @@
 // no-inline: the CSP only allows same-origin scripts, so the worklet must not become a data: URL.
 import workletUrl from "./captureWorklet.js?url&no-inline"
 import {
+  bandLevels,
   base64FromBytes,
   encodeWav16,
   resample,
@@ -16,6 +17,8 @@ const FLUSH_TIMEOUT_MS = 2_000
 export interface Recording {
   /** Loudness (RMS, 0..1) of the most recent block of audio, for the listening wave. */
   level: () => number
+  /** Loudness (0..1) of each speech band (`SPEECH_BANDS` in wav.ts) right now, for the "lines" waves. */
+  bands: () => readonly number[]
   /**
    * Stop, release the microphone, and return the audio as a base64 16 kHz mono WAV, with
    * whether it ever reached speech level. Fails after {@link FLUSH_TIMEOUT_MS} when the
@@ -56,6 +59,14 @@ export async function startRecording(): Promise<Recording> {
   mute.gain.value = 0
   source.connect(node)
   node.connect(mute)
+  // Only read for the listening wave: a spectrum of the microphone, nothing is played.
+  const analyser = context.createAnalyser()
+  analyser.fftSize = 2048
+  analyser.minDecibels = -90
+  analyser.maxDecibels = -25
+  analyser.smoothingTimeConstant = 0.6
+  source.connect(analyser)
+  const spectrum = new Uint8Array(analyser.frequencyBinCount)
   mute.connect(context.destination)
 
   const chunks: Float32Array[] = []
@@ -79,12 +90,17 @@ export async function startRecording(): Promise<Recording> {
     node.port.onmessage = null
     source.disconnect()
     node.disconnect()
+    analyser.disconnect()
     release()
     abortStop?.(new Error("The recording was cancelled"))
   }
 
   return {
     level: () => latestLevel,
+    bands: () => {
+      analyser.getByteFrequencyData(spectrum)
+      return bandLevels(spectrum, context.sampleRate)
+    },
     stop: async () => {
       // Stop the microphone right away; the worklet still holds the last partial block.
       for (const track of stream.getTracks()) track.stop()

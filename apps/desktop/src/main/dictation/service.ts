@@ -408,7 +408,7 @@ export class DictationService {
     return {
       selectedModel: row?.selectedModel ?? null,
       outputAction: row?.outputAction ?? "insert",
-      waveformStyle: row?.waveformStyle ?? "dots",
+      waveformStyle: waveformStyleOrDots(row?.waveformStyle),
     }
   }
 
@@ -420,6 +420,11 @@ export class DictationService {
       .onConflictDoUpdate({ target: dictationSettings.id, set: next })
       .run()
   }
+}
+
+/** The stored style if it is still one of the three styles, else "dots" (old rows may hold removed styles). */
+function waveformStyleOrDots(stored: string | null | undefined): DictationWaveformStyle {
+  return stored === "ascii-art" || stored === "lines" ? stored : "dots"
 }
 
 function fileName(model: DictationModel): string {

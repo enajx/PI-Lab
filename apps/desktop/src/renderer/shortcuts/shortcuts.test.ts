@@ -35,13 +35,15 @@ describe("formatBinding", () => {
 })
 
 describe("dictation shortcut", () => {
-  test("registers a rebindable Alt+d that conflicts with no other default", () => {
+  test("defaults to a rebindable Cmd+D; split right has no default and never conflicts", () => {
     expect(SHORTCUTS.find((shortcut) => shortcut.id === "dictation-toggle")).toMatchObject({
-      defaultBinding: "Alt+d",
+      defaultBinding: "Mod+d",
       editable: true,
     })
-    expect(findShortcutConflict("dictation-toggle", "Alt+d", defaults)).toBeNull()
-    expect(defaults("split-right")).toBe("Mod+d")
+    expect(findShortcutConflict("dictation-toggle", "Mod+d", defaults)).toBeNull()
+    expect(defaults("split-right")).toBe("")
+    expect(findShortcutConflict("split-down", "", defaults)).toBeNull()
+    expect(formatBinding("")).toBe("Not set")
   })
 
   test("matches macOS Option+D by physical key, although the key event reports ∂", () => {
