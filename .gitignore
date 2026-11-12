@@ -81,3 +81,5 @@ apps/desktop/build/Assets.car
 
 # Downloaded bundled Tectonic executables are generated before dev/build/package.
 /apps/desktop/resources/latex/*/
+# Built bundled whisper.cpp dictation engines are generated before packaging.
+/apps/desktop/resources/whisper/*/

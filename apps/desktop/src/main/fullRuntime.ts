@@ -38,6 +38,10 @@ import { AutomationScheduler } from "./automations/scheduler"
 import { trayProjectSnapshot } from "./background/projectSnapshot"
 import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
 import { getDb, initDatabase } from "./db/db"
+import { DICTATION_MODELS, type DictationModel, withTestPins } from "./dictation/catalog"
+import { electronMicrophone } from "./dictation/electronMicrophone"
+import { resolveWhisperServer, WhisperServerEngine } from "./dictation/engine"
+import { DictationService } from "./dictation/service"
 import { stopRunningRenders } from "./documents/render"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelFromAppName } from "./identity/channel"
@@ -132,6 +136,7 @@ export class FullRuntime {
   private activityMonitor: ActivityMonitorPort | null = null
   private caffeineController: CaffeineController | null = null
   private automationScheduler: AutomationScheduler | null = null
+  private dictation: DictationService | null = null
 
   constructor(private readonly host: FullRuntimeHost) {
     this.notificationService = new NotificationService({
@@ -195,6 +200,25 @@ export class FullRuntime {
       initialSettings: getSettingsOrDefaults(getDb()).caffeine,
     })
     this.activityStatus = new ActivityStatusFeed(getDb(), this.activityRegistry)
+    const whisperServer = await resolveWhisperServer(
+      app.isPackaged
+        ? join(process.resourcesPath, "whisper")
+        : join(__dirname, "..", "..", "resources", "whisper"),
+    )
+    const enginePidFile = join(resolveDataDir(), "dictation", "whisper-server.pid")
+    this.dictation = new DictationService({
+      db: getDb(),
+      catalog: dictationCatalog(),
+      modelsDir: join(resolveDataDir(), "dictation", "models"),
+      engine: whisperServer ? new WhisperServerEngine(whisperServer, enginePidFile) : null,
+      fetch: DEFAULT_HTTP_FETCH,
+      microphone: electronMicrophone,
+      idleMs: 10 * 60_000,
+      enginePidFile,
+      downloadStallMs: 30_000,
+    })
+    // Before the window loads, so no new engine or download can start during the cleanup.
+    await this.dictation.start()
     this.startupReady = this.ensureAgentRecovery().catch((error) => {
       console.warn(`[pi-lab] activity reconciliation skipped: ${String(error)}`)
     })
@@ -539,6 +563,7 @@ export class FullRuntime {
   dispose(): void {
     this.automationScheduler?.stop()
     this.caffeineController?.dispose()
+    this.dictation?.dispose()
     this.activityMonitor?.dispose()
     this.activityRegistry.dispose()
     this.managedProcesses.dispose()
@@ -574,6 +599,7 @@ export class FullRuntime {
         homedir(),
         process.env,
       ),
+      dictation: this.dictation ?? undefined,
       bundledSkillsDir: app.isPackaged
         ? join(process.resourcesPath, "skills")
         : join(__dirname, "..", "..", "resources", "skills"),
@@ -632,4 +658,10 @@ export function reportFullBootFailure(error: unknown): void {
   if (error instanceof MigrationFailure) {
     dialog.showErrorBox(nativeText("PI Lab database could not be opened"), error.message)
   }
+}
+
+/** The dictation catalog; test mode can re-pin model sizes and digests for e2e downloads. */
+function dictationCatalog(): readonly DictationModel[] {
+  const pins = isTestMode ? process.env.PI_LAB_TEST_DICTATION_PINS?.trim() : undefined
+  return pins ? withTestPins(DICTATION_MODELS, pins) : DICTATION_MODELS
 }

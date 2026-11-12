@@ -22,7 +22,8 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "prepare:latex": "node scripts/prepare-latex-runtime.cjs"
+    "prepare:latex": "node scripts/prepare-latex-runtime.cjs",
+    "prepare:whisper": "node scripts/prepare-whisper-runtime.cjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

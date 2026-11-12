@@ -11,6 +11,7 @@ import {
   FlaskConical,
   FolderGit2,
   FolderPlus,
+  History,
   Keyboard,
   LayoutDashboard,
   Library,
@@ -26,6 +27,7 @@ import {
   Waypoints,
 } from "lucide-react"
 import type { ComponentType } from "react"
+import { openDictationHistory } from "../dictation/historyPicker"
 import { useTranslate } from "../i18n/language"
 import {
   useExperimentalV2,
@@ -58,7 +60,7 @@ export interface PaletteCommand {
   /** Secondary muted text shown on the right (e.g. a project's path). */
   hint?: string
   /** Section this belongs to (kept for ordering; not a header in v1). */
-  group: "Navigate" | "View" | "Settings" | "Projects"
+  group: "Navigate" | "View" | "Settings" | "Projects" | "Dictation"
   icon: ComponentType<{ className?: string }>
   /** Perform the action. The palette closes after success and shows rejected writes. */
   run: (() => void) | (() => Promise<unknown>)
@@ -183,6 +185,14 @@ export function usePaletteCommands(): PaletteCommand[] {
     },
   ]
 
+  const dictationHistoryCommand: PaletteCommand = {
+    id: "dictation-history",
+    label: "Dictation history",
+    group: "Dictation",
+    icon: History,
+    run: openDictationHistory,
+  }
+
   const directSettingsCommands = useDirectSettingsCommands()
   const settingsCommands: PaletteCommand[] = [
     ...directSettingsCommands,
@@ -282,6 +292,7 @@ export function usePaletteCommands(): PaletteCommand[] {
   return [
     ...navCommands,
     ...viewCommands,
+    dictationHistoryCommand,
     ...settingsCommands,
     addProjectCommand,
     newFileCommand,

@@ -4,6 +4,7 @@ import { automationsRouter } from "./automations"
 import { caffeineRouter } from "./caffeine"
 import { diagnosticsRouter } from "./diagnostics"
 import { diaryRouter } from "./diary/diary"
+import { dictationRouter } from "./dictation/dictation"
 import { documentsRouter } from "./documents/documents"
 import { filesRouter } from "./files"
 import { healthRouter } from "./health/health"
@@ -48,6 +49,7 @@ export const appRouter = router({
   latex: latexRouter,
   paper: paperRouter,
   diagnostics: diagnosticsRouter,
+  dictation: dictationRouter,
   science: scienceRouter,
   diary: diaryRouter,
   documents: documentsRouter,

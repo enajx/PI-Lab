@@ -16,7 +16,7 @@ export interface ShortcutDef {
   id: string
   label: string
   description: string
-  /** Default binding, e.g. `"Mod+,"`. `Mod` = ⌘ on macOS / Ctrl elsewhere. */
+  /** Default binding, e.g. `"Mod+,"`; `""` means no default. `Mod` = ⌘ on macOS / Ctrl elsewhere. */
   defaultBinding: string
   /** App-global (rebindable) vs. reference-only (shown but not editable in v1). */
   editable: boolean
@@ -55,7 +55,8 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     id: "split-right",
     label: "Split right",
     description: "Split the focused terminal: a new terminal opens beside it",
-    defaultBinding: "Mod+d",
+    // No default: Cmd+D belongs to dictation. Users can set one in Settings > Shortcuts.
+    defaultBinding: "",
     editable: true,
   },
   {
@@ -63,6 +64,13 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     label: "Split down",
     description: "Split the focused terminal: a new terminal opens below it",
     defaultBinding: "Mod+Shift+d",
+    editable: true,
+  },
+  {
+    id: "dictation-toggle",
+    label: "Dictation",
+    description: "Start dictation in the focused terminal or editor; press again to stop",
+    defaultBinding: "Mod+d",
     editable: true,
   },
   {
@@ -152,7 +160,17 @@ export function matchesBinding(event: KeyboardEvent, binding: string): boolean {
   if (parts.includes("Mod") !== hasMod) return false
   if (parts.includes("Shift") !== event.shiftKey) return false
   if (parts.includes("Alt") !== event.altKey) return false
-  return event.key.toLowerCase() === key
+  if (event.key.toLowerCase() === key) return true
+  // macOS Option turns letters and digits into other characters (Option+D is "∂"), so an
+  // Alt binding also matches the physical key.
+  return event.altKey && physicalKey(event.code) === key
+}
+
+/** The letter or digit of a physical key code (`"KeyD"` → `"d"`), or null for other keys. */
+function physicalKey(code: string): string | null {
+  const match = /^(?:Key([A-Z])|Digit([0-9]))$/u.exec(code)
+  if (!match) return null
+  return (match[1] ?? match[2] ?? "").toLowerCase()
 }
 
 /** Whether a keydown matches a registered shortcut's current binding. */
@@ -191,6 +209,7 @@ export function paletteForKeydown(event: KeyboardEvent): "global" | "project" | 
  * `"Mod+,"` → `"⌘,"`, `"Mod+Shift+p"` → `"⇧⌘P"`.
  */
 export function formatBinding(binding: string): string {
+  if (!binding) return "Not set"
   const parts = binding.split("+")
   const key = parts.at(-1) ?? ""
   const modifiers =
@@ -213,7 +232,8 @@ export function findShortcutConflict(
 ): ShortcutDef | null {
   return (
     SHORTCUTS.find(
-      (shortcut) => shortcut.id !== shortcutId && bindingFor(shortcut.id) === binding,
+      (shortcut) =>
+        binding !== "" && shortcut.id !== shortcutId && bindingFor(shortcut.id) === binding,
     ) ?? null
   )
 }
@@ -251,6 +271,7 @@ export function bindingFromEvent(event: KeyboardEvent): string | null {
   if (event.metaKey || event.ctrlKey) parts.push("Mod")
   if (event.shiftKey) parts.push("Shift")
   if (event.altKey) parts.push("Alt")
-  parts.push(key.length === 1 ? key.toLowerCase() : key)
+  const physical = event.altKey ? physicalKey(event.code) : null
+  parts.push(physical ?? (key.length === 1 ? key.toLowerCase() : key))
   return parts.join("+")
 }

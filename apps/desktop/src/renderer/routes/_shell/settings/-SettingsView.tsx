@@ -8,6 +8,7 @@ import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
 import { FeatureHelpPanel, FeatureHelpRestoreButton } from "../components/Sidebar"
 import { TitleBarSystemControls } from "../titleBar"
+import { DictationSection } from "./components/DictationSection"
 import { DocumentToolsSection } from "./components/DocumentToolsSection"
 import { LatexSection } from "./components/LatexSection"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
@@ -66,6 +67,12 @@ const SECTIONS = [
     label: "LaTeX",
     description: "Choose the LaTeX compiler for all projects and install PDFLaTeX.",
     render: () => <LatexSection />,
+  },
+  {
+    id: "dictation",
+    label: "Dictation",
+    description: "Install local speech models and choose what happens with dictated text.",
+    render: () => <DictationSection />,
   },
   {
     id: "document-tools",

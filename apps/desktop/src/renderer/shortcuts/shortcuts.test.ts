@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest"
-import { eventMatchesShortcut, findShortcutConflict, formatBinding, SHORTCUTS } from "./shortcuts"
+import {
+  bindingFromEvent,
+  eventMatchesShortcut,
+  findShortcutConflict,
+  formatBinding,
+  matchesBinding,
+  SHORTCUTS,
+} from "./shortcuts"
 
 const defaults = (id: string): string =>
   SHORTCUTS.find((shortcut) => shortcut.id === id)?.defaultBinding ?? ""
@@ -25,6 +32,39 @@ describe("formatBinding", () => {
     expect(formatBinding("Mod+Shift+p")).toBe("⇧⌘P")
     expect(formatBinding("Mod+Alt+Shift+k")).toBe("⌥⇧⌘K")
     expect(formatBinding("Mod+,")).toBe("⌘,")
+  })
+})
+
+describe("dictation shortcut", () => {
+  test("defaults to a rebindable Cmd+D; split right has no default and never conflicts", () => {
+    expect(SHORTCUTS.find((shortcut) => shortcut.id === "dictation-toggle")).toMatchObject({
+      defaultBinding: "Mod+d",
+      editable: true,
+    })
+    expect(findShortcutConflict("dictation-toggle", "Mod+d", defaults)).toBeNull()
+    expect(defaults("split-right")).toBe("")
+    expect(findShortcutConflict("split-down", "", defaults)).toBeNull()
+    expect(formatBinding("")).toBe("Not set")
+  })
+
+  test("matches macOS Option+D by physical key, although the key event reports ∂", () => {
+    const optionD = new KeyboardEvent("keydown", { key: "∂", code: "KeyD", altKey: true })
+    expect(matchesBinding(optionD, "Alt+d")).toBe(true)
+    expect(matchesBinding(optionD, "Mod+d")).toBe(false)
+    const plainD = new KeyboardEvent("keydown", { key: "d", code: "KeyD" })
+    expect(matchesBinding(plainD, "Alt+d")).toBe(false)
+  })
+
+  test("records Option+letter as the letter, not the macOS dead-key character", () => {
+    const optionD = new KeyboardEvent("keydown", { key: "∂", code: "KeyD", altKey: true })
+    expect(bindingFromEvent(optionD)).toBe("Alt+d")
+    const optionShift7 = new KeyboardEvent("keydown", {
+      key: "‡",
+      code: "Digit7",
+      altKey: true,
+      shiftKey: true,
+    })
+    expect(bindingFromEvent(optionShift7)).toBe("Shift+Alt+7")
   })
 })
 

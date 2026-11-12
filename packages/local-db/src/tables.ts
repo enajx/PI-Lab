@@ -1068,6 +1068,39 @@ export const automationPromptVersions = sqliteTable(
 )
 
 // ---------------------------------------------------------------------------
+// Dictation — singleton preferences and the local transcription history.
+// ---------------------------------------------------------------------------
+
+/** What happens to a finished transcription. */
+export type DictationOutputAction = "insert" | "review" | "insert-copy" | "copy"
+/** How the listening pill draws the microphone level. */
+export type DictationWaveformStyle = "dots" | "ascii-art" | "lines"
+
+export const dictationSettings = sqliteTable("dictation_settings", {
+  /** Always 1: this table holds exactly one row. */
+  id: integer("id").primaryKey().default(1),
+  /** Catalog key of the model used for transcription, or null before the first download. */
+  selectedModel: text("selected_model"),
+  outputAction: text("output_action").notNull().$type<DictationOutputAction>().default("insert"),
+  waveformStyle: text("waveform_style").notNull().$type<DictationWaveformStyle>().default("dots"),
+  updatedAt: integer("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+})
+
+/** Past transcriptions, kept local. The router keeps only the newest 100 rows. */
+export const dictationHistory = sqliteTable(
+  "dictation_history",
+  {
+    id: primaryId(),
+    text: text("text").notNull(),
+    modelKey: text("model_key").notNull(),
+    createdAt: createdNow(),
+  },
+  (t) => [index("ix_dictation_history_created").on(t.createdAt)],
+)
+
+// ---------------------------------------------------------------------------
 // Row type aliases — inferred from the tables above.
 // ---------------------------------------------------------------------------
 
@@ -1095,3 +1128,4 @@ export type AutomationPromptVersion = typeof automationPromptVersions.$inferSele
 export type NewAutomationPromptVersion = typeof automationPromptVersions.$inferInsert
 export type ProjectWorkflowRun = typeof projectWorkflowRuns.$inferSelect
 export type NewProjectWorkflowRun = typeof projectWorkflowRuns.$inferInsert
+export type DictationHistoryEntry = typeof dictationHistory.$inferSelect

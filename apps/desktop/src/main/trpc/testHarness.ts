@@ -29,6 +29,9 @@ import {
 } from "../automations/nonInteractiveRunner"
 import type { CaffeineControllerPort, CaffeineSettings, CaffeineStatus } from "../caffeine"
 import type { PyToolsExec } from "../diagnostics"
+import { DICTATION_MODELS, type DictationModel } from "../dictation/catalog"
+import type { DictationEngine } from "../dictation/engine"
+import { DictationService } from "../dictation/service"
 import type { PiLabChannel } from "../identity/channel"
 import type { SshExec } from "../lib/ssh-config"
 import { NotebookServers } from "../notebooks/notebookServers"
@@ -102,6 +105,7 @@ export interface Harness {
   notifications: NotificationBrokers
   notificationDeliveries: TestNotificationDelivery[]
   analysisInteractive: TestAnalysisInteractive
+  dictation: DictationService
   dispose: () => Promise<void>
 }
 
@@ -268,6 +272,18 @@ export interface HarnessOptions {
   notificationsUnfocused?: boolean
   /** Make the fake native platform accept and record notification delivery. */
   nativeNotificationsSupported?: boolean
+  /** Dictation models offered (defaults to the real catalog). */
+  dictationCatalog?: readonly DictationModel[]
+  /** Where dictation models are stored (defaults to a folder in the temp data dir). */
+  dictationModelsDir?: string
+  /** Dictation engine (defaults to none, as in a build without the bundled engine). */
+  dictationEngine?: DictationEngine | null
+  /** Idle time before the dictation engine stops (defaults to 10 minutes). */
+  dictationIdleMs?: number
+  /** The engine's PID record (defaults to a file in the temp data dir). */
+  dictationEnginePidFile?: string
+  /** Time without data before a model download fails as stalled (defaults to 30 s). */
+  dictationDownloadStallMs?: number
 }
 
 /** Initialize a repo with one commit on `main`, deterministic identity. */
@@ -311,6 +327,12 @@ export async function createHarness(
     | "git"
     | "daemon"
     | "appChannel"
+    | "dictationCatalog"
+    | "dictationModelsDir"
+    | "dictationEngine"
+    | "dictationIdleMs"
+    | "dictationEnginePidFile"
+    | "dictationDownloadStallMs"
   > = {},
 ): Promise<Harness> {
   // Canonicalize: on macOS `mkdtemp` hands back `/var/...` but git reports the
@@ -379,6 +401,23 @@ export async function createHarness(
   const caffeine = createTestCaffeineController()
   const analysisInteractive = createTestAnalysisInteractive()
   const skillsHomeDir = join(dataDir, "home")
+  const dictation = new DictationService({
+    db,
+    catalog: options.dictationCatalog ?? DICTATION_MODELS,
+    modelsDir: options.dictationModelsDir ?? join(dataDir, "dictation", "models"),
+    engine: options.dictationEngine ?? null,
+    fetch: options.httpFetch ?? FAKE_HTTP_FETCH,
+    microphone: {
+      status: () => "granted",
+      request: async () => true,
+      openSettings: async () => {},
+    },
+    idleMs: options.dictationIdleMs ?? 10 * 60_000,
+    enginePidFile:
+      options.dictationEnginePidFile ?? join(dataDir, "dictation", "whisper-server.pid"),
+    downloadStallMs: options.dictationDownloadStallMs ?? 30_000,
+  })
+  await dictation.start()
   const context: AppContext = {
     db,
     appChannel: options.appChannel ?? "alpha",
@@ -386,6 +425,7 @@ export async function createHarness(
     latexResourcesDir: options.latexResourcesDir,
     latexCacheDir: options.latexCacheDir ?? join(dataDir, "latex", "cache"),
     latexUserHome: options.latexUserHome,
+    dictation,
     getDaemonClient: async () => {
       await ensureDaemon()
       return client
@@ -434,6 +474,7 @@ export async function createHarness(
   const caller = createCaller(context)
 
   const dispose = async () => {
+    dictation.dispose()
     activityMonitor.dispose()
     activityRegistry.dispose()
     if (daemonStarting) {
@@ -462,6 +503,7 @@ export async function createHarness(
     notifications,
     notificationDeliveries,
     analysisInteractive,
+    dictation,
     dispose,
   }
 }

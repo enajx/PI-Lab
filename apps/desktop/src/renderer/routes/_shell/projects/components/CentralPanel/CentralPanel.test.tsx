@@ -583,7 +583,7 @@ describe("CentralPanel — panel", () => {
     ).toBe("Switch to this interactive shell terminal.")
   })
 
-  /** ⌘D splits the focused terminal into a new split holding a new terminal. */
+  /** ⇧⌘D splits the focused terminal into a new split holding a new terminal; ⌘D (dictation) does not. */
   test("the split shortcut opens a new terminal in a new split", async () => {
     let spawned = 0
     const { container } = renderPanel(
@@ -594,7 +594,11 @@ describe("CentralPanel — panel", () => {
     fireEvent.click(screen.getByTestId("launcher-terminal"))
     await screen.findByTestId("terminal")
 
+    // Split right has no default binding: ⌘D belongs to dictation.
     fireEvent.keyDown(window, { key: "d", metaKey: true })
+    expect(screen.getAllByTestId("terminal")).toHaveLength(1)
+
+    fireEvent.keyDown(window, { key: "d", metaKey: true, shiftKey: true })
 
     await waitFor(() => expect(screen.getAllByTestId("terminal")).toHaveLength(2))
     expect(spawned).toBe(2)
