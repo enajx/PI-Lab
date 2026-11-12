@@ -119,6 +119,28 @@ test("research diary shows today's heading, edits in place, and saves the file o
   await expect(panel.locator(".cm-content")).toContainText(today())
 })
 
+/** Real app and IPC: unsaved diary edits are saved when the user leaves the Diary tab. */
+test("unsaved diary edits are saved on disk when another tab is opened", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await window.getByTestId("project-view-research-diary").click()
+  const panel = window.getByTestId("research-diary-panel")
+  const text = panel.locator(".cm-content")
+  await expect(text).toContainText(today(), { timeout: 30_000 })
+  await text.click()
+  await window.keyboard.press("ControlOrMeta+End")
+  await window.keyboard.type("Not saved by hand.")
+  await expect(panel.getByTestId("research-diary-dirty")).toBeVisible()
+
+  await window.getByTestId("panel-tab-files").click()
+  await expect(panel).toHaveCount(0)
+  const diaryPath = join(repoDir, "md", "research-diary", "diary.md")
+  await expect
+    .poll(() => readFile(diaryPath, "utf8").catch(() => ""), { timeout: 10_000 })
+    .toBe(`## ${today()}\n\nNot saved by hand.`)
+})
+
 /** Real app and IPC: a save drops the day headings that have nothing under them. */
 test("saving the diary removes empty day headings already in the file", async () => {
   const diaryDir = join(repoDir, "md", "research-diary")

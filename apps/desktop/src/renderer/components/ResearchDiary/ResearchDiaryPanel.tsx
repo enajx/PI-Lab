@@ -9,7 +9,7 @@ import { translateKnownError } from "../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../i18n/language"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
 import { InteractivePreview } from "../../routes/_shell/science/components/ScienceAnalysis/components/AnalysisPreview/AnalysisPreview"
-import { useTRPC } from "../../trpc/react"
+import { useTRPC, useTRPCClient } from "../../trpc/react"
 import {
   type DocumentRenderResult,
   RenderControl,
@@ -29,7 +29,8 @@ import {
  * to Source. A dot next to the title marks unsaved changes; ⌘S writes the
  * text through `diary.save`, which drops the day headings with nothing under
  * them. A save refused because the file changed on disk shows the error and
- * keeps the edit. A Quarto diary, or the diary in MyST mode, also gets a Render
+ * keeps the edit. Unsaved edits are saved when the panel closes or switches to
+ * another project (a failure of that save is logged, as the panel is gone). A Quarto diary, or the diary in MyST mode, also gets a Render
  * button that renders the saved file with quarto or mystmd and shows the HTML
  * page in the panel, until Show source. `headerActions` go at the end of its
  * header (e.g. a collapse button), or null for none.
@@ -51,6 +52,7 @@ export function ResearchDiaryPanel({
   const openDiaryRef = useRef(openDiary.mutateAsync)
   openDiaryRef.current = openDiary.mutateAsync
   const saveDiary = useMutation(trpc.diary.save.mutationOptions())
+  const client = useTRPCClient()
   // The diary as opened, with `content` updated to the text of each successful save.
   const [loaded, setLoaded] = useState<DiaryFile | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
@@ -70,6 +72,9 @@ export function ResearchDiaryPanel({
         ? "myst"
         : null
   const dirty = loaded !== null && draft !== loaded.content
+  // What the panel holds now, read when it closes or leaves the project.
+  const latest = useRef({ projectId, loaded, draft })
+  latest.current = { projectId, loaded, draft }
 
   useEffect(() => {
     // Only the still-active run applies its result (StrictMode runs effects twice;
@@ -92,8 +97,19 @@ export function ResearchDiaryPanel({
     )
     return () => {
       active = false
+      // Leaving this project (or closing the panel): save the unsaved edits.
+      const left = latest.current
+      if (!left.loaded || left.draft === left.loaded.content) return
+      client.diary.save
+        .mutate({
+          projectId: left.projectId,
+          relPath: left.loaded.relPath,
+          content: left.draft,
+          baseline: left.loaded.baseline,
+        })
+        .catch((error: Error) => console.error("Research diary autosave failed:", error))
     }
-  }, [projectId])
+  }, [projectId, client])
 
   const save = () => {
     if (!loaded || saveDiary.isPending) return

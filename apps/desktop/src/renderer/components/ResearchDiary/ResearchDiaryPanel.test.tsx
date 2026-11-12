@@ -48,6 +48,7 @@ const LOADED = {
   baseline: { exists: true, mtimeMs: 10, size: 33 },
 }
 
+/** Render the panel for project p1; `rerender` switches project, or closes it with null. */
 function renderPanel(save: FakeHandlers[string], loaded: typeof LOADED, extra: FakeHandlers) {
   const handlers: FakeHandlers = {
     "settings.get": () => ({ editor: DEFAULT_EDITOR_SETTINGS }),
@@ -56,11 +57,14 @@ function renderPanel(save: FakeHandlers[string], loaded: typeof LOADED, extra: F
     ...extra,
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <AppProviders client={createFakeTrpcClient(handlers)} queryClient={queryClient}>
-      <ResearchDiaryPanel projectId="p1" headerActions={null} />
-    </AppProviders>,
+  const client = createFakeTrpcClient(handlers)
+  const view = (projectId: string | null) => (
+    <AppProviders client={client} queryClient={queryClient}>
+      {projectId ? <ResearchDiaryPanel projectId={projectId} headerActions={null} /> : null}
+    </AppProviders>
   )
+  const result = render(view("p1"))
+  return { rerender: (projectId: string | null) => result.rerender(view(projectId)) }
 }
 
 describe("ResearchDiaryPanel", () => {
@@ -99,6 +103,36 @@ describe("ResearchDiaryPanel", () => {
       },
     ])
     expect(screen.getByTestId("editor-buffer")).toBe(buffer)
+  })
+
+  test("unsaved edits are saved when the panel closes or the project changes", async () => {
+    const saves: { projectId: string; content: string }[] = []
+    const save = (input: unknown) => {
+      saves.push(input as { projectId: string; content: string })
+      return { baseline: { exists: true, mtimeMs: 20, size: 38 } }
+    }
+    const { rerender } = renderPanel(save, LOADED, {})
+    await screen.findByTestId("editor-buffer")
+    fireEvent.click(screen.getByTestId("buffer-type"))
+    rerender("p2")
+    await waitFor(() =>
+      expect(saves).toEqual([
+        expect.objectContaining({ projectId: "p1", content: `${LOADED.content} EDIT` }),
+      ]),
+    )
+    await screen.findByTestId("editor-buffer")
+    fireEvent.click(screen.getByTestId("buffer-type"))
+    rerender(null)
+    await waitFor(() => expect(saves.map((input) => input.projectId)).toEqual(["p1", "p2"]))
+  })
+
+  test("nothing is saved on close when there are no edits", async () => {
+    const saves: unknown[] = []
+    const { rerender } = renderPanel((input) => saves.push(input), LOADED, {})
+    await screen.findByTestId("editor-buffer")
+    rerender(null)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(saves).toEqual([])
   })
 
   test("the Preview/Source switch shows the same text as source, keeping the edit", async () => {
