@@ -11,6 +11,8 @@ import {
   type ElectronApplication,
   _electron as electron,
   expect,
+  type Locator,
+  type Page,
   test,
 } from "./fixtures/playwright"
 
@@ -353,4 +355,76 @@ test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", asyn
   await window.getByTestId("analysis-fetch-experiments").click()
   await expect(window.getByTestId("workflow-result-dialog")).toBeVisible()
   await expect(window.getByTestId("workflow-result-text")).toBeVisible({ timeout: 30_000 })
+})
+
+/** Drag a resize handle horizontally by `dx` px with the real mouse. */
+async function dragHandle(window: Page, testId: string, dx: number): Promise<void> {
+  const box = await window.getByTestId(testId).boundingBox()
+  if (!box) throw new Error(`No ${testId} handle`)
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await window.mouse.move(x, y)
+  await window.mouse.down()
+  await window.mouse.move(x + dx, y, { steps: 8 })
+  await window.mouse.up()
+}
+
+/** A locator's rendered width in px. */
+async function widthOf(locator: Locator): Promise<number> {
+  return locator.evaluate((element) => element.getBoundingClientRect().width)
+}
+
+/**
+ * Real app: the line between the file list and the preview, and the line between
+ * the preview and the right panel, both drag to resize; each width is saved and
+ * comes back after a reload. Tasks uses the same right panel width. The rounded
+ * Sessions box keeps a 12px gap from the lines around it (the panel's left line,
+ * the Sessions header line and the diary divider), like the project view's boxes.
+ */
+test("Analysis file list and right panel resize from their lines and keep the size after reload", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1600, 900))
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  const analysisNav = window.locator(
+    '[data-testid="science-nav-item"][data-science-tab="analysis"]',
+  )
+  await analysisNav.click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+
+  const files = window.getByTestId("analysis-files-column")
+  const panel = window.getByTestId("science-sessions")
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expect(panel.getByTestId("central-panel")).toBeVisible({ timeout: 30_000 })
+  const filesBefore = await widthOf(files)
+  const panelBefore = await widthOf(panel)
+
+  await dragHandle(window, "analysis-files-edge-drag", 80)
+  await expect.poll(() => widthOf(files)).toBe(filesBefore + 80)
+  await dragHandle(window, "science-sessions-edge-drag", -100)
+  await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
+
+  // The rounded Sessions box does not touch any line around it.
+  const box = await panel.getByTestId("central-panel").boundingBox()
+  const aside = await panel.boundingBox()
+  const header = await panel.getByTestId("science-sessions-header").boundingBox()
+  const divider = await panel.getByTestId("science-panel-divider").boundingBox()
+  if (!box || !aside || !header || !divider) throw new Error("No Sessions layout")
+  expect(Math.round(box.x - aside.x)).toBeGreaterThanOrEqual(12)
+  expect(Math.round(aside.x + aside.width - (box.x + box.width))).toBeGreaterThanOrEqual(12)
+  expect(Math.round(box.y - (header.y + header.height))).toBeGreaterThanOrEqual(12)
+  expect(Math.round(divider.y - (box.y + box.height))).toBeGreaterThanOrEqual(12)
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-resized.png") })
+
+  // The reload stays on Analysis.
+  await window.reload()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expect.poll(() => widthOf(files)).toBe(filesBefore + 80)
+  await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
+
+  // Tasks shows the same right panel at the saved width.
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
+  await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
 })

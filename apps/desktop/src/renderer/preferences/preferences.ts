@@ -385,6 +385,21 @@ export const RESEARCH_DIARY_DEFAULT_WIDTH = 340
 export const useResearchDiaryWidth = (): [number, (next: number) => void] =>
   useNumberPref("pi-lab.researchDiary.width", RESEARCH_DIARY_DEFAULT_WIDTH)
 
+// --- Analysis and Tasks right panel (Sessions and diary) width (px), resizable
+// from its left line; one value for both views ------------------------------------
+export const SCIENCE_PANEL_MIN_WIDTH = 352
+export const SCIENCE_PANEL_MAX_WIDTH = 800
+export const SCIENCE_PANEL_DEFAULT_WIDTH = 520
+export const useSciencePanelWidth = (): [number, (next: number) => void] =>
+  useNumberPref("pi-lab.sciencePanel.width", SCIENCE_PANEL_DEFAULT_WIDTH)
+
+// --- Analysis left file list width (px), resizable from its right line --------
+export const ANALYSIS_FILES_MIN_WIDTH = 240
+export const ANALYSIS_FILES_MAX_WIDTH = 480
+export const ANALYSIS_FILES_DEFAULT_WIDTH = 320
+export const useAnalysisFilesWidth = (): [number, (next: number) => void] =>
+  useNumberPref("pi-lab.analysis.filesWidth", ANALYSIS_FILES_DEFAULT_WIDTH)
+
 // --- Project view: left Files panel width (px), continuously resizable ---------
 const FILES_PANEL_WIDTH_KEY = "pi-lab.projectView.filesPanelWidth"
 export const FILES_PANEL_MIN_WIDTH = 160
