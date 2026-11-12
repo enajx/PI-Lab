@@ -786,9 +786,15 @@ const editorTypographyExtension = EditorView.theme({
     fontFamily: "var(--pi-lab-editor-font-family)",
     fontSize: "var(--pi-lab-editor-font-size)",
   },
+  // Line numbers are smaller than the text, in a narrow gutter (every editor:
+  // files, LaTeX, research diary).
   ".cm-gutters": {
     fontFamily: "var(--pi-lab-editor-font-family)",
-    fontSize: "var(--pi-lab-editor-font-size)",
+    fontSize: "calc(var(--pi-lab-editor-font-size) * 0.78)",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "2ch",
+    padding: "0 6px 0 6px",
   },
 })
 
