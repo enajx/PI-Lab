@@ -87,6 +87,13 @@ const editorPatch = z.object({
   askPapersFolder: z.boolean().optional(),
   researchDiaryFormat: z.enum(["md", "qmd", "myst"]).optional(),
   analysisFormat: z.enum(ANALYSIS_FORMATS).optional(),
+  /** A skill folder name: letters, digits, dots, dashes and underscores, not starting with a dot. */
+  reportSkill: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/)
+    .max(128)
+    .optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */

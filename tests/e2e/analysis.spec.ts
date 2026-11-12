@@ -131,6 +131,8 @@ test.beforeEach(async () => {
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       // Open the temp repo as a project on load (renderer query seam).
       PI_LAB_TEST_OPEN_PROJECT: repoDir,
+      // User skills come from here, so the real home folder's skills stay out.
+      PI_LAB_TEST_SKILLS_HOME: join(dataDir, "home"),
       PI_LAB_TEST_PICK_DIRECTORY: join(repoDir, "outputs"),
       PI_LAB_TEST_MARIMO_FIXTURE: MARIMO_FIXTURE,
       PI_LAB_TEST_MARIMO_MARKER: markerPath,
@@ -244,34 +246,40 @@ test("Analysis lists the results folder grouped by experiment and Change… pick
   await expect(group("exp-a")).toBeVisible()
 })
 
-test("a new HTML report is saved in reports/, listed in the Reports group and stays selected", async () => {
+test("Report shows an error without the report skill, then starts the project's agent with it", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  // Seed the remembered fixture agent; the launch still crosses the real PTY boundary.
+  await execFileAsync("/usr/bin/sqlite3", [
+    join(dataDir, "local.db"),
+    `UPDATE projects SET agent_config='{"agentId":"test-echo"}'`,
+  ])
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
-  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/", {
-    timeout: 30_000,
-  })
-  // No reports/ folder yet: no Reports group.
-  await expect(window.getByTestId("analysis-reports-group")).toHaveCount(0)
+  const report = window.getByTestId("analysis-report")
+  await expect(report).toHaveText("Report")
+  await expect(report).toBeEnabled({ timeout: 30_000 })
 
-  await window.getByTestId("analysis-new-html-report").click()
-  const row = window
-    .getByTestId("analysis-reports-group")
-    .locator('[data-testid="analysis-file"][data-rel-path="reports/report.html"]')
-  await expect(row).toBeVisible({ timeout: 30_000 })
-  await expect(row).toHaveAttribute("aria-pressed", "true")
-  await expect(window.getByTestId("analysis-preview-html")).toBeVisible({ timeout: 30_000 })
-  await expect(readFile(join(repoDir, "reports", "report.html"), "utf8")).resolves.toContain(
-    "Interactive report",
+  // No experiment-report skill in the user skills folders yet: a clear error, no session.
+  await report.click()
+  await expect(window.getByTestId("analysis-shortcut-error")).toContainText(
+    'The report skill "experiment-report" was not found',
+    { timeout: 30_000 },
   )
-  // The reports/ inside the results folder stays an experiment group.
-  await expect(
-    window.locator(
-      '[data-testid="analysis-experiment-group"][data-experiment="reports"] [data-rel-path="results/reports/interactive.html"]',
-    ),
-  ).toBeVisible()
+
+  const skillDir = join(dataDir, "home", ".agents", "skills", "experiment-report")
+  await mkdir(skillDir, { recursive: true })
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    "---\nname: experiment-report\ndescription: Build a report\n---\nBuild the report.\n",
+  )
+  await report.click()
+  const panel = window.getByTestId("science-sessions")
+  await expect(panel).toHaveAttribute("data-collapsed", "false", { timeout: 30_000 })
+  await expect(panel.getByTestId("terminal")).toContainText("AGENT-UI-OK", { timeout: 15_000 })
+  await expect(panel.getByTestId("central-tab-select").filter({ hasText: "Report" })).toBeVisible()
+  await expect(window.getByTestId("analysis-shortcut-error")).toHaveCount(0)
 })
 
 test("interactive HTML is sandboxed while scripts, relative assets, and network fetch work", async () => {

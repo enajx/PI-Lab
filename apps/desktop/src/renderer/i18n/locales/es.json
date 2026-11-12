@@ -546,7 +546,6 @@
   "e.g. NeurIPS 2026": "p. ej., NeurIPS 2026",
   "e.g. https://www.overleaf.com/project/…": "p. ej., https://www.overleaf.com/project/…",
   "Browse and preview the data files in a project's repo": "Explora y previsualiza los archivos de datos del repositorio del proyecto",
-  "HTML report": "Informe HTML",
   "Marimo report": "Informe de Marimo",
   "Analysis project": "Proyecto de análisis",
   "Choose which project repository to scan for data files.": "Elige el repositorio del proyecto que se analizará para buscar archivos de datos.",

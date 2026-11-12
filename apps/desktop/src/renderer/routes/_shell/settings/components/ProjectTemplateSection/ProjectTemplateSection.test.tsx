@@ -62,6 +62,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   askPapersFolder: true,
   researchDiaryFormat: "md",
   analysisFormat: "md",
+  reportSkill: "experiment-report",
 }
 
 let store: Record<string, string>

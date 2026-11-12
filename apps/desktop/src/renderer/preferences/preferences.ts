@@ -515,7 +515,7 @@ export type HeaderShortcutsView = "project" | "latex" | "tasks" | "analysis"
  * Default top bar shortcuts per view, in top bar order. Built-in ids are the
  * view's own buttons (Project view: `tasks`, `paper`, `auto-research`,
  * `plan-research`, `project-status`, `research-diary`; LaTeX Editor: `update-paper`,
- * `sync`, `research-diary`; Analysis: `analyze-experiments`, `html-report`,
+ * `sync`, `research-diary`; Analysis: `analyze-experiments`, `report`,
  * `fetch-experiments`, `research-diary`; Tasks: `research-diary`);
  * added skills and routines are stored as `skill:<slug>` and
  * `routine:<automation id>`.
@@ -524,7 +524,7 @@ export const DEFAULT_HEADER_SHORTCUTS: Record<HeaderShortcutsView, string[]> = {
   project: ["tasks", "paper", "auto-research", "plan-research", "project-status", "research-diary"],
   latex: ["update-paper", "sync", "research-diary"],
   tasks: ["research-diary"],
-  analysis: ["analyze-experiments", "html-report", "fetch-experiments", "research-diary"],
+  analysis: ["analyze-experiments", "report", "fetch-experiments", "research-diary"],
 }
 const HEADER_SHORTCUTS_KEYS: Record<HeaderShortcutsView, string> = {
   project: "pi-lab.projectView.headerShortcuts",
@@ -545,7 +545,7 @@ const HEADER_SHORTCUTS_ADDED: { version: number; ids: Record<HeaderShortcutsView
       project: [],
       latex: ["sync"],
       tasks: [],
-      analysis: ["html-report", "fetch-experiments"],
+      analysis: ["report", "fetch-experiments"],
     },
   },
   { version: 3, ids: { project: ["paper"], latex: [], tasks: [], analysis: [] } },
@@ -559,6 +559,8 @@ const HEADER_SHORTCUTS_ADDED: { version: number; ids: Record<HeaderShortcutsView
   },
 ]
 const HEADER_SHORTCUTS_VERSION = "5"
+/** Old built-in ids that a saved list may hold, with the id each one has now. */
+const RENAMED_HEADER_SHORTCUTS: Readonly<Record<string, string>> = { "html-report": "report" }
 /** `saved` with each id of `added` that it lacks put after its nearest default predecessor. */
 function withAddedShortcuts(saved: string[], defaults: string[], added: string[]): string[] {
   const next = [...saved]
@@ -580,7 +582,7 @@ export const useHeaderShortcuts = (
   const value = useMemo(
     () =>
       withAddedShortcuts(
-        saved,
+        saved.map((id) => RENAMED_HEADER_SHORTCUTS[id] ?? id),
         DEFAULT_HEADER_SHORTCUTS[view],
         HEADER_SHORTCUTS_ADDED.filter((entry) => entry.version > Number(version)).flatMap(
           (entry) => entry.ids[view],

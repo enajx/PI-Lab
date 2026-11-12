@@ -123,7 +123,7 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   expect(await x(picker)).toBeLessThan(await x(analyze))
   for (const testId of [
     "analysis-analyze-experiments",
-    "analysis-new-html-report",
+    "analysis-report",
     "analysis-fetch-experiments",
     "analysis-research-diary",
   ]) {

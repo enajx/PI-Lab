@@ -388,6 +388,62 @@ function EditorTypography() {
 }
 
 /** Editor preferences persisted in the DB, including the in-editor gear controls. */
+/**
+ * The skill the Analysis view's Report button starts an agent with, by its
+ * folder name in the project or user skills folders. Typed, then saved with Save.
+ */
+function ReportSkillField({ saved }: { saved: string }) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  // The typed name, or null while it shows the saved one.
+  const [draft, setDraft] = useState<string | null>(null)
+  const update = useMutation(
+    trpc.settings.updateEditor.mutationOptions({
+      onSuccess: () => {
+        setDraft(null)
+        void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
+      },
+    }),
+  )
+  const typed = draft?.trim() ?? ""
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3 text-sm">
+      <span>{t("Report skill")}</span>
+      <p className="text-muted-foreground text-xs">
+        {t(
+          "Skill the Report button in Analysis starts an agent with: its folder name in the project or user skills folders.",
+        )}
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          data-testid="settings-report-skill"
+          aria-label={t("Report skill")}
+          value={draft ?? saved}
+          placeholder={DEFAULT_EDITOR_SETTINGS.reportSkill}
+          onChange={(event) => setDraft(event.target.value)}
+          className="w-56 rounded-md border border-border bg-background px-2 py-1 font-mono text-foreground text-xs outline-none"
+        />
+        <Button
+          data-testid="settings-report-skill-save"
+          variant="outline"
+          size="sm"
+          disabled={typed === "" || typed === saved || update.isPending}
+          onClick={() => update.mutate({ reportSkill: typed })}
+        >
+          {t("Save")}
+        </Button>
+      </div>
+      {update.error ? (
+        <p role="alert" className="cursor-text select-text text-destructive text-xs">
+          {update.error.message}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export function EditorSection() {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -537,6 +593,7 @@ export function EditorSection() {
         }))}
         onChange={(value) => patch({ analysisFormat: value as AnalysisFormat })}
       />
+      <ReportSkillField saved={editor.reportSkill ?? DEFAULT_EDITOR_SETTINGS.reportSkill} />
       <SelectField
         testId="settings-editor-theme"
         label="Editor theme"

@@ -475,6 +475,57 @@ export async function startAnalyzeExperiments(
   return { ...result, agentId }
 }
 
+/** A Report launch: the started session and the agent it runs. */
+export interface StartReportResult extends StartSessionResult {
+  agentId: string
+}
+
+/**
+ * The Analysis view's Report button: start the project's agent (remembered
+ * choice, else the default) as an Analysis agent, with a prompt that triggers
+ * the report skill named in Settings (`reportSkill`, default
+ * `experiment-report`), found in the project and user skill folders. The
+ * prompt names the project's analysis format (see {@link effectiveAnalysisFormat})
+ * and the bundled `analysis-format` skill. Throws NOT_FOUND, starting nothing,
+ * when the report skill cannot be found.
+ */
+export async function startReport(
+  ctx: AppContext,
+  input: { projectId: string },
+): Promise<StartReportResult> {
+  const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
+  if (!project) {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+  }
+  const editor = getSettingsOrDefaults(ctx.db).editor
+  const catalog = await discoverSkills(project.repoPath, ctx.skillsHomeDir)
+  const skill = catalog.skills.find((entry) => entry.slug === editor.reportSkill)
+  if (!skill) {
+    const failures = catalog.roots.flatMap((root) => (root.detail ? [root.detail] : []))
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `The report skill "${editor.reportSkill}" was not found in this project or your user skill folders. Add it there, or name another skill in Settings > Editor > Report skill.${failures.length ? `\n${failures.join("\n")}` : ""}`,
+    })
+  }
+  const formatSkill = await findSkill(
+    "analysis-format",
+    "Analysis format",
+    project.repoPath,
+    ctx.skillsHomeDir,
+    ctx.bundledSkillsDir,
+  )
+  const format = effectiveAnalysisFormat(project.metadata, editor)
+  const agentId = await projectAgentId(ctx, project)
+  const result = await startAgentSession(ctx, {
+    projectId: project.id,
+    agentId,
+    origin: "analysis",
+    workspaceMode: "policy",
+    prompt: `Use the ${skill.slug} skill to build a report for this project. Its SKILL.md is at ${skill.path}. The analysis format is ${format}. Write the report as the analysis-format skill at ${formatSkill.path} says for ${format}. Follow their instructions.`,
+  })
+  return { ...result, agentId }
+}
+
 /**
  * The rows of a project's "Project Agents" box: its live agents started outside
  * the Project view (LaTeX Editor, Analysis, Tasks, routines) and its running background workflow
@@ -558,4 +609,9 @@ export const sessionsRouter = router({
       ({ ctx, input }): Promise<StartAnalyzeExperimentsResult> =>
         startAnalyzeExperiments(ctx, input),
     ),
+
+  /** The Analysis view's Report button (see {@link startReport}). */
+  startReport: publicProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(({ ctx, input }): Promise<StartReportResult> => startReport(ctx, input)),
 })

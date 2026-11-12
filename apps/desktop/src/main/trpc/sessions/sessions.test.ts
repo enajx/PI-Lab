@@ -733,6 +733,74 @@ describe("sessions.startAnalyzeExperiments — Analysis button", () => {
   })
 })
 
+describe("sessions.startReport — Analysis Report button", () => {
+  /** Start Report and return the session id and the agent's output (the prompt), line breaks removed. */
+  async function reportPrompt(): Promise<{ sessionId: string; prompt: string }> {
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "prompt-agent" })
+    const result = await h.caller.sessions.startReport({ projectId })
+    const chunks: string[] = []
+    const stream = await h.caller.terminal.onData({ sessionId: result.sessionId })
+    const sub = stream.subscribe({
+      next: (event) => {
+        if (event.type === "data") chunks.push(event.chunk)
+      },
+    })
+    await waitFor(() =>
+      chunks.join("").replace(/\r?\n/g, "").includes("Follow their instructions."),
+    )
+    sub.unsubscribe()
+    expect(result.agentId).toBe("prompt-agent")
+    return { sessionId: result.sessionId, prompt: chunks.join("").replace(/\r?\n/g, "") }
+  }
+
+  test("starts the project's agent as an Analysis agent with the user's experiment-report skill and the analysis format", async () => {
+    const reportSkill = await writeUserSkill("experiment-report")
+    const formatSkill = await writeUserSkill("analysis-format")
+    await h.caller.settings.updateEditor({ analysisFormat: "qmd" })
+
+    const { sessionId, prompt } = await reportPrompt()
+
+    const row = h.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.sessionId, sessionId))
+      .get()
+    expect(row?.origin).toBe("analysis")
+    expect(prompt).toContain("Use the experiment-report skill to build a report for this project.")
+    expect(prompt).toContain(reportSkill)
+    expect(prompt).toContain("The analysis format is qmd.")
+    expect(prompt).toContain(formatSkill)
+  })
+
+  test("uses the report skill named in Settings", async () => {
+    await writeUserSkill("experiment-report")
+    const labReport = await writeUserSkill("lab-report")
+    await writeUserSkill("analysis-format")
+    await h.caller.settings.updateEditor({ reportSkill: "lab-report" })
+
+    const { prompt } = await reportPrompt()
+
+    expect(prompt).toContain("Use the lab-report skill")
+    expect(prompt).toContain(labReport)
+    expect(prompt).not.toContain("experiment-report")
+  })
+
+  test("a missing report skill is an error naming the skill and the setting, and starts no session", async () => {
+    await writeUserSkill("analysis-format")
+
+    await expect(h.caller.sessions.startReport({ projectId })).rejects.toThrow(
+      /The report skill "experiment-report" was not found.*Settings/,
+    )
+    expect(h.db.select().from(agentSessions).all()).toEqual([])
+  })
+
+  test("the report skill setting accepts only a skill folder name", async () => {
+    expect((await h.caller.settings.get()).editor.reportSkill).toBe("experiment-report")
+    for (const reportSkill of ["", "../escape", "a/b"])
+      await expect(h.caller.settings.updateEditor({ reportSkill })).rejects.toThrow()
+  })
+})
+
 describe("sessions.start — worktreePerAgent ON", () => {
   test("the FIRST start is already a 'worktree'", async () => {
     enableWorktreePerAgent()
