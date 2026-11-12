@@ -104,14 +104,22 @@ export class DictationService {
   }
   private downloadAbort: AbortController | null = null
   private idleTimer: NodeJS.Timeout | null = null
+  /** The startup cleanup; the engine waits for it so it never starts before the old one is killed. */
+  private cleanup: Promise<void> = Promise.resolve()
 
   constructor(private readonly options: DictationServiceOptions) {}
 
   /**
    * Clean up after an earlier run that crashed or was killed: stop its whisper-server and
-   * delete its partial downloads. Call once before the engine or a download starts.
+   * delete its partial downloads. Call once at app start, without waiting for it: prepare and
+   * transcribe wait for it before they start the engine.
    */
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    this.cleanup = this.removeLeftovers()
+    return this.cleanup
+  }
+
+  private async removeLeftovers(): Promise<void> {
     await killLeftoverWhisperServer(this.options.enginePidFile)
     if (this.downloadAbort || !existsSync(this.options.modelsDir)) return
     const leftovers = (await readdir(this.options.modelsDir)).filter(
@@ -234,6 +242,7 @@ export class DictationService {
   async prepare(): Promise<{ state: EngineState; error: string | null }> {
     const { engine, model } = this.requireReady()
     this.touch()
+    await this.cleanup
     await engine.prepare(this.modelPath(model)).catch(() => undefined)
     const { state, error } = engine.status()
     return { state, error }
@@ -250,6 +259,7 @@ export class DictationService {
     if (wav.length === 0) throw new Error("The recording is empty")
     if (wav.length > MAX_WAV_BYTES) throw new Error("The recording is too long to transcribe")
     this.touch()
+    await this.cleanup
     await engine.prepare(this.modelPath(model))
     // whisper-server rejects a recording with no samples with HTTP 400; that is no speech.
     const raw = await engine

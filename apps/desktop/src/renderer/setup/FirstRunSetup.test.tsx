@@ -31,6 +31,9 @@ function renderSetup(
 ) {
   const client = createFakeTrpcClient({
     "settings.updateAgents": (input) => input,
+    // The wizard sizes the window to its content while it is shown.
+    "system.fitWindowToContent": () => undefined,
+    "system.restoreWindowSize": () => undefined,
     ...ROW_HANDLERS,
     "settings.get": () => ({
       agents: { projectConfigStorage: "app", executableOverrides: {}, setupCompleted: false },

@@ -1,6 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process"
-import { constants, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { access } from "node:fs/promises"
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
 import { basename, dirname, join } from "node:path"
 import { promisify } from "node:util"
@@ -39,14 +38,15 @@ const LOAD_TIMEOUT_MS = 120_000
 const TRANSCRIBE_TIMEOUT_MS = 300_000
 const STDERR_TAIL_BYTES = 4000
 
-/** Path of the bundled whisper-server for this machine, or null when it is not built. */
-export async function resolveWhisperServer(resourcesDir: string): Promise<string | null> {
+/**
+ * Path of the bundled whisper-server for this machine, or null when it is not built.
+ * Synchronous (one stat), so app start does not wait on it before the window opens.
+ */
+export function resolveWhisperServer(resourcesDir: string): string | null {
   if (process.platform !== "darwin") return null
   const path = join(resourcesDir, `darwin-${process.arch}`, "whisper-server")
-  return access(path, constants.X_OK).then(
-    () => path,
-    () => null,
-  )
+  if (!existsSync(path)) return null
+  return (statSync(path).mode & 0o111) !== 0 ? path : null
 }
 
 /** Ask the OS for a free loopback port. */
