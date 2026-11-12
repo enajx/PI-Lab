@@ -793,9 +793,12 @@ const editorTypographyExtension = EditorView.theme({
     fontSize: "calc(var(--pi-lab-editor-font-size) * 0.78)",
   },
   // No fold arrows column, so the numbers sit close to the text line.
+  // Faded toward the background so they stand out less in every theme: lighter
+  // grey in light themes, darker in dark themes.
   ".cm-lineNumbers .cm-gutterElement": {
     minWidth: "2ch",
     padding: "0 4px 0 4px",
+    opacity: "0.55",
   },
 })
 

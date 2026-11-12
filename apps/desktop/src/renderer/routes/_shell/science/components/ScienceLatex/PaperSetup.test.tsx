@@ -621,7 +621,7 @@ describe("PaperSetup (mocked server)", () => {
     })
     const card = await screen.findByTestId("paper-setup-create")
     expect(within(card).getByRole("heading", { level: 3 }).textContent).toBe("Start draft")
-    expect(card.textContent).toContain("New paper from your LaTeX template.")
+    expect(card.textContent).toContain("New paper from template.")
     expect(screen.getByTestId("paper-create").textContent).toBe("Start draft")
     expect(screen.getByTestId("paper-setup").textContent).not.toContain("Create paper")
   })

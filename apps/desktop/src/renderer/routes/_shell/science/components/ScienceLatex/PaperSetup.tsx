@@ -330,6 +330,11 @@ export function PaperSetup({
                   <GitBranch className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Add Overleaf project")}</h3>
                 </div>
+                {!needsToken && tokenFromGit ? (
+                  <p data-testid="paper-overleaf-token-found" className={cardTextClass}>
+                    {t("Overleaf Git detected")}
+                  </p>
+                ) : null}
                 <Input
                   data-testid="paper-overleaf-url"
                   aria-label={t("Overleaf Git URL")}
@@ -346,10 +351,6 @@ export function PaperSetup({
                     value={token}
                     onChange={(event) => setToken(event.target.value)}
                   />
-                ) : tokenFromGit ? (
-                  <p data-testid="paper-overleaf-token-found" className={cardTextClass}>
-                    {t("Overleaf Git detected")}
-                  </p>
                 ) : null}
                 {needsToken ? (
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
@@ -382,8 +383,8 @@ export function PaperSetup({
                   <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Use an existing folder")}</h3>
                 </div>
-                <div className="mt-auto flex flex-col items-start gap-3">
-                  <p className={cardTextClass}>{t("Open a paper folder.")}</p>
+                <p className={cardTextClass}>{t("Open a paper folder.")}</p>
+                <div className="mt-auto">
                   <Button
                     type="button"
                     size="sm"
@@ -401,6 +402,7 @@ export function PaperSetup({
                   <FilePlus className="size-4 text-muted-foreground" aria-hidden />
                   <h3 className={cardTitleClass}>{t("Start draft")}</h3>
                 </div>
+                <p className={cardTextClass}>{t("New paper from template.")}</p>
                 {/* The folder wraps onto more lines when it is long; it is never cut. */}
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
                   <span
@@ -430,8 +432,7 @@ export function PaperSetup({
                     {t("Change…")}
                   </button>
                 </div>
-                <div className="mt-auto flex flex-col items-start gap-3">
-                  <p className={cardTextClass}>{t("New paper from your LaTeX template.")}</p>
+                <div className="mt-auto">
                   <Button
                     type="button"
                     size="sm"
