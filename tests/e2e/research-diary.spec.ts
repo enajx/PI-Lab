@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -54,8 +54,12 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
-/** Real app and IPC: in the project view the diary is the right sidebar's Diary tab. */
-test("research diary shows today's heading, edits, and saves the file on disk", async () => {
+/**
+ * Real app and IPC: in the project view the diary is the right sidebar's Diary tab.
+ * It is edited in place in Preview (the editor's rendered Markdown), shows an
+ * unsaved dot, and Cmd+S saves. Opening it writes nothing.
+ */
+test("research diary shows today's heading, edits in place, and saves the file on disk", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
@@ -79,29 +83,63 @@ test("research diary shows today's heading, edits, and saves the file on disk", 
   await window.getByTestId("project-view-research-diary").click()
   await expect(window.getByTestId("panel-tab-diary")).toHaveAttribute("data-active", "true")
   await expect(sidebar.getByTestId("research-diary-panel")).toBeVisible()
-  await expect(panel.getByRole("heading", { name: today() })).toBeVisible({ timeout: 30_000 })
+  const text = panel.locator(".cm-content")
+  await expect(text).toContainText(today(), { timeout: 30_000 })
+  // No Edit button: the Markdown view switch starts on Render, and nothing is on disk yet.
+  await expect(panel.getByRole("button", { name: "Edit" })).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Render Markdown" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(panel.getByTestId("research-diary-dirty")).toHaveCount(0)
   const diaryPath = join(repoDir, "md", "research-diary", "diary.md")
-  expect(await readFile(diaryPath, "utf8")).toBe(`## ${today()}\n\n`)
-  await window.screenshot({ path: join(SCREENS, "project-diary-tab.png") })
+  await expect(stat(diaryPath)).rejects.toThrow()
 
-  await panel.getByTestId("research-diary-edit").click()
-  const source = panel.locator(".cm-content")
-  await expect(source).toBeVisible()
-  await source.click()
+  await text.click()
   await window.keyboard.press("ControlOrMeta+End")
   await window.keyboard.type("Ran the first diary test.")
-  await panel.getByTestId("research-diary-save").click()
+  await expect(panel.getByTestId("research-diary-dirty")).toBeVisible()
+  await window.screenshot({ path: join(SCREENS, "project-diary-preview.png") })
+  await window.keyboard.press("ControlOrMeta+S")
 
-  await expect(panel.getByTestId("research-diary-rendered")).toContainText(
-    "Ran the first diary test.",
-  )
+  await expect(panel.getByTestId("research-diary-dirty")).toHaveCount(0)
   expect(await readFile(diaryPath, "utf8")).toBe(`## ${today()}\n\nRan the first diary test.`)
+
+  // Source shows the same text as plain Markdown.
+  await panel.getByRole("button", { name: "Source Markdown" }).click()
+  await expect(panel.locator(".cm-editor.cm-md-render")).toHaveCount(0)
+  await expect(text).toContainText(`## ${today()}`)
+  await expect(text).toContainText("Ran the first diary test.")
+  await window.screenshot({ path: join(SCREENS, "project-diary-source.png") })
 
   // Another tab hides the diary; the top bar button brings it back.
   await window.getByTestId("panel-tab-files").click()
   await expect(panel).toHaveCount(0)
   await window.getByTestId("project-view-research-diary").click()
-  await expect(panel.getByRole("heading", { name: today() })).toBeVisible()
+  await expect(panel.locator(".cm-content")).toContainText(today())
+})
+
+/** Real app and IPC: a save drops the day headings that have nothing under them. */
+test("saving the diary removes empty day headings already in the file", async () => {
+  const diaryDir = join(repoDir, "md", "research-diary")
+  await mkdir(diaryDir, { recursive: true })
+  const diaryPath = join(diaryDir, "diary.md")
+  await writeFile(diaryPath, `## ${today()}\n\n## 2020-01-02\n\n## 2020-01-01\n\nOld entry.\n`)
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await window.getByTestId("project-view-research-diary").click()
+  const panel = window.getByTestId("research-diary-panel")
+  const text = panel.locator(".cm-content")
+  await expect(text).toContainText("Old entry.", { timeout: 30_000 })
+
+  await text.click()
+  await window.keyboard.press("ControlOrMeta+End")
+  await window.keyboard.type("More.")
+  await window.keyboard.press("ControlOrMeta+S")
+
+  await expect(panel.getByTestId("research-diary-dirty")).toHaveCount(0)
+  expect(await readFile(diaryPath, "utf8")).toBe("## 2020-01-01\n\nOld entry.\nMore.")
 })
 
 /**
@@ -144,7 +182,7 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   // Open by default, with the diary showing.
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await expect(diaryButton).toHaveAttribute("aria-pressed", "true")
-  await expect(diary.getByRole("heading", { name: today() })).toBeVisible({ timeout: 30_000 })
+  await expect(diary.locator(".cm-content")).toContainText(today(), { timeout: 30_000 })
   const sessionsBox = await panel.getByTestId("science-panel-sessions").boundingBox()
   const diaryBox = await panel.getByTestId("science-panel-diary").boundingBox()
   expect(sessionsBox && diaryBox && sessionsBox.y < diaryBox.y).toBe(true)

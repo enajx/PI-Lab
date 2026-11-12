@@ -89,7 +89,7 @@ async function saveChapter(
   text: string,
   buildTimeout: number,
 ): Promise<void> {
-  const editor = page.getByTestId("editor-buffer")
+  const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
   await expect(editor).toBeVisible()
   await editor.locator(".cm-content").click()
   await page.keyboard.press("ControlOrMeta+a")

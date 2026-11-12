@@ -314,7 +314,7 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     const topBar = page.getByTestId("science-latex").locator("header")
     await expect(topBar.getByTestId("paper-sync")).toBeVisible()
     await expect(topBar.getByTestId("latex-project-select")).toBeVisible()
-    const editor = page.getByTestId("editor-buffer")
+    const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
     await expect(editor.locator(".cm-content")).toContainText("Shared first line.")
     await expect(editor.locator(".cm-line span").first()).toBeVisible()
     await page.getByTestId("paper-outline-entry").filter({ hasText: "Method" }).click()
@@ -431,7 +431,7 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     await expect(footer.getByRole("alert")).toHaveCount(0)
 
     // Cmd+S builds and opens the PDF beside the source, without Show in PDF.
-    const editor = page.getByTestId("editor-buffer")
+    const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
     await editor.locator(".cm-content").click()
     await page.keyboard.press("ControlOrMeta+s")
     // The status already says complete from the build on open, so wait for the new PDF first.
@@ -840,7 +840,7 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     })
     await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 200_000 })
     // main.tex opens on the left with its built PDF already on the right: no save or click.
-    const editor = page.getByTestId("editor-buffer")
+    const editor = page.getByTestId("central-panel").getByTestId("editor-buffer")
     await expect(editor).toBeVisible()
     /** The PDF viewer shows a rendered page to the right of the source. */
     const expectPdfBeside = async (): Promise<void> => {
@@ -885,11 +885,9 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
     const paper = join(project, "paper")
     expect(await readFile(join(paper, "refs.bib"), "utf8")).toBe("@misc{a}\n")
     expect((await git(paper, "ls-files")).trim().split("\n")).toEqual(["main.tex", "refs.bib"])
-    // The project repo does not see the paper folder; the only new file is the
-    // research diary, which the open diary column creates.
-    expect((await git(project, "status", "--porcelain", "-uall")).trim()).toBe(
-      "?? md/research-diary/diary.md",
-    )
+    // The project repo does not see the paper folder, and the open diary column
+    // writes nothing until the user saves an entry.
+    expect((await git(project, "status", "--porcelain", "-uall")).trim()).toBe("")
 
     // No remote yet: Sync is disabled and the footer offers Connect to Overleaf.
     await expect(page.getByTestId("paper-sync")).toBeDisabled()

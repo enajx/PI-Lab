@@ -9,23 +9,31 @@ import { fireEvent, render, screen, waitFor, within } from "../../test/render"
 /**
  * Component test for the research diary panel, with a faked tRPC client (mocked
  * main process). The real CodeMirror view needs layout APIs jsdom lacks, so it is
- * stubbed with a buffer that shows its seeded doc and can append " EDIT".
+ * stubbed with a buffer that shows its seeded doc and Markdown mode, can append
+ * " EDIT", and has a button that stands in for the ⌘S its keymap handles.
  */
 
 vi.mock("../../Editor/components/CodeMirrorBuffer", () => ({
   CodeMirrorBuffer: ({
     initialDoc,
     onChange,
+    onSave,
+    markdownMode,
   }: {
     initialDoc: string
     onChange: (doc: string) => void
+    onSave: () => void
+    markdownMode?: "render" | "source"
   }) => {
     const [seeded] = useState(initialDoc)
     return (
-      <div data-testid="editor-buffer">
+      <div data-testid="editor-buffer" data-mode={markdownMode ?? "none"}>
         <pre data-testid="buffer-doc">{seeded}</pre>
         <button type="button" data-testid="buffer-type" onClick={() => onChange(`${seeded} EDIT`)}>
           type
+        </button>
+        <button type="button" data-testid="buffer-cmd-s" onClick={onSave}>
+          cmd-s
         </button>
       </div>
     )
@@ -56,7 +64,7 @@ function renderPanel(save: FakeHandlers[string], loaded: typeof LOADED, extra: F
 }
 
 describe("ResearchDiaryPanel", () => {
-  test("shows the rendered diary, edits the source, and saves back to the rendered view", async () => {
+  test("edits the diary in place in Preview, shows the unsaved dot, and saves with Cmd+S", async () => {
     const saves: unknown[] = []
     renderPanel(
       (input) => {
@@ -67,14 +75,21 @@ describe("ResearchDiaryPanel", () => {
       {},
     )
     const panel = await screen.findByTestId("research-diary-panel")
-    expect(await within(panel).findByRole("heading", { name: "2026-11-11" })).toBeTruthy()
-
-    fireEvent.click(within(panel).getByRole("button", { name: "Edit" }))
+    const buffer = await within(panel).findByTestId("editor-buffer")
+    expect(within(panel).queryByRole("button", { name: "Edit" })).toBeNull()
+    expect(within(panel).queryByRole("button", { name: "Save" })).toBeNull()
+    expect(
+      within(panel).getByRole("button", { name: "Render Markdown" }).getAttribute("aria-pressed"),
+    ).toBe("true")
+    expect(buffer.getAttribute("data-mode")).toBe("render")
     expect(screen.getByTestId("buffer-doc").textContent).toBe(LOADED.content)
-    fireEvent.click(screen.getByTestId("buffer-type"))
-    fireEvent.click(within(panel).getByRole("button", { name: "Save" }))
+    expect(within(panel).queryByTestId("research-diary-dirty")).toBeNull()
 
-    await waitFor(() => expect(screen.queryByTestId("editor-buffer")).toBeNull())
+    fireEvent.click(screen.getByTestId("buffer-type"))
+    expect(within(panel).getByTestId("research-diary-dirty")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("buffer-cmd-s"))
+
+    await waitFor(() => expect(within(panel).queryByTestId("research-diary-dirty")).toBeNull())
     expect(saves).toEqual([
       {
         projectId: "p1",
@@ -83,10 +98,23 @@ describe("ResearchDiaryPanel", () => {
         baseline: LOADED.baseline,
       },
     ])
-    expect(within(panel).getByText(/Ran the baseline\. EDIT/)).toBeTruthy()
+    expect(screen.getByTestId("editor-buffer")).toBe(buffer)
   })
 
-  test("shows the error and keeps the edit open when the file changed on disk", async () => {
+  test("the Preview/Source switch shows the same text as source, keeping the edit", async () => {
+    renderPanel(() => null, LOADED, {})
+    const panel = await screen.findByTestId("research-diary-panel")
+    const buffer = await within(panel).findByTestId("editor-buffer")
+    fireEvent.click(screen.getByTestId("buffer-type"))
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Source Markdown" }))
+
+    expect(buffer.getAttribute("data-mode")).toBe("source")
+    expect(screen.getByTestId("editor-buffer")).toBe(buffer)
+    expect(within(panel).getByTestId("research-diary-dirty")).toBeTruthy()
+  })
+
+  test("shows the error and keeps the unsaved edit when the file changed on disk", async () => {
     renderPanel(
       () =>
         Promise.reject(
@@ -96,25 +124,27 @@ describe("ResearchDiaryPanel", () => {
       {},
     )
     const panel = await screen.findByTestId("research-diary-panel")
-    await within(panel).findByRole("heading", { name: "2026-11-11" })
+    await within(panel).findByTestId("editor-buffer")
 
-    fireEvent.click(within(panel).getByRole("button", { name: "Edit" }))
     fireEvent.click(screen.getByTestId("buffer-type"))
-    fireEvent.click(within(panel).getByRole("button", { name: "Save" }))
+    fireEvent.click(screen.getByTestId("buffer-cmd-s"))
 
     expect((await within(panel).findByRole("alert")).textContent).toMatch(/changed on disk/)
-    expect(screen.getByTestId("editor-buffer")).toBeTruthy()
+    expect(within(panel).getByTestId("research-diary-dirty")).toBeTruthy()
   })
 
-  test("hides a MyST or Quarto front matter in the rendered view and keeps it in the source", async () => {
+  test("a Quarto diary's Preview hides the front matter, and a click on it opens Source", async () => {
     const content = "---\ntitle: Research diary\n---\n\n## 2026-11-11\n\nRan the baseline.\n"
-    renderPanel(() => null, { ...LOADED, content }, {})
+    renderPanel(() => null, { ...LOADED, relPath: "md/research-diary/diary.qmd", content }, {})
     const panel = await screen.findByTestId("research-diary-panel")
-    expect(await within(panel).findByRole("heading", { name: "2026-11-11" })).toBeTruthy()
+    const heading = await within(panel).findByRole("heading", { name: "2026-11-11" })
     expect(within(panel).queryByText(/title: Research diary/)).toBeNull()
 
-    fireEvent.click(within(panel).getByRole("button", { name: "Edit" }))
+    fireEvent.click(heading)
     expect(screen.getByTestId("buffer-doc").textContent).toBe(content)
+    expect(
+      within(panel).getByRole("button", { name: "Source Markdown" }).getAttribute("aria-pressed"),
+    ).toBe("true")
   })
 
   test("renders a Quarto diary with Render and shows the page in the panel", async () => {
@@ -162,7 +192,7 @@ describe("ResearchDiaryPanel", () => {
   test("shows no Render button for a plain Markdown diary", async () => {
     renderPanel(() => null, LOADED, {})
     const panel = await screen.findByTestId("research-diary-panel")
-    await within(panel).findByRole("heading", { name: "2026-11-11" })
+    await within(panel).findByTestId("editor-buffer")
     expect(within(panel).queryByRole("button", { name: "Render" })).toBeNull()
   })
 })
