@@ -8,6 +8,7 @@ import {
   type SystemFontDetector,
 } from "../../fonts/systemFonts"
 import { pickDirectoryOverride, testFontFamilies } from "../../runtime/env"
+import { fitWindowToContent, restoreWindowSize } from "../../window/contentFit"
 import { liveStartAtLoginService, type StartAtLoginService } from "../../window/startAtLogin"
 import { applyTrafficLightInset } from "../../window/trafficLights"
 import { publicProcedure, router } from "../trpc"
@@ -109,6 +110,20 @@ export function createSystemRouter(
         const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
         return { applied: applyTrafficLightInset(win, input.inTitleBar) }
       }),
+
+    /** Resize the focused window so its content area is the given size (first-run wizard). */
+    fitWindowToContent: publicProcedure
+      .input(z.object({ width: z.number().positive(), height: z.number().positive() }))
+      .mutation(({ input }): void => {
+        const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+        if (win) fitWindowToContent(win, input.width, input.height)
+      }),
+
+    /** Put the window back to the size and position it had before `fitWindowToContent`. */
+    restoreWindowSize: publicProcedure.mutation((): void => {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      if (win) restoreWindowSize(win)
+    }),
   })
 }
 

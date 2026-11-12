@@ -73,7 +73,7 @@ test("first launch finishes with Silent, stays complete after restart, and can r
   await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
 })
 
-test("first-run setup wizard fits the default window without scrolling", async () => {
+test("first-run setup window fits the wizard content and is restored after Finish", async () => {
   if (!app) throw new Error("Electron app did not launch")
   const window = await app.firstWindow()
 
@@ -81,38 +81,29 @@ test("first-run setup wizard fits the default window without scrolling", async (
   await expect(window.getByText("Checking your local environment…")).toHaveCount(0, {
     timeout: 30_000,
   })
-  const size = await window.evaluate(() => ({ width: innerWidth, height: innerHeight }))
-  expect(size.width).toBeGreaterThanOrEqual(1270)
-  expect(size.height).toBeGreaterThanOrEqual(760)
-  const scroll = window.getByTestId("first-run-setup-scroll")
-  const metrics = await scroll.evaluate((element) => ({
-    scrollHeight: element.scrollHeight,
-    clientHeight: element.clientHeight,
-  }))
-  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight)
   const finish = window.getByTestId("first-run-setup-finish")
   await expect(finish).toBeInViewport({ ratio: 1 })
-  await window.screenshot({ path: resolve(".cache", "screens", "setup-wizard.png") })
-})
-
-test("first-run setup card is sized to its content, with no blank space inside it", async () => {
-  if (!app) throw new Error("Electron app did not launch")
-  const window = await app.firstWindow()
-
-  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
-  await expect(window.getByText("Checking your local environment…")).toHaveCount(0, {
-    timeout: 30_000,
-  })
-  const card = window.getByTestId("first-run-setup-card")
-  const box = await card.boundingBox()
-  if (!box) throw new Error("setup card has no box")
-  expect(box.width).toBeLessThanOrEqual(800)
-  const metrics = await window.getByTestId("first-run-setup-scroll").evaluate((element) => ({
+  // The window follows the content: narrow, and little blank space under the buttons.
+  await expect
+    .poll(async () => window.evaluate(() => innerWidth), { timeout: 10_000 })
+    .toBeLessThanOrEqual(800)
+  const gap = await finish.evaluate(
+    (element) => innerHeight - element.getBoundingClientRect().bottom,
+  )
+  expect(gap).toBeLessThanOrEqual(40)
+  const scroll = await window.getByTestId("first-run-setup-scroll").evaluate((element) => ({
     scrollHeight: element.scrollHeight,
     clientHeight: element.clientHeight,
   }))
-  expect(metrics.clientHeight - metrics.scrollHeight).toBeLessThanOrEqual(2)
-  await window.screenshot({ path: resolve(".cache", "screens", "setup-wizard-fit.png") })
+  expect(scroll.scrollHeight).toBeLessThanOrEqual(scroll.clientHeight)
+  await window.screenshot({ path: resolve(".cache", "screens", "setup-wizard.png") })
+
+  await finish.click()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  await expect
+    .poll(async () => window.evaluate(() => innerWidth), { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1270)
+  expect(await window.evaluate(() => innerHeight)).toBeGreaterThanOrEqual(760)
 })
 
 test("first-launch setup is skippable", async () => {
