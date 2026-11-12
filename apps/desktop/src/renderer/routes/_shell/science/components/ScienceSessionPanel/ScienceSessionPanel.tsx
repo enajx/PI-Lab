@@ -34,7 +34,6 @@ import {
   SCIENCE_PANEL_MIN_WIDTH,
   useResearchDiaryOpen,
   useResearchDiaryShare,
-  useSciencePanelWidth,
 } from "../../../../../preferences/preferences"
 import { overlayIsOpen } from "../../../../../shortcuts/keyGuards"
 import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
@@ -55,6 +54,7 @@ import type {
   CentralPanelRestoreState,
   SessionPane,
 } from "../../../projects/components/CentralPanel/useCentralPanel"
+import { fitPanelRow, type PanelRowFit, type PanelRowInput } from "./panelFit"
 import type { FocusSessionRequest } from "./sessionViewSearch"
 
 /**
@@ -121,6 +121,105 @@ export function useSciencePanel(): SciencePanelState {
   return { collapsed, setCollapsed, diaryOpen, toggleDiary }
 }
 
+/** A row's measured width in px (`Infinity` until measured or while not laid out), via a ref callback. */
+export function useMeasuredWidth(): [(node: HTMLElement | null) => void, number] {
+  const [width, setWidth] = useState(Number.POSITIVE_INFINITY)
+  const observer = useRef<ResizeObserver | null>(null)
+  const ref = useCallback((node: HTMLElement | null) => {
+    observer.current?.disconnect()
+    observer.current = null
+    if (!node) return
+    const measure = () => {
+      const next = node.getBoundingClientRect().width
+      setWidth(next > 0 ? next : Number.POSITIVE_INFINITY)
+    }
+    measure()
+    observer.current = new ResizeObserver(measure)
+    observer.current.observe(node)
+  }, [])
+  useEffect(() => () => observer.current?.disconnect(), [])
+  return [ref, width]
+}
+
+/** The right panel's saved width, being dragged live, and its setters. */
+export interface SciencePanelWidth {
+  /** The saved width (live while dragging); the drawn width can be smaller. */
+  saved: number
+  /** The width the panel is drawn at now. */
+  drawn: number
+  setWidth: (next: number) => void
+  persistWidth: (next: number) => void
+}
+
+/** A view's row of cards with the right panel, fitted to the row's width (see {@link fitPanelRow}). */
+export interface SciencePanelRow {
+  /** Ref for the row element that is measured. */
+  rowRef: (node: HTMLElement | null) => void
+  fit: PanelRowFit
+  /** The panel state to draw with: collapsed also while there is no room for it. */
+  panel: SciencePanelState
+  width: SciencePanelWidth
+}
+
+/**
+ * Fit a view's row (an optional side column, the main card and the right panel,
+ * whose saved width and drawn minimum are given) in its width with no horizontal scrolling; see {@link fitPanelRow}. While
+ * there is no room the panel is drawn collapsed, but `panel.collapsed` (the
+ * user's choice) is kept. Opening it then (its expand button, the top bar diary
+ * button, a session that opens) squeezes the others to their minimums, until the
+ * row has room again or the user collapses it.
+ */
+export function useSciencePanelRow(
+  panel: SciencePanelState,
+  savedPanelWidth: [number, (next: number) => void],
+  panelMin: number,
+  side: PanelRowInput["side"],
+  main: PanelRowInput["main"],
+): SciencePanelRow {
+  const [rowRef, available] = useMeasuredWidth()
+  const [savedWidth, persistWidth] = savedPanelWidth
+  const [width, setWidth] = useState(savedWidth)
+  useEffect(() => setWidth(savedWidth), [savedWidth])
+  const [squeezeOpen, setSqueezeOpen] = useState(false)
+  const input: PanelRowInput = {
+    available,
+    side,
+    main,
+    panel: { wanted: width, min: panelMin },
+    userCollapsed: panel.collapsed,
+    squeezeOpen: false,
+  }
+  const natural = fitPanelRow(input)
+  const fit = squeezeOpen ? fitPanelRow({ ...input, squeezeOpen: true }) : natural
+  // Room again (or collapsed by the user): the next shortage collapses the panel again.
+  useEffect(() => {
+    if (squeezeOpen && natural.open) setSqueezeOpen(false)
+  }, [natural.open, squeezeOpen])
+  const { setCollapsed: setUserCollapsed, toggleDiary: userToggleDiary, diaryOpen } = panel
+  const setCollapsed = useCallback(
+    (next: boolean) => {
+      setSqueezeOpen(!next)
+      setUserCollapsed(next)
+    },
+    [setUserCollapsed],
+  )
+  const forced = fit.forcedCollapsed
+  const toggleDiary = useCallback(() => {
+    if (!forced) {
+      userToggleDiary()
+      return
+    }
+    setSqueezeOpen(true)
+    if (!diaryOpen) userToggleDiary()
+  }, [diaryOpen, forced, userToggleDiary])
+  return {
+    rowRef,
+    fit,
+    panel: { collapsed: !fit.open, setCollapsed, diaryOpen, toggleDiary },
+    width: { saved: width, drawn: fit.panel, setWidth, persistWidth },
+  }
+}
+
 /**
  * The top bar Research diary button of a view with a right panel: icon-only,
  * pressed while the diary shows. `disabled` (no project chosen) asks to pick one.
@@ -158,8 +257,10 @@ interface ScienceSessionPanelProps {
   view: SessionPanelView
   /** The project sessions start in, or null when none is chosen (Tasks "All projects"). */
   project: { id: string; name: string } | null
-  /** Collapsed state and diary choice, from {@link useSciencePanel}. */
+  /** Collapsed state and diary choice, fitted to the row ({@link useSciencePanelRow}). */
   panel: SciencePanelState
+  /** The panel's saved and drawn width ({@link useSciencePanelRow}). */
+  width: SciencePanelWidth
   /** A started session to open as a tab, or null. */
   openSession: ScienceSessionRequest | null
   /** Called once `openSession` is open, so the caller can clear it. */
@@ -187,6 +288,7 @@ export function ScienceSessionPanel({
   view,
   project,
   panel,
+  width,
   openSession,
   onSessionOpened,
 }: ScienceSessionPanelProps) {
@@ -196,9 +298,6 @@ export function ScienceSessionPanel({
   const [savedShare, persistShare] = useResearchDiaryShare()
   const [share, setShare] = useState(savedShare)
   useEffect(() => setShare(savedShare), [savedShare])
-  const [savedWidth, persistWidth] = useSciencePanelWidth()
-  const [width, setWidth] = useState(savedWidth)
-  useEffect(() => setWidth(savedWidth), [savedWidth])
   const bodyRef = useRef<HTMLDivElement | null>(null)
   // Removes a drag's window listeners; also run if the panel unmounts mid-drag.
   const endDrag = useRef<(() => void) | null>(null)
@@ -277,16 +376,16 @@ export function ScienceSessionPanel({
       className={
         collapsed
           ? "flex shrink-0 flex-col items-center self-start overflow-hidden rounded-lg border border-border bg-muted/30"
-          : "relative flex min-h-0 shrink flex-col"
+          : "relative flex min-h-0 shrink-0 flex-col"
       }
-      style={collapsed ? undefined : { width, minWidth: SCIENCE_PANEL_MIN_WIDTH }}
+      style={collapsed ? undefined : { width: width.drawn }}
     >
       {collapsed ? null : (
         <EdgeResizeHandle
           side="left"
-          width={width}
-          onResize={setWidth}
-          onResizeEnd={persistWidth}
+          width={width.drawn}
+          onResize={width.setWidth}
+          onResizeEnd={width.persistWidth}
           min={SCIENCE_PANEL_MIN_WIDTH}
           max={SCIENCE_PANEL_MAX_WIDTH}
           testId="science-sessions-edge-drag"

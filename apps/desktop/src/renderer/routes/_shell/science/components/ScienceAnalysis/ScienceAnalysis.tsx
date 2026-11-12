@@ -29,6 +29,7 @@ import {
   useAnalysisProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
+  useSciencePanelWidth,
 } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
@@ -41,12 +42,18 @@ import {
   type ScienceSessionRequest,
   useFocusSessionRequest,
   useSciencePanel,
+  useSciencePanelRow,
 } from "../ScienceSessionPanel"
+import {
+  ANALYSIS_FILES_DRAWN_MIN_WIDTH,
+  ANALYSIS_PREVIEW_MIN_WIDTH,
+  ANALYSIS_PREVIEW_PREFERRED_WIDTH,
+  PANEL_DRAWN_MIN_WIDTH,
+} from "../ScienceSessionPanel/panelFit"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
 
 /** The preview column's smallest width in px, beside the resizable file list. */
-const PREVIEW_MIN_WIDTH = 256
 
 /**
  * Analysis science tab — a **read-only data
@@ -99,10 +106,20 @@ export function ScienceAnalysis({
   const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
   const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
-  const panel = useSciencePanel()
+  const userPanel = useSciencePanel()
   const [savedFilesWidth, persistFilesWidth] = useAnalysisFilesWidth()
   const [filesWidth, setFilesWidth] = useState(savedFilesWidth)
   useEffect(() => setFilesWidth(savedFilesWidth), [savedFilesWidth])
+  // The file list, preview and right panel fit the row's width (no horizontal scroll).
+  const row = useSciencePanelRow(
+    userPanel,
+    useSciencePanelWidth(),
+    PANEL_DRAWN_MIN_WIDTH,
+    projects.length === 0 ? null : { wanted: filesWidth, min: ANALYSIS_FILES_DRAWN_MIN_WIDTH },
+    { preferred: ANALYSIS_PREVIEW_PREFERRED_WIDTH, min: ANALYSIS_PREVIEW_MIN_WIDTH },
+  )
+  const panel = row.panel
+  const drawnFilesWidth = row.fit.side
   const capabilities = useQuery({
     ...trpc.projects.capabilities.queryOptions({ id: selectedProject?.id ?? "" }),
     enabled: Boolean(selectedProject),
@@ -451,13 +468,11 @@ export function ScienceAnalysis({
         </>
       }
     >
-      {/* The file list keeps its width and the preview 16rem; the right panel narrows first.
-          Each column is its own rounded card, 12px apart, like the project view. */}
-      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto">
-        <div
-          className="flex min-h-0 flex-1 flex-col"
-          style={{ minWidth: filesWidth + PREVIEW_MIN_WIDTH + 12 }}
-        >
+      {/* Each column is its own rounded card, 12px apart, like the project view. They fit
+          the row's width: when it runs short the right panel narrows first, then the file
+          list, then the preview, and then the right panel is drawn collapsed. */}
+      <div ref={row.rowRef} className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {projects.length === 0 ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               <NoProjectsState />
@@ -468,11 +483,11 @@ export function ScienceAnalysis({
               <div
                 data-testid="analysis-files-column"
                 className="relative flex min-h-0 shrink-0"
-                style={{ width: filesWidth }}
+                style={{ width: drawnFilesWidth }}
               >
                 <EdgeResizeHandle
                   side="right"
-                  width={filesWidth}
+                  width={drawnFilesWidth}
                   onResize={setFilesWidth}
                   onResizeEnd={persistFilesWidth}
                   min={ANALYSIS_FILES_MIN_WIDTH}
@@ -652,8 +667,7 @@ export function ScienceAnalysis({
               {/* Middle card: preview pane for the selected file. */}
               <div
                 data-testid="analysis-preview-column"
-                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
-                style={{ minWidth: PREVIEW_MIN_WIDTH }}
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
               >
                 {selectedProjectId && selectedRelPath ? (
                   <AnalysisPreview
@@ -677,6 +691,7 @@ export function ScienceAnalysis({
           view="analysis"
           project={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
           panel={panel}
+          width={row.width}
           openSession={sessionRequest}
           onSessionOpened={clearSessionRequest}
         />

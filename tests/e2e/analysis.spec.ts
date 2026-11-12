@@ -459,3 +459,98 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
   await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
 })
+
+/**
+ * Every card's right edge, and the row's scroll width, stay inside the view minus
+ * its 12px margin: nothing is cut off and nothing scrolls sideways.
+ */
+async function expectCardsInside(window: Page, viewTestId: string, cards: Locator[]) {
+  const view = await window.getByTestId(viewTestId).boundingBox()
+  if (!view) throw new Error(`No ${viewTestId}`)
+  for (const card of cards) {
+    if ((await card.count()) === 0) continue
+    const box = await card.first().boundingBox()
+    if (!box) continue
+    expect(Math.round(box.x + box.width)).toBeLessThanOrEqual(Math.round(view.x + view.width - 12))
+  }
+  // The view and each card's row hold their content: nothing overflows sideways.
+  for (const element of [window.getByTestId(viewTestId), ...cards]) {
+    if ((await element.count()) === 0) continue
+    const overflow = await element.first().evaluate((node) => {
+      const holder =
+        node.hasAttribute("data-testid") && node.parentElement ? node.parentElement : node
+      return holder.scrollWidth - holder.clientWidth
+    })
+    expect(overflow).toBeLessThanOrEqual(1)
+  }
+}
+
+/**
+ * Real app: at 1100x800 and 900x700 the Analysis and Tasks cards fit the window.
+ * Short of room the right panel is drawn collapsed without changing the saved
+ * choice: expanding it squeezes the other cards to their minimums, and a wide
+ * window shows it open again.
+ */
+test("Analysis and Tasks cards fit narrow windows, collapsing the right panel when needed", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  const setSize = (width: number, height: number) =>
+    app.evaluate(
+      ({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]?.setSize(w, h),
+      [width, height],
+    )
+  const panel = window.getByTestId("science-sessions")
+  const analysisCards = [
+    window.getByTestId("analysis-files-column"),
+    window.getByTestId("analysis-preview-column"),
+    panel,
+    panel.getByTestId("central-panel"),
+    panel.getByTestId("science-panel-diary"),
+  ]
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+
+  await setSize(1100, 800)
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expect(panel.getByTestId("central-panel")).toBeVisible({ timeout: 30_000 })
+  await expectCardsInside(window, "science-analysis", analysisCards)
+
+  await setSize(900, 700)
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await expectCardsInside(window, "science-analysis", analysisCards)
+  // Expanding makes room: the panel opens and every card still fits.
+  await panel.getByTestId("science-sessions-expand").click()
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  await expectCardsInside(window, "science-analysis", analysisCards)
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-900-expanded.png") })
+  await panel.getByTestId("science-sessions-collapse").click()
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await panel.getByTestId("science-sessions-expand").click()
+  await setSize(1400, 900)
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+  // Short of room again, the panel is drawn collapsed; the saved choice is still open.
+  await setSize(900, 700)
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await setSize(1400, 900)
+  await expect(panel).toHaveAttribute("data-collapsed", "false")
+
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
+  await expect(window.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  const tasksCards = [window.getByTestId("tasks-board"), panel]
+  for (const [width, height] of [
+    [1100, 800],
+    [900, 700],
+  ]) {
+    await setSize(width, height)
+    await expect(window.getByTestId("tasks-board")).toBeVisible()
+    await expect
+      .poll(async () => {
+        const board = await window.getByTestId("tasks-board").boundingBox()
+        return board ? Math.round(board.width) : 0
+      })
+      .toBeGreaterThanOrEqual(320)
+    await expectCardsInside(window, "science-tasks", tasksCards)
+  }
+})

@@ -17,7 +17,16 @@ import {
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { ProjectPicker } from "../ProjectPicker"
-import { SciencePanelDiaryButton, type SciencePanelState } from "../ScienceSessionPanel"
+import {
+  SciencePanelDiaryButton,
+  type SciencePanelState,
+  type SciencePanelWidth,
+  useSciencePanelRow,
+} from "../ScienceSessionPanel"
+import {
+  LATEX_EDITOR_MIN_WIDTH,
+  LATEX_EDITOR_PREFERRED_WIDTH,
+} from "../ScienceSessionPanel/panelFit"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type FocusSessionRequest, PaperEditor } from "./PaperEditor"
 import { MissingPaperFolder } from "./PaperFolder"
@@ -99,7 +108,16 @@ export function ScienceLatex({
   })
   const standaloneSetup = newPaper || (projectsQuery.isSuccess && projects.length === 0)
   const paperOnly = !standaloneSetup && selected?.metadata?.paperOnly === true
-  const diaryPanel = useLatexDiaryPanel()
+  // The editor and the diary fit the row's width: the diary narrows first, then the
+  // editor, and then the diary is drawn collapsed (see useSciencePanelRow).
+  const diaryRow = useSciencePanelRow(
+    useLatexDiaryPanel(),
+    useResearchDiaryWidth(),
+    RESEARCH_DIARY_MIN_WIDTH,
+    null,
+    { preferred: LATEX_EDITOR_PREFERRED_WIDTH, min: LATEX_EDITOR_MIN_WIDTH },
+  )
+  const diaryPanel = diaryRow.panel
   // The paper workspace puts the picker in its "+" shortcut row (in `syncSlot`).
   const editorShown =
     !projectsQuery.isError &&
@@ -179,7 +197,7 @@ export function ScienceLatex({
       ) : paper.data === undefined ? null : paper.data.paper?.missing ? (
         <MissingPaperFolder key={selected.id} projectId={selected.id} dir={paper.data.paper.dir} />
       ) : paper.data.paper && paper.data.workspaceId && creatingFor !== selected.id ? (
-        <div className="flex min-h-0 flex-1 gap-3">
+        <div ref={diaryRow.rowRef} className="flex min-h-0 flex-1 gap-3 overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
             {paper.data.skippedFolders && paper.data.skippedFolders.length > 0 ? (
               <p
@@ -222,7 +240,9 @@ export function ScienceLatex({
               }
             />
           </div>
-          {paperOnly ? null : <LatexDiaryColumn projectId={selected.id} panel={diaryPanel} />}
+          {paperOnly ? null : (
+            <LatexDiaryColumn projectId={selected.id} panel={diaryPanel} width={diaryRow.width} />
+          )}
         </div>
       ) : (
         <PaperSetup
@@ -259,14 +279,20 @@ function useLatexDiaryPanel(): SciencePanelState {
 
 /**
  * The LaTeX Editor's right column: the project's research diary as its own rounded
- * card, resizable from the gap on its left (the width is a saved preference), with
- * a collapse button; when collapsed, a small card with a button to show it again.
+ * card, resizable from the gap on its left (the width is a saved preference; it is
+ * drawn at `width.drawn`), with a collapse button; when collapsed, a small card with
+ * a button to show it again.
  */
-function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: SciencePanelState }) {
+function LatexDiaryColumn({
+  projectId,
+  panel,
+  width,
+}: {
+  projectId: string
+  panel: SciencePanelState
+  width: SciencePanelWidth
+}) {
   const t = useTranslate()
-  const [savedWidth, persistWidth] = useResearchDiaryWidth()
-  const [width, setWidth] = useState(savedWidth)
-  useEffect(() => setWidth(savedWidth), [savedWidth])
   if (panel.collapsed) {
     return (
       <aside
@@ -292,14 +318,14 @@ function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: Scie
     <aside
       data-testid="latex-diary"
       data-collapsed="false"
-      className="relative flex min-h-0 shrink flex-col"
-      style={{ width, minWidth: RESEARCH_DIARY_MIN_WIDTH }}
+      className="relative flex min-h-0 shrink-0 flex-col"
+      style={{ width: width.drawn }}
     >
       <EdgeResizeHandle
         side="left"
-        width={width}
-        onResize={setWidth}
-        onResizeEnd={persistWidth}
+        width={width.drawn}
+        onResize={width.setWidth}
+        onResizeEnd={width.persistWidth}
         min={RESEARCH_DIARY_MIN_WIDTH}
         max={RESEARCH_DIARY_MAX_WIDTH}
         testId="research-diary-edge-drag"

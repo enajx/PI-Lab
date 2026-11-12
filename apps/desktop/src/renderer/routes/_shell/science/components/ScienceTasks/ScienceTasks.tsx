@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectMarkdownChoice } from "../../../../../components/ProjectMarkdownChoice"
 import { useTranslate } from "../../../../../i18n/language"
-import { readDefaultAgentId, useTasksProject } from "../../../../../preferences/preferences"
+import {
+  readDefaultAgentId,
+  useSciencePanelWidth,
+  useTasksProject,
+} from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
 import { ProjectPicker } from "../ProjectPicker"
@@ -15,7 +19,9 @@ import {
   type ScienceSessionRequest,
   useFocusSessionRequest,
   useSciencePanel,
+  useSciencePanelRow,
 } from "../ScienceSessionPanel"
+import { PANEL_DRAWN_MIN_WIDTH, TASKS_BOARD_MIN_WIDTH } from "../ScienceSessionPanel/panelFit"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { type TaskDraft, type TaskRecord, type TaskStatus, TasksWorkspace } from "./TasksWorkspace"
 
@@ -79,7 +85,18 @@ export function ScienceTasks({
   const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
   const clearSessionRequest = useCallback(() => setSessionRequest(null), [])
   useFocusSessionRequest(initialProjectId, focusSession, setSessionRequest)
-  const panel = useSciencePanel()
+  // The board and the right panel fit the row's width (no horizontal scroll).
+  const row = useSciencePanelRow(
+    useSciencePanel(),
+    useSciencePanelWidth(),
+    PANEL_DRAWN_MIN_WIDTH,
+    null,
+    {
+      preferred: TASKS_BOARD_MIN_WIDTH,
+      min: TASKS_BOARD_MIN_WIDTH,
+    },
+  )
+  const panel = row.panel
   const [shortcutError, setShortcutError] = useState<string | null>(null)
 
   const tasks = (listing.data?.tasks ?? []) as TaskRecord[]
@@ -254,7 +271,7 @@ export function ScienceTasks({
       }
     >
       {/* The board and the right panel are separate rounded cards, 12px apart. */}
-      <div className="flex min-h-0 flex-1 gap-3">
+      <div ref={row.rowRef} className="flex min-h-0 flex-1 gap-3 overflow-hidden">
         <div
           data-testid="tasks-board"
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
@@ -310,6 +327,7 @@ export function ScienceTasks({
         <ScienceSessionPanel
           view="tasks"
           panel={panel}
+          width={row.width}
           project={
             selectedSource
               ? { id: selectedSource.projectId, name: selectedSource.projectName }

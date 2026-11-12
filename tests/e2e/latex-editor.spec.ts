@@ -1036,6 +1036,32 @@ test("LaTeX Editor shows the editor and diary as separate cards, and keeps the d
     await page.getByTestId("latex-diary-expand").click()
     await expect(diary).toHaveAttribute("data-collapsed", "false")
 
+    // Narrow windows: the editor and diary cards stay inside the view's 12px margin.
+    for (const [w, h] of [
+      [1100, 800],
+      [900, 700],
+    ]) {
+      await app.evaluate(
+        ({ BrowserWindow }, [width, height]) =>
+          BrowserWindow.getAllWindows()[0]?.setSize(width, height),
+        [w, h],
+      )
+      await expect
+        .poll(async () => {
+          const view = await latex.boundingBox()
+          const cards = await Promise.all(
+            [latex.getByTestId("central-panel"), diary].map((card) => card.boundingBox()),
+          )
+          if (!view || cards.some((card) => !card)) return "no layout"
+          const right = view.x + view.width - 12
+          return cards.every((card) => card && Math.round(card.x + card.width) <= Math.round(right))
+            ? "inside"
+            : "past the right edge"
+        })
+        .toBe("inside")
+    }
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1400, 900))
+
     const handle = await page.getByTestId("research-diary-edge-drag").boundingBox()
     if (!handle) throw new Error("No diary resize handle")
     const before = column.width

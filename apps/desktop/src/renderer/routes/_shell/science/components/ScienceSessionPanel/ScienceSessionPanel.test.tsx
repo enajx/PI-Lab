@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { useSciencePanelWidth } from "../../../../../preferences/preferences"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 
@@ -15,9 +16,8 @@ vi.mock("../../../../../Terminal", () => ({
   ),
 }))
 
-const { ScienceSessionPanel, SciencePanelDiaryButton, useSciencePanel } = await import(
-  "./ScienceSessionPanel"
-)
+const { ScienceSessionPanel, SciencePanelDiaryButton, useSciencePanel, useSciencePanelRow } =
+  await import("./ScienceSessionPanel")
 
 let ensured: string[]
 let started: Array<{ agentId: string; origin: string; projectId: string }>
@@ -66,14 +66,22 @@ function Harness({
   view: "tasks" | "analysis"
   project: { id: string; name: string } | null
 }) {
-  const panel = useSciencePanel()
+  const row = useSciencePanelRow(useSciencePanel(), useSciencePanelWidth(), 300, null, {
+    preferred: 320,
+    min: 320,
+  })
   return (
     <>
-      <SciencePanelDiaryButton testId="diary-button" panel={panel} disabled={project === null} />
+      <SciencePanelDiaryButton
+        testId="diary-button"
+        panel={row.panel}
+        disabled={project === null}
+      />
       <ScienceSessionPanel
         view={view}
         project={project}
-        panel={panel}
+        panel={row.panel}
+        width={row.width}
         openSession={null}
         onSessionOpened={() => undefined}
       />
