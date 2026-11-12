@@ -375,13 +375,12 @@ async function widthOf(locator: Locator): Promise<number> {
 }
 
 /**
- * Real app: the line between the file list and the preview, and the line between
+ * Real app: the gap between the file list and the preview, and the gap between
  * the preview and the right panel, both drag to resize; each width is saved and
- * comes back after a reload. Tasks uses the same right panel width. The rounded
- * Sessions box keeps a 12px gap from the lines around it (the panel's left line,
- * the Sessions header line and the diary divider), like the project view's boxes.
+ * comes back after a reload. Tasks uses the same right panel width. Like the
+ * project view, each part is its own rounded card with 12px gaps between them.
  */
-test("Analysis file list and right panel resize from their lines and keep the size after reload", async () => {
+test("Analysis file list and right panel resize from the gaps and keep the size after reload", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1600, 900))
@@ -404,16 +403,48 @@ test("Analysis file list and right panel resize from their lines and keep the si
   await dragHandle(window, "science-sessions-edge-drag", -100)
   await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
 
-  // The rounded Sessions box does not touch any line around it.
+  // Like the project view, the file list, the preview, Sessions and the diary are
+  // separate rounded cards 12px apart, with no line of their own outside a card; the
+  // Sessions title and collapse button sit in the Sessions card's toolbar row.
   const box = await panel.getByTestId("central-panel").boundingBox()
   const aside = await panel.boundingBox()
+  const filesBox = await files.boundingBox()
+  const preview = await window.getByTestId("analysis-preview-column").boundingBox()
   const header = await panel.getByTestId("science-sessions-header").boundingBox()
-  const divider = await panel.getByTestId("science-panel-divider").boundingBox()
-  if (!box || !aside || !header || !divider) throw new Error("No Sessions layout")
-  expect(Math.round(box.x - aside.x)).toBeGreaterThanOrEqual(12)
-  expect(Math.round(aside.x + aside.width - (box.x + box.width))).toBeGreaterThanOrEqual(12)
-  expect(Math.round(box.y - (header.y + header.height))).toBeGreaterThanOrEqual(12)
-  expect(Math.round(divider.y - (box.y + box.height))).toBeGreaterThanOrEqual(12)
+  const collapse = await panel.getByTestId("science-sessions-collapse").boundingBox()
+  const diaryCard = await panel.getByTestId("science-panel-diary").boundingBox()
+  if (!box || !aside || !filesBox || !preview || !header || !collapse || !diaryCard) {
+    throw new Error("No Analysis layout")
+  }
+  expect(Math.round(preview.x - (filesBox.x + filesBox.width))).toBe(12)
+  expect(Math.round(aside.x - (preview.x + preview.width))).toBe(12)
+  expect(Math.round(box.x)).toBe(Math.round(aside.x))
+  expect(Math.round(box.x + box.width)).toBe(Math.round(aside.x + aside.width))
+  expect(Math.round(diaryCard.y - (box.y + box.height))).toBe(12)
+  for (const inner of [header, collapse]) {
+    expect(inner.y).toBeGreaterThanOrEqual(box.y)
+    expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + 40)
+    expect(inner.x + inner.width).toBeLessThanOrEqual(box.x + box.width)
+  }
+  const cardStyle = (locator: Locator) =>
+    locator.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return `${style.borderTopLeftRadius} ${style.borderLeftWidth}`
+    })
+  for (const card of [
+    files.locator(":scope > div.rounded-lg"),
+    window.getByTestId("analysis-preview-column"),
+    panel.getByTestId("central-panel"),
+    panel.getByTestId("science-panel-diary"),
+  ]) {
+    expect(await cardStyle(card)).toBe("8px 1px")
+  }
+  for (const frame of [files, panel]) {
+    expect(await frame.evaluate((element) => getComputedStyle(element).borderLeftWidth)).toBe("0px")
+    expect(await frame.evaluate((element) => getComputedStyle(element).borderRightWidth)).toBe(
+      "0px",
+    )
+  }
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-resized.png") })
 
   // The reload stays on Analysis.

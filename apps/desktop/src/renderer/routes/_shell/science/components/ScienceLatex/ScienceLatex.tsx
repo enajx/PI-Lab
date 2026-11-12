@@ -139,6 +139,7 @@ export function ScienceLatex({
 
   return (
     <ScienceTabShell
+      layout="cards"
       title={t("LaTeX Editor")}
       testId="science-latex"
       actions={
@@ -150,7 +151,7 @@ export function ScienceLatex({
       }
     >
       {updateEditor.isError ? (
-        <p role="alert" className="cursor-text select-text px-6 pt-3 text-destructive text-sm">
+        <p role="alert" className="cursor-text select-text px-1 text-destructive text-sm">
           {updateEditor.error.message}
         </p>
       ) : null}
@@ -178,12 +179,12 @@ export function ScienceLatex({
       ) : paper.data === undefined ? null : paper.data.paper?.missing ? (
         <MissingPaperFolder key={selected.id} projectId={selected.id} dir={paper.data.paper.dir} />
       ) : paper.data.paper && paper.data.workspaceId && creatingFor !== selected.id ? (
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 gap-3">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
             {paper.data.skippedFolders && paper.data.skippedFolders.length > 0 ? (
               <p
                 data-testid="paper-skipped-folders"
-                className="cursor-text select-text px-6 pt-2 text-muted-foreground text-xs"
+                className="cursor-text select-text px-1 text-muted-foreground text-xs"
               >
                 {t("Skipped folders that could not be read:")}{" "}
                 {paper.data.skippedFolders.join(", ")}
@@ -257,9 +258,9 @@ function useLatexDiaryPanel(): SciencePanelState {
 }
 
 /**
- * The LaTeX Editor's right column: the project's research diary, resizable from
- * its left edge (the width is a saved preference), with a collapse button; when
- * collapsed, a thin strip with a button to show it again.
+ * The LaTeX Editor's right column: the project's research diary as its own rounded
+ * card, resizable from the gap on its left (the width is a saved preference), with
+ * a collapse button; when collapsed, a small card with a button to show it again.
  */
 function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: SciencePanelState }) {
   const t = useTranslate()
@@ -271,7 +272,7 @@ function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: Scie
       <aside
         data-testid="latex-diary"
         data-collapsed="true"
-        className="flex w-9 shrink-0 flex-col items-center border-border border-l py-2"
+        className="flex shrink-0 flex-col items-center self-start overflow-hidden rounded-lg border border-border bg-muted/30"
       >
         <button
           type="button"
@@ -280,7 +281,7 @@ function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: Scie
           aria-label={t("Show research diary")}
           data-feature-help={t("Show this project's research diary.")}
           onClick={() => panel.setCollapsed(false)}
-          className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <PanelRightOpen className="size-4" aria-hidden />
         </button>
@@ -291,7 +292,7 @@ function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: Scie
     <aside
       data-testid="latex-diary"
       data-collapsed="false"
-      className="relative flex min-h-0 shrink flex-col border-border border-l"
+      className="relative flex min-h-0 shrink flex-col"
       style={{ width, minWidth: RESEARCH_DIARY_MIN_WIDTH }}
     >
       <EdgeResizeHandle
@@ -303,23 +304,25 @@ function LatexDiaryColumn({ projectId, panel }: { projectId: string; panel: Scie
         max={RESEARCH_DIARY_MAX_WIDTH}
         testId="research-diary-edge-drag"
       />
-      <ResearchDiaryPanel
-        key={projectId}
-        projectId={projectId}
-        headerActions={
-          <button
-            type="button"
-            data-testid="latex-diary-collapse"
-            title={t("Hide research diary")}
-            aria-label={t("Hide research diary")}
-            data-feature-help={t("Collapse this panel to give the editor more room.")}
-            onClick={() => panel.setCollapsed(true)}
-            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <PanelRightClose className="size-4" aria-hidden />
-          </button>
-        }
-      />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+        <ResearchDiaryPanel
+          key={projectId}
+          projectId={projectId}
+          headerActions={
+            <button
+              type="button"
+              data-testid="latex-diary-collapse"
+              title={t("Hide research diary")}
+              aria-label={t("Hide research diary")}
+              data-feature-help={t("Collapse this panel to give the editor more room.")}
+              onClick={() => panel.setCollapsed(true)}
+              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <PanelRightClose className="size-4" aria-hidden />
+            </button>
+          }
+        />
+      </div>
     </aside>
   )
 }

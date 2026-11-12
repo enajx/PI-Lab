@@ -306,6 +306,7 @@ export function ScienceAnalysis({
 
   return (
     <ScienceTabShell
+      layout="cards"
       testId="science-analysis"
       title={t("Analysis")}
       subtitle={t("Browse and preview the data files in a project's repo")}
@@ -450,22 +451,23 @@ export function ScienceAnalysis({
         </>
       }
     >
-      {/* The file list keeps its width and the preview 16rem; the right panel narrows first. */}
-      <div className="flex min-h-0 flex-1 overflow-x-auto">
+      {/* The file list keeps its width and the preview 16rem; the right panel narrows first.
+          Each column is its own rounded card, 12px apart, like the project view. */}
+      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto">
         <div
           className="flex min-h-0 flex-1 flex-col"
-          style={{ minWidth: filesWidth + PREVIEW_MIN_WIDTH }}
+          style={{ minWidth: filesWidth + PREVIEW_MIN_WIDTH + 12 }}
         >
           {projects.length === 0 ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
               <NoProjectsState />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1">
-              {/* Left column: search + category filter + file list, resizable from its right line. */}
+            <div className="flex min-h-0 flex-1 gap-3">
+              {/* Left card: search + category filter + file list, resizable from the gap on its right. */}
               <div
                 data-testid="analysis-files-column"
-                className="relative flex shrink-0 flex-col border-border border-r"
+                className="relative flex min-h-0 shrink-0"
                 style={{ width: filesWidth }}
               >
                 <EdgeResizeHandle
@@ -477,177 +479,180 @@ export function ScienceAnalysis({
                   max={ANALYSIS_FILES_MAX_WIDTH}
                   testId="analysis-files-edge-drag"
                 />
-                <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
-                  {selectedProjectId ? (
-                    <ResultsFolderField
-                      key={selectedProjectId}
-                      projectId={selectedProjectId}
-                      resultsFolder={listing.data?.resultsFolder ?? null}
-                      overridden={listing.data?.overridden === true}
-                    />
-                  ) : null}
-                  <div className="relative">
-                    <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
-                    <Input
-                      data-testid="analysis-search"
-                      aria-label={t("Search data files")}
-                      data-feature-label={t("Search data files")}
-                      data-feature-help={t(
-                        "Filter this project's discovered data files by name or path.",
-                      )}
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={t("Search files…")}
-                      className="h-8 pl-8"
-                      disabled={allFiles.length === 0}
-                    />
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+                  <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
+                    {selectedProjectId ? (
+                      <ResultsFolderField
+                        key={selectedProjectId}
+                        projectId={selectedProjectId}
+                        resultsFolder={listing.data?.resultsFolder ?? null}
+                        overridden={listing.data?.overridden === true}
+                      />
+                    ) : null}
+                    <div className="relative">
+                      <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
+                      <Input
+                        data-testid="analysis-search"
+                        aria-label={t("Search data files")}
+                        data-feature-label={t("Search data files")}
+                        data-feature-help={t(
+                          "Filter this project's discovered data files by name or path.",
+                        )}
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder={t("Search files…")}
+                        className="h-8 pl-8"
+                        disabled={allFiles.length === 0}
+                      />
+                    </div>
+                    {categoriesPresent.length > 0 ? (
+                      <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                        <FilterChip
+                          label={t("All")}
+                          active={categoryFilter === "all"}
+                          onClick={() => selectCategory("all")}
+                          testId="analysis-category-all"
+                        />
+                        {categoriesPresent.map((category) => (
+                          <FilterChip
+                            key={category}
+                            label={t(DATA_FILE_CATEGORY_LABELS[category])}
+                            active={categoryFilter === category}
+                            onClick={() => selectCategory(category)}
+                            testId={`analysis-category-${category}`}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    {subKindsPresent.length > 1 ? (
+                      <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
+                        <FilterChip
+                          label={t("All")}
+                          active={kindFilter === null}
+                          onClick={() => setKindFilter(null)}
+                          testId="analysis-subkind-all"
+                        />
+                        {subKindsPresent.map((kind) => (
+                          <FilterChip
+                            key={kind}
+                            label={t(DATA_FILE_KIND_LABELS[kind])}
+                            active={kindFilter === kind}
+                            onClick={() => setKindFilter(kind)}
+                            testId={`analysis-subkind-${kind}`}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                  {categoriesPresent.length > 0 ? (
-                    <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
-                      <FilterChip
-                        label={t("All")}
-                        active={categoryFilter === "all"}
-                        onClick={() => selectCategory("all")}
-                        testId="analysis-category-all"
-                      />
-                      {categoriesPresent.map((category) => (
-                        <FilterChip
-                          key={category}
-                          label={t(DATA_FILE_CATEGORY_LABELS[category])}
-                          active={categoryFilter === category}
-                          onClick={() => selectCategory(category)}
-                          testId={`analysis-category-${category}`}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                  {subKindsPresent.length > 1 ? (
-                    <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
-                      <FilterChip
-                        label={t("All")}
-                        active={kindFilter === null}
-                        onClick={() => setKindFilter(null)}
-                        testId="analysis-subkind-all"
-                      />
-                      {subKindsPresent.map((kind) => (
-                        <FilterChip
-                          key={kind}
-                          label={t(DATA_FILE_KIND_LABELS[kind])}
-                          active={kindFilter === kind}
-                          onClick={() => setKindFilter(kind)}
-                          testId={`analysis-subkind-${kind}`}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  {listing.data?.partial ? (
-                    <p
-                      data-testid="analysis-partial"
-                      role="status"
-                      className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
-                      title={listing.data.skipped.join("\n")}
-                    >
-                      {t("Some project paths could not be read")} ({listing.data.skipped.length}).
-                    </p>
-                  ) : null}
-                  {listing.isError ? (
-                    <p
-                      data-testid="analysis-list-error"
-                      role="alert"
-                      className="p-4 text-destructive text-xs"
-                    >
-                      {t("Could not read project data files:")} {listing.error.message}
-                    </p>
-                  ) : resultsMissing && allFiles.length === 0 ? (
-                    <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
-                  ) : allFiles.length === 0 && !listing.isLoading ? (
-                    <EmptyState />
-                  ) : (
-                    <div className="flex flex-col gap-3 p-3">
-                      {resultsMissing ? (
-                        <p
-                          data-testid="analysis-results-missing"
-                          className="rounded border border-border border-dashed px-2 py-1.5 text-muted-foreground text-xs"
-                        >
-                          {t("No {folder} folder in this project").replace(
-                            "{folder}",
-                            `${listing.data?.resultsFolder ?? ""}/`,
-                          )}
-                        </p>
-                      ) : null}
-                      <div className="flex items-center justify-between px-1">
-                        <span
-                          data-testid="analysis-file-count"
-                          className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
-                        >
-                          {filtered.length} {t("of")} {allFiles.length} {t("files")}
-                        </span>
-                        {listing.data?.truncated ? (
-                          <span
-                            data-testid="analysis-truncated"
-                            className="text-[10px] text-amber-500"
-                            title={t("The repo has more data files than are shown")}
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {listing.data?.partial ? (
+                      <p
+                        data-testid="analysis-partial"
+                        role="status"
+                        className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
+                        title={listing.data.skipped.join("\n")}
+                      >
+                        {t("Some project paths could not be read")} ({listing.data.skipped.length}).
+                      </p>
+                    ) : null}
+                    {listing.isError ? (
+                      <p
+                        data-testid="analysis-list-error"
+                        role="alert"
+                        className="p-4 text-destructive text-xs"
+                      >
+                        {t("Could not read project data files:")} {listing.error.message}
+                      </p>
+                    ) : resultsMissing && allFiles.length === 0 ? (
+                      <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
+                    ) : allFiles.length === 0 && !listing.isLoading ? (
+                      <EmptyState />
+                    ) : (
+                      <div className="flex flex-col gap-3 p-3">
+                        {resultsMissing ? (
+                          <p
+                            data-testid="analysis-results-missing"
+                            className="rounded border border-border border-dashed px-2 py-1.5 text-muted-foreground text-xs"
                           >
-                            {t("truncated")}
+                            {t("No {folder} folder in this project").replace(
+                              "{folder}",
+                              `${listing.data?.resultsFolder ?? ""}/`,
+                            )}
+                          </p>
+                        ) : null}
+                        <div className="flex items-center justify-between px-1">
+                          <span
+                            data-testid="analysis-file-count"
+                            className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                          >
+                            {filtered.length} {t("of")} {allFiles.length} {t("files")}
                           </span>
+                          {listing.data?.truncated ? (
+                            <span
+                              data-testid="analysis-truncated"
+                              className="text-[10px] text-amber-500"
+                              title={t("The repo has more data files than are shown")}
+                            >
+                              {t("truncated")}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {filteredGroups.map((group) => (
+                          <div
+                            key={group.experiment ?? ""}
+                            data-testid="analysis-experiment-group"
+                            data-experiment={group.experiment ?? ""}
+                            className="flex flex-col gap-1"
+                          >
+                            <div className="flex items-center gap-2 px-1">
+                              <span
+                                className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
+                                title={group.experiment ?? undefined}
+                              >
+                                {group.experiment ?? t("No experiment")}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground/50">
+                                {group.files.length}
+                              </span>
+                            </div>
+                            {fileRows(group.files)}
+                          </div>
+                        ))}
+
+                        {filteredReports.length > 0 ? (
+                          <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 px-1">
+                              <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+                                {t("Reports (reports/)")}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground/50">
+                                {filteredReports.length}
+                              </span>
+                            </div>
+                            {fileRows(filteredReports)}
+                          </div>
+                        ) : null}
+
+                        {filtered.length === 0 && allFiles.length > 0 ? (
+                          <p
+                            data-testid="analysis-no-matches"
+                            className="px-1 text-muted-foreground text-xs"
+                          >
+                            {t("No files match the current filter.")}
+                          </p>
                         ) : null}
                       </div>
-
-                      {filteredGroups.map((group) => (
-                        <div
-                          key={group.experiment ?? ""}
-                          data-testid="analysis-experiment-group"
-                          data-experiment={group.experiment ?? ""}
-                          className="flex flex-col gap-1"
-                        >
-                          <div className="flex items-center gap-2 px-1">
-                            <span
-                              className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
-                              title={group.experiment ?? undefined}
-                            >
-                              {group.experiment ?? t("No experiment")}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground/50">
-                              {group.files.length}
-                            </span>
-                          </div>
-                          {fileRows(group.files)}
-                        </div>
-                      ))}
-
-                      {filteredReports.length > 0 ? (
-                        <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2 px-1">
-                            <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                              {t("Reports (reports/)")}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground/50">
-                              {filteredReports.length}
-                            </span>
-                          </div>
-                          {fileRows(filteredReports)}
-                        </div>
-                      ) : null}
-
-                      {filtered.length === 0 && allFiles.length > 0 ? (
-                        <p
-                          data-testid="analysis-no-matches"
-                          className="px-1 text-muted-foreground text-xs"
-                        >
-                          {t("No files match the current filter.")}
-                        </p>
-                      ) : null}
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Right column: preview pane for the selected file. */}
+              {/* Middle card: preview pane for the selected file. */}
               <div
-                className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                data-testid="analysis-preview-column"
+                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
                 style={{ minWidth: PREVIEW_MIN_WIDTH }}
               >
                 {selectedProjectId && selectedRelPath ? (

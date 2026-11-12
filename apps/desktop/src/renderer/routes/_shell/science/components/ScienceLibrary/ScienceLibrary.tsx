@@ -57,6 +57,7 @@ export function ScienceLibrary() {
 
   return (
     <ScienceTabShell
+      layout="flush"
       testId="science-library"
       title={t("Library")}
       subtitle={t("Browse your Zotero library or a folder of PDFs")}

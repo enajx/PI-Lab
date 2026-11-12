@@ -170,9 +170,11 @@ interface ScienceSessionPanelProps {
  * The right panel of Tasks and Analysis: agent and terminal sessions on top, and
  * the chosen project's research diary below (when the diary is on), with a
  * draggable divider between them whose position is saved as the diary's height
- * share. The panel resizes from its left line; the width is one saved value for
- * Analysis and Tasks. The rounded Sessions box keeps a gap from the lines around
- * it. The sessions part is built from the same central panel as the LaTeX
+ * share. Like the project view, the Sessions part and the diary part are each
+ * their own rounded card, 12px apart; the Sessions card's toolbar row holds its
+ * title and collapse button, the diary card holds the diary's own header. The
+ * panel resizes from the gap on its left, and the gap between the cards is the
+ * divider. The width is one saved value for Analysis and Tasks. The sessions part is built from the same central panel as the LaTeX
  * Editor (with its "+", agent and terminal buttons), and its sessions start in the
  * selected project's main folder. The panel starts open with the diary while
  * the diary is on (the default), else collapsed; collapsing hides both parts. It opens when a session opens. ⌘T (Settings → Shortcuts) opens a
@@ -239,14 +241,43 @@ export function ScienceSessionPanel({
     window.addEventListener("pointercancel", onUp)
   }
 
+  const header: SessionsHeader = {
+    title: (
+      <span
+        data-testid="science-sessions-header"
+        className="truncate text-muted-foreground text-xs"
+      >
+        {t("Sessions")}
+      </span>
+    ),
+    collapse: (
+      <button
+        type="button"
+        data-testid="science-sessions-collapse"
+        title={t("Hide sessions")}
+        aria-label={t("Hide sessions")}
+        data-feature-help={t("Collapse this panel to give the main view more room.")}
+        onClick={() => setCollapsed(true)}
+        className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <PanelRightClose className="size-4" aria-hidden />
+      </button>
+    ),
+  }
+
+  // Open: the Sessions card and the diary card, 12px apart, each with its own header;
+  // the panel resizes from the gap on its left, and the gap between the cards is the
+  // divider. Collapsed: only a small card with the expand button is left, at the top
+  // of the column. One tree for both, so the sessions part is not remounted (with
+  // notebook tabs it stays mounted, hidden, while collapsed).
   return (
     <aside
       data-testid="science-sessions"
       data-collapsed={collapsed}
       className={
         collapsed
-          ? "flex w-9 shrink-0 flex-col items-center border-border border-l py-2"
-          : "relative flex shrink flex-col border-border border-l"
+          ? "flex shrink-0 flex-col items-center self-start overflow-hidden rounded-lg border border-border bg-muted/30"
+          : "relative flex min-h-0 shrink flex-col"
       }
       style={collapsed ? undefined : { width, minWidth: SCIENCE_PANEL_MIN_WIDTH }}
     >
@@ -271,29 +302,11 @@ export function ScienceSessionPanel({
             "Open the panel with this project's agent and terminal sessions and its research diary.",
           )}
           onClick={expand}
-          className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <PanelRightOpen className="size-4" aria-hidden />
         </button>
-      ) : (
-        <div
-          data-testid="science-sessions-header"
-          className="flex h-8 shrink-0 items-center justify-between border-border border-b px-2"
-        >
-          <span className="text-muted-foreground text-xs">{t("Sessions")}</span>
-          <button
-            type="button"
-            data-testid="science-sessions-collapse"
-            title={t("Hide sessions")}
-            aria-label={t("Hide sessions")}
-            data-feature-help={t("Collapse this panel to give the main view more room.")}
-            onClick={() => setCollapsed(true)}
-            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <PanelRightClose className="size-4" aria-hidden />
-          </button>
-        </div>
-      )}
+      ) : null}
       <div
         ref={bodyRef}
         className={collapsed ? "contents" : "flex min-h-0 min-w-0 flex-1 flex-col"}
@@ -309,12 +322,13 @@ export function ScienceSessionPanel({
               view={view}
               project={project}
               collapsed={collapsed}
+              header={header}
               onExpand={expand}
               openSession={openSession?.projectId === project.id ? openSession : null}
               onSessionOpened={onSessionOpened}
             />
           ) : (
-            <NoProjectSessions collapsed={collapsed} onExpand={expand} />
+            <NoProjectSessions collapsed={collapsed} header={header} onExpand={expand} />
           )}
         </div>
         {diaryProjectId ? (
@@ -323,11 +337,13 @@ export function ScienceSessionPanel({
               data-testid="science-panel-divider"
               aria-hidden
               onPointerDown={onDividerDown}
-              className="app-no-drag h-1.5 shrink-0 cursor-row-resize border-border border-t transition-colors hover:bg-primary/30"
-            />
+              className="app-no-drag group flex h-3 shrink-0 cursor-row-resize items-center"
+            >
+              <div className="h-1.5 w-full rounded-full transition-colors group-hover:bg-primary/30" />
+            </div>
             <div
               data-testid="science-panel-diary"
-              className="flex min-h-0 min-w-0 flex-col"
+              className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border"
               style={{ flex: `${share} 1 0` }}
             >
               <ResearchDiaryPanel
@@ -343,8 +359,31 @@ export function ScienceSessionPanel({
   )
 }
 
+/** The Sessions card's title and collapse button, shown in its toolbar row. */
+interface SessionsHeader {
+  title: ReactNode
+  collapse: ReactNode
+}
+
+/**
+ * The Sessions card while it has no central panel to show (the workspace is loading,
+ * or failed to open): the same toolbar row with the title and collapse button, over `children`.
+ */
+function SessionsCard({ header, children }: { header: SessionsHeader; children: ReactNode }) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+      <div className="flex shrink-0 items-center gap-0.5 border-border border-b bg-muted/30 pr-1 pl-3">
+        <div className="flex min-w-0 flex-1 items-center">{header.title}</div>
+        {header.collapse}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 interface SessionsBodyProps {
   collapsed: boolean
+  header: SessionsHeader
   onExpand: () => void
 }
 
@@ -358,6 +397,7 @@ function ProjectSessions({
   view,
   project,
   collapsed,
+  header,
   onExpand,
   openSession,
   onSessionOpened,
@@ -384,18 +424,21 @@ function ProjectSessions({
   }, [project.id])
   if (ensureMain.error && !collapsed) {
     return (
-      <p role="alert" className="cursor-text select-text p-3 text-destructive text-xs">
-        {ensureMain.error.message}
-      </p>
+      <SessionsCard header={header}>
+        <p role="alert" className="cursor-text select-text p-3 text-destructive text-xs">
+          {ensureMain.error.message}
+        </p>
+      </SessionsCard>
     )
   }
-  if (!workspaceId) return null
+  if (!workspaceId) return collapsed ? null : <SessionsCard header={header}>{null}</SessionsCard>
   return (
     <SessionsBody
       view={view}
       project={project}
       workspaceId={workspaceId}
       collapsed={collapsed}
+      header={header}
       onExpand={onExpand}
       openSession={openSession}
       onSessionOpened={onSessionOpened}
@@ -409,6 +452,7 @@ function SessionsBody({
   project,
   workspaceId,
   collapsed,
+  header,
   onExpand,
   openSession,
   onSessionOpened,
@@ -510,7 +554,7 @@ function SessionsBody({
   return (
     <div
       hidden={collapsed}
-      className={collapsed ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col p-3"}
+      className={collapsed ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col"}
     >
       <CentralPanel
         controller={controller}
@@ -526,6 +570,13 @@ function SessionsBody({
         filesPanelOpen={filesPanelOpen}
         onFilesPanelOpenChange={setFilesPanelOpen}
         hidden={collapsed}
+        toolbarTitle={header.title}
+        toolbarEnd={
+          <>
+            <ToolbarSeparator />
+            {header.collapse}
+          </>
+        }
       />
     </div>
   )
@@ -546,7 +597,7 @@ function restorableState(
 }
 
 /** No project chosen: ⌘T and the session buttons show a notice to pick one. */
-function NoProjectSessions({ collapsed, onExpand }: SessionsBodyProps) {
+function NoProjectSessions({ collapsed, header, onExpand }: SessionsBodyProps) {
   const t = useTranslate()
   const [notice, setNotice] = useState(false)
   const ask = (): void => {
@@ -560,8 +611,9 @@ function NoProjectSessions({ collapsed, onExpand }: SessionsBodyProps) {
   })
   if (collapsed) return null
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center justify-end gap-0.5 border-border border-b px-1">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+      <div className="flex shrink-0 items-center gap-0.5 border-border border-b bg-muted/30 pr-1 pl-3">
+        <div className="flex min-w-0 flex-1 items-center">{header.title}</div>
         <NoticeButton testId="science-sessions-add" label={t("Add pane")} onClick={ask}>
           <Plus className="size-4" aria-hidden />
         </NoticeButton>
@@ -575,6 +627,8 @@ function NoProjectSessions({ collapsed, onExpand }: SessionsBodyProps) {
         >
           <TerminalSquare className="size-4" aria-hidden />
         </NoticeButton>
+        <ToolbarSeparator />
+        {header.collapse}
       </div>
       {notice ? (
         <div
@@ -627,4 +681,9 @@ function NoticeButton({
       {children}
     </button>
   )
+}
+
+/** A short upright line between toolbar button groups, like the central panel's own. */
+function ToolbarSeparator() {
+  return <div aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
 }

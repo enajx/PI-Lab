@@ -130,7 +130,7 @@ export function ResearchDiaryPanel({
       data-testid="research-diary-panel"
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
-      <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-border border-b px-2">
+      <div className="box-content flex h-7 shrink-0 items-center justify-between gap-2 border-border border-b pr-1 pl-3">
         <span
           className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs"
           title={loaded?.relPath ?? undefined}

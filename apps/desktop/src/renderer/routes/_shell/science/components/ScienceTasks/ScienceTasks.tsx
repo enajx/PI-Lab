@@ -200,6 +200,7 @@ export function ScienceTasks({
 
   return (
     <ScienceTabShell
+      layout="cards"
       testId="science-tasks"
       title={t("Tasks")}
       subtitle={t("Every project's TODO Markdown, in one place")}
@@ -252,8 +253,12 @@ export function ScienceTasks({
         />
       }
     >
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* The board and the right panel are separate rounded cards, 12px apart. */}
+      <div className="flex min-h-0 flex-1 gap-3">
+        <div
+          data-testid="tasks-board"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+        >
           {listing.isLoading ? (
             <div className="grid min-h-0 flex-1 place-items-center text-muted-foreground text-sm">
               {t("Loading tasks…")}

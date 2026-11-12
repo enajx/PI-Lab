@@ -978,12 +978,13 @@ test("LaTeX Editor adds a paper with no project, shows its own card, and links i
 })
 
 /**
- * Real app: the rounded editor box keeps a 12px gap from the lines around it (the
- * top bar line, the app sidebar and the diary column's line), like the project
- * view's boxes; the diary column's line drags to resize it, and the width comes
+ * Real app: like the project view, the editor and the diary are separate rounded
+ * cards with 12px gaps between them and from the view's edges, and no line of
+ * their own outside a card; collapsed, the diary leaves only a small card with the
+ * expand button. The gap left of the diary drags to resize it, and the width comes
  * back after a reload.
  */
-test("LaTeX Editor keeps the editor box clear of the diary line, and the diary width after reload", async () => {
+test("LaTeX Editor shows the editor and diary as separate cards, and keeps the diary width after reload", async () => {
   test.setTimeout(120_000)
   const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-panels-e2e-"))
   const { project, paper } = await setUp(root)
@@ -1003,9 +1004,37 @@ test("LaTeX Editor keeps the editor box clear of the diary line, and the diary w
     if (!box || !header || !shell || !column) throw new Error("No LaTeX Editor layout")
     expect(Math.round(box.y - (header.y + header.height))).toBeGreaterThanOrEqual(12)
     expect(Math.round(box.x - shell.x)).toBeGreaterThanOrEqual(12)
-    expect(Math.round(column.x - (box.x + box.width))).toBeGreaterThanOrEqual(12)
-    expect(Math.round(shell.y + shell.height - (box.y + box.height))).toBeGreaterThanOrEqual(12)
+    expect(Math.round(column.x - (box.x + box.width))).toBe(12)
+    expect(Math.round(shell.y + shell.height - (box.y + box.height))).toBe(12)
+    expect(Math.round(shell.x + shell.width - (column.x + column.width))).toBe(12)
+    const style = (locator: typeof diary) =>
+      locator.evaluate((element) => {
+        const css = getComputedStyle(element)
+        return `${css.borderTopLeftRadius} ${css.borderLeftWidth}`
+      })
+    expect(await style(diary)).toBe("0px 0px")
+    expect(await style(diary.locator(":scope > div.rounded-lg"))).toBe("8px 1px")
+    expect(await style(latex.getByTestId("central-panel"))).toBe("8px 1px")
+    expect(
+      await latex
+        .locator("header")
+        .first()
+        .evaluate((el) => getComputedStyle(el).borderBottomWidth),
+    ).toBe("0px")
     await page.screenshot({ path: resolve(".cache", "screens", "latex-editor-panels.png") })
+
+    // Collapsed: a small card at the top right, level with the editor card.
+    await page.getByTestId("latex-diary-collapse").click()
+    await expect(diary).toHaveAttribute("data-collapsed", "true")
+    const strip = await diary.boundingBox()
+    const wide = await latex.getByTestId("central-panel").boundingBox()
+    if (!strip || !wide) throw new Error("No collapsed diary layout")
+    expect(await style(diary)).toBe("8px 1px")
+    expect(Math.round(strip.y)).toBe(Math.round(wide.y))
+    expect(strip.height).toBeLessThan(40)
+    expect(Math.round(strip.x - (wide.x + wide.width))).toBe(12)
+    await page.getByTestId("latex-diary-expand").click()
+    await expect(diary).toHaveAttribute("data-collapsed", "false")
 
     const handle = await page.getByTestId("research-diary-edge-drag").boundingBox()
     if (!handle) throw new Error("No diary resize handle")
