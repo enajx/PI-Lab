@@ -141,24 +141,27 @@ describe("ScienceAnalysis", () => {
     expect(screen.getByText("没有打开的项目")).toBeTruthy()
   })
 
-  test("creates HTML reports and hides Marimo report creation", async () => {
-    const createTemplate = vi.fn(() => ({ relPath: "reports/report-2.html" }))
+  test("Report starts the report agent for the selected project and Marimo report creation stays hidden", async () => {
+    const startReport = vi.fn(() => ({
+      sessionId: "report-1",
+      workspaceId: "ws-1",
+      kind: "branch",
+      agentId: "claude-code",
+      warning: null,
+    }))
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
-      "science.analysis.listFiles": () =>
-        listing([{ relPath: "reports/report-2.html", name: "report-2.html", kind: "report" }]),
-      "science.analysis.createTemplate": createTemplate,
-      "science.analysis.openInteractive": () => ({ type: "html", url: "pi-lab-report://test" }),
-      "science.analysis.closeInteractive": () => undefined,
+      "science.analysis.listFiles": () => listing([]),
+      "sessions.startReport": startReport,
     })
 
     await waitFor(() =>
       expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "p1"),
     )
-    fireEvent.click(await screen.findByTestId("analysis-new-html-report"))
-    await waitFor(() =>
-      expect(createTemplate).toHaveBeenCalledWith({ projectId: "p1", kind: "html" }),
-    )
+    const button = await screen.findByTestId("analysis-report")
+    expect(button.textContent).toBe("Report")
+    fireEvent.click(button)
+    await waitFor(() => expect(startReport).toHaveBeenCalledWith({ projectId: "p1" }))
     expect(screen.queryByTestId("analysis-new-marimo-notebook")).toBeNull()
   })
 
@@ -289,41 +292,6 @@ describe("ScienceAnalysis", () => {
       (groups[1] as HTMLElement).compareDocumentPosition(reports) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
-  })
-
-  test("a new HTML report is listed and stays selected", async () => {
-    let created = false
-    renderAnalysis({
-      "projects.list": () => [project({ id: "p1", name: "alpha" })],
-      "science.analysis.listFiles": () =>
-        listing(
-          created
-            ? [
-                {
-                  relPath: "reports/report.html",
-                  name: "report.html",
-                  kind: "report",
-                  inReportsFolder: true,
-                },
-              ]
-            : [],
-        ),
-      "science.analysis.createTemplate": () => {
-        created = true
-        return { relPath: "reports/report.html" }
-      },
-      "science.analysis.openInteractive": () => ({ type: "html", url: "pi-lab-report://test" }),
-      "science.analysis.closeInteractive": () => undefined,
-    })
-    await waitFor(() =>
-      expect(screen.getByTestId("analysis-project-select")).toHaveProperty("value", "p1"),
-    )
-    fireEvent.click(await screen.findByTestId("analysis-new-html-report"))
-    const row = await within(await screen.findByTestId("analysis-reports-group")).findByTestId(
-      "analysis-file",
-    )
-    expect(row.dataset.relPath).toBe("reports/report.html")
-    await waitFor(() => expect(row.getAttribute("aria-pressed")).toBe("true"))
   })
 
   test("a missing results folder still lists the reports/ folder below the notice", async () => {

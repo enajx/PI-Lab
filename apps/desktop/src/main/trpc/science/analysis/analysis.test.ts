@@ -596,25 +596,20 @@ describe("science.analysis.openInteractive", () => {
 })
 
 describe("science.analysis.createTemplate", () => {
-  test("creates ready-to-run templates under reports without overwriting an existing file", async () => {
-    await writeRepoFile("reports/report.html", "existing")
+  test("creates a ready-to-run marimo notebook under reports without overwriting an existing file", async () => {
+    await writeRepoFile("reports/notebook.py", "existing")
     const project = await h.caller.projects.open({ path: h.repoDir })
 
-    const html = await h.caller.science.analysis.createTemplate({
-      projectId: project.id,
-      kind: "html",
-    })
     const notebook = await h.caller.science.analysis.createTemplate({
       projectId: project.id,
       kind: "marimo",
     })
 
-    expect(html).toEqual({ relPath: "reports/report-1.html" })
-    expect(await readFile(join(h.repoDir, html.relPath), "utf8")).toContain("Interactive report")
-    expect(notebook).toEqual({ relPath: "reports/notebook.py" })
+    expect(notebook).toEqual({ relPath: "reports/notebook-1.py" })
     expect(await readFile(join(h.repoDir, notebook.relPath), "utf8")).toContain(
       "app = marimo.App()",
     )
+    expect(await readFile(join(h.repoDir, "reports/notebook.py"), "utf8")).toBe("existing")
   })
 })
 

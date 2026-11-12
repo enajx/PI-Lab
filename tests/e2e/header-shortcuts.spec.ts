@@ -185,16 +185,11 @@ test("LaTeX Editor and Analysis have their own top bar + menu", async () => {
     const analysisItems = menu.getByRole("menuitemcheckbox")
     await expect(analysisItems).toHaveText([
       "Analyze experiments",
-      "HTML report",
+      "Report",
       "Fetch experiments",
       "Research diary",
     ])
-    for (const name of [
-      "Analyze experiments",
-      "HTML report",
-      "Fetch experiments",
-      "Research diary",
-    ])
+    for (const name of ["Analyze experiments", "Report", "Fetch experiments", "Research diary"])
       await expect(menu.getByRole("menuitemcheckbox", { name })).toHaveAttribute(
         "aria-checked",
         "true",

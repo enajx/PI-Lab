@@ -85,6 +85,11 @@ export interface EditorSettings {
   researchDiaryFormat: ResearchDiaryFormat
   /** Default format agents write analysis in; a project can override it (default `md`). */
   analysisFormat: AnalysisFormat
+  /**
+   * Folder name of the skill the Analysis view's Report button starts an agent
+   * with, found in the project and user skills folders (default `experiment-report`).
+   */
+  reportSkill: string
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -106,4 +111,5 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   askPapersFolder: true,
   researchDiaryFormat: "md",
   analysisFormat: "md",
+  reportSkill: "experiment-report",
 }

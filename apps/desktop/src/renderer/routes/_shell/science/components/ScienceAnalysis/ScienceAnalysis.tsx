@@ -78,7 +78,6 @@ export function ScienceAnalysis({
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
-  const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
 
@@ -140,14 +139,21 @@ export function ScienceAnalysis({
       onError: (cause) => setShortcutError(cause.message),
     }),
   )
-  const createTemplate = useMutation(
-    trpc.science.analysis.createTemplate.mutationOptions({
-      onSuccess: async (created) => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.science.analysis.listFiles.queryKey(),
-        })
-        setSelectedRelPath(created.relPath)
-      },
+  // Report starts the project's agent with the report skill named in Settings.
+  const report = useMutation(
+    trpc.sessions.startReport.mutationOptions({
+      onSuccess: (result, input) =>
+        setSessionRequest({
+          projectId: input.projectId,
+          pane: {
+            kind: "agent",
+            sessionId: result.sessionId,
+            label: t("Report"),
+            wsKind: result.kind,
+            launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
+          },
+        }),
+      onError: (cause) => setShortcutError(cause.message),
     }),
   )
   // The default results folder from Settings; an empty field means the built-in default.
@@ -365,25 +371,30 @@ export function ScienceAnalysis({
                 ),
               },
               {
-                id: "html-report",
-                label: t("HTML report"),
+                id: "report",
+                label: t("Report"),
                 node: (
                   <button
                     type="button"
-                    data-testid="analysis-new-html-report"
-                    disabled={!selectedProjectId || createTemplate.isPending}
-                    data-feature-help={
+                    data-testid="analysis-report"
+                    disabled={!selectedProjectId || report.isPending}
+                    data-feature-label={t("Report")}
+                    title={
                       selectedProjectId
-                        ? t("Add a new HTML report file to the project and show it.")
+                        ? t(
+                            "Start an agent that builds a report with the report skill set in Settings",
+                          )
                         : t("Select a project")
                     }
-                    onClick={() =>
-                      createTemplate.mutate({ projectId: selectedProjectId ?? "", kind: "html" })
-                    }
+                    onClick={() => {
+                      if (!selectedProjectId) return
+                      setShortcutError(null)
+                      report.mutate({ projectId: selectedProjectId })
+                    }}
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <FileCode2 className="size-3.5" aria-hidden />
-                    {t("HTML report")}
+                    {t("Report")}
                   </button>
                 ),
               },

@@ -74,6 +74,7 @@ describe("settings.get", () => {
       askPapersFolder: true,
       researchDiaryFormat: "md",
       analysisFormat: "md",
+      reportSkill: "experiment-report",
     })
   })
 })
@@ -206,6 +207,7 @@ describe("settings.updateEditor", () => {
       askPapersFolder: true,
       researchDiaryFormat: "md",
       analysisFormat: "md",
+      reportSkill: "experiment-report",
     })
 
     // The patch persisted and `get` reflects it.
@@ -234,6 +236,7 @@ describe("settings.updateEditor", () => {
       askPapersFolder: true,
       researchDiaryFormat: "md",
       analysisFormat: "md",
+      reportSkill: "experiment-report",
     })
   })
 
