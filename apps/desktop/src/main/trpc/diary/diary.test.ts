@@ -17,7 +17,7 @@ afterEach(async () => {
 const diaryDir = () => join(h.repoDir, "md", "research-diary")
 
 describe("diary.open", () => {
-  test("creates the diary with today's heading when the file is missing", async () => {
+  test("shows today's heading for a missing diary but does not create the file", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     const today = localDateHeading(new Date())
 
@@ -25,21 +25,22 @@ describe("diary.open", () => {
 
     expect(opened.relPath).toBe("md/research-diary/diary.md")
     expect(opened.content).toBe(`${today}\n\n`)
-    expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(`${today}\n\n`)
+    expect(opened.baseline.exists).toBe(false)
+    await expect(stat(join(diaryDir(), "diary.md"))).rejects.toThrow()
   })
 
-  test("adds today's heading at the top below the title, once", async () => {
+  test("shows today's heading at the top below the title, once, without writing it", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     const today = localDateHeading(new Date())
     await mkdir(diaryDir(), { recursive: true })
-    await writeFile(join(diaryDir(), "diary.md"), "# My diary\n\n## 2020-01-02\n\nOld entry.\n")
+    const onDisk = "# My diary\n\n## 2020-01-02\n\nOld entry.\n"
+    await writeFile(join(diaryDir(), "diary.md"), onDisk)
 
     await h.caller.diary.open({ projectId: project.id })
     const again = await h.caller.diary.open({ projectId: project.id })
 
-    const expected = `# My diary\n\n${today}\n\n## 2020-01-02\n\nOld entry.\n`
-    expect(again.content).toBe(expected)
-    expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(expected)
+    expect(again.content).toBe(`# My diary\n\n${today}\n\n## 2020-01-02\n\nOld entry.\n`)
+    expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(onDisk)
   })
 
   test("renames diary.md to diary.qmd and back when the format setting changes", async () => {
@@ -60,7 +61,7 @@ describe("diary.open", () => {
     expect(md.content).toBe(`${today}\n\nEntry.\n`)
     await expect(stat(join(diaryDir(), "diary.qmd"))).rejects.toThrow()
   })
-  test("MyST adds a title front matter to diary.md once, and renames nothing", async () => {
+  test("MyST shows a title front matter on diary.md once, renames nothing, and writes nothing", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     const today = localDateHeading(new Date())
     await mkdir(diaryDir(), { recursive: true })
@@ -70,10 +71,9 @@ describe("diary.open", () => {
     await h.caller.diary.open({ projectId: project.id })
     const myst = await h.caller.diary.open({ projectId: project.id })
 
-    const expected = `---\ntitle: Research diary\n---\n\n${today}\n\nEntry.\n`
     expect(myst.relPath).toBe("md/research-diary/diary.md")
-    expect(myst.content).toBe(expected)
-    expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(expected)
+    expect(myst.content).toBe(`---\ntitle: Research diary\n---\n\n${today}\n\nEntry.\n`)
+    expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(`${today}\n\nEntry.\n`)
   })
 
   test("MyST keeps an existing front matter as it is", async () => {
@@ -134,6 +134,43 @@ describe("diary.save", () => {
     ).rejects.toThrow(/changed on disk/)
     expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(
       "Changed by an agent, longer text.\n",
+    )
+  })
+
+  test("drops day headings with nothing under them, keeping the front matter and the title", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const opened = await h.caller.diary.open({ projectId: project.id })
+    const content = [
+      "---",
+      "title: Lab notes",
+      "---",
+      "",
+      "# Diary",
+      "",
+      "## 2026-11-12",
+      "",
+      "## 2026-11-11",
+      "",
+      "",
+      "## 2026-11-10",
+      "",
+      "Entry.",
+      "",
+      "### Details",
+      "",
+      "## 2026-11-09",
+      "",
+    ].join("\n")
+
+    await h.caller.diary.save({
+      projectId: project.id,
+      relPath: opened.relPath,
+      content,
+      baseline: opened.baseline,
+    })
+
+    expect(await readFile(join(diaryDir(), "diary.md"), "utf8")).toBe(
+      "---\ntitle: Lab notes\n---\n\n# Diary\n\n## 2026-11-10\n\nEntry.\n\n### Details\n",
     )
   })
 })

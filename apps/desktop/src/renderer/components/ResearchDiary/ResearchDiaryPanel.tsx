@@ -1,10 +1,10 @@
 import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
-import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import type { DiaryFile } from "../../../main/trpc/diary/diary"
 import { CodeMirrorBuffer } from "../../Editor/components/CodeMirrorBuffer"
+import { MarkdownModeToggle } from "../../Editor/components/MarkdownModeToggle"
 import { translateKnownError } from "../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../i18n/language"
 import { Markdown } from "../../routes/_shell/projects/components/RightSidebar/components/Markdown"
@@ -19,16 +19,20 @@ import {
 /**
  * Research diary panel: a tab of the project view's right sidebar, and the lower
  * part of the Analysis and Tasks right panel (the whole right column in the LaTeX
- * Editor). It fills its container. On mount (and on a project change) it calls `diary.open`, which creates
- * the diary file and today's `## YYYY-MM-DD` heading when needed, and shows the
- * diary rendered as Markdown (a leading YAML front matter is not shown). A
- * Quarto diary (diary.qmd), or the diary in MyST mode, also gets a Render button
- * that renders it with quarto or mystmd and shows the HTML page in the panel,
- * until Show source. Edit switches to the Markdown source editor; Save
- * (or ⌘S) writes the file through `diary.save` and goes back to the rendered
- * view. A save refused because the file changed on disk shows the error and
- * keeps the edit open. `headerActions` go at the end of its header (e.g. a
- * collapse button), or null for none.
+ * Editor). It fills its container. On mount (and on a project change) it calls
+ * `diary.open`, which returns the diary with today's `## YYYY-MM-DD` heading at
+ * the top (not yet on disk). The diary is edited in place: the header's
+ * Markdown view switch (the same one Markdown files use in the editor) picks
+ * Render, the editor's editable rendered Markdown, or Source, the plain text.
+ * A Quarto diary (diary.qmd) is not Markdown to the editor, so its Render view
+ * is the rendered Markdown (front matter hidden), and a click on it switches
+ * to Source. A dot next to the title marks unsaved changes; ⌘S writes the
+ * text through `diary.save`, which drops the day headings with nothing under
+ * them. A save refused because the file changed on disk shows the error and
+ * keeps the edit. A Quarto diary, or the diary in MyST mode, also gets a Render
+ * button that renders the saved file with quarto or mystmd and shows the HTML
+ * page in the panel, until Show source. `headerActions` go at the end of its
+ * header (e.g. a collapse button), or null for none.
  */
 export function ResearchDiaryPanel({
   projectId,
@@ -47,33 +51,40 @@ export function ResearchDiaryPanel({
   const openDiaryRef = useRef(openDiary.mutateAsync)
   openDiaryRef.current = openDiary.mutateAsync
   const saveDiary = useMutation(trpc.diary.save.mutationOptions())
+  // The diary as opened, with `content` updated to the text of each successful save.
   const [loaded, setLoaded] = useState<DiaryFile | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
-  // The Markdown source being edited, or null while the rendered view is shown.
-  const [draft, setDraft] = useState<string | null>(null)
-  // The last render of the diary, shown instead of the Markdown view until Show source.
+  // The text in the editor; it differs from `loaded.content` while there are unsaved changes.
+  const [draft, setDraft] = useState("")
+  const [mode, setMode] = useState<"render" | "source">("render")
+  // The last render of the diary, shown instead of the editor until Show source.
   const [rendered, setRendered] = useState<{ result: DocumentRenderResult; at: number } | null>(
     null,
   )
+  const quarto = loaded?.relPath.endsWith(".qmd") ?? false
   const renderTool = !loaded
     ? null
-    : loaded.relPath.endsWith(".qmd")
+    : quarto
       ? "quarto"
       : editorSettings.researchDiaryFormat === "myst"
         ? "myst"
         : null
+  const dirty = loaded !== null && draft !== loaded.content
 
   useEffect(() => {
     // Only the still-active run applies its result (StrictMode runs effects twice;
-    // `diary.open` is idempotent).
+    // `diary.open` writes nothing).
     let active = true
     setLoaded(null)
     setOpenError(null)
-    setDraft(null)
+    setDraft("")
+    setMode("render")
     setRendered(null)
     openDiaryRef.current({ projectId }).then(
       (file) => {
-        if (active) setLoaded(file)
+        if (!active) return
+        setLoaded(file)
+        setDraft(file.content)
       },
       (error: Error) => {
         if (active) setOpenError(error.message)
@@ -84,25 +95,18 @@ export function ResearchDiaryPanel({
     }
   }, [projectId])
 
-  const startEdit = () => {
-    if (!loaded) return
-    saveDiary.reset()
-    setRendered(null)
-    setDraft(loaded.content)
-  }
-
   const save = () => {
-    if (!loaded || draft === null || saveDiary.isPending) return
+    if (!loaded || saveDiary.isPending) return
     const content = draft
     saveDiary.mutate(
       { projectId, relPath: loaded.relPath, content, baseline: loaded.baseline },
-      {
-        onSuccess: (result) => {
-          setLoaded({ ...loaded, content, baseline: result.baseline })
-          setDraft(null)
-        },
-      },
+      { onSuccess: (result) => setLoaded({ ...loaded, content, baseline: result.baseline }) },
     )
+  }
+
+  const changeMode = (next: "render" | "source") => {
+    setRendered(null)
+    setMode(next)
   }
 
   return (
@@ -112,13 +116,20 @@ export function ResearchDiaryPanel({
     >
       <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-border border-b px-2">
         <span
-          className="min-w-0 truncate text-muted-foreground text-xs"
+          className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs"
           title={loaded?.relPath ?? undefined}
         >
-          {t("Research diary")}
+          <span className="truncate">{t("Research diary")}</span>
+          {dirty ? (
+            <span
+              data-testid="research-diary-dirty"
+              title={t("Unsaved changes")}
+              className="size-1.5 shrink-0 rounded-full bg-foreground/60"
+            />
+          ) : null}
         </span>
         <div className="flex shrink-0 items-center gap-1">
-          {draft === null && loaded && renderTool ? (
+          {loaded && renderTool ? (
             <RenderControl
               projectId={projectId}
               relPath={loaded.relPath}
@@ -126,33 +137,7 @@ export function ResearchDiaryPanel({
               onRendered={(result) => setRendered({ result, at: Date.now() })}
             />
           ) : null}
-          {draft === null ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              data-testid="research-diary-edit"
-              className="h-6 px-2 text-xs"
-              disabled={!loaded}
-              data-feature-help={t("Edit the diary's Markdown source")}
-              onClick={startEdit}
-            >
-              {t("Edit")}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              data-testid="research-diary-save"
-              className="h-6 px-2 text-xs"
-              disabled={saveDiary.isPending}
-              data-feature-help={t("Save the diary and show it rendered")}
-              onClick={save}
-            >
-              {t("Save")}
-            </Button>
-          )}
+          {loaded ? <MarkdownModeToggle mode={mode} onChange={changeMode} /> : null}
           {headerActions}
         </div>
       </div>
@@ -175,19 +160,6 @@ export function ResearchDiaryPanel({
         </p>
       ) : !loaded ? (
         <p className="px-3 py-2 text-muted-foreground text-xs">{t("Loading…")}</p>
-      ) : draft !== null ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <CodeMirrorBuffer
-            autoFocus
-            relPath={loaded.relPath}
-            initialDoc={draft}
-            onChange={setDraft}
-            onSave={save}
-            vim={editorSettings.vim}
-            theme={editorSettings.editorTheme}
-            customThemes={editorSettings.customEditorThemes}
-          />
-        </div>
       ) : rendered ? (
         <div className="min-h-0 flex-1">
           <RenderedDocument
@@ -205,12 +177,30 @@ export function ResearchDiaryPanel({
             ) : null}
           </RenderedDocument>
         </div>
-      ) : (
+      ) : quarto && mode === "render" ? (
+        // The Source switch in the header is the keyboard way to the same view.
+        // biome-ignore lint/a11y/noStaticElementInteractions: a click on the text is a shortcut to Source.
+        // biome-ignore lint/a11y/useKeyWithClickEvents: the header's Source switch does this from the keyboard.
         <div
           data-testid="research-diary-rendered"
-          className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
+          className="min-h-0 flex-1 cursor-text overflow-y-auto px-4 py-3"
+          onClick={() => setMode("source")}
         >
-          <Markdown content={splitFrontMatter(loaded.content).body} />
+          <Markdown content={splitFrontMatter(draft).body} />
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <CodeMirrorBuffer
+            autoFocus={quarto}
+            relPath={loaded.relPath}
+            initialDoc={draft}
+            onChange={setDraft}
+            onSave={save}
+            markdownMode={quarto ? undefined : mode}
+            vim={editorSettings.vim}
+            theme={editorSettings.editorTheme}
+            customThemes={editorSettings.customEditorThemes}
+          />
         </div>
       )}
     </section>

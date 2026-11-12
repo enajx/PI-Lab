@@ -188,7 +188,7 @@ describe("RightSidebar", () => {
     expect(screen.getByTestId("panel-tab-diary").textContent).toBe("Diary")
     fireEvent.click(screen.getByTestId("panel-tab-diary"))
     const panel = await screen.findByTestId("research-diary-panel")
-    expect(await within(panel).findByRole("heading", { name: "2026-11-12" })).toBeTruthy()
+    expect(await within(panel).findByText("First entry.")).toBeTruthy()
   })
 
   test("a selected tab that no longer exists falls back to Files, not the first tab", () => {
