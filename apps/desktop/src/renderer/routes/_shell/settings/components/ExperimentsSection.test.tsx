@@ -73,6 +73,7 @@ describe("Settings > Remote experiments: where runs are tracked", () => {
     await waitFor(() => expect(select.value).toBe("auto"))
     expect([...select.options].map((option) => option.textContent)).toEqual([
       "Auto-detect",
+      "Folders",
       "One folder per experiment",
       "Experiment / run folders",
       "Flat file list",

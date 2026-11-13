@@ -274,6 +274,7 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
   await expect(structure).toHaveValue("auto")
   expect(await structure.locator("option").allTextContents()).toEqual([
     "Auto-detect",
+    "Folders",
     "One folder per experiment",
     "Experiment / run folders",
     "Flat file list",
@@ -324,6 +325,48 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
   await window.getByTestId("analysis-results-folder-reset").click()
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/")
   await expect(row("gecko")).toBeVisible()
+})
+
+test("the Folders structure shows the results folder as a plain folder tree with no experiment rows", async () => {
+  await mkdir(join(repoDir, "results", "exp-a", "runs", "s0"), { recursive: true })
+  await writeFile(join(repoDir, "results", "exp-a", "runs", "s0", "m.csv"), CSV_BODY)
+  await writeFile(join(repoDir, "results", "summary.json"), "{}")
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  const structure = window.getByTestId("analysis-structure")
+  await expect(structure).toHaveValue("auto", { timeout: 30_000 })
+  await structure.selectOption("folders")
+  await expect(structure).toHaveValue("folders")
+
+  // Top-level folders and root files are rows of the tree; no group or experiment rows.
+  const folders = () =>
+    window
+      .getByTestId("analysis-folder")
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-folder")))
+  await expect
+    .poll(folders, { timeout: 30_000 })
+    .toEqual(expect.arrayContaining(["data", "exp-a", "exp-b"]))
+  await expect(window.getByTestId("analysis-experiment")).toHaveCount(0)
+  await expect(window.getByTestId("analysis-group")).toHaveCount(0)
+  await expect(window.getByText("No experiment")).toHaveCount(0)
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/summary.json"]'),
+  ).toBeVisible()
+
+  // A folder expands to its real subfolders and files.
+  await openAnalysisFolder(window, "exp-a")
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]'),
+  ).toBeVisible()
+  await openAnalysisFolder(window, "exp-a/runs")
+  await openAnalysisFolder(window, "exp-a/runs/s0")
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/runs/s0/m.csv"]'),
+  ).toBeVisible()
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-folders.png") })
 })
 
 test("a category chip shows a row of format chips; picking PDF lists the PDFs, and a PDF previews in PDF.js", async () => {
@@ -640,8 +683,10 @@ test("with no results folder, Analysis shows no folder and points to Select expe
   const select = window.getByTestId("analysis-results-folder-change")
   await expect(select).toHaveText("Select…")
   await expect(select).toHaveAttribute("data-highlighted", "true")
-  // The accent ring is drawn (it pulses, then stays until the button is clicked).
-  expect(await select.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none")
+  // A soft accent wave moves across the button face (not its edge) until it is clicked.
+  expect(
+    await select.evaluate((element) => getComputedStyle(element, "::before").animationName),
+  ).toBe("analysis-select-folder-wave")
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-select-folder.png") })
 
   // Choosing a folder (the test picker returns <project>/outputs) lists it.

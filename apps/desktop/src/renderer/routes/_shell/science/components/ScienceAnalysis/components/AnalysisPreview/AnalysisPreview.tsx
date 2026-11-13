@@ -58,8 +58,16 @@ export function AnalysisPreview({
   const pdf = kind === "pdf"
   const media = kind === "video" || kind === "animation"
   const [pdfStatus, setPdfStatus] = useState("")
+  // The Load click and the chosen HDF5 dataset belong to the file they were made on.
+  const [choice, setChoice] = useState<{ relPath: string; load: boolean; dataset: string | null }>({
+    relPath,
+    load: false,
+    dataset: null,
+  })
+  const load = choice.relPath === relPath && choice.load
+  const dataset = choice.relPath === relPath ? choice.dataset : null
   const preview = useQuery({
-    ...trpc.science.analysis.preview.queryOptions({ projectId, relPath }),
+    ...trpc.science.analysis.preview.queryOptions({ projectId, relPath, load, dataset }),
     enabled: !interactive && !pdf && !media,
     staleTime: 30_000,
   })
@@ -170,7 +178,12 @@ export function AnalysisPreview({
             {preview.error?.message ?? t("Failed to load preview.")}
           </p>
         ) : preview.data ? (
-          <PreviewBody preview={preview.data} kind={kind} />
+          <PreviewBody
+            preview={preview.data}
+            kind={kind}
+            onLoad={() => setChoice({ relPath, load: true, dataset })}
+            onDataset={(next) => setChoice({ relPath, load, dataset: next })}
+          />
         ) : null}
       </div>
     </div>
@@ -454,7 +467,9 @@ function InteractiveMessage({ testId, children }: { testId: string; children: Re
 function MarimoSource({ projectId, relPath }: { projectId: string; relPath: string }) {
   const t = useTranslate()
   const trpc = useTRPC()
-  const source = useQuery(trpc.science.analysis.preview.queryOptions({ projectId, relPath }))
+  const source = useQuery(
+    trpc.science.analysis.preview.queryOptions({ projectId, relPath, load: false, dataset: null }),
+  )
   if (source.isError) {
     return (
       <p
@@ -541,9 +556,71 @@ function NotebookOutputView({ output }: { output: NotebookOutput }) {
 }
 
 /** Dispatch one preview payload to its renderer. */
-function PreviewBody({ preview, kind }: { preview: DataFilePreview; kind: DataFileKind }) {
+function PreviewBody({
+  preview,
+  kind,
+  onLoad,
+  onDataset,
+}: {
+  preview: DataFilePreview
+  kind: DataFileKind
+  /** Read a file above its size limit (the Large file prompt's Load button). */
+  onLoad: () => void
+  /** Preview another dataset of an HDF5 file. */
+  onDataset: (path: string) => void
+}) {
   const t = useTranslate()
   switch (preview.type) {
+    case "large":
+      return (
+        <div
+          data-testid="analysis-preview-large"
+          className="flex flex-col items-start gap-3 rounded-md border border-border bg-card/40 p-4 text-sm"
+        >
+          <p className="select-text cursor-text">
+            {`${t("Large file")} (${formatMegabytes(preview.size)}), ${t("loading may be slow")}`}
+          </p>
+          <button
+            type="button"
+            data-testid="analysis-preview-load"
+            onClick={onLoad}
+            className="rounded-md border border-border px-2 py-1 text-xs"
+          >
+            {t("Load")}
+          </button>
+        </div>
+      )
+    case "datasets":
+      return (
+        <div data-testid="analysis-preview-datasets" className="flex flex-col gap-3">
+          <label className="flex items-center gap-2 text-xs">
+            <span className="shrink-0 text-muted-foreground">{t("Dataset")}</span>
+            <select
+              data-testid="analysis-preview-dataset"
+              value={preview.selected}
+              onChange={(event) => onDataset(event.target.value)}
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs"
+            >
+              {preview.datasets.map((entry) => (
+                <option key={entry.path} value={entry.path}>
+                  {`${entry.path}  (${entry.shape.join(" × ") || t("scalar")}) ${entry.dtype}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          {preview.truncated ? (
+            <p className="text-amber-500 text-xs">
+              {`${t("Showing the first")} ${preview.datasets.length} ${t("datasets")}`}
+            </p>
+          ) : null}
+          <PreviewBody
+            preview={preview.preview}
+            kind={kind}
+            onLoad={onLoad}
+            onDataset={onDataset}
+          />
+        </div>
+      )
     case "notebook":
       return <NotebookBody cells={preview.cells} />
     case "table":
@@ -672,6 +749,11 @@ function TruncatedNote() {
       {t("Preview truncated — file is larger than shown.")}
     </p>
   )
+}
+
+/** Bytes as decimal megabytes, the unit of the Large file prompt (e.g. `40.0 MB`). */
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
 }
 
 function formatSize(bytes: number): string {

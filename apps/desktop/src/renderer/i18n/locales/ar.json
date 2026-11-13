@@ -231,6 +231,7 @@
   "Checking…": "جارٍ الفحص…",
   "Environments unavailable": "البيئات غير متاحة",
   "Auto-detect": "اكتشاف تلقائي",
+  "Folders": "المجلدات",
   "Choose environment folder…": "اختر مجلد البيئة…",
   "Choose Python interpreter…": "اختر مفسر Python…",
   "Python type checking is on. Click to turn it off.": "فحص أنواع Python مفعّل. انقر لإيقافه.",
@@ -1138,5 +1139,12 @@
   "List files and folders whose name starts with a dot in the file tree.": "اعرض في شجرة الملفات الملفات والمجلدات التي يبدأ اسمها بنقطة.",
   "Don't ask again": "لا تسأل مرة أخرى",
   "Confirm before deleting files": "التأكيد قبل حذف الملفات",
-  "Ask before moving a file or folder in the file tree to the Trash.": "اسأل قبل نقل ملف أو مجلد من شجرة الملفات إلى سلة المهملات."
+  "Ask before moving a file or folder in the file tree to the Trash.": "اسأل قبل نقل ملف أو مجلد من شجرة الملفات إلى سلة المهملات.",
+  "Large file": "ملف كبير",
+  "loading may be slow": "قد يكون التحميل بطيئًا",
+  "Load": "تحميل",
+  "Dataset": "مجموعة بيانات",
+  "scalar": "قيمة مفردة",
+  "datasets": "مجموعات بيانات",
+  "+{count} more": "+{count} أخرى"
 }

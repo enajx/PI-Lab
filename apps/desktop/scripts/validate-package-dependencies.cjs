@@ -69,6 +69,24 @@ function packageName(specifier) {
     .join("/")
 }
 
+/**
+ * @param {string} specifier @param {string} name @param {NodeRequire} fromRequire
+ * @returns {string} Resolve a module file, also an ESM-only subpath export that
+ * main loads with `import()` (e.g. `h5wasm/node`), which `require.resolve` refuses.
+ */
+function resolveEntry(specifier, name, fromRequire) {
+  const subpath = `.${specifier.slice(name.length)}`
+  if (subpath === ".") return fromRequire.resolve(specifier)
+  const manifestPath = (fromRequire.resolve.paths(name) ?? [])
+    .map((dir) => join(dir, name, "package.json"))
+    .find((path) => existsSync(path))
+  if (!manifestPath) return fromRequire.resolve(specifier)
+  const target = JSON.parse(readFileSync(manifestPath, "utf8")).exports?.[subpath]
+  const file = typeof target === "string" ? target : (target?.require ?? target?.import)
+  if (typeof file !== "string") return fromRequire.resolve(specifier)
+  return join(dirname(manifestPath), file)
+}
+
 /** @param {string} entry @param {string} name @returns {string} Locate the package manifest. */
 function packageDir(entry, name) {
   let dir = dirname(entry)
@@ -111,7 +129,7 @@ function validatePackageDependencies(outputRoot, config) {
     )
       return
     const name = packageName(specifier)
-    const entry = fromRequire.resolve(specifier)
+    const entry = resolveEntry(specifier, name, fromRequire)
     const dir = packageDir(entry, name)
     const shippedPath = join(DESKTOP_DIR, "node_modules", name, relative(dir, entry))
     if (!filter(shippedPath, stat))

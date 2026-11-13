@@ -21,7 +21,6 @@ import {
   type DataFilePreview,
   discoverDataFiles,
   isMarimoNotebookFile,
-  previewDataFile,
 } from "./discover"
 import type { AnalysisInteractiveResult } from "./interactive"
 import { analysisMedia } from "./mediaGrants"
@@ -71,6 +70,11 @@ export interface ResultsListing extends DataFileListing {
   overridden: boolean
   /** False when the results folder does not exist (the listing is then empty). */
   exists: boolean
+  /**
+   * True for the Folders structure: the results files are shown as the plain
+   * folder tree, with no "No experiment" row.
+   */
+  plainFolders: boolean
 }
 
 const getStructureInput = z.object({
@@ -99,6 +103,13 @@ const previewInput = z.object({
   projectId: z.string().min(1),
   /** Repo-relative path of the file to preview (POSIX or native separators). */
   relPath: z.string().min(1),
+})
+
+const dataPreviewInput = previewInput.extend({
+  /** Read the file even when it is above its format's size limit (the Load button). */
+  load: z.boolean(),
+  /** The HDF5 dataset to preview, or null for the first one. */
+  dataset: z.string().min(1).nullable(),
 })
 
 const interactiveInput = previewInput.extend({
@@ -336,6 +347,7 @@ export const analysisRouter = router({
       const root = resolveInsideDir(project.repoPath, resultsFolder)
       const info = await statOrNull(root)
       let results: DataFileListing = EMPTY_LISTING
+      let plainFolders = false
       if (info !== null) {
         await realPathInside(project.repoPath, root, resultsFolder)
         if (!info.isDirectory()) {
@@ -351,6 +363,7 @@ export const analysisRouter = router({
           structureFile,
         )
         results = await discoverDataFiles(project.repoPath, root, "results", structure)
+        plainFolders = structure.kind === "folders"
       }
       const reports = await listReportsFolder(project.repoPath)
       return {
@@ -358,6 +371,7 @@ export const analysisRouter = router({
         resultsFolder,
         overridden,
         exists: info !== null,
+        plainFolders,
       }
     }),
 
@@ -398,11 +412,16 @@ export const analysisRouter = router({
    * can never balloon the IPC response.
    */
   preview: publicProcedure
-    .input(previewInput)
+    .input(dataPreviewInput)
     .query(async ({ ctx, input }): Promise<DataFilePreview> => {
       const repoPath = requireRepoPath(ctx.db, input.projectId)
-      const abs = resolveInsideDir(repoPath, input.relPath)
-      return previewDataFile(abs, input.relPath)
+      const absPath = resolveInsideDir(repoPath, input.relPath)
+      return ctx.analysisPreview.preview({
+        absPath,
+        relPath: input.relPath,
+        load: input.load,
+        dataset: input.dataset,
+      })
     }),
 
   /**

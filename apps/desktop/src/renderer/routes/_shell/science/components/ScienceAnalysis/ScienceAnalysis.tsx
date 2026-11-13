@@ -817,7 +817,13 @@ export function ScienceAnalysis({
                               )
                             })}
                             {model.experiments.map(experimentNodeBlock)}
-                            {model.loose
+                            {model.loose && listing.data?.plainFolders ? (
+                              <>
+                                {model.loose.truncated ? <TruncatedNotice /> : null}
+                                {treeContents("loose", model.loose.tree)}
+                              </>
+                            ) : null}
+                            {model.loose && !listing.data?.plainFolders
                               ? experimentBlock(
                                   "loose",
                                   "analysis-experiment-group",
@@ -1359,7 +1365,7 @@ function ResultsFolderField({
           )}
           disabled={busy}
           onClick={change}
-          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-ring")}
+          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-wave")}
         >
           {missing ? t("Select…") : t("Change…")}
         </button>

@@ -1,4 +1,4 @@
-import { open, readFile, stat } from "node:fs/promises"
+import { type FileHandle, open, readFile, stat } from "node:fs/promises"
 import { extname, join, relative } from "node:path"
 import {
   ALL_DATA_FILE_KINDS,
@@ -7,9 +7,30 @@ import {
   type DataFileKind,
   isMarimoNotebookSource,
 } from "@pi-lab/shared"
-import { type ParsedNotebook, parseIpynb } from "@pi-lab/shared/analysis/ipynb"
+import { parseIpynb } from "@pi-lab/shared/analysis/ipynb"
 import { walkWorkspace } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
+import { previewHdf5 } from "./hdf5"
+import { previewParquet } from "./parquet"
+import {
+  type ArrayPreview,
+  type ChartPreview,
+  type DataFilePreview,
+  detectScalarChart,
+  formatCell,
+  LARGE_FILE_BYTES,
+  MAX_ARRAY_COLS,
+  MAX_ARRAY_ROWS,
+  MAX_CHART_POINTS,
+  MAX_IMAGE_BYTES,
+  MAX_NOTEBOOK_BYTES,
+  MAX_PICKLE_BYTES,
+  MAX_TABLE_ROWS,
+  MAX_TEXT_BYTES,
+  type MetadataPreview,
+  type TextPreview,
+} from "./previewShapes"
+import { previewPickle } from "./pythonPreview"
 import type { ExperimentsStructure } from "./structure"
 
 /** Filesystem discovery and preview for Analysis, independent of the tRPC router. */
@@ -88,7 +109,7 @@ export interface DataFileListing {
  * explicitly whitelisted data/analysis artifacts. Source, compiled, and unknown
  * files never enter the candidate set. The whole folder is walked; the
  * {@link MAX_LISTED_FILES} cap applies per experiment, so one with many files
- * cannot hide other experiments. `.zarr` directories are
+ * cannot hide other experiments; the Folders structure has no cap. `.zarr` directories are
  * collected as one metadata-only dataset and pruned. Paths are returned relative
  * to `repoPath`. For the results folder (`folder: "results"`) each entry's
  * group, experiment and inner path come from `structure` (see {@link assignRow});
@@ -123,9 +144,11 @@ export async function discoverDataFiles(
       folder === "results"
         ? assignRow(folders, fileName, structure, level)
         : { group: null, experiment: null, innerPath: [...folders, fileName].join("/") }
+    // Folders shows the plain tree, so it lists every file: no per-row cap.
+    const capped = !(structure.kind === "folders" && folder === "results")
     const key = `${row.group ?? ""}\u0000${row.experiment ?? ""}`
     const kept = keptPerExperiment.get(key) ?? 0
-    if (kept >= MAX_LISTED_FILES) {
+    if (capped && kept >= MAX_LISTED_FILES) {
       if (kept === MAX_LISTED_FILES) {
         truncatedExperiments.push({
           group: row.group,
@@ -238,6 +261,8 @@ export function detectExperimentLevel(foldersOfFiles: string[][]): number {
  *   (`*` matches any folder), else the file is loose. One folder per
  *   experiment and Experiment / run folders are the patterns `{experiment}`
  *   and `{experiment}/{run}`.
+ * - `folders`: no group, no experiment; every file is loose and its inner path
+ *   is its whole path under the results folder (the list shows the real tree).
  * - `flat`: no group, no experiment, no folders (the inner path is the name).
  *
  * A file above the experiment level belongs to its group (its folders), with
@@ -251,6 +276,9 @@ export function assignRow(
   level: number,
 ): { group: string | null; experiment: string | null; innerPath: string } {
   if (structure.kind === "flat") return { group: null, experiment: null, innerPath: name }
+  if (structure.kind === "folders") {
+    return { group: null, experiment: null, innerPath: [...folders, name].join("/") }
+  }
   let experimentIndex = level - 1
   if (structure.kind === "pattern") {
     const at = structure.segments.indexOf("{experiment}")
@@ -339,128 +367,7 @@ export async function isMarimoNotebookFile(abs: string): Promise<boolean> {
 
 // ── Preview ──────────────────────────────────────────────────────────────────
 
-/** Rows of a CSV/TSV sampled into a header + body. */
-export interface TablePreview {
-  type: "table"
-  /** Column headers (first row of the file). */
-  headers: string[]
-  /** Up to {@link MAX_TABLE_ROWS} body rows, each aligned to `headers`. */
-  rows: string[][]
-  /** Total data rows in the file (header excluded), exact when not truncated. */
-  totalRows: number
-  /** True iff more than {@link MAX_TABLE_ROWS} rows exist. */
-  truncated: boolean
-}
-
-/** A pretty-printed JSON document. */
-export interface JsonPreview {
-  type: "json"
-  /** 2-space-indented JSON text (re-serialized from the parse). */
-  text: string
-}
-
-/** An inline-renderable image as a data URL. */
-export interface ImagePreview {
-  type: "image"
-  /** `data:<mime>;base64,…` — bounded by {@link MAX_IMAGE_BYTES}. */
-  dataUrl: string
-}
-
-/** The head of a text file. */
-export interface TextPreview {
-  type: "text"
-  /** First chunk of the file (bounded by {@link MAX_TEXT_BYTES}). */
-  text: string
-  /** True iff the file is longer than the returned chunk. */
-  truncated: boolean
-}
-
-/** Metadata-only fallback for kinds with no inline renderer (or on parse error). */
-export interface MetadataPreview {
-  type: "metadata"
-  /** The file's classified kind (so the UI can label the fallback). */
-  kind: DataFileKind
-  size: number
-  mtime: number
-  /** Optional reason the richer preview was not produced (e.g. parse failed). */
-  note?: string
-}
-
-/** One labelled series of points for a {@link ChartPreview} line chart. */
-export interface ChartSeries {
-  /** Series name (column header / array column label), used as the legend key. */
-  label: string
-  /** Y values aligned 1:1 with the chart's shared x axis; `null` = a gap. */
-  values: Array<number | null>
-}
-
-/**
- * A numeric file detected as a line-chartable scalar series — a shared,
- * monotonic x axis (an index/step column) plus one or more y series. Produced
- * for numeric CSV/TSV that look like metric logs and for 1-D `.npy` arrays.
- */
-export interface ChartPreview {
-  type: "chart"
-  /** Axis label for the shared x values (the step/index column header). */
-  xLabel: string
-  /** The shared, monotonic x values (one per plotted point). */
-  x: number[]
-  /** One or more y series, each aligned 1:1 with {@link x}. */
-  series: ChartSeries[]
-  /** True iff the source had more points than were sampled into the chart. */
-  truncated: boolean
-}
-
-/**
- * A decoded numeric array (a `.npy` 1-D/2-D array, or any array-shaped data)
- * rendered as a bounded grid. 1-D arrays become a single column; 2-D arrays
- * keep their row/column layout. Cells are stringified for transport.
- */
-export interface ArrayPreview {
-  type: "array"
-  /** Reported dtype string (e.g. `<f8`), for the header chip. */
-  dtype: string
-  /** Full array shape, e.g. `[1000]` or `[64, 8]` (pre-truncation). */
-  shape: number[]
-  /** Column headers (`c0`, `c1`, … or a single value column for 1-D). */
-  columns: string[]
-  /** Up to {@link MAX_ARRAY_ROWS} rows, each aligned to `columns`. */
-  rows: string[][]
-  /** True iff more than {@link MAX_ARRAY_ROWS} rows exist. */
-  truncated: boolean
-}
-
-/** A Jupyter notebook's cells with their stored outputs (see {@link parseIpynb}). */
-export interface NotebookPreview extends ParsedNotebook {
-  type: "notebook"
-}
-
-export type DataFilePreview =
-  | NotebookPreview
-  | TablePreview
-  | JsonPreview
-  | ImagePreview
-  | TextPreview
-  | ChartPreview
-  | ArrayPreview
-  | MetadataPreview
-
-/** Max body rows returned for a CSV/TSV preview. */
-export const MAX_TABLE_ROWS = 50
-/** Max raw bytes read for a CSV/TSV / JSON / text preview. */
-export const MAX_TEXT_BYTES = 512 * 1024
-/** Max bytes for an inline image (over this → metadata fallback). */
-export const MAX_IMAGE_BYTES = 4 * 1024 * 1024
-/** Max plotted points per chart (longer series are downsampled to this). */
-export const MAX_CHART_POINTS = 1000
-/** Max rows shown in an {@link ArrayPreview} grid. */
-export const MAX_ARRAY_ROWS = 200
-/** Max columns shown in an {@link ArrayPreview} grid (a 2-D array's width). */
-export const MAX_ARRAY_COLS = 32
-/** Max bytes of a `.ipynb` read for its preview (over this → metadata fallback). */
-export const MAX_NOTEBOOK_BYTES = 16 * 1024 * 1024
-/** Max bytes read when decoding a `.npy` array (over this → metadata fallback). */
-export const MAX_NPY_BYTES = 16 * 1024 * 1024
+export * from "./previewShapes"
 
 const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
   ".png": "image/png",
@@ -481,7 +388,11 @@ const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
  * or that fails to parse — degrades to a {@link MetadataPreview} rather than
  * erroring, so the UI always has something to show.
  */
-export async function previewDataFile(abs: string, relPath: string): Promise<DataFilePreview> {
+export async function previewDataFile(
+  abs: string,
+  relPath: string,
+  options: PreviewOptions,
+): Promise<DataFilePreview> {
   const kind = classifyDataFile(relPath)
 
   let info: Awaited<ReturnType<typeof stat>>
@@ -502,6 +413,17 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     mtime: info.mtimeMs,
     note,
   })
+
+  const ext = extname(relPath).toLowerCase()
+  const reader = READER_BY_EXT[ext]
+  if (reader) {
+    const limit = LARGE_FILE_BYTES[reader]
+    if (!options.load && limit !== null && info.size > limit)
+      return { type: "large", kind, size: info.size }
+    if (reader === "pickle") return previewPickleFile(abs, relPath, info.size, meta)
+    if (reader === "hdf5") return previewHdf5(abs, options.dataset, meta)
+    return previewParquet(abs, info.size, options.load, meta)
+  }
 
   // A marimo notebook is a `.py` file: show its source.
   if (extname(relPath).toLowerCase() === ".py" && (await isMarimoNotebookFile(abs))) {
@@ -524,13 +446,43 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     case "text":
       return previewText(abs)
     case "npy":
-      return previewNpy(abs, relPath, info.size, meta)
+      return previewNpy(abs, relPath, info.size, options.load, meta)
     default:
-      // Binary stores (including pickle), reports, plots, and Zarr
-      // directories are intentionally metadata-only: never deserialize or read.
-      // PDFs render in the renderer's PDF.js viewer (`analysis.pdf`).
+      // Other binary stores, reports, plots, and Zarr directories are
+      // metadata-only. PDFs render in the renderer's PDF.js viewer (`analysis.pdf`).
       return meta()
   }
+}
+
+/** What a preview request asks for besides the file. */
+export interface PreviewOptions {
+  /** Read the file even when it is above its format's {@link LARGE_FILE_BYTES}. */
+  load: boolean
+  /** The HDF5 dataset to preview, or null for the first one. */
+  dataset: string | null
+}
+
+/** The extensions with their own reader, keyed to {@link LARGE_FILE_BYTES}. */
+const READER_BY_EXT: Readonly<Record<string, keyof typeof LARGE_FILE_BYTES>> = {
+  ".pkl": "pickle",
+  ".pickle": "pickle",
+  ".h5": "hdf5",
+  ".hdf5": "hdf5",
+  ".parquet": "parquet",
+  ".pq": "parquet",
+}
+
+/** Read a whole `.pkl` (up to {@link MAX_PICKLE_BYTES}) with the safe unpickler. */
+async function previewPickleFile(
+  abs: string,
+  relPath: string,
+  size: number,
+  meta: (note?: string) => MetadataPreview,
+): Promise<DataFilePreview> {
+  if (size > MAX_PICKLE_BYTES) {
+    return meta(`Stores Python objects; too large to read (${formatMegabytes(size)})`)
+  }
+  return previewPickle(await readFile(abs), baseNameWithoutExt(relPath), meta)
 }
 
 /** Read at most {@link MAX_TEXT_BYTES} of a file as UTF-8, flagging a cutoff. */
@@ -614,138 +566,6 @@ async function previewTable(
   }
 }
 
-// ── Scalar-curve detection (CSV/TSV → line chart) ──────────────────────────────
-
-/**
- * Fraction of a numeric column's non-empty cells that must parse as finite
- * numbers for the column to count as "numeric". Tolerates the odd `NaN`/blank.
- */
-const NUMERIC_COLUMN_THRESHOLD = 0.8
-/**
- * Fraction of a candidate x column's steps that must be non-decreasing for it to
- * read as a monotonic index/step axis (≈ allows a couple of out-of-order rows).
- */
-const MONOTONIC_THRESHOLD = 0.95
-
-/** Missing cells remain missing; a literal zero remains a measurement. */
-function numericCell(cell: string | undefined): number | null {
-  if (cell === undefined || cell.trim() === "") return null
-  const value = Number(cell)
-  return Number.isFinite(value) ? value : null
-}
-
-/** Whether at least {@link NUMERIC_COLUMN_THRESHOLD} of column `col` is numeric. */
-function isNumericColumn(rows: string[][], col: number): boolean {
-  let numeric = 0
-  let nonEmpty = 0
-  for (const row of rows) {
-    const cell = row[col]
-    if (cell === undefined || cell.trim() === "") continue
-    nonEmpty++
-    if (numericCell(cell) !== null) numeric++
-  }
-  return nonEmpty > 0 && numeric / nonEmpty >= NUMERIC_COLUMN_THRESHOLD
-}
-
-/** Whether column `col` is monotonically non-decreasing (skipping non-numbers). */
-function isMonotonicColumn(rows: string[][], col: number): boolean {
-  let prev = Number.NEGATIVE_INFINITY
-  let seen = 0
-  let ordered = 0
-  for (const row of rows) {
-    const value = numericCell(row[col])
-    if (value === null) continue
-    seen++
-    if (value >= prev) ordered++
-    prev = value
-  }
-  return seen > 1 && ordered / seen >= MONOTONIC_THRESHOLD
-}
-
-/**
- * Decide whether a parsed CSV/TSV looks like a scalar metric log — a monotonic
- * first numeric column (the step/index axis) followed by ≥1 further numeric
- * column (the plotted series) — and if so build a {@link ChartPreview}. Pure;
- * returns `null` (→ fall back to a table) when the heuristic rejects.
- */
-function detectScalarChart(headers: string[], rows: string[][]): ChartPreview | null {
-  if (headers.length < 2 || rows.length < 2) return null
-
-  const numericCols: number[] = []
-  for (let col = 0; col < headers.length; col++) {
-    if (isNumericColumn(rows, col)) numericCols.push(col)
-  }
-  if (numericCols.length < 2) return null
-
-  const xCol = numericCols[0] ?? 0
-  if (!isMonotonicColumn(rows, xCol)) return null
-  const seriesCols = numericCols.slice(1)
-
-  return buildChart({
-    rows,
-    xCol,
-    xLabel: headers[xCol] ?? "step",
-    seriesCols,
-    seriesLabels: seriesCols.map((col) => headers[col] ?? `col${col}`),
-  })
-}
-
-/**
- * Assemble a {@link ChartPreview} from string rows: read the x column and each
- * series column as numbers, drop rows whose x is not finite, and downsample to
- * {@link MAX_CHART_POINTS} by striding so a long log still charts cheaply.
- */
-function buildChart(args: {
-  rows: string[][]
-  xCol: number
-  xLabel: string
-  seriesCols: number[]
-  seriesLabels: string[]
-}): ChartPreview {
-  const { rows, xCol, xLabel, seriesCols, seriesLabels } = args
-
-  const xAll: number[] = []
-  const seriesAll: Array<Array<number | null>> = seriesCols.map(() => [])
-  for (const row of rows) {
-    const x = numericCell(row[xCol])
-    if (x === null) continue
-    xAll.push(x)
-    seriesCols.forEach((col, s) => {
-      seriesAll[s]?.push(numericCell(row[col]))
-    })
-  }
-
-  return downsampleChart(xLabel, xAll, seriesLabels, seriesAll)
-}
-
-/** Stride a chart's x + series down to at most {@link MAX_CHART_POINTS} points. */
-function downsampleChart(
-  xLabel: string,
-  xAll: number[],
-  seriesLabels: string[],
-  seriesAll: Array<Array<number | null>>,
-): ChartPreview {
-  const truncated = xAll.length > MAX_CHART_POINTS
-  const stride = truncated ? Math.ceil(xAll.length / MAX_CHART_POINTS) : 1
-
-  const x: number[] = []
-  const sampled: Array<Array<number | null>> = seriesAll.map(() => [])
-  for (let i = 0; i < xAll.length; i += stride) {
-    x.push(xAll[i] ?? 0)
-    seriesAll.forEach((values, s) => {
-      sampled[s]?.push(values[i] ?? null)
-    })
-  }
-
-  return {
-    type: "chart",
-    xLabel,
-    x,
-    series: seriesLabels.map((label, s) => ({ label, values: sampled[s] ?? [] })),
-    truncated,
-  }
-}
-
 // ── NumPy (.npy) decoding ──────────────────────────────────────────────────────
 
 /** The 6 magic bytes that prefix every `.npy` file: `\x93NUMPY`. */
@@ -773,13 +593,23 @@ const NPY_DTYPES: Readonly<Record<string, NpyDtype>> = {
   u1: { width: 1, read: (v, o) => v.getUint8(o) },
 }
 
-/** A successfully decoded `.npy` 1-D/2-D numeric array (row-major values). */
+/** A `.npy` file's header fields and where its data starts. */
+interface NpyHeader {
+  descr: string
+  fortranOrder: boolean
+  /** `[n]` or `[rows, cols]` (higher ranks are refused by the parser). */
+  shape: number[]
+  /** Byte offset of the first data byte. */
+  dataOffset: number
+}
+
+/** A 1-D/2-D numeric `.npy` source whose shown cells were read from disk. */
 interface DecodedNpy {
   /** Array shape: `[n]` for 1-D, `[rows, cols]` for 2-D. */
   shape: number[]
   /** Original dtype descr (e.g. `<f8`). */
   dtype: string
-  /** Read one logical cell directly from its source bytes. */
+  /** Read one shown logical cell. */
   readValue: (row: number, col: number) => number
 }
 
@@ -808,19 +638,17 @@ function parseNpyHeader(
 }
 
 /**
- * Decode a `.npy` header into a 1-D/2-D numeric source accessor. Any
- * malformed/unsupported input (bad magic, an unsupported dtype, >2 dimensions,
- * a scalar, or truncated data) yields `null` rather than throwing, so the caller
- * can degrade to a metadata card.
+ * Parse the magic, version and header dict of a `.npy` prefix. Returns null
+ * for a bad magic, an unsupported version, a header past the end of `buf`, or
+ * a header the parser refuses (see {@link parseNpyHeader}).
  *
  * Format spec: https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html
  */
-export function decodeNpy(buf: Buffer): DecodedNpy | null {
+function parseNpyPrefix(buf: Buffer): NpyHeader | null {
   if (buf.length < 10) return null
   for (let i = 0; i < NPY_MAGIC.length; i++) {
     if (buf[i] !== NPY_MAGIC[i]) return null
   }
-
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
   const major = buf[6]
   const minor = buf[7]
@@ -836,85 +664,154 @@ export function decodeNpy(buf: Buffer): DecodedNpy | null {
   } else {
     return null
   }
-
   const dataOffset = headerStart + headerLen
   if (!Number.isSafeInteger(dataOffset) || dataOffset > buf.length) return null
-  const header = buf.toString("utf8", headerStart, dataOffset)
-  const parsed = parseNpyHeader(header)
-  if (!parsed) return null
-  // Only 1-D / 2-D numeric arrays are renderable; scalars and N-D arrays fall back.
-  if (parsed.shape.length === 0 || parsed.shape.length > 2) return null
-
-  const marker = parsed.descr[0]
-  if (marker !== "<" && marker !== ">" && marker !== "|" && marker !== "=") return null
-  const littleEndian =
-    marker === "<" ||
-    marker === "|" ||
-    (marker === "=" && new Uint8Array(new Uint16Array([1]).buffer)[0] === 1)
-  const dtype = NPY_DTYPES[parsed.descr.slice(1)]
-  if (!dtype) return null
-
-  let total = 1
-  for (const dimension of parsed.shape) {
-    total *= dimension
-    if (!Number.isSafeInteger(total)) return null
-  }
-  const byteCount = total * dtype.width
-  if (!Number.isSafeInteger(byteCount) || byteCount > buf.length - dataOffset) return null
-
-  const [rowCount = 0, colCount = 1] = parsed.shape
-  const readValue = (row: number, col: number): number => {
-    const index =
-      parsed.fortranOrder && parsed.shape.length === 2 ? col * rowCount + row : row * colCount + col
-    return dtype.read(view, dataOffset + index * dtype.width, littleEndian)
-  }
-  return { readValue, shape: parsed.shape, dtype: parsed.descr }
+  const parsed = parseNpyHeader(buf.toString("utf8", headerStart, dataOffset))
+  return parsed ? { ...parsed, dataOffset } : null
 }
 
+/** Max bytes read for a `.npy` header (longer headers fall back to metadata). */
+const MAX_NPY_HEADER_BYTES = 1024 * 1024
+
 /**
- * Preview a `.npy` array. A 1-D array becomes a {@link ChartPreview} (value vs.
- * row index — the common loss/fitness curve); a 2-D array becomes a bounded
- * {@link ArrayPreview} grid. Oversized files and any decode failure degrade to a
- * metadata card with a note (no throw).
+ * Preview a `.npy` array, reading only what is shown. A 1-D numeric array
+ * becomes a {@link ChartPreview} (value vs. row index, strided to
+ * {@link MAX_CHART_POINTS}); a 2-D one a bounded {@link ArrayPreview} grid.
+ * Only the header and the shown cells are read from disk, so the file size
+ * does not matter. An object array (`|O`) holds a pickle, read whole (up to
+ * {@link MAX_PICKLE_BYTES}, and above the pickle size limit only with `load`)
+ * by the safe unpickler. Anything malformed or
+ * unsupported degrades to a metadata card with a note (no throw).
  */
 async function previewNpy(
   abs: string,
   relPath: string,
   size: number,
+  load: boolean,
   meta: (note?: string) => MetadataPreview,
 ): Promise<DataFilePreview> {
-  if (size > MAX_NPY_BYTES) return meta("Array too large to decode inline")
   const file = await open(abs, "r")
-  let source = Buffer.allocUnsafe(Math.min(MAX_NPY_BYTES + 1, Math.max(4096, size + 1)))
-  let length = 0
   try {
-    while (length < MAX_NPY_BYTES + 1) {
-      if (length === source.length) {
-        const grown = Buffer.allocUnsafe(Math.min(MAX_NPY_BYTES + 1, source.length * 2))
-        source.copy(grown, 0, 0, length)
-        source = grown
+    const head = await readAt(file, 0, Math.min(size, MAX_NPY_HEADER_BYTES))
+    const header = parseNpyPrefix(head)
+    if (!header) return meta("Could not decode .npy array")
+    if (/^[|<>=]O\d*$/.test(header.descr)) {
+      const limit = LARGE_FILE_BYTES.pickle
+      if (!load && limit !== null && size > limit) return { type: "large", kind: "npy", size }
+      if (size > MAX_PICKLE_BYTES) {
+        return meta(`Stores Python objects; too large to read (${formatMegabytes(size)})`)
       }
-      const result = await file.read(source, length, source.length - length, length)
-      if (result.bytesRead === 0) break
-      length += result.bytesRead
+      const payload = await readAt(file, header.dataOffset, size - header.dataOffset)
+      return previewPickle(payload, baseNameWithoutExt(relPath), meta)
     }
+    const decoded = await readNpyCells(file, header, size)
+    if (!decoded) return meta("Could not decode .npy array")
+    if (decoded.shape.length === 1) return npyChart(decoded, relPath)
+    return npyArray(decoded)
   } finally {
     await file.close()
   }
-  if (length > MAX_NPY_BYTES) return meta("Array too large to decode inline")
-  const decoded = decodeNpy(source.subarray(0, length))
-  if (!decoded) return meta("Could not decode .npy array")
+}
 
-  if (decoded.shape.length === 1) return npyChart(decoded, relPath)
-  return npyArray(decoded)
+/** Read `length` bytes at `position` (fewer if the file is shorter). */
+async function readAt(file: FileHandle, position: number, length: number): Promise<Buffer> {
+  const buffer = Buffer.alloc(Math.max(0, length))
+  let done = 0
+  while (done < buffer.length) {
+    const { bytesRead } = await file.read(buffer, done, buffer.length - done, position + done)
+    if (bytesRead === 0) break
+    done += bytesRead
+  }
+  return buffer.subarray(0, done)
+}
+
+/** Bytes between two shown cells below which one read covers both. */
+const NPY_READ_GAP = 4096
+
+/**
+ * Read the cells a preview shows (a strided series, or the top-left grid) of
+ * a numeric 1-D/2-D array. Null when the dtype is unsupported, the shape is a
+ * scalar, or the file is shorter than the header says.
+ */
+async function readNpyCells(
+  file: FileHandle,
+  header: NpyHeader,
+  size: number,
+): Promise<DecodedNpy | null> {
+  if (header.shape.length === 0 || header.shape.length > 2) return null
+  const marker = header.descr[0]
+  if (marker !== "<" && marker !== ">" && marker !== "|" && marker !== "=") return null
+  const littleEndian =
+    marker === "<" ||
+    marker === "|" ||
+    (marker === "=" && new Uint8Array(new Uint16Array([1]).buffer)[0] === 1)
+  const dtype = NPY_DTYPES[header.descr.slice(1)]
+  if (!dtype) return null
+  let total = 1
+  for (const dimension of header.shape) {
+    total *= dimension
+    if (!Number.isSafeInteger(total)) return null
+  }
+  const byteCount = total * dtype.width
+  if (!Number.isSafeInteger(byteCount) || byteCount > size - header.dataOffset) return null
+
+  const [rowCount = 0, colCount = 1] = header.shape
+  const storageIndex = (row: number, col: number): number =>
+    header.fortranOrder && header.shape.length === 2 ? col * rowCount + row : row * colCount + col
+  const wanted: number[] = []
+  if (header.shape.length === 1) {
+    for (let row = 0; row < rowCount; row += chartStride(rowCount)) wanted.push(row)
+  } else {
+    const shownRows = Math.min(rowCount, MAX_ARRAY_ROWS)
+    const shownCols = Math.min(colCount, MAX_ARRAY_COLS)
+    for (let row = 0; row < shownRows; row++) {
+      for (let col = 0; col < shownCols; col++) wanted.push(storageIndex(row, col))
+    }
+    wanted.sort((a, b) => a - b)
+  }
+
+  const values = new Map<number, number>()
+  let start = 0
+  while (start < wanted.length) {
+    let end = start
+    while (
+      end + 1 < wanted.length &&
+      ((wanted[end + 1] ?? 0) - (wanted[end] ?? 0)) * dtype.width <= NPY_READ_GAP
+    ) {
+      end++
+    }
+    const first = wanted[start] ?? 0
+    const last = wanted[end] ?? 0
+    const bytes = await readAt(
+      file,
+      header.dataOffset + first * dtype.width,
+      (last - first + 1) * dtype.width,
+    )
+    if (bytes.length < (last - first + 1) * dtype.width) return null
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    for (let i = start; i <= end; i++) {
+      const index = wanted[i] ?? 0
+      values.set(index, dtype.read(view, (index - first) * dtype.width, littleEndian))
+    }
+    start = end + 1
+  }
+  return {
+    shape: header.shape,
+    dtype: header.descr,
+    readValue: (row, col) => values.get(storageIndex(row, col)) ?? Number.NaN,
+  }
+}
+
+/** The stride that brings `count` points down to at most {@link MAX_CHART_POINTS}. */
+function chartStride(count: number): number {
+  return count > MAX_CHART_POINTS ? Math.ceil(count / MAX_CHART_POINTS) : 1
 }
 
 /** A 1-D `.npy` array → a single-series line chart over its row index. */
 function npyChart(decoded: DecodedNpy, relPath: string): ChartPreview {
   const label = baseNameWithoutExt(relPath)
   const count = decoded.shape[0] ?? 0
-  const truncated = count > MAX_CHART_POINTS
-  const stride = truncated ? Math.ceil(count / MAX_CHART_POINTS) : 1
+  const stride = chartStride(count)
   const x: number[] = []
   const values: Array<number | null> = []
   for (let row = 0; row < count; row += stride) {
@@ -922,7 +819,7 @@ function npyChart(decoded: DecodedNpy, relPath: string): ChartPreview {
     const value = decoded.readValue(row, 0)
     values.push(Number.isFinite(value) ? value : null)
   }
-  return { type: "chart", xLabel: "index", x, series: [{ label, values }], truncated }
+  return { type: "chart", xLabel: "index", x, series: [{ label, values }], truncated: stride > 1 }
 }
 
 /** A 2-D `.npy` array → a bounded grid (rows × columns, both capped). */
@@ -949,6 +846,11 @@ function npyArray(decoded: DecodedNpy): ArrayPreview {
   }
 }
 
+/** A byte count as `12.3 MB` (decimal megabytes). */
+export function formatMegabytes(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
+}
+
 // ── Small pure helpers ───────────────────────────────────────────────────────
 
 /** Normalize native (Windows) separators to POSIX for stable relPaths. */
@@ -961,12 +863,6 @@ function baseNameWithoutExt(relPath: string): string {
   const base = relPath.slice(relPath.lastIndexOf("/") + 1)
   const dot = base.lastIndexOf(".")
   return dot > 0 ? base.slice(0, dot) : base
-}
-
-/** Stringify one array cell: a finite number is trimmed to 6 sig-figs, else `""`. */
-function formatCell(value: number | undefined): string {
-  if (value === undefined || !Number.isFinite(value)) return ""
-  return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)))
 }
 
 /** Split into lines on `\n`/`\r\n`, dropping a single trailing empty line. */

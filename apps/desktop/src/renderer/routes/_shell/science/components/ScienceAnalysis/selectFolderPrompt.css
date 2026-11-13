@@ -1,20 +1,42 @@
 /*
- * "Select experiments folder": an accent ring on the Select… button. It pulses a
- * few times, then stays until the button is clicked. With reduced motion it does
- * not pulse.
+ * "Select experiments folder": a soft accent wave moves back and forth across the
+ * face of the Select… button (not its edge) until the button is clicked. The wave
+ * is a pseudo-element that only translates, so it stays on the compositor. With
+ * reduced motion it is a still accent tint.
  */
-.analysis-select-folder-ring {
-  box-shadow: 0 0 0 2px var(--accent-brand);
+.analysis-select-folder-wave {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .analysis-select-folder-ring {
-    animation: analysis-select-folder-pulse 1.2s ease-in-out 3;
+.analysis-select-folder-wave::before {
+  position: absolute;
+  inset: 0 -100%;
+  z-index: -1;
+  background: repeating-linear-gradient(
+    100deg,
+    transparent 0,
+    color-mix(in oklch, var(--accent-brand) 22%, transparent) 1.25rem,
+    transparent 2.5rem
+  );
+  content: "";
+  pointer-events: none;
+  animation: analysis-select-folder-wave 3.2s ease-in-out infinite alternate;
+}
+
+@keyframes analysis-select-folder-wave {
+  from {
+    transform: translateX(-2.5rem);
+  }
+  to {
+    transform: translateX(2.5rem);
   }
 }
 
-@keyframes analysis-select-folder-pulse {
-  50% {
-    box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent-brand) 30%, transparent);
+@media (prefers-reduced-motion: reduce) {
+  .analysis-select-folder-wave::before {
+    animation: none;
+    transform: none;
   }
 }

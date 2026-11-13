@@ -24,6 +24,7 @@ export const STRUCTURE_FILE_NAME = "experiments-structure.yaml"
 /** The preset ids, in the order the UI offers them. */
 export const STRUCTURE_PRESETS = [
   "auto",
+  "folders",
   "one-folder-per-experiment",
   "experiment-run",
   "flat",
@@ -35,13 +36,15 @@ export const DEFAULT_STRUCTURE_VALUE: StructurePreset = "auto"
 
 /**
  * A resolved structure. `auto`: every folder that holds data files is a run,
- * grouped by its parent folder. `flat`: no grouping. `pattern`: the leading
+ * grouped by its parent folder. `folders`: the plain folder tree, no grouping
+ * or experiments. `flat`: no grouping. `pattern`: the leading
  * folders of a file's path are matched against the segments, where
  * `{experiment}` names the group, `{run}` the run, `*` any folder, and any
  * other segment a folder with that exact name.
  */
 export type ExperimentsStructure =
   | { kind: "auto" }
+  | { kind: "folders" }
   | { kind: "flat" }
   | { kind: "pattern"; segments: string[] }
 
@@ -70,6 +73,7 @@ export function parseStructureValue(value: string): ExperimentsStructure | strin
     }
     const preset = trimmed as StructurePreset
     if (preset === "auto") return { kind: "auto" }
+    if (preset === "folders") return { kind: "folders" }
     if (preset === "flat") return { kind: "flat" }
     if (preset === "one-folder-per-experiment")
       return { kind: "pattern", segments: ["{experiment}"] }

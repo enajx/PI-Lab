@@ -231,6 +231,7 @@
   "Checking…": "Comprobando…",
   "Environments unavailable": "Entornos no disponibles",
   "Auto-detect": "Detectar automáticamente",
+  "Folders": "Carpetas",
   "Choose environment folder…": "Elegir carpeta del entorno…",
   "Choose Python interpreter…": "Elegir intérprete de Python…",
   "Python type checking is on. Click to turn it off.": "La comprobación de tipos de Python está activada. Haz clic para desactivarla.",
@@ -1138,5 +1139,12 @@
   "List files and folders whose name starts with a dot in the file tree.": "Muestra en el árbol de archivos los archivos y carpetas cuyo nombre empieza por un punto.",
   "Don't ask again": "No volver a preguntar",
   "Confirm before deleting files": "Confirmar antes de eliminar archivos",
-  "Ask before moving a file or folder in the file tree to the Trash.": "Pregunta antes de mover a la Papelera un archivo o carpeta del árbol de archivos."
+  "Ask before moving a file or folder in the file tree to the Trash.": "Pregunta antes de mover a la Papelera un archivo o carpeta del árbol de archivos.",
+  "Large file": "Archivo grande",
+  "loading may be slow": "la carga puede ser lenta",
+  "Load": "Cargar",
+  "Dataset": "Conjunto de datos",
+  "scalar": "escalar",
+  "datasets": "conjuntos de datos",
+  "+{count} more": "+{count} más"
 }
