@@ -56,10 +56,19 @@ describe("gradientPatterns", () => {
     expect(buildLayerSVG(cfg, { blur: 0 })).toContain('stdDeviation="0"')
   })
 
-  test("buildGrainSVG produces a desaturated fractal-noise tile", () => {
-    const grain = buildGrainSVG()
-    expect(grain).toContain("fractalNoise")
-    expect(grain).toContain('type="saturate"')
+  test("buildGrainSVG is the reference noise layer, sized to its box instead of a repeating tile", () => {
+    const grain = buildGrainSVG({
+      baseFrequency: GRADIENT_PATTERN_DEFAULTS.baseFrequency,
+      numOctaves: GRADIENT_PATTERN_DEFAULTS.numOctaves,
+    })
+    // Same filter chain as the full reference SVG: turbulence on gray, overlay-blended.
+    expect(grain).toContain(
+      `<feTurbulence baseFrequency="${GRADIENT_PATTERN_DEFAULTS.baseFrequency}"`,
+    )
+    expect(grain).toContain('mode="overlay"')
+    expect(grain).toContain("fill:gray")
+    // No fixed pixel size: the image fills the card once, so the noise never repeats as tiles.
+    expect(grain).toMatch(/<svg [^>]*width="100%" height="100%"/)
   })
 
   test("toDataUri round-trips SVG markup through a CSS-safe data URI", () => {

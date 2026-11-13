@@ -233,6 +233,20 @@ test("dashboard shows a directly resizable project card", async () => {
   })
   expect(artwork.backgroundImage).toContain("data:image/svg+xml")
   expect(artwork.animationName).toMatch(/^pi-lab-gradient-(meander|turn|breathe|weave|orbit|rock)$/)
+
+  // The grain is one baked noise image drawn once over the whole cover. Small
+  // repeating background tiles (e.g. 5px/7px dot screens) show as a mesh.
+  const grain = await window
+    .getByTestId("project-card-gradient-grain")
+    .first()
+    .evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { backgroundImage: style.backgroundImage, backgroundRepeat: style.backgroundRepeat }
+    })
+  // Count CSS image layers; `url(%23…)` refs inside the encoded SVG are not layers.
+  expect(grain.backgroundImage.match(/url\("|gradient\(/g)).toHaveLength(1)
+  expect(grain.backgroundImage).toContain("data:image/svg+xml")
+  expect(grain.backgroundRepeat).toBe("no-repeat")
 })
 
 test("Project summary stays viewport-sized when opened from a hovered card", async () => {

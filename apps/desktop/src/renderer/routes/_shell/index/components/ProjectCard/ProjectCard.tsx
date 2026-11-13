@@ -396,15 +396,16 @@ export function ProjectCard({ project }: ProjectCardProps) {
                 )
               })}
             </div>
-            {/* Static film grain over the fields: the baked turbulence tile plus two
-                fine dot screens keep the texture legible over any palette. */}
+            {/* Static grain over the fields: one baked noise image drawn once over the
+                whole cover (no repeating tiles, which show as a mesh). */}
             <div
               data-testid="project-card-gradient-grain"
               aria-hidden
-              className="pointer-events-none absolute inset-0 opacity-50 mix-blend-soft-light"
+              className="pointer-events-none absolute inset-0 opacity-50 mix-blend-overlay"
               style={{
-                backgroundImage: `url("${artwork.grainUrl}"), radial-gradient(circle at 25% 35%, hsl(0 0% 0% / 0.26) 0 0.6px, transparent 0.9px), radial-gradient(circle at 70% 62%, hsl(0 0% 100% / 0.42) 0 0.55px, transparent 0.9px)`,
-                backgroundSize: "180px 180px, 5px 5px, 7px 7px",
+                backgroundImage: `url("${artwork.grainUrl}")`,
+                backgroundSize: "100% 100%",
+                backgroundRepeat: "no-repeat",
               }}
             />
           </>

@@ -50,7 +50,7 @@ describe("projectGradient", () => {
     }
 
     expect(grainUrl.startsWith("data:image/svg+xml,")).toBe(true)
-    expect(grainUrl).toContain(encodeURIComponent("fractalNoise"))
+    expect(grainUrl).toContain(encodeURIComponent("<feTurbulence"))
   })
 
   test("animation timing sits in the documented ranges", () => {

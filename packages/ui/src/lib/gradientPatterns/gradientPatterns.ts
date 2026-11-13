@@ -287,15 +287,20 @@ export function buildLayerSVG(
   </svg>`
 }
 
-/** Build a standalone turbulence grain tile (desaturated fractal noise). */
+/**
+ * Build the grain as a standalone SVG: the reference's noise layer (a gray rect
+ * run through `feTurbulence`, composited and overlay-blended, as in `buildSVG`).
+ * It has no fixed size, so CSS draws it once over the whole box at the box's own
+ * pixel size. A small repeating tile would show as a regular mesh on the card.
+ */
 export function buildGrainSVG({
-  baseFrequency = GRADIENT_PATTERN_DEFAULTS.baseFrequency,
-  numOctaves = GRADIENT_PATTERN_DEFAULTS.numOctaves,
+  baseFrequency,
+  numOctaves,
 }: {
-  baseFrequency?: number
-  numOctaves?: number
-} = {}): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="${baseFrequency}" numOctaves="${numOctaves}" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#n)" opacity="0.9"/></svg>`
+  baseFrequency: number
+  numOctaves: number
+}): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><filter id="g" filterUnits="objectBoundingBox" x="0%" y="0%" width="100%" height="100%"><feTurbulence baseFrequency="${baseFrequency}" numOctaves="${numOctaves}" seed="0" result="out1"/><feComposite in="out1" in2="SourceGraphic" operator="in" result="out2"/><feBlend in="SourceGraphic" in2="out2" mode="overlay" result="out3"/></filter><rect width="100%" height="100%" style="fill:gray; stroke:transparent; filter:url(#g)"/></svg>`
 }
 
 /** Wrap SVG markup as an inline `data:image/svg+xml` URI, escaped for CSS `url()`. */
