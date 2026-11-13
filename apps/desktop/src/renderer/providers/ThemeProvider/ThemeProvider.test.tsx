@@ -55,6 +55,7 @@ function ThemeHarness() {
     setAccentId,
     previewThemeId,
     previewAccentId,
+    previewMode,
   } = useTheme()
   return (
     <>
@@ -72,6 +73,12 @@ function ThemeHarness() {
       </button>
       <button type="button" onClick={() => setAccentId("ember")}>
         Ember
+      </button>
+      <button type="button" onClick={() => previewMode("dark")}>
+        Preview dark
+      </button>
+      <button type="button" onClick={() => previewMode(null)}>
+        End mode preview
       </button>
       <button type="button" onClick={() => previewThemeId("nord")}>
         Preview Nord
@@ -292,5 +299,19 @@ describe("ThemeProvider", () => {
     await waitFor(() =>
       expect(screen.getByTestId("theme-state").textContent).toBe("light:light:tokyo-night"),
     )
+  })
+
+  test("a mode preview switches light and dark without saving", async () => {
+    installMatchMedia(false)
+    render(
+      <ThemeProvider>
+        <ThemeHarness />
+      </ThemeProvider>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Preview dark" }))
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true))
+    expect(window.localStorage.getItem("pi-lab.theme")).toBe("light")
+    fireEvent.click(screen.getByRole("button", { name: "End mode preview" }))
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(false))
   })
 })

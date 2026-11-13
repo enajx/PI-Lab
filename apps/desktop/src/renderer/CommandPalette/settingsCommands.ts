@@ -36,18 +36,30 @@ function toggle(id: string, label: string, current: boolean, set: Setter<boolean
   return action(id, `${current ? "Turn off" : "Turn on"} ${label}`, () => set(!current))
 }
 
-/** Enumerate explicit choices so a command never cycles to an unexpected value. */
-function choices<T extends string>(
+/**
+ * One command per multi-choice setting ("Change <label>"), opening its options as
+ * a sub-list with the current value highlighted. `preview` is given only for
+ * visual settings that are cheap and safe to show live; others apply on Enter.
+ */
+function choice<T extends string>(
   id: string,
   label: string,
   options: readonly (readonly [T, string])[],
   current: T,
   set: Setter<T>,
-): PaletteCommand[] {
-  return options.map(([value, name]) => ({
-    ...action(`${id}-${value}`, `Set ${label}: ${name}`, () => set(value)),
-    hint: value === current ? "Current" : undefined,
-  }))
+  preview: ((value: T | null) => void) | null,
+): PaletteCommand {
+  const known = (value: string): T => {
+    const option = options.find(([candidate]) => candidate === value)
+    if (!option) throw new Error(`Unknown ${label} choice: ${value}`)
+    return option[0]
+  }
+  return picker(id, `Change ${label}`, {
+    options,
+    current,
+    preview: preview && ((value) => preview(value === null ? null : known(value))),
+    apply: (value) => set(known(value)),
+  })
 }
 
 /** Direct controls for existing boolean and choice settings; forms stay in Settings. */
@@ -109,7 +121,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       setAutocomplete,
     ),
     toggle("quick-editor-run-python", "Quick Editor Run Python", runPython, setRunPython),
-    ...choices(
+    choice(
       "quick-editor-markdown-view",
       "Quick Editor Markdown view",
       [
@@ -118,8 +130,9 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ],
       markdown,
       setMarkdown,
+      null,
     ),
-    ...choices(
+    choice(
       "digital-rain-density",
       "Digital Rain density",
       [
@@ -129,8 +142,9 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ],
       density,
       setDensity,
+      null,
     ),
-    ...choices(
+    choice(
       "digital-rain-speed",
       "Digital Rain speed",
       [
@@ -140,8 +154,9 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ],
       speed,
       setSpeed,
+      null,
     ),
-    ...choices(
+    choice(
       "theme-mode",
       "theme mode",
       [
@@ -151,6 +166,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ],
       theme.mode,
       theme.setMode,
+      theme.previewMode,
     ),
     // Each theme is previewed with Theme default, and picking one resets the accent.
     picker("change-theme", "Change theme", {
@@ -174,12 +190,13 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       preview: theme.previewAccentId,
       apply: theme.setAccentId,
     }),
-    ...choices(
+    choice(
       "language",
       "language",
       LANGUAGES.map((value) => [value.code, value.label] as const),
       language,
       setLanguage,
+      null,
     ),
   ]
   if (login?.available)
@@ -190,7 +207,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
     )
   if (caffeine)
     commands.push(
-      ...choices(
+      choice(
         "caffeine-mode",
         "Caffeine mode",
         [
@@ -200,8 +217,9 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
         ],
         caffeine.mode,
         (mode) => caffeineMode.mutateAsync({ mode }),
+        null,
       ),
-      ...choices(
+      choice(
         "caffeine-scope",
         "Caffeine scope",
         [
@@ -210,6 +228,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
         ],
         caffeine.scope,
         (scope) => caffeineScope.mutateAsync({ scope }),
+        null,
       ),
     )
   if (!settings) return commands
@@ -226,7 +245,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       settings.worktreePerAgent,
       (worktreePerAgent) => general.mutateAsync({ worktreePerAgent }),
     ),
-    ...choices(
+    choice(
       "update-channel",
       "update channel",
       [
@@ -235,6 +254,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ],
       settings.publicUpdateChannel,
       (publicUpdateChannel) => general.mutateAsync({ publicUpdateChannel }),
+      null,
     ),
     toggle(
       "editor-diagnostics",
@@ -254,7 +274,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       settings.editor.confirmFileDelete,
       (confirmFileDelete) => editor.mutateAsync({ confirmFileDelete }),
     ),
-    ...choices(
+    choice(
       "python-run-destination",
       "Run Python in",
       [
@@ -263,8 +283,9 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ],
       settings.editor.pythonRunDestination,
       (pythonRunDestination) => editor.mutateAsync({ pythonRunDestination }),
+      null,
     ),
-    ...choices(
+    choice(
       "editor-theme",
       "editor theme",
       allEditorThemes(settings.editor.customEditorThemes).map(
@@ -272,8 +293,18 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ),
       settings.editor.editorTheme,
       (editorTheme) => editor.mutateAsync({ editorTheme }),
+      // Preview by changing only the cached settings the editors read; nothing is saved.
+      (editorTheme) =>
+        cache.setQueryData(trpc.settings.get.queryKey(), (old) =>
+          old
+            ? {
+                ...old,
+                editor: { ...old.editor, editorTheme: editorTheme ?? settings.editor.editorTheme },
+              }
+            : old,
+        ),
     ),
-    ...choices(
+    choice(
       "project-config-storage",
       "per-project config storage",
       [
@@ -283,13 +314,15 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       ],
       settings.agents.projectConfigStorage,
       (projectConfigStorage) => agent.mutateAsync({ projectConfigStorage }),
+      null,
     ),
-    ...choices(
+    choice(
       "default-agent",
       "default agent",
       agents.map((value) => [value.id, value.label] as const),
       settings.agents.defaultAgentId ?? "",
       (defaultAgentId) => agent.mutateAsync({ defaultAgentId }),
+      null,
     ),
     toggle("notifications-muted", "Mute all notifications", settings.notifications.muted, (muted) =>
       notifications.mutateAsync({ muted }),
@@ -311,12 +344,13 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
         settings.notifications[key].enabled,
         (enabled) => notifications.mutateAsync({ [key]: { enabled } }),
       ),
-      ...choices(
+      choice(
         `notification-${key}-sound`,
         `${label} sound`,
         NOTIFICATION_SOUND_OPTIONS.map((value) => [value.id, value.label] as const),
         settings.notifications[key].sound,
         (sound) => notifications.mutateAsync({ [key]: { sound } }),
+        null,
       ),
     )
   }

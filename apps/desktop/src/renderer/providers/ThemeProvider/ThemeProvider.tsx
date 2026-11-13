@@ -27,6 +27,8 @@ interface ThemeContextValue {
   mode: ThemeMode
   resolvedMode: ResolvedThemeMode
   setMode: (mode: ThemeMode) => void
+  /** Show a mode without saving it; null ends the preview. Saving a mode also ends it. */
+  previewMode: (mode: ThemeMode | null) => void
   /** The theme in use: a preview, else the saved one, or Default when this channel does not offer it. */
   themeId: string
   setThemeId: (themeId: string) => void
@@ -100,7 +102,9 @@ export function applySavedAppearance(): void {
  * tokens. CodeMirror keeps its own editor-theme preference.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<ThemeMode>(readInitialMode)
+  const [savedMode, setSavedMode] = useState<ThemeMode>(readInitialMode)
+  const [modePreview, setModePreview] = useState<ThemeMode | null>(null)
+  const mode = modePreview ?? savedMode
   const [savedThemeId, setThemeIdState] = useState<string>(readInitialThemeId)
   const [savedAccentId, setAccentIdState] = useState<string>(readInitialAccentId)
   const [themePreview, setThemePreview] = useState<string | null>(null)
@@ -142,11 +146,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyTheme(themeId, resolvedMode, accentId)
-    window.localStorage.setItem(MODE_STORAGE_KEY, mode)
+    window.localStorage.setItem(MODE_STORAGE_KEY, savedMode)
     // Keep a saved theme this channel does not offer, so Settings can say why Default is shown.
     window.localStorage.setItem(APP_THEME_STORAGE_KEY, savedThemeId)
     window.localStorage.setItem(ACCENT_STORAGE_KEY, savedAccentId)
-  }, [mode, resolvedMode, themeId, savedThemeId, accentId, savedAccentId])
+  }, [savedMode, resolvedMode, themeId, savedThemeId, accentId, savedAccentId])
 
   const setThemeId = useCallback((nextThemeId: string) => {
     setThemePreview(null)
@@ -164,9 +168,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     (next: string | null) => setAccentPreview(next === null ? null : normalizeAccentId(next)),
     [],
   )
+  const setMode = useCallback((nextMode: ThemeMode) => {
+    setModePreview(null)
+    setSavedMode(nextMode)
+  }, [])
   const toggleTheme = useCallback(
     () => setMode(resolvedMode === "dark" ? "light" : "dark"),
-    [resolvedMode],
+    [resolvedMode, setMode],
   )
 
   const value = useMemo<ThemeContextValue>(
@@ -174,6 +182,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       mode,
       resolvedMode,
       setMode,
+      previewMode: setModePreview,
       themeId,
       setThemeId,
       themes,
@@ -187,6 +196,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     [
       mode,
       resolvedMode,
+      setMode,
       themeId,
       setThemeId,
       themes,

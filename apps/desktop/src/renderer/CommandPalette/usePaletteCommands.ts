@@ -70,14 +70,16 @@ export interface PaletteCommand {
 
 /**
  * Choices shown in place of the command list, like VS Code's Color Theme picker.
- * The highlighted choice is previewed live; Enter applies it; Escape or closing
- * the palette calls `preview(null)` to go back to what was set before.
+ * With `preview`, the highlighted choice is shown live and Escape or closing the
+ * palette calls `preview(null)` to go back to what was set before. Without it,
+ * nothing changes until Enter. `apply` may return a promise; a rejection stays
+ * visible in the palette.
  */
 export interface PaletteSubmenu {
   options: readonly (readonly [value: string, label: string])[]
   current: string
-  preview: (value: string | null) => void
-  apply: (value: string) => void
+  preview: ((value: string | null) => void) | null
+  apply: ((value: string) => void) | ((value: string) => Promise<unknown>)
 }
 
 /** Param-less navigation targets — literal `to`s so TanStack types them precisely. */

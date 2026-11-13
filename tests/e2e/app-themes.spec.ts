@@ -87,7 +87,10 @@ async function rootColor(window: Page, property: string): Promise<string> {
   }, property)
 }
 
-async function style(locator: Locator, property: "borderTopColor" | "color"): Promise<string> {
+async function style(
+  locator: Locator,
+  property: "backgroundColor" | "borderTopColor" | "color",
+): Promise<string> {
   return locator.evaluate((node, name) => getComputedStyle(node)[name], property)
 }
 
@@ -129,14 +132,22 @@ async function appearance(window: Page) {
   }))
 }
 
+/** The palette backdrop's color: a dim at the top level, transparent while previewing. */
+async function backdrop(window: Page): Promise<string> {
+  return style(window.getByTestId("command-palette-dim"), "backgroundColor")
+}
+
 async function openChangeTheme(window: Page): Promise<void> {
   await window.keyboard.press("ControlOrMeta+Shift+p")
   await expect(window.getByTestId("command-palette")).toBeVisible()
+  expect(await backdrop(window)).not.toBe("rgba(0, 0, 0, 0)")
   await window.getByTestId("command-palette-input").fill("Change theme")
-  await window.keyboard.press("Enter")
+  await window.locator('[data-command-id="settings-change-theme"]').click()
   await expect(
     window.locator('[data-testid="command-palette-item"][data-highlighted="true"]'),
   ).toHaveAttribute("data-command-id", "nord")
+  // No dim while previewing, so the app shows the theme's real colors.
+  expect(await backdrop(window)).toBe("rgba(0, 0, 0, 0)")
 }
 
 test("palette Change theme previews themes with Theme default, Escape restores, Enter saves", async () => {
@@ -174,4 +185,29 @@ test("palette Change theme previews themes with Theme default, Escape restores, 
       return { savedTheme, savedAccent, panelBorder }
     })
     .toEqual({ savedTheme: highlighted, savedAccent: "default", panelBorder: "" })
+})
+
+test("palette lists one Change command per setting and previews theme mode live", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.keyboard.press("ControlOrMeta+Shift+p")
+  const input = window.getByTestId("command-palette-input")
+  await input.fill("them")
+  const labels = await window.getByTestId("command-palette-item").allTextContents()
+  expect(labels.some((label) => label.startsWith("Set "))).toBe(false)
+  expect(labels).toEqual(
+    expect.arrayContaining(["Change theme", "Change theme mode", "Change editor theme"]),
+  )
+
+  const dark = () => window.evaluate(() => document.documentElement.classList.contains("dark"))
+  const savedMode = () => window.evaluate(() => localStorage.getItem("pi-lab.theme"))
+  expect(await dark()).toBe(false)
+  await input.fill("Change theme mode")
+  await window.keyboard.press("Enter")
+  await window.keyboard.press("ArrowDown")
+  await expect.poll(dark).toBe(true)
+  expect(await savedMode()).toBe("light")
+  await window.keyboard.press("Escape")
+  await expect.poll(dark).toBe(false)
+  expect(await savedMode()).toBe("light")
 })

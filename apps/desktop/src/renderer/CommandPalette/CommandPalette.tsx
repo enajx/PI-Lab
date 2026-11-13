@@ -40,6 +40,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const [highlight, setHighlight] = useState(0)
   const [open, setOpen] = useState<OpenSubmenu | null>(null)
   const previewed = useRef<string | null>(null)
+  // Set once a sub-list choice is saved, so closing does not restore the old value.
+  const applied = useRef(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
 
@@ -82,21 +84,29 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   // Preview the highlighted sub-list choice (arrow keys and mouse hover both move it).
   const highlightedChoice = open ? ranked[clampedHighlight]?.command.id : undefined
   useEffect(() => {
-    if (!open || highlightedChoice === undefined || highlightedChoice === previewed.current) return
+    const preview = open?.submenu.preview
+    if (!preview || highlightedChoice === undefined || highlightedChoice === previewed.current)
+      return
     previewed.current = highlightedChoice
-    open.submenu.preview(highlightedChoice)
+    preview(highlightedChoice)
   }, [open, highlightedChoice])
 
   // Closing the palette by any route while a sub-list is open restores the previous choice.
   useEffect(() => {
-    if (!open) return
-    return () => open.submenu.preview(null)
+    const preview = open?.submenu.preview
+    if (!preview) return
+    return () => {
+      if (!applied.current) preview(null)
+    }
   }, [open])
 
   const dismiss = () => {
-    open?.submenu.preview(null)
+    open?.submenu.preview?.(null)
     onClose()
   }
+
+  // A previewing sub-list leaves the app undimmed so the preview shows its real colors.
+  const dim = !open?.submenu.preview
 
   // Scroll the highlighted row into view as the user arrows through.
   useEffect(() => {
@@ -108,11 +118,6 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const choose = (index: number) => {
     const entry = ranked[index]
     if (!entry || running) return
-    if (open) {
-      open.submenu.apply(entry.command.id)
-      onClose()
-      return
-    }
     const { submenu } = entry.command
     if (submenu) {
       previewed.current = submenu.current
@@ -127,16 +132,24 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
       inputRef.current?.focus()
       return
     }
-    const run = entry.command.run
+    const apply = open?.submenu.apply
+    const value = entry.command.id
+    const run = apply ? () => apply(value) : entry.command.run
     if (!run) throw new Error(`Palette command ${entry.command.id} has neither run nor submenu`)
     setActionError(null)
     setRunning(true)
     void Promise.resolve()
       .then(() => run())
-      .then(onClose, (error: unknown) => {
-        setActionError(`Could not apply command: ${String(error)}`)
-        setRunning(false)
-      })
+      .then(
+        () => {
+          applied.current = open !== null
+          onClose()
+        },
+        (error: unknown) => {
+          setActionError(`Could not apply command: ${String(error)}`)
+          setRunning(false)
+        },
+      )
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -166,7 +179,9 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         data-feature-help={t("Close the command palette without running an action")}
         tabIndex={-1}
         onClick={dismiss}
-        className="-z-10 absolute inset-0 cursor-default bg-black/40"
+        data-testid="command-palette-dim"
+        data-dim={dim}
+        className={cn("-z-10 absolute inset-0 cursor-default", dim && "bg-black/40")}
       />
       <div
         data-testid="command-palette"
@@ -222,7 +237,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                     data-index={index}
                     data-highlighted={selected}
                     onClick={() => choose(index)}
-                    onMouseEnter={() => setHighlight(index)}
+                    // Pointer movement, not a row appearing under a still pointer, moves the highlight.
+                    onMouseMove={() => {
+                      if (index !== clampedHighlight) setHighlight(index)
+                    }}
                     className={cn(
                       "flex w-full items-center gap-2.5 px-4 py-1.5 text-start text-xs",
                       selected
