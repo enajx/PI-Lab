@@ -295,8 +295,12 @@ describe("Analysis top bar shortcuts", () => {
     fireEvent.click(button)
     await waitFor(() => expect(started).toEqual([{ projectId: "p1" }]))
     const panel = screen.getByTestId("science-sessions")
-    expect((await within(panel).findByTestId("terminal")).getAttribute("data-session-id")).toBe(
-      "report-1",
+    // The shared workspace recovery store still holds the previous test's "analyze-1" tab
+    // for p1; the panel drops it once terminal.list shows it is gone, so wait for report-1.
+    await waitFor(() =>
+      expect(within(panel).getByTestId("terminal").getAttribute("data-session-id")).toBe(
+        "report-1",
+      ),
     )
     expect(
       within(panel)

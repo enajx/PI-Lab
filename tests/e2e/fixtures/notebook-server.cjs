@@ -7,6 +7,7 @@ const { appendFileSync } = require("node:fs")
 const { createServer } = require("node:http")
 
 const args = process.argv.slice(2)
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: Test-only setting read by this stand-in server, outside Turbo.
 const markerPath = process.env.PI_LAB_TEST_NOTEBOOK_MARKER
 
 function mark(line) {
@@ -24,8 +25,10 @@ function option(name) {
 
 mark(`launch:${process.pid}`)
 
-if (process.env.PI_LAB_TEST_NOTEBOOK_FAIL) {
-  process.stderr.write(`${process.env.PI_LAB_TEST_NOTEBOOK_FAIL}\n`)
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: Test-only setting read by this stand-in server, outside Turbo.
+const failMessage = process.env.PI_LAB_TEST_NOTEBOOK_FAIL
+if (failMessage) {
+  process.stderr.write(`${failMessage}\n`)
   process.exit(1)
 }
 
@@ -54,6 +57,7 @@ function printUrl() {
 
 // With PI_LAB_TEST_NOTEBOOK_LISTEN_DELAY_MS the URL is printed first and the server
 // listens later, as marimo's sandbox mode does.
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: Test-only setting read by this stand-in server, outside Turbo.
 const listenDelay = Number(process.env.PI_LAB_TEST_NOTEBOOK_LISTEN_DELAY_MS ?? "0")
 if (listenDelay > 0) printUrl()
 setTimeout(() => {

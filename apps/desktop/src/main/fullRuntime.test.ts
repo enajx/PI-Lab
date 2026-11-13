@@ -19,7 +19,10 @@ vi.mock("electron", () => ({
   safeStorage: {},
   shell: {},
   session: {
-    defaultSession: { webRequest: { onBeforeRequest: vi.fn(), onHeadersReceived: vi.fn() } },
+    defaultSession: {
+      protocol: { handle: vi.fn() },
+      webRequest: { onBeforeRequest: vi.fn(), onHeadersReceived: vi.fn() },
+    },
   },
 }))
 vi.mock("trpc-electron/main", () => ({ createIPCHandler: handler }))

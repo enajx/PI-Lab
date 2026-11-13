@@ -15,7 +15,13 @@ const seedArb = fc.integer({ min: 0, max: 0xffffffff })
 
 describe("seedPalette", () => {
   test("the same seed always gives the same colors", () => {
-    fc.assert(fc.property(seedArb, (seed) => seedPalette(seed).join() === seedPalette(seed).join()))
+    fc.assert(
+      fc.property(seedArb, (seed) => {
+        const first = seedPalette(seed)
+        const second = seedPalette(seed)
+        expect(second).toEqual(first)
+      }),
+    )
     expect(seedPalette(1)).not.toEqual(seedPalette(2))
   })
 

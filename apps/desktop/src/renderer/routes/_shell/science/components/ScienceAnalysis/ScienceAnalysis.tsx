@@ -687,7 +687,10 @@ export function ScienceAnalysis({
                       />
                     </div>
                     {categoriesPresent.length > 0 ? (
-                      <div className="mt-1 flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                      <div
+                        className="mt-1 flex flex-wrap gap-1"
+                        data-testid="analysis-category-filters"
+                      >
                         <FilterChip
                           label={t("All")}
                           active={categoryFilter === "all"}
@@ -1494,9 +1497,7 @@ function NoSelectionState() {
       data-testid="analysis-no-selection"
       className="flex h-full items-center justify-center p-6 text-center"
     >
-      <p className="max-w-xs text-muted-foreground text-sm">
-        {t("Select a file to view it.")}
-      </p>
+      <p className="max-w-xs text-muted-foreground text-sm">{t("Select a file to view it.")}</p>
     </div>
   )
 }

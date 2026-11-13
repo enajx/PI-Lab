@@ -166,9 +166,7 @@ describe("Settings sections", () => {
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue("--background")).toBe("#eceff4"),
     )
-    expect(screen.getByRole("button", { name: "Nord" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    )
+    expect(screen.getByRole("button", { name: "Nord" }).getAttribute("aria-pressed")).toBe("true")
     expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("nord")
   })
 

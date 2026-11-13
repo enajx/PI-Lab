@@ -143,13 +143,12 @@ test("hovering the line chart shows the x value and each series value", async ()
   const box = await plot.boundingBox()
   if (!box) throw new Error("Expected the chart to have a size")
   await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  const tooltip = chart.locator(".recharts-tooltip-wrapper")
   // The x line names the axis, and values have about 4 significant digits.
-  await expect(tooltip.locator(".recharts-tooltip-label")).toHaveText(/^index \d+$/)
-  await expect(tooltip.locator(".recharts-tooltip-item")).toHaveText(
-    /^training_losses : 0\.\d{1,5}$/,
+  await expect(chart.getByTestId("analysis-chart-tooltip-label")).toHaveText(/^index \d+$/)
+  await expect(chart.getByTestId("analysis-chart-tooltip-item")).toHaveText(
+    /^training_losses: 0\.\d{1,5}$/,
   )
-  await expect(tooltip.locator(".recharts-tooltip-item")).toHaveCount(1)
+  await expect(chart.getByTestId("analysis-chart-tooltip-item")).toHaveCount(1)
 })
 
 test("an object .npy of None says what it stores, and a pandas pickle is a table", async () => {

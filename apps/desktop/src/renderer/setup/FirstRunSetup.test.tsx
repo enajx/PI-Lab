@@ -329,11 +329,11 @@ describe("FirstRunSetup", () => {
     expect(loginCard.contains(screen.getByTestId("setup-start-at-login"))).toBe(true)
     expect(languageCard.contains(language)).toBe(true)
     expect(loginCard.parentElement).toBe(languageCard.parentElement)
-    expect(Array.from(language.options).map((option) => option.text).slice(0, 3)).toEqual([
-      "English",
-      "Español",
-      "Norsk",
-    ])
+    expect(
+      Array.from(language.options)
+        .map((option) => option.text)
+        .slice(0, 3),
+    ).toEqual(["English", "Español", "Norsk"])
   })
 
   test("finishes with the selected sound only after persistence succeeds", async () => {
