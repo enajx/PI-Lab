@@ -44,8 +44,6 @@ export function createSystemRouter(
   const detectSystemFontsOnce = cacheSystemFontDetector(detectSystemFonts)
   let appInfo: AppInfo | null = null
   return router({
-    /** The app version (`app.getVersion()`), shown in the window status bar. */
-    appVersion: publicProcedure.query(() => app.getVersion()),
     /** The user's home folder, so the renderer can show paths as `~/…` (display only). */
     homeDir: publicProcedure.query(() => homedir()),
     /**

@@ -111,7 +111,7 @@ test("the status bar is off by default, turns on from the palette and off in Set
   await expect(bar.getByTestId("status-bar-caffeine")).toHaveText("Caffeine off")
   await page.getByTestId("caffeine-control").first().click()
   await expect(bar.getByTestId("status-bar-caffeine")).toHaveText("Caffeine on")
-  await expect(bar.getByTestId("status-bar-version")).toHaveText(/^Alpha \d+\.\d+\.\d+/)
+  await expect(bar.getByTestId("status-bar-version")).toHaveText(/^Alpha ([0-9a-f]{8}|dev)$/)
   await expect(bar.getByTestId("status-bar-palette-hint")).toHaveText(/P Commands$/)
 
   // Every item has a "What's this?" text, like other controls.

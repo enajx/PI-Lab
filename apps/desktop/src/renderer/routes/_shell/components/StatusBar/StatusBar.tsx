@@ -198,38 +198,30 @@ function LatexItem() {
   )
 }
 
-/** The app channel and version, e.g. "Alpha 0.4.2". */
+/** The app channel and version, e.g. "Beta 0.1.0"; Alpha shows its build commit, e.g. "Alpha 59ed026e". */
 function VersionItem() {
   const t = useTranslate()
   const trpc = useTRPC()
-  const version = useQuery(trpc.system.appVersion.queryOptions())
-  const channel = useQuery({
-    queryKey: ["status-bar", "channel"],
-    queryFn: async () => {
-      const bridge = window.piLab?.appIcon
-      if (!bridge) throw new Error("the app bridge is unavailable")
-      return bridge.getChannel()
-    },
-    staleTime: Number.POSITIVE_INFINITY,
-  })
-  const error = version.error ?? channel.error
-  if (error) {
+  const info = useQuery(trpc.system.appInfo.queryOptions())
+  if (info.error) {
     return (
       <span role="alert" className="truncate text-destructive">
-        {t("Could not read the version:")} {error.message}
+        {t("Could not read the version:")} {info.error.message}
       </span>
     )
   }
-  if (!version.data || !channel.data) return null
+  if (!info.data) return null
   return (
     <Item
       testId="status-bar-version"
       icon={null}
       title={t("Channel and version")}
-      help={t("The PI Lab release channel and version you are running.")}
+      help={t(
+        "The PI Lab release channel and version you are running. Alpha builds show their git commit.",
+      )}
       className="shrink-0"
     >
-      {`${CHANNEL_NAMES[channel.data]} ${version.data}`}
+      {`${CHANNEL_NAMES[info.data.channel]} ${info.data.commit ?? info.data.version}`}
     </Item>
   )
 }
