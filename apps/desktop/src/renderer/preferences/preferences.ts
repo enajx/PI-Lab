@@ -527,6 +527,15 @@ const DEFAULT_RIGHT_SIDEBAR_TAB_ORDER: string[] = ["files", "research", "todos"]
 /** Persisted drag order for the project-view right-sidebar tabs (by tab id), shared by every project. */
 export const useRightSidebarTabOrder = (): [string[], (next: string[]) => void] =>
   useOrderPref("pi-lab.projectView.sidebarTabOrder", DEFAULT_RIGHT_SIDEBAR_TAB_ORDER)
+/**
+ * The Analysis or Tasks right panel tabs the user has shown or hidden from the pin
+ * menu, by tab id: each id listed has the opposite of the view's default (shown or
+ * hidden). Unset, every tab has its default.
+ */
+export const useSciencePanelTabToggles = (
+  view: "analysis" | "tasks",
+): [string[], (next: string[]) => void] =>
+  useOrderPref(`pi-lab.sciencePanel.tabToggles.${view}`, EMPTY_ORDER)
 /** The views whose top bar has a "+" shortcut menu, each with its own saved list. */
 export type HeaderShortcutsView = "project" | "latex" | "tasks" | "analysis"
 /**

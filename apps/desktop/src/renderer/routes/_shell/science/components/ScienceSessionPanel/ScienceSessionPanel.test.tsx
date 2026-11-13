@@ -131,6 +131,13 @@ function tabSelected(id: string): string | null {
   return screen.getByTestId(`panel-tab-${id}`).getAttribute("aria-selected")
 }
 
+/** The right sidebar tab ids in their shown order. */
+function tabIds(): string[] {
+  return screen
+    .getAllByRole("tab")
+    .map((tab) => (tab.getAttribute("data-testid") ?? "").replace("panel-tab-", ""))
+}
+
 describe("ScienceSessionPanel", () => {
   test("starts collapsed, and ⌘T opens an agent in the project and shows the Sessions tab", async () => {
     renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
@@ -241,7 +248,7 @@ describe("ScienceSessionPanel", () => {
   test("the panel is the project view's right sidebar with Sessions first, one collapse button, and the pins the project view saved", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
     writeProjectPinnedPanels("p-1", ["notes/plan.md"])
-    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+    renderPanel("tasks", { id: "p-1", name: "Project 1" }, handlers())
     const aside = screen.getByTestId("science-sessions")
     const sidebar = await within(aside).findByTestId("right-sidebar")
     const tabs = within(sidebar).getAllByRole("tab")
@@ -250,8 +257,8 @@ describe("ScienceSessionPanel", () => {
     expect(within(sidebar).getByTestId("panel-tab-todos")).toBeTruthy()
     expect(within(sidebar).getByTestId("panel-tab-files")).toBeTruthy()
     expect(within(sidebar).getByTestId("panel-tab-pinned:notes/plan.md")).toBeTruthy()
-    // Analysis opens on Sessions.
-    expect(tabSelected("sessions")).toBe("true")
+    // Tasks opens on the Diary.
+    expect(tabSelected("diary")).toBe("true")
 
     // On another tab the diary button shows the Diary tab again.
     const button = screen.getByTestId("diary-button")
@@ -290,6 +297,80 @@ describe("ScienceSessionPanel", () => {
     // The same terminal node: hidden, not unmounted.
     expect(screen.getByTestId("terminal")).toBe(terminal)
     expect(terminal.isConnected).toBe(true)
+  })
+
+  test("Analysis shows only the Sessions, Files and Diary tabs by default; Tasks shows them all", async () => {
+    window.localStorage.removeItem("pi-lab.researchDiary.open")
+    writeProjectPinnedPanels("p-4", ["notes/plan.md"])
+    const analysis = renderPanel("analysis", { id: "p-4", name: "Project 4" }, handlers())
+    await screen.findByTestId("right-sidebar")
+    expect(tabIds()).toEqual(["sessions", "files", "diary"])
+    analysis.unmount()
+
+    renderPanel("tasks", { id: "p-4", name: "Project 4" }, handlers())
+    await screen.findByTestId("right-sidebar")
+    expect(tabIds()).toEqual([
+      "sessions",
+      "files",
+      "research",
+      "todos",
+      "diary",
+      "pinned:notes/plan.md",
+    ])
+  })
+
+  test("the pin menu lists the tabs with which are shown, and a shown tab is kept per view", async () => {
+    window.localStorage.removeItem("pi-lab.researchDiary.open")
+    const first = renderPanel("analysis", { id: "p-5", name: "Project 5" }, handlers())
+    await screen.findByTestId("right-sidebar")
+    fireEvent.click(screen.getByTestId("right-sidebar-pin"))
+    const menu = screen.getByTestId("pin-menu")
+    const rows = within(menu).getAllByRole("menuitemcheckbox")
+    expect(
+      rows.map((row) => [row.getAttribute("data-tab-id"), row.getAttribute("aria-checked")]),
+    ).toEqual([
+      ["sessions", "true"],
+      ["files", "true"],
+      ["research", "false"],
+      ["todos", "false"],
+      ["diary", "true"],
+    ])
+    // The file search is below the tab list.
+    expect(within(menu).getByTestId("pin-menu-search")).toBeTruthy()
+
+    fireEvent.click(within(menu).getByTestId("pin-menu-tab-research"))
+    expect(within(menu).getByTestId("pin-menu-tab-research").getAttribute("aria-checked")).toBe(
+      "true",
+    )
+    expect(tabIds()).toEqual(["sessions", "files", "research", "diary"])
+    first.unmount()
+
+    // Kept after a reload, and only for Analysis.
+    const second = renderPanel("analysis", { id: "p-5", name: "Project 5" }, handlers())
+    await screen.findByTestId("right-sidebar")
+    expect(tabIds()).toEqual(["sessions", "files", "research", "diary"])
+    second.unmount()
+    renderPanel("tasks", { id: "p-5", name: "Project 5" }, handlers())
+    await screen.findByTestId("right-sidebar")
+    expect(tabIds()).toEqual(["sessions", "files", "research", "todos", "diary"])
+  })
+
+  test("hiding the shown tab moves to another tab, and a tab that is asked for shows again", async () => {
+    window.localStorage.removeItem("pi-lab.researchDiary.open")
+    renderPanel("analysis", { id: "p-6", name: "Project 6" }, handlers())
+    await screen.findByTestId("right-sidebar")
+    fireEvent.click(screen.getByTestId("panel-tab-diary"))
+    fireEvent.click(screen.getByTestId("right-sidebar-pin"))
+    fireEvent.click(screen.getByTestId("pin-menu-tab-diary"))
+    expect(tabIds()).toEqual(["sessions", "files"])
+    expect(tabSelected("sessions")).toBe("true")
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.queryByTestId("pin-menu")).toBeNull()
+
+    // The top bar diary button shows the Diary tab again.
+    fireEvent.click(screen.getByTestId("diary-button"))
+    expect(tabIds()).toEqual(["sessions", "files", "diary"])
+    expect(tabSelected("diary")).toBe("true")
   })
 
   test("with no project, the diary button is disabled and the panel shows only Sessions", async () => {

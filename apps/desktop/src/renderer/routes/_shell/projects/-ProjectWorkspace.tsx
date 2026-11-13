@@ -722,6 +722,7 @@ export function ProjectWorkspace({
                 onUnpinFile={unpinPanel}
                 gitAvailable={gitAvailable}
                 filesPanelOpen={filesPanelOpen}
+                tabVisibility={null}
               />
             </div>
           )}

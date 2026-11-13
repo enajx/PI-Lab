@@ -69,6 +69,7 @@ function renderSidebar(
         gitAvailable={props.gitAvailable}
         pinnedPanels={props.pinnedPanels}
         filesPanelOpen={props.filesPanelOpen ?? false}
+        tabVisibility={null}
         activeId={props.activeId}
       />
     </AppProviders>,
@@ -99,6 +100,7 @@ function CollapsibleHarness({ onOpenFile = vi.fn() }: { onOpenFile?: () => void 
       onOpenFile={onOpenFile}
       onCollapse={() => setCollapsed(true)}
       filesPanelOpen={false}
+      tabVisibility={null}
     />
   )
 }
@@ -412,6 +414,7 @@ describe("RightSidebar", () => {
           onOpenFile={() => {}}
           onCollapse={() => {}}
           filesPanelOpen={false}
+          tabVisibility={null}
         />
       </AppProviders>
     )
@@ -462,6 +465,7 @@ describe("RightSidebar", () => {
           onOpenFile={vi.fn()}
           onCollapse={null}
           filesPanelOpen={false}
+          tabVisibility={null}
           activeId={activeId}
           onActiveIdChange={setActiveId}
           leadingTab={{
@@ -532,7 +536,21 @@ function seedWorkspaceState(projectId: string) {
   })
 }
 
-function PinnedHarness({ projectId }: { projectId: string }) {
+function PinnedHarness({
+  projectId,
+  withTabVisibility,
+}: {
+  projectId: string
+  withTabVisibility: boolean
+}) {
+  const [hidden, setHidden] = useState<string[]>(["research", "todos"])
+  const tabVisibility = withTabVisibility
+    ? {
+        shown: (id: string) => !hidden.includes(id),
+        setShown: (id: string, shown: boolean) =>
+          setHidden((prev) => (shown ? prev.filter((x) => x !== id) : [...prev, id])),
+      }
+    : null
   const [restored] = useState(() => readProjectWorkspaceState(projectId, true))
   const [pinned, setPinned] = useState<string[]>(() => restored?.pinnedPanels ?? [])
   const [activeId, setActiveId] = useState<string | null>(
@@ -560,11 +578,12 @@ function PinnedHarness({ projectId }: { projectId: string }) {
       }
       onUnpinFile={(relPath) => setPinned((prev) => prev.filter((path) => path !== relPath))}
       filesPanelOpen={false}
+      tabVisibility={tabVisibility}
     />
   )
 }
 
-function renderPinned(projectId: string, overrides: FakeHandlers = {}) {
+function renderPinned(projectId: string, overrides: FakeHandlers = {}, withTabVisibility = false) {
   seedWorkspaceState(projectId)
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const client = createFakeTrpcClient({
@@ -582,7 +601,7 @@ function renderPinned(projectId: string, overrides: FakeHandlers = {}) {
   })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <PinnedHarness projectId={projectId} />
+      <PinnedHarness projectId={projectId} withTabVisibility={withTabVisibility} />
     </AppProviders>,
   )
 }
@@ -625,21 +644,63 @@ describe("RightSidebar pinned Markdown panels", () => {
     renderPinned("p-plus")
     fireEvent.click(screen.getByTestId("right-sidebar-pin"))
 
-    fireEvent.change(screen.getByTestId("quick-open-input"), { target: { value: "notes" } })
-    const results = await screen.findAllByTestId("quick-open-result")
+    fireEvent.change(screen.getByTestId("pin-menu-search"), { target: { value: "notes" } })
+    const results = await screen.findAllByTestId("pin-menu-result")
     // main.py is filtered out; only the .md hit is selectable.
     expect(results.map((node) => node.getAttribute("data-rel-path"))).toEqual(["notes.md"])
 
-    fireEvent.click(screen.getByTestId("quick-open-result"))
+    fireEvent.click(screen.getByTestId("pin-menu-result"))
     expect(await screen.findByTestId("panel-tab-pinned:notes.md")).toBeTruthy()
-    expect(screen.queryByTestId("quick-open")).toBeNull()
+    expect(screen.queryByTestId("pin-menu")).toBeNull()
+  })
+
+  test("in the project view the pin menu is a compact file search with no tab list", async () => {
+    renderPinned("p-plain")
+    fireEvent.click(screen.getByTestId("right-sidebar-pin"))
+    const menu = screen.getByTestId("pin-menu")
+    expect(within(menu).queryAllByRole("menuitemcheckbox")).toEqual([])
+    expect(document.activeElement).toBe(screen.getByTestId("pin-menu-search"))
+    // Anchored under the pin button, not a centered dialog over a backdrop.
+    expect(screen.queryByTestId("quick-open-backdrop")).toBeNull()
+  })
+
+  test("with tab visibility, arrows and Enter toggle tabs and typing searches files to pin", async () => {
+    renderPinned("p-keys", {}, true)
+    fireEvent.click(screen.getByTestId("right-sidebar-pin"))
+    const search = screen.getByTestId("pin-menu-search")
+    expect(document.activeElement).toBe(search)
+    expect(screen.queryByTestId("panel-tab-research")).toBeNull()
+    // Files, Research, TODOs, Diary: the first row is highlighted; down once is Research.
+    expect(screen.getByTestId("pin-menu-tab-files").getAttribute("data-highlighted")).toBe("true")
+    fireEvent.keyDown(search, { key: "ArrowDown" })
+    expect(screen.getByTestId("pin-menu-tab-research").getAttribute("data-highlighted")).toBe(
+      "true",
+    )
+    fireEvent.keyDown(search, { key: "Enter" })
+    expect(screen.getByTestId("pin-menu-tab-research").getAttribute("aria-checked")).toBe("true")
+    expect(screen.getByTestId("panel-tab-research")).toBeTruthy()
+    // The menu stays open after a toggle.
+    expect(screen.getByTestId("pin-menu")).toBeTruthy()
+
+    fireEvent.change(search, { target: { value: "notes" } })
+    // Enter before the search has run does not toggle the highlighted tab.
+    fireEvent.keyDown(search, { key: "Enter" })
+    expect(screen.getByTestId("pin-menu-tab-research").getAttribute("aria-checked")).toBe("true")
+    await screen.findByTestId("pin-menu-result")
+    await waitFor(() =>
+      expect(screen.getByTestId("pin-menu-result").getAttribute("data-highlighted")).toBe("true"),
+    )
+    fireEvent.keyDown(search, { key: "Enter" })
+    // The pinned file is shown as a tab, and the menu closes.
+    expect(await screen.findByTestId("panel-tab-pinned:notes.md")).toBeTruthy()
+    expect(screen.queryByTestId("pin-menu")).toBeNull()
   })
 
   test("pinned panels persist to -workspaceState and restore on a fresh mount", async () => {
     const view = renderPinned("p-persist")
     fireEvent.click(screen.getByTestId("right-sidebar-pin"))
-    fireEvent.change(screen.getByTestId("quick-open-input"), { target: { value: "notes" } })
-    fireEvent.click(await screen.findByTestId("quick-open-result"))
+    fireEvent.change(screen.getByTestId("pin-menu-search"), { target: { value: "notes" } })
+    fireEvent.click(await screen.findByTestId("pin-menu-result"))
     await screen.findByTestId("panel-tab-pinned:notes.md")
 
     // Persisted through the real workspace-state writer.
@@ -670,7 +731,7 @@ describe("RightSidebar pinned Markdown panels", () => {
     })
     render(
       <AppProviders client={client} queryClient={queryClient}>
-        <PinnedHarness projectId="p-unpin" />
+        <PinnedHarness projectId="p-unpin" withTabVisibility={false} />
       </AppProviders>,
     )
 
