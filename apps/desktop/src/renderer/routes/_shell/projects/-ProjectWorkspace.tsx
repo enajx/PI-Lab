@@ -649,6 +649,7 @@ export function ProjectWorkspace({
         <div className="flex min-h-0 flex-1 gap-3">
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             <CentralPanel
+              launcherTitle={t("Open something to get started")}
               controller={controller}
               client={client}
               workspaceId={workspaceId}

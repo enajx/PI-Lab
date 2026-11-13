@@ -1138,5 +1138,7 @@
   "List files and folders whose name starts with a dot in the file tree.": "اعرض في شجرة الملفات الملفات والمجلدات التي يبدأ اسمها بنقطة.",
   "Don't ask again": "لا تسأل مرة أخرى",
   "Confirm before deleting files": "التأكيد قبل حذف الملفات",
-  "Ask before moving a file or folder in the file tree to the Trash.": "اسأل قبل نقل ملف أو مجلد من شجرة الملفات إلى سلة المهملات."
+  "Ask before moving a file or folder in the file tree to the Trash.": "اسأل قبل نقل ملف أو مجلد من شجرة الملفات إلى سلة المهملات.",
+  "Start agents": "تشغيل الوكلاء",
+  "Start agent": "تشغيل وكيل"
 }

@@ -660,6 +660,7 @@ function SessionsBody({
 
   // While hidden the central panel's shortcuts are off, so ⌘T is handled here.
   const openNewSession = useOpenNewSession(controller)
+  const t = useTranslate()
   useNewSessionShortcut(() => {
     if (!hidden || overlayIsOpen()) return false
     return openNewSession()
@@ -674,6 +675,7 @@ function SessionsBody({
       className={hidden ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col"}
     >
       <CentralPanel
+        launcherTitle={t("Start agents")}
         controller={controller}
         client={client}
         workspaceId={workspaceId}

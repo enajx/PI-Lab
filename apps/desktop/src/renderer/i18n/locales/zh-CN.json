@@ -1138,5 +1138,7 @@
   "List files and folders whose name starts with a dot in the file tree.": "在文件树中显示名称以点开头的文件和文件夹。",
   "Don't ask again": "不再询问",
   "Confirm before deleting files": "删除文件前确认",
-  "Ask before moving a file or folder in the file tree to the Trash.": "将文件树中的文件或文件夹移到废纸篓前进行确认。"
+  "Ask before moving a file or folder in the file tree to the Trash.": "将文件树中的文件或文件夹移到废纸篓前进行确认。",
+  "Start agents": "启动智能体",
+  "Start agent": "启动智能体"
 }

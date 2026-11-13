@@ -417,6 +417,7 @@ export function PaperEditor({
           </p>
         ) : null}
         <CentralPanel
+          launcherTitle={t("Start agent")}
           controller={controller}
           client={client}
           workspaceId={workspaceId}
