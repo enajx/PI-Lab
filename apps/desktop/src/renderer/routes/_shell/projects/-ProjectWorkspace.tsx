@@ -11,7 +11,6 @@ import {
   headerIconButtonClass,
 } from "../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectStageRow } from "../../../components/ProjectStage"
-import { useCenteredPlacement } from "../../../components/ProjectStage/useCenteredPlacement"
 import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
@@ -196,18 +195,7 @@ export function ProjectWorkspace({
   // strip, so the header clears + drags around them (the path text stays selectable).
   const [collapsed] = useSidebarCollapsed()
   const diaryShown = !rightSidebarCollapsed && rightSidebarActiveId === DIARY_TAB_ID
-  const headerRef = useRef<HTMLElement | null>(null)
-  const titleRef = useRef<HTMLDivElement | null>(null)
-  const stageRef = useRef<HTMLDivElement | null>(null)
-  const headerRightRef = useRef<HTMLDivElement | null>(null)
   useReportViewProject(projectId)
-  const stagePlacement = useCenteredPlacement(
-    headerRef,
-    titleRef,
-    stageRef,
-    headerRightRef,
-    `${projectQuery.data?.name ?? ""}\n${projectQuery.data?.repoPath ?? ""}`,
-  )
 
   // Ensure the project's main-checkout (branch) workspace exists, once on mount
   // (this component is keyed by project, so a switch remounts and re-ensures).
@@ -406,52 +394,38 @@ export function ProjectWorkspace({
         </p>
       ) : null}
       <header
-        ref={headerRef}
         data-testid="project-view-header"
-        className={cn(
-          "relative flex items-center justify-between gap-3",
-          titleBarInsetHeaderClass(collapsed),
-        )}
+        className={cn("relative flex items-center gap-3", titleBarInsetHeaderClass(collapsed))}
       >
-        <div className={cn("flex min-w-0 items-center gap-3", titleBarControlClass(collapsed))}>
-          <div ref={titleRef} data-testid="project-view-title" className="flex min-w-0 flex-col">
-            <h1 className="truncate text-foreground text-sm tracking-tight">
-              {project?.name ?? t("Loading…")}
-            </h1>
-            {project ? (
-              <p
-                title={project.repoPath}
-                className="cursor-text select-text truncate text-muted-foreground text-xs"
-              >
-                {toDisplayPath(project.repoPath)}
-              </p>
-            ) : null}
-          </div>
-          {/* Centered on the whole top bar when it fits there, else right after the title. */}
-          <div
-            ref={stageRef}
-            data-testid="project-view-stage-slot"
-            data-placement={stagePlacement}
-            className={cn(
-              "shrink-0",
-              stagePlacement === "center" &&
-                "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
-            )}
-          >
-            {project ? (
-              <ProjectStageRow
-                projectId={projectId}
-                stage={project.metadata?.stage ?? null}
-                testId="project-view-stage"
-                className="shrink-0"
-              />
-            ) : null}
-          </div>
-        </div>
         <div
-          ref={headerRightRef}
-          className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}
+          data-testid="project-view-title"
+          className={cn("flex min-w-0 flex-col", titleBarControlClass(collapsed))}
         >
+          <h1 className="truncate text-foreground text-sm tracking-tight">
+            {project?.name ?? t("Loading…")}
+          </h1>
+          {project ? (
+            <p
+              title={project.repoPath}
+              className="cursor-text select-text truncate text-muted-foreground text-xs"
+            >
+              {toDisplayPath(project.repoPath)}
+            </p>
+          ) : null}
+        </div>
+        {/* The free space between the title and the buttons: the dots sit centered in it,
+            or right after the title when it is no wider than they are. */}
+        <div className="flex flex-1 justify-center">
+          {project ? (
+            <ProjectStageRow
+              projectId={projectId}
+              stage={project.metadata?.stage ?? null}
+              testId="project-view-stage"
+              className={cn("shrink-0", titleBarControlClass(collapsed))}
+            />
+          ) : null}
+        </div>
+        <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
           <HeaderShortcuts
             view="project"
             projectId={projectId}
