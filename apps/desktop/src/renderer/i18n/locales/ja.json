@@ -571,7 +571,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "サイドバーからプロジェクトを開き、リポジトリ内のデータファイルを閲覧します。",
   "No data files found": "データファイルが見つかりません",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "分析には、プロジェクトのリポジトリで見つかったデータファイル、画像、ノートブック、グラフが表示されます。",
-  "Select a file to preview its contents.": "ファイルを選択すると内容をプレビューできます。",
+  "Select a file to view it.": "ファイルを選択すると表示されます。",
   "Monitor compute machines from your ssh config": "SSH 設定内の計算マシンを監視",
   "Temporarily include machines hidden from the cluster grid": "クラスター一覧で非表示のマシンを一時的に表示します",
   "Hide hidden": "非表示のマシンを隠す",

@@ -116,10 +116,48 @@ async function sourceOutput(
 }
 
 /** Reject lexical traversal and symlinks whose targets leave the workspace. */
-async function insideFile(dir: string, relPath: string): Promise<string> {
+export async function insideFile(dir: string, relPath: string): Promise<string> {
   const target = await realpath(resolveInsideDir(dir, relPath))
   resolveInsideDir(dir, relative(dir, target))
   return target
+}
+
+/** The bytes of a PDF file and the size and time they were read at. */
+export interface PdfSnapshot {
+  data: Uint8Array
+  baseline: { mtimeMs: number; size: number }
+}
+
+/**
+ * Read a whole PDF file (at most 100 MB) for the PDF.js viewer. Throws when
+ * the path is not a `.pdf`, the file changes while it is read, or it has no PDF
+ * header. `path` must already be checked to be inside its folder.
+ */
+export async function readPdfSnapshot(path: string): Promise<PdfSnapshot> {
+  if (extname(path).toLowerCase() !== ".pdf") throw new Error("Select a PDF file")
+  const handle = await open(path, "r")
+  return (async () => {
+    const baseline = await handle.stat()
+    if (!baseline.isFile() || baseline.size > MAX_PDF_BYTES)
+      throw new Error("PDF exceeds the 100 MB limit")
+    const bytes = Buffer.alloc(baseline.size)
+    let offset = 0
+    while (offset < bytes.length) {
+      const read = await handle.read(bytes, offset, bytes.length - offset, offset)
+      if (read.bytesRead === 0)
+        throw new Error("PDF changed while being read; waiting for the next refresh")
+      offset += read.bytesRead
+    }
+    const after = await handle.stat()
+    if (after.size !== baseline.size || after.mtimeMs !== baseline.mtimeMs)
+      throw new Error("PDF changed while being read; waiting for the next refresh")
+    if (bytes.subarray(0, 1024).indexOf("%PDF-") < 0)
+      throw new Error("This file does not contain a PDF header")
+    return {
+      data: new Uint8Array(bytes),
+      baseline: { mtimeMs: baseline.mtimeMs, size: baseline.size },
+    }
+  })().finally(() => handle.close())
 }
 
 /** Renderer paths always use forward slashes, including on Windows. */
@@ -422,30 +460,7 @@ export const pdfRouter = router({
   read: publicProcedure.input(pathInput).query(async ({ ctx, input }) => {
     const { dir } = await workspaceDirectory(ctx.db, input.workspaceId)
     const path = await insideFile(dir, input.relPath)
-    if (extname(path).toLowerCase() !== ".pdf") throw new Error("Select a PDF file")
-    const handle = await open(path, "r")
-    return (async () => {
-      const baseline = await handle.stat()
-      if (!baseline.isFile() || baseline.size > MAX_PDF_BYTES)
-        throw new Error("PDF exceeds the 100 MB limit")
-      const bytes = Buffer.alloc(baseline.size)
-      let offset = 0
-      while (offset < bytes.length) {
-        const read = await handle.read(bytes, offset, bytes.length - offset, offset)
-        if (read.bytesRead === 0)
-          throw new Error("PDF changed while being read; waiting for the next refresh")
-        offset += read.bytesRead
-      }
-      const after = await handle.stat()
-      if (after.size !== baseline.size || after.mtimeMs !== baseline.mtimeMs)
-        throw new Error("PDF changed while being read; waiting for the next refresh")
-      if (bytes.subarray(0, 1024).indexOf("%PDF-") < 0)
-        throw new Error("This file does not contain a PDF header")
-      return {
-        data: new Uint8Array(bytes),
-        baseline: { mtimeMs: baseline.mtimeMs, size: baseline.size },
-      }
-    })().finally(() => handle.close())
+    return readPdfSnapshot(path)
   }),
   build: publicProcedure.input(pathInput).mutation(async ({ ctx, input }): Promise<BuildResult> => {
     const target = await workspaceDirectory(ctx.db, input.workspaceId)

@@ -571,7 +571,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "افتح مشروعًا من الشريط الجانبي لتصفح ملفات البيانات في مستودعه.",
   "No data files found": "لم يُعثر على ملفات بيانات",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "يعرض التحليل ملفات البيانات والصور والدفاتر والرسوم المكتشفة في مستودع المشروع.",
-  "Select a file to preview its contents.": "اختر ملفًا لمعاينة محتواه.",
+  "Select a file to view it.": "اختر ملفًا لعرضه.",
   "Monitor compute machines from your ssh config": "راقب أجهزة الحوسبة من إعدادات SSH",
   "Temporarily include machines hidden from the cluster grid": "أظهر الأجهزة المخفية في شبكة الحوسبة مؤقتًا",
   "Hide hidden": "إخفاء الأجهزة المخفية",

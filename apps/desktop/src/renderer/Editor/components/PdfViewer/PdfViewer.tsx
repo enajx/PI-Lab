@@ -2,7 +2,6 @@ import { getDocument, type PDFDocumentProxy, PDFWorker } from "pdfjs-dist/legacy
 import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"
 import { EventBus, PDFLinkService, PDFViewer } from "pdfjs-dist/legacy/web/pdf_viewer.mjs"
 import { useEffect, useRef, useState } from "react"
-import type { PiLabTrpcClient } from "../../../trpc/client"
 import "pdfjs-dist/web/pdf_viewer.css"
 import "./pdfViewer.css"
 import { anchorScroll, pdfStatusText, wheelZoom } from "./pdfZoom"
@@ -45,21 +44,34 @@ interface Position {
   left: number
 }
 
+/**
+ * Where the viewer reads its PDF: `stat` is polled to see when the file
+ * changed, `read` gets its bytes, and `reverseSync` maps a double-clicked page
+ * point to its LaTeX source (null when the PDF has no source, as in Analysis).
+ */
+export interface PdfSource {
+  stat: () => Promise<{ exists: boolean; mtimeMs: number; size: number }>
+  read: () => Promise<{ data: Uint8Array; baseline: { mtimeMs: number; size: number } }>
+  reverseSync: ((point: { page: number; x: number; y: number }) => Promise<SourceLocation>) | null
+}
+
 /** PDF.js scale presets that depend on the viewer's size. */
 const RELATIVE_SCALES = new Set(["page-width", "page-fit", "auto"])
 
 /** PDF.js owns the page DOM; React owns the document lifecycle and wheel zoom. */
 export function PdfViewer({
-  client,
-  workspaceId,
+  source,
+  sourceKey,
   relPath,
   location,
   onSource,
   build,
   onMessage,
 }: {
-  client: PiLabTrpcClient
-  workspaceId: string
+  /** Read through a ref: a new object with the same `sourceKey` does not reload. */
+  source: PdfSource
+  /** Changing it loads the PDF again from the new source. */
+  sourceKey: string
   relPath: string
   location: PdfLocation | null
   onSource: (location: SourceLocation) => void
@@ -68,6 +80,8 @@ export function PdfViewer({
   onMessage: (message: string) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
+  const sourceRef = useRef(source)
+  sourceRef.current = source
   const runtime = useRef<Runtime | null>(null)
   const navigateSource = useRef(onSource)
   navigateSource.current = onSource
@@ -87,6 +101,8 @@ export function PdfViewer({
   const buildRef = useRef(build)
   buildRef.current = build
 
+  // sourceKey names the source; the source itself is read through its ref.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the source changes.
   useEffect(() => {
     let live = true
     let busy = false
@@ -103,7 +119,7 @@ export function PdfViewer({
       if (!live || busy || root.clientWidth === 0 || buildIsRunning()) return
       busy = true
       try {
-        const stat = await client.files.stat.query({ workspaceId, relPath })
+        const stat = await sourceRef.current.stat()
         if (!live) return
         if (!stat.exists) throw new Error("PDF is missing. Waiting for it to be written again.")
         const blocked = buildRef.current?.failedOutputs?.[relPath]
@@ -117,7 +133,7 @@ export function PdfViewer({
           return
         }
         setMessage(runtime.current ? "Refreshing PDF…" : "Loading PDF…")
-        const snapshot = await client.pdf.read.query({ workspaceId, relPath })
+        const snapshot = await sourceRef.current.read()
         if (!live) return
         const assets = new URL("pdfjs/", document.baseURI).href
         const port = new Worker(workerUrl, { type: "module" })
@@ -219,9 +235,9 @@ export function PdfViewer({
             event.clientY - bounds.top,
           )
           const pageTop = pageView.pdfPage?.view[3]
-          if (pageTop === undefined) return
-          void client.pdf.reverseSync
-            .mutate({ workspaceId, relPath, page: index + 1, x, y: pageTop - y })
+          const reverseSync = sourceRef.current.reverseSync
+          if (pageTop === undefined || reverseSync === null) return
+          void reverseSync({ page: index + 1, x, y: pageTop - y })
             .then((source) => {
               if (live && runtime.current === next) {
                 setError(null)
@@ -312,7 +328,7 @@ export function PdfViewer({
       runtime.current?.destroy()
       runtime.current = null
     }
-  }, [client, workspaceId, relPath])
+  }, [sourceKey, relPath])
 
   // Fit width / fit page are computed from the viewer's size. A split lays out after the
   // PDF loads and can be resized later, so re-apply a relative scale when the size changes.

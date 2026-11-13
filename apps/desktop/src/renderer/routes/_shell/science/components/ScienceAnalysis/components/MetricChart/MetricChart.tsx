@@ -58,6 +58,9 @@ function useMeasuredWidth(): { ref: React.RefObject<HTMLDivElement | null>; widt
   return { ref, width }
 }
 
+/** Above this many series the legend is hidden: it would take more room than the chart. */
+const MAX_LEGEND_SERIES = 10
+
 export function MetricChart({ preview }: { preview: ChartPreview }) {
   const t = useTranslate()
   const { ref, width } = useMeasuredWidth()
@@ -85,18 +88,6 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
 
   return (
     <div data-testid="analysis-preview-chart" className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-x-4 gap-y-1" data-testid="analysis-chart-legend">
-        {preview.series.map((series, i) => (
-          <span key={series.label} className="flex items-center gap-1.5 text-xs">
-            <span
-              aria-hidden
-              className="size-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: colorFor(i) }}
-            />
-            <span className="text-muted-foreground">{series.label}</span>
-          </span>
-        ))}
-      </div>
       <div ref={ref} className="w-full">
         <LineChart
           width={width || FALLBACK_WIDTH}
@@ -141,6 +132,20 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
           ))}
         </LineChart>
       </div>
+      {preview.series.length <= MAX_LEGEND_SERIES ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1" data-testid="analysis-chart-legend">
+          {preview.series.map((series, i) => (
+            <span key={series.label} className="flex items-center gap-1.5 text-xs">
+              <span
+                aria-hidden
+                className="size-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: colorFor(i) }}
+              />
+              <span className="text-muted-foreground">{series.label}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
       {preview.truncated ? (
         <p className="text-amber-500 text-xs">
           {t("Chart downsampled — the file has more points than are plotted.")}

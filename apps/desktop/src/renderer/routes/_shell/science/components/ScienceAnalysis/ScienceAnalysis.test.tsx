@@ -76,8 +76,10 @@ function listing(
     relPath: string
     name: string
     kind: string
+    group?: string | null
     experiment?: string | null
-    run?: string | null
+    /** The path inside its row; the file name by default. */
+    innerPath?: string
     inReportsFolder?: boolean
   }>,
 ) {
@@ -93,15 +95,20 @@ function listing(
       kind,
       files: fs.map((f) => ({
         ...f,
+        group: f.group ?? null,
         experiment: f.experiment ?? null,
-        run: f.run ?? null,
+        innerPath: f.innerPath ?? f.name,
         inReportsFolder: f.inReportsFolder ?? false,
         size: 10,
         mtime: 0,
       })),
     })),
     total: files.length,
-    truncated: false,
+    truncatedExperiments: [] as Array<{
+      group: string | null
+      experiment: string | null
+      inReportsFolder: boolean
+    }>,
     partial: false,
     skipped: [],
     resultsFolder: "results",
@@ -246,7 +253,7 @@ describe("ScienceAnalysis", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
 
-    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(3))
+    await waitFor(() => expect(screen.getAllByTestId("analysis-experiment")).toHaveLength(3))
     const groups = screen.getAllByTestId("analysis-experiment-group")
     expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual([
       "exp-a",
@@ -254,21 +261,24 @@ describe("ScienceAnalysis", () => {
       "",
     ])
     expect(within(groups[2] as HTMLElement).getByText("No experiment")).toBeTruthy()
+    // Collapsed by default: no files until a row is opened.
+    expect(screen.queryAllByTestId("analysis-file")).toHaveLength(0)
+    fireEvent.click(within(groups[0] as HTMLElement).getByTestId("analysis-experiment"))
     expect(
       within(groups[0] as HTMLElement)
         .getAllByTestId("analysis-file")
         .map((row) => row.getAttribute("data-rel-path")),
     ).toEqual(["outputs/exp-a/plot.png"])
 
-    // The category filters and the search still narrow the results files.
+    // The category filters narrow the rows; the search opens the rows that match.
     fireEvent.click(screen.getByTestId("analysis-category-text"))
+    expect(
+      screen.getAllByTestId("analysis-experiment").map((row) => row.dataset.experiment),
+    ).toEqual(["exp-b"])
+    fireEvent.click(screen.getByTestId("analysis-category-all"))
+    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "log.txt" } })
     expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
       "outputs/exp-b/log.txt",
-    ])
-    fireEvent.click(screen.getByTestId("analysis-category-all"))
-    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "plot.png" } })
-    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
-      "outputs/exp-a/plot.png",
     ])
     expect(screen.getAllByTestId("analysis-experiment-group")).toHaveLength(1)
   })
@@ -288,11 +298,12 @@ describe("ScienceAnalysis", () => {
           { relPath: "results/top.json", name: "top.json", kind: "json" },
         ]),
     })
-    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(3))
+    await waitFor(() => expect(screen.getAllByTestId("analysis-experiment")).toHaveLength(3))
     const groups = screen.getAllByTestId("analysis-experiment-group")
     expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual(["exp-a", ""])
     const reports = screen.getByTestId("analysis-reports-group")
     expect(within(reports).getByText("Reports (reports/)")).toBeTruthy()
+    fireEvent.click(within(reports).getByTestId("analysis-experiment"))
     expect(
       within(reports)
         .getAllByTestId("analysis-file")
@@ -305,68 +316,131 @@ describe("ScienceAnalysis", () => {
     ).toBeTruthy()
   })
 
-  test("lists one row per run, grouped by experiment, and a run row shows its files", async () => {
+  test("groups hold collapsed experiment rows; an experiment shows its folder tree, folders first", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
         listing([
           {
-            relPath: "results/gecko/fl-shape_s1/run.db",
-            name: "run.db",
-            kind: "sqlite",
-            experiment: "gecko",
-            run: "fl-shape_s1",
+            relPath: "results/pattern_translation/easily-boss-grouse/training_curve.pdf",
+            name: "training_curve.pdf",
+            kind: "pdf",
+            group: "pattern_translation",
+            experiment: "easily-boss-grouse",
           },
           {
-            relPath: "results/gecko/fl-shape_s0/run.db",
-            name: "run.db",
-            kind: "sqlite",
-            experiment: "gecko",
-            run: "fl-shape_s0",
+            relPath: "results/pattern_translation/easily-boss-grouse/animations/growth.mp4",
+            name: "growth.mp4",
+            kind: "video",
+            group: "pattern_translation",
+            experiment: "easily-boss-grouse",
+            innerPath: "animations/growth.mp4",
           },
           {
-            relPath: "results/gecko/fl-shape_s0/metrics.csv",
-            name: "metrics.csv",
+            relPath: "results/pattern_translation/fully-witty-marmot/grid.png",
+            name: "grid.png",
+            kind: "image",
+            group: "pattern_translation",
+            experiment: "fully-witty-marmot",
+          },
+          {
+            relPath: "results/multiplexing/20260214_141942/best.csv",
+            name: "best.csv",
             kind: "csv",
-            experiment: "gecko",
-            run: "fl-shape_s0",
+            group: "multiplexing",
+            experiment: "20260214_141942",
           },
-          { relPath: "results/exp-a/plot.png", name: "plot.png", kind: "image", run: "exp-a" },
+          {
+            relPath: "results/multiplexing/notes.txt",
+            name: "notes.txt",
+            kind: "text",
+            group: "multiplexing",
+          },
           { relPath: "results/summary.json", name: "summary.json", kind: "json" },
         ]),
     })
-    await waitFor(() => expect(screen.getAllByTestId("analysis-run")).toHaveLength(3))
-    const groups = screen.getAllByTestId("analysis-experiment-group")
-    expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual(["gecko", ""])
-    expect(
-      within(groups[0] as HTMLElement)
-        .getAllByTestId("analysis-run")
-        .map((row) => row.dataset.run),
-    ).toEqual(["fl-shape_s0", "fl-shape_s1"])
-    // Runs at the top of the results folder sit under its name; loose files stay rows.
-    expect(within(groups[1] as HTMLElement).getByText("results/")).toBeTruthy()
-    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
-      "results/summary.json",
+    // Top rows: the groups, then the loose files; all collapsed, no counts.
+    const groups = await screen.findAllByTestId("analysis-group")
+    expect(groups.map((row) => [row.dataset.group, row.textContent, row.ariaExpanded])).toEqual([
+      ["multiplexing", "multiplexing", "false"],
+      ["pattern_translation", "pattern_translation", "false"],
     ])
-
-    // A run row shows its files, and hides them again.
-    const run = within(groups[0] as HTMLElement).getAllByTestId("analysis-run")[0] as HTMLElement
-    fireEvent.click(run)
-    expect(run.getAttribute("aria-expanded")).toBe("true")
     expect(
-      within(groups[0] as HTMLElement)
+      screen.getAllByTestId("analysis-experiment").map((row) => row.dataset.experiment),
+    ).toEqual([""])
+    expect(screen.queryAllByTestId("analysis-file")).toHaveLength(0)
+
+    // A group lists its experiments (collapsed), then its own files.
+    fireEvent.click(groups[1] as HTMLElement)
+    const experiments = screen
+      .getAllByTestId("analysis-experiment")
+      .map((row) => [row.dataset.experiment, row.ariaExpanded])
+    expect(experiments).toEqual([
+      ["easily-boss-grouse", "false"],
+      ["fully-witty-marmot", "false"],
+      ["", "false"],
+    ])
+    fireEvent.click(groups[0] as HTMLElement)
+    const multiplexing = screen.getAllByTestId("analysis-group-contents")[0] as HTMLElement
+    expect(
+      within(multiplexing)
         .getAllByTestId("analysis-file")
-        .map((row) => row.dataset.relPath)
-        .sort(),
-    ).toEqual(["results/gecko/fl-shape_s0/metrics.csv", "results/gecko/fl-shape_s0/run.db"])
-    fireEvent.click(run)
-    expect(within(groups[0] as HTMLElement).queryAllByTestId("analysis-file")).toHaveLength(0)
+        .map((row) => row.dataset.relPath),
+    ).toEqual(["results/multiplexing/notes.txt"])
 
-    // A search opens the runs that match.
-    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "metrics" } })
+    // An experiment shows its tree: the animations/ folder (collapsed) before its files.
+    const grouse = screen
+      .getAllByTestId("analysis-experiment")
+      .find((row) => row.dataset.experiment === "easily-boss-grouse") as HTMLElement
+    fireEvent.click(grouse)
+    const files = screen.getAllByTestId("analysis-experiment-files")[0] as HTMLElement
+    expect(
+      [
+        ...files.querySelectorAll('[data-testid="analysis-folder"], [data-testid="analysis-file"]'),
+      ].map((row) => (row as HTMLElement).dataset.folder ?? (row as HTMLElement).dataset.relPath),
+    ).toEqual(["animations", "results/pattern_translation/easily-boss-grouse/training_curve.pdf"])
+    fireEvent.click(within(files).getByTestId("analysis-folder"))
+    expect(within(files).getAllByTestId("analysis-file")).toHaveLength(2)
+
+    // Chips hide folders with no matching files; a search opens the matching folders.
+    fireEvent.click(screen.getByTestId("analysis-category-figure"))
+    expect(screen.queryAllByTestId("analysis-folder")).toHaveLength(0)
+    fireEvent.click(screen.getByTestId("analysis-category-all"))
+    fireEvent.click(grouse)
+    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "growth" } })
     expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
-      "results/gecko/fl-shape_s0/metrics.csv",
+      "results/pattern_translation/easily-boss-grouse/animations/growth.mp4",
     ])
+    expect(screen.getByTestId("analysis-folder").ariaExpanded).toBe("true")
+  })
+
+  test("a row cut at the file cap says so when opened; other rows do not", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([
+          { relPath: "results/bulk/f0.csv", name: "f0.csv", kind: "csv", experiment: "bulk" },
+          {
+            relPath: "results/zz/run/x.csv",
+            name: "x.csv",
+            kind: "csv",
+            experiment: "zz",
+            innerPath: "run/x.csv",
+          },
+        ]),
+        truncatedExperiments: [{ group: null, experiment: "bulk", inReportsFolder: false }],
+      }),
+    })
+    const rows = await screen.findAllByTestId("analysis-experiment")
+    expect(rows.map((row) => row.dataset.experiment)).toEqual(["bulk", "zz"])
+    expect(screen.queryByTestId("analysis-experiment-truncated")).toBeNull()
+    fireEvent.click(rows[0] as HTMLElement)
+    fireEvent.click(rows[1] as HTMLElement)
+    const notices = screen.getAllByTestId("analysis-experiment-truncated")
+    expect(notices).toHaveLength(1)
+    expect(
+      screen.getAllByTestId("analysis-experiment-files")[0]?.contains(notices[0] ?? null),
+    ).toBe(true)
   })
 
   test("with no experiments folder, no folder is shown and Select… is highlighted until clicked", async () => {
@@ -401,8 +475,16 @@ describe("ScienceAnalysis", () => {
       "science.analysis.setStructure": setStructure,
     })
     const select = (await screen.findByTestId("analysis-structure")) as HTMLSelectElement
-    await waitFor(() => expect(select.value).toBe("default"))
-    expect(within(select).getByText("Default (Auto-detect)")).toBeTruthy()
+    // With no entry of its own, the project shows the default from Settings.
+    await waitFor(() => expect(select.value).toBe("auto"))
+    // Only the real options, no "Default (…)" entry.
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "Auto-detect",
+      "One folder per experiment",
+      "Experiment / run folders",
+      "Flat file list",
+      "Custom pattern",
+    ])
     expect(select.title).toContain("/data/experiments-structure.yaml")
     fireEvent.change(select, { target: { value: "experiment-run" } })
     await waitFor(() =>
@@ -419,6 +501,20 @@ describe("ScienceAnalysis", () => {
         value: "{experiment}/seeds/{run}/",
       }),
     )
+  })
+
+  test("the select shows the project's own saved choice over the default", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => listing([]),
+      "science.analysis.getStructure": () => ({
+        filePath: "/data/experiments-structure.yaml",
+        defaultValue: "flat",
+        projectValue: "experiment-run",
+      }),
+    })
+    const select = (await screen.findByTestId("analysis-structure")) as HTMLSelectElement
+    await waitFor(() => expect(select.value).toBe("experiment-run"))
   })
 
   test("a saved custom pattern can be edited directly", async () => {
@@ -484,9 +580,9 @@ describe("ScienceAnalysis", () => {
       }),
     })
     expect(await screen.findByTestId("analysis-results-missing")).toBeTruthy()
-    expect(
-      within(await screen.findByTestId("analysis-reports-group")).getByTestId("analysis-file"),
-    ).toBeTruthy()
+    const reports = await screen.findByTestId("analysis-reports-group")
+    fireEvent.click(within(reports).getByTestId("analysis-experiment"))
+    expect(within(reports).getByTestId("analysis-file")).toBeTruthy()
   })
 
   test("says plainly when the results folder does not exist, and offers Change…", async () => {
@@ -577,7 +673,8 @@ describe("ScienceAnalysis", () => {
     const paths = screen
       .getAllByTestId("analysis-file")
       .map((el) => el.getAttribute("data-rel-path"))
-    expect(paths).toEqual(["data/metrics.csv", "config.json"])
+    // Sorted by name, like the file tree.
+    expect(paths).toEqual(["config.json", "data/metrics.csv"])
   })
 
   test("shows a partial warning alongside readable files", async () => {
@@ -604,6 +701,126 @@ describe("ScienceAnalysis", () => {
     })
     expect(await screen.findByTestId("analysis-partial")).toBeTruthy()
     expect(screen.getByTestId("science-analysis-empty")).toBeTruthy()
+  })
+
+  test("Escape deselects the file, but not while typing in a field or with a dialog open", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([{ relPath: "plot.png", name: "plot.png", kind: "image" }]),
+      "science.analysis.preview": () => ({ type: "image", dataUrl: "data:image/png;base64," }),
+    })
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+    expect(await screen.findByTestId("analysis-preview-path")).toBeTruthy()
+
+    // In the search box Escape stays with the field.
+    const search = screen.getByTestId("analysis-search")
+    search.focus()
+    fireEvent.keyDown(search, { key: "Escape" })
+    expect(screen.getByTestId("analysis-preview-path")).toBeTruthy()
+    search.blur()
+
+    // With a dialog open, Escape is the dialog's.
+    const dialog = document.createElement("div")
+    dialog.setAttribute("role", "dialog")
+    document.body.append(dialog)
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.getByTestId("analysis-preview-path")).toBeTruthy()
+    dialog.remove()
+
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(await screen.findByTestId("analysis-no-selection")).toBeTruthy()
+    expect(screen.queryByTestId("analysis-preview-path")).toBeNull()
+  })
+
+  test("a click on empty space deselects the file; clicks on files, controls or the preview content do not", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          { relPath: "plot.png", name: "plot.png", kind: "image" },
+          { relPath: "m.csv", name: "m.csv", kind: "csv" },
+        ]),
+      "science.analysis.preview": () => ({ type: "image", dataUrl: "data:image/png;base64," }),
+    })
+    const select = async (): Promise<void> => {
+      const row = (await screen.findAllByTestId("analysis-file")).find(
+        (element) => element.dataset.relPath === "plot.png",
+      ) as HTMLElement
+      fireEvent.click(row)
+      await screen.findByTestId("analysis-preview-path")
+    }
+    await select()
+    // Controls, the preview content and the right panel keep the selection.
+    fireEvent.click(screen.getByTestId("analysis-category-figure"))
+    fireEvent.click(screen.getByTestId("analysis-category-all"))
+    fireEvent.click(screen.getByTestId("analysis-search"))
+    fireEvent.click(await screen.findByTestId("analysis-preview-image"))
+    fireEvent.click(screen.getByTestId("science-sessions"))
+    expect(screen.getByTestId("analysis-preview-path")).toBeTruthy()
+
+    // The empty area of the list deselects.
+    fireEvent.click(screen.getByTestId("analysis-files-list"))
+    expect(await screen.findByTestId("analysis-no-selection")).toBeTruthy()
+    // So does the preview pane's empty area.
+    await select()
+    fireEvent.click(screen.getByTestId("analysis-preview"))
+    expect(await screen.findByTestId("analysis-no-selection")).toBeTruthy()
+  })
+
+  test("the folder tree can be hidden: files are listed directly with their path, and the choice is kept", async () => {
+    const files = listing([
+      {
+        relPath: "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+        name: "growth.gif",
+        kind: "animation",
+        group: "pattern_translation",
+        experiment: "easily-boss-grouse",
+        innerPath: "animations/growth.gif",
+      },
+      {
+        relPath: "results/pattern_translation/easily-boss-grouse/curve.pdf",
+        name: "curve.pdf",
+        kind: "pdf",
+        group: "pattern_translation",
+        experiment: "easily-boss-grouse",
+      },
+      { relPath: "results/summary.json", name: "summary.json", kind: "json" },
+    ])
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => files,
+    })
+    const toggle = await screen.findByTestId("analysis-flat-toggle")
+    // Off by default: the tree, with its group row.
+    expect(toggle.getAttribute("aria-pressed")).toBe("false")
+    expect(toggle.getAttribute("aria-label")).toBe("Hide folders")
+    expect(toggle.dataset.featureLabel).toBe("Hide folders")
+    // The lucide ListTree icon.
+    expect(toggle.querySelector("svg")?.getAttribute("class")).toContain("lucide-list-tree")
+    expect(toggle.dataset.featureHelp).toBeTruthy()
+    await screen.findAllByTestId("analysis-group")
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-pressed")).toBe("true")
+    expect(screen.queryAllByTestId("analysis-group")).toHaveLength(0)
+    expect(screen.queryAllByTestId("analysis-folder")).toHaveLength(0)
+    const rows = screen.getAllByTestId("analysis-file")
+    expect(rows.map((row) => row.dataset.relPath)).toEqual([
+      "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+      "results/pattern_translation/easily-boss-grouse/curve.pdf",
+      "results/summary.json",
+    ])
+    expect(rows[0]?.textContent).toContain(
+      "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+    )
+    expect(window.localStorage.getItem("pi-lab.analysis.flatList")).toBe("true")
+
+    // Chips still apply.
+    fireEvent.click(screen.getByTestId("analysis-category-figure"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "results/pattern_translation/easily-boss-grouse/curve.pdf",
+    ])
   })
 
   test("selecting a CSV file renders a table preview", async () => {
@@ -885,26 +1102,6 @@ describe("ScienceAnalysis", () => {
     ).toBe("mtrcs")
   })
 
-  test("empty search ranks likely results above config-like files within a category", async () => {
-    renderAnalysis({
-      "projects.list": () => [project({ id: "p1", name: "alpha" })],
-      "science.analysis.listFiles": () =>
-        listing([
-          { relPath: "config.json", name: "config.json", kind: "json" },
-          {
-            relPath: "runs/experiment-results.json",
-            name: "experiment-results.json",
-            kind: "json",
-          },
-        ]),
-    })
-
-    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(2))
-    expect(
-      screen.getAllByTestId("analysis-file").map((row) => row.getAttribute("data-rel-path")),
-    ).toEqual(["runs/experiment-results.json", "config.json"])
-  })
-
   test("⌘F opens a fuzzy finder over the analysis files; picking one previews it", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
@@ -949,7 +1146,7 @@ describe("ScienceAnalysis", () => {
     })
   })
 
-  test("top-level filter chips are categories, and group headers read by category", async () => {
+  test("filter chips are Data, Figures, Markup and Text, only those present", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
@@ -957,71 +1154,137 @@ describe("ScienceAnalysis", () => {
           { relPath: "data/metrics.csv", name: "metrics.csv", kind: "csv" },
           { relPath: "runs/loss.npy", name: "loss.npy", kind: "npy" },
           { relPath: "figs/plot.png", name: "plot.png", kind: "image" },
+          { relPath: "figs/grad.pdf", name: "grad.pdf", kind: "pdf" },
+          { relPath: "config.yaml", name: "config.yaml", kind: "markup" },
+          { relPath: "summary.json", name: "summary.json", kind: "json" },
+          { relPath: "run.log", name: "run.log", kind: "text" },
+          { relPath: "notes.md", name: "notes.md", kind: "markdown" },
         ]),
     })
-
-    await waitFor(() => {
-      expect(screen.getByTestId("analysis-category-filters")).toBeTruthy()
-    })
-    // csv + npy both collapse into the "Data" category, so there is one Data
-    // chip — not separate CSV / NumPy chips.
-    expect(screen.getByTestId("analysis-category-data")).toBeTruthy()
-    expect(screen.getByTestId("analysis-category-image")).toBeTruthy()
-    expect(screen.queryByTestId("analysis-category-csv")).toBeNull()
-    expect(screen.queryByTestId("analysis-category-npy")).toBeNull()
-    // The grouped list reads by category label, not raw sub-format.
-    const filters = screen.getByTestId("analysis-category-filters")
-    expect(filters.textContent).toContain("Data")
-    expect(filters.textContent).toContain("Images")
-    expect(filters.textContent).not.toContain("CSV")
-    expect(filters.textContent).not.toContain("NumPy")
+    const filters = await screen.findByTestId("analysis-category-filters")
+    expect(
+      within(filters)
+        .getAllByRole("button")
+        .map((chip) => chip.textContent),
+    ).toEqual(["All", "Data", "Figures", "Markup", "Text"])
+    for (const old of ["Plots", "Images", "Logs"]) expect(filters.textContent).not.toContain(old)
   })
 
-  test("selecting a multi-kind category reveals sub-format bubbles that narrow further", async () => {
+  test("a category shows a second row of smaller format chips; a format chip filters and clicking it again shows all", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
         listing([
+          { relPath: "figs/grad.pdf", name: "grad.pdf", kind: "pdf" },
+          { relPath: "figs/loss.png", name: "loss.png", kind: "image" },
+          { relPath: "figs/arch.svg", name: "arch.svg", kind: "image" },
           { relPath: "data/metrics.csv", name: "metrics.csv", kind: "csv" },
-          { relPath: "runs/loss.npy", name: "loss.npy", kind: "npy" },
         ]),
     })
+    await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(4))
+    const formats = () =>
+      within(screen.getByTestId("analysis-format-filters"))
+        .getAllByRole("button")
+        .map((chip) => chip.textContent)
+    // All shows only the formats present, in the categories' fixed order.
+    expect(formats()).toEqual(["CSV", "PNG", "PDF", "SVG"])
+    expect(screen.queryByTestId("analysis-format-menu")).toBeNull()
+    // Format chips are smaller than category chips.
+    expect(screen.getByTestId("analysis-format-pdf").className).toContain("text-[10px]")
+    expect(screen.getByTestId("analysis-category-all").className).not.toContain("text-[10px]")
 
-    await waitFor(() => {
-      expect(screen.getAllByTestId("analysis-file")).toHaveLength(2)
-    })
-    // No sub-bubbles until a category is selected.
-    expect(screen.queryByTestId("analysis-subkind-filters")).toBeNull()
+    // A format chip from All filters to that format.
+    fireEvent.click(screen.getByTestId("analysis-format-csv"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "data/metrics.csv",
+    ])
+    fireEvent.click(screen.getByTestId("analysis-format-csv"))
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(4)
 
-    fireEvent.click(screen.getByTestId("analysis-category-data"))
+    // Figures: its formats in the second row, no "All figures".
+    const figures = screen.getByTestId("analysis-category-figure")
+    fireEvent.click(figures)
+    expect(formats()).toEqual(["PNG", "PDF", "SVG", "JPG"])
+    expect(screen.queryByText("All figures")).toBeNull()
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
 
-    await waitFor(() => {
-      expect(screen.getByTestId("analysis-subkind-filters")).toBeTruthy()
-    })
-    expect(screen.getByTestId("analysis-subkind-csv")).toBeTruthy()
-    expect(screen.getByTestId("analysis-subkind-npy")).toBeTruthy()
-
-    // Narrowing to one sub-kind filters the list to that kind.
-    fireEvent.click(screen.getByTestId("analysis-subkind-npy"))
-    await waitFor(() => {
-      expect(screen.getAllByTestId("analysis-file")).toHaveLength(1)
-    })
-    expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("runs/loss.npy")
+    const pdf = screen.getByTestId("analysis-format-pdf")
+    fireEvent.click(pdf)
+    expect(pdf.getAttribute("aria-pressed")).toBe("true")
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "figs/grad.pdf",
+    ])
+    // Clicking it again goes back to all figures.
+    fireEvent.click(pdf)
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
+    // Clicking the selected category again does the same.
+    fireEvent.click(screen.getByTestId("analysis-format-png"))
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(1)
+    fireEvent.click(figures)
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
   })
 
-  test("a single-kind category shows no sub-format bubbles", async () => {
+  test("a selected category lists its fixed formats; absent ones are greyed out and not clickable", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
-        listing([{ relPath: "figs/plot.png", name: "plot.png", kind: "image" }]),
+        listing([
+          { relPath: "figs/plot.png", name: "plot.png", kind: "image" },
+          { relPath: "runs/growth.mp4", name: "growth.mp4", kind: "video" },
+          { relPath: "runs/growth.gif", name: "growth.gif", kind: "animation" },
+          { relPath: "runs/config.yml", name: "config.yml", kind: "markup" },
+          { relPath: "runs/params.yaml", name: "params.yaml", kind: "markup" },
+        ]),
     })
-
-    await waitFor(() => {
-      expect(screen.getByTestId("analysis-category-image")).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId("analysis-category-image"))
-    // Images is a single-kind category — no second row of bubbles.
-    expect(screen.queryByTestId("analysis-subkind-filters")).toBeNull()
+    const chips = () =>
+      within(screen.getByTestId("analysis-format-filters"))
+        .getAllByRole("button")
+        .map((chip) => [chip.textContent, (chip as HTMLButtonElement).disabled])
+    const figures = await screen.findByTestId("analysis-category-figure")
+    // All: only the formats present (YAML and YML are one chip).
+    expect(chips()).toEqual([
+      ["PNG", false],
+      ["MP4", false],
+      ["GIF", false],
+      ["YAML", false],
+    ])
+    fireEvent.click(figures)
+    expect(chips()).toEqual([
+      ["PNG", false],
+      ["PDF", true],
+      ["SVG", true],
+      ["JPG", true],
+    ])
+    fireEvent.click(screen.getByTestId("analysis-category-animation"))
+    expect(chips()).toEqual([
+      ["MP4", false],
+      ["GIF", false],
+      ["WEBM", true],
+      ["MOV", true],
+      ["MKV", true],
+    ])
+    // A greyed-out chip does nothing.
+    fireEvent.click(screen.getByTestId("analysis-format-webm"))
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(2)
+    fireEvent.click(screen.getByTestId("analysis-format-mp4"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "runs/growth.mp4",
+    ])
+    // Markup: YAML covers .yaml and .yml.
+    fireEvent.click(screen.getByTestId("analysis-category-markup"))
+    expect(chips()).toEqual([
+      ["YAML", false],
+      ["TOML", true],
+      ["JSON", true],
+      ["XML", true],
+    ])
+    fireEvent.click(screen.getByTestId("analysis-format-yaml"))
+    expect(
+      screen
+        .getAllByTestId("analysis-file")
+        .map((row) => row.dataset.relPath)
+        .sort(),
+    ).toEqual(["runs/config.yml", "runs/params.yaml"])
   })
 
   test("the project picker sits in the top bar and switches and remembers the project", async () => {
@@ -1182,6 +1445,42 @@ describe("Analysis preview formats (mocked server)", () => {
     expect(await within(pane).findByRole("heading", { name: "Loss went down" })).toBeTruthy()
     expect(within(pane).getByText("10%").tagName).toBe("STRONG")
     expect(within(pane).queryByText(/title: Run 1/)).toBeNull()
+  })
+
+  test("a video plays muted and looping with controls from a media grant, revoked on switch", async () => {
+    const openMedia = vi.fn(() => ({ url: "pi-lab-media://t1/growth.mp4" }))
+    const closeMedia = vi.fn(() => undefined)
+    const { unmount } = renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([{ relPath: "results/growth.mp4", name: "growth.mp4", kind: "video" }]),
+      "science.analysis.openMedia": openMedia,
+      "science.analysis.closeMedia": closeMedia,
+    })
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+    const video = (await screen.findByTestId("analysis-preview-video")) as HTMLVideoElement
+    expect(openMedia).toHaveBeenCalledWith({ projectId: "p1", relPath: "results/growth.mp4" })
+    expect(video.getAttribute("src")).toBe("pi-lab-media://t1/growth.mp4")
+    expect(video.muted).toBe(true)
+    expect(video.loop).toBe(true)
+    expect(video.controls).toBe(true)
+    unmount()
+    await waitFor(() =>
+      expect(closeMedia).toHaveBeenCalledWith({ url: "pi-lab-media://t1/growth.mp4" }),
+    )
+  })
+
+  test("a gif shows as an animated image from a media grant", async () => {
+    const pane = await selectFile(
+      { relPath: "results/growth.gif", name: "growth.gif", kind: "animation" },
+      {
+        "science.analysis.openMedia": () => ({ url: "pi-lab-media://t2/growth.gif" }),
+        "science.analysis.closeMedia": () => undefined,
+      },
+    )
+    const image = await within(pane).findByTestId("analysis-preview-animation")
+    expect(image.tagName).toBe("IMG")
+    expect(image.getAttribute("src")).toBe("pi-lab-media://t2/growth.gif")
   })
 
   test("a Jupyter notebook shows Markdown cells, code cells and their stored outputs", async () => {

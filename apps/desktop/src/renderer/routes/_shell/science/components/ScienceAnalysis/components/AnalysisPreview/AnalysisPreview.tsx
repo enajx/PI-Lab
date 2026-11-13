@@ -2,7 +2,7 @@ import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysi
 import type { NotebookCell, NotebookOutput } from "@pi-lab/shared/analysis/ipynb"
 import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import {
   type DocumentRenderResult,
@@ -11,10 +11,17 @@ import {
   RenderedDocument,
 } from "../../../../../../../components/DocumentRender/DocumentRender"
 import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
-import { useTRPC } from "../../../../../../../trpc/react"
+import { useTRPC, useTRPCClient } from "../../../../../../../trpc/react"
 import { Markdown } from "../../../../../projects/components/RightSidebar/components/Markdown"
 import { ArrayGrid } from "../ArrayGrid"
 import { MetricChart } from "../MetricChart"
+
+/** The app's bundled PDF.js viewer (the one PDF tabs use), loaded on first use. */
+const PdfViewer = lazy(() =>
+  import("../../../../../../../Editor/components/PdfViewer/PdfViewer").then((module) => ({
+    default: module.PdfViewer,
+  })),
+)
 
 /**
  * Preview pane for a single selected data file (P8c). Fetches
@@ -23,7 +30,8 @@ import { MetricChart } from "../MetricChart"
  * NumPy 2-D array grid, an inline image, pretty-printed JSON, a text head
  * (Markdown, Quarto and MyST files render as Markdown with the front matter
  * hidden), a Jupyter notebook's cells, or a metadata card for kinds with no
- * inline renderer. HTML reports and marimo notebooks open in their interactive
+ * inline renderer. PDFs open in the bundled PDF.js viewer, read through
+ * `science.analysis.pdf`. HTML reports and marimo notebooks open in their interactive
  * surface; a marimo notebook is labelled, and shows its Python code when marimo
  * cannot start. The pane owns its own
  * vertical scroll; the fetch is keyed on the project + path so switching
@@ -47,9 +55,12 @@ export function AnalysisPreview({
   const t = useTranslate()
   const trpc = useTRPC()
   const interactive = kind === "report" || kind === "marimo"
+  const pdf = kind === "pdf"
+  const media = kind === "video" || kind === "animation"
+  const [pdfStatus, setPdfStatus] = useState("")
   const preview = useQuery({
     ...trpc.science.analysis.preview.queryOptions({ projectId, relPath }),
-    enabled: !interactive,
+    enabled: !interactive && !pdf && !media,
     staleTime: 30_000,
   })
   const renderTool = documentToolForFile(
@@ -65,8 +76,11 @@ export function AnalysisPreview({
   const shownRender = rendered?.relPath === relPath ? rendered.result : null
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-border border-b px-4 py-2">
+    <div data-deselect-area className="flex h-full min-h-0 flex-col">
+      <div
+        data-deselect-area
+        className="flex shrink-0 flex-wrap items-center gap-2 border-border border-b px-4 py-2"
+      >
         <span
           data-testid="analysis-preview-path"
           className="min-w-0 flex-1 truncate font-mono text-foreground text-xs"
@@ -74,6 +88,14 @@ export function AnalysisPreview({
         >
           {relPath}
         </span>
+        {pdf && pdfStatus !== "" ? (
+          <span
+            data-testid="analysis-pdf-status"
+            className="shrink-0 text-muted-foreground text-xs"
+          >
+            {pdfStatus}
+          </span>
+        ) : null}
         {kind === "marimo" ? (
           <span
             data-testid="analysis-preview-label"
@@ -105,9 +127,19 @@ export function AnalysisPreview({
       </div>
       <div
         data-testid="analysis-preview"
-        className={`min-h-0 flex-1 ${interactive || shownRender ? "overflow-hidden" : "overflow-auto p-4"}`}
+        data-deselect-area
+        className={`min-h-0 flex-1 ${interactive || shownRender || pdf || media ? "flex flex-col overflow-hidden" : "overflow-auto p-4"}`}
       >
-        {shownRender ? (
+        {pdf ? (
+          <AnalysisPdf projectId={projectId} relPath={relPath} onMessage={setPdfStatus} />
+        ) : media ? (
+          <MediaPreview
+            key={relPath}
+            projectId={projectId}
+            relPath={relPath}
+            kind={kind === "video" ? "video" : "animation"}
+          />
+        ) : shownRender ? (
           <RenderedDocument
             projectId={projectId}
             result={shownRender}
@@ -142,6 +174,118 @@ export function AnalysisPreview({
         ) : null}
       </div>
     </div>
+  )
+}
+
+/**
+ * A project video (muted, looping, with controls) or gif (an animated image),
+ * streamed from a `pi-lab-media://` grant (`science.analysis.openMedia`) so a
+ * large file is never read whole. The grant is revoked when the preview closes.
+ */
+function MediaPreview({
+  projectId,
+  relPath,
+  kind,
+}: {
+  projectId: string
+  relPath: string
+  kind: "video" | "animation"
+}) {
+  const t = useTranslate()
+  const client = useTRPCClient()
+  const [url, setUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    let granted: string | null = null
+    client.science.analysis.openMedia
+      .mutate({ projectId, relPath })
+      .then((result) => {
+        granted = result.url
+        if (live) setUrl(result.url)
+        else
+          void client.science.analysis.closeMedia.mutate({ url: result.url }).catch(console.error)
+      })
+      .catch((cause: unknown) => {
+        if (live) setError(cause instanceof Error ? cause.message : String(cause))
+      })
+    return () => {
+      live = false
+      if (granted !== null)
+        void client.science.analysis.closeMedia.mutate({ url: granted }).catch(console.error)
+    }
+  }, [client, projectId, relPath])
+  if (error !== null) {
+    return (
+      <p data-testid="analysis-preview-error" className="p-4 text-destructive text-sm">
+        {error}
+      </p>
+    )
+  }
+  if (url === null)
+    return <p className="p-4 text-muted-foreground text-sm">{t("Loading preview…")}</p>
+  return (
+    <div
+      data-deselect-area
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto p-4"
+    >
+      {kind === "video" ? (
+        <video
+          data-testid="analysis-preview-video"
+          src={url}
+          muted
+          loop
+          controls
+          autoPlay
+          playsInline
+          onError={() =>
+            setError(t("This video cannot be played here (format or codec not supported)."))
+          }
+          className="max-h-full max-w-full"
+        />
+      ) : (
+        <img
+          data-testid="analysis-preview-animation"
+          src={url}
+          alt={relPath}
+          className="max-h-full max-w-full object-contain"
+        />
+      )}
+    </div>
+  )
+}
+
+/** A project PDF in the bundled PDF.js viewer, read through `science.analysis.pdf`. */
+function AnalysisPdf({
+  projectId,
+  relPath,
+  onMessage,
+}: {
+  projectId: string
+  relPath: string
+  /** The viewer's status, e.g. "Loading PDF…" or "Page 2 / 5". */
+  onMessage: (message: string) => void
+}) {
+  const t = useTranslate()
+  const client = useTRPCClient()
+  return (
+    <Suspense
+      fallback={<p className="p-4 text-muted-foreground text-xs">{t("Loading PDF viewer…")}</p>}
+    >
+      <PdfViewer
+        source={{
+          stat: () => client.science.analysis.pdfStat.query({ projectId, relPath }),
+          read: () => client.science.analysis.pdf.query({ projectId, relPath }),
+          reverseSync: null,
+        }}
+        sourceKey={projectId}
+        relPath={relPath}
+        location={null}
+        onSource={() => undefined}
+        build={null}
+        onMessage={onMessage}
+      />
+    </Suspense>
   )
 }
 
