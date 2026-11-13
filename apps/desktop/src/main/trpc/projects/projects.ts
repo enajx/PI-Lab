@@ -18,7 +18,14 @@ import { TRPCError } from "@trpc/server"
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { writeProjectAgentConfig } from "../../agents/projectConfig"
-import { currentBranch, GitError, isGitRepo, resolveDefaultBranch, runGit, status } from "../../git"
+import {
+  currentBranch,
+  GitError,
+  hasChanges,
+  isGitRepo,
+  resolveDefaultBranch,
+  runGit,
+} from "../../git"
 import { hasPendingAgentLaunch } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
 import { discoverTaskFile } from "../science/tasks/store"
@@ -538,11 +545,11 @@ export const projectsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
       }
       if (!(await isGitRepo(project.repoPath))) return null
-      const [branch, changes] = await Promise.all([
+      const [branch, dirty] = await Promise.all([
         currentBranch(project.repoPath),
-        status(project.repoPath),
+        hasChanges(project.repoPath),
       ])
-      return { branch, dirty: changes.length > 0 }
+      return { branch, dirty }
     }),
 
   /** Bounded, fresh-per-launch source characters for a project's Digital Rain card artwork. */
