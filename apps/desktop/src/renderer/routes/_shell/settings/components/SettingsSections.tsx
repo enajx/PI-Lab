@@ -56,6 +56,7 @@ import {
   useShowFilesPanel,
   useShowResearchHeartbeatSection,
   useShowSkillsPanel,
+  useShowStatusBar,
 } from "../../../../preferences/preferences"
 import { type ThemeMode, useTheme } from "../../../../providers/ThemeProvider"
 import {
@@ -238,6 +239,7 @@ export function AppearanceSection() {
   const { mode, setMode } = useTheme()
   const [digitalRainDensity, setDigitalRainDensity] = useDigitalRainDensity()
   const [digitalRainSpeed, setDigitalRainSpeed] = useDigitalRainSpeed()
+  const [statusBar, setStatusBar] = useShowStatusBar()
 
   return (
     <SettingsSection
@@ -258,6 +260,13 @@ export function AppearanceSection() {
         onChange={(value) => setMode(value as ThemeMode)}
       />
       <AppThemeGallery />
+      <ToggleField
+        testId="settings-status-bar"
+        label="Status bar"
+        description="Show a small status bar at the bottom of the window."
+        checked={statusBar}
+        onChange={setStatusBar}
+      />
       <div
         id="appearance-advanced"
         data-testid="appearance-advanced"

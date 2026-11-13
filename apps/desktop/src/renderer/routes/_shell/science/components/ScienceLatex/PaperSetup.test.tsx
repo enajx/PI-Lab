@@ -1,3 +1,4 @@
+import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { buttonVariants, cn } from "@pi-lab/ui"
 import { QueryClient } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
@@ -24,6 +25,11 @@ function renderSetupWith(handlers: FakeHandlers, autoDetect: boolean) {
   const client = createFakeTrpcClient({
     "paper.detect": () => ({ clones: [], stoppedEarly: false }),
     "paper.createTarget": () => ({ dir: "/p/paper", displayDir: "paper" }),
+    // "Inside the project" is remembered, so Add Overleaf project clones without the
+    // destination question (that question is covered by the LaTeX Editor e2e test).
+    "settings.get": () => ({
+      editor: { ...DEFAULT_EDITOR_SETTINGS, overleafCloneLocation: "project" },
+    }),
     ...handlers,
   })
   return render(
@@ -61,6 +67,7 @@ describe("PaperSetup (mocked server)", () => {
       expect(addOverleaf).toHaveBeenCalledWith({
         projectId: "p1",
         url: OVERLEAF_URL,
+        dir: null,
         token: "olp_secret",
       }),
     )
@@ -499,7 +506,7 @@ describe("PaperSetup (mocked server)", () => {
     })
     fireEvent.click(screen.getByTestId("paper-overleaf-add"))
     await waitFor(() =>
-      expect(addOverleaf).toHaveBeenCalledWith({ projectId: "p1", url: OVERLEAF_URL }),
+      expect(addOverleaf).toHaveBeenCalledWith({ projectId: "p1", url: OVERLEAF_URL, dir: null }),
     )
   })
 

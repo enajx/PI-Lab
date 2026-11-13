@@ -11,6 +11,7 @@ import {
   headerIconButtonClass,
 } from "../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectStageRow } from "../../../components/ProjectStage"
+import { useCenteredPlacement } from "../../../components/ProjectStage/useCenteredPlacement"
 import { ProjectStatusControl } from "../../../components/ProjectStatus"
 import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
@@ -191,6 +192,17 @@ export function ProjectWorkspace({
   // strip, so the header clears + drags around them (the path text stays selectable).
   const [collapsed] = useSidebarCollapsed()
   const diaryShown = !rightSidebarCollapsed && rightSidebarActiveId === DIARY_TAB_ID
+  const headerRef = useRef<HTMLElement | null>(null)
+  const titleRef = useRef<HTMLDivElement | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const headerRightRef = useRef<HTMLDivElement | null>(null)
+  const stagePlacement = useCenteredPlacement(
+    headerRef,
+    titleRef,
+    stageRef,
+    headerRightRef,
+    `${projectQuery.data?.name ?? ""}\n${projectQuery.data?.repoPath ?? ""}`,
+  )
 
   // Ensure the project's main-checkout (branch) workspace exists, once on mount
   // (this component is keyed by project, so a switch remounts and re-ensures).
@@ -389,13 +401,15 @@ export function ProjectWorkspace({
         </p>
       ) : null}
       <header
+        ref={headerRef}
+        data-testid="project-view-header"
         className={cn(
-          "flex items-center justify-between gap-3",
+          "relative flex items-center justify-between gap-3",
           titleBarInsetHeaderClass(collapsed),
         )}
       >
         <div className={cn("flex min-w-0 items-center gap-3", titleBarControlClass(collapsed))}>
-          <div className="flex min-w-0 flex-col">
+          <div ref={titleRef} data-testid="project-view-title" className="flex min-w-0 flex-col">
             <h1 className="truncate text-foreground text-sm tracking-tight">
               {project?.name ?? t("Loading…")}
             </h1>
@@ -408,16 +422,31 @@ export function ProjectWorkspace({
               </p>
             ) : null}
           </div>
-          {project ? (
-            <ProjectStageRow
-              projectId={projectId}
-              stage={project.metadata?.stage ?? null}
-              testId="project-view-stage"
-              className="shrink-0"
-            />
-          ) : null}
+          {/* Centered on the whole top bar when it fits there, else right after the title. */}
+          <div
+            ref={stageRef}
+            data-testid="project-view-stage-slot"
+            data-placement={stagePlacement}
+            className={cn(
+              "shrink-0",
+              stagePlacement === "center" &&
+                "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
+            )}
+          >
+            {project ? (
+              <ProjectStageRow
+                projectId={projectId}
+                stage={project.metadata?.stage ?? null}
+                testId="project-view-stage"
+                className="shrink-0"
+              />
+            ) : null}
+          </div>
         </div>
-        <div className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}>
+        <div
+          ref={headerRightRef}
+          className={cn("flex shrink-0 items-center gap-2", titleBarControlClass(collapsed))}
+        >
           <HeaderShortcuts
             view="project"
             projectId={projectId}

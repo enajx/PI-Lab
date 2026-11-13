@@ -13,6 +13,7 @@ import {
   useShowAnalysisSection,
   useShowClusterSection,
   useShowSkillsPanel,
+  useShowStatusBar,
 } from "../preferences/preferences"
 import { APP_THEMES, useTheme } from "../providers/ThemeProvider"
 import { useTRPC } from "../trpc/react"
@@ -85,6 +86,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
   const [skills, setSkills] = useShowSkillsPanel()
   const [cluster, setCluster] = useShowClusterSection()
   const [analysis, setAnalysis] = useShowAnalysisSection()
+  const [statusBar, setStatusBar] = useShowStatusBar()
   const [autocomplete, setAutocomplete] = useQuickEditorAutocomplete()
   const [runPython, setRunPython] = useQuickEditorRunPython()
   const [markdown, setMarkdown] = useQuickEditorMarkdownMode()
@@ -97,6 +99,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
     toggle("show-skills", "Skills panel", skills, setSkills),
     toggle("show-cluster-section", "Cluster section", cluster, setCluster),
     toggle("show-analysis-section", "Analysis section", analysis, setAnalysis),
+    toggle("status-bar", "Status bar", statusBar, setStatusBar),
     toggle(
       "quick-editor-autocomplete",
       "Quick Editor word autocomplete",

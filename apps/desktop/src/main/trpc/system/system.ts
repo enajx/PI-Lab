@@ -1,5 +1,5 @@
 import { homedir } from "node:os"
-import { BrowserWindow, dialog, type OpenDialogOptions } from "electron"
+import { app, BrowserWindow, dialog, type OpenDialogOptions } from "electron"
 import { z } from "zod"
 import { createMenuBarIconService, type MenuBarIconService } from "../../background/trayVisibility"
 import {
@@ -32,6 +32,8 @@ export function createSystemRouter(
 ) {
   const detectSystemFontsOnce = cacheSystemFontDetector(detectSystemFonts)
   return router({
+    /** The app version (`app.getVersion()`), shown in the window status bar. */
+    appVersion: publicProcedure.query(() => app.getVersion()),
     /** The user's home folder, so the renderer can show paths as `~/…` (display only). */
     homeDir: publicProcedure.query(() => homedir()),
     /** System-installed font families for the global editor typography picker. */

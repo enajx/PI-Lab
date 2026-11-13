@@ -15,6 +15,9 @@ export type LatexProvider = "auto" | "bundled" | "system"
 
 export type PythonRunDestination = "central" | "below-editor"
 
+/** The remembered answer to "where should the Overleaf clone go?"; see {@link EditorSettings}. */
+export type OverleafCloneLocation = "ask" | "project" | "folder"
+
 /**
  * File format of the research diary: Markdown (`diary.md`), Quarto Markdown
  * (`diary.qmd`), or MyST Markdown (`diary.md` with a MyST front matter).
@@ -81,6 +84,14 @@ export interface EditorSettings {
   papersFolder: string
   /** Ask where to put such a paper, proposing a folder in {@link papersFolder} (default on). */
   askPapersFolder: boolean
+  /**
+   * Where Add Overleaf project clones a paper for an existing project: "ask"
+   * each time (default), "project" for `<project>/paper`, or "folder" for
+   * `<overleafCloneFolder>/<Overleaf project id>`.
+   */
+  overleafCloneLocation: OverleafCloneLocation
+  /** The remembered folder for {@link overleafCloneLocation} "folder" ("~" is the home folder). */
+  overleafCloneFolder: string
   /** Research diary file format; switching renames the diary when its panel next opens (default `md`). */
   researchDiaryFormat: ResearchDiaryFormat
   /** Default format agents write analysis in; a project can override it (default `md`). */
@@ -109,6 +120,8 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   confirmOverleafCommit: true,
   papersFolder: "~/Papers",
   askPapersFolder: true,
+  overleafCloneLocation: "ask",
+  overleafCloneFolder: "",
   researchDiaryFormat: "md",
   analysisFormat: "md",
   reportSkill: "experiment-report",
