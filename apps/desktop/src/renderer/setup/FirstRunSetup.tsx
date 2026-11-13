@@ -128,6 +128,10 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     }),
   )
 
+  /** Start at login is proposed on; the OS setting changes only when setup finishes. */
+  const [startAtLoginChoice, setStartAtLoginChoice] = useState(true)
+  const loginAvailable = startAtLogin.data !== undefined && startAtLogin.data.available !== false
+
   const chooseAgent = (agentId: "claude-code" | "codex") => {
     setSelectionTouched(true)
     setSelectedAgent((current) => (current === agentId ? null : agentId))
@@ -138,6 +142,9 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     void saved
       .then(async (ok) => {
         if (!ok) return
+        if (loginAvailable && startAtLogin.data?.enabled !== startAtLoginChoice) {
+          await setStartAtLogin.mutateAsync({ enabled: startAtLoginChoice })
+        }
         await complete.mutateAsync({ sound: completionSound })
         await queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
         onClose()
@@ -370,32 +377,30 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             </div>
           </section>
 
-          <section
-            data-testid="first-run-login-language"
-            className="grid gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-2"
-          >
-            <div className="flex flex-col gap-1 text-xs">
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <section
+              data-testid="first-run-start-at-login-card"
+              className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-xs"
+            >
               <h2 className="font-medium text-sm">{t("Start at login")}</h2>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   role="switch"
                   aria-label={t("Start at login")}
-                  aria-checked={startAtLogin.data?.enabled ?? false}
+                  aria-checked={loginAvailable && startAtLoginChoice}
                   data-testid="setup-start-at-login"
-                  disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
-                  onClick={() =>
-                    setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
-                  }
+                  disabled={!loginAvailable || setStartAtLogin.isPending}
+                  onClick={() => setStartAtLoginChoice((current) => !current)}
                   className={cn(
                     "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
-                    startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
+                    loginAvailable && startAtLoginChoice ? "bg-primary" : "bg-muted",
                   )}
                 >
                   <span
                     className={cn(
                       "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
-                      startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
+                      loginAvailable && startAtLoginChoice ? "translate-x-4" : "translate-x-0.5",
                     )}
                   />
                 </button>
@@ -405,23 +410,28 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                     : t("Launch PI Lab in the background when you sign in.")}
                 </span>
               </div>
-            </div>
-            <label className="flex flex-col gap-1 text-xs">
-              <h2 className="font-medium text-sm">{t("Language")}</h2>
-              <select
-                aria-label={t("Language")}
-                value={language}
-                onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
-                className={selectClass}
-              >
-                {LANGUAGES.map((item) => (
-                  <option key={item.code} value={item.code}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
+            </section>
+            <section
+              data-testid="first-run-language-card"
+              className="rounded-lg border border-border bg-card p-3"
+            >
+              <label className="flex flex-col gap-1 text-xs">
+                <h2 className="font-medium text-sm">{t("Language")}</h2>
+                <select
+                  aria-label={t("Language")}
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
+                  className={selectClass}
+                >
+                  {LANGUAGES.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+          </div>
 
           {error ? (
             <p

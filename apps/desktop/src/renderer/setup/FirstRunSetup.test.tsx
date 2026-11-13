@@ -123,12 +123,12 @@ describe("FirstRunSetup", () => {
     const language = await screen.findByLabelText<HTMLSelectElement>("Language")
     expect(Array.from(language.options).map((option) => option.value)).toEqual([
       "en",
+      "es",
+      "nb",
       "zh-CN",
       "ko",
       "ja",
-      "es",
       "ar",
-      "nb",
     ])
     fireEvent.change(language, { target: { value: "es" } })
     expect(await screen.findByRole("heading", { name: "Configurar PI Lab" })).toBeTruthy()
@@ -276,7 +276,7 @@ describe("FirstRunSetup", () => {
     expect(screen.queryByTestId("app-theme-gallery")).toBeNull()
   })
 
-  test("offers Start at login off by default and applies a change before setup ends", async () => {
+  test("offers Start at login on by default and turns it on when setup finishes", async () => {
     const loginPatches: unknown[] = []
     renderSetup({
       "system.startAtLogin": () => ({ enabled: false }),
@@ -284,11 +284,31 @@ describe("FirstRunSetup", () => {
         loginPatches.push(input)
         return input
       },
+      "setup.complete": () => ({ ok: true }),
     })
     const toggle = await screen.findByTestId("setup-start-at-login")
-    expect(toggle.getAttribute("aria-checked")).toBe("false")
-    fireEvent.click(toggle)
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"))
+    expect(loginPatches).toEqual([])
+    fireEvent.click(screen.getByTestId("first-run-setup-finish"))
     await waitFor(() => expect(loginPatches).toContainEqual({ enabled: true }))
+  })
+
+  test("a user who turns Start at login off finishes without enabling it", async () => {
+    const loginPatches: unknown[] = []
+    renderSetup({
+      "system.startAtLogin": () => ({ enabled: false }),
+      "system.setStartAtLogin": (input) => {
+        loginPatches.push(input)
+        return input
+      },
+      "setup.complete": () => ({ ok: true }),
+    })
+    const toggle = await screen.findByTestId("setup-start-at-login")
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(screen.getByTestId("first-run-setup-finish"))
+    await waitFor(() => expect(screen.getByTestId("first-run-setup-finish")).toBeTruthy())
+    expect(loginPatches).not.toContainEqual({ enabled: true })
   })
 
   test("has no dictation section and shows Start at login in the last card", async () => {
@@ -296,15 +316,24 @@ describe("FirstRunSetup", () => {
     const toggle = await screen.findByTestId("setup-start-at-login")
     expect(screen.queryByTestId("first-run-dictation")).toBeNull()
     const cards = screen.getByTestId("first-run-setup-scroll").querySelectorAll("section")
-    expect(cards[cards.length - 1]?.contains(toggle)).toBe(true)
+    expect(cards[cards.length - 2]?.contains(toggle)).toBe(true)
   })
 
-  test("shows Language next to Start at login in the last card", async () => {
+  test("shows Start at login and Language as two cards side by side at the bottom", async () => {
     renderSetup({ "system.startAtLogin": () => ({ enabled: false }) })
-    const language = await screen.findByLabelText("Language")
-    const card = screen.getByTestId("first-run-login-language")
-    expect(card.contains(language)).toBe(true)
-    expect(card.contains(screen.getByTestId("setup-start-at-login"))).toBe(true)
+    const language = await screen.findByLabelText<HTMLSelectElement>("Language")
+    const loginCard = screen.getByTestId("first-run-start-at-login-card")
+    const languageCard = screen.getByTestId("first-run-language-card")
+    expect(loginCard.tagName).toBe("SECTION")
+    expect(languageCard.tagName).toBe("SECTION")
+    expect(loginCard.contains(screen.getByTestId("setup-start-at-login"))).toBe(true)
+    expect(languageCard.contains(language)).toBe(true)
+    expect(loginCard.parentElement).toBe(languageCard.parentElement)
+    expect(Array.from(language.options).map((option) => option.text).slice(0, 3)).toEqual([
+      "English",
+      "Español",
+      "Norsk",
+    ])
   })
 
   test("finishes with the selected sound only after persistence succeeds", async () => {
