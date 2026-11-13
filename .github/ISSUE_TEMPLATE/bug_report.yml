@@ -1,0 +1,34 @@
+name: Report a bug
+description: Something in PI Lab does not work as expected.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: PI Lab version, channel and macOS version.
+      placeholder: PI Lab 0.9.1 (Beta), macOS 15.4.1
+    validations:
+      required: true

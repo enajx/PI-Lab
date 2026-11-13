@@ -545,7 +545,7 @@
   "e.g. Ada Lovelace, Alan Turing": "مثل Ada Lovelace وAlan Turing",
   "e.g. NeurIPS 2026": "مثل NeurIPS 2026",
   "e.g. https://www.overleaf.com/project/…": "مثل https://www.overleaf.com/project/…",
-  "Browse and preview the data files in a project's repo": "تصفح ملفات البيانات في مستودع المشروع ومعاينتها",
+  "Experiments logs and visualisation": "سجلات التجارب وتصورها",
   "Marimo report": "تقرير Marimo",
   "Analysis project": "مشروع التحليل",
   "Choose which project repository to scan for data files.": "اختر مستودع المشروع المراد فحصه بحثًا عن ملفات البيانات.",

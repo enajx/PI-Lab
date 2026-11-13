@@ -7,6 +7,7 @@ import {
   defaultSshConfigPath,
   type GpuSnapshot,
   readSshConfig,
+  type SshConfigHost,
   type SshExec,
 } from "../../../lib/ssh-config"
 import { publicProcedure, router } from "../../trpc"
@@ -94,6 +95,17 @@ function clean(value: string | undefined): string | undefined {
 }
 
 export const clusterRouter = router({
+  /**
+   * The concrete hosts of an OpenSSH client config (`path`, or `~/.ssh/config`
+   * when null), read fresh on each call and not imported. Backs the window
+   * status bar's hosts item.
+   */
+  sshHosts: publicProcedure
+    .input(z.object({ path: z.string().min(1).nullable() }))
+    .query(
+      ({ input }): Promise<SshConfigHost[]> => readSshConfig(input.path ?? defaultSshConfigPath()),
+    ),
+
   /**
    * Import hosts from an OpenSSH client config (default `~/.ssh/config`) into the
    * `machines` table as `source: "ssh-config"` rows. Upserts by `host` so a

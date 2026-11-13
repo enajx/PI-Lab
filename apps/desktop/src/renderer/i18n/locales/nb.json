@@ -545,7 +545,7 @@
   "e.g. Ada Lovelace, Alan Turing": "f.eks. Ada Lovelace, Alan Turing",
   "e.g. NeurIPS 2026": "f.eks. NeurIPS 2026",
   "e.g. https://www.overleaf.com/project/…": "f.eks. https://www.overleaf.com/project/…",
-  "Browse and preview the data files in a project's repo": "Bla gjennom og forhåndsvis datafiler i prosjektlageret",
+  "Experiments logs and visualisation": "Eksperimentlogger og visualisering",
   "Marimo report": "Marimo-rapport",
   "Analysis project": "Analyseprosjekt",
   "Choose which project repository to scan for data files.": "Velg prosjektlageret som skal skannes etter datafiler.",

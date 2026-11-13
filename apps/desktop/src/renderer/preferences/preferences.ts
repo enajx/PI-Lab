@@ -210,6 +210,11 @@ export const useDigitalRainSpeed = (): [DigitalRainSpeed, (next: DigitalRainSpee
   return [speed, setStored]
 }
 
+// --- Window status bar (hidden by default) -------------------------------------
+const SHOW_STATUS_BAR_KEY = "pi-lab.window.showStatusBar"
+export const useShowStatusBar = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref(SHOW_STATUS_BAR_KEY, false)
+
 // --- Project view: show the "Code changes" panel (hidden by default) ----------
 const SHOW_CODE_CHANGES_KEY = "pi-lab.projectView.showCodeChanges"
 export const readShowCodeChanges = (): boolean => readBoolean(SHOW_CODE_CHANGES_KEY, false)

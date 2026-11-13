@@ -11,6 +11,7 @@ import {
   settleEditorVimChoice,
   useDefaultAgentId,
   useEditorVimCache,
+  useShowStatusBar,
   useSidebarCollapsed,
 } from "../preferences/preferences"
 import { quickEditorRevision, subscribeQuickEditor } from "../QuickEditor/quickEditorState"
@@ -25,6 +26,7 @@ import { ProjectActivityProvider } from "./_shell/-ProjectActivity"
 import { AddProjectControllerProvider } from "./_shell/components/AddProjectController"
 import { NewFileControllerProvider } from "./_shell/components/NewFileController"
 import { Sidebar } from "./_shell/components/Sidebar"
+import { StatusBar } from "./_shell/components/StatusBar/StatusBar"
 import { WorkspaceRecoveryController } from "./_shell/components/WorkspaceRecoveryController"
 import { useTitleBarTrafficLights } from "./_shell/titleBar"
 
@@ -48,6 +50,7 @@ const CommandPalette = lazy(() =>
  *    else (dashboard, Workflows) this shell finds a project to jump to.
  *
  * Settings is full-screen: on `/settings` the sidebar is hidden so the panel fills the window.
+ * The optional window status bar (off by default) is the bottom row, below both.
  */
 export const Route = createFileRoute("/_shell")({
   component: ShellLayout,
@@ -120,6 +123,7 @@ function ShellLayout() {
   // strip above the main panel only when the sidebar is shown AND collapsed, and sit
   // on the sidebar header otherwise (expanded, or a full-screen route).
   const [collapsed] = useSidebarCollapsed()
+  const [showStatusBar] = useShowStatusBar()
   useTitleBarTrafficLights({ sidebarShown: !isFullScreen, collapsed })
 
   // ⌘F (the `quick-open` shortcut) is context-aware. The project view (files) and every science
@@ -174,14 +178,13 @@ function ShellLayout() {
               data-testid="setup-gate-loading"
               className="flex h-screen w-screen bg-background text-foreground"
             />
-          ) : isFullScreen ? (
-            <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-              {content}
-            </div>
           ) : (
-            <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-              <Sidebar />
-              {content}
+            <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+              <div className="flex min-h-0 flex-1 overflow-hidden">
+                {isFullScreen ? null : <Sidebar />}
+                {content}
+              </div>
+              {showStatusBar && !isSetup && !redirectToSetup ? <StatusBar /> : null}
             </div>
           )}
           {paletteOpen ? (

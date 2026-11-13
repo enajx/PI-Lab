@@ -422,6 +422,7 @@ export async function createHarness(
     db,
     appChannel: options.appChannel ?? "alpha",
     skillsHomeDir,
+    userDataDir: dataDir,
     latexResourcesDir: options.latexResourcesDir,
     latexCacheDir: options.latexCacheDir ?? join(dataDir, "latex", "cache"),
     latexUserHome: options.latexUserHome,

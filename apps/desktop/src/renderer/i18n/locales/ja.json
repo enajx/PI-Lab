@@ -545,7 +545,7 @@
   "e.g. Ada Lovelace, Alan Turing": "例: Ada Lovelace、Alan Turing",
   "e.g. NeurIPS 2026": "例: NeurIPS 2026",
   "e.g. https://www.overleaf.com/project/…": "例: https://www.overleaf.com/project/…",
-  "Browse and preview the data files in a project's repo": "プロジェクトのリポジトリ内のデータファイルを閲覧・プレビュー",
+  "Experiments logs and visualisation": "実験ログと可視化",
   "Marimo report": "Marimo レポート",
   "Analysis project": "分析するプロジェクト",
   "Choose which project repository to scan for data files.": "データファイルを調べるプロジェクトのリポジトリを選択します。",

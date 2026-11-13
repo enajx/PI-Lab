@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
+import { openAnalysisRun } from "./fixtures/analysis"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -75,6 +76,7 @@ test("Render in Analysis renders a .qmd and shows the HTML in the preview", asyn
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
+  await openAnalysisRun(window, "run")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.qmd"]')
     .click()

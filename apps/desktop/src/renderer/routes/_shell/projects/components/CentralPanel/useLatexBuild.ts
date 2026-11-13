@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { BuildOutputEvent, BuildResult } from "../../../../../../main/trpc/pdf/pdf"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
+import { publishLatexBuild } from "../../../components/StatusBar/latexBuildStore"
 
 /** Most live output kept per build, so a long build cannot grow memory without limit. */
 const MAX_LIVE_LOG = 100_000
@@ -100,19 +101,21 @@ export function useLatexBuild(
     const finishedLog = scope.failures.length
       ? scope.failures.map((failure) => `${failure.source}\n${failure.log}`).join("\n\n")
       : scope.lastLog
+    const message =
+      state === "building"
+        ? active.some((build) => build.firstBuild)
+          ? "First build: downloading TeX packages…"
+          : active.some((build) => build.downloading)
+            ? "Downloading TeX packages…"
+            : "Building LaTeX…"
+        : state === "failed"
+          ? "LaTeX build failed"
+          : "LaTeX build complete"
+    publishLatexBuild(scope.workspaceId, { state, message })
     setSnapshot({
       scope,
       status: {
-        message:
-          state === "building"
-            ? active.some((build) => build.firstBuild)
-              ? "First build: downloading TeX packages…"
-              : active.some((build) => build.downloading)
-                ? "Downloading TeX packages…"
-                : "Building LaTeX…"
-            : state === "failed"
-              ? "LaTeX build failed"
-              : "LaTeX build complete",
+        message,
         log: [scope.streamError, state === "building" && liveLog !== "" ? liveLog : finishedLog]
           .filter((part) => part !== null)
           .join("\n"),
@@ -154,6 +157,7 @@ export function useLatexBuild(
     return () => {
       scope.live = false
       subscription.unsubscribe()
+      publishLatexBuild(scope.workspaceId, null)
     }
   }, [scope, publish])
 

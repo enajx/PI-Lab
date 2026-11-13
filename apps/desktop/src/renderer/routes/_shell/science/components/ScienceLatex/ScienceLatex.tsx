@@ -14,6 +14,7 @@ import {
   useResearchDiaryWidth,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
 import { setPendingOpenFile } from "../../../projects/-pendingOpenFile"
 import { DIARY_TAB_ID } from "../../../projects/components/RightSidebar"
 import { ProjectPicker } from "../ProjectPicker"
@@ -90,6 +91,7 @@ export function ScienceLatex({
   }, [initialProjectId, setSavedProjectId])
   const wanted = initialProjectId ?? savedProjectId
   const selected = projects.find((project) => project.id === wanted) ?? projects[0] ?? null
+  useReportViewProject(selected?.id ?? null)
 
   const settingsQuery = useQuery(trpc.settings.get.queryOptions())
   const settings: EditorSettings = settingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
@@ -221,6 +223,8 @@ export function ScienceLatex({
               paperDir={paper.data.paper.dir}
               displayDir={paper.data.paper.displayDir}
               rootRelPath={paper.data.rootRelPath}
+              mainDoc={paper.data.mainDoc}
+              texFiles={paper.data.texFiles}
               lastSyncAt={paper.data.paper.lastSyncAt}
               hasRemote={paper.data.paper.remoteUrl !== null}
               syncEnabled={paper.data.paper.syncEnabled}

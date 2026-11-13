@@ -82,6 +82,16 @@ describe("science.cluster.importFromSshConfig", () => {
   })
 })
 
+describe("science.cluster.sshHosts", () => {
+  test("lists the concrete hosts of an ssh config without importing them", async () => {
+    const hosts = await h.caller.science.cluster.sshHosts({ path: fixturePath })
+    expect(hosts.map((host) => host.alias)).toEqual(["gpu-box", "laptop"])
+    expect(hosts[0]).toMatchObject({ hostname: "10.0.0.5", user: "researcher", port: 2222 })
+    const { machines } = await h.caller.science.cluster.list()
+    expect(machines).toEqual([])
+  })
+})
+
 describe("science.cluster manual machines + annotate + hide", () => {
   test("addMachine stores a manual row; duplicate host is a CONFLICT", async () => {
     const machine = await h.caller.science.cluster.addMachine({

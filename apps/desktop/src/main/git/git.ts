@@ -114,6 +114,21 @@ export async function addWorktree(
   await runGit(repoDir, args)
 }
 
+/**
+ * True when the working tree has staged, unstaged or untracked changes. Runs
+ * with `--no-optional-locks`, so a status check that repeats (the window status
+ * bar) never takes `.git/index.lock` and makes an agent's `git add` or
+ * `git commit` in the same checkout fail. Untracked folders are not expanded.
+ */
+export async function hasChanges(dir: string): Promise<boolean> {
+  const { stdout } = await runGit(
+    dir,
+    ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal"],
+    { timeoutMs: 10_000 },
+  )
+  return stdout.trim() !== ""
+}
+
 /** Force-remove a worktree and prune Git metadata; tolerate one already gone. */
 export async function removeWorktree(repoDir: string, worktreeDir: string): Promise<void> {
   try {
