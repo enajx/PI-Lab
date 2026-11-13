@@ -88,7 +88,7 @@ interface CodeMirrorBufferProps {
    * Optional color-theme id (the stored `EditorSettings.editorTheme`). Resolved to
    * a CodeMirror extension via {@link editorThemeExtension} and layered on top of
    * the structural height/scroll theme. Omitted / `"default"` / unknown ⇒ the
-   * accent app theme's syntax colors, or else GitHub, Light or Dark following the
+   * chosen app accent's syntax colors, or else GitHub, Light or Dark following the
    * app's appearance. Changing it, or the appearance, reconfigures live (no remount).
    */
   theme?: string
@@ -302,7 +302,7 @@ export function CodeMirrorBuffer({
   const vimCompartment = useRef(new Compartment()).current
   const autocompleteCompartment = useRef(new Compartment()).current
   const themeCompartment = useRef(new Compartment()).current
-  const { resolvedMode, themeId: appThemeId } = useTheme()
+  const { resolvedMode, themeId: appThemeId, accentId } = useTheme()
   const lintCompartment = useRef(new Compartment()).current
   const markdownCompartment = useRef(new Compartment()).current
 
@@ -464,7 +464,10 @@ export function CodeMirrorBuffer({
         // Layered over the default highlight; the structural height theme
         // below only sets layout, so the two never conflict on color.
         themeCompartment.of(
-          editorThemeExtension(theme, customThemes ?? [], resolvedMode, appThemeId),
+          editorThemeExtension(theme, customThemes ?? [], resolvedMode, {
+            themeId: appThemeId,
+            accentId,
+          }),
         ),
         editorTypographyExtension,
         lintCompartment.of(lintExtension(diagnostics)),
@@ -554,10 +557,13 @@ export function CodeMirrorBuffer({
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: themeCompartment.reconfigure(
-        editorThemeExtension(theme, customThemes ?? [], resolvedMode, appThemeId),
+        editorThemeExtension(theme, customThemes ?? [], resolvedMode, {
+          themeId: appThemeId,
+          accentId,
+        }),
       ),
     })
-  }, [theme, customThemes, resolvedMode, appThemeId, themeCompartment])
+  }, [theme, customThemes, resolvedMode, appThemeId, accentId, themeCompartment])
 
   // Swap the diagnostics source live.
   useEffect(() => {

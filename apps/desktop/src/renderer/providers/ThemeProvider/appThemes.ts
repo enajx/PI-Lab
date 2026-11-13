@@ -26,8 +26,8 @@ export const BASE_THEME_TOKENS = [
 ] as const
 
 /**
- * Tokens only accent themes set: panel card borders, panel titles, headings, and
- * selected items. When unset, globals.css falls back to the color each place used
+ * Tokens only a chosen accent sets: panel card borders, panel titles, headings,
+ * and selected items. When unset, globals.css falls back to the color each place used
  * before these tokens existed, so other themes look the same.
  */
 export const ACCENT_THEME_TOKENS = [
@@ -44,9 +44,9 @@ export type BaseThemeToken = (typeof BASE_THEME_TOKENS)[number]
 export type AccentThemeToken = (typeof ACCENT_THEME_TOKENS)[number]
 export type AppThemeToken = (typeof APP_THEME_TOKENS)[number]
 export type ResolvedThemeMode = "dark" | "light"
-export type ThemeTokenSet = Record<BaseThemeToken, string> &
-  Partial<Record<AccentThemeToken, string>>
-/** Release channel; only Alpha offers the trial and accent themes. */
+/** Tokens to set on the root element; any token left out keeps the globals.css value. */
+export type ThemeTokenSet = Partial<Record<AppThemeToken, string>>
+/** Release channel; only Alpha offers the trial themes. */
 export type AppChannel = "alpha" | "beta" | "stable"
 
 interface Palette {
@@ -65,8 +65,8 @@ interface Palette {
   destructiveForeground: string
 }
 
-/** The accent of an accent theme in one mode. */
-interface AccentColors {
+/** One shade of an accent, for light or dark mode. */
+export interface AccentColors {
   /** Panel card borders, titles, headings, selected items, buttons and links. */
   accent: string
   /** Second hue for editor syntax (functions, types, strings). */
@@ -78,8 +78,6 @@ export interface AppTheme {
   label: string
   /** Offered on Beta and Stable; the others are Alpha-only until the user trims the list. */
   kept: boolean
-  /** Set for accent themes, which color more of the interface and the code editor. */
-  accent: { light: AccentColors; dark: AccentColors } | null
   light: Palette
   dark: Palette
 }
@@ -133,74 +131,6 @@ function palette(values: PaletteValues): Palette {
   }
 }
 
-type AccentPaletteValues = readonly [
-  background: string,
-  surface: string,
-  elevated: string,
-  hover: string,
-  sidebar: string,
-  border: string,
-  foreground: string,
-  subtext: string,
-  accent: string,
-  secondary: string,
-  destructive: string,
-]
-
-/**
- * Build an accent theme: a quiet base whose accent also serves as the primary
- * (buttons, links), focus ring and brand color.
- */
-function accentTheme(
-  id: string,
-  label: string,
-  modes: { light: AccentPaletteValues; dark: AccentPaletteValues },
-): AppTheme {
-  const build = (values: AccentPaletteValues): { colors: Palette; accent: AccentColors } => {
-    const [
-      background,
-      surface,
-      elevated,
-      hover,
-      sidebar,
-      border,
-      foreground,
-      subtext,
-      accent,
-      secondary,
-      destructive,
-    ] = values
-    return {
-      colors: palette([
-        background,
-        surface,
-        elevated,
-        hover,
-        sidebar,
-        border,
-        foreground,
-        subtext,
-        accent,
-        background,
-        accent,
-        destructive,
-        background,
-      ]),
-      accent: { accent, secondary },
-    }
-  }
-  const light = build(modes.light)
-  const dark = build(modes.dark)
-  return {
-    id,
-    label,
-    kept: false,
-    accent: { light: light.accent, dark: dark.accent },
-    light: light.colors,
-    dark: dark.colors,
-  }
-}
-
 export const DEFAULT_APP_THEME_ID = "default"
 
 export const APP_THEMES: readonly AppTheme[] = [
@@ -208,7 +138,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: DEFAULT_APP_THEME_ID,
     label: "Default",
     kept: true,
-    accent: null,
     light: palette([
       "#ffffff",
       "#ffffff",
@@ -244,7 +173,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "tokyo-night",
     label: "Tokyo Night",
     kept: true,
-    accent: null,
     light: palette([
       "#e1e2e7",
       "#e9e9ed",
@@ -280,7 +208,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "catppuccin",
     label: "Catppuccin",
     kept: true,
-    accent: null,
     light: palette([
       "#eff1f5",
       "#e6e9ef",
@@ -316,7 +243,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "nord",
     label: "Nord",
     kept: true,
-    accent: null,
     light: palette([
       "#eceff4",
       "#e5e9f0",
@@ -352,7 +278,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "gruvbox",
     label: "Gruvbox",
     kept: true,
-    accent: null,
     light: palette([
       "#fbf1c7",
       "#f2e5bc",
@@ -388,7 +313,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "solarized",
     label: "Solarized",
     kept: true,
-    accent: null,
     light: palette([
       "#fdf6e3",
       "#eee8d5",
@@ -424,7 +348,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "rose-pine",
     label: "Rosé Pine",
     kept: true,
-    accent: null,
     light: palette([
       "#faf4ed",
       "#fffaf3",
@@ -460,7 +383,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "everforest",
     label: "Everforest",
     kept: true,
-    accent: null,
     light: palette([
       "#fffbef",
       "#f8f5e4",
@@ -496,7 +418,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "dracula",
     label: "Dracula",
     kept: true,
-    accent: null,
     light: palette([
       "#fffbeb",
       "#f6f2e4",
@@ -532,7 +453,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "one",
     label: "One Dark / One Light",
     kept: false,
-    accent: null,
     light: palette([
       "#fafafa",
       "#ffffff",
@@ -568,7 +488,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "github",
     label: "GitHub",
     kept: false,
-    accent: null,
     light: palette([
       "#ffffff",
       "#ffffff",
@@ -604,7 +523,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "ayu",
     label: "Ayu",
     kept: false,
-    accent: null,
     light: palette([
       "#fcfcfc",
       "#f8f9fa",
@@ -640,7 +558,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "monokai",
     label: "Monokai",
     kept: false,
-    accent: null,
     light: palette([
       "#faf4f2",
       "#fdf9f8",
@@ -676,7 +593,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "material",
     label: "Material",
     kept: false,
-    accent: null,
     light: palette([
       "#fafafa",
       "#ffffff",
@@ -712,7 +628,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "zenburn",
     label: "Zenburn",
     kept: false,
-    accent: null,
     light: palette([
       "#f2f1e6",
       "#f7f6ee",
@@ -748,7 +663,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "warm-paper",
     label: "Warm Paper",
     kept: false,
-    accent: null,
     light: palette([
       "#f5efe0",
       "#faf6ea",
@@ -784,7 +698,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "night-owl",
     label: "Night Owl",
     kept: false,
-    accent: null,
     light: palette([
       "#fbfbfb",
       "#ffffff",
@@ -820,7 +733,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "ia-writer",
     label: "iA Writer Grey",
     kept: false,
-    accent: null,
     light: palette([
       "#f7f7f7",
       "#fbfbfb",
@@ -856,7 +768,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "graphite",
     label: "Graphite",
     kept: false,
-    accent: null,
     light: palette([
       "#f4f4f5",
       "#ffffff",
@@ -892,7 +803,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "slate",
     label: "Slate",
     kept: false,
-    accent: null,
     light: palette([
       "#f8fafc",
       "#ffffff",
@@ -928,7 +838,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "warm-grey",
     label: "Warm Grey",
     kept: false,
-    accent: null,
     light: palette([
       "#fafaf9",
       "#ffffff",
@@ -964,7 +873,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "scandi-grey",
     label: "Scandinavian Grey",
     kept: false,
-    accent: null,
     light: palette([
       "#f7f7f7",
       "#fcfcfc",
@@ -1000,7 +908,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "pale-slate",
     label: "Pale Slate",
     kept: false,
-    accent: null,
     light: palette([
       "#eef1f5",
       "#f5f7fa",
@@ -1036,7 +943,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "ascii-terminal",
     label: "ASCII Terminal",
     kept: false,
-    accent: null,
     light: palette([
       "#f4f1e8",
       "#f8f6ef",
@@ -1072,7 +978,6 @@ export const APP_THEMES: readonly AppTheme[] = [
     id: "cyberpunk",
     label: "Cyberpunk",
     kept: false,
-    accent: null,
     light: palette([
       "#f3f0ff",
       "#faf8ff",
@@ -1104,286 +1009,6 @@ export const APP_THEMES: readonly AppTheme[] = [
       "#0a0a1a",
     ]),
   },
-  accentTheme("neon-pink", "Neon Pink", {
-    light: [
-      "#fdf8fb",
-      "#ffffff",
-      "#f6ecf2",
-      "#f0e1ea",
-      "#f9f1f6",
-      "#eadbe4",
-      "#2a2027",
-      "#7a6872",
-      "#c2347f",
-      "#0e7490",
-      "#c62839",
-    ],
-    dark: [
-      "#141118",
-      "#1a1620",
-      "#231d2b",
-      "#2c2436",
-      "#110e15",
-      "#2e2735",
-      "#ece6f0",
-      "#a69bb0",
-      "#ff9bd2",
-      "#8fdcff",
-      "#ff6b7a",
-    ],
-  }),
-  accentTheme("ember", "Ember", {
-    light: [
-      "#fcf9f5",
-      "#ffffff",
-      "#f5ede4",
-      "#efe3d6",
-      "#f8f2eb",
-      "#e9dfd3",
-      "#2b241d",
-      "#7a6d60",
-      "#c4540f",
-      "#8a6400",
-      "#c0392b",
-    ],
-    dark: [
-      "#151311",
-      "#1b1815",
-      "#25201b",
-      "#2e2721",
-      "#110f0d",
-      "#2f2924",
-      "#eee7df",
-      "#a89d90",
-      "#ff9a4d",
-      "#e9c46a",
-      "#ff6b5b",
-    ],
-  }),
-  accentTheme("lagoon", "Lagoon", {
-    light: [
-      "#f5fafa",
-      "#ffffff",
-      "#e8f2f1",
-      "#dcebea",
-      "#eef6f5",
-      "#d6e5e3",
-      "#18292a",
-      "#5d7472",
-      "#0f7a6e",
-      "#b4532a",
-      "#c0392b",
-    ],
-    dark: [
-      "#0f1617",
-      "#131c1d",
-      "#1a2627",
-      "#213031",
-      "#0c1213",
-      "#223234",
-      "#dfeceb",
-      "#8fa7a5",
-      "#4fd6c4",
-      "#f4a98a",
-      "#ff7a6b",
-    ],
-  }),
-  accentTheme("acid-lime", "Acid Lime", {
-    light: [
-      "#f8faf3",
-      "#ffffff",
-      "#eef2e4",
-      "#e4ead6",
-      "#f2f5ea",
-      "#dde4cf",
-      "#1f251a",
-      "#687258",
-      "#4f7d0c",
-      "#1f6fb2",
-      "#c0392b",
-    ],
-    dark: [
-      "#121410",
-      "#171a14",
-      "#1f231b",
-      "#282d22",
-      "#0e100c",
-      "#2a2f24",
-      "#e8eddf",
-      "#9ea692",
-      "#bff25a",
-      "#8cc8ff",
-      "#ff6b6b",
-    ],
-  }),
-  accentTheme("ultraviolet", "Ultraviolet", {
-    light: [
-      "#f9f7fd",
-      "#ffffff",
-      "#efeaf9",
-      "#e6dff6",
-      "#f3f0fa",
-      "#e0d9ef",
-      "#221d33",
-      "#6e6789",
-      "#6a3fd4",
-      "#9a5b00",
-      "#c62839",
-    ],
-    dark: [
-      "#13111b",
-      "#181523",
-      "#211c30",
-      "#2a243c",
-      "#0f0d16",
-      "#2c2640",
-      "#e9e5f5",
-      "#a29bb8",
-      "#b8a1ff",
-      "#ffd27a",
-      "#ff6b8a",
-    ],
-  }),
-  accentTheme("amber", "Amber", {
-    light: [
-      "#fcf9f0",
-      "#ffffff",
-      "#f5efdd",
-      "#eee5cc",
-      "#f8f3e5",
-      "#e8dfc5",
-      "#2a2414",
-      "#786d50",
-      "#9a6700",
-      "#b5452a",
-      "#b3261e",
-    ],
-    dark: [
-      "#13110c",
-      "#191610",
-      "#221e15",
-      "#2b261b",
-      "#0f0d09",
-      "#2e291d",
-      "#f0e9d8",
-      "#a99f86",
-      "#ffc247",
-      "#ff8f6b",
-      "#ff6b5b",
-    ],
-  }),
-  accentTheme("crimson", "Crimson", {
-    light: [
-      "#fcf7f7",
-      "#ffffff",
-      "#f6eaeb",
-      "#f0dfe0",
-      "#f9f0f1",
-      "#ecd9db",
-      "#2b1d20",
-      "#7d6467",
-      "#c01c30",
-      "#8a5a1b",
-      "#a8321b",
-    ],
-    dark: [
-      "#151012",
-      "#1b1517",
-      "#251c1f",
-      "#2f2428",
-      "#110d0e",
-      "#33262a",
-      "#f0e4e6",
-      "#ad979b",
-      "#ff5f6d",
-      "#f2c38f",
-      "#ff7b5c",
-    ],
-  }),
-  accentTheme("glacier", "Glacier", {
-    light: [
-      "#f4f9fc",
-      "#ffffff",
-      "#e7f0f6",
-      "#dae8f1",
-      "#edf4f9",
-      "#d4e3ec",
-      "#172532",
-      "#5b6f80",
-      "#0369a1",
-      "#b0306f",
-      "#c62839",
-    ],
-    dark: [
-      "#0e1319",
-      "#121921",
-      "#19222d",
-      "#202b38",
-      "#0b0f14",
-      "#22303d",
-      "#e0eaf2",
-      "#8fa1b2",
-      "#66e3ff",
-      "#ffa3d1",
-      "#ff6b7a",
-    ],
-  }),
-  accentTheme("mint", "Mint", {
-    light: [
-      "#f7f9f8",
-      "#ffffff",
-      "#edf2ef",
-      "#e2e9e5",
-      "#f1f5f3",
-      "#dce4e0",
-      "#1b2420",
-      "#64726b",
-      "#0f7a4c",
-      "#6b4fc8",
-      "#c0392b",
-    ],
-    dark: [
-      "#161818",
-      "#1b1e1e",
-      "#232727",
-      "#2b3030",
-      "#121414",
-      "#2c3131",
-      "#e4ebe8",
-      "#97a39e",
-      "#7ef0b4",
-      "#c9b5ff",
-      "#ff6b6b",
-    ],
-  }),
-  accentTheme("cobalt", "Cobalt", {
-    light: [
-      "#f6f8fd",
-      "#ffffff",
-      "#eaeef9",
-      "#dfe5f5",
-      "#eff2fa",
-      "#d9dfef",
-      "#1a2035",
-      "#646c88",
-      "#2453c9",
-      "#a3530b",
-      "#c62839",
-    ],
-    dark: [
-      "#10121a",
-      "#141722",
-      "#1b1f2d",
-      "#232838",
-      "#0c0e14",
-      "#252a3b",
-      "#e3e7f3",
-      "#959cb5",
-      "#7aa7ff",
-      "#ffb86b",
-      "#ff6b7a",
-    ],
-  }),
 ]
 
 export function normalizeAppThemeId(themeId: string | null): string {
@@ -1404,19 +1029,132 @@ export function availableAppThemeId(themeId: string, channel: AppChannel): strin
     : DEFAULT_APP_THEME_ID
 }
 
+/** A preset accent with a shade tuned for light and for dark mode. */
+export interface AppAccent {
+  id: string
+  label: string
+  light: AccentColors
+  dark: AccentColors
+}
+
+/** "Theme default": no accent, the theme looks as it is. */
+export const DEFAULT_ACCENT_ID = "default"
+
+export const APP_ACCENTS: readonly AppAccent[] = [
+  {
+    id: "neon-pink",
+    label: "Neon Pink",
+    light: { accent: "#c2347f", secondary: "#0e7490" },
+    dark: { accent: "#ff9bd2", secondary: "#8fdcff" },
+  },
+  {
+    id: "ember",
+    label: "Ember",
+    light: { accent: "#c4540f", secondary: "#8a6400" },
+    dark: { accent: "#ff9a4d", secondary: "#e9c46a" },
+  },
+  {
+    id: "lagoon",
+    label: "Lagoon",
+    light: { accent: "#0f7a6e", secondary: "#b4532a" },
+    dark: { accent: "#4fd6c4", secondary: "#f4a98a" },
+  },
+  {
+    id: "acid-lime",
+    label: "Acid Lime",
+    light: { accent: "#4f7d0c", secondary: "#1f6fb2" },
+    dark: { accent: "#bff25a", secondary: "#8cc8ff" },
+  },
+  {
+    id: "ultraviolet",
+    label: "Ultraviolet",
+    light: { accent: "#6a3fd4", secondary: "#9a5b00" },
+    dark: { accent: "#b8a1ff", secondary: "#ffd27a" },
+  },
+  {
+    id: "amber",
+    label: "Amber",
+    light: { accent: "#9a6700", secondary: "#b5452a" },
+    dark: { accent: "#ffc247", secondary: "#ff8f6b" },
+  },
+  {
+    id: "crimson",
+    label: "Crimson",
+    light: { accent: "#c01c30", secondary: "#8a5a1b" },
+    dark: { accent: "#ff5f6d", secondary: "#f2c38f" },
+  },
+  {
+    id: "glacier",
+    label: "Glacier",
+    light: { accent: "#0369a1", secondary: "#b0306f" },
+    dark: { accent: "#66e3ff", secondary: "#ffa3d1" },
+  },
+  {
+    id: "mint",
+    label: "Mint",
+    light: { accent: "#0f7a4c", secondary: "#6b4fc8" },
+    dark: { accent: "#7ef0b4", secondary: "#c9b5ff" },
+  },
+  {
+    id: "cobalt",
+    label: "Cobalt",
+    light: { accent: "#2453c9", secondary: "#a3530b" },
+    dark: { accent: "#7aa7ff", secondary: "#ffb86b" },
+  },
+]
+
+const CUSTOM_ACCENT = /^#[0-9a-f]{6}$/u
+
+/** A preset accent id, a custom `#rrggbb` color, or Theme default for anything else. */
+export function normalizeAccentId(accentId: string | null): string {
+  const value = accentId?.toLowerCase() ?? DEFAULT_ACCENT_ID
+  if (CUSTOM_ACCENT.test(value)) return value
+  return APP_ACCENTS.some(({ id }) => id === value) ? value : DEFAULT_ACCENT_ID
+}
+
+/**
+ * The accent shade for a mode: a preset's tuned shade, or for a custom color the
+ * color itself, darkened (light) or lightened (dark) only as far as text needs,
+ * with the second syntax color at a hue 150 degrees away.
+ */
+function accentShade(accentId: string, mode: ResolvedThemeMode): AccentColors | null {
+  const normalized = normalizeAccentId(accentId)
+  if (normalized === DEFAULT_ACCENT_ID) return null
+  const preset = APP_ACCENTS.find(({ id }) => id === normalized)
+  if (preset) return preset[mode]
+  const reference = mode === "light" ? "#ffffff" : "#1c1c1c"
+  return {
+    accent: ensureContrast(reference, normalized),
+    secondary: ensureContrast(reference, rotateHue(normalized, 150)),
+  }
+}
+
+/** The theme's palette for a mode; unknown ids use Default's. */
+function themePalette(themeId: string, mode: ResolvedThemeMode): Palette {
+  const normalizedId = normalizeAppThemeId(themeId)
+  const theme = APP_THEMES.find(({ id }) => id === normalizedId) ?? APP_THEMES[0]
+  if (!theme) throw new Error("The app theme registry is empty")
+  return theme[mode]
+}
+
+/**
+ * The tokens to set for a theme and accent. Default with Theme default sets none
+ * (globals.css applies). Default with an accent sets only the accent colors.
+ */
 export function resolveAppThemeTokens(
   themeId: string,
   mode: ResolvedThemeMode,
+  accentId: string,
 ): ThemeTokenSet | null {
-  const normalizedId = normalizeAppThemeId(themeId)
-  if (normalizedId === DEFAULT_APP_THEME_ID) return null
-  const theme = APP_THEMES.find(({ id }) => id === normalizedId)
-  if (!theme) return null
-  const base = buildTokenSet(theme[mode])
-  return theme.accent ? { ...base, ...accentTokens(theme[mode], theme.accent[mode].accent) } : base
+  const isDefault = normalizeAppThemeId(themeId) === DEFAULT_APP_THEME_ID
+  const colors = themePalette(themeId, mode)
+  const shade = accentShade(accentId, mode)
+  const base = isDefault ? {} : buildTokenSet(colors)
+  if (!shade) return isDefault ? null : base
+  return { ...base, ...accentTokens(colors, shade.accent) }
 }
 
-/** Code editor colors of an accent theme; null for other themes, which keep the editor theme. */
+/** Code editor colors for a chosen accent; null for Theme default, which keeps the editor theme. */
 export interface AccentEditorColors {
   background: string
   foreground: string
@@ -1436,11 +1174,12 @@ export interface AccentEditorColors {
 export function accentEditorColors(
   themeId: string,
   mode: ResolvedThemeMode,
+  accentId: string,
 ): AccentEditorColors | null {
-  const theme = APP_THEMES.find(({ id }) => id === themeId)
-  if (!theme?.accent) return null
-  const colors = theme[mode]
-  const { accent, secondary } = theme.accent[mode]
+  const shade = accentShade(accentId, mode)
+  if (!shade) return null
+  const colors = themePalette(themeId, mode)
+  const { accent, secondary } = shade
   const background = colors.background
   const readable = (color: string) => readableOn([background], color)
   return {
@@ -1504,13 +1243,16 @@ function buildTokenSet(colors: Palette): ThemeTokenSet {
 }
 
 /**
- * The accent-colored tokens: card borders use the accent as given; text uses it
- * as far as it stays readable on the surfaces it sits on.
+ * The accent-colored tokens: card borders, buttons and the focus ring use the
+ * accent as given; text uses it as far as it stays readable on its surfaces.
  */
-function accentTokens(colors: Palette, accent: string): Record<AccentThemeToken, string> {
+function accentTokens(colors: Palette, accent: string): ThemeTokenSet {
   const text = accentText(colors, accent)
   const selected = blend(colors.sidebar, accent, 0.16)
   return {
+    primary: accent,
+    "primary-foreground": ensureContrast(accent, colors.background),
+    ring: accent,
     "panel-border": accent,
     "panel-title": text,
     heading: text,
@@ -1565,6 +1307,37 @@ function mix(from: Rgb, to: Rgb, amount: number): Rgb {
     green: from.green + (to.green - from.green) * amount,
     blue: from.blue + (to.blue - from.blue) * amount,
   }
+}
+
+/** The same color with its hue turned by `degrees`, keeping saturation and lightness. */
+function rotateHue(color: string, degrees: number): string {
+  const { red, green, blue } = parseHex(color)
+  const [r, g, b] = [red / 255, green / 255, blue / 255]
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const lightness = (max + min) / 2
+  const delta = max - min
+  if (delta === 0) return color
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1))
+  const sector =
+    max === r ? ((g - b) / delta) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4
+  const hue = (((sector * 60 + degrees) % 360) + 360) % 360
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation
+  const x = chroma * (1 - Math.abs(((hue / 60) % 2) - 1))
+  const m = lightness - chroma / 2
+  const [r1, g1, b1] =
+    hue < 60
+      ? [chroma, x, 0]
+      : hue < 120
+        ? [x, chroma, 0]
+        : hue < 180
+          ? [0, chroma, x]
+          : hue < 240
+            ? [0, x, chroma]
+            : hue < 300
+              ? [x, 0, chroma]
+              : [chroma, 0, x]
+  return toHex({ red: (r1 + m) * 255, green: (g1 + m) * 255, blue: (b1 + m) * 255 })
 }
 
 function blend(from: string, to: string, amount: number): string {

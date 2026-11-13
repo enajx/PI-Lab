@@ -15,6 +15,7 @@ import {
   appThemesForChannel,
   availableAppThemeId,
   DEFAULT_APP_THEME_ID,
+  normalizeAccentId,
   normalizeAppThemeId,
   type ResolvedThemeMode,
   resolveAppThemeTokens,
@@ -33,6 +34,9 @@ interface ThemeContextValue {
   themes: readonly AppTheme[]
   /** Label of a saved theme this channel does not offer (Default is used instead). */
   unavailableTheme: string | null
+  /** "default" (the theme's own look), a preset accent id, or a custom `#rrggbb`. */
+  accentId: string
+  setAccentId: (accentId: string) => void
   toggleTheme: () => void
 }
 
@@ -40,6 +44,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 const MODE_STORAGE_KEY = "pi-lab.theme"
 const APP_THEME_STORAGE_KEY = "pi-lab.appTheme"
+const ACCENT_STORAGE_KEY = "pi-lab.appAccent"
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)"
 
 function readInitialMode(): ThemeMode {
@@ -53,17 +58,22 @@ function readInitialThemeId(): string {
   return normalizeAppThemeId(window.localStorage.getItem(APP_THEME_STORAGE_KEY))
 }
 
+function readInitialAccentId(): string {
+  if (typeof window === "undefined") return normalizeAccentId(null)
+  return normalizeAccentId(window.localStorage.getItem(ACCENT_STORAGE_KEY))
+}
+
 function systemPrefersDark(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.(SYSTEM_DARK_QUERY).matches === true
 }
 
-function applyTheme(themeId: string, mode: ResolvedThemeMode) {
+function applyTheme(themeId: string, mode: ResolvedThemeMode, accentId: string) {
   if (typeof document === "undefined") return
   const root = document.documentElement
   root.classList.toggle("dark", mode === "dark")
   root.style.colorScheme = mode
 
-  const tokens = resolveAppThemeTokens(themeId, mode)
+  const tokens = resolveAppThemeTokens(themeId, mode, accentId)
   for (const token of APP_THEME_TOKENS) {
     const property = `--${token}`
     const value = tokens?.[token]
@@ -76,18 +86,19 @@ function applyTheme(themeId: string, mode: ResolvedThemeMode) {
 export function applySavedAppearance(): void {
   const selected = readInitialMode()
   const resolved = selected === "system" ? (systemPrefersDark() ? "dark" : "light") : selected
-  applyTheme(readInitialThemeId(), resolved)
+  applyTheme(readInitialThemeId(), resolved, readInitialAccentId())
 }
 
 /**
- * Owns the two independent app-appearance choices: a light/dark/system mode and
- * a named UI palette. The resolved mode remains reflected as `.dark` for
- * Tailwind and other consumers, while palette colors override the shared CSS
+ * Owns the app-appearance choices: a light/dark/system mode, a named UI palette,
+ * and an accent. The resolved mode remains reflected as `.dark` for Tailwind and
+ * other consumers, while palette and accent colors override the shared CSS
  * tokens. CodeMirror keeps its own editor-theme preference.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<ThemeMode>(readInitialMode)
   const [savedThemeId, setThemeIdState] = useState<string>(readInitialThemeId)
+  const [accentId, setAccentIdState] = useState<string>(readInitialAccentId)
   const [systemDark, setSystemDark] = useState(systemPrefersDark)
   // Unknown until Electron main answers; until then the saved theme is shown as is.
   const [channel, setChannel] = useState<AppChannel | null>(null)
@@ -121,14 +132,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    applyTheme(themeId, resolvedMode)
+    applyTheme(themeId, resolvedMode, accentId)
     window.localStorage.setItem(MODE_STORAGE_KEY, mode)
     // Keep a saved theme this channel does not offer, so Settings can say why Default is shown.
     window.localStorage.setItem(APP_THEME_STORAGE_KEY, savedThemeId)
-  }, [mode, resolvedMode, themeId, savedThemeId])
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, accentId)
+  }, [mode, resolvedMode, themeId, savedThemeId, accentId])
 
   const setThemeId = useCallback(
     (nextThemeId: string) => setThemeIdState(normalizeAppThemeId(nextThemeId)),
+    [],
+  )
+  const setAccentId = useCallback(
+    (nextAccentId: string) => setAccentIdState(normalizeAccentId(nextAccentId)),
     [],
   )
   const toggleTheme = useCallback(
@@ -145,9 +161,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setThemeId,
       themes,
       unavailableTheme,
+      accentId,
+      setAccentId,
       toggleTheme,
     }),
-    [mode, resolvedMode, themeId, setThemeId, themes, unavailableTheme, toggleTheme],
+    [
+      mode,
+      resolvedMode,
+      themeId,
+      setThemeId,
+      themes,
+      unavailableTheme,
+      accentId,
+      setAccentId,
+      toggleTheme,
+    ],
   )
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

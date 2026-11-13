@@ -51,6 +51,8 @@ function ThemeHarness() {
     themes,
     toggleTheme,
     unavailableTheme,
+    accentId,
+    setAccentId,
   } = useTheme()
   return (
     <>
@@ -58,6 +60,7 @@ function ThemeHarness() {
         {mode}:{resolvedMode}:{themeId}
       </output>
       <output data-testid="theme-count">{themes.length}</output>
+      <output data-testid="theme-accent">{accentId}</output>
       <output data-testid="theme-unavailable">{unavailableTheme ?? ""}</output>
       <button type="button" onClick={() => setMode("system")}>
         System
@@ -65,8 +68,11 @@ function ThemeHarness() {
       <button type="button" onClick={() => setThemeId("tokyo-night")}>
         Tokyo Night
       </button>
-      <button type="button" onClick={() => setThemeId("ember")}>
+      <button type="button" onClick={() => setAccentId("ember")}>
         Ember
+      </button>
+      <button type="button" onClick={() => setAccentId("default")}>
+        Theme default
       </button>
       <button type="button" onClick={() => setThemeId(DEFAULT_APP_THEME_ID)}>
         Default
@@ -165,13 +171,14 @@ describe("ThemeProvider", () => {
     expect(screen.getByTestId("theme-state").textContent).toBe("light:light:tokyo-night")
   })
 
-  test("an accent theme sets the accent tokens and a plain theme clears them", async () => {
-    installMatchMedia(true)
+  test("a chosen accent overrides the theme and Theme default clears it, and both are saved", async () => {
+    installMatchMedia(false)
     render(
       <ThemeProvider>
         <ThemeHarness />
       </ThemeProvider>,
     )
+    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
     fireEvent.click(screen.getByRole("button", { name: "Ember" }))
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#c4540f"),
@@ -179,15 +186,39 @@ describe("ThemeProvider", () => {
     for (const token of ACCENT_THEME_TOKENS) {
       expect(document.documentElement.style.getPropertyValue(`--${token}`)).not.toBe("")
     }
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe("#c4540f")
+    expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("ember")
+
+    fireEvent.click(screen.getByRole("button", { name: "Theme default" }))
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe(""),
     )
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe("#2e7de9")
+    expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("default")
+  })
+
+  test("restores a saved accent and resets an unknown one to Theme default", () => {
+    installMatchMedia(false)
+    window.localStorage.setItem("pi-lab.appAccent", "#ff00aa")
+    const { unmount } = render(
+      <ThemeProvider>
+        <ThemeHarness />
+      </ThemeProvider>,
+    )
+    expect(screen.getByTestId("theme-accent").textContent).toBe("#ff00aa")
+    unmount()
+    window.localStorage.setItem("pi-lab.appAccent", "removed")
+    render(
+      <ThemeProvider>
+        <ThemeHarness />
+      </ThemeProvider>,
+    )
+    expect(screen.getByTestId("theme-accent").textContent).toBe("default")
   })
 
   test("Beta lists only kept themes and shows Default for a saved Alpha-only theme", async () => {
     installMatchMedia(false)
-    window.localStorage.setItem("pi-lab.appTheme", "ember")
+    window.localStorage.setItem("pi-lab.appTheme", "cyberpunk")
     const previous = window.piLab
     window.piLab = {
       ...previous,
@@ -201,12 +232,12 @@ describe("ThemeProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("theme-count").textContent).toBe("9"))
     expect(screen.getByTestId("theme-state").textContent).toBe("light:light:default")
-    expect(screen.getByTestId("theme-unavailable").textContent).toBe("Ember")
+    expect(screen.getByTestId("theme-unavailable").textContent).toBe("Cyberpunk")
     for (const token of APP_THEME_TOKENS) {
       expect(document.documentElement.style.getPropertyValue(`--${token}`)).toBe("")
     }
     // The saved choice is kept, so the notice stays until the user picks a theme.
-    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("ember")
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("cyberpunk")
 
     fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
     expect(screen.getByTestId("theme-unavailable").textContent).toBe("")

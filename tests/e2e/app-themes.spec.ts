@@ -15,9 +15,9 @@ import {
 } from "./fixtures/playwright"
 
 /**
- * Accent app themes in the real Electron build (a source run, so the Alpha theme
- * list): picking one in Settings colors the panel card borders and the panel
- * titles with the accent, while a plain theme keeps the quiet border.
+ * Theme accents in the real Electron build: picking an accent in Settings colors
+ * the panel card borders and the panel titles, while Theme default keeps the
+ * theme's quiet border and muted titles.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -63,15 +63,14 @@ test.afterEach(async () => {
   if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
-/** Pick a theme in Settings → Appearance and go back to the fixture project. */
-async function pickTheme(window: Page, themeId: string): Promise<void> {
+/** Pick a theme and an accent in Settings → Appearance and go back to the fixture project. */
+async function pickAppearance(window: Page, themeId: string, accentId: string): Promise<void> {
   await window.getByTestId("nav-settings").click()
   await window.getByTestId("settings-nav-appearance").click()
-  await window.getByTestId(`settings-app-theme-${themeId}`).click()
-  await expect(window.getByTestId(`settings-app-theme-${themeId}`)).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  for (const testId of [`settings-app-theme-${themeId}`, `settings-app-accent-${accentId}`]) {
+    await window.getByTestId(testId).click()
+    await expect(window.getByTestId(testId)).toHaveAttribute("aria-pressed", "true")
+  }
   await window.getByTestId("settings-back").click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
 }
@@ -92,13 +91,13 @@ async function style(locator: Locator, property: "borderTopColor" | "color"): Pr
   return locator.evaluate((node, name) => getComputedStyle(node)[name], property)
 }
 
-test("an accent theme colors the panel card borders and panel titles", async () => {
+test("an accent colors the panel card borders and panel titles; Theme default does not", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
 
-  await pickTheme(window, "neon-pink")
+  await pickAppearance(window, "nord", "ember")
   const panel = window.getByTestId("central-panel")
   const rightPanel = window.getByTestId("right-sidebar")
   await window.getByTestId("panel-tab-files").click()
@@ -113,8 +112,8 @@ test("an accent theme colors the panel card borders and panel titles", async () 
   expect(await style(filesTitle, "color")).toBe(await rootColor(window, "--panel-title"))
   expect(await style(filesTitle, "color")).not.toBe(await rootColor(window, "--muted-foreground"))
 
-  // A plain theme leaves the accent tokens unset: quiet card borders and muted titles.
-  await pickTheme(window, "nord")
+  // Theme default leaves the accent tokens unset: Nord's quiet card border and muted titles.
+  await pickAppearance(window, "nord", "default")
   await window.getByTestId("panel-tab-files").click()
   expect(await style(panel, "borderTopColor")).toBe(await rootColor(window, "--border"))
   expect(await style(filesTitle, "color")).toBe(await rootColor(window, "--muted-foreground"))

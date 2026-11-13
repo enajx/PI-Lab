@@ -491,37 +491,50 @@ export function allEditorThemes(customThemes: ImportedEditorTheme[]): readonly E
   return [...EDITOR_THEMES, ...customThemes.map(importedEditorTheme)]
 }
 
+/** The app theme and accent the editor follows while its own theme is "default". */
+export interface AppAppearance {
+  themeId: string
+  accentId: string
+}
+
 /**
  * Resolve a stored theme id to its CodeMirror extension. A known id (built-in or
  * imported) resolves to its own palette, so an explicit choice is always kept. An
- * undefined/empty/unknown id or the stored `"default"` value follows the app: an
- * accent app theme (`appThemeId`) gives its own syntax colors, any other app theme
- * gives {@link defaultEditorThemeId} for the app's current light/dark `mode`.
+ * undefined/empty/unknown id or the stored `"default"` value follows the app: a
+ * chosen accent gives its own syntax colors on the app theme's background,
+ * Theme default gives {@link defaultEditorThemeId} for the app's light/dark `mode`.
  */
 export function editorThemeExtension(
   id: string | undefined,
   customThemes: ImportedEditorTheme[],
   mode: "light" | "dark",
-  appThemeId: string,
+  appearance: AppAppearance,
 ): Extension {
   const chosen = allEditorThemes(customThemes).find((theme) => theme.id === id)
   if (chosen) return chosen.extension
-  const accent = accentEditorExtension(appThemeId, mode)
+  const accent = accentEditorExtension(appearance, mode)
   if (accent) return accent
   const fallback = EDITOR_THEMES.find((theme) => theme.id === defaultEditorThemeId(mode))
   if (!fallback) throw new Error(`Default editor theme ${defaultEditorThemeId(mode)} is missing`)
   return fallback.extension
 }
 
-/** Built once per accent app theme and mode, so a live swap keeps the same extension. */
+/**
+ * Built once per theme, accent and mode, so a live swap keeps the same extension.
+ * A custom color picker adds an entry per color, so the cache is emptied when large.
+ */
 const accentExtensions = new Map<string, Extension>()
 
-function accentEditorExtension(appThemeId: string, mode: "light" | "dark"): Extension | null {
-  const key = `${appThemeId}:${mode}`
+function accentEditorExtension(
+  { themeId, accentId }: AppAppearance,
+  mode: "light" | "dark",
+): Extension | null {
+  const key = `${themeId}:${accentId}:${mode}`
   const cached = accentExtensions.get(key)
   if (cached) return cached
-  const colors = accentEditorColors(appThemeId, mode)
+  const colors = accentEditorColors(themeId, mode, accentId)
   if (!colors) return null
+  if (accentExtensions.size >= 64) accentExtensions.clear()
   const extension = compactTheme(colors, mode)
   accentExtensions.set(key, extension)
   return extension

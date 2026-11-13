@@ -23,7 +23,7 @@ vi.mock("../Editor/components/CodeMirrorBuffer", () => ({
 }))
 vi.mock("../providers/ThemeProvider", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../providers/ThemeProvider")>()),
-  useTheme: () => ({ resolvedMode: "light", themeId: "default" }),
+  useTheme: () => ({ resolvedMode: "light", themeId: "default", accentId: "default" }),
 }))
 
 function deferred<T>() {

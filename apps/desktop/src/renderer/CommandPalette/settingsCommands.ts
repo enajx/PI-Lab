@@ -14,7 +14,7 @@ import {
   useShowClusterSection,
   useShowSkillsPanel,
 } from "../preferences/preferences"
-import { useTheme } from "../providers/ThemeProvider"
+import { APP_ACCENTS, DEFAULT_ACCENT_ID, useTheme } from "../providers/ThemeProvider"
 import { useTRPC } from "../trpc/react"
 import type { PaletteCommand } from "./usePaletteCommands"
 
@@ -153,6 +153,16 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       theme.themes.map((value) => [value.id, value.label] as const),
       theme.themeId,
       theme.setThemeId,
+    ),
+    ...choices(
+      "app-accent",
+      "app accent",
+      [
+        [DEFAULT_ACCENT_ID, "Theme default"] as const,
+        ...APP_ACCENTS.map((value) => [value.id, value.label] as const),
+      ],
+      theme.accentId,
+      theme.setAccentId,
     ),
     ...choices(
       "language",

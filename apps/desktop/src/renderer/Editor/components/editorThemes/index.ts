@@ -1,4 +1,5 @@
 export {
+  type AppAppearance,
   allEditorThemes,
   defaultEditorThemeId,
   EDITOR_THEMES,
