@@ -612,9 +612,7 @@ test("Escape deselects the previewed file, and the folder tree can be hidden fro
   await expect(window.getByTestId("analysis-preview-path")).toBeVisible()
   await window.getByTestId("analysis-search").blur()
   await window.keyboard.press("Escape")
-  await expect(window.getByTestId("analysis-no-selection")).toHaveText(
-    "Select a file to view it.",
-  )
+  await expect(window.getByTestId("analysis-no-selection")).toHaveText("Select a file to view it.")
 
   // A click on empty space in the list deselects too; a click on a chip does not.
   await window
