@@ -245,7 +245,7 @@ function HostsItem() {
   }
   const list = hosts.data ?? []
   return (
-    <div ref={hostRef} className="relative shrink-0">
+    <div ref={hostRef} className="relative flex shrink-0 items-center">
       <button
         type="button"
         data-testid="status-bar-hosts"
