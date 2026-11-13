@@ -167,9 +167,7 @@ async function paperMainSource(
   const found = await paperOf(db, target, source)
   if (!found) return null
   const { paper, paperDir } = found
-  const mainDoc = saved
-    ? (paper.mainDoc ?? null)
-    : await mainDocOf(paper, null, getSettingsOrDefaults(db).editor.latexOutputDir)
+  const mainDoc = saved ? (paper.mainDoc ?? null) : await mainDocOf(paper, null)
   // A saved main document that was deleted or renamed is passed over, as the footer does.
   if (mainDoc === null || !existsSync(join(paperDir, mainDoc))) return null
   return insideFile(target.dir, relative(target.dir, join(paperDir, mainDoc)))

@@ -25,9 +25,9 @@ async function write(files: Record<string, string>): Promise<void> {
   }
 }
 
-/** The guess for the current folder, with `build` as the output folder. */
+/** The guess for the current folder. */
 async function guess(): Promise<string | null> {
-  return guessMainDoc(dir, (await listPaperFiles(dir)).files, "build")
+  return guessMainDoc(dir, (await listPaperFiles(dir)).files)
 }
 
 test("main.tex at the top wins over a .tex with a matching PDF", async () => {
@@ -35,12 +35,25 @@ test("main.tex at the top wins over a .tex with a matching PDF", async () => {
   expect(await guess()).toBe("main.tex")
 })
 
-test("else the .tex with a matching PDF next to it or in the output folder", async () => {
+test("among several .tex files with \\documentclass, the one with a matching PDF next to it", async () => {
   await write({ "paper.tex": DOC, "notes.tex": DOC, "paper.pdf": "%PDF-" })
   expect(await guess()).toBe("paper.tex")
-  await rm(join(dir, "paper.pdf"))
-  await write({ "build/notes.pdf": "%PDF-" })
-  expect(await guess()).toBe("notes.tex")
+})
+
+test("a fragment or standalone figure with a PDF does not beat the paper with none yet", async () => {
+  await write({
+    "paper.tex": DOC,
+    "figures/plot.tex": PART,
+    "figures/plot.pdf": "%PDF-",
+    "figures/diagram.tex": "\\documentclass[tikz]{standalone}\n\\begin{document}x\\end{document}\n",
+    "figures/diagram.pdf": "%PDF-",
+  })
+  expect(await guess()).toBe("paper.tex")
+})
+
+test("a PDF in the build output folder does not change the guess", async () => {
+  await write({ "paper.tex": DOC, "response.tex": DOC, "build/response.pdf": "%PDF-" })
+  expect(await guess()).toBeNull()
 })
 
 test("else the single .tex with an uncommented \\documentclass", async () => {
@@ -66,7 +79,7 @@ test("reads only a bounded number of the shallowest .tex files", async () => {
 test("a saved main document wins while it is listed; else the guess", async () => {
   await write({ "main.tex": DOC, "other.tex": DOC })
   const files = (await listPaperFiles(dir)).files
-  expect(await paperMainDoc(dir, "other.tex", files, "build")).toBe("other.tex")
-  expect(await paperMainDoc(dir, "gone.tex", files, "build")).toBe("main.tex")
-  expect(await paperMainDoc(dir, undefined, files, "build")).toBe("main.tex")
+  expect(await paperMainDoc(dir, "other.tex", files)).toBe("other.tex")
+  expect(await paperMainDoc(dir, "gone.tex", files)).toBe("main.tex")
+  expect(await paperMainDoc(dir, undefined, files)).toBe("main.tex")
 })

@@ -306,9 +306,7 @@ async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperSt
       missing,
     },
     workspaceId: paperWorkspace(db, projectId)?.id ?? null,
-    rootRelPath: missing
-      ? null
-      : await mainDocOf(paper, listed.files, getSettingsOrDefaults(db).editor.latexOutputDir),
+    rootRelPath: missing ? null : await mainDocOf(paper, listed.files),
     mainDoc: paper.mainDoc ?? null,
     texFiles: listed.files.filter((file) => file.kind === "tex").map((file) => file.relPath),
   }
@@ -1078,7 +1076,7 @@ export const paperRouter = router({
     .input(projectIdInput)
     .query(async ({ ctx, input }): Promise<OutlineEntry[]> => {
       const paper = requirePaper(requireProject(ctx.db, input.projectId))
-      const root = await mainDocOf(paper, null, getSettingsOrDefaults(ctx.db).editor.latexOutputDir)
+      const root = await mainDocOf(paper, null)
       if (!root) return []
       return buildOutline(root, (relPath) => readPaperText(paper.dir, relPath))
     }),

@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { getAgentSettingsOrDefaults, getSettingsOrDefaults, projects } from "@pi-lab/local-db"
+import { getAgentSettingsOrDefaults, projects } from "@pi-lab/local-db"
 import { DEFAULT_AGENT_ID } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
@@ -42,7 +42,7 @@ export async function startUpdatePaper(
     ctx.skillsHomeDir,
     ctx.bundledSkillsDir,
   )
-  const root = await mainDocOf(paper, null, getSettingsOrDefaults(ctx.db).editor.latexOutputDir)
+  const root = await mainDocOf(paper, null)
   const agentSettings = getAgentSettingsOrDefaults(ctx.db)
   const config = await readProjectAgentConfig(project, agentSettings.projectConfigStorage)
   const agentId = config.agentId ?? agentSettings.defaultAgentId ?? DEFAULT_AGENT_ID

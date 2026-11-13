@@ -95,50 +95,42 @@ async function readHead(path: string): Promise<string> {
   return buffer.subarray(0, bytesRead).toString("utf8")
 }
 
+/** True when `source` has an uncommented `\documentclass` that is not `standalone` (a figure). */
+function isRootSource(source: string): boolean {
+  return source
+    .split(/\r?\n/)
+    .map(stripComment)
+    .some(
+      (line) =>
+        /\\documentclass(?![a-zA-Z])/.test(line) &&
+        !/\\documentclass\s*(?:\[[^\]]*\])?\s*\{\s*standalone\s*\}/.test(line),
+    )
+}
+
 /**
  * Guess the main .tex file of a paper folder, relative to it: `main.tex` at
- * the top when present; else the shallowest `X.tex` with a matching `X.pdf`
- * next to it or in the output folder, when only one is at that depth; else the
- * only .tex file with an uncommented `\documentclass`; else null. The work is
- * bounded: only the {@link MAX_TEX_READS} shallowest .tex files are read (their
- * start) or checked for a PDF in the output folder.
+ * the top when present; else the only .tex file with an uncommented
+ * `\documentclass` (not `standalone`); when several have one, the only one of
+ * them with a matching `X.pdf` next to it (build output does not count); else
+ * null. The work is bounded: only the start of the {@link MAX_TEX_READS}
+ * shallowest .tex files is read.
  *
  * @param files the paper's listed files ({@link listPaperFiles})
- * @param outputDir the paper's effective build output folder, relative to a .tex file's folder
  */
-export async function guessMainDoc(
-  dir: string,
-  files: PaperFile[],
-  outputDir: string,
-): Promise<string | null> {
+export async function guessMainDoc(dir: string, files: PaperFile[]): Promise<string | null> {
   const texFiles = files
     .filter((file) => file.kind === "tex")
     .map((file) => file.relPath)
     .sort((a, b) => depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0))
   if (texFiles.includes("main.tex")) return "main.tex"
-  const listed = new Set(files.map((file) => file.relPath))
-  // A listed PDF is checked for every .tex; a built one only for the shallowest ones.
-  const withPdf = texFiles.filter((relPath, index) => {
-    const pdf = relPath.replace(/\.tex$/i, ".pdf")
-    if (listed.has(pdf)) return true
-    const slash = pdf.lastIndexOf("/")
-    const built = join(dir, pdf.slice(0, slash + 1), outputDir, pdf.slice(slash + 1))
-    return index < MAX_TEX_READS && existsSync(built)
-  })
-  const first = withPdf[0]
-  if (first !== undefined) {
-    const shallowest = withPdf.filter((relPath) => depth(relPath) === depth(first))
-    if (shallowest.length === 1) return first
-  }
   const roots: string[] = []
   for (const relPath of texFiles.slice(0, MAX_TEX_READS)) {
-    const source = await readHead(join(dir, relPath))
-    const hasClass = source
-      .split(/\r?\n/)
-      .some((line) => /\\documentclass(?![a-zA-Z])/.test(stripComment(line)))
-    if (hasClass) roots.push(relPath)
+    if (isRootSource(await readHead(join(dir, relPath)))) roots.push(relPath)
   }
-  return roots.length === 1 ? (roots[0] ?? null) : null
+  if (roots.length === 1) return roots[0] ?? null
+  const listed = new Set(files.map((file) => file.relPath))
+  const withPdf = roots.filter((relPath) => listed.has(relPath.replace(/\.tex$/i, ".pdf")))
+  return withPdf.length === 1 ? (withPdf[0] ?? null) : null
 }
 
 /**
@@ -149,7 +141,6 @@ export async function paperMainDoc(
   dir: string,
   mainDoc: string | undefined,
   files: PaperFile[],
-  outputDir: string,
 ): Promise<string | null> {
   if (
     mainDoc !== undefined &&
@@ -157,7 +148,7 @@ export async function paperMainDoc(
   ) {
     return mainDoc
   }
-  return guessMainDoc(dir, files, outputDir)
+  return guessMainDoc(dir, files)
 }
 
 /** Read a text file under `dir` for the outline parser; null when it is not a file. */

@@ -35,10 +35,9 @@ export function effectiveOutputDir(paper: ProjectPaper, defaultOutputDir: string
 export async function mainDocOf(
   paper: ProjectPaper,
   files: PaperFile[] | null,
-  defaultOutputDir: string,
 ): Promise<string | null> {
   const listed = files ?? (await listPaperFiles(paper.dir)).files
-  return paperMainDoc(paper.dir, paper.mainDoc, listed, effectiveOutputDir(paper, defaultOutputDir))
+  return paperMainDoc(paper.dir, paper.mainDoc, listed)
 }
 
 /**
@@ -70,7 +69,7 @@ export async function excludeEffectiveOutputs(
   defaultOutputDir: string,
 ): Promise<void> {
   if (paper.syncEnabled === false) return
-  const root = await mainDocOf(paper, null, defaultOutputDir)
+  const root = await mainDocOf(paper, null)
   await excludePaperOutputs(paper.dir, effectiveOutputDir(paper, defaultOutputDir), root)
 }
 
