@@ -670,7 +670,7 @@ export function ScienceAnalysis({
                       />
                     ) : null}
                     <div className="relative">
-                      <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
+                      <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-3.5 text-muted-foreground" />
                       <Input
                         data-testid="analysis-search"
                         aria-label={t("Search data files")}
@@ -681,12 +681,12 @@ export function ScienceAnalysis({
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
                         placeholder={t("Search files…")}
-                        className="h-8 pl-8"
+                        className="h-7 pl-7 text-xs md:text-xs"
                         disabled={allFiles.length === 0}
                       />
                     </div>
                     {categoriesPresent.length > 0 ? (
-                      <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                      <div className="mt-1 flex flex-wrap gap-1" data-testid="analysis-category-filters">
                         <FilterChip
                           label={t("All")}
                           active={categoryFilter === "all"}
