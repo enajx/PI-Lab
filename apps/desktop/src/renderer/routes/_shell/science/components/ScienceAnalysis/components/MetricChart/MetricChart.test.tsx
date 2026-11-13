@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, test } from "vitest"
 import { MetricChart } from "./MetricChart"
 
@@ -35,5 +35,36 @@ describe("MetricChart legend", () => {
     cleanup()
     render(<MetricChart preview={previewWith(11)} />)
     expect(screen.queryByTestId("analysis-chart-legend")).toBeNull()
+  })
+})
+
+describe("MetricChart tooltip", () => {
+  afterEach(() => cleanup())
+
+  test("names the x axis and shows each series value with about 4 significant digits", () => {
+    const { container } = render(
+      <MetricChart
+        preview={
+          {
+            type: "chart",
+            xLabel: "step",
+            x: [0, 1, 2],
+            series: [
+              { label: "loss.train", values: [0.5, 0.045454545454545456, 0.25] },
+              { label: "lr", values: [0.000001234, 0.000001234, 0.000001234] },
+            ],
+            truncated: false,
+          } as Preview
+        }
+      />,
+    )
+    const plot = container.querySelector(".recharts-wrapper")
+    if (!plot) throw new Error("Expected the chart to render")
+    // The plot spans x 60..624 of the 640 px fallback width; the middle is step 1.
+    fireEvent.mouseMove(plot, { clientX: 342, clientY: 100, pageX: 342, pageY: 100 })
+    const tooltip = container.querySelector(".recharts-tooltip-wrapper")
+    expect(tooltip?.querySelector(".recharts-tooltip-label")?.textContent).toBe("step 1")
+    const items = [...(tooltip?.querySelectorAll(".recharts-tooltip-item") ?? [])]
+    expect(items.map((item) => item.textContent)).toEqual(["loss.train : 0.04545", "lr : 1.234e-6"])
   })
 })

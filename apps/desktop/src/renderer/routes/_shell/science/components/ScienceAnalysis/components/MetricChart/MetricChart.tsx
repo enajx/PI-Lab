@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts"
 import type { ChartPreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { formatChartNumber } from "./formatChartNumber"
 
 /**
  * Line-chart renderer for a {@link ChartPreview} — a numeric metric log (a
@@ -101,6 +102,7 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
             type="number"
             domain={["dataMin", "dataMax"]}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            tickFormatter={formatChartNumber}
             label={{
               value: preview.xLabel,
               position: "insideBottom",
@@ -108,8 +110,13 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
               style: { fontSize: 11, fill: "var(--muted-foreground)" },
             }}
           />
-          <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+          <YAxis
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            tickFormatter={formatChartNumber}
+          />
           <Tooltip
+            labelFormatter={(x: number) => `${preview.xLabel} ${formatChartNumber(x)}`}
+            formatter={(value: number) => formatChartNumber(value)}
             contentStyle={{
               background: "var(--popover)",
               border: "1px solid var(--border)",
