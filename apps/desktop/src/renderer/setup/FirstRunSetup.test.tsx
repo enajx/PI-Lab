@@ -291,6 +291,14 @@ describe("FirstRunSetup", () => {
     await waitFor(() => expect(loginPatches).toContainEqual({ enabled: true }))
   })
 
+  test("has no dictation section and shows Start at login in the last card", async () => {
+    renderSetup({ "system.startAtLogin": () => ({ enabled: false }) })
+    const toggle = await screen.findByTestId("setup-start-at-login")
+    expect(screen.queryByTestId("first-run-dictation")).toBeNull()
+    const cards = screen.getByTestId("first-run-setup-scroll").querySelectorAll("section")
+    expect(cards[cards.length - 1]?.contains(toggle)).toBe(true)
+  })
+
   test("finishes with the selected sound only after persistence succeeds", async () => {
     const completed: unknown[] = []
     const setup = renderSetup({

@@ -3,8 +3,6 @@ import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, CircleAlert, CircleHelp, Loader2, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { LOCAL_ONLY_STATEMENT } from "../dictation/DictationPill"
-import { DownloadProgress } from "../dictation/DownloadProgress"
 import {
   type InterfaceLanguage,
   LANGUAGES,
@@ -273,38 +271,6 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                   {soundPreview}
                 </span>
               </div>
-              <div className="flex flex-col gap-1 text-xs">
-                <span>{t("Start at login")}</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-label={t("Start at login")}
-                    aria-checked={startAtLogin.data?.enabled ?? false}
-                    data-testid="setup-start-at-login"
-                    disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
-                    onClick={() =>
-                      setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
-                    }
-                    className={cn(
-                      "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
-                      startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
-                        startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
-                      )}
-                    />
-                  </button>
-                  <span className="text-[11px] text-muted-foreground">
-                    {startAtLogin.data?.available === false
-                      ? t("Start at login is available in packaged desktop builds.")
-                      : t("Launch PI Lab in the background when you sign in.")}
-                  </span>
-                </div>
-              </div>
               {appChannel.data && appChannel.data !== "alpha" ? (
                 <div className="col-span-2 flex flex-col gap-1 text-xs lg:col-span-4">
                   <label className="flex items-center gap-2">
@@ -419,7 +385,40 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             </div>
           </section>
 
-          <DictationSetupSection />
+          <section className="rounded-lg border border-border bg-card p-3">
+            <div className="flex flex-col gap-1 text-xs">
+              <h2 className="font-medium text-sm">{t("Start at login")}</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label={t("Start at login")}
+                  aria-checked={startAtLogin.data?.enabled ?? false}
+                  data-testid="setup-start-at-login"
+                  disabled={startAtLogin.data?.available === false || setStartAtLogin.isPending}
+                  onClick={() =>
+                    setStartAtLogin.mutate({ enabled: !(startAtLogin.data?.enabled ?? false) })
+                  }
+                  className={cn(
+                    "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
+                    startAtLogin.data?.enabled ? "bg-primary" : "bg-muted",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
+                      startAtLogin.data?.enabled ? "translate-x-4" : "translate-x-0.5",
+                    )}
+                  />
+                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  {startAtLogin.data?.available === false
+                    ? t("Start at login is available in packaged desktop builds.")
+                    : t("Launch PI Lab in the background when you sign in.")}
+                </span>
+              </div>
+            </div>
+          </section>
 
           {error ? (
             <p
@@ -643,87 +642,4 @@ function StateIcon({ state }: { state: HarnessStatus["state"] }) {
   if (state === "error")
     return <CircleAlert className="size-4 text-destructive" aria-label={t("Check failed")} />
   return <CircleHelp className="size-4 text-muted-foreground" aria-hidden />
-}
-
-/** Optional one-click install of the recommended local speech model for dictation. */
-function DictationSetupSection() {
-  const t = useTranslate()
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const status = useQuery(
-    trpc.dictation.status.queryOptions(undefined, {
-      refetchInterval: (query) => {
-        const state = query.state.data?.download.state
-        return state === "downloading" || state === "verifying" ? 250 : false
-      },
-    }),
-  )
-  const install = useMutation(
-    trpc.dictation.downloadModel.mutationOptions({
-      onSuccess: () =>
-        void queryClient.invalidateQueries({ queryKey: trpc.dictation.status.queryKey() }),
-    }),
-  )
-  const data = status.data
-  const model = data?.models.find((entry) => entry.recommended)
-  const download = data?.download
-  const ownDownload = download && model && download.modelKey === model.key ? download : null
-  const downloading = ownDownload?.state === "downloading" || ownDownload?.state === "verifying"
-  const percent =
-    downloading && ownDownload && ownDownload.totalBytes > 0
-      ? Math.round((ownDownload.receivedBytes / ownDownload.totalBytes) * 100)
-      : 0
-  const error =
-    status.error?.message ??
-    install.error?.message ??
-    (ownDownload?.state === "failed" ? `${t("Download failed:")} ${ownDownload.error}` : null)
-
-  return (
-    <section
-      data-testid="first-run-dictation"
-      className="rounded-xl border border-border bg-card p-5"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="font-medium text-sm">{t("Dictation")}</h2>
-          <p className="mt-1 text-muted-foreground text-xs">{t(LOCAL_ONLY_STATEMENT)}</p>
-          <p className="mt-1 text-muted-foreground text-xs">
-            {t("Optional. You can also install a model later in Settings > Dictation.")}
-          </p>
-        </div>
-        {model?.installed ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs">
-            <CheckCircle2 className="size-3.5 text-emerald-600" aria-hidden />
-            {`${model.name} ${t("installed")}`}
-          </span>
-        ) : model ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            disabled={downloading || install.isPending || data?.download.state === "downloading"}
-            onClick={() => install.mutate({ key: model.key })}
-          >
-            {`${t("Install")} ${model.name} (${model.sizeLabel})`}
-          </Button>
-        ) : null}
-      </div>
-      {downloading && ownDownload ? (
-        <div className="mt-3 flex items-center gap-3 text-muted-foreground text-xs">
-          <DownloadProgress label={t("Speech model download")} percent={percent} />
-          <span className="tabular-nums">
-            {ownDownload.state === "verifying"
-              ? t("Checking the file…")
-              : `${Math.round(ownDownload.receivedBytes / 1_000_000)} / ${Math.round(ownDownload.totalBytes / 1_000_000)} MB`}
-          </span>
-        </div>
-      ) : null}
-      {error ? (
-        <p role="alert" className="mt-2 text-destructive text-xs">
-          {error}
-        </p>
-      ) : null}
-    </section>
-  )
 }
