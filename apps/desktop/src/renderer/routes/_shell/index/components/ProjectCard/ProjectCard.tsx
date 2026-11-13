@@ -203,26 +203,35 @@ export function ProjectCard({ project }: ProjectCardProps) {
   // card has no thumbnail, the project id seeds a default with OKLCH colors from
   // that seed. The default is persisted below so it (and its palette) stays fixed
   // across restarts.
-  const needsDefaultGradient = !project.digitalRain && !thumbnail.hasThumbnail && !project.gradient
+  //
+  // One-time recolor: a stored gradient whose seed is the project id's hash is the
+  // auto default (a user-generated one has a random seed). If its palette is not the
+  // seed's OKLCH palette, it still holds the old theme colors, so it gets the new
+  // colors once; after that the stored palette equals the seed's and nothing fires.
+  const autoSeed = hashString(project.id)
+  const canAutoGradient = !project.digitalRain && !thumbnail.hasThumbnail
+  const autoPalette = useMemo(() => seedPalette(autoSeed), [autoSeed])
+  const storedGradient = project.gradient
+  const needsDefaultGradient =
+    canAutoGradient &&
+    (!storedGradient ||
+      (storedGradient.seed === autoSeed && storedGradient.palette.join() !== autoPalette.join()))
   const defaultGradient = useMemo(
-    () =>
-      needsDefaultGradient
-        ? { seed: hashString(project.id), palette: seedPalette(hashString(project.id)) }
-        : null,
-    [needsDefaultGradient, project.id],
+    () => (needsDefaultGradient ? { seed: autoSeed, palette: autoPalette } : null),
+    [needsDefaultGradient, autoSeed, autoPalette],
   )
-  const gradientSource = project.gradient ?? defaultGradient
+  const gradientSource = defaultGradient ?? storedGradient
   const artwork = gradientSource
     ? projectGradient(gradientSource.seed, gradientSource.palette)
     : null
 
-  // Persist the freshly-sampled default exactly once (the mutation refreshes the
-  // list, after which `project.gradient` is set and this no longer fires).
+  // Persist the default (or the recolor) exactly once: the mutation refreshes the
+  // list, after which the stored palette matches and this no longer fires.
   const persistDefault = setGradient.mutate
   useEffect(() => {
-    if (!needsDefaultGradient || !defaultGradient) return
+    if (!defaultGradient) return
     persistDefault({ id: project.id, gradient: defaultGradient })
-  }, [needsDefaultGradient, defaultGradient, project.id, persistDefault])
+  }, [defaultGradient, project.id, persistDefault])
 
   const generateGradient = () => {
     artworkGenerationRef.current += 1

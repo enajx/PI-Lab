@@ -40,6 +40,8 @@ export const GRADIENT_PATTERN_DEFAULTS = {
   numOctaves: 3,
   /** Whether the turbulence grain layer is applied at all. */
   noise: true,
+  /** Share of seeds that get the black base instead of white (the reference uses about half). */
+  darkBaseShare: 0.2,
 } as const
 
 export interface Stop {
@@ -180,7 +182,8 @@ export function generateConfig({
   const r = makeRng(baseRng)
   const bgOpacity = r.float(0.1, 0.5)
   const bgColor = r.pick(palette)
-  const lightDarkMode = r.int(0, 10) % 2 ? "#FFFFFF" : "#000000"
+  // One draw, as in the reference, so the later shape draws are unchanged.
+  const lightDarkMode = baseRng() < GRADIENT_PATTERN_DEFAULTS.darkBaseShare ? "#000000" : "#FFFFFF"
   const n = r.pick([1, 2, 3, 4, 5, 6])
 
   const shapes: Shape[] = []

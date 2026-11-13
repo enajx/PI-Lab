@@ -33,6 +33,14 @@ describe("gradientPatterns", () => {
     expect(["#FFFFFF", "#000000"]).toContain(cfg.lightDarkMode)
   })
 
+  test("about 1 in 5 seeds get the dark base", () => {
+    const seeds = Array.from({ length: 4000 }, (_, seed) => seed)
+    const dark = seeds.filter((seed) => generateConfig({ seed }).lightDarkMode === "#000000")
+    const share = dark.length / seeds.length
+    expect(share).toBeGreaterThan(0.17)
+    expect(share).toBeLessThan(0.23)
+  })
+
   test("buildSVG renders the full reference look: opaque base, blur, and turbulence", () => {
     const svg = buildSVG(generateConfig({ seed: 1 }))
     expect(svg.startsWith("<svg")).toBe(true)

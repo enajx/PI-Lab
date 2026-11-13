@@ -235,10 +235,10 @@ export interface ProjectAgentConfig {
  * A project's persisted dashboard-card gradient. The card's noisy-gradient artwork
  * is re-derived from these on every launch, so it stays identical across restarts.
  * `seed` drives the `mulberry32` PRNG in `@pi-lab/ui`'s gradient-patterns generator;
- * `palette` is the exact list of colors it was sampled with (captured from the app
- * theme at generation time), frozen here so a later theme change never alters an
- * existing project's gradient. Null ⇒ no gradient captured yet (the card samples one
- * from the current theme on first render and persists it).
+ * `palette` is the exact list of colors it was made with (OKLCH colors generated
+ * from the seed; older rows hold colors sampled from the app theme), frozen here.
+ * Null ⇒ no gradient captured yet (the card seeds one from the project id on first
+ * render and persists it).
  */
 export interface ProjectGradient {
   seed: number
@@ -489,10 +489,9 @@ export const projects = sqliteTable(
      */
     thumbnail: text("thumbnail"),
     /**
-     * Persisted dashboard-card gradient (`{ seed, palette }`), captured from the app
-     * theme when the gradient is generated and frozen so it survives restarts and later
-     * theme changes ({@link ProjectGradient}). Null ⇒ none captured yet (the card samples
-     * one on first render). Mutually exclusive with {@link projects.thumbnail} in the UI:
+     * Persisted dashboard-card gradient (`{ seed, palette }`), fixed when the gradient
+     * is generated so it survives restarts ({@link ProjectGradient}). Null ⇒ none
+     * captured yet (the card seeds one on first render). Mutually exclusive with {@link projects.thumbnail} in the UI:
      * setting a thumbnail nulls this, generating a gradient nulls the thumbnail.
      */
     gradient: text("gradient", { mode: "json" }).$type<ProjectGradient>(),
