@@ -5,6 +5,7 @@ import {
   defaultEditorThemeId,
   EDITOR_THEMES,
   editorThemeExtension,
+  shownEditorThemeId,
 } from "./editorThemes"
 
 /** An app theme with Theme default: the editor keeps its own theme. */
@@ -138,5 +139,14 @@ describe("editorThemeExtension", () => {
     expect(
       editorThemeExtension("monokai", [], "dark", { themeId: "nord", accentId: "neon-pink" }),
     ).toBe(monokai)
+  })
+})
+
+describe("shownEditorThemeId", () => {
+  test("names the theme the editor shows: a known choice, else GitHub for the mode", () => {
+    expect(shownEditorThemeId("monokai", [], "light")).toBe("monokai")
+    expect(shownEditorThemeId("default", [], "light")).toBe("github-light")
+    expect(shownEditorThemeId("default", [], "dark")).toBe("github-dark")
+    expect(shownEditorThemeId("removed-theme", [], "dark")).toBe("github-dark")
   })
 })

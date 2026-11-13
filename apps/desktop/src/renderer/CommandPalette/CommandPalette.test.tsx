@@ -13,6 +13,19 @@ vi.mock("./usePaletteCommands", () => ({
       icon: () => null,
       run: command.run,
     },
+    // Listed before Change theme, so ranking (not list order) must put Change theme first.
+    {
+      id: "theme-mode",
+      label: "Change theme mode",
+      group: "Settings",
+      icon: () => null,
+      submenu: {
+        options: [["light", "Light"]],
+        current: "light",
+        preview: null,
+        apply: plain.apply,
+      },
+    },
     {
       id: "theme",
       label: "Change theme",
@@ -63,7 +76,18 @@ test("the top level lists one command per setting, not its options", () => {
   fireEvent.change(screen.getByTestId("command-palette-input"), { target: { value: "them" } })
   expect(
     screen.getAllByTestId("command-palette-item").map((item) => item.dataset.commandId),
-  ).toEqual(["theme"])
+  ).toEqual(["theme-mode", "theme"])
+})
+
+test("an exact label match ranks first, then labels starting with the query", () => {
+  render(<CommandPalette onClose={vi.fn()} />)
+  const input = screen.getByTestId("command-palette-input")
+  const ids = () =>
+    screen.getAllByTestId("command-palette-item").map((item) => item.dataset.commandId)
+  fireEvent.change(input, { target: { value: "change theme" } })
+  expect(ids()).toEqual(["theme", "theme-mode"])
+  fireEvent.change(input, { target: { value: "Change theme m" } })
+  expect(ids()?.[0]).toBe("theme-mode")
 })
 
 test("a sub-list without preview applies only on Enter and shows a failed write", async () => {

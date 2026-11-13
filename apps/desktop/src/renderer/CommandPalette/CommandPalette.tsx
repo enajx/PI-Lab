@@ -15,6 +15,13 @@ interface RankedCommand {
   positions: number[]
 }
 
+/** 0 for an exact label match, 1 for a label starting with the query, 2 for other matches. */
+function matchTier(query: string, label: string): number {
+  const q = query.toLowerCase()
+  const l = label.toLowerCase()
+  return l === q ? 0 : l.startsWith(q) ? 1 : 2
+}
+
 /** The open sub-list and the command that opened it. */
 interface OpenSubmenu {
   command: PaletteCommand
@@ -74,7 +81,11 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         ): entry is { command: PaletteCommand; match: { score: number; positions: number[] } } =>
           entry.match !== null,
       )
-      .sort((a, b) => b.match.score - a.match.score)
+      .sort(
+        (a, b) =>
+          matchTier(q, a.command.label) - matchTier(q, b.command.label) ||
+          b.match.score - a.match.score,
+      )
       .map((entry) => ({ command: entry.command, positions: entry.match.positions }))
   }, [query, source])
 

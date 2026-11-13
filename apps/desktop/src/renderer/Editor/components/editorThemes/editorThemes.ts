@@ -491,6 +491,17 @@ export function allEditorThemes(customThemes: ImportedEditorTheme[]): readonly E
   return [...EDITOR_THEMES, ...customThemes.map(importedEditorTheme)]
 }
 
+/** The built-in or imported theme the editor shows for a stored id: a known id, else GitHub for `mode`. */
+export function shownEditorThemeId(
+  id: string,
+  customThemes: ImportedEditorTheme[],
+  mode: "light" | "dark",
+): string {
+  return allEditorThemes(customThemes).some((theme) => theme.id === id)
+    ? id
+    : defaultEditorThemeId(mode)
+}
+
 /** The app theme and accent the editor follows while its own theme is "default". */
 export interface AppAppearance {
   themeId: string

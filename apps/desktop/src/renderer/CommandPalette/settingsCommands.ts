@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Settings } from "lucide-react"
-import { allEditorThemes } from "../Editor/components/editorThemes"
+import { allEditorThemes, shownEditorThemeId } from "../Editor/components/editorThemes"
 import { LANGUAGES, useInterfaceLanguage } from "../i18n/language"
 import { NOTIFICATION_SOUND_OPTIONS } from "../notifications/sounds"
 import {
@@ -291,7 +291,12 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       allEditorThemes(settings.editor.customEditorThemes).map(
         (value) => [value.id, value.label] as const,
       ),
-      settings.editor.editorTheme,
+      // "default" shows GitHub for the app's mode, so that entry is the current one.
+      shownEditorThemeId(
+        settings.editor.editorTheme,
+        settings.editor.customEditorThemes,
+        theme.resolvedMode,
+      ),
       (editorTheme) => editor.mutateAsync({ editorTheme }),
       // Preview by changing only the cached settings the editors read; nothing is saved.
       (editorTheme) =>

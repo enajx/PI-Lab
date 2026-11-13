@@ -6,4 +6,5 @@ export {
   type EditorTheme,
   type EditorThemeId,
   editorThemeExtension,
+  shownEditorThemeId,
 } from "./editorThemes"
