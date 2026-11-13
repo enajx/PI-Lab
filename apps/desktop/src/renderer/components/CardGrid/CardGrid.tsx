@@ -17,8 +17,8 @@ import { useTranslate } from "../../i18n/language"
 import "./cardGrid.css"
 
 export const CARD_GRID_SURFACES = {
-  dashboard: { baseColumnPx: 220, baseRowPx: 236 },
-  cluster: { baseColumnPx: 280, baseRowPx: 128 },
+  dashboard: { baseColumnPx: 220, baseRowPx: 236, defaultSize: { width: 0.9, height: 1 } },
+  cluster: { baseColumnPx: 280, baseRowPx: 128, defaultSize: { width: 1, height: 1 } },
 } as const
 
 export type CardGridSurface = keyof typeof CARD_GRID_SURFACES
@@ -41,12 +41,16 @@ export interface CardGridSize {
   height: number
 }
 
-const DEFAULT_SIZE: CardGridSize = { width: DEFAULT_SCALE, height: DEFAULT_SCALE }
+/** The size a surface's cards have until the user resizes them (Home also returns to it). */
+function defaultSize(surface: CardGridSurface): CardGridSize {
+  return CARD_GRID_SURFACES[surface].defaultSize
+}
 
 interface CardGridContextValue {
   size: CardGridSize
   baseColumnPx: number
   baseRowPx: number
+  defaultSize: CardGridSize
   setSize: (size: CardGridSize) => void
 }
 
@@ -73,7 +77,8 @@ function snapSize(size: CardGridSize): CardGridSize {
 
 function writeStoredSize(surface: CardGridSurface, size: CardGridSize): void {
   if (typeof window === "undefined") return
-  if (size.width === DEFAULT_SCALE && size.height === DEFAULT_SCALE) {
+  const base = defaultSize(surface)
+  if (size.width === base.width && size.height === base.height) {
     window.localStorage.removeItem(storageKey(surface))
     return
   }
@@ -91,7 +96,7 @@ function finiteOrNull(value: unknown): number | null {
  * A malformed stored value falls back to the base size.
  */
 function readStoredSize(surface: CardGridSurface): CardGridSize {
-  if (typeof window === "undefined") return DEFAULT_SIZE
+  if (typeof window === "undefined") return defaultSize(surface)
   const legacy = window.localStorage.getItem(legacyScaleKey(surface))
   if (legacy !== null) {
     window.localStorage.removeItem(legacyScaleKey(surface))
@@ -103,13 +108,13 @@ function readStoredSize(surface: CardGridSurface): CardGridSize {
     }
   }
   const raw = window.localStorage.getItem(storageKey(surface))
-  if (raw === null) return DEFAULT_SIZE
+  if (raw === null) return defaultSize(surface)
   const parsed: unknown = JSON.parse(raw)
   const record =
     typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {}
   const width = finiteOrNull(record.width)
   const height = finiteOrNull(record.height)
-  if (width === null || height === null) return DEFAULT_SIZE
+  if (width === null || height === null) return defaultSize(surface)
   return snapSize({ width, height })
 }
 
@@ -148,6 +153,7 @@ export function CardGrid({
       size,
       baseColumnPx: config.baseColumnPx,
       baseRowPx: config.baseRowPx,
+      defaultSize: config.defaultSize,
       setSize: (next: CardGridSize) => {
         const normalized = snapSize(next)
         setSizeState(normalized)
@@ -293,7 +299,7 @@ export function ResizableCardGridItem({
     if (narrower) next = { width: width - SIZE_STEP, height }
     if (event.key === "ArrowDown") next = { width, height: height + SIZE_STEP }
     if (event.key === "ArrowUp") next = { width, height: height - SIZE_STEP }
-    if (event.key === "Home") next = DEFAULT_SIZE
+    if (event.key === "Home") next = context.defaultSize
     if (next === null) return
     event.preventDefault()
     event.stopPropagation()

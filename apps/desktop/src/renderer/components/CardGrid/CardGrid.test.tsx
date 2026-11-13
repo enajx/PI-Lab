@@ -39,6 +39,14 @@ function GridHarness({ surface = "dashboard" }: { surface?: "dashboard" | "clust
   )
 }
 
+/** Start the Dashboard grid at the 100% base size, so drag and key steps read from 1. */
+function startDashboardAtBase(): void {
+  window.localStorage.setItem(
+    "pi-lab.cardGrid.dashboard.size",
+    JSON.stringify({ width: 1, height: 1 }),
+  )
+}
+
 describe("CardGrid", () => {
   beforeEach(() => {
     cleanup()
@@ -50,9 +58,9 @@ describe("CardGrid", () => {
 
     const grid = screen.getByTestId("test-grid")
     expect(screen.queryByRole("slider")).toBeNull()
-    expect(grid.getAttribute("data-card-grid-width")).toBe("1")
+    expect(grid.getAttribute("data-card-grid-width")).toBe("0.9")
     expect(grid.getAttribute("data-card-grid-height")).toBe("1")
-    expect(grid.style.gridTemplateColumns).toContain("min(100%, 220px)")
+    expect(grid.style.gridTemplateColumns).toContain("min(100%, 198px)")
     expect(grid.style.gridAutoRows).toContain("236px")
     expect(screen.getByTestId("item-alpha").getAttribute("data-card-span")).toBe("1x1")
     expect(screen.getByTestId("item-beta").getAttribute("data-card-span")).toBe("1x1")
@@ -62,7 +70,7 @@ describe("CardGrid", () => {
     const dashboard = render(<GridHarness />)
     const dashboardGrid = screen.getByTestId("test-grid")
     expect(dashboardGrid.style.gridTemplateColumns).toBe(
-      "repeat(auto-fill, minmax(min(100%, 220px), 220px))",
+      "repeat(auto-fill, minmax(min(100%, 198px), 198px))",
     )
     expect(dashboardGrid.style.justifyContent).toBe("start")
 
@@ -76,6 +84,7 @@ describe("CardGrid", () => {
   })
 
   test("a corner drag changes width and height separately in 10% steps and persists them", () => {
+    startDashboardAtBase()
     const { unmount } = render(<GridHarness />)
     const handle = firstResizeHandle()
     expect(handle.querySelector("svg")).toBeNull()
@@ -109,6 +118,7 @@ describe("CardGrid", () => {
   })
 
   test("a drag clamps each axis to 70%-160% and cancel restores the start size", () => {
+    startDashboardAtBase()
     render(<GridHarness />)
     const handle = firstResizeHandle()
     const grid = screen.getByTestId("test-grid")
@@ -145,6 +155,7 @@ describe("CardGrid", () => {
 
   test("Arabic uses the lower-left resize corner and mirrored horizontal controls", () => {
     document.documentElement.dir = "rtl"
+    startDashboardAtBase()
     render(<GridHarness />)
     const handle = firstResizeHandle()
     expect(handle.className).toContain("rtl:left-0")
@@ -160,6 +171,7 @@ describe("CardGrid", () => {
   })
 
   test("keyboard resizing steps 10%: left/right change width, up/down change height", () => {
+    startDashboardAtBase()
     render(<GridHarness />)
     const handle = firstResizeHandle()
     const grid = screen.getByTestId("test-grid")
@@ -177,13 +189,15 @@ describe("CardGrid", () => {
 
     for (let index = 0; index < 30; index += 1) fireEvent.keyDown(handle, { key: "ArrowLeft" })
     expect(grid.getAttribute("data-card-grid-width")).toBe("0.7")
+    // Home returns to the Dashboard default: one 10% step narrower than the base width.
     fireEvent.keyDown(handle, { key: "Home" })
-    expect(grid.getAttribute("data-card-grid-width")).toBe("1")
+    expect(grid.getAttribute("data-card-grid-width")).toBe("0.9")
     expect(grid.getAttribute("data-card-grid-height")).toBe("1")
     expect(screen.getAllByTestId("card-resize-status")[0]?.getAttribute("aria-live")).toBe("polite")
   })
 
   test("surface sizes stay independent", () => {
+    startDashboardAtBase()
     const first = render(<GridHarness />)
     fireEvent.keyDown(firstResizeHandle(), { key: "ArrowRight" })
     expect(screen.getByTestId("test-grid").getAttribute("data-card-grid-width")).toBe("1.1")
