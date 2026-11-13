@@ -109,7 +109,7 @@ export interface DataFileListing {
  * explicitly whitelisted data/analysis artifacts. Source, compiled, and unknown
  * files never enter the candidate set. The whole folder is walked; the
  * {@link MAX_LISTED_FILES} cap applies per experiment, so one with many files
- * cannot hide other experiments. `.zarr` directories are
+ * cannot hide other experiments; the Folders structure has no cap. `.zarr` directories are
  * collected as one metadata-only dataset and pruned. Paths are returned relative
  * to `repoPath`. For the results folder (`folder: "results"`) each entry's
  * group, experiment and inner path come from `structure` (see {@link assignRow});
@@ -144,13 +144,11 @@ export async function discoverDataFiles(
       folder === "results"
         ? assignRow(folders, fileName, structure, level)
         : { group: null, experiment: null, innerPath: [...folders, fileName].join("/") }
-    // Folders: the cap applies to each top-level folder, not the whole results folder.
-    const key =
-      structure.kind === "folders" && folder === "results"
-        ? `\u0001${folders[0] ?? ""}`
-        : `${row.group ?? ""}\u0000${row.experiment ?? ""}`
+    // Folders shows the plain tree, so it lists every file: no per-row cap.
+    const capped = !(structure.kind === "folders" && folder === "results")
+    const key = `${row.group ?? ""}\u0000${row.experiment ?? ""}`
     const kept = keptPerExperiment.get(key) ?? 0
-    if (kept >= MAX_LISTED_FILES) {
+    if (capped && kept >= MAX_LISTED_FILES) {
       if (kept === MAX_LISTED_FILES) {
         truncatedExperiments.push({
           group: row.group,

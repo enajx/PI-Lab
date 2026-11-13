@@ -598,6 +598,22 @@ describe("science.analysis.listFiles", () => {
     ])
   })
 
+  test("Folders lists every file with no cap and no 'more files' notice", async () => {
+    const count = MAX_LISTED_FILES + 5
+    await Promise.all(
+      Array.from({ length: count }, (_, i) => writeRepoFile(`results/bulk/f${i}.csv`, "a\n1\n")),
+    )
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.science.analysis.setStructure({ projectId: project.id, value: "folders" })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    const files = listing.groups.flatMap((group) => group.files)
+    expect(files.filter((file) => file.relPath.startsWith("results/bulk/"))).toHaveLength(count)
+    expect(listing.truncatedExperiments).toEqual([])
+  })
+
   test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", async () => {
     await Promise.all(
       Array.from({ length: MAX_LISTED_FILES + 5 }, (_, i) =>
