@@ -640,8 +640,10 @@ test("with no results folder, Analysis shows no folder and points to Select expe
   const select = window.getByTestId("analysis-results-folder-change")
   await expect(select).toHaveText("Select…")
   await expect(select).toHaveAttribute("data-highlighted", "true")
-  // The accent ring is drawn (it pulses, then stays until the button is clicked).
-  expect(await select.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none")
+  // A soft accent wave moves across the button face (not its edge) until it is clicked.
+  expect(
+    await select.evaluate((element) => getComputedStyle(element, "::before").animationName),
+  ).toBe("analysis-select-folder-wave")
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-select-folder.png") })
 
   // Choosing a folder (the test picker returns <project>/outputs) lists it.

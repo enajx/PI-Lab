@@ -1359,7 +1359,7 @@ function ResultsFolderField({
           )}
           disabled={busy}
           onClick={change}
-          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-ring")}
+          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-wave")}
         >
           {missing ? t("Select…") : t("Change…")}
         </button>
