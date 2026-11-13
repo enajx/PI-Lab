@@ -275,7 +275,7 @@ export function ScienceTasks({
       <div ref={row.rowRef} className="flex min-h-0 flex-1 gap-3 overflow-hidden">
         <div
           data-testid="tasks-board"
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
         >
           {listing.isLoading ? (
             <div className="grid min-h-0 flex-1 place-items-center text-muted-foreground text-sm">

@@ -1,6 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { APP_THEME_TOKENS, DEFAULT_APP_THEME_ID } from "./appThemes"
+import {
+  ACCENT_THEME_TOKENS,
+  APP_THEME_TOKENS,
+  BASE_THEME_TOKENS,
+  DEFAULT_APP_THEME_ID,
+} from "./appThemes"
 import { ThemeProvider, useTheme } from "./ThemeProvider"
 
 interface MediaController {
@@ -37,17 +42,31 @@ function installMatchMedia(initialDark: boolean): MediaController {
 }
 
 function ThemeHarness() {
-  const { mode, resolvedMode, setMode, themeId, setThemeId, toggleTheme } = useTheme()
+  const {
+    mode,
+    resolvedMode,
+    setMode,
+    themeId,
+    setThemeId,
+    themes,
+    toggleTheme,
+    unavailableTheme,
+  } = useTheme()
   return (
     <>
       <output data-testid="theme-state">
         {mode}:{resolvedMode}:{themeId}
       </output>
+      <output data-testid="theme-count">{themes.length}</output>
+      <output data-testid="theme-unavailable">{unavailableTheme ?? ""}</output>
       <button type="button" onClick={() => setMode("system")}>
         System
       </button>
       <button type="button" onClick={() => setThemeId("tokyo-night")}>
         Tokyo Night
+      </button>
+      <button type="button" onClick={() => setThemeId("ember")}>
+        Ember
       </button>
       <button type="button" onClick={() => setThemeId(DEFAULT_APP_THEME_ID)}>
         Default
@@ -91,7 +110,7 @@ describe("ThemeProvider", () => {
     expect(media.listenerCount()).toBe(0)
   })
 
-  test("applies every curated token and clears every override on Default", async () => {
+  test("applies every base token and clears every override on Default", async () => {
     installMatchMedia(false)
     render(
       <ThemeProvider>
@@ -103,8 +122,11 @@ describe("ThemeProvider", () => {
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue("--background")).toBe("#e1e2e7"),
     )
-    for (const token of APP_THEME_TOKENS) {
+    for (const token of BASE_THEME_TOKENS) {
       expect(document.documentElement.style.getPropertyValue(`--${token}`)).not.toBe("")
+    }
+    for (const token of ACCENT_THEME_TOKENS) {
+      expect(document.documentElement.style.getPropertyValue(`--${token}`)).toBe("")
     }
 
     fireEvent.click(screen.getByRole("button", { name: "Default" }))
@@ -141,5 +163,54 @@ describe("ThemeProvider", () => {
 
     act(() => media.setDark(false))
     expect(screen.getByTestId("theme-state").textContent).toBe("light:light:tokyo-night")
+  })
+
+  test("an accent theme sets the accent tokens and a plain theme clears them", async () => {
+    installMatchMedia(true)
+    render(
+      <ThemeProvider>
+        <ThemeHarness />
+      </ThemeProvider>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Ember" }))
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#c4540f"),
+    )
+    for (const token of ACCENT_THEME_TOKENS) {
+      expect(document.documentElement.style.getPropertyValue(`--${token}`)).not.toBe("")
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe(""),
+    )
+  })
+
+  test("Beta lists only kept themes and shows Default for a saved Alpha-only theme", async () => {
+    installMatchMedia(false)
+    window.localStorage.setItem("pi-lab.appTheme", "ember")
+    const previous = window.piLab
+    window.piLab = {
+      ...previous,
+      appIcon: { ...previous?.appIcon, getChannel: async () => "beta" },
+    } as NonNullable<typeof window.piLab>
+    render(
+      <ThemeProvider>
+        <ThemeHarness />
+      </ThemeProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId("theme-count").textContent).toBe("9"))
+    expect(screen.getByTestId("theme-state").textContent).toBe("light:light:default")
+    expect(screen.getByTestId("theme-unavailable").textContent).toBe("Ember")
+    for (const token of APP_THEME_TOKENS) {
+      expect(document.documentElement.style.getPropertyValue(`--${token}`)).toBe("")
+    }
+    // The saved choice is kept, so the notice stays until the user picks a theme.
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("ember")
+
+    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    expect(screen.getByTestId("theme-unavailable").textContent).toBe("")
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
+    window.piLab = previous
   })
 })

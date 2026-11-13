@@ -2,6 +2,7 @@ import type { Extension } from "@codemirror/state"
 import { type Tag, tags as t } from "@lezer/highlight"
 import type { ImportedEditorTheme } from "@pi-lab/local-db/editor-settings"
 import { createTheme } from "@uiw/codemirror-themes"
+import { accentEditorColors } from "../../../providers/ThemeProvider"
 
 /**
  * Curated color themes for the built-in CodeMirror editor. The editor core ({@link CodeMirrorBuffer}) ships
@@ -493,19 +494,37 @@ export function allEditorThemes(customThemes: ImportedEditorTheme[]): readonly E
 /**
  * Resolve a stored theme id to its CodeMirror extension. A known id (built-in or
  * imported) resolves to its own palette, so an explicit choice is always kept. An
- * undefined/empty/unknown id or the stored `"default"` value resolves to
- * {@link defaultEditorThemeId} for the app's current light/dark `mode`.
+ * undefined/empty/unknown id or the stored `"default"` value follows the app: an
+ * accent app theme (`appThemeId`) gives its own syntax colors, any other app theme
+ * gives {@link defaultEditorThemeId} for the app's current light/dark `mode`.
  */
 export function editorThemeExtension(
   id: string | undefined,
   customThemes: ImportedEditorTheme[],
   mode: "light" | "dark",
+  appThemeId: string,
 ): Extension {
   const chosen = allEditorThemes(customThemes).find((theme) => theme.id === id)
   if (chosen) return chosen.extension
+  const accent = accentEditorExtension(appThemeId, mode)
+  if (accent) return accent
   const fallback = EDITOR_THEMES.find((theme) => theme.id === defaultEditorThemeId(mode))
   if (!fallback) throw new Error(`Default editor theme ${defaultEditorThemeId(mode)} is missing`)
   return fallback.extension
+}
+
+/** Built once per accent app theme and mode, so a live swap keeps the same extension. */
+const accentExtensions = new Map<string, Extension>()
+
+function accentEditorExtension(appThemeId: string, mode: "light" | "dark"): Extension | null {
+  const key = `${appThemeId}:${mode}`
+  const cached = accentExtensions.get(key)
+  if (cached) return cached
+  const colors = accentEditorColors(appThemeId, mode)
+  if (!colors) return null
+  const extension = compactTheme(colors, mode)
+  accentExtensions.set(key, extension)
+  return extension
 }
 
 function importedEditorTheme(theme: ImportedEditorTheme): EditorTheme {

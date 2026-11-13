@@ -599,7 +599,7 @@ export function CentralPanel({
       <div className="relative flex min-h-0 shrink-0" style={{ width: filesWidth }}>
         <div
           data-testid="central-files-panel"
-          className="flex min-h-0 w-full flex-col overflow-y-auto rounded-lg border border-border"
+          className="flex min-h-0 w-full flex-col overflow-y-auto rounded-lg border border-panel-border"
         >
           {leftColumn.filesOpen ? (
             // Open: the tree's own "Files" header carries the collapse chevron.
@@ -639,7 +639,7 @@ export function CentralPanel({
       data-testid="central-panel"
       className={cn(
         "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
-        !frameless && "rounded-lg border border-border",
+        !frameless && "rounded-lg border border-panel-border",
       )}
       onBlurCapture={editor.onBlurCapture}
     >
@@ -1384,7 +1384,9 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
       data-dirty={dirty ?? false}
       className={cn(
         "flex h-full items-center gap-1.5 border-border border-r pr-1 pl-2.5 text-xs",
-        active ? "bg-background text-foreground" : "text-muted-foreground hover:bg-accent/40",
+        active
+          ? "bg-background text-selected-foreground"
+          : "text-muted-foreground hover:bg-accent/40",
       )}
     >
       <button

@@ -9,6 +9,11 @@ import {
 } from "react"
 import {
   APP_THEME_TOKENS,
+  APP_THEMES,
+  type AppChannel,
+  type AppTheme,
+  appThemesForChannel,
+  availableAppThemeId,
   DEFAULT_APP_THEME_ID,
   normalizeAppThemeId,
   type ResolvedThemeMode,
@@ -21,8 +26,13 @@ interface ThemeContextValue {
   mode: ThemeMode
   resolvedMode: ResolvedThemeMode
   setMode: (mode: ThemeMode) => void
+  /** The theme in use: the saved one, or Default when this channel does not offer it. */
   themeId: string
   setThemeId: (themeId: string) => void
+  /** The themes this release channel offers in Settings. */
+  themes: readonly AppTheme[]
+  /** Label of a saved theme this channel does not offer (Default is used instead). */
+  unavailableTheme: string | null
   toggleTheme: () => void
 }
 
@@ -77,9 +87,29 @@ export function applySavedAppearance(): void {
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<ThemeMode>(readInitialMode)
-  const [themeId, setThemeIdState] = useState<string>(readInitialThemeId)
+  const [savedThemeId, setThemeIdState] = useState<string>(readInitialThemeId)
   const [systemDark, setSystemDark] = useState(systemPrefersDark)
+  // Unknown until Electron main answers; until then the saved theme is shown as is.
+  const [channel, setChannel] = useState<AppChannel | null>(null)
   const resolvedMode: ResolvedThemeMode = mode === "system" ? (systemDark ? "dark" : "light") : mode
+  const themes = channel === null ? APP_THEMES : appThemesForChannel(channel)
+  const themeId = channel === null ? savedThemeId : availableAppThemeId(savedThemeId, channel)
+  const unavailableTheme =
+    themeId === savedThemeId
+      ? null
+      : (APP_THEMES.find(({ id }) => id === savedThemeId)?.label ?? null)
+
+  useEffect(() => {
+    let active = true
+    // Without the desktop bridge (unit tests, a plain browser) the renderer is a source run: Alpha.
+    const bridge = window.piLab?.appIcon
+    void (bridge ? bridge.getChannel() : Promise.resolve<AppChannel>("alpha")).then((value) => {
+      if (active) setChannel(value)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     const query = window.matchMedia?.(SYSTEM_DARK_QUERY)
@@ -93,8 +123,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyTheme(themeId, resolvedMode)
     window.localStorage.setItem(MODE_STORAGE_KEY, mode)
-    window.localStorage.setItem(APP_THEME_STORAGE_KEY, themeId)
-  }, [mode, resolvedMode, themeId])
+    // Keep a saved theme this channel does not offer, so Settings can say why Default is shown.
+    window.localStorage.setItem(APP_THEME_STORAGE_KEY, savedThemeId)
+  }, [mode, resolvedMode, themeId, savedThemeId])
 
   const setThemeId = useCallback(
     (nextThemeId: string) => setThemeIdState(normalizeAppThemeId(nextThemeId)),
@@ -106,8 +137,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ mode, resolvedMode, setMode, themeId, setThemeId, toggleTheme }),
-    [mode, resolvedMode, themeId, setThemeId, toggleTheme],
+    () => ({
+      mode,
+      resolvedMode,
+      setMode,
+      themeId,
+      setThemeId,
+      themes,
+      unavailableTheme,
+      toggleTheme,
+    }),
+    [mode, resolvedMode, themeId, setThemeId, themes, unavailableTheme, toggleTheme],
   )
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

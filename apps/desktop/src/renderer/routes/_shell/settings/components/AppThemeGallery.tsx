@@ -1,10 +1,10 @@
 import { cn } from "@pi-lab/ui"
 import { useTranslate } from "../../../../i18n/language"
-import { APP_THEMES, appThemeSwatch, useTheme } from "../../../../providers/ThemeProvider"
+import { appThemeSwatch, useTheme } from "../../../../providers/ThemeProvider"
 
 export function AppThemeGallery() {
   const t = useTranslate()
-  const { resolvedMode, themeId, setThemeId } = useTheme()
+  const { resolvedMode, themeId, setThemeId, themes, unavailableTheme } = useTheme()
 
   return (
     <div className="flex flex-col gap-3 px-4 py-4">
@@ -14,8 +14,17 @@ export function AppThemeGallery() {
           {t("Affects PI Lab’s interface; the code editor theme stays separate.")}
         </span>
       </div>
+      {unavailableTheme ? (
+        <p
+          data-testid="settings-app-theme-unavailable"
+          className="rounded-md border border-amber-500/35 bg-amber-500/8 px-3 py-2 text-foreground text-xs"
+        >
+          {t("Your saved theme is not offered in this release, so PI Lab uses Default:")}{" "}
+          {unavailableTheme}
+        </p>
+      ) : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="settings-app-themes">
-        {APP_THEMES.map((theme) => {
+        {themes.map((theme) => {
           const selected = theme.id === themeId
           return (
             <button

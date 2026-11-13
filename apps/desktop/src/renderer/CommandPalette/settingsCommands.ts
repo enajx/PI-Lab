@@ -14,7 +14,7 @@ import {
   useShowClusterSection,
   useShowSkillsPanel,
 } from "../preferences/preferences"
-import { APP_THEMES, useTheme } from "../providers/ThemeProvider"
+import { useTheme } from "../providers/ThemeProvider"
 import { useTRPC } from "../trpc/react"
 import type { PaletteCommand } from "./usePaletteCommands"
 
@@ -150,7 +150,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
     ...choices(
       "app-theme",
       "app theme",
-      APP_THEMES.map((value) => [value.id, value.label] as const),
+      theme.themes.map((value) => [value.id, value.label] as const),
       theme.themeId,
       theme.setThemeId,
     ),

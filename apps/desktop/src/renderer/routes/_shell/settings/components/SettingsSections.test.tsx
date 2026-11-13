@@ -157,7 +157,7 @@ describe("Settings sections", () => {
 
   test("Appearance gallery selects and applies a named app theme", async () => {
     renderSection(<AppearanceSection />)
-    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(9)
+    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(35)
     expect(screen.getByRole("button", { name: "Default" }).getAttribute("aria-pressed")).toBe(
       "true",
     )
@@ -170,6 +170,24 @@ describe("Settings sections", () => {
       "true",
     )
     expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
+  })
+
+  test("Appearance on Beta lists the kept themes and says why a saved trial theme is not used", async () => {
+    window.localStorage.setItem("pi-lab.appTheme", "neon-pink")
+    const previous = window.piLab
+    window.piLab = {
+      ...previous,
+      appIcon: { ...previous?.appIcon, getChannel: async () => "beta" },
+    } as NonNullable<typeof window.piLab>
+    renderSection(<AppearanceSection />)
+
+    const notice = await screen.findByTestId("settings-app-theme-unavailable")
+    expect(notice.textContent).toContain("Neon Pink")
+    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(9)
+    expect(screen.getByRole("button", { name: "Default" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    )
+    window.piLab = previous
   })
 
   test("Appearance does not expose a Caffeine animation choice", async () => {

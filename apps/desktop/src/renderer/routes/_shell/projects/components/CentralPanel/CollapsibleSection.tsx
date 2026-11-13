@@ -33,7 +33,7 @@ export function CollapsibleSection({
         data-testid={testId}
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
-        className="flex shrink-0 items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide hover:text-foreground"
+        className="flex shrink-0 items-center gap-1 px-2 py-1.5 text-left font-medium text-panel-title text-xs uppercase tracking-wide hover:text-foreground"
       >
         <Chevron className="size-3.5" aria-hidden />
         {title}

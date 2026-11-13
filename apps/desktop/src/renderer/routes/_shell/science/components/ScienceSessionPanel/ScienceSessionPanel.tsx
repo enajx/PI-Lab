@@ -291,7 +291,7 @@ export function SciencePanelCollapsedBar({
   return (
     <div
       data-testid={testId}
-      className="flex w-9 shrink-0 flex-col items-center rounded-lg border border-border py-1"
+      className="flex w-9 shrink-0 flex-col items-center rounded-lg border border-panel-border py-1"
     >
       <PanelExpandButton
         testId="science-sessions-expand"
@@ -691,7 +691,7 @@ function NoProjectSessions({
   })
   if (collapsed) return null
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border">
       <div className="flex shrink-0 items-center gap-0.5 border-border border-b bg-muted/30 pr-1 pl-3">
         <div className="flex min-w-0 flex-1 items-center">
           <span

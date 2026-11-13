@@ -555,7 +555,7 @@ function HeadingTaskList({
             aria-label={source.projectName}
           >
             {showProjectHeadings ? (
-              <h2 className="border-border border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+              <h2 className="border-border border-b bg-muted/40 px-4 py-2 font-medium text-panel-title text-xs uppercase tracking-wide">
                 {source.projectName}
               </h2>
             ) : null}
@@ -858,7 +858,7 @@ function HeadingBoard({
           return (
             <section key={source.projectId} data-testid="tasks-heading-project">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <h2 className="min-w-0 truncate font-medium text-muted-foreground text-xs uppercase tracking-wide">
+                <h2 className="min-w-0 truncate font-medium text-panel-title text-xs uppercase tracking-wide">
                   {source.projectName}
                 </h2>
                 <ColumnPicker

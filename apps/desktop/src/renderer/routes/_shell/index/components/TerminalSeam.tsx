@@ -13,7 +13,7 @@ export function TerminalSeam({
   const client = useTRPCClient()
   return (
     <div className="flex h-full flex-col gap-4 p-8">
-      <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
+      <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-panel-border">
         <Terminal
           client={client}
           inputKind={termSpawn.inputKind}

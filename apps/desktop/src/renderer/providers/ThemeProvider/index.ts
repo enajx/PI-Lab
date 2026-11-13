@@ -1,6 +1,9 @@
 export {
+  type AccentEditorColors,
   APP_THEME_TOKENS,
   APP_THEMES,
+  type AppChannel,
+  accentEditorColors,
   appThemeSwatch,
   DEFAULT_APP_THEME_ID,
   type ResolvedThemeMode,
