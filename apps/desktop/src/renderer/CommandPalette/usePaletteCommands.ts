@@ -63,7 +63,21 @@ export interface PaletteCommand {
   group: "Navigate" | "View" | "Settings" | "Projects" | "Dictation"
   icon: ComponentType<{ className?: string }>
   /** Perform the action. The palette closes after success and shows rejected writes. */
-  run: (() => void) | (() => Promise<unknown>)
+  run?: (() => void) | (() => Promise<unknown>)
+  /** Instead of `run`: open a sub-list of choices that previews the highlighted one. */
+  submenu?: PaletteSubmenu
+}
+
+/**
+ * Choices shown in place of the command list, like VS Code's Color Theme picker.
+ * The highlighted choice is previewed live; Enter applies it; Escape or closing
+ * the palette calls `preview(null)` to go back to what was set before.
+ */
+export interface PaletteSubmenu {
+  options: readonly (readonly [value: string, label: string])[]
+  current: string
+  preview: (value: string | null) => void
+  apply: (value: string) => void
 }
 
 /** Param-less navigation targets — literal `to`s so TanStack types them precisely. */

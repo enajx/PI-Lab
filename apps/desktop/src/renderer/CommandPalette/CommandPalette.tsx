@@ -2,17 +2,23 @@ import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { cn } from "@pi-lab/ui"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslate } from "../i18n/language"
-import { type PaletteCommand, usePaletteCommands } from "./usePaletteCommands"
+import { type PaletteCommand, type PaletteSubmenu, usePaletteCommands } from "./usePaletteCommands"
 
 interface CommandPaletteProps {
   /** Dismiss the palette without running anything. */
   onClose: () => void
 }
 
-/** A command paired with the match positions to highlight in its label. */
+/** A command, or a sub-list choice, paired with the match positions to highlight in its label. */
 interface RankedCommand {
   command: PaletteCommand
   positions: number[]
+}
+
+/** The open sub-list and the command that opened it. */
+interface OpenSubmenu {
+  command: PaletteCommand
+  submenu: PaletteSubmenu
 }
 
 /**
@@ -22,6 +28,8 @@ interface RankedCommand {
  * highlighting; ↑/↓ move the highlight, Enter runs the highlighted entry, Esc/backdrop
  * dismiss. Mounted app-globally by the shell so it works from any surface. With an empty
  * query it shows every entry in registry order (navigations, view toggles, then projects).
+ * A command with a sub-list (Change theme, Change accent) replaces the list with its
+ * choices; the highlighted choice is previewed, and dismissing restores the previous one.
  */
 export function CommandPalette({ onClose }: CommandPaletteProps) {
   const t = useTranslate()
@@ -30,6 +38,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [highlight, setHighlight] = useState(0)
+  const [open, setOpen] = useState<OpenSubmenu | null>(null)
+  const previewed = useRef<string | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
 
@@ -37,10 +47,24 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
     inputRef.current?.focus()
   }, [])
 
+  const source = useMemo<PaletteCommand[]>(
+    () =>
+      open
+        ? open.submenu.options.map(([value, label]) => ({
+            id: value,
+            label,
+            hint: value === open.submenu.current ? "Current" : undefined,
+            group: open.command.group,
+            icon: open.command.icon,
+          }))
+        : commands,
+    [open, commands],
+  )
+
   const ranked = useMemo<RankedCommand[]>(() => {
     const q = query.trim()
-    if (!q) return commands.map((command) => ({ command, positions: [] }))
-    return commands
+    if (!q) return source.map((command) => ({ command, positions: [] }))
+    return source
       .map((command) => ({ command, match: fuzzyMatch(q, command.label) }))
       .filter(
         (
@@ -50,16 +74,29 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
       )
       .sort((a, b) => b.match.score - a.match.score)
       .map((entry) => ({ command: entry.command, positions: entry.match.positions }))
-  }, [query, commands])
+  }, [query, source])
 
   // Keep the highlight in range as the result set shrinks/changes.
   const clampedHighlight = Math.min(highlight, Math.max(ranked.length - 1, 0))
 
-  // Reset to the top whenever the query changes so Enter targets the best match.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed to the query changing
+  // Preview the highlighted sub-list choice (arrow keys and mouse hover both move it).
+  const highlightedChoice = open ? ranked[clampedHighlight]?.command.id : undefined
   useEffect(() => {
-    setHighlight(0)
-  }, [query])
+    if (!open || highlightedChoice === undefined || highlightedChoice === previewed.current) return
+    previewed.current = highlightedChoice
+    open.submenu.preview(highlightedChoice)
+  }, [open, highlightedChoice])
+
+  // Closing the palette by any route while a sub-list is open restores the previous choice.
+  useEffect(() => {
+    if (!open) return
+    return () => open.submenu.preview(null)
+  }, [open])
+
+  const dismiss = () => {
+    open?.submenu.preview(null)
+    onClose()
+  }
 
   // Scroll the highlighted row into view as the user arrows through.
   useEffect(() => {
@@ -71,10 +108,31 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const choose = (index: number) => {
     const entry = ranked[index]
     if (!entry || running) return
+    if (open) {
+      open.submenu.apply(entry.command.id)
+      onClose()
+      return
+    }
+    const { submenu } = entry.command
+    if (submenu) {
+      previewed.current = submenu.current
+      setOpen({ command: entry.command, submenu })
+      setQuery("")
+      setHighlight(
+        Math.max(
+          submenu.options.findIndex(([value]) => value === submenu.current),
+          0,
+        ),
+      )
+      inputRef.current?.focus()
+      return
+    }
+    const run = entry.command.run
+    if (!run) throw new Error(`Palette command ${entry.command.id} has neither run nor submenu`)
     setActionError(null)
     setRunning(true)
     void Promise.resolve()
-      .then(() => entry.command.run())
+      .then(() => run())
       .then(onClose, (error: unknown) => {
         setActionError(`Could not apply command: ${String(error)}`)
         setRunning(false)
@@ -84,7 +142,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
       event.preventDefault()
-      onClose()
+      dismiss()
     } else if (event.key === "ArrowDown") {
       event.preventDefault()
       setHighlight(Math.min(clampedHighlight + 1, Math.max(ranked.length - 1, 0)))
@@ -107,7 +165,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         aria-label={t("Close command palette")}
         data-feature-help={t("Close the command palette without running an action")}
         tabIndex={-1}
-        onClick={onClose}
+        onClick={dismiss}
         className="-z-10 absolute inset-0 cursor-default bg-black/40"
       />
       <div
@@ -125,9 +183,13 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
             "Search commands and open projects; press Enter to run the highlighted action",
           )}
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            // Back to the top so Enter targets the best match.
+            setHighlight(0)
+          }}
           onKeyDown={onKeyDown}
-          placeholder={t("Search commands and projects…")}
+          placeholder={open ? t(open.command.label) : t("Search commands and projects…")}
           className="shrink-0 border-border border-b bg-transparent px-4 py-3 text-foreground text-sm outline-none placeholder:text-muted-foreground"
         />
         {actionError ? (

@@ -16,7 +16,7 @@ import {
 } from "../preferences/preferences"
 import { APP_ACCENTS, DEFAULT_ACCENT_ID, useTheme } from "../providers/ThemeProvider"
 import { useTRPC } from "../trpc/react"
-import type { PaletteCommand } from "./usePaletteCommands"
+import type { PaletteCommand, PaletteSubmenu } from "./usePaletteCommands"
 
 type Action = (() => void) | (() => Promise<unknown>)
 type Setter<T> = ((value: T) => void) | ((value: T) => Promise<unknown>)
@@ -24,6 +24,11 @@ type Setter<T> = ((value: T) => void) | ((value: T) => Promise<unknown>)
 /** A direct setting action; failures remain visible in the command palette. */
 function action(id: string, label: string, run: Action): PaletteCommand {
   return { id: `settings-${id}`, label, group: "Settings", icon: Settings, run }
+}
+
+/** A setting chosen from a sub-list that previews the highlighted choice. */
+function picker(id: string, label: string, submenu: PaletteSubmenu): PaletteCommand {
+  return { id: `settings-${id}`, label, group: "Settings", icon: Settings, submenu }
 }
 
 /** Show the next boolean value in the label before the user changes it. */
@@ -147,23 +152,28 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       theme.mode,
       theme.setMode,
     ),
-    ...choices(
-      "app-theme",
-      "app theme",
-      theme.themes.map((value) => [value.id, value.label] as const),
-      theme.themeId,
-      theme.setThemeId,
-    ),
-    ...choices(
-      "app-accent",
-      "app accent",
-      [
+    // Each theme is previewed with Theme default, and picking one resets the accent.
+    picker("change-theme", "Change theme", {
+      options: theme.themes.map((value) => [value.id, value.label] as const),
+      current: theme.themeId,
+      preview: (value) => {
+        theme.previewThemeId(value)
+        theme.previewAccentId(value === null ? null : DEFAULT_ACCENT_ID)
+      },
+      apply: (value) => {
+        theme.setThemeId(value)
+        theme.setAccentId(DEFAULT_ACCENT_ID)
+      },
+    }),
+    picker("change-accent", "Change accent", {
+      options: [
         [DEFAULT_ACCENT_ID, "Theme default"] as const,
         ...APP_ACCENTS.map((value) => [value.id, value.label] as const),
       ],
-      theme.accentId,
-      theme.setAccentId,
-    ),
+      current: theme.accentId,
+      preview: theme.previewAccentId,
+      apply: theme.setAccentId,
+    }),
     ...choices(
       "language",
       "language",

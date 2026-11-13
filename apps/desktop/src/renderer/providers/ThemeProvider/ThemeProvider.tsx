@@ -27,16 +27,20 @@ interface ThemeContextValue {
   mode: ThemeMode
   resolvedMode: ResolvedThemeMode
   setMode: (mode: ThemeMode) => void
-  /** The theme in use: the saved one, or Default when this channel does not offer it. */
+  /** The theme in use: a preview, else the saved one, or Default when this channel does not offer it. */
   themeId: string
   setThemeId: (themeId: string) => void
   /** The themes this release channel offers in Settings. */
   themes: readonly AppTheme[]
   /** Label of a saved theme this channel does not offer (Default is used instead). */
   unavailableTheme: string | null
-  /** "default" (the theme's own look), a preset accent id, or a custom `#rrggbb`. */
+  /** The accent in use (a preview, else the saved one): "default", a preset id, or `#rrggbb`. */
   accentId: string
   setAccentId: (accentId: string) => void
+  /** Show a theme without saving it; null ends the preview. Saving a theme also ends it. */
+  previewThemeId: (themeId: string | null) => void
+  /** Show an accent without saving it; null ends the preview. Saving an accent also ends it. */
+  previewAccentId: (accentId: string | null) => void
   toggleTheme: () => void
 }
 
@@ -98,15 +102,20 @@ export function applySavedAppearance(): void {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<ThemeMode>(readInitialMode)
   const [savedThemeId, setThemeIdState] = useState<string>(readInitialThemeId)
-  const [accentId, setAccentIdState] = useState<string>(readInitialAccentId)
+  const [savedAccentId, setAccentIdState] = useState<string>(readInitialAccentId)
+  const [themePreview, setThemePreview] = useState<string | null>(null)
+  const [accentPreview, setAccentPreview] = useState<string | null>(null)
   const [systemDark, setSystemDark] = useState(systemPrefersDark)
   // Unknown until Electron main answers; until then the saved theme is shown as is.
   const [channel, setChannel] = useState<AppChannel | null>(null)
   const resolvedMode: ResolvedThemeMode = mode === "system" ? (systemDark ? "dark" : "light") : mode
   const themes = channel === null ? APP_THEMES : appThemesForChannel(channel)
-  const themeId = channel === null ? savedThemeId : availableAppThemeId(savedThemeId, channel)
+  const offeredThemeId =
+    channel === null ? savedThemeId : availableAppThemeId(savedThemeId, channel)
+  const themeId = themePreview ?? offeredThemeId
+  const accentId = accentPreview ?? savedAccentId
   const unavailableTheme =
-    themeId === savedThemeId
+    offeredThemeId === savedThemeId
       ? null
       : (APP_THEMES.find(({ id }) => id === savedThemeId)?.label ?? null)
 
@@ -136,15 +145,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(MODE_STORAGE_KEY, mode)
     // Keep a saved theme this channel does not offer, so Settings can say why Default is shown.
     window.localStorage.setItem(APP_THEME_STORAGE_KEY, savedThemeId)
-    window.localStorage.setItem(ACCENT_STORAGE_KEY, accentId)
-  }, [mode, resolvedMode, themeId, savedThemeId, accentId])
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, savedAccentId)
+  }, [mode, resolvedMode, themeId, savedThemeId, accentId, savedAccentId])
 
-  const setThemeId = useCallback(
-    (nextThemeId: string) => setThemeIdState(normalizeAppThemeId(nextThemeId)),
+  const setThemeId = useCallback((nextThemeId: string) => {
+    setThemePreview(null)
+    setThemeIdState(normalizeAppThemeId(nextThemeId))
+  }, [])
+  const setAccentId = useCallback((nextAccentId: string) => {
+    setAccentPreview(null)
+    setAccentIdState(normalizeAccentId(nextAccentId))
+  }, [])
+  const previewThemeId = useCallback(
+    (next: string | null) => setThemePreview(next === null ? null : normalizeAppThemeId(next)),
     [],
   )
-  const setAccentId = useCallback(
-    (nextAccentId: string) => setAccentIdState(normalizeAccentId(nextAccentId)),
+  const previewAccentId = useCallback(
+    (next: string | null) => setAccentPreview(next === null ? null : normalizeAccentId(next)),
     [],
   )
   const toggleTheme = useCallback(
@@ -163,6 +180,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       unavailableTheme,
       accentId,
       setAccentId,
+      previewThemeId,
+      previewAccentId,
       toggleTheme,
     }),
     [
@@ -174,6 +193,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       unavailableTheme,
       accentId,
       setAccentId,
+      previewThemeId,
+      previewAccentId,
       toggleTheme,
     ],
   )

@@ -53,6 +53,8 @@ function ThemeHarness() {
     unavailableTheme,
     accentId,
     setAccentId,
+    previewThemeId,
+    previewAccentId,
   } = useTheme()
   return (
     <>
@@ -70,6 +72,21 @@ function ThemeHarness() {
       </button>
       <button type="button" onClick={() => setAccentId("ember")}>
         Ember
+      </button>
+      <button type="button" onClick={() => previewThemeId("nord")}>
+        Preview Nord
+      </button>
+      <button type="button" onClick={() => previewAccentId("ember")}>
+        Preview Ember
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          previewThemeId(null)
+          previewAccentId(null)
+        }}
+      >
+        End preview
       </button>
       <button type="button" onClick={() => setAccentId("default")}>
         Theme default
@@ -243,5 +260,37 @@ describe("ThemeProvider", () => {
     expect(screen.getByTestId("theme-unavailable").textContent).toBe("")
     expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
     window.piLab = previous
+  })
+
+  test("a preview applies a theme and accent without saving, and ending it restores the saved ones", async () => {
+    installMatchMedia(false)
+    render(
+      <ThemeProvider>
+        <ThemeHarness />
+      </ThemeProvider>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview Nord" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview Ember" }))
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#eceff4"),
+    )
+    expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#c4540f")
+    expect(screen.getByTestId("theme-state").textContent).toBe("light:light:nord")
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
+    expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("default")
+
+    fireEvent.click(screen.getByRole("button", { name: "End preview" }))
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#e1e2e7"),
+    )
+    expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("")
+
+    // Picking a theme during a preview saves it and ends the theme preview.
+    fireEvent.click(screen.getByRole("button", { name: "Preview Nord" }))
+    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    await waitFor(() =>
+      expect(screen.getByTestId("theme-state").textContent).toBe("light:light:tokyo-night"),
+    )
   })
 })

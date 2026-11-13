@@ -118,3 +118,60 @@ test("an accent colors the panel card borders and panel titles; Theme default do
   expect(await style(panel, "borderTopColor")).toBe(await rootColor(window, "--border"))
   expect(await style(filesTitle, "color")).toBe(await rootColor(window, "--muted-foreground"))
 })
+
+/** The saved theme and accent, and the colors the app shows now. */
+async function appearance(window: Page) {
+  return window.evaluate(() => ({
+    savedTheme: localStorage.getItem("pi-lab.appTheme"),
+    savedAccent: localStorage.getItem("pi-lab.appAccent"),
+    background: document.documentElement.style.getPropertyValue("--background"),
+    panelBorder: document.documentElement.style.getPropertyValue("--panel-border"),
+  }))
+}
+
+async function openChangeTheme(window: Page): Promise<void> {
+  await window.keyboard.press("ControlOrMeta+Shift+p")
+  await expect(window.getByTestId("command-palette")).toBeVisible()
+  await window.getByTestId("command-palette-input").fill("Change theme")
+  await window.keyboard.press("Enter")
+  await expect(
+    window.locator('[data-testid="command-palette-item"][data-highlighted="true"]'),
+  ).toHaveAttribute("data-command-id", "nord")
+}
+
+test("palette Change theme previews themes with Theme default, Escape restores, Enter saves", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  await pickAppearance(window, "nord", "ember")
+  const before = await appearance(window)
+  expect(before).toMatchObject({ savedTheme: "nord", savedAccent: "ember" })
+  expect(before.panelBorder).not.toBe("")
+
+  await openChangeTheme(window)
+  await window.keyboard.press("ArrowDown")
+  await window.keyboard.press("ArrowDown")
+  await expect.poll(async () => (await appearance(window)).background).not.toBe(before.background)
+  const previewing = await appearance(window)
+  // Previewed with Theme default, and nothing saved yet.
+  expect(previewing).toMatchObject({ savedTheme: "nord", savedAccent: "ember", panelBorder: "" })
+
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("command-palette")).toHaveCount(0)
+  await expect.poll(() => appearance(window)).toEqual(before)
+
+  await openChangeTheme(window)
+  await window.keyboard.press("ArrowDown")
+  const highlighted = await window
+    .locator('[data-testid="command-palette-item"][data-highlighted="true"]')
+    .getAttribute("data-command-id")
+  await window.keyboard.press("Enter")
+  await expect(window.getByTestId("command-palette")).toHaveCount(0)
+  await expect
+    .poll(async () => {
+      const { savedTheme, savedAccent, panelBorder } = await appearance(window)
+      return { savedTheme, savedAccent, panelBorder }
+    })
+    .toEqual({ savedTheme: highlighted, savedAccent: "default", panelBorder: "" })
+})

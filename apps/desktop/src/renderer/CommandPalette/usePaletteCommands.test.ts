@@ -44,7 +44,7 @@ describe("Add Project palette command", () => {
       group: "Projects",
     })
 
-    command.run()
+    command.run?.()
     expect(requests).toHaveLength(1)
     requests[0]?.onAdded(project)
 
@@ -67,7 +67,7 @@ describe("New file palette command", () => {
       group: "Projects",
     })
 
-    command.run()
+    command.run?.()
     expect(requests).toHaveLength(1)
     requests[0]?.onCreated({ projectId: "project-added", relPath: "notes/idea.md" })
 
@@ -78,7 +78,7 @@ describe("New file palette command", () => {
   test("opens an untitled buffer first when the palette runs inside a project", () => {
     const openNewFile = vi.fn()
     const command = createNewFileCommand(openNewFile, vi.fn(), "project-added")
-    command.run()
+    command.run?.()
 
     expect(openNewFile).not.toHaveBeenCalled()
     expect(readPendingOpenFile("project-added")).toMatchObject({ kind: "new" })
