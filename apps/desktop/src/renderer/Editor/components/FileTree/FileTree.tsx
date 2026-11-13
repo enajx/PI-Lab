@@ -13,7 +13,7 @@ import {
   ListFilter,
   X,
 } from "lucide-react"
-import { createContext, useCallback, useContext, useState } from "react"
+import { createContext, type ReactNode, useCallback, useContext, useState } from "react"
 import { useTranslate } from "../../../i18n/language"
 import { type FileTreeSort, useFileTreeSort } from "../../../preferences/preferences"
 import { useTRPC } from "../../../trpc/react"
@@ -91,6 +91,8 @@ interface FileTreeProps {
   editorTabs?: FileTreeEditorTabs
   /** When given, the header starts with a chevron that collapses the tree (LaTeX Editor column). */
   onCollapse?: () => void
+  /** Shown at the end of the header (the LaTeX Editor column's hide button). */
+  headerEnd?: ReactNode
 }
 
 /**
@@ -143,6 +145,7 @@ export function FileTree({
   onSetMainFile,
   editorTabs,
   onCollapse,
+  headerEnd,
 }: FileTreeProps) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -435,6 +438,7 @@ export function FileTree({
         >
           <FileTreeSortIcon sort={sort} />
         </button>
+        {headerEnd}
       </div>
       {actionError ? (
         <p

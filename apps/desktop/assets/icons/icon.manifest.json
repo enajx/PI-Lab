@@ -16,27 +16,27 @@
       "derivative": "58baca1709f9fdfb91db7533eb140206ce0375d63af83e5e383237ebd6d3dc29"
     },
     "beta": {
-      "master": "397128d5aadd7d7245771efd7efc2a832fce46acb34ce7ba513845c33a276eae",
-      "derivative": "df821916316910397b1707044ff287c2c5b5b175ae47e87b2805628ec87b6ac9"
+      "master": "130d4906e87f5ec5a5dddfc8fe674adb27a75e607b621010aef80d1725b46c21",
+      "derivative": "c789e275179fd6941b84ba400bf2cfe06a9e5b69368dec5d1aa6d4563836dde9"
     }
   },
   "modernIcons": {
-    "compiler": "Xcode 27.1 (27A9275)",
+    "compiler": "Xcode 27.2 (27B52)",
     "channels": {
       "stable": {
         "document": "e920b05f4ad19260dfe2717afb637ba0df1ef46a2168f54d1fea52d706a7e70b",
         "artwork": "5169d9fc4d20dc1c0b9c3f18db2fb8973499f4a7026d9eed382bb302199fcb96",
-        "catalog": "882aaa3e91e4e46f2fbab85114c942d64f78e020751efced9be2c6f3e6ff6fa3"
+        "catalog": "1a99d75b55c7092c870edda3161968fbcc91b0ebc1e12f2e6f6617515f885533"
       },
       "alpha": {
         "document": "e920b05f4ad19260dfe2717afb637ba0df1ef46a2168f54d1fea52d706a7e70b",
         "artwork": "58baca1709f9fdfb91db7533eb140206ce0375d63af83e5e383237ebd6d3dc29",
-        "catalog": "f19d9c6df5815e978a5ccd36abb18e03c7a210197d2dc94f0b661abbb446e249"
+        "catalog": "f0b62e926db97a0f2d24019f26fcce33852a43396b2d0c94f639e46c9d3c598b"
       },
       "beta": {
-        "document": "7157f00a827c60ebccc4edd79d0ac448b7a691ff021032c3225e711e0d4ed481",
-        "artwork": "df821916316910397b1707044ff287c2c5b5b175ae47e87b2805628ec87b6ac9",
-        "catalog": "86eed14ed1674c1d7ac16295266aef55d522d56d7f022c7345dac00d70f9e050"
+        "document": "16229776ee807de9cecff06cc987d0157db93a2d02a398b6a247c255843e8abe",
+        "artwork": "c789e275179fd6941b84ba400bf2cfe06a9e5b69368dec5d1aa6d4563836dde9",
+        "catalog": "10a90388fd5fbfae4dd9d0adca6b5a2a3f2fb69e66d8cc6b75c145f64fb4a591"
       }
     }
   }

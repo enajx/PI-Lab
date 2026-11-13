@@ -100,6 +100,49 @@ test("title bar agent status shows installed agents and current sessions", async
   await expect(panel).toContainText("No current sessions.")
 })
 
+test("title bar bug menu opens the prefilled GitHub issue forms", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  // Record the URL instead of opening the browser.
+  await app.evaluate(({ shell }) => {
+    const opened: string[] = []
+    ;(globalThis as { openedUrls?: string[] }).openedUrls = opened
+    shell.openExternal = async (url: string) => {
+      opened.push(url)
+    }
+  })
+  // A source run is Alpha: it names the git commit, since its version is 0.0.0.
+  const commit = (
+    await execFileAsync("git", ["rev-parse", "--short=8", "HEAD"], { cwd: DESKTOP_DIR })
+  ).stdout.trim()
+  const macosVersion = await app.evaluate(() => process.getSystemVersion())
+  const expected = `PI Lab Alpha ${commit}, macOS ${macosVersion}`
+  const control = window.getByTestId("issue-report-control")
+  const issueBounds = await control.boundingBox()
+  const agentBounds = await window.getByTestId("agent-status-control").boundingBox()
+  const caffeineBounds = await window.getByTestId("caffeine-control").boundingBox()
+  if (!issueBounds || !agentBounds || !caffeineBounds) throw new Error("Title bar button missing")
+  // Same 8px gap as the other views' title bar buttons.
+  expect(agentBounds.x - (issueBounds.x + issueBounds.width)).toBe(8)
+  expect(caffeineBounds.x - (agentBounds.x + agentBounds.width)).toBe(8)
+  for (const [name, template] of [
+    ["Report a bug", "bug_report.yml"],
+    ["Request a feature", "feature_request.yml"],
+  ] as const) {
+    await control.click()
+    const menu = window.getByRole("menu", { name: "Report an issue" })
+    await expect(menu.getByRole("menuitem")).toHaveText(["Report a bug", "Request a feature"])
+    await menu.getByRole("menuitem", { name }).click()
+    await expect(menu).toBeHidden()
+    const url = new URL(
+      await app.evaluate(() => (globalThis as { openedUrls?: string[] }).openedUrls?.at(-1) ?? ""),
+    )
+    expect(url.origin + url.pathname).toBe("https://github.com/enajx/PI-Lab/issues/new")
+    expect(url.searchParams.get("template")).toBe(template)
+    expect(url.searchParams.get("environment")).toBe(expected)
+  }
+})
+
 test("dashboard shows a directly resizable project card", async () => {
   const window = await app.firstWindow()
 

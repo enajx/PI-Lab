@@ -3,6 +3,7 @@ import { DEFAULT_EDITOR_SETTINGS } from "@pi-lab/local-db/editor-settings"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import {
+  Bug,
   ChartArea,
   FileCode2,
   FileDiff,
@@ -29,6 +30,7 @@ import {
 import type { ComponentType } from "react"
 import { openDictationHistory } from "../dictation/historyPicker"
 import { useTranslate } from "../i18n/language"
+import { ISSUE_ACTION_LABELS, useOpenIssueForm } from "../issueReport/issueForms"
 import {
   useExperimentalV2,
   useShowCodeChanges,
@@ -213,6 +215,7 @@ export function usePaletteCommands(): PaletteCommand[] {
   }
 
   const directSettingsCommands = useDirectSettingsCommands()
+  const openIssueForm = useOpenIssueForm()
   const settingsCommands: PaletteCommand[] = [
     ...directSettingsCommands,
     {
@@ -221,6 +224,20 @@ export function usePaletteCommands(): PaletteCommand[] {
       group: "Settings",
       icon: ScanSearch,
       run: requestUpdateCheck,
+    },
+    {
+      id: "report-bug",
+      label: ISSUE_ACTION_LABELS.bug,
+      group: "Settings",
+      icon: Bug,
+      run: () => openIssueForm("bug"),
+    },
+    {
+      id: "request-feature",
+      label: ISSUE_ACTION_LABELS.feature,
+      group: "Settings",
+      icon: Bug,
+      run: () => openIssueForm("feature"),
     },
     {
       id: "open-first-run-setup",

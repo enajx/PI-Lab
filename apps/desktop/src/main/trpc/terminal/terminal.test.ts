@@ -48,6 +48,7 @@ beforeEach(async () => {
     thumbnailImageProcessor: { inspect: () => null, inspectWebP: async () => null },
     db: {} as PiLabDatabase,
     skillsHomeDir: socketDir,
+    userDataDir: socketDir,
     getDaemonClient: async () => client,
     agentCatalog: DEFAULT_AGENT_CATALOG,
     resolveAgentExecutable: async (candidate) => candidate,

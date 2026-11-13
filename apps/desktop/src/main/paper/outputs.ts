@@ -10,7 +10,7 @@ import { TRPCError } from "@trpc/server"
 import { isGitRepo, repoRoot, runGit } from "../git"
 import { addLocalExclude } from "../git/remote"
 import { normalizeOutputDir, outputDirProblem, outputExcludePatterns } from "../latex/outputDir"
-import { findRootTex, listPaperFiles } from "./files"
+import { listPaperFiles, type PaperFile, paperMainDoc } from "./files"
 
 /**
  * Where a linked paper's LaTeX build output goes, and keeping that output out
@@ -26,6 +26,18 @@ export async function isOwnRepo(dir: string): Promise<boolean> {
 /** The paper's build output folder: its own override, else the global default. */
 export function effectiveOutputDir(paper: ProjectPaper, defaultOutputDir: string): string {
   return paper.outputDir ?? defaultOutputDir
+}
+
+/**
+ * A linked paper's main .tex file: the user's saved choice, else the guess
+ * ({@link paperMainDoc}). `files` defaults to listing the paper folder when null.
+ */
+export async function mainDocOf(
+  paper: ProjectPaper,
+  files: PaperFile[] | null,
+): Promise<string | null> {
+  const listed = files ?? (await listPaperFiles(paper.dir)).files
+  return paperMainDoc(paper.dir, paper.mainDoc, listed)
 }
 
 /**
@@ -57,7 +69,7 @@ export async function excludeEffectiveOutputs(
   defaultOutputDir: string,
 ): Promise<void> {
   if (paper.syncEnabled === false) return
-  const root = await findRootTex(paper.dir, (await listPaperFiles(paper.dir)).files)
+  const root = await mainDocOf(paper, null)
   await excludePaperOutputs(paper.dir, effectiveOutputDir(paper, defaultOutputDir), root)
 }
 

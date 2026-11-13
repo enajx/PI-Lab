@@ -2,10 +2,12 @@ import { Button, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FilePlus, FolderOpen, GitBranch } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import type { PaperState } from "../../../../../../main/trpc/paper/paper"
 import type { BuildResult } from "../../../../../../main/trpc/pdf/pdf"
 import { useTranslate } from "../../../../../i18n/language"
 import { useDisplayPath } from "../../../../../trpc/displayPath"
 import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
+import { useOverleafCloneDestination } from "./OverleafCloneDestination"
 import { usePaperDestination } from "./PaperDestination"
 import { usePaperFolderPicker } from "./PaperFolder"
 
@@ -34,8 +36,8 @@ export interface CreatedPaper {
  * the search stopped early on a large project). With it off (the user cleared
  * the paper folder) it does not search. Then it offers the three
  * agreed ways to set a paper folder as three cards of the same height, laid out like the
- * Library's source chooser (same width, padding, card style, text sizes and buttons): clone an Overleaf project into `<project>/paper/` from its
- * Git URL, open a folder the user already cloned, or start a draft: a new
+ * Library's source chooser (same width, padding, card style, text sizes and buttons): clone an Overleaf project from its
+ * Git URL into `<project>/paper/` or another folder (see {@link useOverleafCloneDestination}), open a folder the user already cloned, or start a draft: a new
  * paper from the LaTeX template (in `<project>/paper/`, or the next free
  * `paper-2/`, `paper-3/`, … when it has files, or an empty folder the user
  * chooses; see `paper.createTarget` and `paper.create`). The one Overleaf token is
@@ -92,9 +94,28 @@ export function PaperSetup({
     void queryClient.invalidateQueries({ queryKey: trpc.paper.token.status.queryKey() })
   }
   const onError = (cause: { message: string }): void => setError(cause.message)
-  const addOverleaf = useMutation(
-    trpc.paper.addOverleaf.mutationOptions({ onSuccess: linked, onError }),
-  )
+  const cloneDestination = useOverleafCloneDestination(projectId ?? "")
+  // Ask where to clone (unless a choice is remembered), then clone; nothing when the question is cancelled.
+  const addOverleaf = useMutation({
+    mutationFn: async (input: {
+      projectId: string
+      url: string
+      token: string | null
+    }): Promise<PaperState | null> => {
+      const destination = await cloneDestination.ask(input.url)
+      if (destination === null) return null
+      return client.paper.addOverleaf.mutate({
+        projectId: input.projectId,
+        url: input.url,
+        dir: destination.dir,
+        ...(input.token === null ? {} : { token: input.token }),
+      })
+    },
+    onSuccess: (state) => {
+      if (state !== null) linked()
+    },
+    onError,
+  })
   const link = useMutation(trpc.paper.link.mutationOptions({ onSuccess: linked, onError }))
   const picker = usePaperFolderPicker(
     projectId ?? "",
@@ -262,7 +283,7 @@ export function PaperSetup({
     addOverleaf.mutate({
       projectId,
       url: url.trim(),
-      ...(needsToken ? { token: token.trim() } : {}),
+      token: needsToken ? token.trim() : null,
     })
   }
   const canSubmit =
@@ -474,6 +495,7 @@ export function PaperSetup({
       </div>
       {picker.dialog}
       {destination.dialog}
+      {cloneDestination.dialog}
     </div>
   )
 }

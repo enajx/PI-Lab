@@ -91,6 +91,17 @@ test("builder metadata and direct output stay channel-specific", () => {
         config.extraMetadata.piLabBuildId,
         channel === "alpha" ? "one-packaged-build" : undefined,
       )
+      assert.equal(
+        config.extraMetadata.piLabCommit,
+        channel === "alpha"
+          ? require("node:child_process")
+              .execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
+                cwd: __dirname,
+                encoding: "utf8",
+              })
+              .trim()
+          : undefined,
+      )
       assert.equal(config.directories.output, `release/.direct-${channel}`)
       assert.equal(config.fileAssociations.length > 0, channel === "stable")
       assert.equal(Boolean(config.mac.extendInfo.CFBundleDocumentTypes), channel === "stable")

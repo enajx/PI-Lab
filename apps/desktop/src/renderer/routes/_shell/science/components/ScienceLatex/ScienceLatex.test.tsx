@@ -107,6 +107,8 @@ test("with a paper linked, the Sync button is in the page top bar and the other 
     },
     workspaceId: "paper-ws",
     rootRelPath: "main.tex",
+    mainDoc: null,
+    texFiles: ["main.tex"],
   }))
   const header = container.querySelector("header") as HTMLElement
   expect(await within(header).findByTestId("paper-sync")).toBeTruthy()
@@ -115,7 +117,7 @@ test("with a paper linked, the Sync button is in the page top bar and the other 
   expect(screen.queryByTestId("paper-sync-bar")).toBeNull()
   const footer = screen.getByTestId("editor-status-bar")
   expect(within(footer).getByTestId("paper-last-sync").textContent).toBe("Not synced yet")
-  expect(within(footer).getByTestId("paper-output-folder").textContent).toBe("Output: build")
+  expect(within(footer).getByTestId("paper-output-folder").textContent).toBe("main.tex · build/")
   // Order after the file name: last sync, output folder, paper folder.
   const ids = Array.from(footer.querySelectorAll("[data-testid]"), (node) =>
     node.getAttribute("data-testid"),

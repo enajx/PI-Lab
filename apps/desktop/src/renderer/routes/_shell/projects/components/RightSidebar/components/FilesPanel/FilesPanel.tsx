@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { FileTree, type FileTreeEditorTabs } from "../../../../../../../Editor/components/FileTree"
 
 /**
@@ -13,6 +14,7 @@ export function FilesPanel({
   onSetMainFile,
   editorTabs,
   onCollapse,
+  headerEnd,
 }: {
   workspaceId: string
   onOpenFile: (relPath: string) => void
@@ -24,6 +26,8 @@ export function FilesPanel({
   editorTabs?: FileTreeEditorTabs
   /** Show a collapse chevron in the tree header (LaTeX Editor column). */
   onCollapse?: () => void
+  /** Shown at the end of the tree header (the LaTeX Editor column's hide button). */
+  headerEnd?: ReactNode
 }) {
   return (
     <section data-testid="panel-files" className="flex min-h-0 flex-1 flex-col">
@@ -35,6 +39,7 @@ export function FilesPanel({
         onSetMainFile={onSetMainFile}
         editorTabs={editorTabs}
         onCollapse={onCollapse}
+        headerEnd={headerEnd}
       />
     </section>
   )

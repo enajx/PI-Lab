@@ -80,6 +80,176 @@ function makeRawNpy(shape: string, descr: string, fortran: boolean, data: Buffer
   return Buffer.concat([prefix, Buffer.from(header, "ascii"), data])
 }
 
+/** Each listed file as relPath → [experiment, run]. */
+function experimentRuns(listing: {
+  groups: Array<{
+    files: Array<{ relPath: string; experiment: string | null; run: string | null }>
+  }>
+}): Record<string, [string | null, string | null]> {
+  return Object.fromEntries(
+    listing.groups.flatMap((group) =>
+      group.files.map((file) => [file.relPath, [file.experiment, file.run]] as const),
+    ),
+  )
+}
+
+describe("experiments folder structure", () => {
+  const structurePath = () => join(h.dataDir, "experiments-structure.yaml")
+
+  async function writeGecko(): Promise<void> {
+    await writeRepoFile("results/gecko/fl-shape_s0/run.db", "")
+    await writeRepoFile("results/gecko/fl-shape_s1/run.db", "")
+    await writeRepoFile("results/gecko/fl-shape_s1/metrics.csv", "a\n1\n")
+    await writeRepoFile("results/exp-a/plot.png", TINY_PNG)
+    await writeRepoFile("results/summary.json", "{}")
+  }
+
+  async function list(projectId: string) {
+    return h.caller.science.analysis.listFiles({ projectId, defaultResultsFolder: "results" })
+  }
+
+  test("auto-detect (the default): folders that hold data files are runs, grouped by their parent folder", async () => {
+    await writeGecko()
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    expect(experimentRuns(await list(project.id))).toEqual({
+      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0"],
+      "results/gecko/fl-shape_s1/run.db": ["gecko", "fl-shape_s1"],
+      "results/gecko/fl-shape_s1/metrics.csv": ["gecko", "fl-shape_s1"],
+      "results/exp-a/plot.png": [null, "exp-a"],
+      "results/summary.json": [null, null],
+    })
+    expect(await h.caller.science.analysis.getStructure({ projectId: project.id })).toEqual({
+      filePath: structurePath(),
+      defaultValue: "auto",
+      projectValue: null,
+    })
+  })
+
+  test("each preset groups the listing and is stored per project in the YAML file", async () => {
+    await writeGecko()
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const set = (value: string) =>
+      h.caller.science.analysis.setStructure({ projectId: project.id, value })
+
+    await set("one-folder-per-experiment")
+    expect(experimentRuns(await list(project.id))).toMatchObject({
+      "results/gecko/fl-shape_s0/run.db": ["gecko", null],
+      "results/exp-a/plot.png": ["exp-a", null],
+      "results/summary.json": [null, null],
+    })
+
+    await set("experiment-run")
+    expect(experimentRuns(await list(project.id))).toMatchObject({
+      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0"],
+      "results/exp-a/plot.png": ["exp-a", null],
+    })
+
+    const saved = await set("flat")
+    expect(saved).toEqual({ filePath: structurePath(), defaultValue: "auto", projectValue: "flat" })
+    expect(Object.values(experimentRuns(await list(project.id)))).toEqual(
+      Array(5).fill([null, null]),
+    )
+    const text = await readFile(structurePath(), "utf8")
+    expect(text).toContain("default: auto")
+    expect(text).toContain(`${project.repoPath}: flat`)
+
+    // Removing the project's entry uses the default again.
+    await h.caller.science.analysis.setStructure({ projectId: project.id, value: null })
+    expect(
+      (await h.caller.science.analysis.getStructure({ projectId: project.id })).projectValue,
+    ).toBeNull()
+    expect(experimentRuns(await list(project.id))["results/exp-a/plot.png"]).toEqual([
+      null,
+      "exp-a",
+    ])
+  })
+
+  test("the default from Settings applies to projects without their own entry", async () => {
+    await writeGecko()
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.science.analysis.setStructure({
+      projectId: null,
+      value: "one-folder-per-experiment",
+    })
+    expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
+      "gecko",
+      null,
+    ])
+    expect(await h.caller.science.analysis.getStructure({ projectId: null })).toMatchObject({
+      defaultValue: "one-folder-per-experiment",
+      projectValue: null,
+    })
+  })
+
+  test("a custom pattern matches folders, * and folder names", async () => {
+    await writeRepoFile("results/sweep/seeds/s0/a.csv", "a\n1\n")
+    await writeRepoFile("results/sweep/seeds/s1/deep/b.csv", "a\n1\n")
+    await writeRepoFile("results/other/c.csv", "a\n1\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.science.analysis.setStructure({
+      projectId: project.id,
+      value: "{experiment}/*/{run}/",
+    })
+    expect(experimentRuns(await list(project.id))).toEqual({
+      "results/sweep/seeds/s0/a.csv": ["sweep", "s0"],
+      "results/sweep/seeds/s1/deep/b.csv": ["sweep", "s1"],
+      "results/other/c.csv": ["other", null],
+    })
+    await h.caller.science.analysis.setStructure({
+      projectId: project.id,
+      value: "{experiment}/seeds/{run}",
+    })
+    expect(experimentRuns(await list(project.id))).toMatchObject({
+      "results/sweep/seeds/s0/a.csv": ["sweep", "s0"],
+      "results/other/c.csv": ["other", null],
+    })
+  })
+
+  test("an unknown preset or invalid pattern is refused and the file is not changed", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.science.analysis.setStructure({ projectId: project.id, value: "flat" })
+    const before = await readFile(structurePath(), "utf8")
+    for (const value of ["nested", "{experiment}/{experiment}", "a{run}", "*/x/"]) {
+      await expect(
+        h.caller.science.analysis.setStructure({ projectId: project.id, value }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    }
+    expect(await readFile(structurePath(), "utf8")).toBe(before)
+  })
+
+  test("an invalid YAML file or unknown preset in the file is a visible error, never a fallback", async () => {
+    await writeGecko()
+    const project = await h.caller.projects.open({ path: h.repoDir })
+
+    await writeFile(structurePath(), "default: [auto\nprojects: {\n")
+    await expect(list(project.id)).rejects.toThrow(structurePath())
+    await expect(
+      h.caller.science.analysis.getStructure({ projectId: project.id }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    // An invalid file is never overwritten.
+    await expect(
+      h.caller.science.analysis.setStructure({ projectId: project.id, value: "flat" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect(await readFile(structurePath(), "utf8")).toBe("default: [auto\nprojects: {\n")
+
+    await writeFile(structurePath(), `default: auto\nprojects:\n  ${project.repoPath}: nested\n`)
+    await expect(list(project.id)).rejects.toThrow(/Unknown experiments structure "nested"/)
+
+    await writeFile(structurePath(), "default: auto\nproject: {}\n")
+    await expect(list(project.id)).rejects.toThrow(/unknown key "project"/)
+
+    // A hand-written valid file is read as it is.
+    await writeFile(
+      structurePath(),
+      `# mine\ndefault: flat\nprojects:\n  "${project.repoPath}": "{experiment}/"\n`,
+    )
+    expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
+      "gecko",
+      null,
+    ])
+  })
+})
+
 describe("science.analysis.listFiles", () => {
   test("leaves out render output (_render) and Quarto's .quarto folder", async () => {
     await writeRepoFile("results/report.qmd", "# R\n")
@@ -349,6 +519,10 @@ describe("science.analysis.listFiles", () => {
     await writeRepoFile("data/outside.csv", "a\n1\n")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.science.analysis.setStructure({
+      projectId: project.id,
+      value: "one-folder-per-experiment",
+    })
     const listing = await h.caller.science.analysis.listFiles({
       projectId: project.id,
       defaultResultsFolder: "results",
@@ -403,9 +577,9 @@ describe("science.analysis.listFiles", () => {
     })
     expect(listing.resultsFolder).toBe("runs/out")
     expect(listing.overridden).toBe(true)
-    expect(listing.groups.flatMap((g) => g.files.map((f) => [f.relPath, f.experiment]))).toEqual([
-      ["runs/out/exp-c/log.txt", "exp-c"],
-    ])
+    expect(
+      listing.groups.flatMap((g) => g.files.map((f) => [f.relPath, f.experiment, f.run])),
+    ).toEqual([["runs/out/exp-c/log.txt", null, "exp-c"]])
 
     await h.caller.science.analysis.setResultsFolder({ projectId: project.id, dir: null })
     const reset = await h.caller.science.analysis.listFiles({
@@ -443,15 +617,17 @@ describe("science.analysis.listFiles", () => {
     })
     const byRel = Object.fromEntries(
       listing.groups.flatMap((group) =>
-        group.files.map((file) => [file.relPath, [file.experiment, file.inReportsFolder]] as const),
+        group.files.map(
+          (file) => [file.relPath, [file.experiment, file.run, file.inReportsFolder]] as const,
+        ),
       ),
     )
     expect(byRel).toEqual({
-      "results/exp-a/log.txt": ["exp-a", false],
-      // A reports/ folder inside the results folder stays an experiment.
-      "results/reports/inner.html": ["reports", false],
-      "reports/report.html": [null, true],
-      "reports/nested/summary.md": [null, true],
+      "results/exp-a/log.txt": [null, "exp-a", false],
+      // A reports/ folder inside the results folder stays a run of the results folder.
+      "results/reports/inner.html": [null, "reports", false],
+      "reports/report.html": [null, null, true],
+      "reports/nested/summary.md": [null, null, true],
     })
     expect(listing.total).toBe(4)
   })

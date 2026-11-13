@@ -111,14 +111,14 @@ function panelTabKey(view: SessionPanelView): string {
  * The right panel state of Analysis or Tasks (see {@link SciencePanelState}). It
  * starts open while `useResearchDiaryOpen` is on (the default), else collapsed; the
  * top bar diary button turns that value off when it hides the panel and on when it
- * opens it. The panel opens on the Diary tab the first time, then on the view's last
- * tab, kept for the app session (sessionStorage).
+ * opens it. The panel opens on `defaultTab` the first time (Sessions in Analysis, the
+ * Diary in Tasks), then on the view's last tab, kept for the app session (sessionStorage).
  */
-export function useSciencePanel(view: SessionPanelView): SciencePanelState {
+export function useSciencePanel(view: SessionPanelView, defaultTab: string): SciencePanelState {
   const [startOpen, setStartOpen] = useResearchDiaryOpen()
   const [collapsed, setCollapsed] = useState(!startOpen)
   const [documentsTab, setTab] = useState(
-    () => window.sessionStorage.getItem(panelTabKey(view)) ?? DIARY_TAB_ID,
+    () => window.sessionStorage.getItem(panelTabKey(view)) ?? defaultTab,
   )
   const setDocumentsTab = useCallback(
     (id: string) => {

@@ -206,7 +206,7 @@ describe("canonical PI Lab application icon", () => {
         expect(pixelAt(icon.pixels, icon.width, 512, 100)).toEqual([255, 255, 255, 255])
       } else {
         expect(symbol).toEqual([255, 255, 255, 255])
-        expect(pixelAt(icon.pixels, icon.width, 512, 100)).toEqual([48, 48, 48, 255])
+        expect(pixelAt(icon.pixels, icon.width, 512, 100)).toEqual([35, 35, 35, 255])
       }
     }
     expect(readFileSync(join(ICONS_DIR, "icon-alpha.png"))).not.toEqual(
