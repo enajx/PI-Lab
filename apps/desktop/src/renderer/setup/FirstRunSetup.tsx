@@ -220,21 +220,6 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             <h2 className="font-medium text-sm">{t("Appearance and notifications")}</h2>
             <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
               <label className="flex flex-col gap-1 text-xs">
-                <span>{t("Language")}</span>
-                <select
-                  aria-label={t("Language")}
-                  value={language}
-                  onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
-                  className={selectClass}
-                >
-                  {LANGUAGES.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
                 <span>{t("Theme")}</span>
                 <select
                   aria-label={t("Theme mode")}
@@ -385,7 +370,10 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             </div>
           </section>
 
-          <section className="rounded-lg border border-border bg-card p-3">
+          <section
+            data-testid="first-run-login-language"
+            className="grid gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-2"
+          >
             <div className="flex flex-col gap-1 text-xs">
               <h2 className="font-medium text-sm">{t("Start at login")}</h2>
               <div className="flex items-center gap-2">
@@ -418,6 +406,21 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 </span>
               </div>
             </div>
+            <label className="flex flex-col gap-1 text-xs">
+              <h2 className="font-medium text-sm">{t("Language")}</h2>
+              <select
+                aria-label={t("Language")}
+                value={language}
+                onChange={(event) => setLanguage(event.target.value as InterfaceLanguage)}
+                className={selectClass}
+              >
+                {LANGUAGES.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </section>
 
           {error ? (

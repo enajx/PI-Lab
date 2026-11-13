@@ -299,6 +299,14 @@ describe("FirstRunSetup", () => {
     expect(cards[cards.length - 1]?.contains(toggle)).toBe(true)
   })
 
+  test("shows Language next to Start at login in the last card", async () => {
+    renderSetup({ "system.startAtLogin": () => ({ enabled: false }) })
+    const language = await screen.findByLabelText("Language")
+    const card = screen.getByTestId("first-run-login-language")
+    expect(card.contains(language)).toBe(true)
+    expect(card.contains(screen.getByTestId("setup-start-at-login"))).toBe(true)
+  })
+
   test("finishes with the selected sound only after persistence succeeds", async () => {
     const completed: unknown[] = []
     const setup = renderSetup({
