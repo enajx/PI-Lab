@@ -11,7 +11,16 @@ import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { ChartArea, CloudDownload, FileCode2, FileText, Microscope, Search } from "lucide-react"
+import {
+  ChartArea,
+  ChevronRight,
+  CloudDownload,
+  FileCode2,
+  FileText,
+  Folder,
+  Microscope,
+  Search,
+} from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
@@ -41,6 +50,7 @@ import {
   SciencePanelDiaryButton,
   ScienceSessionPanel,
   type ScienceSessionRequest,
+  SESSIONS_TAB_ID,
   useFocusSessionRequest,
   useSciencePanel,
   useSciencePanelRow,
@@ -53,6 +63,8 @@ import {
 } from "../ScienceSessionPanel/panelFit"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
+import { ExperimentsStructureSelect } from "./components/ExperimentsStructure"
+import "./selectFolderPrompt.css"
 
 /** The preview column's smallest width in px, beside the resizable file list. */
 
@@ -60,8 +72,10 @@ import { AnalysisPreview } from "./components/AnalysisPreview"
  * Analysis science tab — a **read-only data
  * browser**: pick a project, browse the data/analysis files in its results
  * folder (`results/` by default, set in Settings; each project can choose its
- * own above the search). Each folder inside it is one experiment, and the list
- * is grouped by experiment, filtered by a search box and the category chips.
+ * own above the search). The list is grouped by experiment, with one row per
+ * run that opens to show the run's files, following the experiments folder
+ * structure (Auto-detect by default; set in Settings, and per project below
+ * the folder field). It is filtered by a search box and the category chips.
  * Preview a selected
  * file in a side pane. CSV/TSV render as a sampled table (or a line chart when
  * they look like a metric log), NumPy arrays as a chart (1-D) or grid (2-D),
@@ -107,7 +121,7 @@ export function ScienceAnalysis({
   const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
   const selectedProjectId = selectedProject?.id ?? null
   const [fetchInstructions] = useFetchExperimentsInstructions()
-  const userPanel = useSciencePanel("analysis")
+  const userPanel = useSciencePanel("analysis", SESSIONS_TAB_ID)
   const [savedFilesWidth, persistFilesWidth] = useAnalysisFilesWidth()
   const [filesWidth, setFilesWidth] = useState(savedFilesWidth)
   useEffect(() => setFilesWidth(savedFilesWidth), [savedFilesWidth])
@@ -281,25 +295,50 @@ export function ScienceAnalysis({
     return ranked
   }, [allFiles, query, categoryFilter, kindFilter])
 
-  // Re-group the filtered files by experiment (the folder inside the results
-  // folder), sorted by name, with "No experiment" (files directly in the
-  // results folder) last. Files of the project's reports/ folder form their own
-  // group after these. Within a group the ranking order is kept.
+  // Re-group the filtered files by experiment (group), sorted by name, with the
+  // no-experiment group last. Inside a group, runs (sorted by name, numbers in
+  // order) come before the loose files. Files of the project's reports/ folder
+  // form their own group after these. Within a run or the loose files the
+  // ranking order is kept.
   const filteredGroups = useMemo(() => {
-    const byExperiment = new Map<string | null, RankedAnalysisFile[]>()
+    const byExperiment = new Map<string | null, ExperimentGroup>()
     for (const rankedFile of filtered) {
       if (rankedFile.file.inReportsFolder) continue
-      const experiment = rankedFile.file.experiment
-      const bucket = byExperiment.get(experiment)
-      if (bucket) bucket.push(rankedFile)
-      else byExperiment.set(experiment, [rankedFile])
+      const { experiment, run } = rankedFile.file
+      let group = byExperiment.get(experiment)
+      if (!group) {
+        group = { experiment, runs: [], loose: [] }
+        byExperiment.set(experiment, group)
+      }
+      if (run === null) {
+        group.loose.push(rankedFile)
+        continue
+      }
+      const existing = group.runs.find((candidate) => candidate.run === run)
+      if (existing) existing.files.push(rankedFile)
+      else group.runs.push({ run, files: [rankedFile] })
+    }
+    for (const group of byExperiment.values()) {
+      group.runs.sort((a, b) => a.run.localeCompare(b.run, undefined, { numeric: true }))
     }
     const named = [...byExperiment.keys()]
       .filter((experiment): experiment is string => experiment !== null)
-      .sort((a, b) => a.localeCompare(b))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     const order: Array<string | null> = byExperiment.has(null) ? [...named, null] : named
-    return order.map((experiment) => ({ experiment, files: byExperiment.get(experiment) ?? [] }))
+    return order.flatMap((experiment) => {
+      const group = byExperiment.get(experiment)
+      return group ? [group] : []
+    })
   }, [filtered])
+  // Runs the user opened, by experiment and run. A search opens every run.
+  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(new Set())
+  const toggleRun = (key: string): void =>
+    setOpenRuns((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
   const filteredReports = useMemo(
     () => filtered.filter((rankedFile) => rankedFile.file.inReportsFolder),
     [filtered],
@@ -327,7 +366,7 @@ export function ScienceAnalysis({
       layout="cards"
       testId="science-analysis"
       title={t("Analysis")}
-      subtitle={t("Browse and preview the data files in a project's repo")}
+      subtitle={t("Experiments logs and visualisation")}
       actions={
         <>
           <HeaderShortcuts
@@ -503,6 +542,7 @@ export function ScienceAnalysis({
                         projectId={selectedProjectId}
                         resultsFolder={listing.data?.resultsFolder ?? null}
                         overridden={listing.data?.overridden === true}
+                        exists={listing.data?.exists ?? null}
                       />
                     ) : null}
                     <div className="relative">
@@ -607,7 +647,9 @@ export function ScienceAnalysis({
                             <span
                               data-testid="analysis-truncated"
                               className="text-[10px] text-amber-500"
-                              title={t("The repo has more data files than are shown")}
+                              title={t(
+                                "The results folder has more data files than are shown, so some runs may be missing",
+                              )}
                             >
                               {t("truncated")}
                             </span>
@@ -621,18 +663,53 @@ export function ScienceAnalysis({
                             data-experiment={group.experiment ?? ""}
                             className="flex flex-col gap-1"
                           >
-                            <div className="flex items-center gap-2 px-1">
-                              <span
-                                className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
-                                title={group.experiment ?? undefined}
-                              >
-                                {group.experiment ?? t("No experiment")}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground/50">
-                                {group.files.length}
-                              </span>
-                            </div>
-                            {fileRows(group.files)}
+                            {/* A flat list (one group, no experiment, no runs) has no header. */}
+                            {group.experiment === null &&
+                            group.runs.length === 0 &&
+                            filteredGroups.length === 1 ? null : (
+                              <div className="flex items-center gap-2 px-1">
+                                <span
+                                  className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
+                                  title={group.experiment ?? undefined}
+                                >
+                                  {group.experiment ??
+                                    (group.runs.length > 0
+                                      ? `${listing.data?.resultsFolder ?? ""}/`
+                                      : t("No experiment"))}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground/50">
+                                  {group.runs.length > 0 ? group.runs.length : group.loose.length}
+                                </span>
+                              </div>
+                            )}
+                            {group.runs.map((run) => {
+                              const key = `${group.experiment ?? ""}\u0000${run.run}`
+                              const open = query.trim() !== "" || openRuns.has(key)
+                              return (
+                                <div
+                                  key={key}
+                                  data-testid="analysis-run-block"
+                                  className="flex flex-col gap-1"
+                                >
+                                  <RunRow
+                                    run={run.run}
+                                    experiment={group.experiment}
+                                    fileCount={run.files.length}
+                                    open={open}
+                                    onToggle={() => toggleRun(key)}
+                                  />
+                                  {open ? (
+                                    <div
+                                      data-testid="analysis-run-files"
+                                      className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
+                                    >
+                                      {fileRows(run.files)}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              )
+                            })}
+                            {fileRows(group.loose)}
                           </div>
                         ))}
 
@@ -716,6 +793,62 @@ export function ScienceAnalysis({
         />
       ) : null}
     </ScienceTabShell>
+  )
+}
+
+/** The files of one run, in ranking order. */
+interface RunGroup {
+  run: string
+  files: RankedAnalysisFile[]
+}
+
+/** One experiment group of the list: its runs and its loose files. */
+interface ExperimentGroup {
+  experiment: string | null
+  runs: RunGroup[]
+  loose: RankedAnalysisFile[]
+}
+
+/** A run row: the run's folder name and file count; clicking shows or hides its files. */
+function RunRow({
+  run,
+  experiment,
+  fileCount,
+  open,
+  onToggle,
+}: {
+  run: string
+  experiment: string | null
+  fileCount: number
+  open: boolean
+  onToggle: () => void
+}) {
+  const t = useTranslate()
+  return (
+    <button
+      type="button"
+      data-testid="analysis-run"
+      data-run={run}
+      data-experiment={experiment ?? ""}
+      aria-expanded={open}
+      data-feature-label={run}
+      data-feature-help={t("Show or hide the files of this run.")}
+      onClick={onToggle}
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
+    >
+      <ChevronRight
+        className={cn(
+          "size-3.5 shrink-0 text-muted-foreground transition-transform",
+          open && "rotate-90",
+        )}
+        aria-hidden
+      />
+      <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1 truncate font-medium" title={run}>
+        {run}
+      </span>
+      <span className="shrink-0 text-[10px] text-muted-foreground/70">{fileCount}</span>
+    </button>
   )
 }
 
@@ -918,16 +1051,23 @@ function NoProjectsState() {
  * The results folder row above the file search: the folder Analysis lists,
  * "Change…" (folder picker; the router accepts only folders inside the
  * project and stores it for this project) and, when the project uses its own
- * folder, "Reset to default". A refused folder shows the reason.
+ * folder, "Reset to default". A refused folder shows the reason. When the
+ * folder does not exist (`exists: false`) no folder is shown; the one-liner
+ * "Select experiments folder" and an accent ring on its "Select…" button (it
+ * pulses a few times, then stays until clicked) point the user to it. Below
+ * it, the project's experiments folder structure.
  */
 function ResultsFolderField({
   projectId,
   resultsFolder,
   overridden,
+  exists,
 }: {
   projectId: string
   resultsFolder: string | null
   overridden: boolean
+  /** Whether the folder exists; null while the listing loads. */
+  exists: boolean | null
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -941,7 +1081,11 @@ function ResultsFolderField({
   const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
   const busy = setResultsFolder.isPending || pickDirectory.isPending
   const error = pickDirectory.error ?? setResultsFolder.error
+  const missing = exists === false
+  // The ring stays on the Select… button until it is clicked.
+  const [ringClicked, setRingClicked] = useState(false)
   const change = (): void => {
+    setRingClicked(true)
     setResultsFolder.reset()
     pickDirectory.mutate(undefined, {
       onSuccess: (dir) => {
@@ -957,25 +1101,35 @@ function ResultsFolderField({
         {t("Results folder")}
       </span>
       <div className="flex items-center gap-1.5">
-        <span
-          data-testid="analysis-results-folder-path"
-          className="min-w-0 flex-1 truncate font-mono text-xs"
-          title={resultsFolder === null ? undefined : `${resultsFolder}/`}
-        >
-          {resultsFolder === null ? "" : `${resultsFolder}/`}
-        </span>
+        {missing ? (
+          <span
+            data-testid="analysis-select-folder-prompt"
+            className="min-w-0 flex-1 truncate text-muted-foreground text-xs"
+          >
+            {t("Select experiments folder")}
+          </span>
+        ) : (
+          <span
+            data-testid="analysis-results-folder-path"
+            className="min-w-0 flex-1 truncate font-mono text-xs"
+            title={resultsFolder === null ? undefined : `${resultsFolder}/`}
+          >
+            {resultsFolder === null ? "" : `${resultsFolder}/`}
+          </span>
+        )}
         <button
           type="button"
           data-testid="analysis-results-folder-change"
+          data-highlighted={missing && !ringClicked}
           data-feature-label={t("Change results folder")}
           data-feature-help={t(
-            "Choose a folder inside the project to list in Analysis. Each folder inside it is one experiment.",
+            "Choose a folder inside the project to list in Analysis. Its folders are grouped by the experiments folder structure below.",
           )}
           disabled={busy}
           onClick={change}
-          className={buttonClass}
+          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-ring")}
         >
-          {t("Change…")}
+          {missing ? t("Select…") : t("Change…")}
         </button>
         {overridden ? (
           <button
@@ -1000,6 +1154,14 @@ function ResultsFolderField({
           {error.message}
         </p>
       ) : null}
+      <div className="flex min-w-0 items-start gap-1.5">
+        <span className="shrink-0 pt-0.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+          {t("Structure")}
+        </span>
+        <div className="min-w-0 flex-1">
+          <ExperimentsStructureSelect projectId={projectId} testId="analysis-structure" />
+        </div>
+      </div>
     </div>
   )
 }
@@ -1022,7 +1184,7 @@ function ResultsMissingState({ resultsFolder }: { resultsFolder: string }) {
             {t("No {folder} folder in this project").replace("{folder}", `${resultsFolder}/`)}
           </p>
           <p className="max-w-xs text-muted-foreground text-xs leading-relaxed">
-            {t("Use Change… above to choose the folder that holds the experiment results.")}
+            {t("Use Select… above to choose the folder that holds the experiment results.")}
           </p>
         </div>
       </div>

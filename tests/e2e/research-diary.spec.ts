@@ -166,8 +166,8 @@ test("saving the diary removes empty day headings already in the file", async ()
 
 /**
  * Real app and IPC: in Analysis the diary is the lower part of the one right
- * panel, below Sessions. The panel starts open with the diary showing. The top
- * bar diary button hides and shows the diary; the divider resizes the diary and
+ * panel, below Sessions. The panel starts open on the Sessions tab. The top
+ * bar diary button shows and hides the diary; the divider resizes the diary and
  * its share is saved; collapsing the panel hides both parts. After the diary was
  * hidden with the button, the next visit starts with the panel collapsed, and the
  * button opens it with the diary.
@@ -201,13 +201,17 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   const panel = window.getByTestId("science-sessions")
   const diary = panel.getByTestId("research-diary-panel")
   const diaryButton = topBar.getByTestId("analysis-research-diary")
-  // Open by default, with the diary showing.
+  // Open by default, on the Sessions tab.
   await expect(panel).toHaveAttribute("data-collapsed", "false")
-  await expect(diaryButton).toHaveAttribute("aria-pressed", "true")
-  await expect(diary.locator(".cm-content")).toContainText(today(), { timeout: 30_000 })
-  // One card: the project view's right sidebar with a Sessions tab first, on the Diary tab.
+  await expect(panel.getByTestId("panel-tab-sessions")).toHaveAttribute("aria-selected", "true")
+  await expect(diaryButton).toHaveAttribute("aria-pressed", "false")
+  // One card: the project view's right sidebar with a Sessions tab first.
   await expect(panel.getByTestId("right-sidebar")).toHaveCount(1)
   await expect(panel.getByRole("tab").first()).toHaveAttribute("data-testid", "panel-tab-sessions")
+  // The diary button shows the Diary tab.
+  await diaryButton.click()
+  await expect(diaryButton).toHaveAttribute("aria-pressed", "true")
+  await expect(diary.locator(".cm-content")).toContainText(today(), { timeout: 30_000 })
   await expect(panel.getByTestId("panel-tab-diary")).toHaveAttribute("aria-selected", "true")
   await window.screenshot({ path: join(SCREENS, "analysis-right-panel.png") })
 

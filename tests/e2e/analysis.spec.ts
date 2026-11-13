@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createServer, type Server } from "node:http"
 import { createRequire } from "node:module"
 import type { AddressInfo } from "node:net"
@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
+import { openAnalysisRun } from "./fixtures/analysis"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -180,7 +181,8 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
   // The tab renders, defaulting to the just-opened project.
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
-  // The repo's CSV appears in the file list.
+  // The repo's CSV appears in the file list, under its run (results/data/).
+  await openAnalysisRun(window, "data")
   const fileRow = window.locator(`[data-testid="analysis-file"][data-rel-path="${CSV_REL_PATH}"]`)
   await expect(fileRow).toBeVisible({ timeout: 30_000 })
   await expect(
@@ -196,7 +198,12 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
   await expect(table.locator("thead th").first()).toHaveText("epoch")
 })
 
-test("Analysis lists the results folder grouped by experiment and Change… picks another folder", async () => {
+test("Analysis lists one row per run grouped by experiment, the structure is set per project, and Change… picks another folder", async () => {
+  // Runs of the gecko experiment (written before Analysis first lists the folder).
+  for (const run of ["fl-shape_s0", "fl-shape_s1"]) {
+    await mkdir(join(repoDir, "results", "gecko", run), { recursive: true })
+    await writeFile(join(repoDir, "results", "gecko", run, "run.db"), "")
+  }
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
@@ -209,14 +216,22 @@ test("Analysis lists the results folder grouped by experiment and Change… pick
   })
   await expect(window.getByTestId("analysis-results-folder-reset")).toHaveCount(0)
 
-  // Each folder inside results/ is one experiment; files outside it are not listed.
+  // Auto-detect: the folders that hold data files are runs (one row each), grouped
+  // by their parent folder; a run's files show when its row is opened.
   const group = (experiment: string) =>
     window.locator(`[data-testid="analysis-experiment-group"][data-experiment="${experiment}"]`)
+  const runs = (experiment: string) =>
+    group(experiment)
+      .getByTestId("analysis-run")
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-run")))
+  await expect
+    .poll(() => runs("gecko"), { timeout: 30_000 })
+    .toEqual(["fl-shape_s0", "fl-shape_s1"])
+  expect(await runs("")).toEqual(["data", "exp-a", "exp-b", "reports"])
+  await expect(window.getByTestId("analysis-file")).toHaveCount(0)
+  await openAnalysisRun(window, "exp-a")
   await expect(
-    group("exp-a").locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]'),
-  ).toBeVisible({ timeout: 30_000 })
-  await expect(
-    group("exp-b").locator('[data-testid="analysis-file"][data-rel-path="results/exp-b/log.txt"]'),
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]'),
   ).toBeVisible()
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path="outside.csv"]'),
@@ -224,6 +239,7 @@ test("Analysis lists the results folder grouped by experiment and Change… pick
 
   // The category filters still narrow the results files.
   await window.getByTestId("analysis-category-image").click()
+  await expect(window.getByTestId("analysis-run")).toHaveCount(1)
   await expect(window.getByTestId("analysis-file")).toHaveCount(1)
   await expect(window.getByTestId("analysis-file")).toHaveAttribute(
     "data-rel-path",
@@ -232,20 +248,61 @@ test("Analysis lists the results folder grouped by experiment and Change… pick
   await window.getByTestId("analysis-category-all").click()
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-results.png") })
 
+  // The project's own structure, chosen below the folder field, is saved in the
+  // YAML file in PI Lab's data folder, keyed by the project path.
+  const structure = window.getByTestId("analysis-structure")
+  await expect(structure).toHaveValue("default")
+  await structure.selectOption("one-folder-per-experiment")
+  await expect(window.getByTestId("analysis-run")).toHaveCount(0)
+  await expect(
+    group("gecko").locator(
+      '[data-testid="analysis-file"][data-rel-path="results/gecko/fl-shape_s0/run.db"]',
+    ),
+  ).toBeVisible()
+  const yamlText = await readFile(join(dataDir, "experiments-structure.yaml"), "utf8")
+  expect(yamlText).toContain("default: auto")
+  expect(yamlText).toMatch(/projects:\n\s+.+repo: one-folder-per-experiment/)
+  await structure.selectOption("default")
+  await expect.poll(() => runs("gecko")).toEqual(["fl-shape_s0", "fl-shape_s1"])
+
   // Change… (test picker returns <project>/outputs) lists that folder for this project.
   await window.getByTestId("analysis-results-folder-change").click()
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("outputs/")
-  await expect(
-    group("exp-c").locator(
-      '[data-testid="analysis-file"][data-rel-path="outputs/exp-c/notes.txt"]',
-    ),
-  ).toBeVisible()
-  await expect(group("exp-a")).toHaveCount(0)
+  await expect.poll(() => runs("")).toEqual(["exp-c"])
+  await expect(group("gecko")).toHaveCount(0)
 
   // Reset to default goes back to results/.
   await window.getByTestId("analysis-results-folder-reset").click()
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/")
-  await expect(group("exp-a")).toBeVisible()
+  await expect(group("gecko")).toBeVisible()
+})
+
+test("with no results folder, Analysis shows no folder and points to Select experiments folder", async () => {
+  await rename(join(repoDir, "results"), join(repoDir, "old-results"))
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+
+  await expect(window.getByTestId("analysis-select-folder-prompt")).toHaveText(
+    "Select experiments folder",
+    { timeout: 30_000 },
+  )
+  await expect(window.getByTestId("analysis-results-folder-path")).toHaveCount(0)
+  const select = window.getByTestId("analysis-results-folder-change")
+  await expect(select).toHaveText("Select…")
+  await expect(select).toHaveAttribute("data-highlighted", "true")
+  // The accent ring is drawn (it pulses, then stays until the button is clicked).
+  expect(await select.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none")
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-select-folder.png") })
+
+  // Choosing a folder (the test picker returns <project>/outputs) lists it.
+  await select.click()
+  await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("outputs/")
+  await expect(window.getByTestId("analysis-select-folder-prompt")).toHaveCount(0)
+  await expect(window.getByTestId("analysis-results-folder-change")).toHaveText("Change…")
+  await expect(window.locator('[data-testid="analysis-run"][data-run="exp-c"]')).toBeVisible()
 })
 
 test("Report shows an error without the report skill, then starts the project's agent with it", async () => {
@@ -292,6 +349,7 @@ test("interactive HTML is sandboxed while scripts, relative assets, and network 
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
 
+  await openAnalysisRun(window, "reports")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/reports/interactive.html"]')
     .click()
@@ -317,6 +375,8 @@ test("marimo starts interactively, stops on artifact switch, and is reaped on ap
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
 
+  await openAnalysisRun(window, "reports")
+  await openAnalysisRun(window, "data")
   const marimoRow = window.locator(
     '[data-testid="analysis-file"][data-rel-path="results/reports/live.py"]',
   )
@@ -349,6 +409,7 @@ test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", asyn
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("analysis-new-marimo-notebook")).toHaveCount(0)
+  await openAnalysisRun(window, "reports")
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path="results/reports/live.py"]'),
   ).toBeVisible()
@@ -396,8 +457,8 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   const sidebar = panel.getByTestId("right-sidebar")
   await expect(sidebar).toBeVisible({ timeout: 30_000 })
-  // The panel opens on the Diary tab, and both side columns start at their minimums.
-  await expect(panel.getByTestId("panel-tab-diary")).toHaveAttribute("aria-selected", "true")
+  // The panel opens on the Sessions tab, and both side columns start at their minimums.
+  await expect(panel.getByTestId("panel-tab-sessions")).toHaveAttribute("aria-selected", "true")
   const filesBefore = await widthOf(files)
   const panelBefore = await widthOf(panel)
   expect(filesBefore).toBe(200)

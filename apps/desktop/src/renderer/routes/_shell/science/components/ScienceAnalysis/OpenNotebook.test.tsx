@@ -46,6 +46,7 @@ const NOTEBOOK_FILE = {
   name: "analysis.ipynb",
   kind: "notebook",
   experiment: "run",
+  run: null,
   inReportsFolder: false,
   size: 10,
   mtime: 0,

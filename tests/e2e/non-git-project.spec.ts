@@ -3,6 +3,7 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { openAnalysisRun } from "./fixtures/analysis"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -98,6 +99,7 @@ test("plain folders work and Git features unlock after Initialize Git", async ()
 
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await openAnalysisRun(window, "data")
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path="results/data/metrics.csv"]'),
   ).toBeVisible({ timeout: 30_000 })

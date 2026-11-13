@@ -10,6 +10,7 @@ import {
 import { type ParsedNotebook, parseIpynb } from "@pi-lab/shared/analysis/ipynb"
 import { walkWorkspace } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
+import type { ExperimentsStructure } from "./structure"
 
 /** Filesystem discovery and preview for Analysis, independent of the tRPC router. */
 
@@ -41,10 +42,12 @@ export interface DataFileEntry {
   size: number
   mtime: number
   /**
-   * The experiment the file belongs to: the name of the first folder under the
-   * listed root, or null for a file directly in the root ("No experiment").
+   * The group the file belongs to under the experiments folder structure (see
+   * {@link assignExperimentRun}), or null for no group ("No experiment").
    */
   experiment: string | null
+  /** The run (one row in the list) the file belongs to, or null for a loose file. */
+  run: string | null
   /** True for a file in the project's `reports/` folder, listed as its own group. */
   inReportsFolder: boolean
 }
@@ -72,14 +75,15 @@ export interface DataFileListing {
  * source-heavy directory cannot starve deeper results. `.zarr` directories are
  * collected as one metadata-only dataset and pruned. Paths are returned relative
  * to `repoPath`. For the results folder (`folder: "results"`) each entry's
- * experiment is its first folder under `rootPath`; for the project's reports
- * folder (`folder: "reports"`) entries have no experiment and are marked
- * `inReportsFolder`.
+ * experiment and run come from `structure` (see {@link assignExperimentRun});
+ * for the project's reports folder (`folder: "reports"`) entries have no
+ * experiment or run and are marked `inReportsFolder`.
  */
 export async function discoverDataFiles(
   repoPath: string,
   rootPath: string,
   folder: "results" | "reports",
+  structure: ExperimentsStructure,
 ): Promise<DataFileListing> {
   const walk = await walkAnalysisArtifacts(rootPath, MAX_LISTED_FILES + 1)
   const candidates = walk.artifacts
@@ -92,8 +96,11 @@ export async function discoverDataFiles(
     const relPath = toPosix(relative(repoPath, abs))
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
     const underRoot = toPosix(relative(rootPath, abs))
-    const slash = underRoot.indexOf("/")
-    const experiment = folder === "results" && slash >= 0 ? underRoot.slice(0, slash) : null
+    const folders = underRoot.split("/").slice(0, -1)
+    const { experiment, run } =
+      folder === "results"
+        ? assignExperimentRun(folders, structure)
+        : { experiment: null, run: null }
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
@@ -109,6 +116,7 @@ export async function discoverDataFiles(
       size: info.size,
       mtime: info.mtimeMs,
       experiment,
+      run,
       inReportsFolder: folder === "reports",
     })
   }
@@ -129,6 +137,43 @@ export async function discoverDataFiles(
   }
 
   return { groups, total: entries.length, truncated, partial: skipped.length > 0, skipped }
+}
+
+/**
+ * The experiment (group) and run of a file from the folders between the
+ * results folder and the file (`folders`, outermost first).
+ *
+ * - `auto`: every folder that holds data files is a run, grouped by its parent
+ *   folder (its path under the results folder, or null when the parent is the
+ *   results folder). For `gecko/fl-shape_s0/run.db` the group is `gecko` and
+ *   the run `fl-shape_s0`. Files directly in the results folder are loose.
+ * - `flat`: no group, no run.
+ * - `pattern`: the leading folders are matched segment by segment; a file whose
+ *   folders do not match a literal segment is loose with no group. A file
+ *   above a placeholder's depth leaves that placeholder null.
+ */
+export function assignExperimentRun(
+  folders: string[],
+  structure: ExperimentsStructure,
+): { experiment: string | null; run: string | null } {
+  if (structure.kind === "flat" || folders.length === 0) return { experiment: null, run: null }
+  if (structure.kind === "auto") {
+    const parent = folders.slice(0, -1)
+    return {
+      experiment: parent.length === 0 ? null : parent.join("/"),
+      run: folders[folders.length - 1] ?? null,
+    }
+  }
+  let experiment: string | null = null
+  let run: string | null = null
+  for (const [index, segment] of structure.segments.entries()) {
+    const name = folders[index]
+    if (name === undefined) break
+    if (segment === "{experiment}") experiment = name
+    else if (segment === "{run}") run = name
+    else if (segment !== "*" && segment !== name) return { experiment: null, run: null }
+  }
+  return { experiment, run }
 }
 
 interface AnalysisArtifactCandidate {

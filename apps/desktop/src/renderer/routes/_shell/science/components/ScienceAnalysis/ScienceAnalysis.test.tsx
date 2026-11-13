@@ -33,7 +33,14 @@ function renderAnalysis(
   focusSession?: FocusSessionRequest,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const client = createFakeTrpcClient(handlers)
+  const client = createFakeTrpcClient({
+    "science.analysis.getStructure": () => ({
+      filePath: "/data/experiments-structure.yaml",
+      defaultValue: "auto",
+      projectValue: null,
+    }),
+    ...handlers,
+  })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
       <ScienceAnalysis initialProjectId={initialProjectId} focusSession={focusSession ?? null} />
@@ -70,6 +77,7 @@ function listing(
     name: string
     kind: string
     experiment?: string | null
+    run?: string | null
     inReportsFolder?: boolean
   }>,
 ) {
@@ -86,6 +94,7 @@ function listing(
       files: fs.map((f) => ({
         ...f,
         experiment: f.experiment ?? null,
+        run: f.run ?? null,
         inReportsFolder: f.inReportsFolder ?? false,
         size: 10,
         mtime: 0,
@@ -137,7 +146,7 @@ describe("ScienceAnalysis", () => {
     setInterfaceLanguage("zh-CN")
     renderAnalysis({ "projects.list": () => [] })
 
-    expect(await screen.findByText("浏览和预览项目仓库中的数据文件")).toBeTruthy()
+    expect(await screen.findByText("实验日志与可视化")).toBeTruthy()
     expect(screen.getByText("没有打开的项目")).toBeTruthy()
   })
 
@@ -296,6 +305,138 @@ describe("ScienceAnalysis", () => {
     ).toBeTruthy()
   })
 
+  test("lists one row per run, grouped by experiment, and a run row shows its files", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          {
+            relPath: "results/gecko/fl-shape_s1/run.db",
+            name: "run.db",
+            kind: "sqlite",
+            experiment: "gecko",
+            run: "fl-shape_s1",
+          },
+          {
+            relPath: "results/gecko/fl-shape_s0/run.db",
+            name: "run.db",
+            kind: "sqlite",
+            experiment: "gecko",
+            run: "fl-shape_s0",
+          },
+          {
+            relPath: "results/gecko/fl-shape_s0/metrics.csv",
+            name: "metrics.csv",
+            kind: "csv",
+            experiment: "gecko",
+            run: "fl-shape_s0",
+          },
+          { relPath: "results/exp-a/plot.png", name: "plot.png", kind: "image", run: "exp-a" },
+          { relPath: "results/summary.json", name: "summary.json", kind: "json" },
+        ]),
+    })
+    await waitFor(() => expect(screen.getAllByTestId("analysis-run")).toHaveLength(3))
+    const groups = screen.getAllByTestId("analysis-experiment-group")
+    expect(groups.map((group) => group.getAttribute("data-experiment"))).toEqual(["gecko", ""])
+    expect(
+      within(groups[0] as HTMLElement)
+        .getAllByTestId("analysis-run")
+        .map((row) => row.dataset.run),
+    ).toEqual(["fl-shape_s0", "fl-shape_s1"])
+    // Runs at the top of the results folder sit under its name; loose files stay rows.
+    expect(within(groups[1] as HTMLElement).getByText("results/")).toBeTruthy()
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "results/summary.json",
+    ])
+
+    // A run row shows its files, and hides them again.
+    const run = within(groups[0] as HTMLElement).getAllByTestId("analysis-run")[0] as HTMLElement
+    fireEvent.click(run)
+    expect(run.getAttribute("aria-expanded")).toBe("true")
+    expect(
+      within(groups[0] as HTMLElement)
+        .getAllByTestId("analysis-file")
+        .map((row) => row.dataset.relPath)
+        .sort(),
+    ).toEqual(["results/gecko/fl-shape_s0/metrics.csv", "results/gecko/fl-shape_s0/run.db"])
+    fireEvent.click(run)
+    expect(within(groups[0] as HTMLElement).queryAllByTestId("analysis-file")).toHaveLength(0)
+
+    // A search opens the runs that match.
+    fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "metrics" } })
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "results/gecko/fl-shape_s0/metrics.csv",
+    ])
+  })
+
+  test("with no experiments folder, no folder is shown and Select… is highlighted until clicked", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({ ...listing([]), exists: false }),
+      "system.pickDirectory": () => null,
+    })
+    const prompt = await screen.findByTestId("analysis-select-folder-prompt")
+    expect(prompt.textContent).toBe("Select experiments folder")
+    expect(screen.queryByTestId("analysis-results-folder-path")).toBeNull()
+    const button = screen.getByTestId("analysis-results-folder-change")
+    expect(button.textContent).toBe("Select…")
+    expect(button.getAttribute("data-highlighted")).toBe("true")
+    expect(button.className).toContain("analysis-select-folder-ring")
+    fireEvent.click(button)
+    expect(button.getAttribute("data-highlighted")).toBe("false")
+    expect(button.className).not.toContain("analysis-select-folder-ring")
+    // The prompt stays until a folder is chosen.
+    expect(screen.getByTestId("analysis-select-folder-prompt")).toBeTruthy()
+  })
+
+  test("the project's structure is chosen below the folder field and saved for the project", async () => {
+    const setStructure = vi.fn(() => ({
+      filePath: "/data/experiments-structure.yaml",
+      defaultValue: "auto",
+      projectValue: "experiment-run",
+    }))
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => listing([]),
+      "science.analysis.setStructure": setStructure,
+    })
+    const select = (await screen.findByTestId("analysis-structure")) as HTMLSelectElement
+    await waitFor(() => expect(select.value).toBe("default"))
+    expect(within(select).getByText("Default (Auto-detect)")).toBeTruthy()
+    expect(select.title).toContain("/data/experiments-structure.yaml")
+    fireEvent.change(select, { target: { value: "experiment-run" } })
+    await waitFor(() =>
+      expect(setStructure).toHaveBeenCalledWith({ projectId: "p1", value: "experiment-run" }),
+    )
+
+    fireEvent.change(select, { target: { value: "custom" } })
+    const pattern = screen.getByTestId("analysis-structure-pattern") as HTMLInputElement
+    fireEvent.change(pattern, { target: { value: "{experiment}/seeds/{run}/" } })
+    fireEvent.click(screen.getByTestId("analysis-structure-pattern-save"))
+    await waitFor(() =>
+      expect(setStructure).toHaveBeenCalledWith({
+        projectId: "p1",
+        value: "{experiment}/seeds/{run}/",
+      }),
+    )
+  })
+
+  test("an invalid structure file shows its error in Analysis", async () => {
+    const message =
+      "Invalid experiments structure file /data/experiments-structure.yaml: bad indentation"
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => {
+        throw new Error(message)
+      },
+      "science.analysis.getStructure": () => {
+        throw new Error(message)
+      },
+    })
+    expect((await screen.findByTestId("analysis-structure-error")).textContent).toBe(message)
+    expect((await screen.findByTestId("analysis-list-error")).textContent).toContain(message)
+  })
+
   test("a missing results folder still lists the reports/ folder below the notice", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
@@ -324,7 +465,7 @@ describe("ScienceAnalysis", () => {
     })
     const missing = await screen.findByTestId("analysis-results-missing")
     expect(missing.textContent).toContain("No results/ folder in this project")
-    expect(missing.textContent).toContain("Use Change… above")
+    expect(missing.textContent).toContain("Use Select… above")
     // The notice is in the preview card; the file list card keeps the folder field.
     expect(screen.getByTestId("analysis-preview-column").contains(missing)).toBe(true)
     expect(screen.queryByTestId("analysis-no-selection")).toBeNull()
@@ -369,9 +510,8 @@ describe("ScienceAnalysis", () => {
     await waitFor(() =>
       expect(setResultsFolder).toHaveBeenLastCalledWith({ projectId: "p1", dir: null }),
     )
-    await waitFor(() =>
-      expect(screen.getByTestId("analysis-results-folder-path").textContent).toBe("results/"),
-    )
+    // The default results/ does not exist in this project, so no folder is shown.
+    expect(await screen.findByTestId("analysis-select-folder-prompt")).toBeTruthy()
     expect(screen.queryByTestId("analysis-results-folder-reset")).toBeNull()
   })
 
@@ -872,10 +1012,11 @@ describe("ScienceAnalysis", () => {
       expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("a.csv")
     })
     fireEvent.click(select)
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "alpha",
-      "beta",
-    ])
+    expect(
+      within(screen.getByRole("listbox"))
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["alpha", "beta"])
 
     fireEvent.click(screen.getByRole("option", { name: "beta" }))
     expect(mocks.navigate).toHaveBeenCalledWith({
