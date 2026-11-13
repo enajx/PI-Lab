@@ -410,8 +410,13 @@ export function CentralPanel({
               fallback={<p className="p-4 text-muted-foreground text-xs">Loading PDF viewer…</p>}
             >
               <PdfViewer
-                client={client}
-                workspaceId={workspaceId}
+                source={{
+                  stat: () => client.files.stat.query({ workspaceId, relPath: tab.relPath }),
+                  read: () => client.pdf.read.query({ workspaceId, relPath: tab.relPath }),
+                  reverseSync: (point) =>
+                    client.pdf.reverseSync.mutate({ workspaceId, relPath: tab.relPath, ...point }),
+                }}
+                sourceKey={workspaceId}
                 relPath={tab.relPath}
                 location={pdfLocation}
                 onSource={navigateSource}

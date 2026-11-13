@@ -1,11 +1,9 @@
 import {
   ALL_DATA_FILE_CATEGORIES,
-  ALL_DATA_FILE_KINDS,
   categoryOf,
   DATA_FILE_CATEGORY_LABELS,
-  DATA_FILE_KIND_LABELS,
   type DataFileCategory,
-  type DataFileKind,
+  fileFormatOf,
 } from "@pi-lab/shared/analysis/file-kind"
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
@@ -21,7 +19,7 @@ import {
   Microscope,
   Search,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import {
@@ -73,19 +71,21 @@ import "./selectFolderPrompt.css"
  * Analysis science tab — a **read-only data
  * browser**: pick a project, browse the data/analysis files in its results
  * folder (`results/` by default, set in Settings; each project can choose its
- * own above the search). The list is grouped by experiment, with one row per
- * run that opens to show the run's files, following the experiments folder
- * structure (Auto-detect by default; set in Settings, and per project below
- * the folder field). It is filtered by a search box and the category chips.
+ * own above the search). The list has one row per experiment (a file's
+ * `listGroup`: its experiment, else its run), collapsed, that opens to show
+ * its files, following the experiments folder structure (Auto-detect by
+ * default; set in Settings, and per project below the folder field). It is
+ * filtered by a search box, which opens the matching experiments, and the
+ * category chips.
  * Preview a selected
  * file in a side pane. CSV/TSV render as a sampled table (or a line chart when
  * they look like a metric log), NumPy arrays as a chart (1-D) or grid (2-D),
  * images inline, JSON pretty-printed, text as a head; everything else shows a
  * metadata card.
  *
- * Top-level filter chips are coarse {@link DataFileCategory}s (Data, Images, …);
- * selecting a category that spans more than one sub-format reveals a second row
- * of sub-format bubbles (e.g. CSV / NumPy under Data) to narrow further.
+ * The filter chips are {@link DataFileCategory}s (Data, Figures, Markup, Logs, …),
+ * only those present. A chip whose category has several formats present opens
+ * a small sub-list to pick one format (e.g. Figures: PDF, PNG, SVG) or all.
  *
  * A project picker in the top bar remembers the last project; `initialProjectId`
  * (from `?projectId=`) selects one and becomes the remembered one, and the picker
@@ -149,9 +149,17 @@ export function ScienceAnalysis({
       : t("Initialize Git to run Git-state-aware project routines.")
 
   const [query, setQuery] = useState("")
-  // Top-level filter is a category; an optional sub-kind narrows within it.
+  // The filter is a category; an optional format (file extension) narrows within it.
   const [categoryFilter, setCategoryFilter] = useState<DataFileCategory | "all">("all")
-  const [kindFilter, setKindFilter] = useState<DataFileKind | null>(null)
+  const [formatFilter, setFormatFilter] = useState<string | null>(null)
+  const [formatMenuOpen, setFormatMenuOpen] = useState(false)
+  // Another project starts with no filter, since its categories may differ.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the project changes.
+  useEffect(() => {
+    setCategoryFilter("all")
+    setFormatFilter(null)
+    setFormatMenuOpen(false)
+  }, [selectedProjectId])
   const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   // A session a top bar button started, until the session panel opens it.
@@ -258,22 +266,25 @@ export function ScienceAnalysis({
     return ALL_DATA_FILE_CATEGORIES.filter((c) => set.has(c))
   }, [allFiles])
 
-  // Sub-kinds present within the selected category, in canonical order. Only a
-  // category with more than one is offered as a row of sub-format bubbles.
-  const subKindsPresent = useMemo(() => {
-    if (categoryFilter === "all") return []
-    const set = new Set<DataFileKind>(
-      allFiles.filter((f) => categoryOf(f.kind) === categoryFilter).map((f) => f.kind),
-    )
-    return ALL_DATA_FILE_KINDS.filter((k) => set.has(k))
-  }, [allFiles, categoryFilter])
+  // Formats present in each category, sorted. A category with more than one
+  // offers them in its chip's sub-list.
+  const formatsByCategory = useMemo(() => {
+    const sets = new Map<DataFileCategory, Set<string>>()
+    for (const file of allFiles) {
+      const category = categoryOf(file.kind)
+      const set = sets.get(category) ?? new Set<string>()
+      set.add(fileFormatOf(file.relPath))
+      sets.set(category, set)
+    }
+    return new Map([...sets].map(([category, set]) => [category, [...set].sort()]))
+  }, [allFiles])
 
   const filtered = useMemo(() => {
     const needle = query.trim()
     const ranked: RankedAnalysisFile[] = []
     for (const file of allFiles) {
       if (categoryFilter !== "all" && categoryOf(file.kind) !== categoryFilter) continue
-      if (kindFilter !== null && file.kind !== kindFilter) continue
+      if (formatFilter !== null && fileFormatOf(file.relPath) !== formatFilter) continue
 
       const nameMatch = fuzzyMatch(needle, file.name)
       const pathMatch = fuzzyMatch(needle, file.relPath)
@@ -295,56 +306,60 @@ export function ScienceAnalysis({
         a.file.relPath.localeCompare(b.file.relPath),
     )
     return ranked
-  }, [allFiles, query, categoryFilter, kindFilter])
+  }, [allFiles, query, categoryFilter, formatFilter])
 
-  // Re-group the filtered files by experiment (group), sorted by name, with the
-  // no-experiment group last. Inside a group, runs (sorted by name, numbers in
-  // order) come before the loose files. Files of the project's reports/ folder
-  // form their own group after these. Within a run or the loose files the
-  // ranking order is kept.
-  const filteredGroups = useMemo(() => {
-    const byExperiment = new Map<string | null, ExperimentGroup>()
+  // Re-group the filtered files into the list's rows: one per experiment
+  // (`listGroup`), sorted by name (numbers in order), with the loose files
+  // ("No experiment") last, then the project's reports/ folder. Within a row
+  // the ranking order is kept.
+  const rows = useMemo<ListRow[]>(() => {
+    const byGroup = new Map<string | null, RankedAnalysisFile[]>()
+    const reports: RankedAnalysisFile[] = []
     for (const rankedFile of filtered) {
-      if (rankedFile.file.inReportsFolder) continue
-      const { experiment, run } = rankedFile.file
-      let group = byExperiment.get(experiment)
-      if (!group) {
-        group = { experiment, runs: [], loose: [] }
-        byExperiment.set(experiment, group)
-      }
-      if (run === null) {
-        group.loose.push(rankedFile)
+      if (rankedFile.file.inReportsFolder) {
+        reports.push(rankedFile)
         continue
       }
-      const existing = group.runs.find((candidate) => candidate.run === run)
-      if (existing) existing.files.push(rankedFile)
-      else group.runs.push({ run, files: [rankedFile] })
+      const key = rankedFile.file.listGroup
+      const files = byGroup.get(key)
+      if (files) files.push(rankedFile)
+      else byGroup.set(key, [rankedFile])
     }
-    for (const group of byExperiment.values()) {
-      group.runs.sort((a, b) => a.run.localeCompare(b.run, undefined, { numeric: true }))
-    }
-    const named = [...byExperiment.keys()]
-      .filter((experiment): experiment is string => experiment !== null)
+    const named = [...byGroup.keys()]
+      .filter((key): key is string => key !== null)
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    const order: Array<string | null> = byExperiment.has(null) ? [...named, null] : named
-    return order.flatMap((experiment) => {
-      const group = byExperiment.get(experiment)
-      return group ? [group] : []
-    })
-  }, [filtered])
-  // Runs the user opened, by experiment and run. A search opens every run.
-  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(new Set())
-  const toggleRun = (key: string): void =>
-    setOpenRuns((current) => {
+    const order: Array<string | null> = byGroup.has(null) ? [...named, null] : named
+    const truncated = listing.data?.truncatedGroups ?? []
+    const result: ListRow[] = order.map((listGroup) => ({
+      id: `results\u0000${listGroup ?? ""}`,
+      listGroup,
+      inReportsFolder: false,
+      files: byGroup.get(listGroup) ?? [],
+      truncated: truncated.some((group) => group.listGroup === listGroup && !group.inReportsFolder),
+    }))
+    if (reports.length > 0) {
+      result.push({
+        id: "reports",
+        listGroup: null,
+        inReportsFolder: true,
+        files: reports,
+        truncated: truncated.some((group) => group.inReportsFolder),
+      })
+    }
+    return result
+  }, [filtered, listing.data])
+  // A list with only the loose results files (a flat list) shows them with no row.
+  const onlyLooseFiles =
+    rows.length === 1 && rows[0]?.listGroup === null && rows[0].inReportsFolder === false
+  // Rows the user opened. A search opens every row with a match.
+  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set())
+  const toggleRow = (id: string): void =>
+    setOpenRows((current) => {
       const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
-  const filteredReports = useMemo(
-    () => filtered.filter((rankedFile) => rankedFile.file.inReportsFolder),
-    [filtered],
-  )
   const fileRows = (files: RankedAnalysisFile[]) =>
     files.map((rankedFile) => (
       <FileRow
@@ -357,10 +372,13 @@ export function ScienceAnalysis({
       />
     ))
 
-  // Selecting a category clears any narrower sub-kind; "All" clears both.
+  // Selecting a category clears any narrower format; "All" clears both. A
+  // category with several formats opens its sub-list; clicking it again closes it.
   const selectCategory = (category: DataFileCategory | "all") => {
+    const formats = category === "all" ? [] : (formatsByCategory.get(category) ?? [])
+    setFormatMenuOpen(formats.length > 1 && !(categoryFilter === category && formatMenuOpen))
+    if (categoryFilter !== category) setFormatFilter(null)
     setCategoryFilter(category)
-    setKindFilter(null)
   }
 
   return (
@@ -570,35 +588,40 @@ export function ScienceAnalysis({
                           active={categoryFilter === "all"}
                           onClick={() => selectCategory("all")}
                           testId="analysis-category-all"
+                          hasFormats={false}
                         />
-                        {categoriesPresent.map((category) => (
-                          <FilterChip
-                            key={category}
-                            label={t(DATA_FILE_CATEGORY_LABELS[category])}
-                            active={categoryFilter === category}
-                            onClick={() => selectCategory(category)}
-                            testId={`analysis-category-${category}`}
-                          />
-                        ))}
-                      </div>
-                    ) : null}
-                    {subKindsPresent.length > 1 ? (
-                      <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
-                        <FilterChip
-                          label={t("All")}
-                          active={kindFilter === null}
-                          onClick={() => setKindFilter(null)}
-                          testId="analysis-subkind-all"
-                        />
-                        {subKindsPresent.map((kind) => (
-                          <FilterChip
-                            key={kind}
-                            label={t(DATA_FILE_KIND_LABELS[kind])}
-                            active={kindFilter === kind}
-                            onClick={() => setKindFilter(kind)}
-                            testId={`analysis-subkind-${kind}`}
-                          />
-                        ))}
+                        {categoriesPresent.map((category) => {
+                          const formats = formatsByCategory.get(category) ?? []
+                          const active = categoryFilter === category
+                          const label = t(DATA_FILE_CATEGORY_LABELS[category])
+                          return (
+                            <div key={category} className="relative">
+                              <FilterChip
+                                label={
+                                  active && formatFilter !== null
+                                    ? `${label}: ${formatFilter.toUpperCase()}`
+                                    : label
+                                }
+                                active={active}
+                                onClick={() => selectCategory(category)}
+                                testId={`analysis-category-${category}`}
+                                hasFormats={formats.length > 1}
+                              />
+                              {active && formatMenuOpen ? (
+                                <FormatMenu
+                                  allLabel={`${t("All")} ${label.toLowerCase()}`}
+                                  formats={formats}
+                                  selected={formatFilter}
+                                  onPick={(format) => {
+                                    setFormatFilter(format)
+                                    setFormatMenuOpen(false)
+                                  }}
+                                  onClose={() => setFormatMenuOpen(false)}
+                                />
+                              ) : null}
+                            </div>
+                          )
+                        })}
                       </div>
                     ) : null}
                   </div>
@@ -638,103 +661,54 @@ export function ScienceAnalysis({
                             )}
                           </p>
                         ) : null}
-                        <div className="flex items-center justify-between px-1">
-                          <span
-                            data-testid="analysis-file-count"
-                            className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
-                          >
-                            {filtered.length} {t("of")} {allFiles.length} {t("files")}
-                          </span>
-                          {listing.data?.truncated ? (
-                            <span
-                              data-testid="analysis-truncated"
-                              className="text-[10px] text-amber-500"
-                              title={t(
-                                "The results folder has more data files than are shown, so some runs may be missing",
-                              )}
-                            >
-                              {t("truncated")}
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {filteredGroups.map((group) => (
-                          <div
-                            key={group.experiment ?? ""}
-                            data-testid="analysis-experiment-group"
-                            data-experiment={group.experiment ?? ""}
-                            className="flex flex-col gap-1"
-                          >
-                            {/* A flat list (one group, no experiment, no runs) has no header. */}
-                            {group.experiment === null &&
-                            group.runs.length === 0 &&
-                            filteredGroups.length === 1 ? null : (
-                              <div className="flex items-center gap-2 px-1">
-                                {/* A long label wraps (after a "/" first) and shows in full on hover. */}
-                                <span
-                                  data-testid="analysis-group-label"
-                                  className="min-w-0 font-medium text-[10px] text-muted-foreground uppercase tracking-wider [overflow-wrap:anywhere]"
-                                  title={group.experiment ?? undefined}
-                                >
-                                  {group.experiment === null ? (
-                                    group.runs.length > 0 ? (
-                                      `${listing.data?.resultsFolder ?? ""}/`
-                                    ) : (
-                                      t("No experiment")
-                                    )
-                                  ) : (
-                                    <PathWithBreaks path={group.experiment} />
-                                  )}
-                                </span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground/50">
-                                  {group.runs.length > 0 ? group.runs.length : group.loose.length}
-                                </span>
+                        {onlyLooseFiles && rows[0] ? (
+                          <div data-testid="analysis-flat-files" className="flex flex-col gap-1">
+                            {rows[0].truncated ? <TruncatedNotice /> : null}
+                            {fileRows(rows[0].files)}
+                          </div>
+                        ) : (
+                          rows.map((row) => {
+                            const open = query.trim() !== "" || openRows.has(row.id)
+                            const label = row.inReportsFolder
+                              ? t("Reports (reports/)")
+                              : row.listGroup === null
+                                ? t("No experiment")
+                                : row.listGroup
+                            return (
+                              <div
+                                key={row.id}
+                                data-testid={
+                                  row.inReportsFolder
+                                    ? "analysis-reports-group"
+                                    : "analysis-experiment-group"
+                                }
+                                data-experiment={
+                                  row.inReportsFolder ? "reports/" : (row.listGroup ?? "")
+                                }
+                                className="flex flex-col gap-1"
+                              >
+                                <ExperimentRow
+                                  experiment={
+                                    row.inReportsFolder ? "reports/" : (row.listGroup ?? "")
+                                  }
+                                  label={label}
+                                  isPath={!row.inReportsFolder && row.listGroup !== null}
+                                  open={open}
+                                  onToggle={() => toggleRow(row.id)}
+                                />
+                                {open ? (
+                                  <div
+                                    data-testid="analysis-experiment-files"
+                                    className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
+                                  >
+                                    {row.truncated ? <TruncatedNotice /> : null}
+                                    {fileRows(row.files)}
+                                  </div>
+                                ) : null}
                               </div>
-                            )}
-                            {group.runs.map((run) => {
-                              const key = `${group.experiment ?? ""}\u0000${run.run}`
-                              const open = query.trim() !== "" || openRuns.has(key)
-                              return (
-                                <div
-                                  key={key}
-                                  data-testid="analysis-run-block"
-                                  className="flex flex-col gap-1"
-                                >
-                                  <RunRow
-                                    run={run.run}
-                                    experiment={group.experiment}
-                                    fileCount={run.files.length}
-                                    open={open}
-                                    onToggle={() => toggleRun(key)}
-                                  />
-                                  {open ? (
-                                    <div
-                                      data-testid="analysis-run-files"
-                                      className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
-                                    >
-                                      {fileRows(run.files)}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              )
-                            })}
-                            {fileRows(group.loose)}
-                          </div>
-                        ))}
-
-                        {filteredReports.length > 0 ? (
-                          <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2 px-1">
-                              <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                                {t("Reports (reports/)")}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground/50">
-                                {filteredReports.length}
-                              </span>
-                            </div>
-                            {fileRows(filteredReports)}
-                          </div>
-                        ) : null}
+                            )
+                          })
+                        )}
 
                         {filtered.length === 0 && allFiles.length > 0 ? (
                           <p
@@ -821,30 +795,33 @@ function PathWithBreaks({ path }: { path: string }) {
   ))
 }
 
-/** The files of one run, in ranking order. */
-interface RunGroup {
-  run: string
+/** One row of the file list: an experiment (or the loose files, or reports/) and its files. */
+interface ListRow {
+  /** Unique id, also the key of its open state. */
+  id: string
+  /** The experiment, else the run, of its files (null for the loose files). */
+  listGroup: string | null
+  /** True for the project's reports/ folder. */
+  inReportsFolder: boolean
+  /** Its files that pass the filters, in ranking order. */
   files: RankedAnalysisFile[]
+  /** True when the listing kept only the row's first files. */
+  truncated: boolean
 }
 
-/** One experiment group of the list: its runs and its loose files. */
-interface ExperimentGroup {
-  experiment: string | null
-  runs: RunGroup[]
-  loose: RankedAnalysisFile[]
-}
-
-/** A run row: the run's folder name and file count; clicking shows or hides its files. */
-function RunRow({
-  run,
+/** An experiment row: its name, no count; clicking shows or hides its files. */
+function ExperimentRow({
   experiment,
-  fileCount,
+  label,
+  isPath,
   open,
   onToggle,
 }: {
-  run: string
-  experiment: string | null
-  fileCount: number
+  /** The `data-experiment` value: the experiment, "" for none, "reports/" for reports/. */
+  experiment: string
+  label: string
+  /** True when `label` is a folder path (it then wraps after each "/"). */
+  isPath: boolean
   open: boolean
   onToggle: () => void
 }) {
@@ -852,12 +829,11 @@ function RunRow({
   return (
     <button
       type="button"
-      data-testid="analysis-run"
-      data-run={run}
-      data-experiment={experiment ?? ""}
+      data-testid="analysis-experiment"
+      data-experiment={experiment}
       aria-expanded={open}
-      data-feature-label={run}
-      data-feature-help={t("Show or hide the files of this run.")}
+      data-feature-label={label}
+      data-feature-help={t("Show or hide the files of this experiment.")}
       onClick={onToggle}
       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
     >
@@ -869,11 +845,29 @@ function RunRow({
         aria-hidden
       />
       <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 flex-1 truncate font-medium" title={run}>
-        {run}
+      {/* A long name wraps (after a "/" first) and shows in full on hover. */}
+      <span
+        data-testid="analysis-experiment-label"
+        className="min-w-0 flex-1 font-medium [overflow-wrap:anywhere]"
+        title={label}
+      >
+        {isPath ? <PathWithBreaks path={label} /> : label}
       </span>
-      <span className="shrink-0 text-[10px] text-muted-foreground/70">{fileCount}</span>
     </button>
+  )
+}
+
+/** Shown in an open row whose files were cut at the listing's per-row cap. */
+function TruncatedNotice() {
+  const t = useTranslate()
+  return (
+    <p
+      data-testid="analysis-experiment-truncated"
+      role="status"
+      className="px-2 text-[10px] text-amber-600"
+    >
+      {t("This experiment has more files than are listed here.")}
+    </p>
   )
 }
 
@@ -1014,17 +1008,20 @@ function HighlightedText({ text, positions }: { text: string; positions: number[
   })
 }
 
-/** A clickable filter chip for a category, sub-kind, or "All". */
+/** A clickable filter chip for a category or "All". */
 function FilterChip({
   label,
   active,
   onClick,
   testId,
+  hasFormats,
 }: {
   label: string
   active: boolean
   onClick: () => void
   testId: string
+  /** True when the chip opens a sub-list of formats. */
+  hasFormats: boolean
 }) {
   const t = useTranslate()
   return (
@@ -1033,6 +1030,7 @@ function FilterChip({
       data-testid={testId}
       data-active={active}
       aria-pressed={active}
+      aria-haspopup={hasFormats ? "menu" : undefined}
       data-feature-label={`${label} ${t("filter")}`}
       data-feature-help={t("Filter the data-file list by format or analysis category.")}
       onClick={onClick}
@@ -1043,6 +1041,64 @@ function FilterChip({
     >
       {label}
     </button>
+  )
+}
+
+/**
+ * The small sub-list under a chip: "All <category>" and one entry per format
+ * present (e.g. PDF, PNG, SVG). Picking one closes it, as does a click outside.
+ */
+function FormatMenu({
+  allLabel,
+  formats,
+  selected,
+  onPick,
+  onClose,
+}: {
+  allLabel: string
+  formats: string[]
+  /** The picked format, or null for all. */
+  selected: string | null
+  onPick: (format: string | null) => void
+  onClose: () => void
+}) {
+  const menu = useRef<HTMLDivElement>(null)
+  const close = useRef(onClose)
+  close.current = onClose
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent): void => {
+      const chip = menu.current?.parentElement
+      if (chip && event.target instanceof Node && !chip.contains(event.target)) close.current()
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    return () => document.removeEventListener("pointerdown", onPointerDown)
+  }, [])
+  const item = (format: string | null, label: string) => (
+    <button
+      key={format ?? ""}
+      type="button"
+      role="menuitemradio"
+      aria-checked={selected === format}
+      data-testid={`analysis-format-${format ?? "all"}`}
+      onClick={() => onPick(format)}
+      className={cn(
+        "w-full rounded px-2 py-1 text-left text-xs hover:bg-muted",
+        selected === format && "font-medium text-primary",
+      )}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div
+      ref={menu}
+      role="menu"
+      data-testid="analysis-format-menu"
+      className="absolute top-full left-0 z-20 mt-1 flex min-w-28 flex-col rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+    >
+      {item(null, allLabel)}
+      {formats.map((format) => item(format, format.toUpperCase()))}
+    </div>
   )
 }
 

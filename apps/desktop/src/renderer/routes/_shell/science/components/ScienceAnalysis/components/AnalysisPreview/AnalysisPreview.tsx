@@ -2,7 +2,7 @@ import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysi
 import type { NotebookCell, NotebookOutput } from "@pi-lab/shared/analysis/ipynb"
 import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import {
   type DocumentRenderResult,
@@ -11,10 +11,17 @@ import {
   RenderedDocument,
 } from "../../../../../../../components/DocumentRender/DocumentRender"
 import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
-import { useTRPC } from "../../../../../../../trpc/react"
+import { useTRPC, useTRPCClient } from "../../../../../../../trpc/react"
 import { Markdown } from "../../../../../projects/components/RightSidebar/components/Markdown"
 import { ArrayGrid } from "../ArrayGrid"
 import { MetricChart } from "../MetricChart"
+
+/** The app's bundled PDF.js viewer (the one PDF tabs use), loaded on first use. */
+const PdfViewer = lazy(() =>
+  import("../../../../../../../Editor/components/PdfViewer/PdfViewer").then((module) => ({
+    default: module.PdfViewer,
+  })),
+)
 
 /**
  * Preview pane for a single selected data file (P8c). Fetches
@@ -23,7 +30,8 @@ import { MetricChart } from "../MetricChart"
  * NumPy 2-D array grid, an inline image, pretty-printed JSON, a text head
  * (Markdown, Quarto and MyST files render as Markdown with the front matter
  * hidden), a Jupyter notebook's cells, or a metadata card for kinds with no
- * inline renderer. HTML reports and marimo notebooks open in their interactive
+ * inline renderer. PDFs open in the bundled PDF.js viewer, read through
+ * `science.analysis.pdf`. HTML reports and marimo notebooks open in their interactive
  * surface; a marimo notebook is labelled, and shows its Python code when marimo
  * cannot start. The pane owns its own
  * vertical scroll; the fetch is keyed on the project + path so switching
@@ -47,9 +55,11 @@ export function AnalysisPreview({
   const t = useTranslate()
   const trpc = useTRPC()
   const interactive = kind === "report" || kind === "marimo"
+  const pdf = kind === "pdf"
+  const [pdfStatus, setPdfStatus] = useState("")
   const preview = useQuery({
     ...trpc.science.analysis.preview.queryOptions({ projectId, relPath }),
-    enabled: !interactive,
+    enabled: !interactive && !pdf,
     staleTime: 30_000,
   })
   const renderTool = documentToolForFile(
@@ -74,6 +84,14 @@ export function AnalysisPreview({
         >
           {relPath}
         </span>
+        {pdf && pdfStatus !== "" ? (
+          <span
+            data-testid="analysis-pdf-status"
+            className="shrink-0 text-muted-foreground text-xs"
+          >
+            {pdfStatus}
+          </span>
+        ) : null}
         {kind === "marimo" ? (
           <span
             data-testid="analysis-preview-label"
@@ -105,9 +123,11 @@ export function AnalysisPreview({
       </div>
       <div
         data-testid="analysis-preview"
-        className={`min-h-0 flex-1 ${interactive || shownRender ? "overflow-hidden" : "overflow-auto p-4"}`}
+        className={`min-h-0 flex-1 ${interactive || shownRender || pdf ? "flex flex-col overflow-hidden" : "overflow-auto p-4"}`}
       >
-        {shownRender ? (
+        {pdf ? (
+          <AnalysisPdf projectId={projectId} relPath={relPath} onMessage={setPdfStatus} />
+        ) : shownRender ? (
           <RenderedDocument
             projectId={projectId}
             result={shownRender}
@@ -142,6 +162,40 @@ export function AnalysisPreview({
         ) : null}
       </div>
     </div>
+  )
+}
+
+/** A project PDF in the bundled PDF.js viewer, read through `science.analysis.pdf`. */
+function AnalysisPdf({
+  projectId,
+  relPath,
+  onMessage,
+}: {
+  projectId: string
+  relPath: string
+  /** The viewer's status, e.g. "Loading PDF…" or "Page 2 / 5". */
+  onMessage: (message: string) => void
+}) {
+  const t = useTranslate()
+  const client = useTRPCClient()
+  return (
+    <Suspense
+      fallback={<p className="p-4 text-muted-foreground text-xs">{t("Loading PDF viewer…")}</p>}
+    >
+      <PdfViewer
+        source={{
+          stat: () => client.science.analysis.pdfStat.query({ projectId, relPath }),
+          read: () => client.science.analysis.pdf.query({ projectId, relPath }),
+          reverseSync: null,
+        }}
+        sourceKey={projectId}
+        relPath={relPath}
+        location={null}
+        onSource={() => undefined}
+        build={null}
+        onMessage={onMessage}
+      />
+    </Suspense>
   )
 }
 

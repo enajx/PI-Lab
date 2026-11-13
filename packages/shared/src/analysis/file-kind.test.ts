@@ -7,8 +7,10 @@ import {
   classifyAnalysisArtifact,
   classifyDataFile,
   DATA_FILE_CATEGORY_LABELS,
+  DATA_FILE_KIND_LABELS,
   type DataFileCategory,
   type DataFileKind,
+  fileFormatOf,
   isMarimoNotebookSource,
   isPreviewableKind,
 } from "./file-kind"
@@ -34,7 +36,8 @@ describe("classifyDataFile", () => {
     expect(classifyDataFile("explore.ipynb")).toBe("notebook")
     expect(classifyDataFile("table.parquet")).toBe("parquet")
     expect(classifyDataFile("table.feather")).toBe("parquet")
-    expect(classifyDataFile("figure.pdf")).toBe("plot")
+    expect(classifyDataFile("figure.pdf")).toBe("pdf")
+    expect(classifyDataFile("figure.eps")).toBe("plot")
   })
 
   test("classifies NumPy arrays", () => {
@@ -46,7 +49,10 @@ describe("classifyDataFile", () => {
     expect(classifyDataFile("RESEARCH.md")).toBe("markdown")
     expect(classifyDataFile("analysis.qmd")).toBe("markdown")
     expect(classifyDataFile("run.log")).toBe("text")
-    expect(classifyDataFile("params.yaml")).toBe("text")
+    expect(classifyDataFile("params.yaml")).toBe("markup")
+    expect(classifyDataFile("pyproject.toml")).toBe("markup")
+    expect(classifyDataFile("layout.xml")).toBe("markup")
+    expect(classifyAnalysisArtifact("results/layout.xml", "file")).toBe("markup")
   })
 
   test("whitelists scientific stores, reports, and explicit metadata-only pickle artifacts", () => {
@@ -157,7 +163,7 @@ describe("classifyDataFile", () => {
       ["parquet", "parquet"],
       ["npy", "npy"],
       ["npz", "npz"],
-      ["pdf", "plot"],
+      ["pdf", "pdf"],
       ["md", "markdown"],
       ["log", "text"],
     ]
@@ -181,22 +187,26 @@ describe("classifyDataFile", () => {
 })
 
 describe("categoryOf", () => {
-  test("collapses tabular/structured/array kinds into 'data'", () => {
+  test("Data holds the tabular, array and store kinds", () => {
     expect(categoryOf("csv")).toBe("data")
     expect(categoryOf("tsv")).toBe("data")
-    expect(categoryOf("json")).toBe("data")
     expect(categoryOf("parquet")).toBe("data")
+    expect(categoryOf("dataset")).toBe("data")
     expect(categoryOf("npy")).toBe("data")
     expect(categoryOf("npz")).toBe("data")
   })
 
-  test("maps the remaining kinds to their own categories", () => {
-    expect(categoryOf("image")).toBe("image")
+  test("Figures merges images, PDFs and plots; Markup and Logs split the text kinds", () => {
+    expect(categoryOf("image")).toBe("figure")
+    expect(categoryOf("pdf")).toBe("figure")
+    expect(categoryOf("plot")).toBe("figure")
+    expect(categoryOf("json")).toBe("markup")
+    expect(categoryOf("markup")).toBe("markup")
+    expect(categoryOf("text")).toBe("log")
+    expect(categoryOf("markdown")).toBe("log")
     expect(categoryOf("notebook")).toBe("notebook")
     expect(categoryOf("marimo")).toBe("notebook")
-    expect(categoryOf("plot")).toBe("plot")
-    expect(categoryOf("markdown")).toBe("text")
-    expect(categoryOf("text")).toBe("text")
+    expect(categoryOf("report")).toBe("report")
     expect(categoryOf("other")).toBe("other")
   })
 
@@ -224,8 +234,27 @@ describe("category metadata", () => {
     for (const category of ALL_DATA_FILE_CATEGORIES) {
       expect(DATA_FILE_CATEGORY_LABELS[category]).toBeTruthy()
     }
-    expect(DATA_FILE_CATEGORY_LABELS.data).toBe("Data")
-    expect(DATA_FILE_CATEGORY_LABELS.image).toBe("Images")
+    expect(ALL_DATA_FILE_CATEGORIES.map((category) => DATA_FILE_CATEGORY_LABELS[category])).toEqual(
+      ["Data", "Figures", "Markup", "Logs", "Notebooks", "Reports", "Other"],
+    )
+    // The old labels are gone from chips and from the preview's kind label.
+    const labels = [
+      ...Object.values(DATA_FILE_CATEGORY_LABELS),
+      ...Object.values(DATA_FILE_KIND_LABELS),
+    ]
+    for (const old of ["Plots", "Images", "Text"]) expect(labels).not.toContain(old)
+    expect(DATA_FILE_KIND_LABELS.plot).toBe("Figure")
+    expect(DATA_FILE_KIND_LABELS.pdf).toBe("Figure")
+    expect(DATA_FILE_KIND_LABELS.image).toBe("Figure")
+  })
+})
+
+describe("fileFormatOf", () => {
+  test("is the lowercase extension, the format a chip's sub-list offers", () => {
+    expect(fileFormatOf("results/a/gradient.PDF")).toBe("pdf")
+    expect(fileFormatOf("results/a/loss.png")).toBe("png")
+    expect(fileFormatOf("results/store.zarr")).toBe("zarr")
+    expect(fileFormatOf("results/noext")).toBe("")
   })
 })
 
@@ -238,6 +267,8 @@ describe("isPreviewableKind", () => {
     expect(isPreviewableKind("markdown")).toBe(true)
     expect(isPreviewableKind("text")).toBe(true)
     expect(isPreviewableKind("npy")).toBe(true)
+    expect(isPreviewableKind("pdf")).toBe(true)
+    expect(isPreviewableKind("markup")).toBe(true)
     expect(isPreviewableKind("report")).toBe(true)
     expect(isPreviewableKind("marimo")).toBe(true)
     expect(isPreviewableKind("notebook")).toBe(true)

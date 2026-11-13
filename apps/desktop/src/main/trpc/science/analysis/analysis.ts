@@ -8,11 +8,13 @@ import {
   workspaces,
 } from "@pi-lab/local-db"
 import { classifyDataFile } from "@pi-lab/shared"
+import { type FileStat, statFile } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
 import { resolveWorkspacePythonRuntime } from "../../../python"
 import { resolveInsideDir } from "../../files/files"
+import { insideFile, type PdfSnapshot, readPdfSnapshot } from "../../pdf/pdf"
 import { publicProcedure, router } from "../../trpc"
 import {
   type DataFileListing,
@@ -175,7 +177,7 @@ const REPORTS_FOLDER = "reports"
 const EMPTY_LISTING: DataFileListing = {
   groups: [],
   total: 0,
-  truncated: false,
+  truncatedGroups: [],
   partial: false,
   skipped: [],
 }
@@ -214,7 +216,7 @@ function mergeListings(results: DataFileListing, reports: DataFileListing): Data
   return {
     groups,
     total: results.total + added,
-    truncated: results.truncated || reports.truncated,
+    truncatedGroups: [...results.truncatedGroups, ...reports.truncatedGroups],
     partial: skipped.length > 0,
     skipped,
   }
@@ -320,8 +322,8 @@ export const analysisRouter = router({
    * paths. The project's `reports/` folder is
    * listed too, marked `inReportsFolder`, each file once; no `reports/` folder
    * adds nothing. A missing results folder is `exists: false`; a folder outside the
-   * project (or the project folder itself) is FORBIDDEN. The walk is capped,
-   * and `truncated` flags when the cap was hit.
+   * project (or the project folder itself) is FORBIDDEN. Each list row (see
+   * `listGroup`) is capped, and `truncatedGroups` names the rows that were cut.
    */
   listFiles: publicProcedure
     .input(listInput)
@@ -401,6 +403,24 @@ export const analysisRouter = router({
       const abs = resolveInsideDir(repoPath, input.relPath)
       return previewDataFile(abs, input.relPath)
     }),
+
+  /**
+   * Size and time of a project PDF, polled by the PDF.js viewer to reload the
+   * preview when the file changes. The path is jailed to the project.
+   */
+  pdfStat: publicProcedure.input(previewInput).query(async ({ ctx, input }): Promise<FileStat> => {
+    const repoPath = requireRepoPath(ctx.db, input.projectId)
+    return statFile(resolveInsideDir(repoPath, input.relPath))
+  }),
+
+  /**
+   * The bytes of a project PDF for the bundled PDF.js viewer (the same reader
+   * as PDF tabs). The path and its symlink target must stay in the project.
+   */
+  pdf: publicProcedure.input(previewInput).query(async ({ ctx, input }): Promise<PdfSnapshot> => {
+    const repoPath = requireRepoPath(ctx.db, input.projectId)
+    return readPdfSnapshot(await insideFile(repoPath, input.relPath))
+  }),
 
   /**
    * Open an interactive report or marimo notebook. The renderer receives only

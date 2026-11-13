@@ -7,7 +7,8 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { openAnalysisRun } from "./fixtures/analysis"
+import { openAnalysisExperiment } from "./fixtures/analysis"
+import { onePagePdf } from "./fixtures/pdf"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -122,8 +123,12 @@ test.beforeEach(async () => {
   reportNetworkUrl = `http://127.0.0.1:${address.port}/marker`
   repoDir = join(dataDir, "repo")
   await initRepo(repoDir)
+  app = await launchApp()
+})
 
-  app = await electron.launch({
+/** Launch the real app on the test's data folder (also used to restart it). */
+function launchApp(): Promise<ElectronApplication> {
+  return electron.launch({
     executablePath: packagedBinary ?? ELECTRON_PATH,
     args: packagedBinary ? [] : [MAIN_ENTRY],
     env: {
@@ -141,7 +146,7 @@ test.beforeEach(async () => {
       PI_LAB_TEST_MARIMO_MARKER: markerPath,
     },
   })
-})
+}
 
 test.afterEach(async () => {
   await app?.close()
@@ -182,7 +187,7 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
   // The repo's CSV appears in the file list, under its run (results/data/).
-  await openAnalysisRun(window, "data")
+  await openAnalysisExperiment(window, "data")
   const fileRow = window.locator(`[data-testid="analysis-file"][data-rel-path="${CSV_REL_PATH}"]`)
   await expect(fileRow).toBeVisible({ timeout: 30_000 })
   await expect(
@@ -198,13 +203,13 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
   await expect(table.locator("thead th").first()).toHaveText("epoch")
 })
 
-test("Analysis lists one row per run grouped by experiment, the structure is set per project, and Change… picks another folder", async () => {
+test("Analysis lists one collapsed row per experiment with no counts, the structure is set per project and survives a restart, and Change… picks another folder", async () => {
   // Runs of the gecko experiment (written before Analysis first lists the folder).
   for (const run of ["fl-shape_s0", "fl-shape_s1"]) {
     await mkdir(join(repoDir, "results", "gecko", run), { recursive: true })
     await writeFile(join(repoDir, "results", "gecko", run, "run.db"), "")
   }
-  const window = await app.firstWindow()
+  let window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
@@ -216,20 +221,31 @@ test("Analysis lists one row per run grouped by experiment, the structure is set
   })
   await expect(window.getByTestId("analysis-results-folder-reset")).toHaveCount(0)
 
-  // Auto-detect: the folders that hold data files are runs (one row each), grouped
-  // by their parent folder; a run's files show when its row is opened.
-  const group = (experiment: string) =>
-    window.locator(`[data-testid="analysis-experiment-group"][data-experiment="${experiment}"]`)
-  const runs = (experiment: string) =>
-    group(experiment)
-      .getByTestId("analysis-run")
-      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-run")))
+  // Auto-detect: one row per experiment (gecko), and per run at the top of the
+  // results folder. Rows start collapsed and show no file counts.
+  const row = (experiment: string) =>
+    window.locator(`[data-testid="analysis-experiment"][data-experiment="${experiment}"]`)
+  const rows = () =>
+    window
+      .getByTestId("analysis-experiment")
+      .evaluateAll((elements) =>
+        elements.map((element) => [
+          element.getAttribute("data-experiment"),
+          element.getAttribute("aria-expanded"),
+          element.textContent,
+        ]),
+      )
   await expect
-    .poll(() => runs("gecko"), { timeout: 30_000 })
-    .toEqual(["fl-shape_s0", "fl-shape_s1"])
-  expect(await runs("")).toEqual(["data", "exp-a", "exp-b", "reports"])
+    .poll(rows, { timeout: 30_000 })
+    .toEqual(["data", "exp-a", "exp-b", "gecko", "reports"].map((name) => [name, "false", name]))
+  await expect(window.getByTestId("analysis-file-count")).toHaveCount(0)
   await expect(window.getByTestId("analysis-file")).toHaveCount(0)
-  await openAnalysisRun(window, "exp-a")
+  await row("gecko").click()
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path^="results/gecko/"]'),
+  ).toHaveCount(2)
+  await row("gecko").click()
+  await openAnalysisExperiment(window, "exp-a")
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]'),
   ).toBeVisible()
@@ -238,8 +254,8 @@ test("Analysis lists one row per run grouped by experiment, the structure is set
   ).toHaveCount(0)
 
   // The category filters still narrow the results files.
-  await window.getByTestId("analysis-category-image").click()
-  await expect(window.getByTestId("analysis-run")).toHaveCount(1)
+  await window.getByTestId("analysis-category-figure").click()
+  await expect(window.getByTestId("analysis-experiment")).toHaveCount(1)
   await expect(window.getByTestId("analysis-file")).toHaveCount(1)
   await expect(window.getByTestId("analysis-file")).toHaveAttribute(
     "data-rel-path",
@@ -248,33 +264,106 @@ test("Analysis lists one row per run grouped by experiment, the structure is set
   await window.getByTestId("analysis-category-all").click()
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-results.png") })
 
-  // The project's own structure, chosen below the folder field, is saved in the
-  // YAML file in PI Lab's data folder, keyed by the project path.
-  const structure = window.getByTestId("analysis-structure")
-  await expect(structure).toHaveValue("default")
+  // The select shows the project's effective choice, only the real options. The
+  // project's own choice is saved in the YAML file in PI Lab's data folder, keyed
+  // by the project path.
+  let structure = window.getByTestId("analysis-structure")
+  await expect(structure).toHaveValue("auto")
+  expect(await structure.locator("option").allTextContents()).toEqual([
+    "Auto-detect",
+    "One folder per experiment",
+    "Experiment / run folders",
+    "Flat file list",
+    "Custom pattern",
+  ])
   await structure.selectOption("one-folder-per-experiment")
-  await expect(window.getByTestId("analysis-run")).toHaveCount(0)
+  await expect
+    .poll(rows)
+    .toEqual(
+      ["data", "exp-a", "exp-b", "gecko", "reports"].map((name) => [
+        name,
+        name === "exp-a" ? "true" : "false",
+        name,
+      ]),
+    )
+  await openAnalysisExperiment(window, "gecko")
   await expect(
-    group("gecko").locator(
+    window.locator(
       '[data-testid="analysis-file"][data-rel-path="results/gecko/fl-shape_s0/run.db"]',
     ),
   ).toBeVisible()
   const yamlText = await readFile(join(dataDir, "experiments-structure.yaml"), "utf8")
   expect(yamlText).toContain("default: auto")
   expect(yamlText).toMatch(/projects:\n\s+.+repo: one-folder-per-experiment/)
-  await structure.selectOption("default")
-  await expect.poll(() => runs("gecko")).toEqual(["fl-shape_s0", "fl-shape_s1"])
+
+  // The choice survives a restart of the app.
+  await app.close()
+  app = await launchApp()
+  window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  structure = window.getByTestId("analysis-structure")
+  await expect(structure).toHaveValue("one-folder-per-experiment", { timeout: 30_000 })
+  await structure.selectOption("auto")
+  await expect(structure).toHaveValue("auto")
+  expect(await readFile(join(dataDir, "experiments-structure.yaml"), "utf8")).toMatch(
+    /projects:\n\s+.+repo: auto/,
+  )
 
   // Change… (test picker returns <project>/outputs) lists that folder for this project.
   await window.getByTestId("analysis-results-folder-change").click()
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("outputs/")
-  await expect.poll(() => runs("")).toEqual(["exp-c"])
-  await expect(group("gecko")).toHaveCount(0)
+  await expect.poll(() => rows().then((all) => all.map((entry) => entry[0]))).toEqual(["exp-c"])
+  await expect(row("gecko")).toHaveCount(0)
 
   // Reset to default goes back to results/.
   await window.getByTestId("analysis-results-folder-reset").click()
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/")
-  await expect(group("gecko")).toBeVisible()
+  await expect(row("gecko")).toBeVisible()
+})
+
+test("Figures opens a sub-list of its formats; picking PDF lists the PDFs, and a PDF previews in PDF.js", async () => {
+  // A deep PDF figure (as in results/multiplexing/...) next to a PNG and an SVG.
+  const pdfDir = join(repoDir, "results", "multiplexing", "grid_7hf2hacr")
+  await mkdir(pdfDir, { recursive: true })
+  await writeFile(
+    join(pdfDir, "gradient_magnitudes_7hf2hacr.pdf"),
+    onePagePdf("Gradient magnitudes"),
+  )
+  await writeFile(join(pdfDir, "arch.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>")
+  const pdfRel = "results/multiplexing/grid_7hf2hacr/gradient_magnitudes_7hf2hacr.pdf"
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+
+  // The chips: no Plots, Images or Text.
+  const chips = window.getByTestId("analysis-category-filters")
+  await expect(chips.getByRole("button")).toHaveText(
+    ["All", "Data", "Figures", "Logs", "Notebooks", "Reports"],
+    { timeout: 30_000 },
+  )
+
+  const figures = window.getByTestId("analysis-category-figure")
+  await figures.click()
+  const menu = window.getByTestId("analysis-format-menu")
+  await expect(menu.getByRole("menuitemradio")).toHaveText(["All figures", "PDF", "PNG", "SVG"])
+  await window.getByTestId("analysis-format-pdf").click()
+  await expect(menu).toHaveCount(0)
+  await expect(figures).toHaveText("Figures: PDF")
+  await expect(window.getByTestId("analysis-experiment")).toHaveCount(1)
+  await openAnalysisExperiment(window, "multiplexing")
+  await expect(window.getByTestId("analysis-file")).toHaveCount(1)
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-figures-pdf.png") })
+
+  // Selecting the PDF renders its page in the bundled PDF.js viewer.
+  await window.locator(`[data-testid="analysis-file"][data-rel-path="${pdfRel}"]`).click()
+  const viewer = window.getByTestId("analysis-preview").getByTestId("pdf-viewer")
+  await expect(viewer.locator(".page canvas").first()).toBeVisible({ timeout: 30_000 })
+  await expect(viewer.locator(".textLayer")).toContainText("Gradient magnitudes")
+  await expect(window.getByTestId("analysis-pdf-status")).toHaveText("Page 1 / 1")
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-pdf-preview.png") })
 })
 
 test("with no results folder, Analysis shows no folder and points to Select experiments folder", async () => {
@@ -302,7 +391,9 @@ test("with no results folder, Analysis shows no folder and points to Select expe
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("outputs/")
   await expect(window.getByTestId("analysis-select-folder-prompt")).toHaveCount(0)
   await expect(window.getByTestId("analysis-results-folder-change")).toHaveText("Change…")
-  await expect(window.locator('[data-testid="analysis-run"][data-run="exp-c"]')).toBeVisible()
+  await expect(
+    window.locator('[data-testid="analysis-experiment"][data-experiment="exp-c"]'),
+  ).toBeVisible()
 })
 
 /** In the page: how far an element's text runs past its box (0 when it fits). */
@@ -339,14 +430,14 @@ test("at the default window width the prompt, the Structure select and long grou
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
   const structure = window.getByTestId("analysis-structure")
-  await expect(structure).toHaveValue("default", { timeout: 30_000 })
+  await expect(structure).toHaveValue("auto", { timeout: 30_000 })
   expect(await selectTextFits(structure)).toBe(true)
 
   const label = window
     .locator(
-      '[data-testid="analysis-experiment-group"][data-experiment="blastocyst-profile/morpheus_s0"]',
+      '[data-testid="analysis-experiment"][data-experiment="blastocyst-profile/morpheus_s0"]',
     )
-    .getByTestId("analysis-group-label")
+    .getByTestId("analysis-experiment-label")
   await expect(label).toHaveAttribute("title", "blastocyst-profile/morpheus_s0", {
     timeout: 30_000,
   })
@@ -359,7 +450,7 @@ test("at the default window width the prompt, the Structure select and long grou
   const prompt = window.getByTestId("analysis-select-folder-prompt")
   await expect(prompt).toBeVisible({ timeout: 30_000 })
   expect(await textOverflow(prompt)).toBeLessThanOrEqual(0)
-  await expect(window.getByTestId("analysis-structure")).toHaveValue("default")
+  await expect(window.getByTestId("analysis-structure")).toHaveValue("auto")
   expect(await selectTextFits(window.getByTestId("analysis-structure"))).toBe(true)
   await window.screenshot({
     path: resolve(".cache", "screens", "analysis-default-width-prompt.png"),
@@ -410,7 +501,7 @@ test("interactive HTML is sandboxed while scripts, relative assets, and network 
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
 
-  await openAnalysisRun(window, "reports")
+  await openAnalysisExperiment(window, "reports")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/reports/interactive.html"]')
     .click()
@@ -436,8 +527,8 @@ test("marimo starts interactively, stops on artifact switch, and is reaped on ap
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
 
-  await openAnalysisRun(window, "reports")
-  await openAnalysisRun(window, "data")
+  await openAnalysisExperiment(window, "reports")
+  await openAnalysisExperiment(window, "data")
   const marimoRow = window.locator(
     '[data-testid="analysis-file"][data-rel-path="results/reports/live.py"]',
   )
@@ -470,7 +561,7 @@ test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", asyn
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("analysis-new-marimo-notebook")).toHaveCount(0)
-  await openAnalysisRun(window, "reports")
+  await openAnalysisExperiment(window, "reports")
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path="results/reports/live.py"]'),
   ).toBeVisible()

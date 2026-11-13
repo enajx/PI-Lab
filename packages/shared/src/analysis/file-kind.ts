@@ -27,9 +27,11 @@ export type DataFileKind =
   | "dataset"
   | "npy"
   | "npz"
+  | "pdf"
   | "plot"
   | "report"
   | "markdown"
+  | "markup"
   | "text"
   | "other"
 
@@ -83,8 +85,9 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   // NumPy arrays (raw `.npy` + zipped `.npz`)
   npy: "npy",
   npz: "npz",
-  // Static plot/figure outputs (rendered, not raw images)
-  pdf: "plot",
+  // PDF figures (previewed with the bundled PDF.js viewer)
+  pdf: "pdf",
+  // Static plot/figure outputs with no inline preview
   eps: "plot",
   ps: "plot",
   // Rendered reports
@@ -102,11 +105,13 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   log: "text",
   dat: "text",
   out: "text",
-  yaml: "text",
-  yml: "text",
-  toml: "text",
-  ini: "text",
-  cfg: "text",
+  // Config and markup files (head-previewable)
+  yaml: "markup",
+  yml: "markup",
+  toml: "markup",
+  xml: "markup",
+  ini: "markup",
+  cfg: "markup",
   // Serialized Python objects are listed for metadata only. Preview code must
   // never deserialize or read their contents.
   pkl: "other",
@@ -128,57 +133,69 @@ export const ALL_DATA_FILE_KINDS: readonly DataFileKind[] = [
   "dataset",
   "npy",
   "npz",
+  "pdf",
   "plot",
   "report",
   "markdown",
+  "markup",
   "text",
   "other",
 ] as const
 
-/** Sub-format labels for each kind (kept for per-file classification + sub-bubbles). */
+/** The label of each kind, shown as the file's kind in the preview. */
 export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
   csv: "CSV",
   tsv: "TSV",
   json: "JSON",
-  image: "Images",
+  image: "Figure",
   notebook: "Notebooks",
   marimo: "marimo",
   parquet: "Parquet",
   dataset: "Datasets",
   npy: "NumPy",
   npz: "NumPy (zip)",
-  plot: "Plots",
+  pdf: "Figure",
+  plot: "Figure",
   report: "Reports",
   markdown: "Markdown",
-  text: "Text",
+  markup: "Markup",
+  text: "Log",
   other: "Other",
 }
 
 /**
- * The coarser categories the Analysis UI groups kinds under. Several tabular /
- * structured / array kinds (csv, tsv, json, parquet, npy, npz) collapse into a
- * single `"data"` category so the top-level filter chips and group headers read
- * "Data" rather than enumerating raw formats; the per-kind {@link DataFileKind}
- * machinery still drives sub-format bubbles and per-file classification.
+ * The categories of the Analysis filter chips: Data (tables, arrays, stores),
+ * Figures (images, PDFs, plots), Markup (JSON, YAML, TOML, XML…), Logs (text,
+ * logs, Markdown), Notebooks, Reports (HTML) and Other. A chip with several
+ * formats present ({@link fileFormatOf}) offers a sub-list to pick one.
  */
-export type DataFileCategory = "data" | "image" | "notebook" | "plot" | "text" | "other"
+export type DataFileCategory =
+  | "data"
+  | "figure"
+  | "markup"
+  | "log"
+  | "notebook"
+  | "report"
+  | "other"
 
 /** Kind → category lookup; the authoritative map {@link categoryOf} reads. */
 const CATEGORY_BY_KIND: Readonly<Record<DataFileKind, DataFileCategory>> = {
   csv: "data",
   tsv: "data",
-  json: "data",
   parquet: "data",
   dataset: "data",
   npy: "data",
   npz: "data",
-  image: "image",
+  image: "figure",
+  pdf: "figure",
+  plot: "figure",
+  json: "markup",
+  markup: "markup",
+  text: "log",
+  markdown: "log",
   notebook: "notebook",
   marimo: "notebook",
-  plot: "plot",
-  report: "text",
-  markdown: "text",
-  text: "text",
+  report: "report",
   other: "other",
 }
 
@@ -193,20 +210,22 @@ export function categoryOf(kind: DataFileKind): DataFileCategory {
  */
 export const ALL_DATA_FILE_CATEGORIES: readonly DataFileCategory[] = [
   "data",
-  "image",
+  "figure",
+  "markup",
+  "log",
   "notebook",
-  "plot",
-  "text",
+  "report",
   "other",
 ] as const
 
-/** Human-readable labels for each category (filter chips / group headers). */
+/** Human-readable labels for each category (the filter chips). */
 export const DATA_FILE_CATEGORY_LABELS: Readonly<Record<DataFileCategory, string>> = {
   data: "Data",
-  image: "Images",
+  figure: "Figures",
+  markup: "Markup",
+  log: "Logs",
   notebook: "Notebooks",
-  plot: "Plots",
-  text: "Text",
+  report: "Reports",
   other: "Other",
 }
 
@@ -224,6 +243,14 @@ function extensionOf(filePath: string): string {
   // dot (`foo.`) → no extension.
   if (lastDot <= 0 || lastDot === base.length - 1) return ""
   return base.slice(lastDot + 1).toLowerCase()
+}
+
+/**
+ * The file's format: its lowercase extension (`pdf`, `png`, `zarr`), or `""`
+ * with none. A filter chip's sub-list offers one entry per format present.
+ */
+export function fileFormatOf(filePath: string): string {
+  return extensionOf(filePath)
 }
 
 /**
@@ -281,9 +308,10 @@ export function isMarimoNotebookSource(source: string): boolean {
 /**
  * Whether a kind is one Analysis can render a meaningful inline preview for
  * (table / chart / array / image / pretty-JSON / text head / notebook cells /
- * isolated web surface). Raw `.npy` arrays decode into a chart or grid; Jupyter
- * notebooks show their cells; HTML reports and marimo notebooks open in their
- * isolated interactive surface. `.npz` (a zip of arrays we don't unpack),
+ * isolated web surface / PDF viewer). Raw `.npy` arrays decode into a chart or
+ * grid; Jupyter notebooks show their cells; HTML reports and marimo notebooks
+ * open in their isolated interactive surface; PDFs open in the bundled PDF.js
+ * viewer. `.npz` (a zip of arrays we don't unpack),
  * `parquet`, `dataset`, `plot`, and `other` fall back to a metadata-only card.
  */
 export function isPreviewableKind(kind: DataFileKind): boolean {
@@ -296,7 +324,9 @@ export function isPreviewableKind(kind: DataFileKind): boolean {
     kind === "notebook" ||
     kind === "report" ||
     kind === "markdown" ||
+    kind === "markup" ||
     kind === "text" ||
-    kind === "npy"
+    kind === "npy" ||
+    kind === "pdf"
   )
 }

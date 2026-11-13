@@ -309,7 +309,7 @@ describe("science.analysis.listFiles", () => {
     expect(npyKind.get("results/runs/loss.npy")).toBe("npy")
     expect(npyKind.get("results/checkpoints/weights.npz")).toBe("npz")
 
-    expect(listing.truncated).toBe(false)
+    expect(listing.truncatedGroups).toEqual([])
     expect(listing.total).toBeGreaterThanOrEqual(5)
   })
 
@@ -474,21 +474,28 @@ describe("science.analysis.listFiles", () => {
     expect(allRel.every((r) => !r.slice(r.lastIndexOf("/") + 1).startsWith("."))).toBe(true)
   })
 
-  test("flags truncation when over the cap", async () => {
-    // Write one more than the cap of recognized data files.
+  test("the file cap is per list row, so every experiment is listed past 2000 files", async () => {
+    // One run folder with more files than the cap, and a later experiment the walk
+    // reaches only after it (breadth-first: zz-late's files come after bulk's).
     const count = MAX_LISTED_FILES + 5
     await Promise.all(
       Array.from({ length: count }, (_, i) => writeRepoFile(`results/bulk/f${i}.csv`, "a\n1\n")),
     )
+    await writeRepoFile("results/zz-late/run-1/x.csv", "a\n1\n")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
     const listing = await h.caller.science.analysis.listFiles({
       projectId: project.id,
       defaultResultsFolder: "results",
     })
-
-    expect(listing.truncated).toBe(true)
-    expect(listing.total).toBe(MAX_LISTED_FILES)
+    const files = listing.groups.flatMap((group) => group.files)
+    // Each file names its list row: the experiment, else the run.
+    expect(files.filter((file) => file.listGroup === "bulk")).toHaveLength(MAX_LISTED_FILES)
+    expect(files.find((file) => file.relPath === "results/zz-late/run-1/x.csv")?.listGroup).toBe(
+      "zz-late",
+    )
+    // Only the row that was cut is flagged.
+    expect(listing.truncatedGroups).toEqual([{ listGroup: "bulk", inReportsFolder: false }])
   })
 
   test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", async () => {
@@ -508,7 +515,7 @@ describe("science.analysis.listFiles", () => {
 
     expect(paths).toContain("results/deep/results/metrics.csv")
     expect(paths.some((path) => path.endsWith(".py"))).toBe(false)
-    expect(listing.truncated).toBe(false)
+    expect(listing.truncatedGroups).toEqual([])
   })
 
   test("lists only the results folder, grouping files by experiment folder", async () => {
@@ -705,6 +712,29 @@ describe("science.analysis.listFiles", () => {
         defaultResultsFolder: "results",
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+})
+
+describe("science.analysis PDF preview", () => {
+  test("pdfStat and pdf read a project PDF for the bundled PDF.js viewer", async () => {
+    const body = "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+    await writeRepoFile("results/multiplexing/run/gradient.pdf", body)
+    await writeRepoFile("results/multiplexing/run/notes.txt", "x\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const input = { projectId: project.id, relPath: "results/multiplexing/run/gradient.pdf" }
+
+    const stat = await h.caller.science.analysis.pdfStat(input)
+    expect(stat).toMatchObject({ exists: true, size: body.length })
+    const snapshot = await h.caller.science.analysis.pdf(input)
+    expect(Buffer.from(snapshot.data).toString("utf8")).toBe(body)
+    expect(snapshot.baseline).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size })
+
+    await expect(
+      h.caller.science.analysis.pdf({ ...input, relPath: "results/multiplexing/run/notes.txt" }),
+    ).rejects.toThrow("Select a PDF file")
+    await expect(
+      h.caller.science.analysis.pdf({ ...input, relPath: "../outside.pdf" }),
+    ).rejects.toThrow()
   })
 })
 
@@ -915,6 +945,19 @@ describe("science.analysis.preview", () => {
     if (preview.type !== "text") throw new Error("expected text")
     expect(preview.text).toBe("line1\nline2\n")
     expect(preview.truncated).toBe(false)
+  })
+
+  test("markup (YAML, XML) → head, like text", async () => {
+    await writeRepoFile("config.yaml", "lr: 0.1\n")
+    await writeRepoFile("layout.xml", "<a/>\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    for (const [relPath, text] of [
+      ["config.yaml", "lr: 0.1\n"],
+      ["layout.xml", "<a/>\n"],
+    ] as const) {
+      const preview = await h.caller.science.analysis.preview({ projectId: project.id, relPath })
+      expect(preview).toEqual({ type: "text", text, truncated: false })
+    }
   })
 
   test(".ipynb → its cells with the stored outputs", async () => {

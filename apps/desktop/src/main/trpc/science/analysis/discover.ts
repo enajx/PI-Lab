@@ -17,10 +17,11 @@ import type { ExperimentsStructure } from "./structure"
 // ── Discovery ────────────────────────────────────────────────────────────────
 
 /**
- * Hard cap on the number of files a single `listFiles` walk returns. Guards a
- * giant repo from producing an unbounded IPC payload; when hit, the listing's
- * `truncated` flag is set so the UI can surface "showing N of more" rather than
- * silently dropping files.
+ * Cap on the files listed for one row of the Analysis list (an experiment, a
+ * run without an experiment, or the loose files). The walk itself goes through
+ * the whole folder, so every row is listed however many files there are; a row
+ * over the cap keeps its first files and is named in `truncatedGroups` so the UI
+ * says so in that row.
  */
 export const MAX_LISTED_FILES = 2000
 /** Max Python prefix read while deciding whether a `.py` file is a marimo notebook. */
@@ -46,8 +47,13 @@ export interface DataFileEntry {
    * {@link assignExperimentRun}), or null for no group ("No experiment").
    */
   experiment: string | null
-  /** The run (one row in the list) the file belongs to, or null for a loose file. */
+  /** The run the file belongs to, or null for a loose file. */
   run: string | null
+  /**
+   * The row of the Analysis list the file is under (see {@link listGroupOf}):
+   * its experiment, else its run, else null for a loose file.
+   */
+  listGroup: string | null
   /** True for a file in the project's `reports/` folder, listed as its own group. */
   inReportsFolder: boolean
 }
@@ -57,11 +63,17 @@ export interface DataFileGroup {
   files: DataFileEntry[]
 }
 
+/** A row of the Analysis list that had more than {@link MAX_LISTED_FILES} files. */
+export interface TruncatedGroup {
+  listGroup: string | null
+  inReportsFolder: boolean
+}
+
 export interface DataFileListing {
   groups: DataFileGroup[]
   total: number
-  /** True iff the walk hit {@link MAX_LISTED_FILES} and stopped early. */
-  truncated: boolean
+  /** The rows that kept only their first {@link MAX_LISTED_FILES} files. */
+  truncatedGroups: TruncatedGroup[]
   /** True when an artifact or child directory vanished or could not be read. */
   partial: boolean
   /** Repo-relative paths skipped due to expected access or disappearance errors. */
@@ -71,8 +83,9 @@ export interface DataFileListing {
 /**
  * Walk `rootPath` (a folder inside the repo, e.g. its results folder) for
  * explicitly whitelisted data/analysis artifacts. Source, compiled, and unknown
- * files never enter the candidate set, so the cap applies after filtering and a
- * source-heavy directory cannot starve deeper results. `.zarr` directories are
+ * files never enter the candidate set. The whole folder is walked; the
+ * {@link MAX_LISTED_FILES} cap applies per list row, so a row with many files
+ * cannot hide other experiments. `.zarr` directories are
  * collected as one metadata-only dataset and pruned. Paths are returned relative
  * to `repoPath`. For the results folder (`folder: "results"`) each entry's
  * experiment and run come from `structure` (see {@link assignExperimentRun});
@@ -85,14 +98,14 @@ export async function discoverDataFiles(
   folder: "results" | "reports",
   structure: ExperimentsStructure,
 ): Promise<DataFileListing> {
-  const walk = await walkAnalysisArtifacts(rootPath, MAX_LISTED_FILES + 1)
-  const candidates = walk.artifacts
-  const truncated = candidates.length > MAX_LISTED_FILES
-  const kept = truncated ? candidates.slice(0, MAX_LISTED_FILES) : candidates
+  const walk = await walkAnalysisArtifacts(rootPath)
 
   const entries: DataFileEntry[] = []
   const skipped = walk.skipped.map((path) => toPosix(relative(repoPath, join(rootPath, path))))
-  for (const { abs, kind } of kept) {
+  // Files kept so far per list row; a row past the cap is recorded once.
+  const keptPerGroup = new Map<string | null, number>()
+  const truncatedGroups: TruncatedGroup[] = []
+  for (const { abs, kind } of walk.artifacts) {
     const relPath = toPosix(relative(repoPath, abs))
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
     const underRoot = toPosix(relative(rootPath, abs))
@@ -101,6 +114,16 @@ export async function discoverDataFiles(
       folder === "results"
         ? assignExperimentRun(folders, structure)
         : { experiment: null, run: null }
+    const listGroup = listGroupOf(experiment, run)
+    const kept = keptPerGroup.get(listGroup) ?? 0
+    if (kept >= MAX_LISTED_FILES) {
+      if (kept === MAX_LISTED_FILES) {
+        truncatedGroups.push({ listGroup, inReportsFolder: folder === "reports" })
+        keptPerGroup.set(listGroup, kept + 1)
+      }
+      continue
+    }
+    keptPerGroup.set(listGroup, kept + 1)
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
@@ -117,6 +140,7 @@ export async function discoverDataFiles(
       mtime: info.mtimeMs,
       experiment,
       run,
+      listGroup,
       inReportsFolder: folder === "reports",
     })
   }
@@ -136,7 +160,22 @@ export async function discoverDataFiles(
     groups.push({ kind, files })
   }
 
-  return { groups, total: entries.length, truncated, partial: skipped.length > 0, skipped }
+  return {
+    groups,
+    total: entries.length,
+    truncatedGroups,
+    partial: skipped.length > 0,
+    skipped,
+  }
+}
+
+/**
+ * The row of the Analysis list a file is under: its experiment, else its run
+ * (a run with no experiment, such as a folder at the top of the results folder
+ * under Auto-detect), else null (a loose file).
+ */
+export function listGroupOf(experiment: string | null, run: string | null): string | null {
+  return experiment ?? run
 }
 
 /**
@@ -182,12 +221,11 @@ interface AnalysisArtifactCandidate {
 }
 
 /**
- * Whitelist-aware visitor over the shared breadth-first walker. Rejected files
- * do not consume `limit`. A `.zarr` directory is collected and pruned.
+ * Whitelist-aware visitor over the shared breadth-first walker, over the whole
+ * folder. A `.zarr` directory is collected and pruned.
  */
 async function walkAnalysisArtifacts(
   repoPath: string,
-  limit: number,
 ): Promise<{ artifacts: AnalysisArtifactCandidate[]; skipped: string[] }> {
   const artifacts: AnalysisArtifactCandidate[] = []
   const result = await walkWorkspace(
@@ -198,7 +236,7 @@ async function walkAnalysisArtifacts(
         const kind = classifyAnalysisArtifact(entry.name, "directory")
         if (kind !== null) {
           artifacts.push({ abs: entry.path, kind })
-          return artifacts.length >= limit ? "stop" : "prune"
+          return "prune"
         }
         return "continue"
       }
@@ -207,7 +245,7 @@ async function walkAnalysisArtifacts(
         kind = (await isMarimoNotebookFile(entry.path)) ? "marimo" : null
       }
       if (kind !== null) artifacts.push({ abs: entry.path, kind })
-      return artifacts.length >= limit ? "stop" : "continue"
+      return "continue"
     },
   )
   return { artifacts, skipped: result.skipped }
@@ -419,6 +457,7 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     case "image":
       return previewImage(abs, relPath, info.size, meta)
     case "markdown":
+    case "markup":
     case "text":
       return previewText(abs)
     case "npy":
@@ -426,6 +465,7 @@ export async function previewDataFile(abs: string, relPath: string): Promise<Dat
     default:
       // Binary stores (including pickle), reports, plots, and Zarr
       // directories are intentionally metadata-only: never deserialize or read.
+      // PDFs render in the renderer's PDF.js viewer (`analysis.pdf`).
       return meta()
   }
 }
