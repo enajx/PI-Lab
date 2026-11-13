@@ -298,6 +298,12 @@ export interface ProjectPaper {
    */
   outputDir?: string
   /**
+   * The main .tex file chosen by the user, relative to the paper folder. Absent:
+   * PI Lab guesses it. Also the build root of a saved .tex with no
+   * `\documentclass` or `% !TeX root` of its own.
+   */
+  mainDoc?: string
+  /**
    * False when the paper is the project folder linked for editing and building
    * only: Sync then refuses to run. Absent: Sync is on.
    */

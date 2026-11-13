@@ -170,6 +170,8 @@ describe("link, get, outline, unlink", () => {
       paper: null,
       workspaceId: null,
       rootRelPath: null,
+      mainDoc: null,
+      texFiles: [],
       autoDetect: true,
       skippedFolders: [],
     })
@@ -221,6 +223,8 @@ describe("link, get, outline, unlink", () => {
       paper: null,
       workspaceId: null,
       rootRelPath: null,
+      mainDoc: null,
+      texFiles: [],
       autoDetect: false,
       skippedFolders: [],
     })
@@ -469,6 +473,30 @@ describe("build output folder", () => {
     expect((await h.caller.paper.get({ projectId })).paper?.effectiveOutputDir).toBe("pdfout")
     const exclude = await readFile(join(dir, ".git", "info", "exclude"), "utf8")
     expect(exclude.split("\n")).toContain("/pdfout/")
+  })
+})
+
+describe("main document", () => {
+  test("the saved choice is the main .tex, is kept on relink, is validated, and is cleared with an empty value", async () => {
+    const dir = await linkOutsideClone()
+    await writeFile(join(dir, "other.tex"), "\\documentclass{article}\n")
+    const guessed = await h.caller.paper.get({ projectId })
+    expect(guessed).toMatchObject({
+      rootRelPath: "main.tex",
+      mainDoc: null,
+      texFiles: ["main.tex", "other.tex", "sections/method.tex"],
+    })
+    const chosen = await h.caller.paper.setMainDoc({ projectId, mainDoc: "other.tex" })
+    expect(chosen).toMatchObject({ rootRelPath: "other.tex", mainDoc: "other.tex" })
+    await h.caller.paper.link({ projectId, dir, rootChoice: null })
+    expect((await h.caller.paper.get({ projectId })).mainDoc).toBe("other.tex")
+    for (const bad of ["missing.tex", "../main.tex", "refs.bib"]) {
+      await expect(h.caller.paper.setMainDoc({ projectId, mainDoc: bad })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      })
+    }
+    const cleared = await h.caller.paper.setMainDoc({ projectId, mainDoc: "" })
+    expect(cleared).toMatchObject({ rootRelPath: "main.tex", mainDoc: null })
   })
 })
 

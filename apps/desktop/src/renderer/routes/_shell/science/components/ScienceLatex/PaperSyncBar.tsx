@@ -42,6 +42,12 @@ interface PaperSyncBarProps {
   outputDir: string | null
   /** The global default build output folder (Settings > LaTeX). */
   defaultOutputDir: string
+  /** The paper's main .tex file (the saved choice, else the guess), or null when there is none. */
+  mainDoc: string | null
+  /** The main .tex file the user chose, or null when PI Lab guesses it. */
+  chosenMainDoc: string | null
+  /** The paper's .tex files, for choosing the main one. */
+  texFiles: string[]
   /** Open the given paper files in the editor pane ("Open in editor"). */
   onOpenFiles: (files: string[]) => void
   /** Save every open paper file with unsaved edits; returns the files that could not be saved. */
@@ -67,7 +73,7 @@ export function formatLastSync(lastSyncAt: number | null, now: number): string {
  * The LaTeX Editor Sync controls. The Sync button is placed in the page top bar
  * (`syncSlot`), or a short note there when Sync is off for the paper. The
  * editor footer (`footerSlot`) gets the last sync time, the Sync messages and
- * errors, and the output folder item. Also shows the dialogs Sync can lead to:
+ * errors, and the main document and output folder item. Also shows the dialogs Sync can lead to:
  * the commit question for edits not yet sent, the conflict choices, and the
  * review of an agent merge.
  */
@@ -82,6 +88,9 @@ export function PaperSyncBar({
   confirmCommit,
   outputDir,
   defaultOutputDir,
+  mainDoc,
+  chosenMainDoc,
+  texFiles,
   onOpenFiles,
   saveOpenFiles,
 }: PaperSyncBarProps) {
@@ -203,10 +212,13 @@ export function PaperSyncBar({
                   {formatLastSync(lastSyncAt, now)}
                 </span>
               ) : null}
-              <OutputFolderItem
+              <MainDocOutputItem
                 projectId={projectId}
                 outputDir={outputDir}
                 defaultOutputDir={defaultOutputDir}
+                mainDoc={mainDoc}
+                chosenMainDoc={chosenMainDoc}
+                texFiles={texFiles}
               />
             </>,
             footerSlot,
@@ -265,20 +277,29 @@ function useNow(intervalMs: number): number {
 }
 
 /**
- * The footer's "Output: <folder>" item. It opens a small popover with this
- * paper's build output folder field (empty uses the global default, shown as
- * the placeholder): Enter applies and closes it, Escape or a click outside
- * closes it. A rejected value is shown in the popover; while it is closed, the
- * item turns red with the error as its tooltip, so the error stays visible.
+ * The footer's main document and output folder item, as short text such as
+ * `main.tex · build/`. It opens a small popover to change either: the main
+ * document select (Automatic lets PI Lab guess it) applies on change and keeps
+ * the popover open; the build output folder field (empty uses the global
+ * default, shown as the placeholder) applies on Enter and closes it. Escape or
+ * a click outside closes it. A rejected value is shown in the popover; while it
+ * is closed, the item turns red with the error as its tooltip, so the error
+ * stays visible.
  */
-function OutputFolderItem({
+function MainDocOutputItem({
   projectId,
   outputDir,
   defaultOutputDir,
+  mainDoc,
+  chosenMainDoc,
+  texFiles,
 }: {
   projectId: string
   outputDir: string | null
   defaultOutputDir: string
+  mainDoc: string | null
+  chosenMainDoc: string | null
+  texFiles: string[]
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -288,26 +309,37 @@ function OutputFolderItem({
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const refreshPaper = (): void => {
+    void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+    void queryClient.invalidateQueries({ queryKey: trpc.paper.outline.queryKey({ projectId }) })
+  }
   const setOutputDir = useMutation(
     trpc.paper.setOutputDir.mutationOptions({
       onSuccess: () => {
         setDraft(null)
         setOpen(false)
-        void queryClient.invalidateQueries({ queryKey: trpc.paper.get.queryKey({ projectId }) })
+        refreshPaper()
       },
+      onError: (cause) => setError(cause.message),
+    }),
+  )
+  const setMainDoc = useMutation(
+    trpc.paper.setMainDoc.mutationOptions({
+      onSuccess: refreshPaper,
       onError: (cause) => setError(cause.message),
     }),
   )
 
   usePopupDismiss(open, [rootRef], () => setOpen(false))
 
+  const folder = outputDir ?? defaultOutputDir
   return (
     <div ref={rootRef} className="relative flex min-w-0 items-center">
       <button
         type="button"
         data-testid="paper-output-folder"
-        title={error ?? t("Build output folder for this paper")}
-        data-feature-label={t("Output folder")}
+        title={error ?? t("Main document and build output folder for this paper")}
+        data-feature-label={t("Main document and output folder")}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -317,45 +349,71 @@ function OutputFolderItem({
             : "flex min-w-0 items-center gap-0.5 rounded px-1 transition-colors hover:bg-accent hover:text-foreground"
         }
       >
-        <span className="min-w-0 truncate">{`${t("Output:")} ${outputDir ?? defaultOutputDir}`}</span>
+        <span className="min-w-0 truncate">{`${mainDoc ?? t("No main .tex")} · ${folder}/`}</span>
         <ChevronDown className="size-3 shrink-0" aria-hidden />
       </button>
       {open ? (
         <div
           role="dialog"
-          aria-label={t("Output folder")}
+          aria-label={t("Main document and output folder")}
           data-testid="paper-output-popover"
-          className="absolute end-0 bottom-full z-30 mb-1 w-72 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+          className="absolute end-0 bottom-full z-30 mb-1 flex w-72 flex-col gap-2 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg"
         >
           <label className="flex flex-col gap-1 text-muted-foreground text-xs">
-            {t("Output folder")}
-            <input
-              data-testid="paper-output-dir"
-              // biome-ignore lint/a11y/noAutofocus: the popover opens to edit this one field.
-              autoFocus
-              value={draft ?? outputDir ?? ""}
-              placeholder={defaultOutputDir}
-              disabled={setOutputDir.isPending}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return
-                if (draft === null) {
-                  setOpen(false)
-                  return
-                }
+            {t("Main document")}
+            <select
+              data-testid="paper-main-doc"
+              value={chosenMainDoc ?? ""}
+              disabled={setMainDoc.isPending}
+              onChange={(event) => {
                 setError(null)
-                setOutputDir.mutate({ projectId, outputDir: draft })
+                setMainDoc.mutate({ projectId, mainDoc: event.target.value })
               }}
-              className="h-7 rounded border border-border bg-background px-1.5 text-foreground"
-            />
+              className="h-7 rounded border border-border bg-background px-1 text-foreground"
+            >
+              <option value="">
+                {chosenMainDoc === null && mainDoc !== null
+                  ? `${t("Automatic")} (${mainDoc})`
+                  : t("Automatic")}
+              </option>
+              {texFiles.map((relPath) => (
+                <option key={relPath} value={relPath}>
+                  {relPath}
+                </option>
+              ))}
+            </select>
           </label>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {t(
-              "Relative to the main .tex file's folder (. for next to it). Leave empty to use the default from Settings > LaTeX. Press Enter to apply.",
-            )}
-          </p>
+          <div>
+            <label className="flex flex-col gap-1 text-muted-foreground text-xs">
+              {t("Output folder")}
+              <input
+                data-testid="paper-output-dir"
+                // biome-ignore lint/a11y/noAutofocus: the popover opens to edit this field.
+                autoFocus
+                value={draft ?? outputDir ?? ""}
+                placeholder={defaultOutputDir}
+                disabled={setOutputDir.isPending}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return
+                  if (draft === null) {
+                    setOpen(false)
+                    return
+                  }
+                  setError(null)
+                  setOutputDir.mutate({ projectId, outputDir: draft })
+                }}
+                className="h-7 rounded border border-border bg-background px-1.5 text-foreground"
+              />
+            </label>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t(
+                "Relative to the main .tex file's folder (. for next to it). Leave empty to use the default from Settings > LaTeX. Press Enter to apply.",
+              )}
+            </p>
+          </div>
           {error ? (
-            <p role="alert" className="mt-1 cursor-text select-text text-destructive text-xs">
+            <p role="alert" className="cursor-text select-text text-destructive text-xs">
               {error}
             </p>
           ) : null}

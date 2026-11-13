@@ -46,8 +46,12 @@ interface PaperEditorProps {
   paperDir: string
   /** The paper folder as shown to the user (from `paper.get`). */
   displayDir: string
-  /** The main .tex file, relative to the paper folder, or null when none was found. */
+  /** The main .tex file, relative to the paper folder (the saved choice, else the guess), or null when none was found. */
   rootRelPath: string | null
+  /** The main .tex file the user chose, or null when PI Lab guesses it. */
+  mainDoc: string | null
+  /** The paper's .tex files, for choosing the main one in the footer. */
+  texFiles: string[]
   lastSyncAt: number | null
   hasRemote: boolean
   /** False when the paper is linked for editing and building only (no Sync). */
@@ -144,6 +148,8 @@ export function PaperEditor({
   paperDir,
   displayDir,
   rootRelPath,
+  mainDoc,
+  texFiles,
   lastSyncAt,
   hasRemote,
   syncEnabled,
@@ -516,6 +522,9 @@ export function PaperEditor({
         confirmCommit={settings.confirmOverleafCommit}
         outputDir={outputDir}
         defaultOutputDir={settings.latexOutputDir}
+        mainDoc={rootRelPath}
+        chosenMainDoc={mainDoc}
+        texFiles={texFiles}
         saveOpenFiles={async () => {
           const failed: string[] = []
           for (const tab of controller.editor.tabs) {

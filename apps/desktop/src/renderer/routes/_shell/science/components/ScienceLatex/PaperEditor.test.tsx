@@ -136,6 +136,8 @@ function renderEditor(
         paperDir="/proj/paper"
         displayDir="paper"
         rootRelPath="main.tex"
+        mainDoc={null}
+        texFiles={["main.tex"]}
         lastSyncAt={null}
         hasRemote={false}
         syncEnabled={true}
@@ -253,6 +255,46 @@ describe("PaperEditor left column (mocked server)", () => {
     fireEvent.click(files)
     await waitFor(() => expect(within(column).queryByTestId("panel-files")).toBeNull())
     expect(window.localStorage.getItem("pi-lab.latexEditor.filesOpen")).toContain("false")
+    cleanup()
+  })
+})
+
+describe("PaperEditor Files panel button and footer (mocked server)", () => {
+  test("an open Files panel has its hide button in its own top bar; hidden, the show button is in the center top bar", async () => {
+    window.localStorage.removeItem("pi-lab.latexEditor.leftColumn")
+    window.localStorage.removeItem("pi-lab.latexEditor.filesOpen")
+    const client = createFakeTrpcClient(handlers())
+    renderEditor(client, "p20", null, null, null)
+    const panel = await screen.findByTestId("central-panel")
+    fireEvent.click(within(panel).getByTestId("central-files-toggle"))
+    const column = await screen.findByTestId("central-files-panel")
+    expect(within(panel).queryByTestId("central-files-toggle")).toBeNull()
+    // In the Files top bar, both with Files open and collapsed.
+    within(column).getByTestId("central-files-toggle")
+    fireEvent.click(within(column).getByTestId("central-files-section"))
+    await waitFor(() => expect(within(column).queryByTestId("panel-files")).toBeNull())
+    fireEvent.click(within(column).getByTestId("central-files-toggle"))
+    await waitFor(() => expect(screen.queryByTestId("central-files-panel")).toBeNull())
+    expect(within(panel).getByTestId("central-files-toggle")).toBeTruthy()
+    cleanup()
+  })
+
+  test("the footer has no Show in PDF item for a focused .tex file", async () => {
+    const client = createFakeTrpcClient({
+      ...handlers(),
+      "files.stat": (input) => statFiles(input, { "main.tex": 1, "build/main.pdf": 2 }),
+    })
+    renderEditor(client, "p21", null, null, null)
+    await waitFor(() => expect(tabLabels()).toEqual(["main.tex", "main.pdf"]))
+    const sourceTab = screen
+      .getAllByTestId("central-tab-select")
+      .find((tab) => tab.textContent?.includes("main.tex"))
+    if (!sourceTab) throw new Error("no main.tex tab")
+    fireEvent.click(sourceTab)
+    await waitFor(() =>
+      expect(screen.getByTestId("editor-status-label").textContent).toBe("main.tex"),
+    )
+    expect(screen.queryByTestId("latex-show-pdf")).toBeNull()
     cleanup()
   })
 })

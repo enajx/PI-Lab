@@ -51,6 +51,9 @@ function renderBarWithSync(
         confirmCommit={confirmCommit}
         outputDir={null}
         defaultOutputDir="build"
+        mainDoc="main.tex"
+        chosenMainDoc={null}
+        texFiles={["main.tex", "other.tex"]}
         onOpenFiles={onOpenFiles}
         saveOpenFiles={saveOpenFiles}
       />
@@ -282,6 +285,31 @@ describe("PaperSyncBar (mocked server)", () => {
     )
     expect(sync).toHaveBeenCalledTimes(1)
   })
+  test("the footer's main document and output folder item is one short item; its popover sets the main document", async () => {
+    const setMainDoc = vi.fn(() => ({ paper: null, workspaceId: null, rootRelPath: null }))
+    renderBar(
+      {
+        "paper.setMainDoc": setMainDoc,
+        "paper.get": () => ({ paper: null, workspaceId: null, rootRelPath: null }),
+      },
+      true,
+      () => undefined,
+      async () => [],
+    )
+    const footer = screen.getAllByTestId("footer-slot").at(-1) as HTMLElement
+    const item = within(footer).getByTestId("paper-output-folder")
+    expect(item.textContent).toBe("main.tex · build/")
+    fireEvent.click(item)
+    const select = within(footer).getByTestId("paper-main-doc") as HTMLSelectElement
+    expect([...select.options].map((option) => option.value)).toEqual(["", "main.tex", "other.tex"])
+    expect(select.value).toBe("")
+    fireEvent.change(select, { target: { value: "other.tex" } })
+    await waitFor(() =>
+      expect(setMainDoc).toHaveBeenCalledWith({ projectId: "p1", mainDoc: "other.tex" }),
+    )
+    // The popover stays open so the output folder can be changed too.
+    expect(within(footer).getByTestId("paper-output-dir")).toBeTruthy()
+  })
   test("the footer's output folder item opens a popover that sets the folder on Enter and shows a rejected value", async () => {
     const setOutputDir = vi.fn((input: unknown) => {
       if ((input as { outputDir: string }).outputDir.includes(".."))
@@ -299,7 +327,7 @@ describe("PaperSyncBar (mocked server)", () => {
     )
     const footer = screen.getAllByTestId("footer-slot").at(-1) as HTMLElement
     const item = within(footer).getByTestId("paper-output-folder")
-    expect(item.textContent).toBe("Output: build")
+    expect(item.textContent).toBe("main.tex · build/")
     expect(screen.queryByTestId("paper-output-dir")).toBeNull()
     fireEvent.click(item)
     const field = within(footer).getByTestId("paper-output-dir") as HTMLInputElement
