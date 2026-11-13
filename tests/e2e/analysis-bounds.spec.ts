@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
+import { openAnalysisRun } from "./fixtures/analysis"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -90,6 +91,7 @@ test("Analysis keeps research output, previews bounded NumPy arrays and reports 
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
     await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+    await openAnalysisRun(window, "build")
     const matrix = window.locator(
       '[data-testid="analysis-file"][data-rel-path="results/build/matrix.npy"]',
     )

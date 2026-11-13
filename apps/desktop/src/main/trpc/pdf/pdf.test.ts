@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { afterEach, beforeAll, beforeEach, expect, test } from "vitest"
@@ -267,4 +267,37 @@ test("a Project view build of a paper inside the project uses the paper's output
     "main",
   ])
   expect(stdout.trim().split("\n")).toEqual(["main.tex"])
+}, 60_000)
+
+/** Installed latexmk: a saved .tex with no root of its own builds the paper's main document. */
+test("a .tex with no root of its own builds the saved main document, else an ancestor main.tex, else the guess", async (context) => {
+  if (missingTools.length) context.skip(`Requires installed TeX tools: ${missingTools.join(", ")}`)
+  const root = (body: string): string =>
+    `\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}\n`
+  const paperDir = join(h.dataDir, "paper")
+  await mkdir(join(paperDir, "sections"), { recursive: true })
+  await promisify(execFile)("git", ["init", "-q", paperDir])
+  await writeFile(join(paperDir, "main.tex"), root("Main document."))
+  await writeFile(join(paperDir, "thesis.tex"), root("\\input{sections/intro}"))
+  await writeFile(join(paperDir, "sections", "intro.tex"), "Introduction sentence.\n")
+  const projectId = (await h.caller.projects.list())[0]?.id ?? ""
+  const linked = await h.caller.paper.link({ projectId, dir: paperDir, rootChoice: null })
+  const paperWorkspace = linked.workspaceId ?? ""
+  const build = (): ReturnType<typeof h.caller.pdf.build> =>
+    h.caller.pdf.build({ workspaceId: paperWorkspace, relPath: "sections/intro.tex" })
+  expect((await build()).relPath).toBe("build/main.pdf")
+  await h.caller.paper.setMainDoc({ projectId, mainDoc: "thesis.tex" })
+  const chosen = await build()
+  expect(chosen.success, chosen.log).toBe(true)
+  expect(chosen.relPath).toBe("build/thesis.pdf")
+  // No saved choice and no ancestor main.tex: the guessed main document.
+  await h.caller.paper.setMainDoc({ projectId, mainDoc: "" })
+  await rm(join(paperDir, "main.tex"))
+  await writeFile(join(paperDir, "other.tex"), root("Other."))
+  await writeFile(join(paperDir, "thesis.pdf"), "%PDF-")
+  expect((await build()).relPath).toBe("build/thesis.pdf")
+  // A saved main document that was deleted afterwards is passed over.
+  await h.caller.paper.setMainDoc({ projectId, mainDoc: "other.tex" })
+  await rm(join(paperDir, "other.tex"))
+  expect((await build()).relPath).toBe("build/thesis.pdf")
 }, 60_000)

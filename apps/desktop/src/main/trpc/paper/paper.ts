@@ -47,12 +47,13 @@ import {
   type OverleafCloneSearch,
   type PaperCandidate,
 } from "../../paper/detect"
-import { findRootTex, listPaperFiles, readPaperText } from "../../paper/files"
+import { listPaperFiles, readPaperText } from "../../paper/files"
 import { buildOutline, type OutlineEntry } from "../../paper/outline"
 import {
   effectiveOutputDir,
   excludeEffectiveOutputs,
   isOwnRepo,
+  mainDocOf,
   outputDirOrBadRequest,
   requireUntrackedOutputDir,
 } from "../../paper/outputs"
@@ -169,8 +170,15 @@ export interface PaperState {
   paper: PaperView | null
   /** Id of the hidden paper workspace, for files.* and pdf.* calls. */
   workspaceId: string | null
-  /** Main .tex file relative to the paper folder, or null when it cannot be chosen. */
+  /**
+   * Main .tex file relative to the paper folder (the saved choice, else the
+   * guess), or null when it cannot be chosen.
+   */
   rootRelPath: string | null
+  /** The main .tex file the user chose, or null when PI Lab guesses it. */
+  mainDoc: string | null
+  /** The paper's .tex files relative to it, sorted, for choosing the main one. */
+  texFiles: string[]
   /** False after the user cleared the paper folder: the LaTeX Editor then does not look for Overleaf clones. */
   autoDetect: boolean
   /** Subfolders of the paper folder that could not be read and were skipped. */
@@ -268,7 +276,15 @@ async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperSt
   const paper = project.metadata?.paper
   const autoDetect = project.metadata?.paperAutoDetect !== false
   if (!paper) {
-    return { paper: null, workspaceId: null, rootRelPath: null, autoDetect, skippedFolders: [] }
+    return {
+      paper: null,
+      workspaceId: null,
+      rootRelPath: null,
+      mainDoc: null,
+      texFiles: [],
+      autoDetect,
+      skippedFolders: [],
+    }
   }
   const missing = !existsSync(paper.dir)
   const listed = missing ? { files: [], unreadable: [] } : await listPaperFiles(paper.dir)
@@ -290,7 +306,9 @@ async function paperState(db: PiLabDatabase, projectId: string): Promise<PaperSt
       missing,
     },
     workspaceId: paperWorkspace(db, projectId)?.id ?? null,
-    rootRelPath: missing ? null : await findRootTex(paper.dir, listed.files),
+    rootRelPath: missing ? null : await mainDocOf(paper, listed.files),
+    mainDoc: paper.mainDoc ?? null,
+    texFiles: listed.files.filter((file) => file.kind === "tex").map((file) => file.relPath),
   }
 }
 
@@ -340,8 +358,8 @@ async function checkFolder(
  * and "no-sync" stores Sync as off. When the folder is the top of its own Git
  * repository, its `origin` URL is recorded without any embedded credentials,
  * and (unless Sync is off) the build output folder is added to that repo's
- * local `.git/info/exclude` so PDF build output is never committed. The previous link's output folder override is kept when
- * the same folder is linked again.
+ * local `.git/info/exclude` so PDF build output is never committed. The previous link's output folder override and main
+ * .tex choice are kept when the same folder is linked again.
  */
 export async function linkPaper(
   db: PiLabDatabase,
@@ -377,8 +395,10 @@ export async function linkPaper(
   const syncOff = askRoot && rootChoice === "no-sync"
   const previous = project.metadata?.paper
   const outputDir = previous?.dir === canonical ? previous.outputDir : undefined
+  const mainDoc = previous?.dir === canonical ? previous.mainDoc : undefined
   const paper: ProjectPaper = { dir: canonical, remoteUrl: null, lastSyncAt: null }
   if (outputDir !== undefined) paper.outputDir = outputDir
+  if (mainDoc !== undefined) paper.mainDoc = mainDoc
   if (syncOff) paper.syncEnabled = false
   await excludeEffectiveOutputs(paper, getSettingsOrDefaults(db).editor.latexOutputDir)
   const url = origin === null ? null : displayRemoteUrl(origin)
@@ -407,26 +427,54 @@ async function excludeFromProjectRepo(repoPath: string, target: string): Promise
 }
 
 /**
- * Clone `url` into `<project>/paper`, hide that folder from the project's own
- * Git repo (via `.git/info/exclude`) when the project is a Git repo, and link
- * it. Refuses when `<project>/paper` already exists.
+ * The folder an Overleaf clone for `project` goes into: `<project>/paper` when
+ * `dir` is null, else `dir` ("~" is the home folder). Refuses (CONFLICT) when
+ * `<project>/paper` already exists, or when `dir` is a folder with files in it.
+ */
+async function requireCloneTarget(project: Project, dir: string | null): Promise<string> {
+  if (dir === null) {
+    const target = join(project.repoPath, "paper")
+    if (existsSync(target)) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `${target} already exists. Use the existing folder or move it first.`,
+      })
+    }
+    return target
+  }
+  const target = expandHome(dir)
+  if (!(await isFreeFolder(target))) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `Choose an empty folder for the paper: ${target} has files in it.`,
+    })
+  }
+  return target
+}
+
+/**
+ * Clone `url` into `<project>/paper` (`dir` null) or into the chosen folder
+ * `dir` (missing parent folders are made), then link it. A clone inside the
+ * project folder is hidden from the project's own Git repo (via
+ * `.git/info/exclude`) when the project is a Git repo; a clone outside it is
+ * linked the same way as a paper folder outside the project. Refuses when the
+ * target is taken (see {@link requireCloneTarget}).
  */
 export async function clonePaper(
   db: PiLabDatabase,
   projectId: string,
   url: string,
+  dir: string | null,
   options: RemoteCallOptions,
 ): Promise<PaperState> {
   const project = requireProject(db, projectId)
-  const target = join(project.repoPath, "paper")
-  if (existsSync(target)) {
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: `${target} already exists. Use the existing folder or move it first.`,
-    })
+  const target = await requireCloneTarget(project, dir)
+  await mkdir(dirname(target), { recursive: true })
+  await clone(dirname(target), url, target, options)
+  const inside = containsOrEquals(await realpath(project.repoPath), await realpath(target))
+  if (inside && (await isGitRepo(project.repoPath))) {
+    await excludeFromProjectRepo(project.repoPath, target)
   }
-  await clone(project.repoPath, url, target, options)
-  if (await isGitRepo(project.repoPath)) await excludeFromProjectRepo(project.repoPath, target)
   return linkPaper(db, projectId, target, null)
 }
 
@@ -522,17 +570,23 @@ function overleafProjectId(url: string): string | null {
 }
 
 /**
- * Where a paper added with no project goes by default: `<papers folder>/<name>`
- * (the papers folder from Settings), where the name is the Overleaf project id
- * of `url`, or `paper`, `paper-2`, … (the first free one) with no URL.
+ * The folder for a new paper inside `root`: `<root>/<Overleaf project id of url>`,
+ * or `paper`, `paper-2`, … (the first free one) when `url` is null or has no id.
  */
-async function standaloneTarget(db: PiLabDatabase, url: string | null): Promise<{ dir: string }> {
-  const root = expandHome(getSettingsOrDefaults(db).editor.papersFolder)
+async function paperTargetIn(root: string, url: string | null): Promise<{ dir: string }> {
   const id = url === null ? null : overleafProjectId(url)
   if (id !== null) return { dir: join(root, id) }
   let name = "paper"
   for (let n = 2; !(await isFreeFolder(join(root, name))); n++) name = `paper-${n}`
   return { dir: join(root, name) }
+}
+
+/**
+ * Where a paper added with no project goes by default: `<papers folder>/<name>`
+ * (the papers folder from Settings); see {@link paperTargetIn}.
+ */
+function standaloneTarget(db: PiLabDatabase, url: string | null): Promise<{ dir: string }> {
+  return paperTargetIn(expandHome(getSettingsOrDefaults(db).editor.papersFolder), url)
 }
 
 /** How a paper with no project is added; see {@link addStandalonePaper}. */
@@ -1056,7 +1110,7 @@ export const paperRouter = router({
     .input(projectIdInput)
     .query(async ({ ctx, input }): Promise<OutlineEntry[]> => {
       const paper = requirePaper(requireProject(ctx.db, input.projectId))
-      const root = await findRootTex(paper.dir, (await listPaperFiles(paper.dir)).files)
+      const root = await mainDocOf(paper, null)
       if (!root) return []
       return buildOutline(root, (relPath) => readPaperText(paper.dir, relPath))
     }),
@@ -1101,31 +1155,38 @@ export const paperRouter = router({
     ),
 
   /**
-   * Clone an Overleaf project into `<project>/paper`, then link it. Uses the
-   * token typed for this attempt (saved once the clone works), else the saved
-   * token or the user's Git credential; see {@link withOverleafAuth}.
+   * Clone an Overleaf project into `<project>/paper` (`dir` null) or a chosen
+   * folder `dir`, then link it; see {@link clonePaper}. Uses the token typed
+   * for this attempt (saved once the clone works), else the saved token or the
+   * user's Git credential; see {@link withOverleafAuth}.
    */
   addOverleaf: publicProcedure
     .input(
       z.object({
         projectId: z.string().min(1),
         url: z.string().trim().min(1),
+        dir: z.string().trim().min(1).nullable(),
         token: tokenInput.optional(),
       }),
     )
     .mutation(async ({ ctx, input }): Promise<PaperState> => {
       requireOverleafUrl(input.url)
-      const project = requireProject(ctx.db, input.projectId)
-      if (existsSync(join(project.repoPath, "paper"))) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: `${join(project.repoPath, "paper")} already exists. Use the existing folder or move it first.`,
-        })
-      }
+      // A taken target is refused before any token is asked for.
+      await requireCloneTarget(requireProject(ctx.db, input.projectId), input.dir)
       return withOverleafAuth(ctx, input.url, input.token, (options) =>
-        clonePaper(ctx.db, input.projectId, input.url, options),
+        clonePaper(ctx.db, input.projectId, input.url, input.dir, options),
       )
     }),
+
+  /**
+   * Where an Overleaf clone goes when the remembered clone location is the
+   * folder `folder`: `<folder>/<Overleaf project id>`; see {@link paperTargetIn}.
+   */
+  cloneTarget: publicProcedure
+    .input(z.object({ folder: z.string().trim().min(1), url: z.string().trim().min(1) }))
+    .query(
+      ({ input }): Promise<{ dir: string }> => paperTargetIn(expandHome(input.folder), input.url),
+    ),
 
   /**
    * Set this paper's build output folder (relative to its root .tex file's
@@ -1148,6 +1209,37 @@ export const paperRouter = router({
       changePaper(ctx.db, input.projectId, (current) => {
         const { outputDir: _current, ...others } = current
         return next.outputDir === undefined ? others : { ...others, outputDir: next.outputDir }
+      })
+      return paperState(ctx.db, input.projectId)
+    }),
+
+  /**
+   * Set this paper's main .tex file (a listed .tex file, relative to the paper
+   * folder), or clear it with "" so PI Lab guesses it. It is also the build root
+   * of a saved .tex with no `\documentclass` or `% !TeX root` of its own. The
+   * build output of the new main .tex is excluded like {@link setOutputDir} does.
+   */
+  setMainDoc: publicProcedure
+    .input(z.object({ projectId: z.string().min(1), mainDoc: z.string().max(1024) }))
+    .mutation(async ({ ctx, input }): Promise<PaperState> => {
+      const paper = requirePaper(requireProject(ctx.db, input.projectId))
+      const { mainDoc: _old, ...rest } = paper
+      const mainDoc = input.mainDoc.trim()
+      if (mainDoc !== "") {
+        const listed = (await listPaperFiles(paper.dir)).files
+        if (!listed.some((file) => file.kind === "tex" && file.relPath === mainDoc)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `${mainDoc} is not a .tex file in the paper folder`,
+          })
+        }
+      }
+      const next: ProjectPaper = mainDoc === "" ? rest : { ...rest, mainDoc }
+      await excludeEffectiveOutputs(next, getSettingsOrDefaults(ctx.db).editor.latexOutputDir)
+      // Only the main .tex changes: a sync saved during the awaits is kept.
+      changePaper(ctx.db, input.projectId, (current) => {
+        const { mainDoc: _current, ...others } = current
+        return next.mainDoc === undefined ? others : { ...others, mainDoc: next.mainDoc }
       })
       return paperState(ctx.db, input.projectId)
     }),

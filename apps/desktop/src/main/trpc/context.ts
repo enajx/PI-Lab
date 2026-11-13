@@ -42,6 +42,8 @@ export interface AppContext {
   appChannel?: PiLabChannel
   /** User home whose conventional global agent-skill roots are indexed read-only. */
   skillsHomeDir: string
+  /** PI Lab's data folder (`app.getPath("userData")`), for app-wide files such as the experiments structure. */
+  userDataDir: string
   /** Read-only skills shipped with PI Lab; absent in isolated callers. */
   bundledSkillsDir?: string
   /** Read-only directory containing platform-specific bundled LaTeX tools. */

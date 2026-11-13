@@ -17,7 +17,7 @@ import { z } from "zod"
 import { GENERATED_EXTENSIONS } from "../../latex/outputDir"
 import { type LatexRuntime, resolveLatexRuntime } from "../../latex/runtime"
 import { forwardSync, reverseSync } from "../../latex/synctex"
-import { effectiveOutputDir, excludePaperOutputs } from "../../paper/outputs"
+import { effectiveOutputDir, excludePaperOutputs, mainDocOf } from "../../paper/outputs"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
@@ -108,13 +108,9 @@ async function sourceOutput(
   source: string,
 ): Promise<SourceOutput> {
   const defaultOutputDir = getSettingsOrDefaults(db).editor.latexOutputDir
-  const paper = projectPaper(db, target.projectId)
-  if (!paper || !existsSync(paper.dir)) return { outputDir: defaultOutputDir, paperDir: null }
-  const paperDir = await realpath(paper.dir)
-  const path = relative(paperDir, source)
-  if (path === "" || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
-    return { outputDir: defaultOutputDir, paperDir: null }
-  }
+  const found = await paperOf(db, target, source)
+  if (!found) return { outputDir: defaultOutputDir, paperDir: null }
+  const { paper, paperDir } = found
   const outputDir = effectiveOutputDir(paper, defaultOutputDir)
   return { outputDir, paperDir: paper.syncEnabled === false ? null : paperDir }
 }
@@ -139,21 +135,71 @@ async function texSource(path: string): Promise<string> {
   return readFile(path, "utf8")
 }
 
-/** Follow explicit root comments, then the source itself or an ancestor main.tex. */
-async function rootSource(dir: string, relPath: string): Promise<string> {
-  let target = await insideFile(dir, relPath)
+/**
+ * The real path of the linked paper folder when `source` lies inside it, with
+ * the paper; null otherwise.
+ */
+async function paperOf(
+  db: PiLabDatabase,
+  target: BuildTarget,
+  source: string,
+): Promise<{ paper: ProjectPaper; paperDir: string } | null> {
+  const paper = projectPaper(db, target.projectId)
+  if (!paper || !existsSync(paper.dir)) return null
+  const paperDir = await realpath(paper.dir)
+  const path = relative(paperDir, source)
+  if (path === "" || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) return null
+  return { paper, paperDir }
+}
+
+/**
+ * The paper's main document for a source inside the linked paper folder:
+ * the saved choice when `saved` is true, else the guess ({@link mainDocOf}).
+ * Null when the source is outside the paper, there is none, or the saved file
+ * no longer exists.
+ */
+async function paperMainSource(
+  db: PiLabDatabase,
+  target: BuildTarget,
+  source: string,
+  saved: boolean,
+): Promise<string | null> {
+  const found = await paperOf(db, target, source)
+  if (!found) return null
+  const { paper, paperDir } = found
+  const mainDoc = saved ? (paper.mainDoc ?? null) : await mainDocOf(paper, null)
+  // A saved main document that was deleted or renamed is passed over, as the footer does.
+  if (mainDoc === null || !existsSync(join(paperDir, mainDoc))) return null
+  return insideFile(target.dir, relative(target.dir, join(paperDir, mainDoc)))
+}
+
+/**
+ * Follow explicit root comments, then the source itself. A source with neither
+ * builds the linked paper's saved main document when it lies inside the paper,
+ * else an ancestor main.tex with `\documentclass`, else the paper's guessed
+ * main document.
+ */
+async function rootSource(
+  db: PiLabDatabase,
+  target: BuildTarget,
+  relPath: string,
+): Promise<string> {
+  const { dir } = target
+  let current = await insideFile(dir, relPath)
   const seen = new Set<string>()
   while (true) {
-    if (seen.has(target)) throw new Error("Circular LaTeX root comments")
-    seen.add(target)
-    const source = await texSource(target)
+    if (seen.has(current)) throw new Error("Circular LaTeX root comments")
+    seen.add(current)
+    const source = await texSource(current)
     const root = /^\s*%\s*!\s*tex\s+root\s*=\s*(.+?)\s*$/im.exec(source)?.[1]
     if (root) {
-      target = await insideFile(dir, relative(dir, resolve(dirname(target), root)))
+      current = await insideFile(dir, relative(dir, resolve(dirname(current), root)))
       continue
     }
-    if (/^\s*\\documentclass(?:\[|\{)/m.test(source)) return target
-    let parent = dirname(target)
+    if (/^\s*\\documentclass(?:\[|\{)/m.test(source)) return current
+    const saved = await paperMainSource(db, target, current, true)
+    if (saved !== null) return saved
+    let parent = dirname(current)
     while (true) {
       const candidate = join(parent, "main.tex")
       const exists = await stat(candidate).then(
@@ -163,7 +209,7 @@ async function rootSource(dir: string, relPath: string): Promise<string> {
           throw error
         },
       )
-      if (exists && candidate !== target) {
+      if (exists && candidate !== current) {
         const checked = await insideFile(dir, relative(dir, candidate))
         if (/^\s*\\documentclass(?:\[|\{)/m.test(await texSource(checked))) return checked
       }
@@ -172,6 +218,8 @@ async function rootSource(dir: string, relPath: string): Promise<string> {
       if (next === parent || relative(dir, next).startsWith("..")) break
       parent = next
     }
+    const guessed = await paperMainSource(db, target, current, false)
+    if (guessed !== null && guessed !== current) return guessed
     throw new Error(
       "Cannot find the LaTeX root. Add % !TeX root = path/to/main.tex to this source.",
     )
@@ -335,7 +383,7 @@ async function pdfForSource(
 ): Promise<string> {
   const { dir } = target
   if (explicit) return insideFile(dir, explicit)
-  const root = await rootSource(dir, rendererPath(dir, source))
+  const root = await rootSource(db, target, rendererPath(dir, source))
   const name = `${basename(root, extname(root))}.pdf`
   const { outputDir } = await sourceOutput(db, target, root)
   const candidates = [join(dirname(root), outputDir, name), join(dirname(root), name)]
@@ -401,7 +449,7 @@ export const pdfRouter = router({
   }),
   build: publicProcedure.input(pathInput).mutation(async ({ ctx, input }): Promise<BuildResult> => {
     const target = await workspaceDirectory(ctx.db, input.workspaceId)
-    return compile(ctx, input.workspaceId, target, await rootSource(target.dir, input.relPath))
+    return compile(ctx, input.workspaceId, target, await rootSource(ctx.db, target, input.relPath))
   }),
   /**
    * Live output of the builds in one workspace; see {@link BuildOutputEvent}.

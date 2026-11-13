@@ -1,0 +1,20 @@
+/*
+ * "Select experiments folder": an accent ring on the Select… button. It pulses a
+ * few times, then stays until the button is clicked. With reduced motion it does
+ * not pulse.
+ */
+.analysis-select-folder-ring {
+  box-shadow: 0 0 0 2px var(--accent-brand);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .analysis-select-folder-ring {
+    animation: analysis-select-folder-pulse 1.2s ease-in-out 3;
+  }
+}
+
+@keyframes analysis-select-folder-pulse {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent-brand) 30%, transparent);
+  }
+}

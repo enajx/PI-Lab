@@ -22,6 +22,7 @@
 
 const { join } = require("node:path")
 const { randomUUID } = require("node:crypto")
+const { execFileSync } = require("node:child_process")
 // Customize the staging image before normal DMG compression, signing and update metadata.
 process.env.CUSTOM_DMGBUILD_PATH = join(__dirname, "scripts/dmg-background.cjs")
 
@@ -86,7 +87,14 @@ const config = {
   extraMetadata: {
     piLabChannel: channel,
     ...(channel === "alpha"
-      ? { piLabBuildId: process.env.PI_LAB_BUILD_ID?.trim() || randomUUID() }
+      ? {
+          piLabBuildId: process.env.PI_LAB_BUILD_ID?.trim() || randomUUID(),
+          // Alpha builds keep version 0.0.0, so issue reports name the commit instead.
+          piLabCommit: execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
+            cwd: __dirname,
+            encoding: "utf8",
+          }).trim(),
+        }
       : {}),
     ...(publicRelease
       ? {

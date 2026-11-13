@@ -545,7 +545,7 @@
   "e.g. Ada Lovelace, Alan Turing": "예: Ada Lovelace, Alan Turing",
   "e.g. NeurIPS 2026": "예: NeurIPS 2026",
   "e.g. https://www.overleaf.com/project/…": "예: https://www.overleaf.com/project/…",
-  "Browse and preview the data files in a project's repo": "프로젝트 저장소의 데이터 파일 탐색 및 미리보기",
+  "Experiments logs and visualisation": "실험 로그 및 시각화",
   "Marimo report": "Marimo 보고서",
   "Analysis project": "분석 프로젝트",
   "Choose which project repository to scan for data files.": "데이터 파일을 검색할 프로젝트 저장소를 선택하세요.",

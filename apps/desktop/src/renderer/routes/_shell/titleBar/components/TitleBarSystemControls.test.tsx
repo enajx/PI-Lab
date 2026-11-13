@@ -37,6 +37,10 @@ describe("TitleBarSystemControls", () => {
     expect(divider.className).toMatch(/\bh-4\b/)
     // With no view buttons before it (an empty Dashboard top bar), the divider is hidden.
     expect(divider.className).toMatch(/(^|\s)first:hidden(\s|$)/)
-    expect(divider.compareDocumentPosition(agents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const issues = screen.getByTestId("issue-report-control")
+    expect(issues.className).toMatch(/\bh-7\b/)
+    expect(issues.className).toMatch(/\bw-7\b/)
+    expect(divider.compareDocumentPosition(issues) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(issues.compareDocumentPosition(agents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

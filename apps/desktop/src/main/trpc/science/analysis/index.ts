@@ -1,4 +1,4 @@
-export { analysisRouter, type ResultsListing } from "./analysis"
+export { analysisRouter, type ResultsListing, type StructureSettings } from "./analysis"
 export type {
   ArrayPreview,
   ChartPreview,
@@ -7,3 +7,4 @@ export type {
   DataFileListing,
   DataFilePreview,
 } from "./discover"
+export type { StructurePreset } from "./structure"

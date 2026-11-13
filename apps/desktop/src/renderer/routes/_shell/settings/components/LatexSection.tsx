@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { useTRPC } from "../../../../trpc/react"
 import { LatexTemplateSettings } from "./LatexTemplateSettings"
+import { OverleafCloneSettings } from "./OverleafCloneSettings"
 import { OverleafSettings } from "./OverleafSettings"
 import { PapersFolderSettings } from "./PapersFolderSettings"
 import { SelectField, SettingsSection } from "./SettingsControls"
@@ -179,6 +180,7 @@ export function LatexSection() {
       <LatexTemplateSettings />
       <PapersFolderSettings />
       <OverleafSettings />
+      <OverleafCloneSettings />
       {update.error ? (
         <p role="alert" className="px-4 py-3 text-destructive text-sm">
           {update.error.message}
