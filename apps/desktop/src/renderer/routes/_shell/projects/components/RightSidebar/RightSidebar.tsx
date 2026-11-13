@@ -451,7 +451,7 @@ export function RightSidebar({
   return (
     <aside
       data-testid="right-sidebar"
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
     >
       <div className="flex shrink-0 items-center gap-0.5 border-border border-b p-1">
         <div
@@ -472,7 +472,7 @@ export function RightSidebar({
               className={cn(
                 "min-w-0 flex-auto truncate rounded-md px-1.5 py-1 text-xs transition-colors",
                 leadingActive
-                  ? "bg-accent text-foreground"
+                  ? "bg-selected text-selected-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
               )}
             >
@@ -505,7 +505,7 @@ export function RightSidebar({
                 className={cn(
                   "min-w-0 flex-auto truncate rounded-md px-1.5 py-1 text-xs transition-colors",
                   selected
-                    ? "bg-accent text-foreground"
+                    ? "bg-selected text-selected-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                   draggingId === tab.id && "opacity-50",
                   relPath === null && dropClass(tab.id),

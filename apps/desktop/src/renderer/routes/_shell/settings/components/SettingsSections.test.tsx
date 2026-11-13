@@ -157,19 +157,57 @@ describe("Settings sections", () => {
 
   test("Appearance gallery selects and applies a named app theme", async () => {
     renderSection(<AppearanceSection />)
-    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(9)
+    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(14)
     expect(screen.getByRole("button", { name: "Default" }).getAttribute("aria-pressed")).toBe(
       "true",
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    fireEvent.click(screen.getByRole("button", { name: "Nord" }))
     await waitFor(() =>
-      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#e1e2e7"),
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#eceff4"),
     )
-    expect(screen.getByRole("button", { name: "Tokyo Night" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("button", { name: "Nord" }).getAttribute("aria-pressed")).toBe(
       "true",
     )
-    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("nord")
+  })
+
+  test("Appearance marks dark-only themes", () => {
+    renderSection(<AppearanceSection />)
+    const dracula = screen.getByTestId("settings-app-theme-dracula")
+    expect(dracula.textContent).toContain("Dark only")
+    expect(screen.getByTestId("settings-app-theme-nord").textContent).not.toContain("Dark only")
+  })
+
+  test("Appearance accent picker applies a preset, a custom color, and Theme default", async () => {
+    renderSection(<AppearanceSection />)
+    const accents = screen.getByTestId("settings-app-accents")
+    expect(accents.querySelectorAll("button")).toHaveLength(11)
+    expect(screen.getByTestId("settings-app-accent-default").getAttribute("aria-pressed")).toBe(
+      "true",
+    )
+
+    fireEvent.click(screen.getByTestId("settings-app-accent-ember"))
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#c4540f"),
+    )
+    expect(screen.getByTestId("settings-app-accent-ember").getAttribute("aria-pressed")).toBe(
+      "true",
+    )
+    expect(window.localStorage.getItem("pi-lab.appAccent.default")).toBe("ember")
+
+    fireEvent.change(screen.getByTestId("settings-app-accent-custom"), {
+      target: { value: "#2266cc" },
+    })
+    await waitFor(() =>
+      expect(window.localStorage.getItem("pi-lab.appAccent.default")).toBe("#2266cc"),
+    )
+    expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#2266cc")
+
+    fireEvent.click(screen.getByTestId("settings-app-accent-default"))
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe(""),
+    )
   })
 
   test("Appearance does not expose a Caffeine animation choice", async () => {

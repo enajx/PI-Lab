@@ -64,7 +64,7 @@ export function ProjectDocumentsCard({
     return (
       <div
         data-testid="project-documents-loading"
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
       >
         {ensureMain.error ? (
           <p role="alert" className="cursor-text select-text p-3 text-destructive text-xs">

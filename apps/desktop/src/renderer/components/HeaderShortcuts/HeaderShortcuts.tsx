@@ -51,10 +51,10 @@ const SKILL_ORIGIN: Record<HeaderShortcutsView, AgentSessionOrigin> = {
  * Tasks). Each names itself in `aria-label`, `title` and `data-feature-label`.
  */
 export const headerIconButtonClass =
-  "flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+  "flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-hover-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
 
 const shortcutButtonClass =
-  "flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+  "flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-hover-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
 
 const menuItemClass =
   "flex h-6 w-full shrink-0 items-center gap-1.5 rounded px-1.5 text-start text-foreground text-xs outline-none hover:bg-accent focus-visible:bg-accent"
@@ -294,7 +294,7 @@ export function HeaderShortcuts({
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="flex size-7 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-accent/60"
+          className="flex size-7 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-hover-foreground focus-visible:bg-accent/60"
         >
           <Plus className="size-3.5 shrink-0" aria-hidden />
         </button>

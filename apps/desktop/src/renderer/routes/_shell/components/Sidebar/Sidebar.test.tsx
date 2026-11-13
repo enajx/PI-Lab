@@ -406,7 +406,7 @@ describe("Sidebar", () => {
     const nav = await screen.findByTestId("science-nav")
     const row = [...nav.children].find((item) => item.getAttribute("data-science-tab") === "tasks")
     fireEvent.click(row?.querySelector("a") ?? (row as HTMLElement))
-    await waitFor(() => expect(nav.querySelector(".bg-accent")).not.toBeNull())
+    await waitFor(() => expect(nav.querySelector(".bg-selected")).not.toBeNull())
     expect(nav.querySelector(".font-medium, .font-semibold, .font-bold")).toBeNull()
   })
 
