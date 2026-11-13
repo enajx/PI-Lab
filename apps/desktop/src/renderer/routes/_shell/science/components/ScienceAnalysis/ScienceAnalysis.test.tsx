@@ -421,6 +421,37 @@ describe("ScienceAnalysis", () => {
     )
   })
 
+  test("a saved custom pattern can be edited directly", async () => {
+    const setStructure = vi.fn(() => ({
+      filePath: "/data/experiments-structure.yaml",
+      defaultValue: "auto",
+      projectValue: "{experiment}/*/{run}/",
+    }))
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => listing([]),
+      "science.analysis.getStructure": () => ({
+        filePath: "/data/experiments-structure.yaml",
+        defaultValue: "auto",
+        projectValue: "{experiment}/seeds/{run}/",
+      }),
+      "science.analysis.setStructure": setStructure,
+    })
+    const select = (await screen.findByTestId("analysis-structure")) as HTMLSelectElement
+    await waitFor(() => expect(select.value).toBe("custom"))
+    // The saved pattern is shown for editing, with no other choice picked first.
+    const pattern = (await screen.findByTestId("analysis-structure-pattern")) as HTMLInputElement
+    expect(pattern.value).toBe("{experiment}/seeds/{run}/")
+    fireEvent.change(pattern, { target: { value: "{experiment}/*/{run}/" } })
+    fireEvent.click(screen.getByTestId("analysis-structure-pattern-save"))
+    await waitFor(() =>
+      expect(setStructure).toHaveBeenCalledWith({
+        projectId: "p1",
+        value: "{experiment}/*/{run}/",
+      }),
+    )
+  })
+
   test("an invalid structure file shows its error in Analysis", async () => {
     const message =
       "Invalid experiments structure file /data/experiments-structure.yaml: bad indentation"

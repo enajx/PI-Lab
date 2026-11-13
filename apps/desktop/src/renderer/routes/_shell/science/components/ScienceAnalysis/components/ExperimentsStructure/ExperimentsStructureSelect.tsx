@@ -51,6 +51,7 @@ export function ExperimentsStructureSelect({
     trpc.science.analysis.setStructure.mutationOptions({
       onSuccess: async () => {
         setCustomOpen(false)
+        setDraft(null)
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.science.analysis.getStructure.queryKey(),
@@ -61,7 +62,8 @@ export function ExperimentsStructureSelect({
     }),
   )
   const [customOpen, setCustomOpen] = useState(false)
-  const [draft, setDraft] = useState("")
+  // The pattern being typed, or null to show the saved pattern.
+  const [draft, setDraft] = useState<string | null>(null)
 
   const data = settings.data
   const stored = data ? (projectId === null ? data.defaultValue : data.projectValue) : null
@@ -72,11 +74,15 @@ export function ExperimentsStructureSelect({
       : isPreset(stored)
         ? stored
         : CUSTOM_OPTION
+  const storedPattern = stored !== null && !isPreset(stored) ? stored : null
+  // The pattern field shows whenever the custom option is selected, also for a saved pattern.
+  const patternShown = selected === CUSTOM_OPTION
+  const patternValue = draft ?? storedPattern ?? PATTERN_PLACEHOLDER
   const save = (value: string | null): void => setStructure.mutate({ projectId, value })
   const choose = (next: string): void => {
     setStructure.reset()
+    setDraft(null)
     if (next === CUSTOM_OPTION) {
-      setDraft(stored !== null && !isPreset(stored) ? stored : PATTERN_PLACEHOLDER)
       setCustomOpen(true)
       return
     }
@@ -114,26 +120,22 @@ export function ExperimentsStructureSelect({
               {t(preset.label)}
             </option>
           ))}
-          <option value={CUSTOM_OPTION}>
-            {selected === CUSTOM_OPTION && !customOpen && stored !== null
-              ? `${t("Custom pattern")}: ${stored}`
-              : t("Custom pattern")}
-          </option>
+          <option value={CUSTOM_OPTION}>{t("Custom pattern")}</option>
         </select>
       </div>
-      {customOpen ? (
+      {patternShown ? (
         <form
           className="flex min-w-0 items-center gap-1.5"
           onSubmit={(event) => {
             event.preventDefault()
-            save(draft.trim())
+            save(patternValue.trim())
           }}
         >
           <input
             type="text"
             data-testid={`${testId}-pattern`}
             aria-label={t("Custom pattern")}
-            value={draft}
+            value={patternValue}
             placeholder={PATTERN_PLACEHOLDER}
             onChange={(event) => setDraft(event.target.value)}
             className="min-w-0 flex-1 rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-foreground text-xs outline-none"
@@ -141,7 +143,7 @@ export function ExperimentsStructureSelect({
           <button
             type="submit"
             data-testid={`${testId}-pattern-save`}
-            disabled={draft.trim() === "" || setStructure.isPending}
+            disabled={patternValue.trim() === "" || setStructure.isPending}
             className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t("Save")}
