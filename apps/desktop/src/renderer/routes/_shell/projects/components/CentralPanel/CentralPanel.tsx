@@ -1469,7 +1469,6 @@ function Launcher({
   pendingAgent,
   pendingTerminal,
 }: LauncherActions) {
-  const t = useTranslate()
   return (
     <div
       data-testid="central-launcher"
