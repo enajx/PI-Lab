@@ -668,16 +668,23 @@ export function ScienceAnalysis({
                             group.runs.length === 0 &&
                             filteredGroups.length === 1 ? null : (
                               <div className="flex items-center gap-2 px-1">
+                                {/* A long label wraps (after a "/" first) and shows in full on hover. */}
                                 <span
-                                  className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
+                                  data-testid="analysis-group-label"
+                                  className="min-w-0 font-medium text-[10px] text-muted-foreground uppercase tracking-wider [overflow-wrap:anywhere]"
                                   title={group.experiment ?? undefined}
                                 >
-                                  {group.experiment ??
-                                    (group.runs.length > 0
-                                      ? `${listing.data?.resultsFolder ?? ""}/`
-                                      : t("No experiment"))}
+                                  {group.experiment === null ? (
+                                    group.runs.length > 0 ? (
+                                      `${listing.data?.resultsFolder ?? ""}/`
+                                    ) : (
+                                      t("No experiment")
+                                    )
+                                  ) : (
+                                    <PathWithBreaks path={group.experiment} />
+                                  )}
                                 </span>
-                                <span className="text-[10px] text-muted-foreground/50">
+                                <span className="shrink-0 text-[10px] text-muted-foreground/50">
                                   {group.runs.length > 0 ? group.runs.length : group.loose.length}
                                 </span>
                               </div>
@@ -794,6 +801,22 @@ export function ScienceAnalysis({
       ) : null}
     </ScienceTabShell>
   )
+}
+
+/** A folder path with a line break opportunity after each "/". */
+function PathWithBreaks({ path }: { path: string }) {
+  const parts = path.split("/")
+  return parts.map((part, index) => (
+    // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed path, in order.
+    <span key={index}>
+      {part}
+      {index < parts.length - 1 ? (
+        <>
+          /<wbr />
+        </>
+      ) : null}
+    </span>
+  ))
 }
 
 /** The files of one run, in ranking order. */
@@ -1100,11 +1123,12 @@ function ResultsFolderField({
       <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
         {t("Results folder")}
       </span>
-      <div className="flex items-center gap-1.5">
+      {/* The prompt takes its own line (the buttons wrap below it) so it is never cut. */}
+      <div className="flex flex-wrap items-center gap-1.5">
         {missing ? (
           <span
             data-testid="analysis-select-folder-prompt"
-            className="min-w-0 flex-1 truncate text-muted-foreground text-xs"
+            className="min-w-0 basis-full text-muted-foreground text-xs"
           >
             {t("Select experiments folder")}
           </span>
@@ -1154,13 +1178,12 @@ function ResultsFolderField({
           {error.message}
         </p>
       ) : null}
-      <div className="flex min-w-0 items-start gap-1.5">
-        <span className="shrink-0 pt-0.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+      {/* The label sits above the select so the select gets the column's full width. */}
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
           {t("Structure")}
         </span>
-        <div className="min-w-0 flex-1">
-          <ExperimentsStructureSelect projectId={projectId} testId="analysis-structure" />
-        </div>
+        <ExperimentsStructureSelect projectId={projectId} testId="analysis-structure" />
       </div>
     </div>
   )

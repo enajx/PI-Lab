@@ -305,6 +305,67 @@ test("with no results folder, Analysis shows no folder and points to Select expe
   await expect(window.locator('[data-testid="analysis-run"][data-run="exp-c"]')).toBeVisible()
 })
 
+/** In the page: how far an element's text runs past its box (0 when it fits). */
+async function textOverflow(locator: Locator): Promise<number> {
+  return locator.evaluate((element) => element.scrollWidth - element.clientWidth)
+}
+
+/** In the page: whether a select's shown option text fits in the select, arrow included. */
+async function selectTextFits(locator: Locator): Promise<boolean> {
+  return locator.evaluate((element) => {
+    const select = element as HTMLSelectElement
+    const style = getComputedStyle(select)
+    const context = document.createElement("canvas").getContext("2d")
+    if (!context) throw new Error("No canvas")
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const text = select.selectedOptions[0]?.textContent ?? ""
+    const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight)
+    // Leave room for the native arrow.
+    return context.measureText(text).width + padding + 16 <= select.clientWidth
+  })
+}
+
+test("at the default window width the prompt, the Structure select and long group names are not cut", async () => {
+  // A long group name: blastocyst-profile/morpheus_s0 (its morpheus_out folder is a run).
+  const run = join(repoDir, "results", "blastocyst-profile", "morpheus_s0")
+  await mkdir(join(run, "morpheus_out"), { recursive: true })
+  await writeFile(join(run, "metrics.csv"), "a\n1\n")
+  await writeFile(join(run, "morpheus_out", "x.csv"), "a\n1\n")
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  expect(await window.evaluate(() => window.innerWidth)).toBe(1280)
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+
+  const structure = window.getByTestId("analysis-structure")
+  await expect(structure).toHaveValue("default", { timeout: 30_000 })
+  expect(await selectTextFits(structure)).toBe(true)
+
+  const label = window
+    .locator(
+      '[data-testid="analysis-experiment-group"][data-experiment="blastocyst-profile/morpheus_s0"]',
+    )
+    .getByTestId("analysis-group-label")
+  await expect(label).toHaveAttribute("title", "blastocyst-profile/morpheus_s0", {
+    timeout: 30_000,
+  })
+  expect(await textOverflow(label)).toBeLessThanOrEqual(0)
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-default-width.png") })
+
+  // With no results folder, the one-liner is shown in full.
+  await rename(join(repoDir, "results"), join(repoDir, "old-results"))
+  await window.reload()
+  const prompt = window.getByTestId("analysis-select-folder-prompt")
+  await expect(prompt).toBeVisible({ timeout: 30_000 })
+  expect(await textOverflow(prompt)).toBeLessThanOrEqual(0)
+  await expect(window.getByTestId("analysis-structure")).toHaveValue("default")
+  expect(await selectTextFits(window.getByTestId("analysis-structure"))).toBe(true)
+  await window.screenshot({
+    path: resolve(".cache", "screens", "analysis-default-width-prompt.png"),
+  })
+})
+
 test("Report shows an error without the report skill, then starts the project's agent with it", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
