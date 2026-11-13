@@ -3,8 +3,10 @@
  *
  * From a seed we pick a base hue and a harmony (analogous, or analogous plus one
  * soft complementary accent). Every color stays in a mid lightness and chroma
- * range, so the cards get soft greens, warm yellows, earthy browns and muted
- * blues, never very dark or neon colors. Colors are converted to sRGB hex for the
+ * range, so the cards get crisp blues, cyans, teals, periwinkles, violets, pinks,
+ * corals and peach, never very dark or neon colors. Greens, olives, khakis and
+ * yellows (the hue band 60..185°, which also covers the green-reading teals) are left out, and oranges stay light so they
+ * never read as brown. Colors are converted to sRGB hex for the
  * SVG generator. The same seed always gives the same palette.
  */
 
@@ -24,7 +26,14 @@ export const PALETTE_LIGHTNESS = { min: 0.55, max: 0.85 } as const
  * The sRGB gamut holds at least chroma 0.074 at every hue for lightness 0.55..0.85,
  * so pulling a color into gamut never takes it below `min`.
  */
-export const PALETTE_CHROMA = { min: 0.04, max: 0.12 } as const
+export const PALETTE_CHROMA = { min: 0.07, max: 0.14 } as const
+
+/** OKLCH hues left out: greens, olives, khakis and yellows. */
+export const EXCLUDED_HUES = { from: 60, to: 185 } as const
+/** Orange hues that read as brown when dark, so they get a higher minimum lightness. */
+export const BROWN_PRONE_HUES = { from: 30, to: 60, minLightness: 0.72 } as const
+/** Draws allowed to find a harmony whose hues all avoid the excluded band. */
+const MAX_HARMONY_TRIES = 64
 
 /** Analogous hue step in degrees. */
 const ANALOGOUS_STEP = { min: 20, max: 40 } as const
@@ -117,23 +126,35 @@ export function seedPaletteOklch(seed: number): OklchColor[] {
   const between = (min: number, max: number): number => min + rng() * (max - min)
   const wrapHue = (hue: number): number => ((hue % 360) + 360) % 360
 
-  const baseHue = between(0, 360)
-  const step = between(ANALOGOUS_STEP.min, ANALOGOUS_STEP.max)
-  const complementary = rng() < COMPLEMENTARY_SHARE
-  const hues = complementary
-    ? [baseHue, baseHue + step, baseHue + 180]
-    : [baseHue - step, baseHue, baseHue + step]
+  const isAllowed = (hue: number): boolean => hue < EXCLUDED_HUES.from || hue >= EXCLUDED_HUES.to
+  const pickHarmony = (): { hues: number[]; complementary: boolean } => {
+    for (let attempt = 0; attempt < MAX_HARMONY_TRIES; attempt++) {
+      const baseHue = between(0, 360)
+      const step = between(ANALOGOUS_STEP.min, ANALOGOUS_STEP.max)
+      const complementary = rng() < COMPLEMENTARY_SHARE
+      const hues = (
+        complementary
+          ? [baseHue, baseHue + step, baseHue + 180]
+          : [baseHue - step, baseHue, baseHue + step]
+      ).map(wrapHue)
+      if (hues.every(isAllowed)) return { hues, complementary }
+    }
+    throw new Error(`No allowed card palette harmony found for seed ${seed}`)
+  }
+  const { hues, complementary } = pickHarmony()
   const chromaMid = (PALETTE_CHROMA.min + PALETTE_CHROMA.max) / 2
 
   return hues.map((hue, index) => {
     // The complementary accent is kept soft: lower half of the chroma range.
     const isAccent = complementary && index === 2
+    const brownProne = hue >= BROWN_PRONE_HUES.from && hue < BROWN_PRONE_HUES.to
+    const minLightness = brownProne ? BROWN_PRONE_HUES.minLightness : PALETTE_LIGHTNESS.min
     const color: OklchColor = {
-      l: between(PALETTE_LIGHTNESS.min, PALETTE_LIGHTNESS.max),
+      l: between(minLightness, PALETTE_LIGHTNESS.max),
       c: isAccent
         ? between(PALETTE_CHROMA.min, chromaMid)
         : between(PALETTE_CHROMA.min, PALETTE_CHROMA.max),
-      h: wrapHue(hue),
+      h: hue,
     }
     return intoGamut(color)
   })

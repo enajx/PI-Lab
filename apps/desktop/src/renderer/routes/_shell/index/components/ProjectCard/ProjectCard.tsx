@@ -410,7 +410,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
             <div
               data-testid="project-card-gradient-grain"
               aria-hidden
-              className="pointer-events-none absolute inset-0 opacity-50 mix-blend-overlay"
+              className="pointer-events-none absolute inset-0 opacity-75 mix-blend-overlay"
               style={{
                 backgroundImage: `url("${artwork.grainUrl}")`,
                 backgroundSize: "100% 100%",

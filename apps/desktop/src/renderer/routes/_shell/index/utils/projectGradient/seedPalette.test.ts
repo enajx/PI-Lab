@@ -1,6 +1,8 @@
 import fc from "fast-check"
 import { describe, expect, test } from "vitest"
 import {
+  BROWN_PRONE_HUES,
+  EXCLUDED_HUES,
   hexToOklch,
   inSrgbGamut,
   PALETTE_CHROMA,
@@ -26,6 +28,22 @@ describe("seedPalette", () => {
           expect(color.c).toBeGreaterThanOrEqual(PALETTE_CHROMA.min)
           expect(color.c).toBeLessThanOrEqual(PALETTE_CHROMA.max)
           expect(inSrgbGamut(color)).toBe(true)
+        }
+      }),
+    )
+  })
+
+  test("no color is green, olive, khaki or brown", () => {
+    fc.assert(
+      fc.property(seedArb, (seed) => {
+        for (const color of seedPaletteOklch(seed)) {
+          // Greens, olives, khakis and most yellows: the excluded hue band.
+          const excluded = color.h >= EXCLUDED_HUES.from && color.h < EXCLUDED_HUES.to
+          expect(excluded).toBe(false)
+          // Oranges read as brown when dark, so they must stay light.
+          if (color.h >= BROWN_PRONE_HUES.from && color.h < BROWN_PRONE_HUES.to) {
+            expect(color.l).toBeGreaterThanOrEqual(BROWN_PRONE_HUES.minLightness)
+          }
         }
       }),
     )

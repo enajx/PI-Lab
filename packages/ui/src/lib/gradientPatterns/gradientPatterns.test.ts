@@ -75,8 +75,12 @@ describe("gradientPatterns", () => {
     )
     expect(grain).toContain('mode="overlay"')
     expect(grain).toContain("fill:gray")
-    // No fixed pixel size: the image fills the card once, so the noise never repeats as tiles.
-    expect(grain).toMatch(/<svg [^>]*width="100%" height="100%"/)
+    // The reference's 1600-unit canvas, cropped to the box like CSS "cover": the noise
+    // scales with the card exactly as the reference SVG does, so at card size it is
+    // finer than a device pixel (crisp, per-pixel grain) and never repeats as tiles.
+    expect(grain).toContain('viewBox="0 0 1600 1600"')
+    expect(grain).toContain('preserveAspectRatio="xMidYMid slice"')
+    expect(grain).not.toMatch(/<svg [^>]*\swidth=/)
   })
 
   test("toDataUri round-trips SVG markup through a CSS-safe data URI", () => {

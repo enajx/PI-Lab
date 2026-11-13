@@ -292,9 +292,12 @@ export function buildLayerSVG(
 
 /**
  * Build the grain as a standalone SVG: the reference's noise layer (a gray rect
- * run through `feTurbulence`, composited and overlay-blended, as in `buildSVG`).
- * It has no fixed size, so CSS draws it once over the whole box at the box's own
- * pixel size. A small repeating tile would show as a regular mesh on the card.
+ * run through `feTurbulence`, composited and overlay-blended, as in `buildSVG`) on
+ * the reference's 1600-unit canvas, cropped to its box like CSS `cover`. So the
+ * noise scales with the card exactly as the reference SVG does: at card size one
+ * noise cell is smaller than a device pixel, which gives crisp per-pixel grain.
+ * (A grain sized in CSS pixels makes 2-4 device-pixel clumps on a 2x screen.)
+ * CSS draws it once over the whole box, so it never repeats as tiles.
  */
 export function buildGrainSVG({
   baseFrequency,
@@ -303,7 +306,7 @@ export function buildGrainSVG({
   baseFrequency: number
   numOctaves: number
 }): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><filter id="g" filterUnits="objectBoundingBox" x="0%" y="0%" width="100%" height="100%"><feTurbulence baseFrequency="${baseFrequency}" numOctaves="${numOctaves}" seed="0" result="out1"/><feComposite in="out1" in2="SourceGraphic" operator="in" result="out2"/><feBlend in="SourceGraphic" in2="out2" mode="overlay" result="out3"/></filter><rect width="100%" height="100%" style="fill:gray; stroke:transparent; filter:url(#g)"/></svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1600" preserveAspectRatio="xMidYMid slice"><filter id="g" filterUnits="objectBoundingBox" x="0%" y="0%" width="100%" height="100%"><feTurbulence baseFrequency="${baseFrequency}" numOctaves="${numOctaves}" seed="0" result="out1"/><feComposite in="out1" in2="SourceGraphic" operator="in" result="out2"/><feBlend in="SourceGraphic" in2="out2" mode="overlay" result="out3"/></filter><rect width="1600" height="1600" style="fill:gray; stroke:transparent; filter:url(#g)"/></svg>`
 }
 
 /** Wrap SVG markup as an inline `data:image/svg+xml` URI, escaped for CSS `url()`. */
