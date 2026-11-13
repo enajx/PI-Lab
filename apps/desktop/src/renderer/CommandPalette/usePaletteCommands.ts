@@ -64,6 +64,8 @@ export interface PaletteCommand {
   icon: ComponentType<{ className?: string }>
   /** Perform the action. The palette closes after success and shows rejected writes. */
   run?: (() => void) | (() => Promise<unknown>)
+  /** Header this sub-list choice is listed under. */
+  section?: string
   /** Instead of `run`: open a sub-list of choices that previews the highlighted one. */
   submenu?: PaletteSubmenu
 }
@@ -76,7 +78,8 @@ export interface PaletteCommand {
  * visible in the palette.
  */
 export interface PaletteSubmenu {
-  options: readonly (readonly [value: string, label: string])[]
+  /** Choices in display order; a third element puts the choice under that header. */
+  options: readonly (readonly [value: string, label: string, section?: string])[]
   current: string
   preview: ((value: string | null) => void) | null
   apply: ((value: string) => void) | ((value: string) => Promise<unknown>)

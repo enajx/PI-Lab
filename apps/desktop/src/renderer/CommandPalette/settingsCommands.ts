@@ -14,7 +14,12 @@ import {
   useShowClusterSection,
   useShowSkillsPanel,
 } from "../preferences/preferences"
-import { APP_ACCENTS, DEFAULT_ACCENT_ID, useTheme } from "../providers/ThemeProvider"
+import {
+  APP_ACCENTS,
+  DEFAULT_ACCENT_ID,
+  type ResolvedThemeMode,
+  useTheme,
+} from "../providers/ThemeProvider"
 import { useTRPC } from "../trpc/react"
 import type { PaletteCommand, PaletteSubmenu } from "./usePaletteCommands"
 
@@ -29,6 +34,21 @@ function action(id: string, label: string, run: Action): PaletteCommand {
 /** A setting chosen from a sub-list that previews the highlighted choice. */
 function picker(id: string, label: string, submenu: PaletteSubmenu): PaletteCommand {
   return { id: `settings-${id}`, label, group: "Settings", icon: Settings, submenu }
+}
+
+const MODE_LABELS = { light: "Light", dark: "Dark" } as const
+
+/** A "Choose theme" entry: one theme in one mode. */
+function themeChoice(themeId: string, mode: ResolvedThemeMode): string {
+  return `${themeId}:${mode}`
+}
+
+function parseThemeChoice(value: string): { themeId: string; mode: ResolvedThemeMode } {
+  const [themeId, mode] = value.split(":")
+  if (!themeId || (mode !== "light" && mode !== "dark")) {
+    throw new Error(`Unknown theme choice: ${value}`)
+  }
+  return { themeId, mode }
 }
 
 /** Show the next boolean value in the label before the user changes it. */
@@ -156,32 +176,35 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
       setSpeed,
       null,
     ),
-    choice(
-      "theme-mode",
-      "theme mode",
-      [
-        ["light", "Light"],
-        ["dark", "Dark"],
-        ["system", "System"],
-      ],
-      theme.mode,
-      theme.setMode,
-      theme.previewMode,
-    ),
-    // Each theme is previewed with Theme default, and picking one resets the accent.
-    picker("change-theme", "Change theme", {
-      options: theme.themes.map((value) => [value.id, value.label] as const),
-      current: theme.themeId,
+    // Switch directly between Light and Dark; System stays in Settings.
+    ...(theme.mode === "dark"
+      ? []
+      : [action("switch-dark-mode", "Switch to Dark mode", () => theme.setMode("dark"))]),
+    ...(theme.mode === "light"
+      ? []
+      : [action("switch-light-mode", "Switch to Light mode", () => theme.setMode("light"))]),
+    // Every theme in both modes; each is previewed in its mode with Theme default.
+    picker("choose-theme", "Choose theme", {
+      options: (["light", "dark"] as const).flatMap((mode) =>
+        theme.themes.map(
+          (value) => [themeChoice(value.id, mode), value.label, MODE_LABELS[mode]] as const,
+        ),
+      ),
+      current: themeChoice(theme.themeId, theme.resolvedMode),
       preview: (value) => {
-        theme.previewThemeId(value)
-        theme.previewAccentId(value === null ? null : DEFAULT_ACCENT_ID)
+        const choice = value === null ? null : parseThemeChoice(value)
+        theme.previewThemeId(choice?.themeId ?? null)
+        theme.previewMode(choice?.mode ?? null)
+        theme.previewAccentId(choice === null ? null : DEFAULT_ACCENT_ID)
       },
       apply: (value) => {
-        theme.setThemeId(value)
+        const { themeId, mode } = parseThemeChoice(value)
+        theme.setThemeId(themeId)
+        theme.setMode(mode)
         theme.setAccentId(DEFAULT_ACCENT_ID)
       },
     }),
-    picker("change-accent", "Change accent", {
+    picker("choose-accent", "Choose accent", {
       options: [
         [DEFAULT_ACCENT_ID, "Theme default"] as const,
         ...APP_ACCENTS.map((value) => [value.id, value.label] as const),

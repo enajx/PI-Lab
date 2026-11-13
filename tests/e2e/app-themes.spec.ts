@@ -122,11 +122,13 @@ test("an accent colors the panel card borders and panel titles; Theme default do
   expect(await style(filesTitle, "color")).toBe(await rootColor(window, "--muted-foreground"))
 })
 
-/** The saved theme and accent, and the colors the app shows now. */
+/** The saved theme, mode and accent, and the colors the app shows now. */
 async function appearance(window: Page) {
   return window.evaluate(() => ({
     savedTheme: localStorage.getItem("pi-lab.appTheme"),
+    savedMode: localStorage.getItem("pi-lab.theme"),
     savedAccent: localStorage.getItem("pi-lab.appAccent"),
+    dark: document.documentElement.classList.contains("dark"),
     background: document.documentElement.style.getPropertyValue("--background"),
     panelBorder: document.documentElement.style.getPropertyValue("--panel-border"),
   }))
@@ -137,77 +139,112 @@ async function backdrop(window: Page): Promise<string> {
   return style(window.getByTestId("command-palette-dim"), "backgroundColor")
 }
 
-async function openChangeTheme(window: Page): Promise<void> {
+const highlightedItem = (window: Page) =>
+  window.locator('[data-testid="command-palette-item"][data-highlighted="true"]')
+
+async function openChooseTheme(window: Page): Promise<void> {
   await window.keyboard.press("ControlOrMeta+Shift+p")
   await expect(window.getByTestId("command-palette")).toBeVisible()
   expect(await backdrop(window)).not.toBe("rgba(0, 0, 0, 0)")
-  await window.getByTestId("command-palette-input").fill("Change theme")
-  await window.locator('[data-command-id="settings-change-theme"]').click()
-  await expect(
-    window.locator('[data-testid="command-palette-item"][data-highlighted="true"]'),
-  ).toHaveAttribute("data-command-id", "nord")
+  await window.getByTestId("command-palette-input").fill("Choose theme")
+  await expect(window.getByTestId("command-palette-item").first()).toHaveAttribute(
+    "data-command-id",
+    "settings-choose-theme",
+  )
+  await window.keyboard.press("Enter")
+  // Every theme in both modes, under Light and Dark headers; the current one highlighted.
+  await expect(window.getByTestId("command-palette-group")).toHaveText(["Light", "Dark"])
+  await expect(highlightedItem(window)).toHaveAttribute("data-command-id", "nord:light")
   // No dim while previewing, so the app shows the theme's real colors.
   expect(await backdrop(window)).toBe("rgba(0, 0, 0, 0)")
 }
 
-test("palette Change theme previews themes with Theme default, Escape restores, Enter saves", async () => {
+test("palette Choose theme previews themes in each mode with Theme default, Escape restores, Enter saves", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
   await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await pickAppearance(window, "nord", "ember")
   const before = await appearance(window)
-  expect(before).toMatchObject({ savedTheme: "nord", savedAccent: "ember" })
+  expect(before).toMatchObject({
+    savedTheme: "nord",
+    savedMode: "light",
+    savedAccent: "ember",
+    dark: false,
+  })
   expect(before.panelBorder).not.toBe("")
 
-  await openChangeTheme(window)
+  await openChooseTheme(window)
   await window.keyboard.press("ArrowDown")
   await window.keyboard.press("ArrowDown")
   await expect.poll(async () => (await appearance(window)).background).not.toBe(before.background)
-  const previewing = await appearance(window)
   // Previewed with Theme default, and nothing saved yet.
-  expect(previewing).toMatchObject({ savedTheme: "nord", savedAccent: "ember", panelBorder: "" })
-
+  expect(await appearance(window)).toMatchObject({
+    savedTheme: "nord",
+    savedAccent: "ember",
+    panelBorder: "",
+  })
   await window.keyboard.press("Escape")
   await expect(window.getByTestId("command-palette")).toHaveCount(0)
   await expect.poll(() => appearance(window)).toEqual(before)
 
-  await openChangeTheme(window)
+  // Nord under Dark previews dark mode without saving it; Enter saves theme and mode.
+  await openChooseTheme(window)
+  await window.getByTestId("command-palette-input").fill("Nord")
   await window.keyboard.press("ArrowDown")
-  const highlighted = await window
-    .locator('[data-testid="command-palette-item"][data-highlighted="true"]')
-    .getAttribute("data-command-id")
+  await expect(highlightedItem(window)).toHaveAttribute("data-command-id", "nord:dark")
+  await expect.poll(async () => (await appearance(window)).dark).toBe(true)
+  expect((await appearance(window)).savedMode).toBe("light")
   await window.keyboard.press("Enter")
   await expect(window.getByTestId("command-palette")).toHaveCount(0)
   await expect
     .poll(async () => {
-      const { savedTheme, savedAccent, panelBorder } = await appearance(window)
-      return { savedTheme, savedAccent, panelBorder }
+      const { savedTheme, savedMode, savedAccent, dark, panelBorder } = await appearance(window)
+      return { savedTheme, savedMode, savedAccent, dark, panelBorder }
     })
-    .toEqual({ savedTheme: highlighted, savedAccent: "default", panelBorder: "" })
+    .toEqual({
+      savedTheme: "nord",
+      savedMode: "dark",
+      savedAccent: "default",
+      dark: true,
+      panelBorder: "",
+    })
 })
 
-test("palette lists one Change command per setting and previews theme mode live", async () => {
+test("palette lists one command per setting and switches Light and Dark mode directly", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-  await window.keyboard.press("ControlOrMeta+Shift+p")
   const input = window.getByTestId("command-palette-input")
+  const labels = () => window.getByTestId("command-palette-item").allTextContents()
+  await window.keyboard.press("ControlOrMeta+Shift+p")
   await input.fill("them")
-  const labels = await window.getByTestId("command-palette-item").allTextContents()
-  expect(labels.some((label) => label.startsWith("Set "))).toBe(false)
-  expect(labels).toEqual(
-    expect.arrayContaining(["Change theme", "Change theme mode", "Change editor theme"]),
-  )
+  expect((await labels()).some((label) => label.startsWith("Set "))).toBe(false)
+  expect(await labels()).toEqual(expect.arrayContaining(["Choose theme", "Change editor theme"]))
+  expect(await labels()).not.toContain("Change theme mode")
 
-  const dark = () => window.evaluate(() => document.documentElement.classList.contains("dark"))
-  const savedMode = () => window.evaluate(() => localStorage.getItem("pi-lab.theme"))
-  expect(await dark()).toBe(false)
-  await input.fill("Change theme mode")
-  await window.keyboard.press("Enter")
-  await window.keyboard.press("ArrowDown")
-  await expect.poll(dark).toBe(true)
-  expect(await savedMode()).toBe("light")
+  // In Light mode only the switch to Dark is offered, and it applies at once.
+  await input.fill("mode")
+  expect(await labels()).toContain("Switch to Dark mode")
+  expect(await labels()).not.toContain("Switch to Light mode")
+  await window.locator('[data-command-id="settings-switch-dark-mode"]').click()
+  await expect(window.getByTestId("command-palette")).toHaveCount(0)
+  await expect.poll(async () => (await appearance(window)).savedMode).toBe("dark")
+  expect((await appearance(window)).dark).toBe(true)
+
+  await window.keyboard.press("ControlOrMeta+Shift+p")
+  await input.fill("mode")
+  expect(await labels()).toContain("Switch to Light mode")
+  expect(await labels()).not.toContain("Switch to Dark mode")
   await window.keyboard.press("Escape")
-  await expect.poll(dark).toBe(false)
-  expect(await savedMode()).toBe("light")
+
+  // With System mode (set in Settings) both switches are offered.
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-appearance").click()
+  await window.getByTestId("settings-theme-mode").selectOption("system")
+  await window.keyboard.press("ControlOrMeta+Shift+p")
+  await input.fill("mode")
+  expect(await labels()).toEqual(
+    expect.arrayContaining(["Switch to Dark mode", "Switch to Light mode"]),
+  )
+  await window.keyboard.press("Escape")
 })

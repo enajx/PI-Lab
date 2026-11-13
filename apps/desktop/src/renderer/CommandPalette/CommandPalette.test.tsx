@@ -4,6 +4,7 @@ import { beforeEach, expect, test, vi } from "vitest"
 const command = vi.hoisted(() => ({ run: vi.fn() }))
 const submenu = vi.hoisted(() => ({ preview: vi.fn(), apply: vi.fn() }))
 const plain = vi.hoisted(() => ({ apply: vi.fn() }))
+const grouped = vi.hoisted(() => ({ preview: vi.fn(), apply: vi.fn() }))
 vi.mock("./usePaletteCommands", () => ({
   usePaletteCommands: () => [
     {
@@ -40,6 +41,23 @@ vi.mock("./usePaletteCommands", () => ({
         current: "nord",
         preview: submenu.preview,
         apply: submenu.apply,
+      },
+    },
+    {
+      id: "grouped",
+      label: "Choose grouped",
+      group: "Settings",
+      icon: () => null,
+      submenu: {
+        options: [
+          ["nord:light", "Nord", "Light"],
+          ["dracula:light", "Dracula", "Light"],
+          ["nord:dark", "Nord", "Dark"],
+          ["dracula:dark", "Dracula", "Dark"],
+        ],
+        current: "nord:dark",
+        preview: grouped.preview,
+        apply: grouped.apply,
       },
     },
     {
@@ -167,4 +185,25 @@ test("typing filters a sub-list and Enter applies the highlighted choice", async
   // Closing after Enter keeps the applied choice instead of restoring the old one.
   unmount()
   expect(submenu.preview).not.toHaveBeenCalledWith(null)
+})
+
+test("a grouped sub-list shows a header per group, skips headers when moving, and filters within groups", () => {
+  render(<CommandPalette onClose={vi.fn()} />)
+  fireEvent.click(screen.getByText("Choose grouped"))
+  const headers = () =>
+    screen.getAllByTestId("command-palette-group").map((header) => header.textContent)
+  expect(headers()).toEqual(["Light", "Dark"])
+  const highlighted = () =>
+    screen
+      .getAllByTestId("command-palette-item")
+      .find((item) => item.getAttribute("data-highlighted") === "true")?.dataset.commandId
+  expect(highlighted()).toBe("nord:dark")
+  const input = screen.getByTestId("command-palette-input")
+  fireEvent.keyDown(input, { key: "ArrowUp" })
+  expect(grouped.preview).toHaveBeenLastCalledWith("dracula:light")
+  fireEvent.change(input, { target: { value: "drac" } })
+  expect(headers()).toEqual(["Light", "Dark"])
+  expect(
+    screen.getAllByTestId("command-palette-item").map((item) => item.dataset.commandId),
+  ).toEqual(["dracula:light", "dracula:dark"])
 })

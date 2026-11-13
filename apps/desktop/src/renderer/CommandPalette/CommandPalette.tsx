@@ -35,7 +35,7 @@ interface OpenSubmenu {
  * highlighting; ↑/↓ move the highlight, Enter runs the highlighted entry, Esc/backdrop
  * dismiss. Mounted app-globally by the shell so it works from any surface. With an empty
  * query it shows every entry in registry order (navigations, view toggles, then projects).
- * A command with a sub-list (Change theme, Change accent) replaces the list with its
+ * A command with a sub-list (Choose theme, Choose accent) replaces the list with its
  * choices; the highlighted choice is previewed, and dismissing restores the previous one.
  */
 export function CommandPalette({ onClose }: CommandPaletteProps) {
@@ -59,9 +59,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const source = useMemo<PaletteCommand[]>(
     () =>
       open
-        ? open.submenu.options.map(([value, label]) => ({
+        ? open.submenu.options.map(([value, label, section]) => ({
             id: value,
             label,
+            section,
             hint: value === open.submenu.current ? "Current" : undefined,
             group: open.command.group,
             icon: open.command.icon,
@@ -73,21 +74,25 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const ranked = useMemo<RankedCommand[]>(() => {
     const q = query.trim()
     if (!q) return source.map((command) => ({ command, positions: [] }))
-    return source
-      .map((command) => ({ command, match: fuzzyMatch(q, command.label) }))
-      .filter(
-        (
-          entry,
-        ): entry is { command: PaletteCommand; match: { score: number; positions: number[] } } =>
-          entry.match !== null,
-      )
-      .sort(
-        (a, b) =>
-          matchTier(q, a.command.label) - matchTier(q, b.command.label) ||
-          b.match.score - a.match.score,
-      )
-      .map((entry) => ({ command: entry.command, positions: entry.match.positions }))
-  }, [query, source])
+    return (
+      source
+        .map((command) => ({ command, match: fuzzyMatch(q, command.label) }))
+        .filter(
+          (
+            entry,
+          ): entry is { command: PaletteCommand; match: { score: number; positions: number[] } } =>
+            entry.match !== null,
+        )
+        // Sub-lists keep their order so their headers stay together.
+        .sort((a, b) =>
+          open
+            ? 0
+            : matchTier(q, a.command.label) - matchTier(q, b.command.label) ||
+              b.match.score - a.match.score,
+        )
+        .map((entry) => ({ command: entry.command, positions: entry.match.positions }))
+    )
+  }, [query, source, open])
 
   // Keep the highlight in range as the result set shrinks/changes.
   const clampedHighlight = Math.min(highlight, Math.max(ranked.length - 1, 0))
@@ -236,7 +241,19 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
               const { command, positions } = entry
               const Icon = command.icon
               const selected = index === clampedHighlight
-              return (
+              const section = command.section
+              const header =
+                section !== undefined && section !== ranked[index - 1]?.command.section ? (
+                  <li
+                    key={`section-${section}`}
+                    data-testid="command-palette-group"
+                    className="px-4 pt-2 pb-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide"
+                  >
+                    {t(section)}
+                  </li>
+                ) : null
+              return [
+                header,
                 <li key={command.id}>
                   <button
                     type="button"
@@ -277,8 +294,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                       </span>
                     ) : null}
                   </button>
-                </li>
-              )
+                </li>,
+              ]
             })
           )}
         </ul>
