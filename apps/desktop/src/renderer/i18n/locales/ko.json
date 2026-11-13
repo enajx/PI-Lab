@@ -1144,5 +1144,6 @@
   "Load": "불러오기",
   "Dataset": "데이터셋",
   "scalar": "스칼라",
-  "datasets": "개 데이터셋"
+  "datasets": "개 데이터셋",
+  "+{count} more": "외 {count}개"
 }

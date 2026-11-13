@@ -62,9 +62,19 @@ describe("MetricChart tooltip", () => {
     if (!plot) throw new Error("Expected the chart to render")
     // The plot spans x 60..624 of the 640 px fallback width; the middle is step 1.
     fireEvent.mouseMove(plot, { clientX: 342, clientY: 100, pageX: 342, pageY: 100 })
-    const tooltip = container.querySelector(".recharts-tooltip-wrapper")
-    expect(tooltip?.querySelector(".recharts-tooltip-label")?.textContent).toBe("step 1")
-    const items = [...(tooltip?.querySelectorAll(".recharts-tooltip-item") ?? [])]
-    expect(items.map((item) => item.textContent)).toEqual(["loss.train : 0.04545", "lr : 1.234e-6"])
+    expect(screen.getByTestId("analysis-chart-tooltip-label").textContent).toBe("step 1")
+    const items = screen.getAllByTestId("analysis-chart-tooltip-item")
+    expect(items.map((item) => item.textContent)).toEqual(["loss.train: 0.04545", "lr: 1.234e-6"])
+  })
+
+  test("lists at most 10 series, highest values first, and counts the rest", () => {
+    const { container } = render(<MetricChart preview={previewWith(12)} />)
+    const plot = container.querySelector(".recharts-wrapper")
+    if (!plot) throw new Error("Expected the chart to render")
+    fireEvent.mouseMove(plot, { clientX: 342, clientY: 100, pageX: 342, pageY: 100 })
+    const items = screen.getAllByTestId("analysis-chart-tooltip-item")
+    expect(items).toHaveLength(10)
+    expect(items[0]?.textContent).toBe("series-11: 12")
+    expect(screen.getByTestId("analysis-chart-tooltip-more").textContent).toBe("+2 more")
   })
 })

@@ -1144,5 +1144,6 @@
   "Load": "加载",
   "Dataset": "数据集",
   "scalar": "标量",
-  "datasets": "个数据集"
+  "datasets": "个数据集",
+  "+{count} more": "还有 {count} 个"
 }

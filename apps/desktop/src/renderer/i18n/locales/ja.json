@@ -1144,5 +1144,6 @@
   "Load": "読み込む",
   "Dataset": "データセット",
   "scalar": "スカラー",
-  "datasets": "個のデータセット"
+  "datasets": "個のデータセット",
+  "+{count} more": "他 {count} 件"
 }

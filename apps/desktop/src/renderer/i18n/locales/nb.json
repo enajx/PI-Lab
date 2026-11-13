@@ -1144,5 +1144,6 @@
   "Load": "Last inn",
   "Dataset": "Datasett",
   "scalar": "skalar",
-  "datasets": "datasett"
+  "datasets": "datasett",
+  "+{count} more": "+{count} til"
 }

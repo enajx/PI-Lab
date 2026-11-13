@@ -1144,5 +1144,6 @@
   "Load": "Cargar",
   "Dataset": "Conjunto de datos",
   "scalar": "escalar",
-  "datasets": "conjuntos de datos"
+  "datasets": "conjuntos de datos",
+  "+{count} more": "+{count} más"
 }
