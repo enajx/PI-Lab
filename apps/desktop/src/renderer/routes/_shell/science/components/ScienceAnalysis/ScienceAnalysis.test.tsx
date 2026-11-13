@@ -114,6 +114,7 @@ function listing(
     resultsFolder: "results",
     overridden: false,
     exists: true,
+    plainFolders: false,
   }
 }
 
@@ -463,6 +464,49 @@ describe("ScienceAnalysis", () => {
     expect(screen.getByTestId("analysis-select-folder-prompt")).toBeTruthy()
   })
 
+  test("Folders shows the results folder as a plain tree: folders and files as rows, no experiment rows", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => ({
+        ...listing([
+          {
+            relPath: "results/exp-a/plot.png",
+            name: "plot.png",
+            kind: "image",
+            innerPath: "exp-a/plot.png",
+          },
+          {
+            relPath: "results/exp-a/runs/m.csv",
+            name: "m.csv",
+            kind: "csv",
+            innerPath: "exp-a/runs/m.csv",
+          },
+          {
+            relPath: "results/summary.json",
+            name: "summary.json",
+            kind: "json",
+            innerPath: "summary.json",
+          },
+          { relPath: "reports/r.md", name: "r.md", kind: "markdown", inReportsFolder: true },
+        ]),
+        plainFolders: true,
+      }),
+    })
+    await waitFor(() => expect(screen.getAllByTestId("analysis-folder")).toHaveLength(1))
+    // The folder and the root file are rows of the tree; nothing is an experiment row.
+    expect(screen.queryByText("No experiment")).toBeNull()
+    expect(
+      screen.getAllByTestId("analysis-folder").map((row) => row.getAttribute("data-folder")),
+    ).toEqual(["exp-a"])
+    expect(
+      screen.getAllByTestId("analysis-file").map((row) => row.getAttribute("data-rel-path")),
+    ).toEqual(["results/summary.json"])
+    fireEvent.click(screen.getAllByTestId("analysis-folder")[0] as HTMLElement)
+    expect(
+      screen.getAllByTestId("analysis-folder").map((row) => row.getAttribute("data-folder")),
+    ).toEqual(["exp-a", "exp-a/runs"])
+  })
+
   test("the project's structure is chosen below the folder field and saved for the project", async () => {
     const setStructure = vi.fn(() => ({
       filePath: "/data/experiments-structure.yaml",
@@ -480,6 +524,7 @@ describe("ScienceAnalysis", () => {
     // Only the real options, no "Default (…)" entry.
     expect([...select.options].map((option) => option.textContent)).toEqual([
       "Auto-detect",
+      "Folders",
       "One folder per experiment",
       "Experiment / run folders",
       "Flat file list",

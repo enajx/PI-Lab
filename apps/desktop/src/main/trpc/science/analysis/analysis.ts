@@ -70,6 +70,11 @@ export interface ResultsListing extends DataFileListing {
   overridden: boolean
   /** False when the results folder does not exist (the listing is then empty). */
   exists: boolean
+  /**
+   * True for the Folders structure: the results files are shown as the plain
+   * folder tree, with no "No experiment" row.
+   */
+  plainFolders: boolean
 }
 
 const getStructureInput = z.object({
@@ -342,6 +347,7 @@ export const analysisRouter = router({
       const root = resolveInsideDir(project.repoPath, resultsFolder)
       const info = await statOrNull(root)
       let results: DataFileListing = EMPTY_LISTING
+      let plainFolders = false
       if (info !== null) {
         await realPathInside(project.repoPath, root, resultsFolder)
         if (!info.isDirectory()) {
@@ -357,6 +363,7 @@ export const analysisRouter = router({
           structureFile,
         )
         results = await discoverDataFiles(project.repoPath, root, "results", structure)
+        plainFolders = structure.kind === "folders"
       }
       const reports = await listReportsFolder(project.repoPath)
       return {
@@ -364,6 +371,7 @@ export const analysisRouter = router({
         resultsFolder,
         overridden,
         exists: info !== null,
+        plainFolders,
       }
     }),
 

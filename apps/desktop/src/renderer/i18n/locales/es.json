@@ -231,6 +231,7 @@
   "Checking…": "Comprobando…",
   "Environments unavailable": "Entornos no disponibles",
   "Auto-detect": "Detectar automáticamente",
+  "Folders": "Carpetas",
   "Choose environment folder…": "Elegir carpeta del entorno…",
   "Choose Python interpreter…": "Elegir intérprete de Python…",
   "Python type checking is on. Click to turn it off.": "La comprobación de tipos de Python está activada. Haz clic para desactivarla.",

@@ -231,6 +231,7 @@
   "Checking…": "Sjekker…",
   "Environments unavailable": "Miljøer utilgjengelige",
   "Auto-detect": "Finn automatisk",
+  "Folders": "Mapper",
   "Choose environment folder…": "Velg miljømappe…",
   "Choose Python interpreter…": "Velg Python-tolk…",
   "Python type checking is on. Click to turn it off.": "Python-typekontroll er på. Klikk for å slå av.",

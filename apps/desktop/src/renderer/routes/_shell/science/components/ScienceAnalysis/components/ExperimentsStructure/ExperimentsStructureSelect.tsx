@@ -7,6 +7,7 @@ import { useTRPC } from "../../../../../../../trpc/react"
 /** The presets in the order offered, with their labels (ids match the main process). */
 const PRESETS: ReadonlyArray<{ id: StructurePreset; label: string }> = [
   { id: "auto", label: "Auto-detect" },
+  { id: "folders", label: "Folders" },
   { id: "one-folder-per-experiment", label: "One folder per experiment" },
   { id: "experiment-run", label: "Experiment / run folders" },
   { id: "flat", label: "Flat file list" },

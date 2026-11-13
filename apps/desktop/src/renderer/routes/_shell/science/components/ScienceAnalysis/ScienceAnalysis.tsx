@@ -817,7 +817,13 @@ export function ScienceAnalysis({
                               )
                             })}
                             {model.experiments.map(experimentNodeBlock)}
-                            {model.loose
+                            {model.loose && listing.data?.plainFolders ? (
+                              <>
+                                {model.loose.truncated ? <TruncatedNotice /> : null}
+                                {treeContents("loose", model.loose.tree)}
+                              </>
+                            ) : null}
+                            {model.loose && !listing.data?.plainFolders
                               ? experimentBlock(
                                   "loose",
                                   "analysis-experiment-group",

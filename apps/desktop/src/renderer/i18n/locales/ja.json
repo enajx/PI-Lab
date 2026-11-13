@@ -231,6 +231,7 @@
   "Checking…": "確認中…",
   "Environments unavailable": "環境を利用できません",
   "Auto-detect": "自動検出",
+  "Folders": "フォルダー",
   "Choose environment folder…": "環境フォルダーを選択…",
   "Choose Python interpreter…": "Python インタープリターを選択…",
   "Python type checking is on. Click to turn it off.": "Python の型チェックはオンです。クリックしてオフにします。",

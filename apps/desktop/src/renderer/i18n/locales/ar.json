@@ -231,6 +231,7 @@
   "Checking…": "جارٍ الفحص…",
   "Environments unavailable": "البيئات غير متاحة",
   "Auto-detect": "اكتشاف تلقائي",
+  "Folders": "المجلدات",
   "Choose environment folder…": "اختر مجلد البيئة…",
   "Choose Python interpreter…": "اختر مفسر Python…",
   "Python type checking is on. Click to turn it off.": "فحص أنواع Python مفعّل. انقر لإيقافه.",

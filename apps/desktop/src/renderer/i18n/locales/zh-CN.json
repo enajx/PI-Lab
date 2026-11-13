@@ -231,6 +231,7 @@
   "Checking…": "正在检查…",
   "Environments unavailable": "环境不可用",
   "Auto-detect": "自动检测",
+  "Folders": "文件夹",
   "Choose environment folder…": "选择环境文件夹…",
   "Choose Python interpreter…": "选择 Python 解释器…",
   "Python type checking is on. Click to turn it off.": "Python 类型检查已开启。点击关闭。",

@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createHarness, type Harness } from "../../testHarness"
 import {
+  assignRow,
   detectExperimentLevel,
   MAX_CHART_POINTS,
   MAX_LISTED_FILES,
@@ -138,6 +139,22 @@ describe("detectExperimentLevel (Auto-detect)", () => {
   })
 })
 
+describe("assignRow (Folders)", () => {
+  test("every file is loose with its whole path inside the results folder", () => {
+    const folders = { kind: "folders" } as const
+    expect(assignRow(["gecko", "s0", "plots"], "a.png", folders, 1)).toEqual({
+      group: null,
+      experiment: null,
+      innerPath: "gecko/s0/plots/a.png",
+    })
+    expect(assignRow([], "summary.json", folders, 1)).toEqual({
+      group: null,
+      experiment: null,
+      innerPath: "summary.json",
+    })
+  })
+})
+
 describe("experiments folder structure", () => {
   const structurePath = () => join(h.dataDir, "experiments-structure.yaml")
 
@@ -213,6 +230,33 @@ describe("experiments folder structure", () => {
       null,
       "plot.png",
     ])
+  })
+
+  test("folders: the results folder as a plain folder tree, no groups or experiments, stored as `folders`", async () => {
+    await writeGecko()
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const saved = await h.caller.science.analysis.setStructure({
+      projectId: project.id,
+      value: "folders",
+    })
+    expect(saved).toEqual({
+      filePath: structurePath(),
+      defaultValue: "auto",
+      projectValue: "folders",
+    })
+    expect(await readFile(structurePath(), "utf8")).toContain(`${project.repoPath}: folders`)
+    const listing = await list(project.id)
+    expect(listing.plainFolders).toBe(true)
+    // Every file is a loose file of the results folder; its inner path is the real path under it.
+    expect(experimentRuns(listing)).toEqual({
+      "results/gecko/fl-shape_s0/run.db": [null, null, "gecko/fl-shape_s0/run.db"],
+      "results/gecko/fl-shape_s1/run.db": [null, null, "gecko/fl-shape_s1/run.db"],
+      "results/gecko/fl-shape_s1/metrics.csv": [null, null, "gecko/fl-shape_s1/metrics.csv"],
+      "results/exp-a/plot.png": [null, null, "exp-a/plot.png"],
+      "results/summary.json": [null, null, "summary.json"],
+    })
+    await h.caller.science.analysis.setStructure({ projectId: project.id, value: "flat" })
+    expect((await list(project.id)).plainFolders).toBe(false)
   })
 
   test("the default from Settings applies to projects without their own entry", async () => {

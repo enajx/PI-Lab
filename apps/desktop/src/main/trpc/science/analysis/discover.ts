@@ -144,7 +144,11 @@ export async function discoverDataFiles(
       folder === "results"
         ? assignRow(folders, fileName, structure, level)
         : { group: null, experiment: null, innerPath: [...folders, fileName].join("/") }
-    const key = `${row.group ?? ""}\u0000${row.experiment ?? ""}`
+    // Folders: the cap applies to each top-level folder, not the whole results folder.
+    const key =
+      structure.kind === "folders" && folder === "results"
+        ? `\u0001${folders[0] ?? ""}`
+        : `${row.group ?? ""}\u0000${row.experiment ?? ""}`
     const kept = keptPerExperiment.get(key) ?? 0
     if (kept >= MAX_LISTED_FILES) {
       if (kept === MAX_LISTED_FILES) {
@@ -259,6 +263,8 @@ export function detectExperimentLevel(foldersOfFiles: string[][]): number {
  *   (`*` matches any folder), else the file is loose. One folder per
  *   experiment and Experiment / run folders are the patterns `{experiment}`
  *   and `{experiment}/{run}`.
+ * - `folders`: no group, no experiment; every file is loose and its inner path
+ *   is its whole path under the results folder (the list shows the real tree).
  * - `flat`: no group, no experiment, no folders (the inner path is the name).
  *
  * A file above the experiment level belongs to its group (its folders), with
@@ -272,6 +278,9 @@ export function assignRow(
   level: number,
 ): { group: string | null; experiment: string | null; innerPath: string } {
   if (structure.kind === "flat") return { group: null, experiment: null, innerPath: name }
+  if (structure.kind === "folders") {
+    return { group: null, experiment: null, innerPath: [...folders, name].join("/") }
+  }
   let experimentIndex = level - 1
   if (structure.kind === "pattern") {
     const at = structure.segments.indexOf("{experiment}")
