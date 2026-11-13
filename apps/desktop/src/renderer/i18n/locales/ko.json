@@ -525,7 +525,7 @@
   "Choose image file": "이미지 파일 선택",
   "Use an image or animated GIF.": "이미지 또는 움직이는 GIF를 사용하세요.",
   "Generate new gradient": "새 그라데이션 만들기",
-  "Create a new theme-sampled gradient.": "현재 테마 색상으로 새 그라데이션을 만듭니다.",
+  "Create a new gradient with new colors.": "새 색상으로 새 그라데이션을 만듭니다.",
   "Digital Rain": "디지털 레인",
   "Animate ASCII sampled from this project's files.": "프로젝트 파일에서 가져온 ASCII 문자로 애니메이션을 만듭니다.",
   "Edit": "편집",

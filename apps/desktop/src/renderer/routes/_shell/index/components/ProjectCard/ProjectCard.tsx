@@ -30,7 +30,7 @@ import { type ProjectSummary, useProjectThumbnail } from "../../../../../trpc/us
 import { useProjectActivityState } from "../../../-ProjectActivity"
 import { setPendingLaunch } from "../../../projects/-pendingLaunch"
 import type { ProjectState } from "../../utils/deriveProjectState"
-import { hashString, projectGradient, sampleThemePalette } from "../../utils/projectGradient"
+import { hashString, projectGradient, seedPalette } from "../../utils/projectGradient"
 import { DigitalRainThumbnail } from "./DigitalRainThumbnail"
 import { EditProjectDialog } from "./EditProjectDialog"
 import { useGradientPlayState } from "./hooks/useGradientPlayState"
@@ -43,11 +43,11 @@ import { readImageFileAsDataUrl } from "./utils/readImageFileAsDataUrl"
  *     baked noisy-gradient seeded from the project's persisted `{ seed, palette }`
  *     (`projects.gradient`). The card shows exactly one artwork; right-clicking the
  *     header's **Set thumbnail** action opens an artwork chooser: pick a local
- *     image (including animated `.gif`), generate a fresh gradient from the
- *     current app theme, or create a Digital Rain canvas. Dropping an image also
- *     sets the thumbnail. Each artwork kind replaces the others (enforced
- *     server-side). A project with none yet captures a default gradient from the
- *     current theme on first render and persists it, so it stays fixed thereafter.
+ *     image (including animated `.gif`), generate a fresh gradient (a new seed
+ *     and its OKLCH colors), or create a Digital Rain canvas. Dropping an image
+ *     also sets the thumbnail. Each artwork kind replaces the others (enforced
+ *     server-side). A project with none yet gets a default gradient seeded from
+ *     its id on first render and persists it, so it stays fixed thereafter.
  *   - an **info area** — the project name on its own full-width line, and below
  *     it a status badge from shared live agent activity. The status is idle, working, or paused. An `active`
  *     project's gradient also drifts as a live activity cue.
@@ -200,13 +200,15 @@ export function ProjectCard({ project }: ProjectCardProps) {
   }
 
   // Resolve the card's gradient source. A stored gradient wins; otherwise, when the
-  // card has no thumbnail, sample the current theme once to seed a default. The
-  // default is persisted below so it (and its captured palette) stays fixed across
-  // restarts and later theme changes.
+  // card has no thumbnail, the project id seeds a default with OKLCH colors from
+  // that seed. The default is persisted below so it (and its palette) stays fixed
+  // across restarts.
   const needsDefaultGradient = !project.digitalRain && !thumbnail.hasThumbnail && !project.gradient
   const defaultGradient = useMemo(
     () =>
-      needsDefaultGradient ? { seed: hashString(project.id), palette: sampleThemePalette() } : null,
+      needsDefaultGradient
+        ? { seed: hashString(project.id), palette: seedPalette(hashString(project.id)) }
+        : null,
     [needsDefaultGradient, project.id],
   )
   const gradientSource = project.gradient ?? defaultGradient
@@ -225,10 +227,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const generateGradient = () => {
     artworkGenerationRef.current += 1
     setActionError(null)
-    setGradient.mutate({
-      id: project.id,
-      gradient: { seed: Math.floor(Math.random() * 0x1_0000_0000), palette: sampleThemePalette() },
-    })
+    const seed = Math.floor(Math.random() * 0x1_0000_0000)
+    setGradient.mutate({ id: project.id, gradient: { seed, palette: seedPalette(seed) } })
   }
 
   const openFilePicker = () => {
@@ -661,7 +661,7 @@ function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
 /**
  * The right-click menu for a project card, positioned at the cursor. Its
  * artwork action opens the chooser for a local image (including animated `.gif`)
- * or a fresh theme-sampled gradient. Closes on outside mousedown or Escape
+ * or a fresh seeded gradient. Closes on outside mousedown or Escape
  * (mirrors the sidebar's project context menu).
  */
 function ProjectCardMenu({
@@ -799,7 +799,7 @@ function ProjectCardArtworkDialog({
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="font-medium text-sm">{t("Generate new gradient")}</span>
               <span className="text-muted-foreground text-xs">
-                {t("Create a new theme-sampled gradient.")}
+                {t("Create a new gradient with new colors.")}
               </span>
             </span>
           </button>

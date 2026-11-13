@@ -6,4 +6,4 @@ export {
   type ProjectGradientVariant,
   projectGradient,
 } from "./projectGradient"
-export { sampleThemePalette } from "./themePalette"
+export { seedPalette } from "./seedPalette"

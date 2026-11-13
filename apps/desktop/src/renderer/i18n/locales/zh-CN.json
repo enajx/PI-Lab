@@ -525,7 +525,7 @@
   "Choose image file": "选择图片文件",
   "Use an image or animated GIF.": "使用图片或动态 GIF。",
   "Generate new gradient": "生成新渐变",
-  "Create a new theme-sampled gradient.": "创建从当前主题取色的新渐变。",
+  "Create a new gradient with new colors.": "用新颜色创建新渐变。",
   "Digital Rain": "数字雨",
   "Animate ASCII sampled from this project's files.": "使用此项目文件中的 ASCII 字符制作动画。",
   "Edit": "编辑",

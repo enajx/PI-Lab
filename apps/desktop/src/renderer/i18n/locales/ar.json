@@ -525,7 +525,7 @@
   "Choose image file": "اختر ملف صورة",
   "Use an image or animated GIF.": "استخدم صورة أو ملف GIF متحركًا.",
   "Generate new gradient": "إنشاء تدرج جديد",
-  "Create a new theme-sampled gradient.": "أنشئ تدرجًا جديدًا بألوان مأخوذة من السمة.",
+  "Create a new gradient with new colors.": "أنشئ تدرجًا جديدًا بألوان جديدة.",
   "Digital Rain": "المطر الرقمي",
   "Animate ASCII sampled from this project's files.": "حرّك أحرف ASCII مأخوذة من ملفات هذا المشروع.",
   "Edit": "تحرير",
