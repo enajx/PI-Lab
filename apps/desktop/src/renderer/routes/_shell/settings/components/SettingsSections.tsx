@@ -26,6 +26,11 @@ import {
   useTranslate,
 } from "../../../../i18n/language"
 import {
+  ISSUE_ACTION_LABELS,
+  type IssueKind,
+  useOpenIssueForm,
+} from "../../../../issueReport/issueForms"
+import {
   NOTIFICATION_SOUND_OPTIONS,
   type NotificationSoundId,
   playNotificationSound,
@@ -88,6 +93,42 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   workflowStart: { enabled: false, sound: "pulse" },
   workflowCompletion: { enabled: true, sound: "success" },
   workflowFailure: { enabled: true, sound: "alert" },
+}
+
+/** Buttons that open the GitHub bug report and feature request forms. */
+function IssueReportButtons() {
+  const t = useTranslate()
+  const openIssueForm = useOpenIssueForm()
+  const [error, setError] = useState<string | null>(null)
+  const choose = (kind: IssueKind) => {
+    setError(null)
+    openIssueForm(kind).catch((cause: unknown) =>
+      setError(`${t("Could not open the issue form")}: ${String(cause)}`),
+    )
+  }
+  return (
+    <div className="px-4 py-3">
+      <div className="flex gap-2">
+        {(["bug", "feature"] as const).map((kind) => (
+          <Button
+            key={kind}
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid={`settings-issue-report-${kind}`}
+            onClick={() => choose(kind)}
+          >
+            {t(ISSUE_ACTION_LABELS[kind])}
+          </Button>
+        ))}
+      </div>
+      {error ? (
+        <p role="alert" className="mt-2 text-destructive text-xs">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 /** General — app-wide behavior (DB-backed via `settings.updateGeneral`). The default
@@ -156,6 +197,7 @@ export function GeneralSection() {
           {t("Check for updates")}
         </Button>
       </div>
+      <IssueReportButtons />
       <ToggleField
         testId="settings-keep-running-after-close"
         label="Keep running after window closes"

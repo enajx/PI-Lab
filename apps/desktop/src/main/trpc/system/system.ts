@@ -7,12 +7,23 @@ import {
   liveSystemFontDetector,
   type SystemFontDetector,
 } from "../../fonts/systemFonts"
+import { readBuildCommit } from "../../identity/buildCommit"
+import { type PiLabChannel, resolveAppChannel } from "../../identity/channel"
 import { pickDirectoryOverride, testFontFamilies } from "../../runtime/env"
+import { publicReleaseFromPackage } from "../../updates/release"
 import { fitWindowToContent, restoreWindowSize } from "../../window/contentFit"
 import { liveStartAtLoginService, type StartAtLoginService } from "../../window/startAtLogin"
 import { applyTrafficLightInset } from "../../window/trafficLights"
 import { publicProcedure, router } from "../trpc"
 import { type EditorThemeImportResult, readEditorThemeFiles } from "./themeImport"
+
+/** What `system.appInfo` returns; it does not change while the app runs. */
+export interface AppInfo {
+  version: string
+  channel: PiLabChannel
+  commit: string | null
+  macosVersion: string
+}
 
 /**
  * System router — small bridges to native OS surfaces that only the main process
@@ -31,11 +42,30 @@ export function createSystemRouter(
   menuBarIcon: MenuBarIconService,
 ) {
   const detectSystemFontsOnce = cacheSystemFontDetector(detectSystemFonts)
+  let appInfo: AppInfo | null = null
   return router({
     /** The app version (`app.getVersion()`), shown in the window status bar. */
     appVersion: publicProcedure.query(() => app.getVersion()),
     /** The user's home folder, so the renderer can show paths as `~/…` (display only). */
     homeDir: publicProcedure.query(() => homedir()),
+    /**
+     * App version, channel, build commit and macOS version, for the environment field
+     * of GitHub issue forms. The channel is the one the user sees (public Beta or
+     * Stable, else the packaged or source channel), the same value as the app icon
+     * channel. `commit` is the short git commit of an Alpha build ("dev" when a source
+     * run is not in a git checkout) and null for Beta and Stable releases.
+     */
+    appInfo: publicProcedure.query((): AppInfo => {
+      appInfo ??= {
+        version: app.getVersion(),
+        channel:
+          publicReleaseFromPackage(app.isPackaged, app.getAppPath())?.channel ??
+          resolveAppChannel(app.isPackaged, app.getAppPath()),
+        commit: readBuildCommit(app.isPackaged, app.getAppPath()),
+        macosVersion: process.getSystemVersion(),
+      }
+      return appInfo
+    }),
     /** System-installed font families for the global editor typography picker. */
     fonts: publicProcedure.query(() => detectSystemFontsOnce()),
     /** The OS login item is separate from the window-close setting in SQLite. */
