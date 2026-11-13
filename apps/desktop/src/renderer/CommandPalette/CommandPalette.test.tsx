@@ -82,6 +82,7 @@ vi.mock("../i18n/language", () => ({ useTranslate: () => (text: string) => text 
 import { CommandPalette } from "./CommandPalette"
 
 beforeEach(() => {
+  window.localStorage.clear()
   submenu.preview.mockClear()
   submenu.apply.mockClear()
   plain.apply.mockReset()
@@ -206,4 +207,34 @@ test("a grouped sub-list shows a header per group, skips headers when moving, an
   expect(
     screen.getAllByTestId("command-palette-item").map((item) => item.dataset.commandId),
   ).toEqual(["dracula:light", "dracula:dark"])
+})
+
+test("recently used commands come first with an empty query and survive a reopen", async () => {
+  window.localStorage.clear()
+  command.run.mockResolvedValue(undefined)
+  const first = render(<CommandPalette onClose={vi.fn()} />)
+  const ids = () =>
+    screen.getAllByTestId("command-palette-item").map((item) => item.dataset.commandId)
+  const listed = ids()
+  expect(listed[0]).not.toBe("channel")
+  fireEvent.click(screen.getByText("Change update channel"))
+  first.unmount()
+  const close = vi.fn()
+  const second = render(<CommandPalette onClose={close} />)
+  fireEvent.click(screen.getByText("Change setting"))
+  await waitFor(() => expect(close).toHaveBeenCalledOnce())
+  second.unmount()
+
+  render(<CommandPalette onClose={vi.fn()} />)
+  // Most recent first, each once, marked, and highlighted first so Enter repeats the last one.
+  expect(ids().slice(0, 2)).toEqual(["setting", "channel"])
+  expect(new Set(ids()).size).toBe(ids().length)
+  const top = screen.getAllByTestId("command-palette-item")[0]
+  expect(top?.textContent).toContain("recently used")
+  expect(top?.getAttribute("data-highlighted")).toBe("true")
+  // Typing shows normal search results instead.
+  fireEvent.change(screen.getByTestId("command-palette-input"), { target: { value: "update" } })
+  expect(screen.getAllByTestId("command-palette-item")[0]?.textContent).not.toContain(
+    "recently used",
+  )
 })

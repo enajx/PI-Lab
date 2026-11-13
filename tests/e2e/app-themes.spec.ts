@@ -127,7 +127,10 @@ async function appearance(window: Page) {
   return window.evaluate(() => ({
     savedTheme: localStorage.getItem("pi-lab.appTheme"),
     savedMode: localStorage.getItem("pi-lab.theme"),
-    savedAccent: localStorage.getItem("pi-lab.appAccent"),
+    // Each theme keeps its own accent; this is the saved theme's.
+    savedAccent: localStorage.getItem(
+      `pi-lab.appAccent.${localStorage.getItem("pi-lab.appTheme") ?? "default"}`,
+    ),
     dark: document.documentElement.classList.contains("dark"),
     background: document.documentElement.style.getPropertyValue("--background"),
     panelBorder: document.documentElement.style.getPropertyValue("--panel-border"),
@@ -159,7 +162,7 @@ async function openChooseTheme(window: Page): Promise<void> {
   expect(await backdrop(window)).toBe("rgba(0, 0, 0, 0)")
 }
 
-test("palette Choose theme previews themes in each mode with Theme default, Escape restores, Enter saves", async () => {
+test("palette Choose theme previews themes in each mode with their own accent, Escape restores, Enter saves", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.getByTestId("project-item").click()
@@ -178,7 +181,7 @@ test("palette Choose theme previews themes in each mode with Theme default, Esca
   await window.keyboard.press("ArrowDown")
   await window.keyboard.press("ArrowDown")
   await expect.poll(async () => (await appearance(window)).background).not.toBe(before.background)
-  // Previewed with Theme default, and nothing saved yet.
+  // Previewed with that theme's own accent (none saved), and nothing saved yet.
   expect(await appearance(window)).toMatchObject({
     savedTheme: "nord",
     savedAccent: "ember",
@@ -188,7 +191,8 @@ test("palette Choose theme previews themes in each mode with Theme default, Esca
   await expect(window.getByTestId("command-palette")).toHaveCount(0)
   await expect.poll(() => appearance(window)).toEqual(before)
 
-  // Nord under Dark previews dark mode without saving it; Enter saves theme and mode.
+  // Nord under Dark previews dark mode without saving it; Enter saves theme and mode and
+  // keeps Nord's accent.
   await openChooseTheme(window)
   await window.getByTestId("command-palette-input").fill("Nord")
   await window.keyboard.press("ArrowDown")
@@ -205,9 +209,9 @@ test("palette Choose theme previews themes in each mode with Theme default, Esca
     .toEqual({
       savedTheme: "nord",
       savedMode: "dark",
-      savedAccent: "default",
+      savedAccent: "ember",
       dark: true,
-      panelBorder: "",
+      panelBorder: "#ff9a4d",
     })
 })
 
@@ -231,7 +235,16 @@ test("palette lists one command per setting and switches Light and Dark mode dir
   await expect.poll(async () => (await appearance(window)).savedMode).toBe("dark")
   expect((await appearance(window)).dark).toBe(true)
 
+  // A command just used is listed first as recently used when the palette reopens.
   await window.keyboard.press("ControlOrMeta+Shift+p")
+  await input.fill("Choose theme")
+  await window.keyboard.press("Enter")
+  await window.keyboard.press("Escape")
+  await window.keyboard.press("ControlOrMeta+Shift+p")
+  const top = window.getByTestId("command-palette-item").first()
+  await expect(top).toHaveAttribute("data-command-id", "settings-choose-theme")
+  await expect(top).toContainText("recently used")
+  await expect(top).toHaveAttribute("data-highlighted", "true")
   await input.fill("mode")
   expect(await labels()).toContain("Switch to Light mode")
   expect(await labels()).not.toContain("Switch to Dark mode")
@@ -247,4 +260,25 @@ test("palette lists one command per setting and switches Light and Dark mode dir
     expect.arrayContaining(["Switch to Dark mode", "Switch to Light mode"]),
   )
   await window.keyboard.press("Escape")
+})
+
+test("with an accent, hovering a title bar icon button colors its icon; Theme default does not", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("project-item").click()
+  await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  const button = window.getByTestId("agent-status-control")
+
+  await pickAppearance(window, "nord", "ember")
+  await button.hover()
+  await expect
+    .poll(() => style(button, "color"))
+    .toBe(await rootColor(window, "--hover-foreground"))
+  expect(await rootColor(window, "--hover-foreground")).not.toBe(
+    await rootColor(window, "--foreground"),
+  )
+
+  await pickAppearance(window, "nord", "default")
+  await button.hover()
+  await expect.poll(() => style(button, "color")).toBe(await rootColor(window, "--foreground"))
 })

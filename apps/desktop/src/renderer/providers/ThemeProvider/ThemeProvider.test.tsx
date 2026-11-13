@@ -48,9 +48,7 @@ function ThemeHarness() {
     setMode,
     themeId,
     setThemeId,
-    themes,
     toggleTheme,
-    unavailableTheme,
     accentId,
     setAccentId,
     previewThemeId,
@@ -62,14 +60,12 @@ function ThemeHarness() {
       <output data-testid="theme-state">
         {mode}:{resolvedMode}:{themeId}
       </output>
-      <output data-testid="theme-count">{themes.length}</output>
       <output data-testid="theme-accent">{accentId}</output>
-      <output data-testid="theme-unavailable">{unavailableTheme ?? ""}</output>
       <button type="button" onClick={() => setMode("system")}>
         System
       </button>
-      <button type="button" onClick={() => setThemeId("tokyo-night")}>
-        Tokyo Night
+      <button type="button" onClick={() => setThemeId("github")}>
+        GitHub
       </button>
       <button type="button" onClick={() => setAccentId("ember")}>
         Ember
@@ -147,10 +143,10 @@ describe("ThemeProvider", () => {
         <ThemeHarness />
       </ThemeProvider>,
     )
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
 
     await waitFor(() =>
-      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#e1e2e7"),
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#ffffff"),
     )
     for (const token of BASE_THEME_TOKENS) {
       expect(document.documentElement.style.getPropertyValue(`--${token}`)).not.toBe("")
@@ -183,16 +179,16 @@ describe("ThemeProvider", () => {
     )
     expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("default")
 
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
-    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("github")
     fireEvent.click(screen.getByRole("button", { name: "Toggle" }))
     await waitFor(() =>
-      expect(screen.getByTestId("theme-state").textContent).toBe("light:light:tokyo-night"),
+      expect(screen.getByTestId("theme-state").textContent).toBe("light:light:github"),
     )
     expect(window.localStorage.getItem("pi-lab.theme")).toBe("light")
 
     act(() => media.setDark(false))
-    expect(screen.getByTestId("theme-state").textContent).toBe("light:light:tokyo-night")
+    expect(screen.getByTestId("theme-state").textContent).toBe("light:light:github")
   })
 
   test("a chosen accent overrides the theme and Theme default clears it, and both are saved", async () => {
@@ -202,7 +198,7 @@ describe("ThemeProvider", () => {
         <ThemeHarness />
       </ThemeProvider>,
     )
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
     fireEvent.click(screen.getByRole("button", { name: "Ember" }))
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#c4540f"),
@@ -211,18 +207,44 @@ describe("ThemeProvider", () => {
       expect(document.documentElement.style.getPropertyValue(`--${token}`)).not.toBe("")
     }
     expect(document.documentElement.style.getPropertyValue("--primary")).toBe("#c4540f")
-    expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("ember")
+    expect(window.localStorage.getItem("pi-lab.appAccent.github")).toBe("ember")
 
     fireEvent.click(screen.getByRole("button", { name: "Theme default" }))
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe(""),
     )
-    expect(document.documentElement.style.getPropertyValue("--primary")).toBe("#2e7de9")
-    expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("default")
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe("#0969da")
+    expect(window.localStorage.getItem("pi-lab.appAccent.github")).toBe("default")
   })
 
-  test("restores a saved accent and resets an unknown one to Theme default", () => {
+  test("each theme keeps its own accent and switching theme brings it back", async () => {
     installMatchMedia(false)
+    render(
+      <ThemeProvider>
+        <ThemeHarness />
+      </ThemeProvider>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
+    fireEvent.click(screen.getByRole("button", { name: "Ember" }))
+    expect(screen.getByTestId("theme-accent").textContent).toBe("ember")
+    fireEvent.click(screen.getByRole("button", { name: "Default" }))
+    expect(screen.getByTestId("theme-accent").textContent).toBe("default")
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe(""),
+    )
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
+    expect(screen.getByTestId("theme-accent").textContent).toBe("ember")
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#c4540f"),
+    )
+    // Previewing a theme shows it with its own saved accent.
+    fireEvent.click(screen.getByRole("button", { name: "Preview Nord" }))
+    expect(screen.getByTestId("theme-accent").textContent).toBe("default")
+  })
+
+  test("moves an accent saved for every theme to the saved theme, and resets an unknown one", () => {
+    installMatchMedia(false)
+    window.localStorage.setItem("pi-lab.appTheme", "nord")
     window.localStorage.setItem("pi-lab.appAccent", "#ff00aa")
     const { unmount } = render(
       <ThemeProvider>
@@ -230,8 +252,10 @@ describe("ThemeProvider", () => {
       </ThemeProvider>,
     )
     expect(screen.getByTestId("theme-accent").textContent).toBe("#ff00aa")
+    expect(window.localStorage.getItem("pi-lab.appAccent.nord")).toBe("#ff00aa")
+    expect(window.localStorage.getItem("pi-lab.appAccent")).toBeNull()
     unmount()
-    window.localStorage.setItem("pi-lab.appAccent", "removed")
+    window.localStorage.setItem("pi-lab.appAccent.nord", "removed")
     render(
       <ThemeProvider>
         <ThemeHarness />
@@ -240,33 +264,15 @@ describe("ThemeProvider", () => {
     expect(screen.getByTestId("theme-accent").textContent).toBe("default")
   })
 
-  test("Beta lists only kept themes and shows Default for a saved Alpha-only theme", async () => {
+  test("a saved dropped theme falls back to Default", () => {
     installMatchMedia(false)
-    window.localStorage.setItem("pi-lab.appTheme", "cyberpunk")
-    const previous = window.piLab
-    window.piLab = {
-      ...previous,
-      appIcon: { ...previous?.appIcon, getChannel: async () => "beta" },
-    } as NonNullable<typeof window.piLab>
+    window.localStorage.setItem("pi-lab.appTheme", "gruvbox")
     render(
       <ThemeProvider>
         <ThemeHarness />
       </ThemeProvider>,
     )
-
-    await waitFor(() => expect(screen.getByTestId("theme-count").textContent).toBe("9"))
     expect(screen.getByTestId("theme-state").textContent).toBe("light:light:default")
-    expect(screen.getByTestId("theme-unavailable").textContent).toBe("Cyberpunk")
-    for (const token of APP_THEME_TOKENS) {
-      expect(document.documentElement.style.getPropertyValue(`--${token}`)).toBe("")
-    }
-    // The saved choice is kept, so the notice stays until the user picks a theme.
-    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("cyberpunk")
-
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
-    expect(screen.getByTestId("theme-unavailable").textContent).toBe("")
-    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
-    window.piLab = previous
   })
 
   test("a preview applies a theme and accent without saving, and ending it restores the saved ones", async () => {
@@ -276,7 +282,7 @@ describe("ThemeProvider", () => {
         <ThemeHarness />
       </ThemeProvider>,
     )
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
     fireEvent.click(screen.getByRole("button", { name: "Preview Nord" }))
     fireEvent.click(screen.getByRole("button", { name: "Preview Ember" }))
     await waitFor(() =>
@@ -284,20 +290,20 @@ describe("ThemeProvider", () => {
     )
     expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#c4540f")
     expect(screen.getByTestId("theme-state").textContent).toBe("light:light:nord")
-    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
-    expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("default")
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("github")
+    expect(window.localStorage.getItem("pi-lab.appAccent.github")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "End preview" }))
     await waitFor(() =>
-      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#e1e2e7"),
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#ffffff"),
     )
     expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("")
 
     // Picking a theme during a preview saves it and ends the theme preview.
     fireEvent.click(screen.getByRole("button", { name: "Preview Nord" }))
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
     await waitFor(() =>
-      expect(screen.getByTestId("theme-state").textContent).toBe("light:light:tokyo-night"),
+      expect(screen.getByTestId("theme-state").textContent).toBe("light:light:github"),
     )
   })
 

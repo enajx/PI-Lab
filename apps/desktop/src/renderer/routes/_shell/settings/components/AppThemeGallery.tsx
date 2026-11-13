@@ -2,6 +2,7 @@ import { cn } from "@pi-lab/ui"
 import { useTranslate } from "../../../../i18n/language"
 import {
   APP_ACCENTS,
+  APP_THEMES,
   appThemeSwatch,
   DEFAULT_ACCENT_ID,
   useTheme,
@@ -21,9 +22,11 @@ function AccentPicker() {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex min-w-0 flex-col">
-        <span className="text-foreground text-sm">{t("Accent")}</span>
+        <span className="text-foreground text-sm">{t("Theme accent")}</span>
         <span className="text-muted-foreground text-xs">
-          {t("Colors panel borders, titles, selected items, buttons and code in any theme.")}
+          {t(
+            "Colors panel borders, titles, selected items, buttons and code; each theme keeps its own.",
+          )}
         </span>
       </div>
       <div className="flex flex-wrap gap-1.5" data-testid="settings-app-accents">
@@ -76,7 +79,7 @@ function AccentPicker() {
 
 export function AppThemeGallery() {
   const t = useTranslate()
-  const { resolvedMode, themeId, setThemeId, themes, unavailableTheme } = useTheme()
+  const { resolvedMode, themeId, setThemeId } = useTheme()
 
   return (
     <div className="flex flex-col gap-3 px-4 py-4">
@@ -87,17 +90,8 @@ export function AppThemeGallery() {
         </span>
       </div>
       <AccentPicker />
-      {unavailableTheme ? (
-        <p
-          data-testid="settings-app-theme-unavailable"
-          className="rounded-md border border-amber-500/35 bg-amber-500/8 px-3 py-2 text-foreground text-xs"
-        >
-          {t("Your saved theme is not offered in this release, so PI Lab uses Default:")}{" "}
-          {unavailableTheme}
-        </p>
-      ) : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="settings-app-themes">
-        {themes.map((theme) => {
+        {APP_THEMES.map((theme) => {
           const selected = theme.id === themeId
           return (
             <button
@@ -124,7 +118,14 @@ export function AppThemeGallery() {
                   />
                 ))}
               </span>
-              <span className="truncate text-foreground text-xs">{t(theme.label)}</span>
+              <span className="flex min-w-0 items-baseline gap-1.5">
+                <span className="truncate text-foreground text-xs">{t(theme.label)}</span>
+                {theme.light ? null : (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {t("Dark only")}
+                  </span>
+                )}
+              </span>
             </button>
           )
         })}

@@ -157,37 +157,26 @@ describe("Settings sections", () => {
 
   test("Appearance gallery selects and applies a named app theme", async () => {
     renderSection(<AppearanceSection />)
-    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(25)
+    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(14)
     expect(screen.getByRole("button", { name: "Default" }).getAttribute("aria-pressed")).toBe(
       "true",
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Tokyo Night" }))
+    fireEvent.click(screen.getByRole("button", { name: "Nord" }))
     await waitFor(() =>
-      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#e1e2e7"),
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#eceff4"),
     )
-    expect(screen.getByRole("button", { name: "Tokyo Night" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("button", { name: "Nord" }).getAttribute("aria-pressed")).toBe(
       "true",
     )
-    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("tokyo-night")
+    expect(window.localStorage.getItem("pi-lab.appTheme")).toBe("nord")
   })
 
-  test("Appearance on Beta lists the kept themes and says why a saved trial theme is not used", async () => {
-    window.localStorage.setItem("pi-lab.appTheme", "cyberpunk")
-    const previous = window.piLab
-    window.piLab = {
-      ...previous,
-      appIcon: { ...previous?.appIcon, getChannel: async () => "beta" },
-    } as NonNullable<typeof window.piLab>
+  test("Appearance marks dark-only themes", () => {
     renderSection(<AppearanceSection />)
-
-    const notice = await screen.findByTestId("settings-app-theme-unavailable")
-    expect(notice.textContent).toContain("Cyberpunk")
-    expect(screen.getByTestId("settings-app-themes").querySelectorAll("button")).toHaveLength(9)
-    expect(screen.getByRole("button", { name: "Default" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    )
-    window.piLab = previous
+    const dracula = screen.getByTestId("settings-app-theme-dracula")
+    expect(dracula.textContent).toContain("Dark only")
+    expect(screen.getByTestId("settings-app-theme-nord").textContent).not.toContain("Dark only")
   })
 
   test("Appearance accent picker applies a preset, a custom color, and Theme default", async () => {
@@ -205,12 +194,14 @@ describe("Settings sections", () => {
     expect(screen.getByTestId("settings-app-accent-ember").getAttribute("aria-pressed")).toBe(
       "true",
     )
-    expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("ember")
+    expect(window.localStorage.getItem("pi-lab.appAccent.default")).toBe("ember")
 
     fireEvent.change(screen.getByTestId("settings-app-accent-custom"), {
       target: { value: "#2266cc" },
     })
-    await waitFor(() => expect(window.localStorage.getItem("pi-lab.appAccent")).toBe("#2266cc"))
+    await waitFor(() =>
+      expect(window.localStorage.getItem("pi-lab.appAccent.default")).toBe("#2266cc"),
+    )
     expect(document.documentElement.style.getPropertyValue("--panel-border")).toBe("#2266cc")
 
     fireEvent.click(screen.getByTestId("settings-app-accent-default"))

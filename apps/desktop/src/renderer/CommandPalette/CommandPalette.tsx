@@ -22,6 +22,19 @@ function matchTier(query: string, label: string): number {
   return l === q ? 0 : l.startsWith(q) ? 1 : 2
 }
 
+const RECENT_STORAGE_KEY = "pi-lab.palette.recent"
+const RECENT_LIMIT = 5
+
+/** Ids of the most recently chosen top-level commands, newest first. */
+function readRecent(): string[] {
+  return (window.localStorage.getItem(RECENT_STORAGE_KEY) ?? "").split("\n").filter(Boolean)
+}
+
+function rememberRecent(id: string): void {
+  const next = [id, ...readRecent().filter((recent) => recent !== id)].slice(0, RECENT_LIMIT)
+  window.localStorage.setItem(RECENT_STORAGE_KEY, next.join("\n"))
+}
+
 /** The open sub-list and the command that opened it. */
 interface OpenSubmenu {
   command: PaletteCommand
@@ -35,8 +48,9 @@ interface OpenSubmenu {
  * highlighting; ↑/↓ move the highlight, Enter runs the highlighted entry, Esc/backdrop
  * dismiss. Mounted app-globally by the shell so it works from any surface. With an empty
  * query it shows every entry in registry order (navigations, view toggles, then projects).
- * A command with a sub-list (Choose theme, Choose accent) replaces the list with its
+ * A command with a sub-list (Choose theme, Choose theme accent) replaces the list with its
  * choices; the highlighted choice is previewed, and dismissing restores the previous one.
+ * With an empty query, recently used commands come first, newest first.
  */
 export function CommandPalette({ onClose }: CommandPaletteProps) {
   const t = useTranslate()
@@ -46,6 +60,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const [running, setRunning] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const [open, setOpen] = useState<OpenSubmenu | null>(null)
+  const [recent] = useState<string[]>(readRecent)
   const previewed = useRef<string | null>(null)
   // Set once a sub-list choice is saved, so closing does not restore the old value.
   const applied = useRef(false)
@@ -73,6 +88,15 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
 
   const ranked = useMemo<RankedCommand[]>(() => {
     const q = query.trim()
+    if (!q && !open) {
+      // Recently used commands first, marked, then the rest in registry order.
+      const recentCommands = recent.flatMap((id) => {
+        const command = source.find((candidate) => candidate.id === id)
+        return command ? [{ ...command, hint: "recently used" }] : []
+      })
+      const others = source.filter((command) => !recent.includes(command.id))
+      return [...recentCommands, ...others].map((command) => ({ command, positions: [] }))
+    }
     if (!q) return source.map((command) => ({ command, positions: [] }))
     return (
       source
@@ -92,7 +116,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         )
         .map((entry) => ({ command: entry.command, positions: entry.match.positions }))
     )
-  }, [query, source, open])
+  }, [query, source, open, recent])
 
   // Keep the highlight in range as the result set shrinks/changes.
   const clampedHighlight = Math.min(highlight, Math.max(ranked.length - 1, 0))
@@ -135,6 +159,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
     const entry = ranked[index]
     if (!entry || running) return
     const { submenu } = entry.command
+    if (!open) rememberRecent(entry.command.id)
     if (submenu) {
       previewed.current = submenu.current
       setOpen({ command: entry.command, submenu })

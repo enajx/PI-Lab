@@ -3,7 +3,6 @@ export {
   APP_ACCENTS,
   APP_THEME_TOKENS,
   APP_THEMES,
-  type AppChannel,
   accentEditorColors,
   appThemeSwatch,
   DEFAULT_ACCENT_ID,

@@ -16,6 +16,7 @@ import {
 } from "../preferences/preferences"
 import {
   APP_ACCENTS,
+  APP_THEMES,
   DEFAULT_ACCENT_ID,
   type ResolvedThemeMode,
   useTheme,
@@ -183,10 +184,11 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
     ...(theme.mode === "light"
       ? []
       : [action("switch-light-mode", "Switch to Light mode", () => theme.setMode("light"))]),
-    // Every theme in both modes; each is previewed in its mode with Theme default.
+    // Every theme under Light (if it has a light palette) and Dark; each is previewed
+    // in that mode with its own saved accent.
     picker("choose-theme", "Choose theme", {
       options: (["light", "dark"] as const).flatMap((mode) =>
-        theme.themes.map(
+        APP_THEMES.filter((value) => value[mode] !== null).map(
           (value) => [themeChoice(value.id, mode), value.label, MODE_LABELS[mode]] as const,
         ),
       ),
@@ -195,16 +197,14 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
         const choice = value === null ? null : parseThemeChoice(value)
         theme.previewThemeId(choice?.themeId ?? null)
         theme.previewMode(choice?.mode ?? null)
-        theme.previewAccentId(choice === null ? null : DEFAULT_ACCENT_ID)
       },
       apply: (value) => {
         const { themeId, mode } = parseThemeChoice(value)
         theme.setThemeId(themeId)
         theme.setMode(mode)
-        theme.setAccentId(DEFAULT_ACCENT_ID)
       },
     }),
-    picker("choose-accent", "Choose accent", {
+    picker("choose-theme-accent", "Choose theme accent", {
       options: [
         [DEFAULT_ACCENT_ID, "Theme default"] as const,
         ...APP_ACCENTS.map((value) => [value.id, value.label] as const),

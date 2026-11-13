@@ -111,6 +111,7 @@
   --color-selected: var(--selected, var(--accent));
   --color-selected-foreground: var(--selected-foreground, var(--foreground));
   --color-selected-accent-foreground: var(--selected-foreground, var(--accent-foreground));
+  --color-hover-foreground: var(--hover-foreground, var(--foreground));
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

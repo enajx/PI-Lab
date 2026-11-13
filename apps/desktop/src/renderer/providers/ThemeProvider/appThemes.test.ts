@@ -7,8 +7,6 @@ import {
   APP_THEME_TOKENS,
   APP_THEMES,
   accentEditorColors,
-  appThemesForChannel,
-  availableAppThemeId,
   BASE_THEME_TOKENS,
   contrastRatio,
   DEFAULT_APP_THEME_ID,
@@ -17,35 +15,23 @@ import {
   resolveAppThemeTokens,
 } from "./appThemes"
 
-const KEPT_LABELS = [
+const LIGHT_AND_DARK = [
   "Default",
-  "Tokyo Night",
-  "Catppuccin",
   "Nord",
-  "Gruvbox",
-  "Solarized",
-  "Rosé Pine",
-  "Everforest",
-  "Dracula",
-]
-
-const TRIAL_LABELS = [
   "One Dark / One Light",
   "GitHub",
-  "Ayu",
-  "Monokai",
-  "Material",
-  "Zenburn",
-  "Warm Paper",
-  "Night Owl",
-  "iA Writer Grey",
   "Graphite",
-  "Slate",
-  "Warm Grey",
-  "Scandinavian Grey",
   "Pale Slate",
-  "ASCII Terminal",
-  "Cyberpunk",
+  "Slate",
+]
+const DARK_ONLY = [
+  "Tokyo Night",
+  "Catppuccin",
+  "Rosé Pine",
+  "Dracula",
+  "Mackerel",
+  "Sand Beige",
+  "Digital Rain",
 ]
 
 const ACCENT_LABELS = [
@@ -65,33 +51,38 @@ const ACCENT_IDS = [...APP_ACCENTS.map(({ id }) => id), CUSTOM]
 const MODES = ["light", "dark"] as const
 
 describe("app theme registry", () => {
-  test("Alpha offers the kept and trial themes with Default first and unique ids", () => {
-    expect(appThemesForChannel("alpha").map(({ label }) => label)).toEqual([
-      ...KEPT_LABELS,
-      ...TRIAL_LABELS,
-    ])
+  test("offers the final themes, light-and-dark first, then dark-only, with unique ids", () => {
+    expect(APP_THEMES.map(({ label }) => label)).toEqual([...LIGHT_AND_DARK, ...DARK_ONLY])
+    expect(APP_THEMES.filter((theme) => theme.light === null).map(({ label }) => label)).toEqual(
+      DARK_ONLY,
+    )
     expect(APP_ACCENTS.map(({ label }) => label)).toEqual(ACCENT_LABELS)
     expect(APP_THEMES[0]?.id).toBe(DEFAULT_APP_THEME_ID)
     expect(new Set(APP_THEMES.map(({ id }) => id)).size).toBe(APP_THEMES.length)
   })
 
-  test("Beta and Stable offer only the kept themes", () => {
-    for (const channel of ["beta", "stable"] as const) {
-      expect(appThemesForChannel(channel).map(({ label }) => label)).toEqual(KEPT_LABELS)
+  test("renamed themes keep their saved ids; dropped themes fall back to Default", () => {
+    const label = (id: string) => APP_THEMES.find((theme) => theme.id === id)?.label
+    expect(label("material")).toBe("Mackerel")
+    expect(label("zenburn")).toBe("Sand Beige")
+    expect(label("ascii-terminal")).toBe("Digital Rain")
+    for (const dropped of ["gruvbox", "solarized", "scandi-grey", "cyberpunk", "monokai"]) {
+      expect(normalizeAppThemeId(dropped)).toBe(DEFAULT_APP_THEME_ID)
     }
   })
 
-  test("a saved theme that the channel does not offer falls back to Default", () => {
-    expect(availableAppThemeId("cyberpunk", "beta")).toBe(DEFAULT_APP_THEME_ID)
-    expect(availableAppThemeId("cyberpunk", "stable")).toBe(DEFAULT_APP_THEME_ID)
-    expect(availableAppThemeId("nord", "beta")).toBe("nord")
-    expect(availableAppThemeId("cyberpunk", "alpha")).toBe("cyberpunk")
-    expect(availableAppThemeId("removed-theme", "alpha")).toBe(DEFAULT_APP_THEME_ID)
+  test("a dark-only theme in Light mode shows Default's light colors", () => {
+    expect(resolveAppThemeTokens("dracula", "light", "default")).toBeNull()
+    expect(resolveAppThemeTokens("dracula", "dark", "default")?.background).toBe("#282a36")
+    // With an accent, only the accent colors are set on top of Default's light look.
+    const tokens = resolveAppThemeTokens("dracula", "light", "ember")
+    expect(tokens?.background).toBeUndefined()
+    expect(tokens?.["panel-border"]).toBe("#c4540f")
   })
 
   test("expands every theme mode into the base app color-token contract", () => {
     for (const theme of APP_THEMES.slice(1)) {
-      for (const mode of ["light", "dark"] as const) {
+      for (const mode of theme.light ? MODES : (["dark"] as const)) {
         const tokens = resolveAppThemeTokens(theme.id, mode, "default")
         expect(tokens).not.toBeNull()
         for (const token of BASE_THEME_TOKENS) expect(tokens?.[token]).toMatch(/^#[0-9a-f]{6}$/u)
@@ -129,7 +120,7 @@ describe("app theme registry", () => {
     ] as const
 
     for (const theme of APP_THEMES.slice(1)) {
-      for (const mode of ["light", "dark"] as const) {
+      for (const mode of theme.light ? MODES : (["dark"] as const)) {
         const tokens = resolveAppThemeTokens(theme.id, mode, "default")
         expect(tokens).not.toBeNull()
         for (const [background, foreground] of pairs) {
@@ -165,6 +156,7 @@ describe("accent tokens", () => {
       "--color-selected: var(--selected, var(--accent));",
       "--color-selected-foreground: var(--selected-foreground, var(--foreground));",
       "--color-selected-accent-foreground: var(--selected-foreground, var(--accent-foreground));",
+      "--color-hover-foreground: var(--hover-foreground, var(--foreground));",
     ]) {
       expect(css).toContain(line)
     }
@@ -176,7 +168,9 @@ describe("accent tokens", () => {
         for (const mode of MODES) {
           const label = `${theme.label} + ${accentId} ${mode}`
           const tokens = resolveAppThemeTokens(theme.id, mode, accentId)
-          const surfaces = theme[mode]
+          // A dark-only theme in Light mode uses Default's light colors.
+          const surfaces = theme[mode] ?? APP_THEMES[0]?.light
+          if (!surfaces) throw new Error("Default has no light palette")
           const shade = tokens?.["panel-border"] ?? ""
           expect(shade, label).toMatch(/^#[0-9a-f]{6}$/u)
           expect(tokens?.primary, label).toBe(shade)
@@ -192,6 +186,12 @@ describe("accent tokens", () => {
                 `${label}: ${token} on ${surface}`,
               ).toBeGreaterThanOrEqual(4.5)
             }
+          }
+          for (const surface of [surfaces.background, surfaces.surface, surfaces.hover]) {
+            expect(
+              contrastRatio(surface, tokens?.["hover-foreground"] ?? ""),
+              `${label}: hover-foreground on ${surface}`,
+            ).toBeGreaterThanOrEqual(4.5)
           }
           for (const surface of [tokens?.selected ?? "", surfaces.background]) {
             expect(
