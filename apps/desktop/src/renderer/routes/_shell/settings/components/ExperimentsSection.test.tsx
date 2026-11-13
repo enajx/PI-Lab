@@ -32,6 +32,15 @@ describe("Settings > Remote experiments: where runs are tracked", () => {
     expect(path.value).toBe("notes/runs.md")
   })
 
+  test("hides the Analysis folder tree (off by default), the same choice as the toggle in Analysis", () => {
+    renderSection({})
+    const toggle = screen.getByTestId("settings-analysis-flat-list")
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(toggle)
+    expect(window.localStorage.getItem("pi-lab.analysis.flatList")).toBe("true")
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+  })
+
   test("sets the default results folder that Analysis lists, relative to each project", () => {
     renderSection({})
     const folder = screen.getByTestId("settings-results-folder") as HTMLInputElement

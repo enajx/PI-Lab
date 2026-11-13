@@ -19,6 +19,7 @@ import {
   FileCode2,
   FileText,
   Folder,
+  List,
   Microscope,
   Search,
 } from "lucide-react"
@@ -36,12 +37,14 @@ import {
   ANALYSIS_FILES_MIN_WIDTH,
   DEFAULT_RESULTS_FOLDER,
   useAnalysisFilesWidth,
+  useAnalysisFlatList,
   useAnalysisProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
   useSciencePanelWidth,
 } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
+import { KEEPS_ESCAPE, OPEN_OVERLAY } from "../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
@@ -233,6 +236,29 @@ export function ScienceAnalysis({
     }
   }, [allFiles, selectedRelPath])
 
+  // Escape deselects the file (the preview shows "Select a file…"), unless focus
+  // is in a field, terminal or editor, an inner handler took the key, or a
+  // dialog, menu or palette was open as the key went down (checked in the
+  // capture phase, as popups that close on Escape may be gone by the bubble phase).
+  useEffect(() => {
+    let overlayOpen = false
+    const onKeyDownCapture = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") overlayOpen = document.querySelector(OPEN_OVERLAY) !== null
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented || overlayOpen) return
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      if (event.target instanceof Element && event.target.closest(KEEPS_ESCAPE)) return
+      setSelectedRelPath(null)
+    }
+    window.addEventListener("keydown", onKeyDownCapture, true)
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("keydown", onKeyDownCapture, true)
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [])
+
   // Context-aware ⌘F: while Analysis is open, the quick-open shortcut opens a fuzzy
   // finder over this project's data files (the shell skips /science/* so this tab is
   // the sole ⌘F owner here). The finder runs its own filter independently.
@@ -327,6 +353,12 @@ export function ScienceAnalysis({
   const model = useMemo(
     () => buildListModel(filtered, listing.data?.truncatedExperiments ?? []),
     [filtered, listing.data],
+  )
+  // With the folder tree hidden, the files are listed directly, sorted by path.
+  const [flatList] = useAnalysisFlatList()
+  const flatFiles = useMemo(
+    () => [...filtered].sort((a, b) => byName(a.file.relPath, b.file.relPath)),
+    [filtered],
   )
   // A list of only loose results files (a flat list) shows them with no row.
   const onlyLooseFiles =
@@ -714,7 +746,14 @@ export function ScienceAnalysis({
                             )}
                           </p>
                         ) : null}
-                        {onlyLooseFiles && model.loose ? (
+                        {flatList ? (
+                          <div data-testid="analysis-flat-files" className="flex flex-col gap-1">
+                            {(listing.data?.truncatedExperiments.length ?? 0) > 0 ? (
+                              <TruncatedNotice />
+                            ) : null}
+                            {flatFiles.map(fileRow)}
+                          </div>
+                        ) : onlyLooseFiles && model.loose ? (
                           <div data-testid="analysis-flat-files" className="flex flex-col gap-1">
                             {model.loose.truncated ? <TruncatedNotice /> : null}
                             {treeContents("loose", model.loose.tree)}
@@ -1326,9 +1365,44 @@ function ResultsFolderField({
         <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
           {t("Structure")}
         </span>
-        <ExperimentsStructureSelect projectId={projectId} testId="analysis-structure" />
+        <div className="flex min-w-0 items-start gap-1.5">
+          <div className="min-w-0 flex-1">
+            <ExperimentsStructureSelect projectId={projectId} testId="analysis-structure" />
+          </div>
+          <FlatListToggle />
+        </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Hide the folder tree: list the files directly, each with its path below its
+ * name. The same choice as Settings > Remote experiments (kept globally).
+ */
+function FlatListToggle() {
+  const t = useTranslate()
+  const [flatList, setFlatList] = useAnalysisFlatList()
+  const label = t("List files without folders")
+  return (
+    <button
+      type="button"
+      data-testid="analysis-flat-toggle"
+      aria-pressed={flatList}
+      aria-label={label}
+      title={label}
+      data-feature-label={label}
+      data-feature-help={t(
+        "Hide the groups, experiments and folders and list the files directly, each with its path. Filters and search still apply. Also in Settings > Remote experiments.",
+      )}
+      onClick={() => setFlatList(!flatList)}
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-md border border-border hover:bg-accent",
+        flatList && "bg-accent text-accent-foreground",
+      )}
+    >
+      <List className="size-3.5" aria-hidden />
+    </button>
   )
 }
 

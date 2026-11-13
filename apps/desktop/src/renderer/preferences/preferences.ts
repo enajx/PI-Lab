@@ -398,7 +398,11 @@ export const useSciencePanelWidth = (): [number, (next: number) => void] =>
 // start at the minimum once -------------------------------------------------------
 export const ANALYSIS_FILES_MIN_WIDTH = 200
 export const ANALYSIS_FILES_MAX_WIDTH = 480
-export const ANALYSIS_FILES_DEFAULT_WIDTH = ANALYSIS_FILES_MIN_WIDTH
+/** About 29% of the content width at the default window size; a dragged width is kept. */
+export const ANALYSIS_FILES_DEFAULT_WIDTH = 280
+/** Analysis lists the files directly (no group, experiment or folder rows). Off by default. */
+export const useAnalysisFlatList = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.analysis.flatList", false)
 export const useAnalysisFilesWidth = (): [number, (next: number) => void] =>
   useNumberPref("pi-lab.analysis.filesWidth.v2", ANALYSIS_FILES_DEFAULT_WIDTH)
 

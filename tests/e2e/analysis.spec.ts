@@ -539,6 +539,64 @@ test("Animations lists videos and gifs; a video plays muted and looping, a gif a
     .toBe(16)
 })
 
+test("Escape deselects the previewed file, and the folder tree can be hidden from the list or Settings", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  // At the default window size the files column is about 29% of the cards' row.
+  await expect
+    .poll(
+      () =>
+        window
+          .getByTestId("analysis-files-column")
+          .evaluate((el) => el.getBoundingClientRect().width),
+      {
+        timeout: 30_000,
+      },
+    )
+    .toBe(280)
+
+  await openAnalysisExperiment(window, "exp-a")
+  await window
+    .locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]')
+    .click()
+  await expect(window.getByTestId("analysis-preview-path")).toHaveText("results/exp-a/plot.png")
+  // Escape in the search box stays with the field.
+  await window.getByTestId("analysis-search").focus()
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("analysis-preview-path")).toBeVisible()
+  await window.getByTestId("analysis-search").blur()
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("analysis-no-selection")).toHaveText(
+    "Select a file to preview its contents.",
+  )
+
+  // The toggle next to the Structure select lists the files without folders.
+  const toggle = window.getByTestId("analysis-flat-toggle")
+  await expect(toggle).toHaveAttribute("aria-pressed", "false")
+  await toggle.click()
+  await expect(window.getByTestId("analysis-experiment")).toHaveCount(0)
+  await expect(window.getByTestId("analysis-file")).toHaveCount(5)
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]'),
+  ).toContainText("results/exp-a/plot.png")
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-flat-list.png") })
+
+  // Settings shows the same choice; turning it off there brings the tree back.
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-experiments").click()
+  const setting = window.getByTestId("settings-analysis-flat-list")
+  await expect(setting).toHaveAttribute("aria-checked", "true", { timeout: 30_000 })
+  await setting.click()
+  await expect(setting).toHaveAttribute("aria-checked", "false")
+  await window.getByTestId("settings-back").click()
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await expect(window.getByTestId("analysis-experiment").first()).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("analysis-flat-toggle")).toHaveAttribute("aria-pressed", "false")
+})
+
 test("with no results folder, Analysis shows no folder and points to Select experiments folder", async () => {
   await rename(join(repoDir, "results"), join(repoDir, "old-results"))
   const window = await app.firstWindow()
@@ -781,7 +839,8 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
   await expect(panel.getByTestId("panel-tab-sessions")).toHaveAttribute("aria-selected", "true")
   const filesBefore = await widthOf(files)
   const panelBefore = await widthOf(panel)
-  expect(filesBefore).toBe(200)
+  // The files column starts at its default (280 px, about 29% of the content width).
+  expect(filesBefore).toBe(280)
   expect(panelBefore).toBe(235)
 
   await dragHandle(window, "analysis-files-edge-drag", 80)

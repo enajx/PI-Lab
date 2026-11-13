@@ -703,6 +703,87 @@ describe("ScienceAnalysis", () => {
     expect(screen.getByTestId("science-analysis-empty")).toBeTruthy()
   })
 
+  test("Escape deselects the file, but not while typing in a field or with a dialog open", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([{ relPath: "plot.png", name: "plot.png", kind: "image" }]),
+      "science.analysis.preview": () => ({ type: "image", dataUrl: "data:image/png;base64," }),
+    })
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+    expect(await screen.findByTestId("analysis-preview-path")).toBeTruthy()
+
+    // In the search box Escape stays with the field.
+    const search = screen.getByTestId("analysis-search")
+    search.focus()
+    fireEvent.keyDown(search, { key: "Escape" })
+    expect(screen.getByTestId("analysis-preview-path")).toBeTruthy()
+    search.blur()
+
+    // With a dialog open, Escape is the dialog's.
+    const dialog = document.createElement("div")
+    dialog.setAttribute("role", "dialog")
+    document.body.append(dialog)
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.getByTestId("analysis-preview-path")).toBeTruthy()
+    dialog.remove()
+
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(await screen.findByTestId("analysis-no-selection")).toBeTruthy()
+    expect(screen.queryByTestId("analysis-preview-path")).toBeNull()
+  })
+
+  test("the folder tree can be hidden: files are listed directly with their path, and the choice is kept", async () => {
+    const files = listing([
+      {
+        relPath: "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+        name: "growth.gif",
+        kind: "animation",
+        group: "pattern_translation",
+        experiment: "easily-boss-grouse",
+        innerPath: "animations/growth.gif",
+      },
+      {
+        relPath: "results/pattern_translation/easily-boss-grouse/curve.pdf",
+        name: "curve.pdf",
+        kind: "pdf",
+        group: "pattern_translation",
+        experiment: "easily-boss-grouse",
+      },
+      { relPath: "results/summary.json", name: "summary.json", kind: "json" },
+    ])
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () => files,
+    })
+    const toggle = await screen.findByTestId("analysis-flat-toggle")
+    // Off by default: the tree, with its group row.
+    expect(toggle.getAttribute("aria-pressed")).toBe("false")
+    expect(toggle.dataset.featureHelp).toBeTruthy()
+    await screen.findAllByTestId("analysis-group")
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-pressed")).toBe("true")
+    expect(screen.queryAllByTestId("analysis-group")).toHaveLength(0)
+    expect(screen.queryAllByTestId("analysis-folder")).toHaveLength(0)
+    const rows = screen.getAllByTestId("analysis-file")
+    expect(rows.map((row) => row.dataset.relPath)).toEqual([
+      "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+      "results/pattern_translation/easily-boss-grouse/curve.pdf",
+      "results/summary.json",
+    ])
+    expect(rows[0]?.textContent).toContain(
+      "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+    )
+    expect(window.localStorage.getItem("pi-lab.analysis.flatList")).toBe("true")
+
+    // Chips still apply.
+    fireEvent.click(screen.getByTestId("analysis-category-figure"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "results/pattern_translation/easily-boss-grouse/curve.pdf",
+    ])
+  })
+
   test("selecting a CSV file renders a table preview", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
