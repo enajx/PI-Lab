@@ -1,11 +1,12 @@
 import {
   ALL_DATA_FILE_CATEGORIES,
-  ALL_DATA_FILE_KINDS,
   categoryOf,
   DATA_FILE_CATEGORY_LABELS,
-  DATA_FILE_KIND_LABELS,
   type DataFileCategory,
-  type DataFileKind,
+  type FormatChip,
+  fileFormatOf,
+  formatChipOf,
+  formatChipsOf,
 } from "@pi-lab/shared/analysis/file-kind"
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
@@ -18,6 +19,7 @@ import {
   FileCode2,
   FileText,
   Folder,
+  ListTree,
   Microscope,
   Search,
 } from "lucide-react"
@@ -35,12 +37,14 @@ import {
   ANALYSIS_FILES_MIN_WIDTH,
   DEFAULT_RESULTS_FOLDER,
   useAnalysisFilesWidth,
+  useAnalysisFlatList,
   useAnalysisProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
   useSciencePanelWidth,
 } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
+import { KEEPS_ESCAPE, OPEN_OVERLAY } from "../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
@@ -73,19 +77,24 @@ import "./selectFolderPrompt.css"
  * Analysis science tab — a **read-only data
  * browser**: pick a project, browse the data/analysis files in its results
  * folder (`results/` by default, set in Settings; each project can choose its
- * own above the search). The list is grouped by experiment, with one row per
- * run that opens to show the run's files, following the experiments folder
- * structure (Auto-detect by default; set in Settings, and per project below
- * the folder field). It is filtered by a search box and the category chips.
+ * own above the search). The list has one row per experiment (a file's
+ * `listGroup`: its experiment, else its run), collapsed, that opens to show
+ * its files, following the experiments folder structure (Auto-detect by
+ * default; set in Settings, and per project below the folder field). It is
+ * filtered by a search box, which opens the matching experiments, and the
+ * category chips.
  * Preview a selected
  * file in a side pane. CSV/TSV render as a sampled table (or a line chart when
  * they look like a metric log), NumPy arrays as a chart (1-D) or grid (2-D),
  * images inline, JSON pretty-printed, text as a head; everything else shows a
  * metadata card.
  *
- * Top-level filter chips are coarse {@link DataFileCategory}s (Data, Images, …);
- * selecting a category that spans more than one sub-format reveals a second row
- * of sub-format bubbles (e.g. CSV / NumPy under Data) to narrow further.
+ * The filter chips are {@link DataFileCategory}s (Data, Figures, Markup, Text, …),
+ * only those present. Below them, a row of smaller format chips shows the
+ * fixed formats of the selected category (e.g. Figures: PNG, PDF, SVG, JPG),
+ * those with no files greyed out, or the formats present under All when there
+ * is more than one. A format chip filters
+ * to that format; clicking it again shows all formats again.
  *
  * A project picker in the top bar remembers the last project; `initialProjectId`
  * (from `?projectId=`) selects one and becomes the remembered one, and the picker
@@ -149,9 +158,15 @@ export function ScienceAnalysis({
       : t("Initialize Git to run Git-state-aware project routines.")
 
   const [query, setQuery] = useState("")
-  // Top-level filter is a category; an optional sub-kind narrows within it.
+  // The filter is a category; an optional format (file extension) narrows within it.
   const [categoryFilter, setCategoryFilter] = useState<DataFileCategory | "all">("all")
-  const [kindFilter, setKindFilter] = useState<DataFileKind | null>(null)
+  const [formatFilter, setFormatFilter] = useState<string | null>(null)
+  // Another project starts with no filter, since its categories may differ.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the project changes.
+  useEffect(() => {
+    setCategoryFilter("all")
+    setFormatFilter(null)
+  }, [selectedProjectId])
   const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   // A session a top bar button started, until the session panel opens it.
@@ -221,6 +236,29 @@ export function ScienceAnalysis({
     }
   }, [allFiles, selectedRelPath])
 
+  // Escape deselects the file (the preview shows "Select a file…"), unless focus
+  // is in a field, terminal or editor, an inner handler took the key, or a
+  // dialog, menu or palette was open as the key went down (checked in the
+  // capture phase, as popups that close on Escape may be gone by the bubble phase).
+  useEffect(() => {
+    let overlayOpen = false
+    const onKeyDownCapture = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") overlayOpen = document.querySelector(OPEN_OVERLAY) !== null
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented || overlayOpen) return
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      if (event.target instanceof Element && event.target.closest(KEEPS_ESCAPE)) return
+      setSelectedRelPath(null)
+    }
+    window.addEventListener("keydown", onKeyDownCapture, true)
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("keydown", onKeyDownCapture, true)
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [])
+
   // Context-aware ⌘F: while Analysis is open, the quick-open shortcut opens a fuzzy
   // finder over this project's data files (the shell skips /science/* so this tab is
   // the sole ⌘F owner here). The finder runs its own filter independently.
@@ -258,14 +296,30 @@ export function ScienceAnalysis({
     return ALL_DATA_FILE_CATEGORIES.filter((c) => set.has(c))
   }, [allFiles])
 
-  // Sub-kinds present within the selected category, in canonical order. Only a
-  // category with more than one is offered as a row of sub-format bubbles.
-  const subKindsPresent = useMemo(() => {
-    if (categoryFilter === "all") return []
-    const set = new Set<DataFileKind>(
-      allFiles.filter((f) => categoryOf(f.kind) === categoryFilter).map((f) => f.kind),
-    )
-    return ALL_DATA_FILE_KINDS.filter((k) => set.has(k))
+  // The format row. A selected category lists its fixed chips (from
+  // file-kind.ts), absent ones greyed out, then any other format present; All
+  // lists only the formats present, category by category.
+  const formatRow = useMemo<Array<{ chip: FormatChip; present: boolean }>>(() => {
+    const presentByCategory = new Map<DataFileCategory, Map<string, FormatChip>>()
+    for (const file of allFiles) {
+      const category = categoryOf(file.kind)
+      const chip = formatChipOf(fileFormatOf(file.relPath))
+      const chips = presentByCategory.get(category) ?? new Map<string, FormatChip>()
+      chips.set(chip.id, chip)
+      presentByCategory.set(category, chips)
+    }
+    const rowOf = (category: DataFileCategory, onlyPresent: boolean) => {
+      const present = presentByCategory.get(category) ?? new Map<string, FormatChip>()
+      const fixed = formatChipsOf(category)
+      const extras = [...present.values()]
+        .filter((chip) => !fixed.some((candidate) => candidate.id === chip.id))
+        .sort((a, b) => a.label.localeCompare(b.label))
+      return [...fixed, ...extras]
+        .map((chip) => ({ chip, present: present.has(chip.id) }))
+        .filter((entry) => !onlyPresent || entry.present)
+    }
+    if (categoryFilter !== "all") return rowOf(categoryFilter, false)
+    return ALL_DATA_FILE_CATEGORIES.flatMap((category) => rowOf(category, true))
   }, [allFiles, categoryFilter])
 
   const filtered = useMemo(() => {
@@ -273,94 +327,141 @@ export function ScienceAnalysis({
     const ranked: RankedAnalysisFile[] = []
     for (const file of allFiles) {
       if (categoryFilter !== "all" && categoryOf(file.kind) !== categoryFilter) continue
-      if (kindFilter !== null && file.kind !== kindFilter) continue
+      if (formatFilter !== null && formatChipOf(fileFormatOf(file.relPath)).id !== formatFilter) {
+        continue
+      }
 
       const nameMatch = fuzzyMatch(needle, file.name)
       const pathMatch = fuzzyMatch(needle, file.relPath)
       if (nameMatch === null && pathMatch === null) continue
       ranked.push({
         file,
-        fuzzyScore: Math.max(nameMatch?.score ?? -1, pathMatch?.score ?? -1),
-        likelihood: analysisLikelihood(file.relPath),
         namePositions: nameMatch?.positions ?? [],
         // When the basename already carries the match, highlighting it again in
         // the path is visual noise; directory-only matches remain visible here.
         pathPositions: nameMatch === null ? (pathMatch?.positions ?? []) : [],
       })
     }
-    ranked.sort(
-      (a, b) =>
-        b.fuzzyScore - a.fuzzyScore ||
-        b.likelihood - a.likelihood ||
-        a.file.relPath.localeCompare(b.file.relPath),
-    )
+    // The list shows them in its folder tree, sorted by name.
     return ranked
-  }, [allFiles, query, categoryFilter, kindFilter])
+  }, [allFiles, query, categoryFilter, formatFilter])
 
-  // Re-group the filtered files by experiment (group), sorted by name, with the
-  // no-experiment group last. Inside a group, runs (sorted by name, numbers in
-  // order) come before the loose files. Files of the project's reports/ folder
-  // form their own group after these. Within a run or the loose files the
-  // ranking order is kept.
-  const filteredGroups = useMemo(() => {
-    const byExperiment = new Map<string | null, ExperimentGroup>()
-    for (const rankedFile of filtered) {
-      if (rankedFile.file.inReportsFolder) continue
-      const { experiment, run } = rankedFile.file
-      let group = byExperiment.get(experiment)
-      if (!group) {
-        group = { experiment, runs: [], loose: [] }
-        byExperiment.set(experiment, group)
-      }
-      if (run === null) {
-        group.loose.push(rankedFile)
-        continue
-      }
-      const existing = group.runs.find((candidate) => candidate.run === run)
-      if (existing) existing.files.push(rankedFile)
-      else group.runs.push({ run, files: [rankedFile] })
-    }
-    for (const group of byExperiment.values()) {
-      group.runs.sort((a, b) => a.run.localeCompare(b.run, undefined, { numeric: true }))
-    }
-    const named = [...byExperiment.keys()]
-      .filter((experiment): experiment is string => experiment !== null)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    const order: Array<string | null> = byExperiment.has(null) ? [...named, null] : named
-    return order.flatMap((experiment) => {
-      const group = byExperiment.get(experiment)
-      return group ? [group] : []
-    })
-  }, [filtered])
-  // Runs the user opened, by experiment and run. A search opens every run.
-  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(new Set())
-  const toggleRun = (key: string): void =>
-    setOpenRuns((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  const filteredReports = useMemo(
-    () => filtered.filter((rankedFile) => rankedFile.file.inReportsFolder),
+  // The list model from the filtered files: group rows (folders above the
+  // experiment level) holding experiment rows, experiment rows with no group,
+  // the loose files ("No experiment") and the project's reports/ folder. Each
+  // row's files keep their folder tree.
+  const model = useMemo(
+    () => buildListModel(filtered, listing.data?.truncatedExperiments ?? []),
+    [filtered, listing.data],
+  )
+  // With the folder tree hidden, the files are listed directly, sorted by path.
+  const [flatList] = useAnalysisFlatList()
+  const flatFiles = useMemo(
+    () => [...filtered].sort((a, b) => byName(a.file.relPath, b.file.relPath)),
     [filtered],
   )
-  const fileRows = (files: RankedAnalysisFile[]) =>
-    files.map((rankedFile) => (
-      <FileRow
-        key={rankedFile.file.relPath}
-        file={rankedFile.file}
-        namePositions={rankedFile.namePositions}
-        pathPositions={rankedFile.pathPositions}
-        selected={rankedFile.file.relPath === selectedRelPath}
-        onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
-      />
-    ))
+  // A list of only loose results files (a flat list) shows them with no row.
+  const onlyLooseFiles =
+    model.groups.length === 0 &&
+    model.experiments.length === 0 &&
+    model.reports === null &&
+    model.loose !== null
+  // Rows and folders the user opened. A search opens every row and folder with a match.
+  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set())
+  const searching = query.trim() !== ""
+  const isOpen = (id: string): boolean => searching || openRows.has(id)
+  const toggleRow = (id: string): void =>
+    setOpenRows((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const fileRow = (rankedFile: RankedAnalysisFile) => (
+    <FileRow
+      key={rankedFile.file.relPath}
+      file={rankedFile.file}
+      namePositions={rankedFile.namePositions}
+      pathPositions={rankedFile.pathPositions}
+      selected={rankedFile.file.relPath === selectedRelPath}
+      onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+    />
+  )
+  /** A folder's contents like the project file tree: subfolders first, then files. */
+  const treeContents = (rowId: string, folder: TreeFolder) => (
+    <>
+      {folder.folders.map((child) => {
+        const id = `${rowId}/${child.path}`
+        const open = isOpen(id)
+        return (
+          <div key={child.path} className="flex flex-col gap-1">
+            <FolderRow
+              testId="analysis-folder"
+              dataName={child.path}
+              label={child.name}
+              isPath={false}
+              open={open}
+              onToggle={() => toggleRow(id)}
+              help={t("Show or hide the files of this folder.")}
+            />
+            {open ? (
+              <div
+                data-testid="analysis-folder-contents"
+                className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
+              >
+                {treeContents(rowId, child)}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {folder.files.map(fileRow)}
+    </>
+  )
+  /** An experiment row (or the loose files, or reports/) and, when open, its tree. */
+  const experimentBlock = (
+    id: string,
+    testId: string,
+    dataExperiment: string,
+    label: string,
+    node: { tree: TreeFolder; truncated: boolean },
+  ) => {
+    const open = isOpen(id)
+    return (
+      <div
+        key={id}
+        data-testid={testId}
+        data-experiment={dataExperiment}
+        className="flex flex-col gap-1"
+      >
+        <FolderRow
+          testId="analysis-experiment"
+          dataName={dataExperiment}
+          label={label}
+          isPath={false}
+          open={open}
+          onToggle={() => toggleRow(id)}
+          help={t("Show or hide the files of this experiment.")}
+        />
+        {open ? (
+          <div
+            data-testid="analysis-experiment-files"
+            className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
+          >
+            {node.truncated ? <TruncatedNotice /> : null}
+            {treeContents(id, node.tree)}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+  const experimentNodeBlock = (node: ExperimentNode) =>
+    experimentBlock(node.id, "analysis-experiment-group", node.experiment, node.experiment, node)
 
-  // Selecting a category clears any narrower sub-kind; "All" clears both.
+  // Selecting a category (or the selected one again) clears the format filter.
   const selectCategory = (category: DataFileCategory | "all") => {
     setCategoryFilter(category)
-    setKindFilter(null)
+    setFormatFilter(null)
   }
 
   return (
@@ -520,7 +621,22 @@ export function ScienceAnalysis({
               <NoProjectsState />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 gap-3">
+            // A click on empty space (an element marked data-deselect-area itself, not
+            // a file, control or preview content inside it) deselects, like Escape.
+            // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is the keyboard way to deselect.
+            // biome-ignore lint/a11y/noStaticElementInteractions: only empty backgrounds react.
+            <div
+              data-deselect-area
+              className="flex min-h-0 flex-1 gap-3"
+              onClick={(event) => {
+                if (
+                  event.target instanceof HTMLElement &&
+                  event.target.hasAttribute("data-deselect-area")
+                ) {
+                  setSelectedRelPath(null)
+                }
+              }}
+            >
               {/* Left card: search + category filter + file list, resizable from the gap on its right. */}
               <div
                 data-testid="analysis-files-column"
@@ -536,8 +652,14 @@ export function ScienceAnalysis({
                   max={ANALYSIS_FILES_MAX_WIDTH}
                   testId="analysis-files-edge-drag"
                 />
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border">
-                  <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
+                <div
+                  data-deselect-area
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
+                >
+                  <div
+                    data-deselect-area
+                    className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2"
+                  >
                     {selectedProjectId ? (
                       <ResultsFolderField
                         key={selectedProjectId}
@@ -548,7 +670,7 @@ export function ScienceAnalysis({
                       />
                     ) : null}
                     <div className="relative">
-                      <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
+                      <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-3.5 text-muted-foreground" />
                       <Input
                         data-testid="analysis-search"
                         aria-label={t("Search data files")}
@@ -559,17 +681,19 @@ export function ScienceAnalysis({
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
                         placeholder={t("Search files…")}
-                        className="h-8 pl-8"
+                        className="h-7 pl-7 text-xs md:text-xs"
                         disabled={allFiles.length === 0}
                       />
                     </div>
                     {categoriesPresent.length > 0 ? (
-                      <div className="flex flex-wrap gap-1" data-testid="analysis-category-filters">
+                      <div className="mt-1 flex flex-wrap gap-1" data-testid="analysis-category-filters">
                         <FilterChip
                           label={t("All")}
                           active={categoryFilter === "all"}
                           onClick={() => selectCategory("all")}
                           testId="analysis-category-all"
+                          size="category"
+                          disabled={false}
                         />
                         {categoriesPresent.map((category) => (
                           <FilterChip
@@ -578,32 +702,41 @@ export function ScienceAnalysis({
                             active={categoryFilter === category}
                             onClick={() => selectCategory(category)}
                             testId={`analysis-category-${category}`}
+                            size="category"
+                            disabled={false}
                           />
                         ))}
                       </div>
                     ) : null}
-                    {subKindsPresent.length > 1 ? (
-                      <div className="flex flex-wrap gap-1" data-testid="analysis-subkind-filters">
-                        <FilterChip
-                          label={t("All")}
-                          active={kindFilter === null}
-                          onClick={() => setKindFilter(null)}
-                          testId="analysis-subkind-all"
-                        />
-                        {subKindsPresent.map((kind) => (
+                    {/* A selected category always shows its row; All only with several formats. */}
+                    {formatRow.length > (categoryFilter === "all" ? 1 : 0) ? (
+                      // One line only: a row wider than the panel scrolls sideways.
+                      <div
+                        className="flex shrink-0 gap-1 overflow-x-auto [scrollbar-width:none] [&>*]:shrink-0"
+                        data-testid="analysis-format-filters"
+                      >
+                        {formatRow.map(({ chip, present }) => (
                           <FilterChip
-                            key={kind}
-                            label={t(DATA_FILE_KIND_LABELS[kind])}
-                            active={kindFilter === kind}
-                            onClick={() => setKindFilter(kind)}
-                            testId={`analysis-subkind-${kind}`}
+                            key={chip.id}
+                            label={chip.label}
+                            active={formatFilter === chip.id}
+                            onClick={() =>
+                              setFormatFilter((current) => (current === chip.id ? null : chip.id))
+                            }
+                            testId={`analysis-format-${chip.id}`}
+                            size="format"
+                            disabled={!present}
                           />
                         ))}
                       </div>
                     ) : null}
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto">
+                  <div
+                    data-testid="analysis-files-list"
+                    data-deselect-area
+                    className="min-h-0 flex-1 overflow-y-auto"
+                  >
                     {listing.data?.partial ? (
                       <p
                         data-testid="analysis-partial"
@@ -626,7 +759,7 @@ export function ScienceAnalysis({
                       !listing.isLoading ? (
                       <EmptyState />
                     ) : (
-                      <div className="flex flex-col gap-3 p-3">
+                      <div data-deselect-area className="flex flex-col gap-3 p-3">
                         {resultsMissing ? (
                           <p
                             data-testid="analysis-results-missing"
@@ -638,103 +771,78 @@ export function ScienceAnalysis({
                             )}
                           </p>
                         ) : null}
-                        <div className="flex items-center justify-between px-1">
-                          <span
-                            data-testid="analysis-file-count"
-                            className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
-                          >
-                            {filtered.length} {t("of")} {allFiles.length} {t("files")}
-                          </span>
-                          {listing.data?.truncated ? (
-                            <span
-                              data-testid="analysis-truncated"
-                              className="text-[10px] text-amber-500"
-                              title={t(
-                                "The results folder has more data files than are shown, so some runs may be missing",
-                              )}
-                            >
-                              {t("truncated")}
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {filteredGroups.map((group) => (
-                          <div
-                            key={group.experiment ?? ""}
-                            data-testid="analysis-experiment-group"
-                            data-experiment={group.experiment ?? ""}
-                            className="flex flex-col gap-1"
-                          >
-                            {/* A flat list (one group, no experiment, no runs) has no header. */}
-                            {group.experiment === null &&
-                            group.runs.length === 0 &&
-                            filteredGroups.length === 1 ? null : (
-                              <div className="flex items-center gap-2 px-1">
-                                {/* A long label wraps (after a "/" first) and shows in full on hover. */}
-                                <span
-                                  data-testid="analysis-group-label"
-                                  className="min-w-0 font-medium text-[10px] text-muted-foreground uppercase tracking-wider [overflow-wrap:anywhere]"
-                                  title={group.experiment ?? undefined}
-                                >
-                                  {group.experiment === null ? (
-                                    group.runs.length > 0 ? (
-                                      `${listing.data?.resultsFolder ?? ""}/`
-                                    ) : (
-                                      t("No experiment")
-                                    )
-                                  ) : (
-                                    <PathWithBreaks path={group.experiment} />
-                                  )}
-                                </span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground/50">
-                                  {group.runs.length > 0 ? group.runs.length : group.loose.length}
-                                </span>
-                              </div>
-                            )}
-                            {group.runs.map((run) => {
-                              const key = `${group.experiment ?? ""}\u0000${run.run}`
-                              const open = query.trim() !== "" || openRuns.has(key)
+                        {flatList ? (
+                          <div data-testid="analysis-flat-files" className="flex flex-col gap-1">
+                            {(listing.data?.truncatedExperiments.length ?? 0) > 0 ? (
+                              <TruncatedNotice />
+                            ) : null}
+                            {flatFiles.map(fileRow)}
+                          </div>
+                        ) : onlyLooseFiles && model.loose ? (
+                          <div data-testid="analysis-flat-files" className="flex flex-col gap-1">
+                            {model.loose.truncated ? <TruncatedNotice /> : null}
+                            {treeContents("loose", model.loose.tree)}
+                          </div>
+                        ) : (
+                          <>
+                            {model.groups.map((group) => {
+                              const open = isOpen(group.id)
                               return (
                                 <div
-                                  key={key}
-                                  data-testid="analysis-run-block"
+                                  key={group.id}
+                                  data-testid="analysis-group-block"
+                                  data-group={group.group}
                                   className="flex flex-col gap-1"
                                 >
-                                  <RunRow
-                                    run={run.run}
-                                    experiment={group.experiment}
-                                    fileCount={run.files.length}
+                                  <FolderRow
+                                    testId="analysis-group"
+                                    dataName={group.group}
+                                    label={group.group}
+                                    isPath
                                     open={open}
-                                    onToggle={() => toggleRun(key)}
+                                    onToggle={() => toggleRow(group.id)}
+                                    help={t("Show or hide the experiments of this group.")}
                                   />
                                   {open ? (
                                     <div
-                                      data-testid="analysis-run-files"
+                                      data-testid="analysis-group-contents"
                                       className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
                                     >
-                                      {fileRows(run.files)}
+                                      {group.experiments.map(experimentNodeBlock)}
+                                      {group.truncated ? <TruncatedNotice /> : null}
+                                      {treeContents(group.id, group.tree)}
                                     </div>
                                   ) : null}
                                 </div>
                               )
                             })}
-                            {fileRows(group.loose)}
-                          </div>
-                        ))}
-
-                        {filteredReports.length > 0 ? (
-                          <div data-testid="analysis-reports-group" className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2 px-1">
-                              <span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-                                {t("Reports (reports/)")}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground/50">
-                                {filteredReports.length}
-                              </span>
-                            </div>
-                            {fileRows(filteredReports)}
-                          </div>
-                        ) : null}
+                            {model.experiments.map(experimentNodeBlock)}
+                            {model.loose && listing.data?.plainFolders ? (
+                              <>
+                                {model.loose.truncated ? <TruncatedNotice /> : null}
+                                {treeContents("loose", model.loose.tree)}
+                              </>
+                            ) : null}
+                            {model.loose && !listing.data?.plainFolders
+                              ? experimentBlock(
+                                  "loose",
+                                  "analysis-experiment-group",
+                                  "",
+                                  t("No experiment"),
+                                  model.loose,
+                                )
+                              : null}
+                            {model.reports
+                              ? experimentBlock(
+                                  "reports",
+                                  "analysis-reports-group",
+                                  "reports/",
+                                  t("Reports (reports/)"),
+                                  model.reports,
+                                )
+                              : null}
+                          </>
+                        )}
 
                         {filtered.length === 0 && allFiles.length > 0 ? (
                           <p
@@ -753,6 +861,7 @@ export function ScienceAnalysis({
               {/* Middle card: preview pane for the selected file. */}
               <div
                 data-testid="analysis-preview-column"
+                data-deselect-area
                 className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
               >
                 {selectedProjectId && selectedRelPath ? (
@@ -821,43 +930,182 @@ function PathWithBreaks({ path }: { path: string }) {
   ))
 }
 
-/** The files of one run, in ranking order. */
-interface RunGroup {
-  run: string
+/** A folder of a row's file tree: its subfolders and files (both sorted by name). */
+interface TreeFolder {
+  name: string
+  /** Its path inside the row ("" for the row itself). */
+  path: string
+  folders: TreeFolder[]
   files: RankedAnalysisFile[]
 }
 
-/** One experiment group of the list: its runs and its loose files. */
-interface ExperimentGroup {
-  experiment: string | null
-  runs: RunGroup[]
-  loose: RankedAnalysisFile[]
+/** An experiment row: its files as a tree. */
+interface ExperimentNode {
+  /** Unique id, also the key of its open state. */
+  id: string
+  experiment: string
+  tree: TreeFolder
+  /** True when the listing kept only the experiment's first files. */
+  truncated: boolean
 }
 
-/** A run row: the run's folder name and file count; clicking shows or hides its files. */
-function RunRow({
-  run,
-  experiment,
-  fileCount,
+/** A group row: the folders above the experiment level, its experiments and its own files. */
+interface GroupNode {
+  id: string
+  group: string
+  experiments: ExperimentNode[]
+  tree: TreeFolder
+  truncated: boolean
+}
+
+/** The file list: group rows, experiments with no group, loose files, reports/. */
+interface ListModel {
+  groups: GroupNode[]
+  experiments: ExperimentNode[]
+  loose: { tree: TreeFolder; truncated: boolean } | null
+  reports: { tree: TreeFolder; truncated: boolean } | null
+}
+
+/** Sort names like the file tree: numbers in order. */
+function byName(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true })
+}
+
+/** Build the folder tree of a row's files from their `innerPath`. */
+function buildTree(files: RankedAnalysisFile[]): TreeFolder {
+  const root: TreeFolder = { name: "", path: "", folders: [], files: [] }
+  for (const rankedFile of files) {
+    const parts = rankedFile.file.innerPath.split("/").slice(0, -1)
+    let folder = root
+    for (const part of parts) {
+      const path = folder.path === "" ? part : `${folder.path}/${part}`
+      let child = folder.folders.find((candidate) => candidate.name === part)
+      if (!child) {
+        child = { name: part, path, folders: [], files: [] }
+        folder.folders.push(child)
+      }
+      folder = child
+    }
+    folder.files.push(rankedFile)
+  }
+  const sort = (folder: TreeFolder): void => {
+    folder.folders.sort((a, b) => byName(a.name, b.name))
+    folder.files.sort((a, b) => byName(a.file.name, b.file.name))
+    for (const child of folder.folders) sort(child)
+  }
+  sort(root)
+  return root
+}
+
+/**
+ * Group the filtered files into the list model. Groups and experiments are
+ * sorted by name; a row with no matching files is left out.
+ */
+function buildListModel(
+  files: RankedAnalysisFile[],
+  truncated: Array<{ group: string | null; experiment: string | null; inReportsFolder: boolean }>,
+): ListModel {
+  const isCut = (group: string | null, experiment: string | null, inReportsFolder: boolean) =>
+    truncated.some(
+      (entry) =>
+        entry.group === group &&
+        entry.experiment === experiment &&
+        entry.inReportsFolder === inReportsFolder,
+    )
+  const byRow = new Map<string, RankedAnalysisFile[]>()
+  const reports: RankedAnalysisFile[] = []
+  for (const rankedFile of files) {
+    if (rankedFile.file.inReportsFolder) {
+      reports.push(rankedFile)
+      continue
+    }
+    const key = `${rankedFile.file.group ?? ""}\u0000${rankedFile.file.experiment ?? ""}`
+    const row = byRow.get(key)
+    if (row) row.push(rankedFile)
+    else byRow.set(key, [rankedFile])
+  }
+  const groups = new Map<string, GroupNode>()
+  const experiments: ExperimentNode[] = []
+  let loose: ListModel["loose"] = null
+  for (const rowFiles of byRow.values()) {
+    const { group, experiment } = rowFiles[0]?.file ?? { group: null, experiment: null }
+    if (group === null && experiment === null) {
+      loose = { tree: buildTree(rowFiles), truncated: isCut(null, null, false) }
+      continue
+    }
+    if (group !== null && !groups.has(group)) {
+      groups.set(group, {
+        id: `g:${group}`,
+        group,
+        experiments: [],
+        tree: buildTree([]),
+        truncated: false,
+      })
+    }
+    const groupNode = group === null ? null : (groups.get(group) ?? null)
+    if (experiment === null) {
+      if (groupNode) {
+        groupNode.tree = buildTree(rowFiles)
+        groupNode.truncated = isCut(group, null, false)
+      }
+      continue
+    }
+    const node: ExperimentNode = {
+      id: `e:${group ?? ""}\u0000${experiment}`,
+      experiment,
+      tree: buildTree(rowFiles),
+      truncated: isCut(group, experiment, false),
+    }
+    if (groupNode) groupNode.experiments.push(node)
+    else experiments.push(node)
+  }
+  for (const group of groups.values()) {
+    group.experiments.sort((a, b) => byName(a.experiment, b.experiment))
+  }
+  experiments.sort((a, b) => byName(a.experiment, b.experiment))
+  return {
+    groups: [...groups.values()].sort((a, b) => byName(a.group, b.group)),
+    experiments,
+    loose,
+    reports:
+      reports.length > 0 ? { tree: buildTree(reports), truncated: isCut(null, null, true) } : null,
+  }
+}
+
+/** A collapsible row of the list (a group, an experiment or a folder); no counts. */
+function FolderRow({
+  testId,
+  dataName,
+  label,
+  isPath,
   open,
   onToggle,
+  help,
 }: {
-  run: string
-  experiment: string | null
-  fileCount: number
+  testId: "analysis-group" | "analysis-experiment" | "analysis-folder"
+  /** The row's `data-group`, `data-experiment` or `data-folder` value. */
+  dataName: string
+  label: string
+  /** True when `label` is a folder path (it then wraps after each "/"). */
+  isPath: boolean
   open: boolean
   onToggle: () => void
+  help: string
 }) {
-  const t = useTranslate()
+  const dataAttribute =
+    testId === "analysis-group"
+      ? { "data-group": dataName }
+      : testId === "analysis-experiment"
+        ? { "data-experiment": dataName }
+        : { "data-folder": dataName }
   return (
     <button
       type="button"
-      data-testid="analysis-run"
-      data-run={run}
-      data-experiment={experiment ?? ""}
+      data-testid={testId}
+      {...dataAttribute}
       aria-expanded={open}
-      data-feature-label={run}
-      data-feature-help={t("Show or hide the files of this run.")}
+      data-feature-label={label}
+      data-feature-help={help}
       onClick={onToggle}
       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
     >
@@ -869,11 +1117,32 @@ function RunRow({
         aria-hidden
       />
       <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 flex-1 truncate font-medium" title={run}>
-        {run}
+      {/* A long name wraps (after a "/" first) and shows in full on hover. */}
+      <span
+        data-testid={`${testId}-label`}
+        className={cn(
+          "min-w-0 flex-1 [overflow-wrap:anywhere]",
+          testId !== "analysis-folder" && "font-medium",
+        )}
+        title={label}
+      >
+        {isPath ? <PathWithBreaks path={label} /> : label}
       </span>
-      <span className="shrink-0 text-[10px] text-muted-foreground/70">{fileCount}</span>
     </button>
+  )
+}
+
+/** Shown in an open row whose files were cut at the listing's per-row cap. */
+function TruncatedNotice() {
+  const t = useTranslate()
+  return (
+    <p
+      data-testid="analysis-experiment-truncated"
+      role="status"
+      className="px-2 text-[10px] text-amber-600"
+    >
+      {t("This experiment has more files than are listed here.")}
+    </p>
   )
 }
 
@@ -923,76 +1192,11 @@ function FileRow({
   )
 }
 
+/** A file that passes the filters, with its search match positions. */
 interface RankedAnalysisFile {
   file: DataFileEntry
-  fuzzyScore: number
-  likelihood: number
   namePositions: number[]
   pathPositions: number[]
-}
-
-const LIKELY_ANALYSIS_TERMS = new Set([
-  "analysis",
-  "artifact",
-  "artifacts",
-  "eval",
-  "evaluation",
-  "experiment",
-  "experiments",
-  "figure",
-  "figures",
-  "metric",
-  "metrics",
-  "output",
-  "outputs",
-  "plot",
-  "plots",
-  "prediction",
-  "predictions",
-  "report",
-  "reports",
-  "result",
-  "results",
-  "run",
-  "runs",
-  "score",
-  "scores",
-  "summary",
-])
-
-const UNLIKELY_ANALYSIS_TERMS = new Set([
-  "code",
-  "config",
-  "configs",
-  "configuration",
-  "fixture",
-  "fixtures",
-  "license",
-  "package",
-  "params",
-  "parameters",
-  "readme",
-  "script",
-  "scripts",
-  "setup",
-  "source",
-  "src",
-  "test",
-  "tests",
-])
-
-/** Lightweight path/name prior; fuzzy relevance remains the primary sort key. */
-function analysisLikelihood(relPath: string): number {
-  const terms = relPath
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-  let score = 0
-  for (const term of terms) {
-    if (LIKELY_ANALYSIS_TERMS.has(term)) score += 10
-    if (UNLIKELY_ANALYSIS_TERMS.has(term)) score -= 10
-  }
-  return score
 }
 
 function HighlightedText({ text, positions }: { text: string; positions: number[] }) {
@@ -1014,17 +1218,23 @@ function HighlightedText({ text, positions }: { text: string; positions: number[
   })
 }
 
-/** A clickable filter chip for a category, sub-kind, or "All". */
+/** A clickable filter chip: a category or "All", or a (smaller) format chip. */
 function FilterChip({
   label,
   active,
   onClick,
   testId,
+  size,
+  disabled,
 }: {
   label: string
   active: boolean
   onClick: () => void
   testId: string
+  /** "format" chips (the second row) have smaller text and padding. */
+  size: "category" | "format"
+  /** A format with no files: greyed out and not clickable. */
+  disabled: boolean
 }) {
   const t = useTranslate()
   return (
@@ -1033,12 +1243,14 @@ function FilterChip({
       data-testid={testId}
       data-active={active}
       aria-pressed={active}
+      disabled={disabled}
       data-feature-label={`${label} ${t("filter")}`}
       data-feature-help={t("Filter the data-file list by format or analysis category.")}
       onClick={onClick}
       className={cn(
         badgeVariants({ variant: active ? "default" : "muted" }),
-        "cursor-pointer select-none",
+        "cursor-pointer select-none disabled:cursor-not-allowed disabled:opacity-40",
+        size === "format" && "px-1.5 py-0 text-[10px]",
       )}
     >
       {label}
@@ -1153,7 +1365,7 @@ function ResultsFolderField({
           )}
           disabled={busy}
           onClick={change}
-          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-ring")}
+          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-wave")}
         >
           {missing ? t("Select…") : t("Change…")}
         </button>
@@ -1185,9 +1397,42 @@ function ResultsFolderField({
         <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
           {t("Structure")}
         </span>
-        <ExperimentsStructureSelect projectId={projectId} testId="analysis-structure" />
+        <div className="flex min-w-0 items-start gap-1.5">
+          <div className="min-w-0 flex-1">
+            <ExperimentsStructureSelect projectId={projectId} testId="analysis-structure" />
+          </div>
+          <FlatListToggle />
+        </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Hide the folder tree: list the files directly, each with its path below its
+ * name. The same choice as Settings > Remote experiments (kept globally).
+ */
+function FlatListToggle() {
+  const t = useTranslate()
+  const [flatList, setFlatList] = useAnalysisFlatList()
+  const label = t("Hide folders")
+  return (
+    <button
+      type="button"
+      data-testid="analysis-flat-toggle"
+      aria-pressed={flatList}
+      aria-label={label}
+      title={label}
+      data-feature-label={label}
+      data-feature-help={t("List the files directly, each with its path, without folders.")}
+      onClick={() => setFlatList(!flatList)}
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-md border border-border hover:bg-accent",
+        flatList && "bg-accent text-accent-foreground",
+      )}
+    >
+      <ListTree className="size-3.5" aria-hidden />
+    </button>
   )
 }
 
@@ -1249,7 +1494,7 @@ function NoSelectionState() {
       className="flex h-full items-center justify-center p-6 text-center"
     >
       <p className="max-w-xs text-muted-foreground text-sm">
-        {t("Select a file to preview its contents.")}
+        {t("Select a file to view it.")}
       </p>
     </div>
   )

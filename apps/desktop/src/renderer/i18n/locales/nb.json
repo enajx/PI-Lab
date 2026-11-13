@@ -231,6 +231,7 @@
   "Checking…": "Sjekker…",
   "Environments unavailable": "Miljøer utilgjengelige",
   "Auto-detect": "Finn automatisk",
+  "Folders": "Mapper",
   "Choose environment folder…": "Velg miljømappe…",
   "Choose Python interpreter…": "Velg Python-tolk…",
   "Python type checking is on. Click to turn it off.": "Python-typekontroll er på. Klikk for å slå av.",
@@ -571,7 +572,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "Åpne et prosjekt fra sidefeltet for å bla gjennom datafilene.",
   "No data files found": "Fant ingen datafiler",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "Analyse viser datafiler, bilder, notatbøker og figurer som finnes i prosjektlageret.",
-  "Select a file to preview its contents.": "Velg en fil for å forhåndsvise innholdet.",
+  "Select a file to view it.": "Velg en fil for å se den.",
   "Monitor compute machines from your ssh config": "Overvåk datamaskiner fra SSH-oppsettet ditt",
   "Temporarily include machines hidden from the cluster grid": "Vis skjulte maskiner midlertidig i klyngerutenettet",
   "Hide hidden": "Skjul skjulte maskiner",
@@ -1138,5 +1139,12 @@
   "List files and folders whose name starts with a dot in the file tree.": "Vis filer og mapper med navn som starter med punktum i filtreet.",
   "Don't ask again": "Ikke spør igjen",
   "Confirm before deleting files": "Bekreft før filer slettes",
-  "Ask before moving a file or folder in the file tree to the Trash.": "Spør før en fil eller mappe i filtreet flyttes til papirkurven."
+  "Ask before moving a file or folder in the file tree to the Trash.": "Spør før en fil eller mappe i filtreet flyttes til papirkurven.",
+  "Large file": "Stor fil",
+  "loading may be slow": "innlasting kan ta tid",
+  "Load": "Last inn",
+  "Dataset": "Datasett",
+  "scalar": "skalar",
+  "datasets": "datasett",
+  "+{count} more": "+{count} til"
 }

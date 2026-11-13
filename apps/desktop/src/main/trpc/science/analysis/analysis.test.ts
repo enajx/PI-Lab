@@ -8,12 +8,14 @@ import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createHarness, type Harness } from "../../testHarness"
 import {
+  assignRow,
+  detectExperimentLevel,
   MAX_CHART_POINTS,
   MAX_LISTED_FILES,
-  MAX_NPY_BYTES,
   MAX_TABLE_ROWS,
   MAX_TEXT_BYTES,
 } from "./discover"
+import { analysisMedia } from "./mediaGrants"
 
 let h: Harness
 
@@ -80,18 +82,78 @@ function makeRawNpy(shape: string, descr: string, fortran: boolean, data: Buffer
   return Buffer.concat([prefix, Buffer.from(header, "ascii"), data])
 }
 
-/** Each listed file as relPath → [experiment, run]. */
+/** Each listed file as relPath → [group, experiment, path inside its row]. */
 function experimentRuns(listing: {
   groups: Array<{
-    files: Array<{ relPath: string; experiment: string | null; run: string | null }>
+    files: Array<{
+      relPath: string
+      group: string | null
+      experiment: string | null
+      innerPath: string
+    }>
   }>
-}): Record<string, [string | null, string | null]> {
+}): Record<string, [string | null, string | null, string]> {
   return Object.fromEntries(
     listing.groups.flatMap((group) =>
-      group.files.map((file) => [file.relPath, [file.experiment, file.run]] as const),
+      group.files.map(
+        (file) => [file.relPath, [file.group, file.experiment, file.innerPath]] as const,
+      ),
     ),
   )
 }
+
+describe("detectExperimentLevel (Auto-detect)", () => {
+  /** The folders of each path, as discovery passes them. */
+  const folders = (paths: string[]) => paths.map((path) => path.split("/").slice(0, -1))
+
+  test("a results/<group>/<experiment>/ layout like the user's is level 2; output folders do not count", () => {
+    expect(
+      detectExperimentLevel(
+        folders([
+          "multiplexing/20260214_141942/best_loss_vs_n.csv",
+          "multiplexing/20260214_141942/plots/best_loss_vs_n_log.png",
+          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run0/a.png",
+          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run1/a.png",
+          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n04_run0/a.png",
+          "pattern_translation/easily-boss-grouse/training_curve.pdf",
+          "pattern_translation/easily-boss-grouse/animations/growth.mp4",
+          "pattern_translation/FAIL-wholly-calm-badger/training_curve.pdf",
+          "pattern_translation/fully-witty-marmot/grid.png",
+          "pattern_translation/fully-witty-marmot/targets/t0.png",
+          "patterns_conditional_growth/firmly-key-amoeba/grid.png",
+          "patterns_conditional_growth/firmly-key-amoeba/targets/t0.png",
+        ]),
+      ),
+    ).toBe(2)
+  })
+
+  test("a results/<experiment>/ layout is level 1, and so is a flat one", () => {
+    expect(
+      detectExperimentLevel(folders(["exp-a/m.csv", "exp-b/m.csv", "exp-b/plots/p.png", "s.json"])),
+    ).toBe(1)
+    expect(detectExperimentLevel(folders(["a.csv", "b.png"]))).toBe(1)
+  })
+
+  test("a tie goes to the shallower level", () => {
+    expect(detectExperimentLevel(folders(["bulk/a.csv", "late/run-1/x.csv"]))).toBe(1)
+  })
+})
+
+describe("assignRow (Folders)", () => {
+  test("every file is loose with its whole path inside the results folder", () => {
+    const folders = { kind: "folders" } as const
+    expect(assignRow(["gecko", "s0", "plots"], "a.png", folders, 1)).toEqual({
+      group: null,
+      experiment: null,
+      innerPath: "gecko/s0/plots/a.png",
+    })
+    expect(assignRow([], "summary.json", folders, 1)).toEqual({
+      group: null,
+      experiment: null,
+      innerPath: "summary.json",
+    })
+  })
+})
 
 describe("experiments folder structure", () => {
   const structurePath = () => join(h.dataDir, "experiments-structure.yaml")
@@ -108,15 +170,16 @@ describe("experiments folder structure", () => {
     return h.caller.science.analysis.listFiles({ projectId, defaultResultsFolder: "results" })
   }
 
-  test("auto-detect (the default): folders that hold data files are runs, grouped by their parent folder", async () => {
+  test("auto-detect (the default): the most common run depth is the experiment level, the folders above it are groups", async () => {
     await writeGecko()
     const project = await h.caller.projects.open({ path: h.repoDir })
     expect(experimentRuns(await list(project.id))).toEqual({
-      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0"],
-      "results/gecko/fl-shape_s1/run.db": ["gecko", "fl-shape_s1"],
-      "results/gecko/fl-shape_s1/metrics.csv": ["gecko", "fl-shape_s1"],
-      "results/exp-a/plot.png": [null, "exp-a"],
-      "results/summary.json": [null, null],
+      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0", "run.db"],
+      "results/gecko/fl-shape_s1/run.db": ["gecko", "fl-shape_s1", "run.db"],
+      "results/gecko/fl-shape_s1/metrics.csv": ["gecko", "fl-shape_s1", "metrics.csv"],
+      // Above the experiment level: a file of the group itself.
+      "results/exp-a/plot.png": ["exp-a", null, "plot.png"],
+      "results/summary.json": [null, null, "summary.json"],
     })
     expect(await h.caller.science.analysis.getStructure({ projectId: project.id })).toEqual({
       filePath: structurePath(),
@@ -133,22 +196,26 @@ describe("experiments folder structure", () => {
 
     await set("one-folder-per-experiment")
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/gecko/fl-shape_s0/run.db": ["gecko", null],
-      "results/exp-a/plot.png": ["exp-a", null],
-      "results/summary.json": [null, null],
+      "results/gecko/fl-shape_s0/run.db": [null, "gecko", "fl-shape_s0/run.db"],
+      "results/exp-a/plot.png": [null, "exp-a", "plot.png"],
+      "results/summary.json": [null, null, "summary.json"],
     })
 
+    // Experiment / run folders: the runs are folders inside each experiment.
     await set("experiment-run")
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0"],
-      "results/exp-a/plot.png": ["exp-a", null],
+      "results/gecko/fl-shape_s0/run.db": [null, "gecko", "fl-shape_s0/run.db"],
+      "results/exp-a/plot.png": [null, "exp-a", "plot.png"],
     })
 
     const saved = await set("flat")
     expect(saved).toEqual({ filePath: structurePath(), defaultValue: "auto", projectValue: "flat" })
-    expect(Object.values(experimentRuns(await list(project.id)))).toEqual(
-      Array(5).fill([null, null]),
-    )
+    // A flat list: no groups, no experiments, no folders.
+    expect(
+      Object.entries(experimentRuns(await list(project.id))).map(
+        ([relPath, row]) => row[0] === null && row[1] === null && relPath.endsWith(`/${row[2]}`),
+      ),
+    ).toEqual(Array(5).fill(true))
     const text = await readFile(structurePath(), "utf8")
     expect(text).toContain("default: auto")
     expect(text).toContain(`${project.repoPath}: flat`)
@@ -159,9 +226,37 @@ describe("experiments folder structure", () => {
       (await h.caller.science.analysis.getStructure({ projectId: project.id })).projectValue,
     ).toBeNull()
     expect(experimentRuns(await list(project.id))["results/exp-a/plot.png"]).toEqual([
-      null,
       "exp-a",
+      null,
+      "plot.png",
     ])
+  })
+
+  test("folders: the results folder as a plain folder tree, no groups or experiments, stored as `folders`", async () => {
+    await writeGecko()
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const saved = await h.caller.science.analysis.setStructure({
+      projectId: project.id,
+      value: "folders",
+    })
+    expect(saved).toEqual({
+      filePath: structurePath(),
+      defaultValue: "auto",
+      projectValue: "folders",
+    })
+    expect(await readFile(structurePath(), "utf8")).toContain(`${project.repoPath}: folders`)
+    const listing = await list(project.id)
+    expect(listing.plainFolders).toBe(true)
+    // Every file is a loose file of the results folder; its inner path is the real path under it.
+    expect(experimentRuns(listing)).toEqual({
+      "results/gecko/fl-shape_s0/run.db": [null, null, "gecko/fl-shape_s0/run.db"],
+      "results/gecko/fl-shape_s1/run.db": [null, null, "gecko/fl-shape_s1/run.db"],
+      "results/gecko/fl-shape_s1/metrics.csv": [null, null, "gecko/fl-shape_s1/metrics.csv"],
+      "results/exp-a/plot.png": [null, null, "exp-a/plot.png"],
+      "results/summary.json": [null, null, "summary.json"],
+    })
+    await h.caller.science.analysis.setStructure({ projectId: project.id, value: "flat" })
+    expect((await list(project.id)).plainFolders).toBe(false)
   })
 
   test("the default from Settings applies to projects without their own entry", async () => {
@@ -172,8 +267,9 @@ describe("experiments folder structure", () => {
       value: "one-folder-per-experiment",
     })
     expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
-      "gecko",
       null,
+      "gecko",
+      "fl-shape_s0/run.db",
     ])
     expect(await h.caller.science.analysis.getStructure({ projectId: null })).toMatchObject({
       defaultValue: "one-folder-per-experiment",
@@ -191,17 +287,18 @@ describe("experiments folder structure", () => {
       value: "{experiment}/*/{run}/",
     })
     expect(experimentRuns(await list(project.id))).toEqual({
-      "results/sweep/seeds/s0/a.csv": ["sweep", "s0"],
-      "results/sweep/seeds/s1/deep/b.csv": ["sweep", "s1"],
-      "results/other/c.csv": ["other", null],
+      "results/sweep/seeds/s0/a.csv": [null, "sweep", "seeds/s0/a.csv"],
+      "results/sweep/seeds/s1/deep/b.csv": [null, "sweep", "seeds/s1/deep/b.csv"],
+      "results/other/c.csv": [null, "other", "c.csv"],
     })
+    // Folders before {experiment} are groups; a literal folder must match.
     await h.caller.science.analysis.setStructure({
       projectId: project.id,
-      value: "{experiment}/seeds/{run}",
+      value: "sweep/{experiment}/{run}",
     })
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/sweep/seeds/s0/a.csv": ["sweep", "s0"],
-      "results/other/c.csv": ["other", null],
+      "results/sweep/seeds/s0/a.csv": ["sweep", "seeds", "s0/a.csv"],
+      "results/other/c.csv": [null, null, "other/c.csv"],
     })
   })
 
@@ -244,8 +341,9 @@ describe("experiments folder structure", () => {
       `# mine\ndefault: flat\nprojects:\n  "${project.repoPath}": "{experiment}/"\n`,
     )
     expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
-      "gecko",
       null,
+      "gecko",
+      "fl-shape_s0/run.db",
     ])
   })
 })
@@ -309,7 +407,7 @@ describe("science.analysis.listFiles", () => {
     expect(npyKind.get("results/runs/loss.npy")).toBe("npy")
     expect(npyKind.get("results/checkpoints/weights.npz")).toBe("npz")
 
-    expect(listing.truncated).toBe(false)
+    expect(listing.truncatedExperiments).toEqual([])
     expect(listing.total).toBeGreaterThanOrEqual(5)
   })
 
@@ -474,21 +572,46 @@ describe("science.analysis.listFiles", () => {
     expect(allRel.every((r) => !r.slice(r.lastIndexOf("/") + 1).startsWith("."))).toBe(true)
   })
 
-  test("flags truncation when over the cap", async () => {
-    // Write one more than the cap of recognized data files.
+  test("the file cap is per list row, so every experiment is listed past 2000 files", async () => {
+    // One run folder with more files than the cap, and a later experiment the walk
+    // reaches only after it (breadth-first: zz-late's files come after bulk's).
     const count = MAX_LISTED_FILES + 5
     await Promise.all(
       Array.from({ length: count }, (_, i) => writeRepoFile(`results/bulk/f${i}.csv`, "a\n1\n")),
     )
+    await writeRepoFile("results/zz-late/run-1/x.csv", "a\n1\n")
 
     const project = await h.caller.projects.open({ path: h.repoDir })
     const listing = await h.caller.science.analysis.listFiles({
       projectId: project.id,
       defaultResultsFolder: "results",
     })
+    const files = listing.groups.flatMap((group) => group.files)
+    // The cap is per experiment.
+    expect(files.filter((file) => file.experiment === "bulk")).toHaveLength(MAX_LISTED_FILES)
+    expect(files.find((file) => file.relPath === "results/zz-late/run-1/x.csv")?.experiment).toBe(
+      "zz-late",
+    )
+    // Only the experiment that was cut is flagged.
+    expect(listing.truncatedExperiments).toEqual([
+      { group: null, experiment: "bulk", inReportsFolder: false },
+    ])
+  })
 
-    expect(listing.truncated).toBe(true)
-    expect(listing.total).toBe(MAX_LISTED_FILES)
+  test("Folders lists every file with no cap and no 'more files' notice", async () => {
+    const count = MAX_LISTED_FILES + 5
+    await Promise.all(
+      Array.from({ length: count }, (_, i) => writeRepoFile(`results/bulk/f${i}.csv`, "a\n1\n")),
+    )
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    await h.caller.science.analysis.setStructure({ projectId: project.id, value: "folders" })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    const files = listing.groups.flatMap((group) => group.files)
+    expect(files.filter((file) => file.relPath.startsWith("results/bulk/"))).toHaveLength(count)
+    expect(listing.truncatedExperiments).toEqual([])
   })
 
   test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", async () => {
@@ -508,7 +631,7 @@ describe("science.analysis.listFiles", () => {
 
     expect(paths).toContain("results/deep/results/metrics.csv")
     expect(paths.some((path) => path.endsWith(".py"))).toBe(false)
-    expect(listing.truncated).toBe(false)
+    expect(listing.truncatedExperiments).toEqual([])
   })
 
   test("lists only the results folder, grouping files by experiment folder", async () => {
@@ -578,8 +701,8 @@ describe("science.analysis.listFiles", () => {
     expect(listing.resultsFolder).toBe("runs/out")
     expect(listing.overridden).toBe(true)
     expect(
-      listing.groups.flatMap((g) => g.files.map((f) => [f.relPath, f.experiment, f.run])),
-    ).toEqual([["runs/out/exp-c/log.txt", null, "exp-c"]])
+      listing.groups.flatMap((g) => g.files.map((f) => [f.relPath, f.experiment, f.innerPath])),
+    ).toEqual([["runs/out/exp-c/log.txt", "exp-c", "log.txt"]])
 
     await h.caller.science.analysis.setResultsFolder({ projectId: project.id, dir: null })
     const reset = await h.caller.science.analysis.listFiles({
@@ -618,16 +741,18 @@ describe("science.analysis.listFiles", () => {
     const byRel = Object.fromEntries(
       listing.groups.flatMap((group) =>
         group.files.map(
-          (file) => [file.relPath, [file.experiment, file.run, file.inReportsFolder]] as const,
+          (file) =>
+            [file.relPath, [file.experiment, file.innerPath, file.inReportsFolder]] as const,
         ),
       ),
     )
     expect(byRel).toEqual({
-      "results/exp-a/log.txt": [null, "exp-a", false],
-      // A reports/ folder inside the results folder stays a run of the results folder.
-      "results/reports/inner.html": [null, "reports", false],
-      "reports/report.html": [null, null, true],
-      "reports/nested/summary.md": [null, null, true],
+      "results/exp-a/log.txt": ["exp-a", "log.txt", false],
+      // A reports/ folder inside the results folder stays an experiment of the results folder.
+      "results/reports/inner.html": ["reports", "inner.html", false],
+      // The project's reports/ folder keeps its folder tree.
+      "reports/report.html": [null, "report.html", true],
+      "reports/nested/summary.md": [null, "nested/summary.md", true],
     })
     expect(listing.total).toBe(4)
   })
@@ -705,6 +830,93 @@ describe("science.analysis.listFiles", () => {
         defaultResultsFolder: "results",
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+})
+
+describe("science.analysis PDF preview", () => {
+  test("pdfStat and pdf read a project PDF for the bundled PDF.js viewer", async () => {
+    const body = "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+    await writeRepoFile("results/multiplexing/run/gradient.pdf", body)
+    await writeRepoFile("results/multiplexing/run/notes.txt", "x\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const input = { projectId: project.id, relPath: "results/multiplexing/run/gradient.pdf" }
+
+    const stat = await h.caller.science.analysis.pdfStat(input)
+    expect(stat).toMatchObject({ exists: true, size: body.length })
+    const snapshot = await h.caller.science.analysis.pdf(input)
+    expect(Buffer.from(snapshot.data).toString("utf8")).toBe(body)
+    expect(snapshot.baseline).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size })
+
+    await expect(
+      h.caller.science.analysis.pdf({ ...input, relPath: "results/multiplexing/run/notes.txt" }),
+    ).rejects.toThrow("Select a PDF file")
+    await expect(
+      h.caller.science.analysis.pdf({ ...input, relPath: "../outside.pdf" }),
+    ).rejects.toThrow()
+  })
+})
+
+describe("science.analysis media preview", () => {
+  test("videos and gifs are listed; .pt/.pth stay out", async () => {
+    await writeRepoFile("results/run/growth.mp4", "v")
+    await writeRepoFile("results/run/growth.gif", "g")
+    await writeRepoFile("results/run/model.pt", "w")
+    await writeRepoFile("results/run/model.pth", "w")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    const kinds = Object.fromEntries(
+      listing.groups.flatMap((group) => group.files.map((file) => [file.relPath, file.kind])),
+    )
+    expect(kinds).toEqual({
+      "results/run/growth.mp4": "video",
+      "results/run/growth.gif": "animation",
+    })
+  })
+
+  test("openMedia streams a project video with byte ranges, and closeMedia revokes it", async () => {
+    const bytes = Buffer.from("0123456789abcdef")
+    await writeRepoFile("results/run/growth.mp4", bytes)
+    await writeRepoFile("results/run/notes.txt", "x\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const { url } = await h.caller.science.analysis.openMedia({
+      projectId: project.id,
+      relPath: "results/run/growth.mp4",
+    })
+    expect(url).toMatch(/^pi-lab-media:\/\/[0-9a-f-]+\/growth\.mp4$/)
+
+    const full = await analysisMedia.handle(new Request(url))
+    expect(full.status).toBe(200)
+    expect(full.headers.get("content-type")).toBe("video/mp4")
+    expect(full.headers.get("accept-ranges")).toBe("bytes")
+    expect(Buffer.from(await full.arrayBuffer())).toEqual(bytes)
+
+    const part = await analysisMedia.handle(new Request(url, { headers: { Range: "bytes=2-5" } }))
+    expect(part.status).toBe(206)
+    expect(part.headers.get("content-range")).toBe("bytes 2-5/16")
+    expect(Buffer.from(await part.arrayBuffer()).toString()).toBe("2345")
+    const tail = await analysisMedia.handle(new Request(url, { headers: { Range: "bytes=10-" } }))
+    expect(Buffer.from(await tail.arrayBuffer()).toString()).toBe("abcdef")
+
+    await h.caller.science.analysis.closeMedia({ url })
+    expect((await analysisMedia.handle(new Request(url))).status).toBe(404)
+
+    // Only videos and gifs, and only inside the project (symlinks too).
+    await expect(
+      h.caller.science.analysis.openMedia({
+        projectId: project.id,
+        relPath: "results/run/notes.txt",
+      }),
+    ).rejects.toThrow()
+    await symlink("/etc/hosts", join(h.repoDir, "results", "run", "escape.mp4"))
+    await expect(
+      h.caller.science.analysis.openMedia({
+        projectId: project.id,
+        relPath: "results/run/escape.mp4",
+      }),
+    ).rejects.toThrow()
   })
 })
 
@@ -797,6 +1009,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "d.csv",
+      load: false,
+      dataset: null,
     })
 
     expect(preview.type).toBe("table")
@@ -818,6 +1032,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "q.csv",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "table") throw new Error("expected table")
     expect(preview.rows).toEqual([["x,y", "z"]])
@@ -829,6 +1045,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "d.tsv",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "table") throw new Error("expected table")
     expect(preview.headers).toEqual(["a", "b"])
@@ -843,6 +1061,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "big.csv",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "table") throw new Error("expected table")
     expect(preview.rows).toHaveLength(MAX_TABLE_ROWS)
@@ -857,6 +1077,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "run.log",
+      load: false,
+      dataset: null,
     })
 
     expect(preview.type).toBe("text")
@@ -872,6 +1094,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "c.json",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("json")
     if (preview.type !== "json") throw new Error("expected json")
@@ -884,6 +1108,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "bad.json",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
@@ -897,6 +1123,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "pic.png",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("image")
     if (preview.type !== "image") throw new Error("expected image")
@@ -910,11 +1138,31 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "log.txt",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("text")
     if (preview.type !== "text") throw new Error("expected text")
     expect(preview.text).toBe("line1\nline2\n")
     expect(preview.truncated).toBe(false)
+  })
+
+  test("markup (YAML, XML) → head, like text", async () => {
+    await writeRepoFile("config.yaml", "lr: 0.1\n")
+    await writeRepoFile("layout.xml", "<a/>\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    for (const [relPath, text] of [
+      ["config.yaml", "lr: 0.1\n"],
+      ["layout.xml", "<a/>\n"],
+    ] as const) {
+      const preview = await h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath,
+        load: false,
+        dataset: null,
+      })
+      expect(preview).toEqual({ type: "text", text, truncated: false })
+    }
   })
 
   test(".ipynb → its cells with the stored outputs", async () => {
@@ -938,6 +1186,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "results/run/analysis.ipynb",
+      load: false,
+      dataset: null,
     })
     expect(preview).toEqual({
       type: "notebook",
@@ -954,6 +1204,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "results/run/analysis.qmd",
+      load: false,
+      dataset: null,
     })
     expect(preview).toEqual({
       type: "text",
@@ -969,6 +1221,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "results/run/notebook.py",
+      load: false,
+      dataset: null,
     })
     expect(preview).toEqual({ type: "text", text: source, truncated: false })
   })
@@ -979,6 +1233,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "model.parquet",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
@@ -991,6 +1247,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "metrics.csv",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("chart")
     if (preview.type !== "chart") throw new Error("expected chart")
@@ -1007,6 +1265,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "people.csv",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("table")
   })
@@ -1017,6 +1277,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "runs/loss.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("chart")
     if (preview.type !== "chart") throw new Error("expected chart")
@@ -1040,6 +1302,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "big.npy",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "chart") throw new Error("expected chart")
     expect(preview.truncated).toBe(true)
@@ -1053,6 +1317,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "mat.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("array")
     if (preview.type !== "array") throw new Error("expected array")
@@ -1095,6 +1361,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "dtype.npy",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "chart") throw new Error("expected chart")
     expect(preview.series[0]?.values).toEqual([value])
@@ -1111,6 +1379,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "fortran.npy",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "array") throw new Error("expected array")
     expect(preview.rows).toEqual([
@@ -1130,6 +1400,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "sample.npy",
+      load: false,
+      dataset: null,
     })
     const readCount = reads.mock.calls.length
     reads.mockRestore()
@@ -1149,6 +1421,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "grid.npy",
+      load: false,
+      dataset: null,
     })
     const readCount = reads.mock.calls.length
     reads.mockRestore()
@@ -1172,6 +1446,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "bad-shape.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
   })
@@ -1185,7 +1461,12 @@ describe("science.analysis.preview", () => {
     await writeRepoFile("bad-version.npy", badVersion)
     const project = await h.caller.projects.open({ path: h.repoDir })
     for (const relPath of ["bad-header.npy", "bad-version.npy"]) {
-      const preview = await h.caller.science.analysis.preview({ projectId: project.id, relPath })
+      const preview = await h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath,
+        load: false,
+        dataset: null,
+      })
       expect(preview.type).toBe("metadata")
     }
   })
@@ -1204,6 +1485,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "high-rank.npy",
+      load: false,
+      dataset: null,
     })
     const expandedShape = maps.mock.contexts.some(
       (context) => Array.isArray(context) && context.length >= 100_000,
@@ -1213,19 +1496,23 @@ describe("science.analysis.preview", () => {
     expect(expandedShape).toBe(false)
   })
 
-  test("zero dimensions remain valid and the source cap returns metadata", async () => {
+  test("zero dimensions remain valid and a file with no header returns metadata", async () => {
     await writeRepoFile("empty.npy", makeRawNpy("0, 3", "<f8", false, Buffer.alloc(0)))
-    await writeRepoFile("oversized.npy", Buffer.alloc(MAX_NPY_BYTES + 1))
+    await writeRepoFile("oversized.npy", Buffer.alloc(64 * 1024))
     const project = await h.caller.projects.open({ path: h.repoDir })
     const empty = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "empty.npy",
+      load: false,
+      dataset: null,
     })
     if (empty.type !== "array") throw new Error("expected array")
     expect(empty.rows).toEqual([])
     const oversized = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "oversized.npy",
+      load: false,
+      dataset: null,
     })
     expect(oversized.type).toBe("metadata")
   })
@@ -1236,6 +1523,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "bad.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
@@ -1249,27 +1538,33 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "arrays.npz",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
     expect(preview.kind).toBe("npz")
   })
 
-  test("pickle is metadata-only and is never opened for preview", async () => {
+  test("a pickle that names os.system is refused without running it", async () => {
     const relPath = "model.pkl"
-    const absPath = join(h.repoDir, relPath)
-    await writeRepoFile(relPath, "unsafe pickle bytes")
-    await chmod(absPath, 0)
+    const marker = join(h.repoDir, "pwned")
+    await writeRepoFile(relPath, Buffer.from(`cos\nsystem\n(S'touch ${marker}'\ntR.`, "latin1"))
     const project = await h.caller.projects.open({ path: h.repoDir })
 
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath,
+      load: false,
+      dataset: null,
     })
 
-    expect(preview.type).toBe("metadata")
-    if (preview.type !== "metadata") throw new Error("expected metadata")
-    expect(preview.kind).toBe("other")
+    expect(preview).toMatchObject({
+      type: "metadata",
+      kind: "other",
+      note: "Stores Python objects of type os.system, which Analysis does not open",
+    })
+    await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   test("Zarr directories use the metadata-only preview", async () => {
@@ -1280,6 +1575,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath,
+      load: false,
+      dataset: null,
     })
 
     expect(preview.type).toBe("metadata")
@@ -1290,23 +1587,43 @@ describe("science.analysis.preview", () => {
   test("path traversal is rejected with FORBIDDEN", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     await expect(
-      h.caller.science.analysis.preview({ projectId: project.id, relPath: "../secret.txt" }),
+      h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath: "../secret.txt",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(
-      h.caller.science.analysis.preview({ projectId: project.id, relPath: "/etc/passwd" }),
+      h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath: "/etc/passwd",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
   test("a missing file is a clean NOT_FOUND", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     await expect(
-      h.caller.science.analysis.preview({ projectId: project.id, relPath: "nope.csv" }),
+      h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath: "nope.csv",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 
   test("an unknown projectId is a clean NOT_FOUND", async () => {
     await expect(
-      h.caller.science.analysis.preview({ projectId: "missing", relPath: "x.csv" }),
+      h.caller.science.analysis.preview({
+        projectId: "missing",
+        relPath: "x.csv",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toBeInstanceOf(TRPCError)
   })
 })

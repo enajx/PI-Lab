@@ -231,6 +231,7 @@
   "Checking…": "確認中…",
   "Environments unavailable": "環境を利用できません",
   "Auto-detect": "自動検出",
+  "Folders": "フォルダー",
   "Choose environment folder…": "環境フォルダーを選択…",
   "Choose Python interpreter…": "Python インタープリターを選択…",
   "Python type checking is on. Click to turn it off.": "Python の型チェックはオンです。クリックしてオフにします。",
@@ -571,7 +572,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "サイドバーからプロジェクトを開き、リポジトリ内のデータファイルを閲覧します。",
   "No data files found": "データファイルが見つかりません",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "分析には、プロジェクトのリポジトリで見つかったデータファイル、画像、ノートブック、グラフが表示されます。",
-  "Select a file to preview its contents.": "ファイルを選択すると内容をプレビューできます。",
+  "Select a file to view it.": "ファイルを選択すると表示されます。",
   "Monitor compute machines from your ssh config": "SSH 設定内の計算マシンを監視",
   "Temporarily include machines hidden from the cluster grid": "クラスター一覧で非表示のマシンを一時的に表示します",
   "Hide hidden": "非表示のマシンを隠す",
@@ -1138,5 +1139,12 @@
   "List files and folders whose name starts with a dot in the file tree.": "名前がドットで始まるファイルとフォルダをファイルツリーに表示します。",
   "Don't ask again": "今後は確認しない",
   "Confirm before deleting files": "ファイルを削除する前に確認",
-  "Ask before moving a file or folder in the file tree to the Trash.": "ファイルツリーのファイルやフォルダをゴミ箱に移動する前に確認します。"
+  "Ask before moving a file or folder in the file tree to the Trash.": "ファイルツリーのファイルやフォルダをゴミ箱に移動する前に確認します。",
+  "Large file": "大きなファイル",
+  "loading may be slow": "読み込みに時間がかかる場合があります",
+  "Load": "読み込む",
+  "Dataset": "データセット",
+  "scalar": "スカラー",
+  "datasets": "個のデータセット",
+  "+{count} more": "他 {count} 件"
 }

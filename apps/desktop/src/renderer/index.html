@@ -7,10 +7,11 @@
          `unsafe-inline` style is required by Tailwind/Vite injected styles.
          `img-src` allows `data:`/`blob:` so dropped thumbnails (read into a
          data URL) and the inline SVG grain overlay render. PDF.js uses local
-         workers and WASM decoders, plus blob URLs for embedded PDF fonts. -->
+         workers and WASM decoders, plus blob URLs for embedded PDF fonts.
+         Analysis videos and gifs stream from `pi-lab-media:` grants. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; font-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src pi-lab-report: http://127.0.0.1:*"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; font-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: pi-lab-media:; media-src pi-lab-media:; frame-src pi-lab-report: http://127.0.0.1:*"
     />
     <title>PI Lab</title>
     <!-- Pre-paint fallback only (warm near-black, matches the dark theme bg) so
