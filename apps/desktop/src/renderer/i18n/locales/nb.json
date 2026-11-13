@@ -525,7 +525,7 @@
   "Choose image file": "Velg bildefil",
   "Use an image or animated GIF.": "Bruk et bilde eller en animert GIF.",
   "Generate new gradient": "Lag ny fargeovergang",
-  "Create a new theme-sampled gradient.": "Lag en ny fargeovergang med farger fra temaet.",
+  "Create a new gradient with new colors.": "Lag en ny fargeovergang med nye farger.",
   "Digital Rain": "Digital Rain",
   "Animate ASCII sampled from this project's files.": "Animer ASCII-tegn hentet fra prosjektfilene.",
   "Edit": "Rediger",

@@ -525,7 +525,7 @@
   "Choose image file": "画像ファイルを選択",
   "Use an image or animated GIF.": "画像またはアニメーション GIF を使用します。",
   "Generate new gradient": "新しいグラデーションを生成",
-  "Create a new theme-sampled gradient.": "現在のテーマから色を採ったグラデーションを作成します。",
+  "Create a new gradient with new colors.": "新しい色でグラデーションを作成します。",
   "Digital Rain": "デジタルレイン",
   "Animate ASCII sampled from this project's files.": "このプロジェクトのファイルから採った ASCII 文字をアニメーション表示します。",
   "Edit": "編集",

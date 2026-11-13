@@ -33,6 +33,14 @@ describe("gradientPatterns", () => {
     expect(["#FFFFFF", "#000000"]).toContain(cfg.lightDarkMode)
   })
 
+  test("about 1 in 5 seeds get the dark base", () => {
+    const seeds = Array.from({ length: 4000 }, (_, seed) => seed)
+    const dark = seeds.filter((seed) => generateConfig({ seed }).lightDarkMode === "#000000")
+    const share = dark.length / seeds.length
+    expect(share).toBeGreaterThan(0.17)
+    expect(share).toBeLessThan(0.23)
+  })
+
   test("buildSVG renders the full reference look: opaque base, blur, and turbulence", () => {
     const svg = buildSVG(generateConfig({ seed: 1 }))
     expect(svg.startsWith("<svg")).toBe(true)
@@ -56,10 +64,23 @@ describe("gradientPatterns", () => {
     expect(buildLayerSVG(cfg, { blur: 0 })).toContain('stdDeviation="0"')
   })
 
-  test("buildGrainSVG produces a desaturated fractal-noise tile", () => {
-    const grain = buildGrainSVG()
-    expect(grain).toContain("fractalNoise")
-    expect(grain).toContain('type="saturate"')
+  test("buildGrainSVG is the reference noise layer, sized to its box instead of a repeating tile", () => {
+    const grain = buildGrainSVG({
+      baseFrequency: GRADIENT_PATTERN_DEFAULTS.baseFrequency,
+      numOctaves: GRADIENT_PATTERN_DEFAULTS.numOctaves,
+    })
+    // Same filter chain as the full reference SVG: turbulence on gray, overlay-blended.
+    expect(grain).toContain(
+      `<feTurbulence baseFrequency="${GRADIENT_PATTERN_DEFAULTS.baseFrequency}"`,
+    )
+    expect(grain).toContain('mode="overlay"')
+    expect(grain).toContain("fill:gray")
+    // The reference's 1600-unit canvas, cropped to the box like CSS "cover": the noise
+    // scales with the card exactly as the reference SVG does, so at card size it is
+    // finer than a device pixel (crisp, per-pixel grain) and never repeats as tiles.
+    expect(grain).toContain('viewBox="0 0 1600 1600"')
+    expect(grain).toContain('preserveAspectRatio="xMidYMid slice"')
+    expect(grain).not.toMatch(/<svg [^>]*\swidth=/)
   })
 
   test("toDataUri round-trips SVG markup through a CSS-safe data URI", () => {

@@ -17,7 +17,14 @@
  * timing, so the whole card is a pure function of the stored pair.
  */
 
-import { buildGrainSVG, buildLayerSVG, generateConfig, mulberry32, toDataUri } from "@pi-lab/ui"
+import {
+  buildGrainSVG,
+  buildLayerSVG,
+  GRADIENT_PATTERN_DEFAULTS,
+  generateConfig,
+  mulberry32,
+  toDataUri,
+} from "@pi-lab/ui"
 
 export type ProjectGradientMotion = "meander" | "turn" | "breathe" | "weave" | "orbit" | "rock"
 
@@ -40,7 +47,7 @@ export interface ProjectGradientArtwork {
   background: string
   /** Three independently drifted, baked color-field images (`url("data:…")`). */
   layerBackgrounds: readonly [string, string, string]
-  /** Stationary, baked turbulence grain shared by every fallback card. */
+  /** Stationary turbulence grain shared by every fallback card, drawn once over the cover. */
   grainUrl: string
   /** Seeded visual family, for the renderer's motion class + debug attributes. */
   variant: ProjectGradientVariant
@@ -132,7 +139,12 @@ export function projectGradient(seed: number, palette: readonly string[]): Proje
     baseColor: baseConfig.lightDarkMode,
     background: `linear-gradient(0deg, ${tint}, ${tint})`,
     layerBackgrounds,
-    grainUrl: toDataUri(buildGrainSVG()),
+    grainUrl: toDataUri(
+      buildGrainSVG({
+        baseFrequency: GRADIENT_PATTERN_DEFAULTS.baseFrequency,
+        numOctaves: GRADIENT_PATTERN_DEFAULTS.numOctaves,
+      }),
+    ),
     variant: { motion },
     animation: { durationSec, delaySec },
   }

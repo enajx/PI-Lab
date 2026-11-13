@@ -12,6 +12,7 @@ import { AppProviders } from "../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
 import { ProjectActivityProvider } from "../../../-ProjectActivity"
 import { AddProjectControllerProvider } from "../../../components/AddProjectController"
+import { hashString, seedPalette } from "../../utils/projectGradient"
 import { Dashboard } from "./Dashboard"
 
 /**
@@ -262,7 +263,7 @@ describe("Dashboard", () => {
     expect(screen.getByTestId("project-card-gradient-grain")).toBeTruthy()
   })
 
-  test("a no-thumbnail card with no stored gradient persists a default sampled from the theme", async () => {
+  test("a no-thumbnail card with no stored gradient persists a default with colors from its seed", async () => {
     const calls: unknown[] = []
     renderDashboard({
       "projects.list": () => [project("p1", "Fresh Project")],
@@ -273,17 +274,47 @@ describe("Dashboard", () => {
       },
     })
 
-    // The card still renders a gradient immediately (from the sampled default)...
+    // The card still renders a gradient immediately (from the seeded default)...
     await screen.findByTestId("project-card-gradient")
     // ...and persists that default exactly once, as a { seed, palette } pair.
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0]).toMatchObject({ id: "p1" })
     const { gradient } = calls[0] as { gradient: { seed: number; palette: string[] } }
     expect(typeof gradient.seed).toBe("number")
-    expect(gradient.palette.length).toBeGreaterThan(0)
+    expect(gradient.palette).toEqual(seedPalette(gradient.seed))
   })
 
-  test("right-click → Set thumbnail generates a new gradient sampled from the current theme", async () => {
+  test("an auto gradient with old colors is recolored once; a user-generated one is kept", async () => {
+    const calls: unknown[] = []
+    const autoSeed = hashString("auto")
+    renderDashboard({
+      "projects.list": () => [
+        // The default gradient (seed from the project id) still holds old theme colors.
+        project("auto", "Auto Project", null, { seed: autoSeed, palette: ["#FFC700"] }),
+        // A gradient the user generated (random seed) keeps its stored colors.
+        project("picked", "Picked Project", null, { seed: 42, palette: ["#FFC700"] }),
+        // Already recolored: nothing to do.
+        project("done", "Done Project", null, {
+          seed: hashString("done"),
+          palette: seedPalette(hashString("done")),
+        }),
+      ],
+      "workspaces.list": () => [],
+      "projects.setGradient": (input) => {
+        calls.push(input)
+        return project("auto", "Auto Project")
+      },
+    })
+
+    await screen.findAllByTestId("project-card-gradient")
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toEqual({
+      id: "auto",
+      gradient: { seed: autoSeed, palette: seedPalette(autoSeed) },
+    })
+  })
+
+  test("right-click → Set thumbnail generates a new gradient with colors from its seed", async () => {
     const calls: unknown[] = []
     renderDashboard({
       "projects.list": () => [
@@ -304,7 +335,7 @@ describe("Dashboard", () => {
     await waitFor(() => expect(calls).toHaveLength(1))
     const { gradient } = calls[0] as { gradient: { seed: number; palette: string[] } }
     expect(typeof gradient.seed).toBe("number")
-    expect(gradient.palette.length).toBeGreaterThan(0)
+    expect(gradient.palette).toEqual(seedPalette(gradient.seed))
     // The menu closes after the action.
     expect(screen.queryByTestId("project-card-menu")).toBeNull()
   })
