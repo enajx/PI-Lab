@@ -1,0 +1,24 @@
+name: Request a feature
+description: Suggest something new for PI Lab.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why / use case
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: PI Lab version, channel and macOS version.
+      placeholder: PI Lab 0.9.1 (Beta), macOS 15.4.1
+    validations:
+      required: true

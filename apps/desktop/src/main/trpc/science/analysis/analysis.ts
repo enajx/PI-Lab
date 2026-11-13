@@ -22,6 +22,13 @@ import {
   previewDataFile,
 } from "./discover"
 import type { AnalysisInteractiveResult } from "./interactive"
+import {
+  effectiveStructureValue,
+  readStructureFile,
+  requireStructure,
+  structureFilePath,
+  writeStructureFile,
+} from "./structure"
 
 /**
  * Analysis science tab — v1 is a **read-only
@@ -61,6 +68,28 @@ export interface ResultsListing extends DataFileListing {
   overridden: boolean
   /** False when the results folder does not exist (the listing is then empty). */
   exists: boolean
+}
+
+const getStructureInput = z.object({
+  /** The project whose own structure is read, or null for only the default. */
+  projectId: z.string().min(1).nullable(),
+})
+
+const setStructureInput = z.object({
+  /** The project whose own structure is set, or null to set the default. */
+  projectId: z.string().min(1).nullable(),
+  /** A preset id or a pattern; null removes the project's own entry (the default applies). */
+  value: z.string().min(1).nullable(),
+})
+
+/** The experiments folder structure settings, from the YAML file in PI Lab's data folder. */
+export interface StructureSettings {
+  /** The YAML file's full path. */
+  filePath: string
+  /** The default structure value (a preset id or a pattern). */
+  defaultValue: string
+  /** The project's own value, or null when it uses the default (or no project was given). */
+  projectValue: string | null
 }
 
 const previewInput = z.object({
@@ -161,7 +190,7 @@ async function listReportsFolder(repoPath: string): Promise<DataFileListing> {
   const info = await statOrNull(root)
   if (info === null || !info.isDirectory()) return EMPTY_LISTING
   await realPathInside(repoPath, root, REPORTS_FOLDER)
-  return discoverDataFiles(repoPath, root, "reports")
+  return discoverDataFiles(repoPath, root, "reports", { kind: "flat" })
 }
 
 /**
@@ -203,6 +232,57 @@ async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>
 
 export const analysisRouter = router({
   /**
+   * Read the experiments folder structure settings: the default and, for a
+   * project, its own entry (keyed by its path). An invalid file is BAD_REQUEST
+   * naming the file, never a silent fallback.
+   */
+  getStructure: publicProcedure
+    .input(getStructureInput)
+    .query(async ({ ctx, input }): Promise<StructureSettings> => {
+      const filePath = structureFilePath(ctx.userDataDir)
+      const file = await readStructureFile(filePath)
+      const projectValue =
+        input.projectId === null
+          ? null
+          : (file.projects[requireRepoPath(ctx.db, input.projectId)] ?? null)
+      return { filePath, defaultValue: file.defaultValue, projectValue }
+    }),
+
+  /**
+   * Set the default structure (`projectId: null`) or a project's own one, and
+   * write the YAML file. `value: null` removes the project's entry. An unknown
+   * preset or invalid pattern is BAD_REQUEST, and an invalid file is never
+   * overwritten (BAD_REQUEST naming the file).
+   */
+  setStructure: publicProcedure
+    .input(setStructureInput)
+    .mutation(async ({ ctx, input }): Promise<StructureSettings> => {
+      const filePath = structureFilePath(ctx.userDataDir)
+      const file = await readStructureFile(filePath)
+      if (input.value !== null) requireStructure(input.value, "Experiments structure")
+      if (input.projectId === null) {
+        if (input.value === null) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "The default experiments structure cannot be removed",
+          })
+        }
+        file.defaultValue = input.value
+      } else {
+        const projectPath = requireRepoPath(ctx.db, input.projectId)
+        if (input.value === null) delete file.projects[projectPath]
+        else file.projects[projectPath] = input.value
+      }
+      await mkdir(ctx.userDataDir, { recursive: true })
+      await writeStructureFile(filePath, file)
+      const projectValue =
+        input.projectId === null
+          ? null
+          : (file.projects[requireRepoPath(ctx.db, input.projectId)] ?? null)
+      return { filePath, defaultValue: file.defaultValue, projectValue }
+    }),
+
+  /**
    * Create a ready-to-run marimo notebook under `reports/`. Existing
    * files are never overwritten: a numeric suffix is selected atomically and
    * returned so the UI can state exactly what it created.
@@ -231,9 +311,10 @@ export const analysisRouter = router({
     }),
   /**
    * Discover and classify the data/analysis files in a project's results folder
-   * (the project's own folder, else the default from Settings). Each folder
-   * inside it is one experiment; every file carries its experiment name, or
-   * null when it sits directly in the results folder. Walks the tree (skipping
+   * (the project's own folder, else the default from Settings). Every file
+   * carries its experiment (group) and run from the project's experiments
+   * folder structure (see `getStructure`); an invalid structure file is
+   * BAD_REQUEST. Walks the tree (skipping
    * noise dirs), tags each file with its data-file kind, and returns them
    * grouped by kind with per-file metadata (size, mtime) and repo-relative
    * paths. The project's `reports/` folder is
@@ -260,7 +341,13 @@ export const analysisRouter = router({
             message: `The results folder is not a folder: ${resultsFolder}`,
           })
         }
-        results = await discoverDataFiles(project.repoPath, root, "results")
+        const structureFile = structureFilePath(ctx.userDataDir)
+        const file = await readStructureFile(structureFile)
+        const structure = requireStructure(
+          effectiveStructureValue(file, project.repoPath),
+          structureFile,
+        )
+        results = await discoverDataFiles(project.repoPath, root, "results", structure)
       }
       const reports = await listReportsFolder(project.repoPath)
       return {

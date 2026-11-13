@@ -16,6 +16,7 @@ import {
   useVisibleSkills,
 } from "../../../../../skills"
 import { useTRPC } from "../../../../../trpc/react"
+import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
 import { ProjectPicker } from "../ProjectPicker"
 import { ScienceTabShell } from "../ScienceTabShell"
 
@@ -59,6 +60,7 @@ export function ScienceSkills() {
       setSelectedId(projects[0]?.id ?? null)
     }
   }, [projects, selectedId])
+  useReportViewProject(selectedId)
 
   const [query, setQuery] = useState("")
 

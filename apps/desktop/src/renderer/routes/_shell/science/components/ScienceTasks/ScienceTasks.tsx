@@ -10,7 +10,9 @@ import {
   useTasksProject,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
+import { DIARY_TAB_ID } from "../../../projects/components/RightSidebar"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
@@ -88,7 +90,7 @@ export function ScienceTasks({
   useFocusSessionRequest(initialProjectId, focusSession, setSessionRequest)
   // The board and the right panel fit the row's width (no horizontal scroll).
   const row = useSciencePanelRow(
-    useSciencePanel("tasks"),
+    useSciencePanel("tasks", DIARY_TAB_ID),
     useSciencePanelWidth(),
     PANEL_DRAWN_MIN_WIDTH,
     null,
@@ -108,6 +110,8 @@ export function ScienceTasks({
     listing.data === undefined || sources.some((source) => source.projectId === wanted)
       ? wanted
       : ""
+  // "" is All projects: no single project.
+  useReportViewProject(selectedProjectId || null)
   // Sessions start in the selected project; "All projects" has none.
   const selectedSource = sources.find((source) => source.projectId === selectedProjectId)
   const busy =

@@ -497,7 +497,8 @@ export function CentralPanel({
         paperFolderItem={paperFolderItem}
         pdfMessage={focusedFile?.kind === "pdf" ? pdfMessages[focusedFile.relPath] : null}
         onShowInPdf={
-          focusedFile && isTexPath(focusedFile.relPath)
+          // The LaTeX Editor footer has no Show in PDF item (double-click still works).
+          !paperFolderItem && focusedFile && isTexPath(focusedFile.relPath)
             ? () => {
                 const cursor = cursors.current[focusedFile.relPath] ?? { line: 1, column: 1 }
                 showInPdf(focusedFile.relPath, cursor.line, cursor.column)
@@ -592,6 +593,29 @@ export function CentralPanel({
       testId="central-files-edge-drag"
     />
   )
+  const filesToggle = (
+    <button
+      type="button"
+      data-testid="central-files-toggle"
+      aria-pressed={showFilesPanel}
+      aria-label={showFilesPanel ? t("Hide files panel") : t("Show files panel")}
+      title={showFilesPanel ? t("Hide files panel") : t("Show files panel")}
+      data-feature-help={t(
+        "Show the project file tree beside the editor instead of in the right sidebar",
+      )}
+      onClick={() => setShowFilesPanel(!showFilesPanel)}
+      className={cn(
+        "flex size-7 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
+        showFilesPanel ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      {showFilesPanel ? (
+        <PanelLeftOpen className="size-4" aria-hidden />
+      ) : (
+        <PanelLeft className="size-4" aria-hidden />
+      )}
+    </button>
+  )
   // The LaTeX Editor's left column is its own rounded card beside the panel's card,
   // resized from the 12px gap between them.
   const leftColumnCard =
@@ -602,7 +626,8 @@ export function CentralPanel({
           className="flex min-h-0 w-full flex-col overflow-y-auto rounded-lg border border-border"
         >
           {leftColumn.filesOpen ? (
-            // Open: the tree's own "Files" header carries the collapse chevron.
+            // Open: the tree's own "Files" header carries the collapse chevron
+            // and, at its end, the button that hides the column.
             <FilesPanel
               workspaceId={workspaceId}
               onOpenFile={controller.openFile}
@@ -611,17 +636,21 @@ export function CentralPanel({
               onSetMainFile={onSetMainFile}
               editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
               onCollapse={() => leftColumn.onFilesOpenChange(false)}
+              headerEnd={filesToggle}
             />
           ) : (
-            <CollapsibleSection
-              title={t("Files")}
-              open={false}
-              onOpenChange={leftColumn.onFilesOpenChange}
-              testId="central-files-section"
-              className="shrink-0"
-            >
-              {null}
-            </CollapsibleSection>
+            <div className="flex shrink-0 items-center pr-1">
+              <CollapsibleSection
+                title={t("Files")}
+                open={false}
+                onOpenChange={leftColumn.onFilesOpenChange}
+                testId="central-files-section"
+                className="min-w-0 flex-1"
+              >
+                {null}
+              </CollapsibleSection>
+              {filesToggle}
+            </div>
           )}
           {leftColumn.bottom}
         </div>
@@ -647,30 +676,12 @@ export function CentralPanel({
           title is hidden and the New agent, New terminal and New markdown buttons are left
           out (Add pane has them), so the toolbar fits down to 200px. */}
       <div className="@container flex shrink-0 items-stretch border-border border-b bg-muted/30">
-        {/* Files-panel toggle — upper left. */}
-        <div className="flex shrink-0 items-center border-border border-r px-1">
-          <button
-            type="button"
-            data-testid="central-files-toggle"
-            aria-pressed={showFilesPanel}
-            aria-label={showFilesPanel ? t("Hide files panel") : t("Show files panel")}
-            title={showFilesPanel ? t("Hide files panel") : t("Show files panel")}
-            data-feature-help={t(
-              "Show the project file tree beside the editor instead of in the right sidebar",
-            )}
-            onClick={() => setShowFilesPanel(!showFilesPanel)}
-            className={cn(
-              "flex size-7 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
-              showFilesPanel ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {showFilesPanel ? (
-              <PanelLeftOpen className="size-4" aria-hidden />
-            ) : (
-              <PanelLeft className="size-4" aria-hidden />
-            )}
-          </button>
-        </div>
+        {/* Files-panel toggle, upper left. The LaTeX Editor's open column has it in its own top bar. */}
+        {leftColumnCard ? null : (
+          <div className="flex shrink-0 items-center border-border border-r px-1">
+            {filesToggle}
+          </div>
+        )}
 
         {/* Tabs live in each split's own tab bar below; this row keeps the shared buttons. */}
         <div className="flex min-w-0 flex-1 items-center px-2 @max-[320px]:invisible @max-[320px]:px-0">

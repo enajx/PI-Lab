@@ -85,6 +85,8 @@ const editorPatch = z.object({
   confirmOverleafCommit: z.boolean().optional(),
   papersFolder: z.string().trim().min(1).max(1024).optional(),
   askPapersFolder: z.boolean().optional(),
+  overleafCloneLocation: z.enum(["ask", "project", "folder"]).optional(),
+  overleafCloneFolder: z.string().trim().max(1024).optional(),
   researchDiaryFormat: z.enum(["md", "qmd", "myst"]).optional(),
   analysisFormat: z.enum(ANALYSIS_FORMATS).optional(),
   /** A skill folder name: letters, digits, dots, dashes and underscores, not starting with a dot. */
