@@ -7,6 +7,8 @@ export type IssueKind = "bug" | "feature"
 export interface AppEnvironment {
   version: string
   channel: "alpha" | "beta" | "stable"
+  /** Short git commit of an Alpha build; null for Beta and Stable. */
+  commit: string | null
   macosVersion: string
 }
 
@@ -17,8 +19,7 @@ const TEMPLATES: Record<IssueKind, string> = {
   feature: "feature_request.yml",
 }
 
-const CHANNEL_LABELS: Record<AppEnvironment["channel"], string> = {
-  alpha: "Alpha",
+const CHANNEL_LABELS: Record<"beta" | "stable", string> = {
   beta: "Beta",
   stable: "Stable",
 }
@@ -29,11 +30,20 @@ export const ISSUE_ACTION_LABELS: Record<IssueKind, string> = {
   feature: "Request a feature",
 }
 
+/** Alpha builds keep version 0.0.0, so they name their commit instead. */
+function appLabel(environment: AppEnvironment): string {
+  if (environment.channel === "alpha") {
+    if (!environment.commit) throw new Error("Alpha build has no commit")
+    return `PI Lab Alpha ${environment.commit}`
+  }
+  return `PI Lab ${environment.version} (${CHANNEL_LABELS[environment.channel]})`
+}
+
 /** URL of the issue form for `kind`, with its `environment` field prefilled. */
 export function issueFormUrl(kind: IssueKind, environment: AppEnvironment): string {
   const params = new URLSearchParams({
     template: TEMPLATES[kind],
-    environment: `PI Lab ${environment.version} (${CHANNEL_LABELS[environment.channel]}), macOS ${environment.macosVersion}`,
+    environment: `${appLabel(environment)}, macOS ${environment.macosVersion}`,
   })
   return `${NEW_ISSUE_URL}?${params.toString()}`
 }

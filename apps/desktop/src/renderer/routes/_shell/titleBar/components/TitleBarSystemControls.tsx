@@ -11,9 +11,12 @@ export function TitleBarSystemControls() {
         data-testid="title-bar-controls-divider"
         className="mx-1 inline-block h-4 w-px shrink-0 bg-border first:hidden"
       />
-      <IssueReportControl />
-      <AgentStatusControl />
-      <CaffeineControl />
+      {/* Own gap so the spacing is the same in every view, whatever the parent's gap. */}
+      <div className="flex shrink-0 items-center gap-2">
+        <IssueReportControl />
+        <AgentStatusControl />
+        <CaffeineControl />
+      </div>
     </>
   )
 }

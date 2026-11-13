@@ -111,16 +111,20 @@ test("title bar bug menu opens the prefilled GitHub issue forms", async () => {
       opened.push(url)
     }
   })
-  const expected = await app.evaluate(
-    ({ app: electronApp }) =>
-      `PI Lab ${electronApp.getVersion()} (Alpha), macOS ${process.getSystemVersion()}`,
-  )
+  // A source run is Alpha: it names the git commit, since its version is 0.0.0.
+  const commit = (
+    await execFileAsync("git", ["rev-parse", "--short=8", "HEAD"], { cwd: DESKTOP_DIR })
+  ).stdout.trim()
+  const macosVersion = await app.evaluate(() => process.getSystemVersion())
+  const expected = `PI Lab Alpha ${commit}, macOS ${macosVersion}`
   const control = window.getByTestId("issue-report-control")
-  const agentBounds = await window.getByTestId("agent-status-control").boundingBox()
   const issueBounds = await control.boundingBox()
-  expect(issueBounds && agentBounds && issueBounds.x + issueBounds.width <= agentBounds.x).toBe(
-    true,
-  )
+  const agentBounds = await window.getByTestId("agent-status-control").boundingBox()
+  const caffeineBounds = await window.getByTestId("caffeine-control").boundingBox()
+  if (!issueBounds || !agentBounds || !caffeineBounds) throw new Error("Title bar button missing")
+  // Same 8px gap as the other views' title bar buttons.
+  expect(agentBounds.x - (issueBounds.x + issueBounds.width)).toBe(8)
+  expect(caffeineBounds.x - (agentBounds.x + agentBounds.width)).toBe(8)
   for (const [name, template] of [
     ["Report a bug", "bug_report.yml"],
     ["Request a feature", "feature_request.yml"],
