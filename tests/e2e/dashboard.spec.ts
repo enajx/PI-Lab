@@ -468,12 +468,12 @@ test("a sparse Dashboard keeps its project card at the bounded grid width and le
   await expect(projectItem).toBeVisible({ timeout: 30_000 })
   await expect(grid).toHaveCSS("justify-content", "start")
   expect(await grid.evaluate((element) => element.style.gridTemplateColumns)).toBe(
-    "repeat(auto-fill, minmax(min(100%, 220px), 220px))",
+    "repeat(auto-fill, minmax(min(100%, 198px), 198px))",
   )
 
   const [gridBox, projectBox] = await Promise.all([grid.boundingBox(), projectItem.boundingBox()])
   if (!gridBox || !projectBox) throw new Error("Expected measurable Dashboard grid and project")
-  expect(projectBox.width).toBeCloseTo(220, 0)
+  expect(projectBox.width).toBeCloseTo(198, 0)
   expect(projectBox.x).toBeCloseTo(gridBox.x, 0)
 })
 

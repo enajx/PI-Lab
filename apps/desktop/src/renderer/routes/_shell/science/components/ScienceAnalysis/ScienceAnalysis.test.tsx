@@ -1332,7 +1332,7 @@ describe("ScienceAnalysis", () => {
     ).toEqual(["runs/config.yml", "runs/params.yaml"])
   })
 
-  test("the project picker sits in the top bar and switches and remembers the project", async () => {
+  test("the project picker sits in the top bar and switches the project and makes it current", async () => {
     renderAnalysis({
       "projects.list": () => [
         project({ id: "p1", name: "alpha" }),
@@ -1363,13 +1363,13 @@ describe("ScienceAnalysis", () => {
       search: { projectId: "p2" },
       replace: true,
     })
-    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p2")
+    expect(window.localStorage.getItem("pi-lab.currentProject")).toBe("p2")
     await waitFor(() => {
       expect(screen.getByTestId("analysis-file").getAttribute("data-rel-path")).toBe("b.json")
     })
   })
 
-  test("arriving with ?projectId remembers it; the picker then wins", async () => {
+  test("arriving with ?projectId makes it current; the picker then wins", async () => {
     renderAnalysis(
       {
         "projects.list": () => [
@@ -1382,7 +1382,7 @@ describe("ScienceAnalysis", () => {
     )
     const select = (await screen.findByTestId("analysis-project-select")) as HTMLButtonElement
     await waitFor(() => expect(select.value).toBe("p2"))
-    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p2")
+    expect(window.localStorage.getItem("pi-lab.currentProject")).toBe("p2")
 
     fireEvent.click(select)
     fireEvent.click(screen.getByRole("option", { name: "alpha" }))
@@ -1391,7 +1391,7 @@ describe("ScienceAnalysis", () => {
       search: { projectId: "p1" },
       replace: true,
     })
-    expect(window.localStorage.getItem("pi-lab.analysis.project")).toBe("p1")
+    expect(window.localStorage.getItem("pi-lab.currentProject")).toBe("p1")
   })
 
   test("arriving with an agent to focus opens it as the active tab of the session panel", async () => {
@@ -1420,8 +1420,8 @@ describe("ScienceAnalysis", () => {
     expect(tab.textContent).toContain("Claude Code")
   })
 
-  test("opens on the remembered project", async () => {
-    window.localStorage.setItem("pi-lab.analysis.project", "p2")
+  test("opens on the current project", async () => {
+    window.localStorage.setItem("pi-lab.currentProject", "p2")
     const listFiles = vi.fn(() => listing([]))
     renderAnalysis({
       "projects.list": () => [

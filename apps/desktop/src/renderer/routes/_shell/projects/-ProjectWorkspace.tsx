@@ -22,6 +22,7 @@ import {
   RIGHT_SIDEBAR_MAX_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
   readRestoreProjectTabs,
+  setCurrentProject,
   useNonGitNoticeDismissed,
   useRightSidebarWidth,
   useShowFilesPanel,
@@ -99,6 +100,8 @@ export function ProjectWorkspace({
     openedProject.current = projectId
     markOpened({ id: projectId })
   }, [markOpened, projectId])
+  // The opened project is the one Tasks, Analysis, LaTeX Editor and Skills open on.
+  useEffect(() => setCurrentProject(projectId), [projectId])
 
   const navigate = useNavigate()
   const projectQuery = useQuery(trpc.projects.get.queryOptions({ id: projectId }))
