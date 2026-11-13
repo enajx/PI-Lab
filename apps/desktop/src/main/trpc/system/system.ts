@@ -1,5 +1,5 @@
 import { homedir } from "node:os"
-import { BrowserWindow, dialog, type OpenDialogOptions } from "electron"
+import { app, BrowserWindow, dialog, type OpenDialogOptions } from "electron"
 import { z } from "zod"
 import { createMenuBarIconService, type MenuBarIconService } from "../../background/trayVisibility"
 import {
@@ -7,7 +7,9 @@ import {
   liveSystemFontDetector,
   type SystemFontDetector,
 } from "../../fonts/systemFonts"
+import { type PiLabChannel, resolveAppChannel } from "../../identity/channel"
 import { pickDirectoryOverride, testFontFamilies } from "../../runtime/env"
+import { publicReleaseFromPackage } from "../../updates/release"
 import { fitWindowToContent, restoreWindowSize } from "../../window/contentFit"
 import { liveStartAtLoginService, type StartAtLoginService } from "../../window/startAtLogin"
 import { applyTrafficLightInset } from "../../window/trafficLights"
@@ -34,6 +36,20 @@ export function createSystemRouter(
   return router({
     /** The user's home folder, so the renderer can show paths as `~/…` (display only). */
     homeDir: publicProcedure.query(() => homedir()),
+    /**
+     * App version, channel and macOS version, for the environment field of GitHub
+     * issue forms. The channel is the one the user sees (public Beta or Stable, else
+     * the packaged or source channel), the same value as the app icon channel.
+     */
+    appInfo: publicProcedure.query(
+      (): { version: string; channel: PiLabChannel; macosVersion: string } => ({
+        version: app.getVersion(),
+        channel:
+          publicReleaseFromPackage(app.isPackaged, app.getAppPath())?.channel ??
+          resolveAppChannel(app.isPackaged, app.getAppPath()),
+        macosVersion: process.getSystemVersion(),
+      }),
+    ),
     /** System-installed font families for the global editor typography picker. */
     fonts: publicProcedure.query(() => detectSystemFontsOnce()),
     /** The OS login item is separate from the window-close setting in SQLite. */

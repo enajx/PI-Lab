@@ -100,6 +100,45 @@ test("title bar agent status shows installed agents and current sessions", async
   await expect(panel).toContainText("No current sessions.")
 })
 
+test("title bar bug menu opens the prefilled GitHub issue forms", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  // Record the URL instead of opening the browser.
+  await app.evaluate(({ shell }) => {
+    const opened: string[] = []
+    ;(globalThis as { openedUrls?: string[] }).openedUrls = opened
+    shell.openExternal = async (url: string) => {
+      opened.push(url)
+    }
+  })
+  const expected = await app.evaluate(
+    ({ app: electronApp }) =>
+      `PI Lab ${electronApp.getVersion()} (Alpha), macOS ${process.getSystemVersion()}`,
+  )
+  const control = window.getByTestId("issue-report-control")
+  const agentBounds = await window.getByTestId("agent-status-control").boundingBox()
+  const issueBounds = await control.boundingBox()
+  expect(issueBounds && agentBounds && issueBounds.x + issueBounds.width <= agentBounds.x).toBe(
+    true,
+  )
+  for (const [name, template] of [
+    ["Report a bug", "bug_report.yml"],
+    ["Request a feature", "feature_request.yml"],
+  ] as const) {
+    await control.click()
+    const menu = window.getByRole("menu", { name: "Report an issue" })
+    await expect(menu.getByRole("menuitem")).toHaveText(["Report a bug", "Request a feature"])
+    await menu.getByRole("menuitem", { name }).click()
+    await expect(menu).toBeHidden()
+    const url = new URL(
+      await app.evaluate(() => (globalThis as { openedUrls?: string[] }).openedUrls?.at(-1) ?? ""),
+    )
+    expect(url.origin + url.pathname).toBe("https://github.com/enajx/PI-Lab/issues/new")
+    expect(url.searchParams.get("template")).toBe(template)
+    expect(url.searchParams.get("environment")).toBe(expected)
+  }
+})
+
 test("dashboard shows a directly resizable project card", async () => {
   const window = await app.firstWindow()
 
