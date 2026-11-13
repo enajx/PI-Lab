@@ -46,8 +46,12 @@ interface PaperEditorProps {
   paperDir: string
   /** The paper folder as shown to the user (from `paper.get`). */
   displayDir: string
-  /** The main .tex file, relative to the paper folder, or null when none was found. */
+  /** The main .tex file, relative to the paper folder (the saved choice, else the guess), or null when none was found. */
   rootRelPath: string | null
+  /** The main .tex file the user chose, or null when PI Lab guesses it. */
+  mainDoc: string | null
+  /** The paper's .tex files, for choosing the main one in the footer. */
+  texFiles: string[]
   lastSyncAt: number | null
   hasRemote: boolean
   /** False when the paper is linked for editing and building only (no Sync). */
@@ -144,6 +148,8 @@ export function PaperEditor({
   paperDir,
   displayDir,
   rootRelPath,
+  mainDoc,
+  texFiles,
   lastSyncAt,
   hasRemote,
   syncEnabled,
@@ -245,8 +251,9 @@ export function PaperEditor({
 
   // Once per paper: open the main .tex (unless tabs from an earlier visit were
   // restored) and show its PDF beside it. A just-created paper shows the build
-  // Start draft ran. Otherwise a missing PDF, or one older than the .tex, is
-  // built first; `onBuilt` then opens it beside the source. A failed build
+  // Start draft ran. With no build output yet, a PDF next to the .tex is shown
+  // without building. Otherwise a missing build output, or one older than the
+  // .tex, is built first; `onBuilt` then opens it beside the source. A failed build
   // shows "LaTeX build failed" and its log in the footer.
   const restoredTabs = useRef(hasRestoredTabs(restoredState)).current
   const openedFor = useRef<string | null>(null)
@@ -269,17 +276,23 @@ export function PaperEditor({
       )
       return
     }
-    const pdf = pdfFor(rootRelPath, effectiveOutputDir)
+    const built = pdfFor(rootRelPath, effectiveOutputDir)
+    const beside = pdfFor(rootRelPath, ".")
     Promise.all([
       client.files.stat.query({ workspaceId, relPath: rootRelPath }),
-      client.files.stat.query({ workspaceId, relPath: pdf }),
+      client.files.stat.query({ workspaceId, relPath: built }),
+      client.files.stat.query({ workspaceId, relPath: beside }),
       sourceOpened,
     ]).then(
-      ([source, built]) => {
-        if (!built.exists || built.mtimeMs < source.mtimeMs) {
+      ([source, output, existing]) => {
+        // With no build output yet, a PDF next to the .tex (e.g. from Overleaf)
+        // is shown as it is, even when older: its time comes from the checkout.
+        const useExisting = !output.exists && existing.exists
+        if (!useExisting && (!output.exists || output.mtimeMs < source.mtimeMs)) {
           buildLatex(rootRelPath)
           return
         }
+        const pdf = useExisting ? beside : built
         if (restoredTabs) return
         // A requested agent tab keeps the focus; the PDF still opens beside the source.
         if (focusRequested.current) {
@@ -288,7 +301,7 @@ export function PaperEditor({
           )
         } else openFile(pdf)
       },
-      (cause: unknown) => setOpenError(`${pdf}: ${String(cause)}`),
+      (cause: unknown) => setOpenError(`${built}: ${String(cause)}`),
     )
   }, [
     buildLatex,
@@ -516,6 +529,9 @@ export function PaperEditor({
         confirmCommit={settings.confirmOverleafCommit}
         outputDir={outputDir}
         defaultOutputDir={settings.latexOutputDir}
+        mainDoc={rootRelPath}
+        chosenMainDoc={mainDoc}
+        texFiles={texFiles}
         saveOpenFiles={async () => {
           const failed: string[] = []
           for (const tab of controller.editor.tabs) {

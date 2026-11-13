@@ -242,11 +242,11 @@ export function validateIconSources(): IconManifest {
       )
         throw new Error("alpha icon must have a viridis Gill Sans Pi on white")
     } else if (
-      !svg.includes("Beta Gill Sans Regular Pi, white on #303030") ||
-      !svg.includes('fill="#303030"') ||
+      !svg.includes("Beta Gill Sans Regular Pi, white on #232323") ||
+      !svg.includes('fill="#232323"') ||
       !svg.includes('fill="#fff"')
     ) {
-      throw new Error("beta icon must have a #303030 tile and white Gill Sans Pi")
+      throw new Error("beta icon must have a #232323 tile and white Gill Sans Pi")
     }
     const icon = decodeRgbaPng(raster)
     if (icon.width !== 1024 || icon.height !== 1024) {
@@ -258,7 +258,7 @@ export function validateIconSources(): IconManifest {
       assertPixel(icon, 512, 270, [33, 145, 140, 255], "alpha viridis Pi")
     } else {
       assertPixel(icon, 512, 270, [255, 255, 255, 255], "beta Pi")
-      assertPixel(icon, 512, 100, [48, 48, 48, 255], "beta gray tile")
+      assertPixel(icon, 512, 100, [35, 35, 35, 255], "beta gray tile")
     }
   }
   for (const channel of ["stable", "alpha", "beta"] as const) {

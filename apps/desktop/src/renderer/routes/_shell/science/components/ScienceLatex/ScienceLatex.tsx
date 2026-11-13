@@ -223,6 +223,8 @@ export function ScienceLatex({
               paperDir={paper.data.paper.dir}
               displayDir={paper.data.paper.displayDir}
               rootRelPath={paper.data.rootRelPath}
+              mainDoc={paper.data.mainDoc}
+              texFiles={paper.data.texFiles}
               lastSyncAt={paper.data.paper.lastSyncAt}
               hasRemote={paper.data.paper.remoteUrl !== null}
               syncEnabled={paper.data.paper.syncEnabled}

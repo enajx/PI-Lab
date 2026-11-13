@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -282,8 +291,12 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     const filesHeader = page.getByTestId("central-files-section")
     const outlineHeader = page.getByTestId("paper-outline-section")
     await expect(column).toHaveCount(0)
-    await page.getByTestId("central-files-toggle").click()
+    const centerTopBar = page.getByTestId("central-panel")
+    await centerTopBar.getByTestId("central-files-toggle").click()
     await expect(page.getByTestId("paper-outline-entry")).toHaveText(["Introduction", "Method"])
+    // Open, the hide button sits in the Files panel's top bar, not in the center top bar.
+    await expect(column.getByTestId("central-files-toggle")).toBeVisible()
+    await expect(centerTopBar.getByTestId("central-files-toggle")).toHaveCount(0)
     await expect(filesHeader).toHaveAttribute("aria-expanded", "true")
     await expect(outlineHeader).toHaveAttribute("aria-expanded", "true")
     await expect(column.getByTestId("file-tree-file").filter({ hasText: "main.tex" })).toBeVisible()
@@ -291,10 +304,10 @@ test("LaTeX Editor links a paper, shows its outline and files, and syncs and res
     const outlineBox = await outlineHeader.boundingBox()
     if (!filesBox || !outlineBox) throw new Error("left column sections are not visible")
     expect(outlineBox.y).toBeGreaterThan(filesBox.y)
-    // The panel button hides and shows the column.
-    await page.getByTestId("central-files-toggle").click()
+    // The panel button hides the column; the show button is back in the center top bar.
+    await column.getByTestId("central-files-toggle").click()
     await expect(column).toHaveCount(0)
-    await page.getByTestId("central-files-toggle").click()
+    await centerTopBar.getByTestId("central-files-toggle").click()
     await expect(column.getByTestId("paper-outline")).toBeVisible()
     // Outline and Files collapse, and stay collapsed after a reload.
     await outlineHeader.click()
@@ -420,14 +433,14 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     // The output folder is set from the editor footer's popover.
     const footer = page.getByTestId("editor-status-bar")
     const outputItem = footer.getByTestId("paper-output-folder")
-    await expect(outputItem).toHaveText("Output: build")
+    await expect(outputItem).toHaveText("main.tex · build/")
     await outputItem.click()
     const outputField = footer.getByTestId("paper-output-dir")
     await expect(outputField).toHaveAttribute("placeholder", "build")
     await outputField.fill("pdfout")
     await outputField.press("Enter")
     await expect(outputField).toHaveCount(0)
-    await expect(outputItem).toHaveText("Output: pdfout")
+    await expect(outputItem).toHaveText("main.tex · pdfout/")
     await expect(footer.getByRole("alert")).toHaveCount(0)
 
     // Cmd+S builds and opens the PDF beside the source, without Show in PDF.
@@ -472,6 +485,87 @@ test("LaTeX Editor builds the paper and shows the PDF beside the source", async 
     await git(overleaf, "pull", "--no-rebase", "--no-edit")
     expect(await readFile(join(overleaf, "main.tex"), "utf8")).toContain("Zyxrefresh")
     expect((await git(overleaf, "ls-files")).split("\n")).toEqual(["main.tex", ""])
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+/** A one-page PDF with `text` on it, with a correct cross-reference table. */
+function onePagePdf(text: string): string {
+  const stream = `BT /F1 24 Tf 72 700 Td (${text}) Tj ET`
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ]
+  let body = "%PDF-1.4\n"
+  const offsets: number[] = []
+  for (const [index, object] of objects.entries()) {
+    offsets.push(body.length)
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`
+  }
+  const xref = body.length
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+  return body
+}
+
+/**
+ * A paper with no main.tex and two documents: the one with a PDF next to it
+ * (`paper.pdf`, older than its source, as after a checkout) is guessed as the
+ * main document. Opening it with no saved tabs and no build output shows the
+ * .tex and that PDF side by side without building, with no Show in PDF item in
+ * the footer. The footer's main document item changes
+ * the main document, and the choice is kept after a reload.
+ */
+test("LaTeX Editor opens the guessed main .tex and its existing PDF side by side without building, and the footer changes the main document", async () => {
+  test.setTimeout(120_000)
+  const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-main-doc-e2e-"))
+  const { project, paper } = await setUp(root)
+  await rm(join(paper, "main.tex"))
+  await writeFile(join(paper, "paper.tex"), MAIN)
+  await writeFile(join(paper, "notes.tex"), MAIN.replace("Introduction", "Notes"))
+  await writeFile(join(paper, "paper.pdf"), onePagePdf("Guessed main PDF"))
+  const anHourAgo = new Date(Date.now() - 3_600_000)
+  await utimes(join(paper, "paper.pdf"), anHourAgo, anHourAgo)
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, paper, {})
+    const page = await app.firstWindow()
+    await openAndLink(page, "test-echo")
+    const tabs = page.getByTestId("central-tab")
+    await expect(tabs.filter({ hasText: "paper.tex" })).toHaveCount(1)
+    await expect(tabs.filter({ hasText: "paper.pdf" })).toHaveCount(1)
+    const viewer = page.getByTestId("pdf-viewer")
+    await expect(viewer).toContainText("Guessed main PDF", { timeout: 15_000 })
+    const source = await page
+      .getByTestId("central-panel")
+      .getByTestId("editor-buffer")
+      .boundingBox()
+    const pdf = await viewer.boundingBox()
+    expect(source && pdf && pdf.x > source.x + source.width / 2).toBe(true)
+
+    const footer = page.getByTestId("editor-status-bar")
+    // The PDF shown is the one next to the .tex, and nothing was built.
+    await page.getByTestId("central-tab-select").filter({ hasText: "paper.pdf" }).click()
+    await expect(footer.getByTestId("editor-status-label")).toHaveText("paper.pdf")
+    expect(existsSync(join(paper, "build"))).toBe(false)
+    await page.getByTestId("central-tab-select").filter({ hasText: "paper.tex" }).click()
+    await expect(footer.getByTestId("editor-status-label")).toHaveText("paper.tex")
+    await expect(footer.getByTestId("latex-show-pdf")).toHaveCount(0)
+    const item = footer.getByTestId("paper-output-folder")
+    await expect(item).toHaveText("paper.tex · build/")
+    await item.click()
+    await footer.getByTestId("paper-main-doc").selectOption("notes.tex")
+    await expect(item).toHaveText("notes.tex · build/")
+    await page.reload()
+    await expect(page.getByTestId("nav-dashboard")).toBeVisible({ timeout: 30_000 })
+    await openLatexEditor(page)
+    await expect(page.getByTestId("paper-output-folder")).toHaveText("notes.tex · build/")
   } finally {
     if (app) await close(app)
     await rm(root, { recursive: true, force: true })

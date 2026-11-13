@@ -74,10 +74,12 @@ import {
 import { useTRPC } from "../../../../trpc/react"
 import { requestUpdateCheck } from "../../../../updates/UpdateFeedback"
 import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
+import { ExperimentsStructureSelect } from "../../science/components/ScienceAnalysis/components/ExperimentsStructure"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
 import { AlphaTestingResets } from "./AlphaTestingResets"
 import { AppThemeGallery } from "./AppThemeGallery"
 import {
+  FieldLabel,
   SelectField,
   SettingsSection,
   TextAreaField,
@@ -1421,11 +1423,20 @@ export function ExperimentsSection() {
       <TextField
         testId="settings-results-folder"
         label="Results folder"
-        description="Folder relative to each project that Analysis lists. Each folder inside it is one experiment. A project can choose its own folder in Analysis."
+        description="Folder relative to each project that Analysis lists. Its folders are grouped by the experiments folder structure below. A project can choose its own folder in Analysis."
         value={resultsFolder}
         placeholder="results"
         onChange={setResultsFolder}
       />
+      <div className="flex items-start justify-between gap-4 px-4 py-3">
+        <FieldLabel
+          label="Experiments folder structure"
+          description="How Analysis groups the results folder into experiments and runs, for every project. A project can choose its own in Analysis, under its results folder."
+        />
+        <div className="w-56 shrink-0">
+          <ExperimentsStructureSelect projectId={null} testId="settings-experiments-structure" />
+        </div>
+      </div>
     </SettingsSection>
   )
 }
