@@ -148,8 +148,11 @@ test("the status bar is off by default, turns on from the palette and off in Set
     await expect(bar.getByTestId("status-bar-project")).toHaveText("repo")
     await expect(bar.getByTestId("status-bar-branch")).toHaveText("main*")
   }
-  // Tasks starts on All projects, and the Dashboard has no selected project.
+  // Tasks opens on the opened project; All projects and the Dashboard have no selected project.
   await page.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
+  await expect(bar.getByTestId("status-bar-project")).toHaveText("repo")
+  await page.getByTestId("tasks-project-select").click()
+  await page.getByRole("option", { name: "All projects", exact: true }).click()
   await expect(bar.getByTestId("status-bar-project")).toHaveCount(0)
   await page.getByTestId("nav-dashboard").click()
   await expect(bar.getByTestId("status-bar-project")).toHaveCount(0)

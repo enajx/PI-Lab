@@ -4,11 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { LiveAgentStatus } from "../../../shared/agentStatus"
 import { useTranslate } from "../../i18n/language"
 import { agentCanOpen, navigateToAgent } from "../../notifications/agentNavigation"
-import {
-  useAnalysisProject,
-  useLatexEditorProject,
-  useTasksProject,
-} from "../../preferences/preferences"
+import { useCurrentProject, useTasksProject } from "../../preferences/preferences"
 import { overlayIsOpen } from "../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../shortcuts/shortcuts"
 import { useTRPC } from "../../trpc/react"
@@ -60,7 +56,7 @@ export function nextAgent(
   return ordered[(index + 1) % ordered.length] ?? null
 }
 
-/** The project last picked in each science view's top bar picker ("" for none). */
+/** The project each science view opens on ("" for none, or All projects in Tasks). */
 export interface PickedProjects {
   latex: string
   analysis: string
@@ -112,12 +108,11 @@ export function AgentShortcuts({ pathname, search }: { pathname: string; search:
   const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
   const { data: statuses } = useAgentStatus()
   const [notice, setNotice] = useState<string | null>(null)
-  const [latexProject] = useLatexEditorProject()
-  const [analysisProject] = useAnalysisProject()
+  const [currentProject] = useCurrentProject()
   const [tasksProject] = useTasksProject()
   const picked: PickedProjects = {
-    latex: latexProject,
-    analysis: analysisProject,
+    latex: currentProject,
+    analysis: currentProject,
     tasks: tasksProject,
   }
 

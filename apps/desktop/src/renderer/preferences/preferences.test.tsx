@@ -4,7 +4,13 @@ import type { PropsWithChildren } from "react"
 import { expect, test, vi } from "vitest"
 import { AppProviders } from "../providers/AppProviders"
 import { createFakeTrpcClient } from "../test/fakeTrpcClient"
-import { useDefaultAgentId, useHeaderShortcuts } from "./preferences"
+import {
+  setCurrentProject,
+  useCurrentProject,
+  useDefaultAgentId,
+  useHeaderShortcuts,
+  useTasksProject,
+} from "./preferences"
 
 test("legacy agent preference migrates once and configured changes reach mounted consumers", async () => {
   window.localStorage.setItem("pi-lab.defaultAgentId", "codex")
@@ -82,4 +88,34 @@ test("LaTeX Editor and Tasks top bars list Research diary by default and add it 
   expect(latex.result.current[0]).toEqual(["update-paper", "sync", "research-diary"])
   latex.unmount()
   window.localStorage.clear()
+})
+
+test("the last opened or picked project is the current one; Tasks All projects holds until another project", () => {
+  window.localStorage.clear()
+  const current = renderHook(() => useCurrentProject())
+  const tasks = renderHook(() => useTasksProject())
+  expect(current.result.current[0]).toBe("")
+  expect(tasks.result.current[0]).toBe("")
+
+  // Opening a project (project view, Dashboard card, sidebar) makes it current everywhere.
+  act(() => setCurrentProject("b"))
+  expect(current.result.current[0]).toBe("b")
+  expect(tasks.result.current[0]).toBe("b")
+  expect(window.localStorage.getItem("pi-lab.currentProject")).toBe("b")
+
+  // All projects in Tasks holds while the same project is opened again...
+  act(() => tasks.result.current[1](""))
+  expect(tasks.result.current[0]).toBe("")
+  expect(current.result.current[0]).toBe("b")
+  act(() => setCurrentProject("b"))
+  expect(tasks.result.current[0]).toBe("")
+  // ...and ends when another project is opened.
+  act(() => setCurrentProject("c"))
+  expect(tasks.result.current[0]).toBe("c")
+
+  // A project picked in a science view becomes the current one.
+  act(() => tasks.result.current[1]("d"))
+  expect(current.result.current[0]).toBe("d")
+  act(() => current.result.current[1]("e"))
+  expect(tasks.result.current[0]).toBe("e")
 })

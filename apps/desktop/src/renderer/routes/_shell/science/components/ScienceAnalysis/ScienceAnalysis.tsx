@@ -35,7 +35,7 @@ import {
   ANALYSIS_FILES_MIN_WIDTH,
   DEFAULT_RESULTS_FOLDER,
   useAnalysisFilesWidth,
-  useAnalysisProject,
+  useCurrentProject,
   useDefaultResultsFolder,
   useFetchExperimentsInstructions,
   useSciencePanelWidth,
@@ -87,9 +87,10 @@ import "./selectFolderPrompt.css"
  * selecting a category that spans more than one sub-format reveals a second row
  * of sub-format bubbles (e.g. CSV / NumPy under Data) to narrow further.
  *
- * A project picker in the top bar remembers the last project; `initialProjectId`
- * (from `?projectId=`) selects one and becomes the remembered one, and the picker
- * always wins afterwards. With no usable choice it falls back to the
+ * A project picker in the top bar opens on the current project (the one last
+ * opened or picked, see `useCurrentProject`); `initialProjectId` (from
+ * `?projectId=`) selects one and makes it current, and the picker always wins
+ * afterwards. With no usable choice it falls back to the
  * most-recently-opened project (`projects.list` is ordered that way). The two
  * columns each own their own scroll.
  */
@@ -106,14 +107,14 @@ export function ScienceAnalysis({
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
 
-  const [savedProjectId, setSavedProjectId] = useAnalysisProject()
+  const [savedProjectId, setSavedProjectId] = useCurrentProject()
   const navigate = useNavigate()
-  // The picker remembers the choice and replaces the address.
+  // The picker makes the choice current and replaces the address.
   const chooseProject = (projectId: string): void => {
     setSavedProjectId(projectId)
     void navigate({ to: "/science/analysis", search: { projectId }, replace: true })
   }
-  // A project given in the address wins and becomes the remembered one.
+  // A project given in the address wins and becomes the current one.
   useEffect(() => {
     if (initialProjectId) setSavedProjectId(initialProjectId)
   }, [initialProjectId, setSavedProjectId])

@@ -260,7 +260,7 @@ describe("AgentShortcuts", () => {
   })
 
   test("⌥⇧Tab in Analysis uses its picked project and opens an Analysis agent in Analysis", async () => {
-    window.localStorage.setItem("pi-lab.analysis.project", "beta")
+    window.localStorage.setItem("pi-lab.currentProject", "beta")
     const analysisAgent = { ...agent("b3", "beta", "waiting", "analysis"), workspaceId: null }
     renderShell("/science/analysis", [...statuses, analysisAgent])
     await settle()
