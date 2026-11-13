@@ -571,7 +571,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "Åpne et prosjekt fra sidefeltet for å bla gjennom datafilene.",
   "No data files found": "Fant ingen datafiler",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "Analyse viser datafiler, bilder, notatbøker og figurer som finnes i prosjektlageret.",
-  "Select a file to preview its contents.": "Velg en fil for å forhåndsvise innholdet.",
+  "Select a file to view it.": "Velg en fil for å se den.",
   "Monitor compute machines from your ssh config": "Overvåk datamaskiner fra SSH-oppsettet ditt",
   "Temporarily include machines hidden from the cluster grid": "Vis skjulte maskiner midlertidig i klyngerutenettet",
   "Hide hidden": "Skjul skjulte maskiner",

@@ -1488,7 +1488,7 @@ function NoSelectionState() {
       className="flex h-full items-center justify-center p-6 text-center"
     >
       <p className="max-w-xs text-muted-foreground text-sm">
-        {t("Select a file to preview its contents.")}
+        {t("Select a file to view it.")}
       </p>
     </div>
   )

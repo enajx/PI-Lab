@@ -571,7 +571,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "Abre un proyecto desde la barra lateral para explorar los archivos de datos de su repositorio.",
   "No data files found": "No se encontraron archivos de datos",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "Análisis muestra los archivos de datos, imágenes, cuadernos y gráficos encontrados en el repositorio del proyecto.",
-  "Select a file to preview its contents.": "Selecciona un archivo para previsualizar su contenido.",
+  "Select a file to view it.": "Selecciona un archivo para verlo.",
   "Monitor compute machines from your ssh config": "Supervisa las máquinas de cómputo de tu configuración SSH",
   "Temporarily include machines hidden from the cluster grid": "Incluye temporalmente las máquinas ocultas en la cuadrícula del clúster",
   "Hide hidden": "Ocultar las máquinas ocultas",

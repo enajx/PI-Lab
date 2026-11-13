@@ -571,7 +571,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "从侧边栏打开项目，浏览其仓库中的数据文件。",
   "No data files found": "未找到数据文件",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "分析会列出项目仓库中发现的数据文件、图像、笔记本和图表。",
-  "Select a file to preview its contents.": "选择文件以预览其内容。",
+  "Select a file to view it.": "选择文件即可查看。",
   "Monitor compute machines from your ssh config": "监控 SSH 配置中的计算机器",
   "Temporarily include machines hidden from the cluster grid": "临时显示集群列表中隐藏的机器",
   "Hide hidden": "隐藏已隐藏的机器",
