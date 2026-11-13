@@ -726,7 +726,7 @@
   "NumPy (zip)": "NumPy(zip)",
   "Datasets": "데이터셋",
   "Reports": "보고서",
-  "Every project's TODO Markdown, in one place": "모든 프로젝트의 TODO Markdown을 한곳에서 확인",
+  "Project tasks": "프로젝트 작업",
   "Loading tasks…": "작업 불러오는 중…",
   "Project filter": "프로젝트 필터",
   "Filter tasks by project": "프로젝트별로 작업 필터링",

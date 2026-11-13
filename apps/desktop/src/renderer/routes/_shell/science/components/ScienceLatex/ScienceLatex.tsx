@@ -10,7 +10,7 @@ import { useTranslate } from "../../../../../i18n/language"
 import {
   RESEARCH_DIARY_MAX_WIDTH,
   RESEARCH_DIARY_MIN_WIDTH,
-  useLatexEditorProject,
+  useCurrentProject,
   useResearchDiaryWidth,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
@@ -71,10 +71,10 @@ export function ScienceLatex({
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
-  const [savedProjectId, setSavedProjectId] = useLatexEditorProject()
+  const [savedProjectId, setSavedProjectId] = useCurrentProject()
   const navigate = useNavigate()
-  // The picker always wins over a project in the address: it remembers the
-  // choice and replaces the address (dropping any agent to focus).
+  // The picker always wins over a project in the address: it makes the
+  // choice current and replaces the address (dropping any agent to focus).
   // New paper… in the picker goes in the address, so opening any project afterwards clears it.
   const chooseProject = (projectId: string): void => {
     if (projectId === NEW_PAPER) {
@@ -85,7 +85,7 @@ export function ScienceLatex({
     void navigate({ to: "/science/latex", search: { projectId }, replace: true })
   }
 
-  // A project chosen from a dashboard card wins and becomes the remembered one.
+  // A project chosen from a dashboard card wins and becomes the current one.
   useEffect(() => {
     if (initialProjectId) setSavedProjectId(initialProjectId)
   }, [initialProjectId, setSavedProjectId])

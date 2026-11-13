@@ -24,10 +24,9 @@ describe("ScienceTabShell", () => {
     )
 
     const control = await screen.findByTestId("caffeine-control")
-    expect(control.closest("header")).toBeTruthy()
-    expect(control.parentElement?.contains(screen.getByRole("button", { name: "Refresh" }))).toBe(
-      true,
-    )
+    // Caffeine sits in the title bar controls group, in the same header as the route actions.
+    const header = control.closest("header")
+    expect(header?.contains(screen.getByRole("button", { name: "Refresh" }))).toBe(true)
   })
 
   test("draws LaTeX in the title as the stylised logo", async () => {
