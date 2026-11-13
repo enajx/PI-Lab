@@ -184,9 +184,7 @@ function ShellLayout() {
                 {isFullScreen ? null : <Sidebar />}
                 {content}
               </div>
-              {showStatusBar && !isSetup && !redirectToSetup ? (
-                <StatusBar pathname={location.pathname} />
-              ) : null}
+              {showStatusBar && !isSetup && !redirectToSetup ? <StatusBar /> : null}
             </div>
           )}
           {paletteOpen ? (

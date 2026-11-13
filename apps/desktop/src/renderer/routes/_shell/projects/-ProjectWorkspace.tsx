@@ -32,6 +32,7 @@ import { stripOuterQuery } from "../../../QuickEditor/routeTarget"
 import { useDisplayPath } from "../../../trpc/displayPath"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { useOptionalNewFileController } from "../components/NewFileController"
+import { useReportViewProject } from "../components/StatusBar/viewProjectStore"
 import { TitleBarSystemControls, titleBarControlClass, titleBarInsetHeaderClass } from "../titleBar"
 import { clearPendingLaunch, readPendingLaunch } from "./-pendingLaunch"
 import { clearPendingOpenFile, usePendingOpenFile } from "./-pendingOpenFile"
@@ -196,6 +197,7 @@ export function ProjectWorkspace({
   const titleRef = useRef<HTMLDivElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const headerRightRef = useRef<HTMLDivElement | null>(null)
+  useReportViewProject(projectId)
   const stagePlacement = useCenteredPlacement(
     headerRef,
     titleRef,

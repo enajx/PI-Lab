@@ -10,29 +10,26 @@ import { useTRPC } from "../../../../trpc/react"
 import { useAgentStatus } from "../../-ProjectActivity"
 import { readSshConfigPathOverride } from "../../utils/sshConfigPathOverride"
 import { useLatestLatexBuild } from "./latexBuildStore"
+import { useViewProject } from "./viewProjectStore"
 
 /** Same refresh rate as the project view's Code changes panel. */
 const GIT_STATE_REFETCH_MS = 8_000
 
 const CHANNEL_NAMES = { alpha: "Alpha", beta: "Beta", stable: "Stable" } as const
 
-/** The project id of a `/projects/<id>` path, or null on any other view. */
-function projectIdOf(pathname: string): string | null {
-  const match = /^\/projects\/([^/]+)/.exec(pathname)
-  return match?.[1] ? decodeURIComponent(match[1]) : null
-}
-
-/** One small item of the bar: an icon and its text. */
+/** One small item of the bar: an icon and its text; `title` and `help` fill the "What's this?" box. */
 function Item({
   testId,
   icon,
   title,
+  help,
   className,
   children,
 }: {
   testId: string
   icon: ReactNode
   title: string
+  help: string
   className: string
   children: ReactNode
 }) {
@@ -40,6 +37,8 @@ function Item({
     <span
       data-testid={testId}
       title={title}
+      data-feature-label={title}
+      data-feature-help={help}
       className={cn("inline-flex min-w-0 items-center gap-1 truncate", className)}
     >
       {icon}
@@ -51,15 +50,16 @@ function Item({
 /**
  * The window status bar: one small-font row at the bottom of the window,
  * shown when it is turned on in Settings or the command palette. It reads the
- * data the app already has: the open project (`projects.get`) and its Git
+ * data the app already has: the project the current view has selected (the
+ * project view or a science tab's picker, see `viewProjectStore`; `projects.get`) and its Git
  * branch and dirty state (`projects.gitState`), the live agent sessions (the
  * shell's shared subscription), caffeine (`useCaffeine`), the last LaTeX build
  * of a mounted editor, the channel and version, the command palette shortcut,
  * and the hosts of `~/.ssh/config` in a popover.
  */
-export function StatusBar({ pathname }: { pathname: string }) {
+export function StatusBar() {
   const t = useTranslate()
-  const projectId = projectIdOf(pathname)
+  const projectId = useViewProject()
   return (
     <footer
       data-testid="window-status-bar"
@@ -76,6 +76,7 @@ export function StatusBar({ pathname }: { pathname: string }) {
         testId="status-bar-palette-hint"
         icon={null}
         title={t("Command palette")}
+        help={t("Press this shortcut to search PI Lab's commands and projects.")}
         className="shrink-0"
       >
         {`${formatBinding(getBinding("command-palette"))} ${t("Commands")}`}
@@ -101,6 +102,7 @@ function ProjectItems({ projectId }: { projectId: string }) {
         testId="status-bar-project"
         icon={<FolderGit2 className="size-3 shrink-0" aria-hidden />}
         title={t("Current project")}
+        help={t("The project this view shows.")}
         className=""
       >
         {project.data?.name ?? ""}
@@ -113,7 +115,13 @@ function ProjectItems({ projectId }: { projectId: string }) {
         <span
           data-testid="status-bar-branch"
           data-dirty={git.data.dirty}
-          title={git.data.dirty ? t("Git branch, with uncommitted changes") : t("Git branch")}
+          title={t("Git branch")}
+          data-feature-label={t("Git branch")}
+          data-feature-help={
+            git.data.dirty
+              ? t("The project's checked-out branch. * means it has uncommitted changes.")
+              : t("The project's checked-out branch. It has no uncommitted changes.")
+          }
           className="inline-flex min-w-0 items-center gap-1"
         >
           <GitBranch className="size-3 shrink-0" aria-hidden />
@@ -145,6 +153,7 @@ function AgentsItem() {
       testId="status-bar-agents"
       icon={<Bot className="size-3 shrink-0" aria-hidden />}
       title={t("Running agents")}
+      help={t("Agent sessions running now, and how many wait for your input.")}
       className={waiting > 0 ? "text-amber-600 dark:text-amber-400" : ""}
     >
       {`${running.length} ${running.length === 1 ? t("agent") : t("agents")}`}
@@ -160,7 +169,10 @@ function CaffeineItem() {
     <Item
       testId="status-bar-caffeine"
       icon={<Coffee className="size-3 shrink-0" aria-hidden />}
-      title={t("Prevent the computer from sleeping.")}
+      title={t("Caffeine")}
+      help={t(
+        "Prevent the computer from sleeping. Change it with the coffee button in the top bar.",
+      )}
       className="shrink-0"
     >
       {`${t("Caffeine")} ${t(status.mode)}`}
@@ -178,6 +190,7 @@ function LatexItem() {
       testId="status-bar-latex"
       icon={<FileText className="size-3 shrink-0" aria-hidden />}
       title={t("LaTeX build")}
+      help={t("The state of the last LaTeX build in an open editor.")}
       className={build.state === "failed" ? "text-destructive" : ""}
     >
       {t(build.message)}
@@ -213,6 +226,7 @@ function VersionItem() {
       testId="status-bar-version"
       icon={null}
       title={t("Channel and version")}
+      help={t("The PI Lab release channel and version you are running.")}
       className="shrink-0"
     >
       {`${CHANNEL_NAMES[channel.data]} ${version.data}`}
@@ -244,7 +258,9 @@ function HostsItem() {
         type="button"
         data-testid="status-bar-hosts"
         aria-expanded={open}
-        title={t("SSH hosts from ~/.ssh/config")}
+        title={t("SSH hosts")}
+        data-feature-label={t("SSH hosts")}
+        data-feature-help={t("The hosts in ~/.ssh/config. Click to list them.")}
         onClick={() => setOpen((current) => !current)}
         className="inline-flex items-center gap-1 rounded px-1 hover:bg-muted hover:text-foreground"
       >

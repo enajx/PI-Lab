@@ -114,6 +114,21 @@ test("the status bar is off by default, turns on from the palette and off in Set
   await expect(bar.getByTestId("status-bar-version")).toHaveText(/^Alpha \d+\.\d+\.\d+/)
   await expect(bar.getByTestId("status-bar-palette-hint")).toHaveText(/P Commands$/)
 
+  // Every item has a "What's this?" text, like other controls.
+  const help = page.getByTestId("sidebar-feature-help")
+  const expectHelp = async (testId: string, label: string): Promise<void> => {
+    await bar.getByTestId(testId).hover()
+    await expect(help.getByTestId("sidebar-feature-help-label")).toHaveText(label)
+    await expect(help.getByTestId("sidebar-feature-help-description")).not.toHaveText("")
+  }
+  await expectHelp("status-bar-project", "Current project")
+  await expectHelp("status-bar-branch", "Git branch")
+  await expectHelp("status-bar-agents", "Running agents")
+  await expectHelp("status-bar-caffeine", "Caffeine")
+  await expectHelp("status-bar-version", "Channel and version")
+  await expectHelp("status-bar-palette-hint", "Command palette")
+  await expectHelp("status-bar-hosts", "SSH hosts")
+
   // N hosts lists the ssh config's concrete hosts.
   const hosts = bar.getByTestId("status-bar-hosts")
   await expect(hosts).toHaveText("2 hosts")
@@ -126,6 +141,18 @@ test("the status bar is off by default, turns on from the palette and off in Set
   await page.screenshot({ path: test.info().outputPath("status-bar.png") })
   await page.keyboard.press("Escape")
   await expect(popover).toHaveCount(0)
+
+  // Views with a project picker show the project they have selected, and its branch.
+  for (const tab of ["latex", "analysis", "skills"]) {
+    await page.locator(`[data-testid="science-nav-item"][data-science-tab="${tab}"]`).click()
+    await expect(bar.getByTestId("status-bar-project")).toHaveText("repo")
+    await expect(bar.getByTestId("status-bar-branch")).toHaveText("main*")
+  }
+  // Tasks starts on All projects, and the Dashboard has no selected project.
+  await page.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]').click()
+  await expect(bar.getByTestId("status-bar-project")).toHaveCount(0)
+  await page.getByTestId("nav-dashboard").click()
+  await expect(bar.getByTestId("status-bar-project")).toHaveCount(0)
 
   // Settings > Appearance: the switch is on; turning it off hides the bar.
   await page.getByTestId("nav-settings").click()

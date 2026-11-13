@@ -34,6 +34,7 @@ import {
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
+import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
@@ -106,6 +107,7 @@ export function ScienceAnalysis({
   // An unknown or missing choice falls back to the most-recently-opened project.
   const selectedProject = projects.find((project) => project.id === wanted) ?? projects[0]
   const selectedProjectId = selectedProject?.id ?? null
+  useReportViewProject(selectedProjectId)
   const [fetchInstructions] = useFetchExperimentsInstructions()
   const userPanel = useSciencePanel("analysis")
   const [savedFilesWidth, persistFilesWidth] = useAnalysisFilesWidth()
