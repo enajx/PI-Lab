@@ -165,7 +165,7 @@ test("the status bar is off by default, turns on from the palette and off in Set
   await expect(bar).toBeVisible()
 })
 
-test("the project stage dots are centered on the top bar, and sit after the title when the window is narrow", async () => {
+test("the project stage dots are centered between the title and the first top bar button, and sit after the title when the window is narrow", async () => {
   const page = await app.firstWindow()
   await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   const setWidth = (width: number) =>
@@ -175,21 +175,27 @@ test("the project stage dots are centered on the top bar, and sit after the titl
     }, width)
   await setWidth(1600)
   await openProject(page)
-  const header = page.getByTestId("project-view-header")
-  const dots = page.getByTestId("project-view-stage-slot")
+  const dots = page.getByTestId("project-view-stage")
   const title = page.getByTestId("project-view-title")
-  await expect(dots).toHaveAttribute("data-placement", "center")
-  const wide = await Promise.all([header.boundingBox(), dots.boundingBox()])
-  const [headerBox, dotsBox] = wide
-  if (!headerBox || !dotsBox) throw new Error("project header is not visible")
+  const firstButton = page.getByTestId("project-view-shortcuts-add")
+  await expect(dots).toBeVisible()
+  const [titleBox, dotsBox, buttonBox] = await Promise.all([
+    title.boundingBox(),
+    dots.boundingBox(),
+    firstButton.boundingBox(),
+  ])
+  if (!titleBox || !dotsBox || !buttonBox) throw new Error("project header is not visible")
+  const freeMiddle = (titleBox.x + titleBox.width + buttonBox.x) / 2
+  expect(Math.abs(dotsBox.x + dotsBox.width / 2 - freeMiddle)).toBeLessThanOrEqual(1)
   expect(
-    Math.abs(dotsBox.x + dotsBox.width / 2 - (headerBox.x + headerBox.width / 2)),
+    Math.abs(dotsBox.y + dotsBox.height / 2 - (buttonBox.y + buttonBox.height / 2)),
   ).toBeLessThanOrEqual(1)
+  await page.screenshot({ path: test.info().outputPath("stage-dots.png") })
 
   await setWidth(720)
-  await expect(dots).toHaveAttribute("data-placement", "after-title")
-  const [titleBox, narrowDots] = await Promise.all([title.boundingBox(), dots.boundingBox()])
-  if (!titleBox || !narrowDots) throw new Error("project header is not visible")
-  expect(narrowDots.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width)
-  expect(narrowDots.x - (titleBox.x + titleBox.width)).toBeLessThanOrEqual(16)
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThan(1600)
+  const [narrowTitle, narrowDots] = await Promise.all([title.boundingBox(), dots.boundingBox()])
+  if (!narrowTitle || !narrowDots) throw new Error("project header is not visible")
+  expect(narrowDots.x).toBeGreaterThanOrEqual(narrowTitle.x + narrowTitle.width)
+  expect(narrowDots.x - (narrowTitle.x + narrowTitle.width)).toBeLessThanOrEqual(16)
 })
