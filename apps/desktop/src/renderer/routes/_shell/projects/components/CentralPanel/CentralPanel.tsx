@@ -76,6 +76,8 @@ export interface CentralPanelLeftColumn {
 
 interface CentralPanelProps {
   controller: CentralPanelController
+  /** Heading of the empty-state launcher, e.g. "Start agents" in Analysis. */
+  launcherTitle: string
   /** App-wide tRPC client for the terminal panes' observable subscriptions. */
   client: PiLabTrpcClient
   /** Main-checkout workspace — drives quick-open search + file reads. */
@@ -140,6 +142,7 @@ interface CentralPanelProps {
  */
 export function CentralPanel({
   controller,
+  launcherTitle,
   client,
   workspaceId,
   openFileFinder,
@@ -921,6 +924,7 @@ export function CentralPanel({
             placementFor={dockPlacement}
             empty={
               <Launcher
+                title={launcherTitle}
                 onOpenAgent={controller.openAgentChooser}
                 onOpenTerminal={controller.openTerminal}
                 onOpenFile={() => setQuickOpen(true)}
@@ -1448,6 +1452,7 @@ function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: Ce
 }
 
 interface LauncherActions {
+  title: string
   onOpenAgent: () => void
   onOpenTerminal: () => void
   onOpenFile: () => void
@@ -1457,6 +1462,7 @@ interface LauncherActions {
 
 /** The empty-state launcher shown when nothing is open in the panel. */
 function Launcher({
+  title,
   onOpenAgent,
   onOpenTerminal,
   onOpenFile,
@@ -1472,7 +1478,9 @@ function Launcher({
       {/* Spacers 1:2 place the launcher about a third of the way down the panel. */}
       <div aria-hidden className="flex-1" />
       <div data-testid="central-launcher-content" className="flex flex-col items-center gap-4">
-        <p className="text-sm">{t("Open something to get started")}</p>
+        <p data-testid="central-launcher-title" className="text-sm">
+          {title}
+        </p>
         <div className="flex flex-wrap items-center justify-center gap-2">
           <LauncherButton
             testId="launcher-agent"

@@ -4,5 +4,6 @@ export {
   RightSidebar,
   type RightSidebarLeadingTab,
   type RightSidebarPanel,
+  type RightSidebarTabVisibility,
   useRightSidebarPanels,
 } from "./RightSidebar"

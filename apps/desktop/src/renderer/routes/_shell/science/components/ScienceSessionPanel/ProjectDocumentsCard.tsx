@@ -9,6 +9,7 @@ import {
 import {
   RightSidebar,
   type RightSidebarLeadingTab,
+  type RightSidebarTabVisibility,
 } from "../../../projects/components/RightSidebar"
 
 /**
@@ -18,7 +19,8 @@ import {
  * list, shared with the project view. `onCollapse` is the sidebar's collapse button,
  * or null for none (the panel has its collapse button elsewhere). Files the Files tab
  * opens go to `onOpenFile`. `leadingTab` is a tab shown first (the Sessions tab of
- * Analysis and Tasks), or null. The parent keys it by project.
+ * Analysis and Tasks), or null. `tabVisibility` is the view's choice of shown tabs
+ * (Analysis and Tasks), or null to show them all. The parent keys it by project.
  */
 export function ProjectDocumentsCard({
   projectId,
@@ -27,6 +29,7 @@ export function ProjectDocumentsCard({
   onCollapse,
   onOpenFile,
   leadingTab,
+  tabVisibility,
 }: {
   projectId: string
   activeId: string
@@ -34,6 +37,7 @@ export function ProjectDocumentsCard({
   onCollapse: (() => void) | null
   onOpenFile: (relPath: string) => void
   leadingTab: RightSidebarLeadingTab | null
+  tabVisibility: RightSidebarTabVisibility | null
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -92,6 +96,7 @@ export function ProjectDocumentsCard({
       gitAvailable={capabilities.data?.git === true}
       filesPanelOpen={false}
       leadingTab={leadingTab}
+      tabVisibility={tabVisibility}
     />
   )
 }

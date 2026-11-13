@@ -312,6 +312,7 @@ function useLatexDocumentsPanel(projectId: string | null): SciencePanelState {
       if (!collapsed && documentsTab === DIARY_TAB_ID) setOpenFor(null)
       else showDiary()
     },
+    tabVisibility: null,
   }
 }
 
@@ -362,6 +363,7 @@ function LatexDocumentsColumn({
         onCollapse={() => panel.setCollapsed(true)}
         onOpenFile={onOpenFile}
         leadingTab={null}
+        tabVisibility={null}
       />
     </aside>
   )

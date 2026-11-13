@@ -22,6 +22,7 @@ import {
   SCIENCE_PANEL_MAX_WIDTH,
   SCIENCE_PANEL_MIN_WIDTH,
   useResearchDiaryOpen,
+  useSciencePanelTabToggles,
 } from "../../../../../preferences/preferences"
 import { overlayIsOpen } from "../../../../../shortcuts/keyGuards"
 import { useTRPC, useTRPCClient } from "../../../../../trpc/react"
@@ -42,7 +43,11 @@ import type {
   CentralPanelRestoreState,
   SessionPane,
 } from "../../../projects/components/CentralPanel/useCentralPanel"
-import { DIARY_TAB_ID } from "../../../projects/components/RightSidebar"
+import {
+  DIARY_TAB_ID,
+  FILES_TAB_ID,
+  type RightSidebarTabVisibility,
+} from "../../../projects/components/RightSidebar"
 import { ProjectDocumentsCard } from "./ProjectDocumentsCard"
 import { fitPanelRow, type PanelRowFit, type PanelRowInput } from "./panelFit"
 import type { FocusSessionRequest } from "./sessionViewSearch"
@@ -86,6 +91,14 @@ export function useFocusSessionRequest(
 /** Id of the Sessions tab, first in the Analysis and Tasks right panel. */
 export const SESSIONS_TAB_ID = "sessions"
 
+/** The tabs Analysis shows until the user changes them in the pin menu. */
+const ANALYSIS_DEFAULT_TABS: readonly string[] = [SESSIONS_TAB_ID, FILES_TAB_ID, DIARY_TAB_ID]
+
+/** Whether `view` shows tab `id` by default: in Analysis only Sessions, Files and Diary, in Tasks every tab. */
+function tabShownByDefault(view: SessionPanelView, id: string): boolean {
+  return view === "analysis" ? ANALYSIS_DEFAULT_TABS.includes(id) : true
+}
+
 /**
  * Whether a view's right panel is collapsed, and the tab it shows (a right sidebar
  * tab id; in Analysis and Tasks also {@link SESSIONS_TAB_ID}). Both are the view's own.
@@ -100,6 +113,8 @@ export interface SciencePanelState {
   showDiary: () => void
   /** The top bar diary button: {@link showDiary}, or while the Diary tab shows, hide the panel. */
   toggleDiary: () => void
+  /** The tabs the view shows, chosen in the pin menu and saved per view, or null to show them all (LaTeX Editor). */
+  tabVisibility: RightSidebarTabVisibility | null
 }
 
 /** The sessionStorage key of a view's last right panel tab. */
@@ -113,19 +128,36 @@ function panelTabKey(view: SessionPanelView): string {
  * top bar diary button turns that value off when it hides the panel and on when it
  * opens it. The panel opens on `defaultTab` the first time (Sessions in Analysis, the
  * Diary in Tasks), then on the view's last tab, kept for the app session (sessionStorage).
+ * The tabs shown are the view's default ({@link tabShownByDefault}) with the changes
+ * made in the pin menu, saved per view. Asking for a hidden tab (the diary button, a
+ * session that opens) shows it again.
  */
 export function useSciencePanel(view: SessionPanelView, defaultTab: string): SciencePanelState {
   const [startOpen, setStartOpen] = useResearchDiaryOpen()
   const [collapsed, setCollapsed] = useState(!startOpen)
-  const [documentsTab, setTab] = useState(
-    () => window.sessionStorage.getItem(panelTabKey(view)) ?? defaultTab,
+  const [toggles, setToggles] = useSciencePanelTabToggles(view)
+  const shown = useCallback(
+    (id: string) => tabShownByDefault(view, id) !== toggles.includes(id),
+    [toggles, view],
   )
+  const setShown = useCallback(
+    (id: string, next: boolean) => {
+      if (shown(id) === next) return
+      setToggles(toggles.includes(id) ? toggles.filter((x) => x !== id) : [...toggles, id])
+    },
+    [setToggles, shown, toggles],
+  )
+  const [documentsTab, setTab] = useState(() => {
+    const stored = window.sessionStorage.getItem(panelTabKey(view))
+    return stored !== null && shown(stored) ? stored : defaultTab
+  })
   const setDocumentsTab = useCallback(
     (id: string) => {
+      setShown(id, true)
       window.sessionStorage.setItem(panelTabKey(view), id)
       setTab(id)
     },
-    [view],
+    [setShown, view],
   )
   const showDiary = useCallback(() => {
     setCollapsed(false)
@@ -138,7 +170,16 @@ export function useSciencePanel(view: SessionPanelView, defaultTab: string): Sci
       setStartOpen(false)
     } else showDiary()
   }, [collapsed, documentsTab, setStartOpen, showDiary])
-  return { collapsed, setCollapsed, documentsTab, setDocumentsTab, showDiary, toggleDiary }
+  const tabVisibility = useMemo(() => ({ shown, setShown }), [setShown, shown])
+  return {
+    collapsed,
+    setCollapsed,
+    documentsTab,
+    setDocumentsTab,
+    showDiary,
+    toggleDiary,
+    tabVisibility,
+  }
 }
 
 /** A row's measured width in px (`Infinity` until measured or while not laid out), via a ref callback. */
@@ -425,6 +466,7 @@ export function ScienceSessionPanel({
           onActiveIdChange={setDocumentsTab}
           onCollapse={() => setCollapsed(true)}
           onOpenFile={(relPath) => setFileRequest({ projectId: project.id, fileRelPath: relPath })}
+          tabVisibility={panel.tabVisibility}
           leadingTab={{
             id: SESSIONS_TAB_ID,
             label: t("Sessions"),
@@ -618,6 +660,7 @@ function SessionsBody({
 
   // While hidden the central panel's shortcuts are off, so ⌘T is handled here.
   const openNewSession = useOpenNewSession(controller)
+  const t = useTranslate()
   useNewSessionShortcut(() => {
     if (!hidden || overlayIsOpen()) return false
     return openNewSession()
@@ -632,6 +675,7 @@ function SessionsBody({
       className={hidden ? "hidden" : "relative flex min-h-0 min-w-0 flex-1 flex-col"}
     >
       <CentralPanel
+        launcherTitle={t("Start agents")}
         controller={controller}
         client={client}
         workspaceId={workspaceId}

@@ -59,6 +59,7 @@ function Harness({
           onCollapse={() => setCollapsed(true)}
           pinnedPanels={[]}
           filesPanelOpen={false}
+          tabVisibility={null}
         />
       )}
       {mountPalette ? (

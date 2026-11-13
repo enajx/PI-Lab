@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useEffect, useState } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { CloseTabRequest } from "../../../../../../shared/closeTab"
+import { useTranslate } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
 import { installCloseTabResponder } from "../../../../../shortcuts/closeTab"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fakeTrpcClient"
@@ -285,6 +286,7 @@ function Harness({
   useEffect(() => {
     if (activatedSession) controller.attachSession(activatedSession)
   }, [activatedSession, controller.attachSession])
+  const t = useTranslate()
   // Stands in for the project route, which owns the per-project left Files column state.
   const [filesPanelOpen, setFilesPanelOpen] = useState(false)
   return (
@@ -308,6 +310,7 @@ function Harness({
         onFilesPanelOpenChange={setFilesPanelOpen}
         onPinFile={onPinFile}
         leftColumn={leftColumn}
+        launcherTitle={t("Start agents")}
       />
     </div>
   )
@@ -381,7 +384,7 @@ describe("CentralPanel — panel", () => {
     window.localStorage.setItem("pi-lab.interface.language", "es")
     renderPanel()
 
-    expect(await screen.findByText("Abre algo para empezar")).toBeTruthy()
+    expect(await screen.findByText("Iniciar agentes")).toBeTruthy()
     expect(screen.getByTestId("central-add-menu").getAttribute("aria-label")).toBe("Añadir panel")
   })
 
@@ -535,6 +538,7 @@ describe("CentralPanel — panel", () => {
   test("shows the launcher when nothing is open", () => {
     renderPanel()
     expect(screen.getByTestId("central-launcher")).toBeTruthy()
+    expect(screen.getByTestId("central-launcher-title").textContent).toBe("Start agents")
     expect(screen.getByTestId("launcher-agent").textContent).toContain("New agent")
     expect(screen.getByTestId("launcher-terminal").textContent).toContain("New terminal")
     expect(screen.getByTestId("launcher-file").textContent).toContain("New file")

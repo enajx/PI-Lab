@@ -13,7 +13,6 @@ import {
 import { ResearchDiaryPanel } from "../../../../../components/ResearchDiary/ResearchDiaryPanel"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import type { FileTreeEditorTabs } from "../../../../../Editor/components/FileTree"
-import { QuickOpen } from "../../../../../Editor/components/QuickOpen"
 import { useTranslate } from "../../../../../i18n/language"
 import {
   useRightSidebarTabOrder,
@@ -24,6 +23,7 @@ import { useTRPC } from "../../../../../trpc/react"
 import { ChangesPanel } from "./components/ChangesPanel"
 import { DocPanel } from "./components/DocPanel"
 import { FilesPanel } from "./components/FilesPanel"
+import { PinMenu } from "./components/PinMenu"
 import { ResearchPanel } from "./components/ResearchPanel"
 import { SkillsPanel } from "./components/SkillsPanel"
 import { TodosPanel } from "./components/TodosPanel"
@@ -252,6 +252,15 @@ export interface RightSidebarLeadingTab {
   content: ReactNode
 }
 
+/**
+ * Which tabs a view shows, chosen from the pin menu (Analysis and Tasks). A hidden
+ * tab is left out of the tab strip but stays listed, unchecked, in the pin menu.
+ */
+export interface RightSidebarTabVisibility {
+  shown: (id: string) => boolean
+  setShown: (id: string, shown: boolean) => void
+}
+
 /** A right-sidebar panel's identity, for the project palette's "switch panel" list. */
 export interface RightSidebarPanel {
   id: string
@@ -307,6 +316,7 @@ export function RightSidebar({
   editorTabs,
   filesPanelOpen,
   leadingTab,
+  tabVisibility,
 }: {
   projectId: string
   workspaceId: string
@@ -335,6 +345,8 @@ export function RightSidebar({
   filesPanelOpen: boolean
   /** A tab shown first, whose content stays mounted; the project view leaves it out. */
   leadingTab?: RightSidebarLeadingTab | null
+  /** The view's choice of shown tabs, or null to show every tab (the project view). */
+  tabVisibility: RightSidebarTabVisibility | null
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -360,7 +372,10 @@ export function RightSidebar({
     pinnedPanels,
     order: tabOrder,
   })
-  const tabIds = tabs.map((tab) => tab.id)
+  const isShown = (id: string) => tabVisibility === null || tabVisibility.shown(id)
+  const shownTabs = tabs.filter((tab) => isShown(tab.id))
+  const leadingShown = leadingTab != null && isShown(leadingTab.id)
+  const tabIds = shownTabs.map((tab) => tab.id)
   const moveTab = (moved: string, target: string, after: boolean) =>
     setTabOrder(movedTabOrder(tabOrder, tabIds, moved, target, after))
 
@@ -437,21 +452,60 @@ export function RightSidebar({
   // pinned panel unpinned) or be unset in controlled mode, so fall back to Files, or to
   // the first tab when Files is in the left column, whenever the stored id no longer resolves.
   // While the leading tab is selected no built-in tab is.
-  const leadingActive = leadingTab != null && activeId === leadingTab.id
+  // The leading tab is also selected when it is the only tab shown.
+  const leadingActive =
+    leadingTab != null && (activeId === leadingTab.id || (leadingShown && shownTabs.length === 0))
   const active = leadingActive
     ? null
-    : (tabs.find((tab) => tab.id === activeId) ??
-      tabs.find((tab) => tab.id === FILES_TAB_ID) ??
-      tabs[0])
+    : (shownTabs.find((tab) => tab.id === activeId) ??
+      shownTabs.find((tab) => tab.id === FILES_TAB_ID) ??
+      shownTabs[0])
 
-  // Pinning is a no-op unless the route wired a handler; guard so the "+" picker and
-  // the Files tree's right-click menu never silently drop a selection.
-  const pinFile = (relPath: string) => onPinFile?.(relPath)
+  // Pinning is a no-op unless the route wired a handler; guard so the pin menu and
+  // the Files tree's right-click menu never silently drop a selection. A pinned file
+  // is shown as a tab in views that choose their tabs.
+  const pinFile = (relPath: string) => {
+    onPinFile?.(relPath)
+    tabVisibility?.setShown(`${PINNED_PREFIX}${relPath}`, true)
+  }
+
+  // The pin menu lists every tab. Hiding the selected tab selects the first other
+  // shown tab; the last shown tab cannot be hidden.
+  const menuTabIds = [...(leadingTab ? [leadingTab.id] : []), ...tabs.map((tab) => tab.id)]
+  const shownIds = menuTabIds.filter(isShown)
+  const selectedId = leadingActive && leadingTab ? leadingTab.id : active?.id
+  const toggleTab = (id: string) => {
+    if (tabVisibility === null) return
+    if (!isShown(id)) {
+      tabVisibility.setShown(id, true)
+      return
+    }
+    if (shownIds.length <= 1) return
+    tabVisibility.setShown(id, false)
+    const next = shownIds.find((shownId) => shownId !== id)
+    if (id === selectedId && next !== undefined) selectTab(next)
+  }
+  const menuTabs =
+    tabVisibility === null
+      ? []
+      : [
+          ...(leadingTab ? [{ id: leadingTab.id, label: leadingTab.label }] : []),
+          ...tabs.map((tab) => ({
+            id: tab.id,
+            label: pinnedRelPath(tab.id) ? tab.label : t(tab.label),
+          })),
+        ].map((tab) => {
+          const shown = isShown(tab.id)
+          return { ...tab, shown, disabled: shown && shownIds.length <= 1 }
+        })
+  const pinRef = useRef<HTMLButtonElement | null>(null)
+  const pinMenuRef = useRef<HTMLDivElement | null>(null)
+  usePopupDismiss(pinPickerOpen, [pinRef, pinMenuRef], () => setPinPickerOpen(false))
 
   return (
     <aside
       data-testid="right-sidebar"
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
     >
       <div className="flex shrink-0 items-center gap-0.5 border-border border-b p-1">
         <div
@@ -459,7 +513,7 @@ export function RightSidebar({
           aria-label={t("Project panels")}
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
         >
-          {leadingTab ? (
+          {leadingTab && leadingShown ? (
             <button
               type="button"
               role="tab"
@@ -479,7 +533,7 @@ export function RightSidebar({
               {leadingTab.label}
             </button>
           ) : null}
-          {tabs.map((tab) => {
+          {shownTabs.map((tab) => {
             const selected = tab.id === active?.id
             const relPath = pinnedRelPath(tab.id)
             const tabButton = (
@@ -540,15 +594,23 @@ export function RightSidebar({
           })}
         </div>
         <button
+          ref={pinRef}
           type="button"
           data-testid="right-sidebar-pin"
-          aria-label={t("Pin a Markdown panel")}
-          title={t("Pin a Markdown panel")}
-          data-feature-help={t(
-            "Pin a Markdown file as a persistent panel in this project's sidebar",
+          aria-haspopup="menu"
+          aria-expanded={pinPickerOpen}
+          aria-label={tabVisibility ? t("Tabs and pinned files") : t("Pin a Markdown panel")}
+          title={tabVisibility ? t("Tabs and pinned files") : t("Pin a Markdown panel")}
+          data-feature-help={
+            tabVisibility
+              ? t("Choose which tabs this panel shows, or pin a Markdown file as a tab")
+              : t("Pin a Markdown file as a persistent panel in this project's sidebar")
+          }
+          onClick={() => setPinPickerOpen((value) => !value)}
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
+            pinPickerOpen ? "text-foreground" : "text-muted-foreground",
           )}
-          onClick={() => setPinPickerOpen(true)}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Pin className="size-3.5" aria-hidden />
         </button>
@@ -599,15 +661,17 @@ export function RightSidebar({
         })}
       </div>
       {pinPickerOpen ? (
-        <QuickOpen
-          workspaceId={workspaceId}
-          filter={(relPath) => relPath.endsWith(".md")}
-          onOpenFile={(relPath) => {
-            pinFile(relPath)
-            setPinPickerOpen(false)
-          }}
-          onClose={() => setPinPickerOpen(false)}
-        />
+        <div ref={pinMenuRef}>
+          <PinMenu
+            workspaceId={workspaceId}
+            tabs={menuTabs}
+            onToggleTab={toggleTab}
+            onPinFile={(relPath) => {
+              pinFile(relPath)
+              setPinPickerOpen(false)
+            }}
+          />
+        </div>
       ) : null}
     </aside>
   )
