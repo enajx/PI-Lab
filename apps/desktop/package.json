@@ -64,6 +64,8 @@
     "dockview-react": "8.5.1",
     "drizzle-orm": "^0.45.0",
     "electron-updater": "^6.8.9",
+    "h5wasm": "0.10.3",
+    "hyparquet": "1.33.0",
     "js-yaml": "4.2.0",
     "lucide-react": "^0.563.0",
     "node-pty": "^1.1.0",

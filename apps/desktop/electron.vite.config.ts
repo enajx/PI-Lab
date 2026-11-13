@@ -168,6 +168,13 @@ const WORKSPACE_PACKAGES = [
   "@pi-lab/port-scanner",
   "@pi-lab/workspace-fs",
 ]
+/**
+ * Pure-JS, ESM-only dependencies inlined into the main bundle (so they need no
+ * entry in the packaged `node_modules` filter). `hyparquet` reads Parquet for
+ * Analysis. `h5wasm` stays external: its 4 MB Node build embeds the WASM and is
+ * loaded with `import()` (see `analysis/hdf5.ts`).
+ */
+const BUNDLED_MAIN_DEPS = ["hyparquet"]
 /** Native `.node` addons that must stay runtime `require`s, never inlined. */
 const NATIVE_DEPS = ["better-sqlite3", "node-pty"]
 /** Native addon the daemon bundle must `require` from disk, never inline. */
@@ -176,7 +183,7 @@ const NATIVE_DEPS_DAEMON = ["node-pty"]
 export default defineConfig({
   main: {
     plugins: [
-      externalizeDepsPlugin({ exclude: WORKSPACE_PACKAGES }),
+      externalizeDepsPlugin({ exclude: [...WORKSPACE_PACKAGES, ...BUNDLED_MAIN_DEPS] }),
       copyMigrationsPlugin(),
       bundlePtyDaemonPlugin(),
     ],
@@ -184,7 +191,16 @@ export default defineConfig({
       outDir: "out/main",
       minify: "esbuild",
       sourcemap: "hidden",
-      lib: { entry: resolve(__dirname, "src/main/index.ts") },
+      lib: {
+        entry: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          // The Analysis preview worker thread (`previewWorker.ts` starts it).
+          analysisPreviewWorker: resolve(
+            __dirname,
+            "src/main/trpc/science/analysis/previewWorkerEntry.ts",
+          ),
+        },
+      },
       rollupOptions: { external: NATIVE_DEPS },
     },
   },

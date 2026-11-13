@@ -1138,5 +1138,11 @@
   "List files and folders whose name starts with a dot in the file tree.": "名前がドットで始まるファイルとフォルダをファイルツリーに表示します。",
   "Don't ask again": "今後は確認しない",
   "Confirm before deleting files": "ファイルを削除する前に確認",
-  "Ask before moving a file or folder in the file tree to the Trash.": "ファイルツリーのファイルやフォルダをゴミ箱に移動する前に確認します。"
+  "Ask before moving a file or folder in the file tree to the Trash.": "ファイルツリーのファイルやフォルダをゴミ箱に移動する前に確認します。",
+  "Large file": "大きなファイル",
+  "loading may be slow": "読み込みに時間がかかる場合があります",
+  "Load": "読み込む",
+  "Dataset": "データセット",
+  "scalar": "スカラー",
+  "datasets": "個のデータセット"
 }

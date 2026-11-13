@@ -53,6 +53,7 @@ import type {
   OpenReportInput,
   StartMarimoInput,
 } from "./science/analysis/interactive"
+import { inProcessAnalysisPreview } from "./science/analysis/previewWorker"
 import { createCallerFactory } from "./trpc"
 
 const execFileAsync = promisify(execFile)
@@ -452,6 +453,7 @@ export async function createHarness(
     discoverPythonEnvironments: options.discoverPythonEnvironments ?? (async () => []),
     resolvePythonRuntime: options.resolvePythonRuntime ?? FAKE_PYTHON_RUNTIME_RESOLVER,
     analysisInteractive,
+    analysisPreview: inProcessAnalysisPreview,
     notebookServers: new NotebookServers(
       { start: 42_800, end: 42_899 },
       10_000,

@@ -21,7 +21,6 @@ import {
   type DataFilePreview,
   discoverDataFiles,
   isMarimoNotebookFile,
-  previewDataFile,
 } from "./discover"
 import type { AnalysisInteractiveResult } from "./interactive"
 import { analysisMedia } from "./mediaGrants"
@@ -99,6 +98,13 @@ const previewInput = z.object({
   projectId: z.string().min(1),
   /** Repo-relative path of the file to preview (POSIX or native separators). */
   relPath: z.string().min(1),
+})
+
+const dataPreviewInput = previewInput.extend({
+  /** Read the file even when it is above its format's size limit (the Load button). */
+  load: z.boolean(),
+  /** The HDF5 dataset to preview, or null for the first one. */
+  dataset: z.string().min(1).nullable(),
 })
 
 const interactiveInput = previewInput.extend({
@@ -398,11 +404,16 @@ export const analysisRouter = router({
    * can never balloon the IPC response.
    */
   preview: publicProcedure
-    .input(previewInput)
+    .input(dataPreviewInput)
     .query(async ({ ctx, input }): Promise<DataFilePreview> => {
       const repoPath = requireRepoPath(ctx.db, input.projectId)
-      const abs = resolveInsideDir(repoPath, input.relPath)
-      return previewDataFile(abs, input.relPath)
+      const absPath = resolveInsideDir(repoPath, input.relPath)
+      return ctx.analysisPreview.preview({
+        absPath,
+        relPath: input.relPath,
+        load: input.load,
+        dataset: input.dataset,
+      })
     }),
 
   /**

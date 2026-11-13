@@ -1138,5 +1138,11 @@
   "List files and folders whose name starts with a dot in the file tree.": "Vis filer og mapper med navn som starter med punktum i filtreet.",
   "Don't ask again": "Ikke spør igjen",
   "Confirm before deleting files": "Bekreft før filer slettes",
-  "Ask before moving a file or folder in the file tree to the Trash.": "Spør før en fil eller mappe i filtreet flyttes til papirkurven."
+  "Ask before moving a file or folder in the file tree to the Trash.": "Spør før en fil eller mappe i filtreet flyttes til papirkurven.",
+  "Large file": "Stor fil",
+  "loading may be slow": "innlasting kan ta tid",
+  "Load": "Last inn",
+  "Dataset": "Datasett",
+  "scalar": "skalar",
+  "datasets": "datasett"
 }

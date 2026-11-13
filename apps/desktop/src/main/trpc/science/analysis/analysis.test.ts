@@ -11,7 +11,6 @@ import {
   detectExperimentLevel,
   MAX_CHART_POINTS,
   MAX_LISTED_FILES,
-  MAX_NPY_BYTES,
   MAX_TABLE_ROWS,
   MAX_TEXT_BYTES,
 } from "./discover"
@@ -950,6 +949,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "d.csv",
+      load: false,
+      dataset: null,
     })
 
     expect(preview.type).toBe("table")
@@ -971,6 +972,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "q.csv",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "table") throw new Error("expected table")
     expect(preview.rows).toEqual([["x,y", "z"]])
@@ -982,6 +985,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "d.tsv",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "table") throw new Error("expected table")
     expect(preview.headers).toEqual(["a", "b"])
@@ -996,6 +1001,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "big.csv",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "table") throw new Error("expected table")
     expect(preview.rows).toHaveLength(MAX_TABLE_ROWS)
@@ -1010,6 +1017,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "run.log",
+      load: false,
+      dataset: null,
     })
 
     expect(preview.type).toBe("text")
@@ -1025,6 +1034,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "c.json",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("json")
     if (preview.type !== "json") throw new Error("expected json")
@@ -1037,6 +1048,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "bad.json",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
@@ -1050,6 +1063,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "pic.png",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("image")
     if (preview.type !== "image") throw new Error("expected image")
@@ -1063,6 +1078,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "log.txt",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("text")
     if (preview.type !== "text") throw new Error("expected text")
@@ -1078,7 +1095,12 @@ describe("science.analysis.preview", () => {
       ["config.yaml", "lr: 0.1\n"],
       ["layout.xml", "<a/>\n"],
     ] as const) {
-      const preview = await h.caller.science.analysis.preview({ projectId: project.id, relPath })
+      const preview = await h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath,
+        load: false,
+        dataset: null,
+      })
       expect(preview).toEqual({ type: "text", text, truncated: false })
     }
   })
@@ -1104,6 +1126,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "results/run/analysis.ipynb",
+      load: false,
+      dataset: null,
     })
     expect(preview).toEqual({
       type: "notebook",
@@ -1120,6 +1144,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "results/run/analysis.qmd",
+      load: false,
+      dataset: null,
     })
     expect(preview).toEqual({
       type: "text",
@@ -1135,6 +1161,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "results/run/notebook.py",
+      load: false,
+      dataset: null,
     })
     expect(preview).toEqual({ type: "text", text: source, truncated: false })
   })
@@ -1145,6 +1173,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "model.parquet",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
@@ -1157,6 +1187,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "metrics.csv",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("chart")
     if (preview.type !== "chart") throw new Error("expected chart")
@@ -1173,6 +1205,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "people.csv",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("table")
   })
@@ -1183,6 +1217,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "runs/loss.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("chart")
     if (preview.type !== "chart") throw new Error("expected chart")
@@ -1206,6 +1242,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "big.npy",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "chart") throw new Error("expected chart")
     expect(preview.truncated).toBe(true)
@@ -1219,6 +1257,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "mat.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("array")
     if (preview.type !== "array") throw new Error("expected array")
@@ -1261,6 +1301,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "dtype.npy",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "chart") throw new Error("expected chart")
     expect(preview.series[0]?.values).toEqual([value])
@@ -1277,6 +1319,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "fortran.npy",
+      load: false,
+      dataset: null,
     })
     if (preview.type !== "array") throw new Error("expected array")
     expect(preview.rows).toEqual([
@@ -1296,6 +1340,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "sample.npy",
+      load: false,
+      dataset: null,
     })
     const readCount = reads.mock.calls.length
     reads.mockRestore()
@@ -1315,6 +1361,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "grid.npy",
+      load: false,
+      dataset: null,
     })
     const readCount = reads.mock.calls.length
     reads.mockRestore()
@@ -1338,6 +1386,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "bad-shape.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
   })
@@ -1351,7 +1401,12 @@ describe("science.analysis.preview", () => {
     await writeRepoFile("bad-version.npy", badVersion)
     const project = await h.caller.projects.open({ path: h.repoDir })
     for (const relPath of ["bad-header.npy", "bad-version.npy"]) {
-      const preview = await h.caller.science.analysis.preview({ projectId: project.id, relPath })
+      const preview = await h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath,
+        load: false,
+        dataset: null,
+      })
       expect(preview.type).toBe("metadata")
     }
   })
@@ -1370,6 +1425,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "high-rank.npy",
+      load: false,
+      dataset: null,
     })
     const expandedShape = maps.mock.contexts.some(
       (context) => Array.isArray(context) && context.length >= 100_000,
@@ -1379,19 +1436,23 @@ describe("science.analysis.preview", () => {
     expect(expandedShape).toBe(false)
   })
 
-  test("zero dimensions remain valid and the source cap returns metadata", async () => {
+  test("zero dimensions remain valid and a file with no header returns metadata", async () => {
     await writeRepoFile("empty.npy", makeRawNpy("0, 3", "<f8", false, Buffer.alloc(0)))
-    await writeRepoFile("oversized.npy", Buffer.alloc(MAX_NPY_BYTES + 1))
+    await writeRepoFile("oversized.npy", Buffer.alloc(64 * 1024))
     const project = await h.caller.projects.open({ path: h.repoDir })
     const empty = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "empty.npy",
+      load: false,
+      dataset: null,
     })
     if (empty.type !== "array") throw new Error("expected array")
     expect(empty.rows).toEqual([])
     const oversized = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "oversized.npy",
+      load: false,
+      dataset: null,
     })
     expect(oversized.type).toBe("metadata")
   })
@@ -1402,6 +1463,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "bad.npy",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
@@ -1415,27 +1478,33 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath: "arrays.npz",
+      load: false,
+      dataset: null,
     })
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
     expect(preview.kind).toBe("npz")
   })
 
-  test("pickle is metadata-only and is never opened for preview", async () => {
+  test("a pickle that names os.system is refused without running it", async () => {
     const relPath = "model.pkl"
-    const absPath = join(h.repoDir, relPath)
-    await writeRepoFile(relPath, "unsafe pickle bytes")
-    await chmod(absPath, 0)
+    const marker = join(h.repoDir, "pwned")
+    await writeRepoFile(relPath, Buffer.from(`cos\nsystem\n(S'touch ${marker}'\ntR.`, "latin1"))
     const project = await h.caller.projects.open({ path: h.repoDir })
 
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath,
+      load: false,
+      dataset: null,
     })
 
-    expect(preview.type).toBe("metadata")
-    if (preview.type !== "metadata") throw new Error("expected metadata")
-    expect(preview.kind).toBe("other")
+    expect(preview).toMatchObject({
+      type: "metadata",
+      kind: "other",
+      note: "Stores Python objects of type os.system, which Analysis does not open",
+    })
+    await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   test("Zarr directories use the metadata-only preview", async () => {
@@ -1446,6 +1515,8 @@ describe("science.analysis.preview", () => {
     const preview = await h.caller.science.analysis.preview({
       projectId: project.id,
       relPath,
+      load: false,
+      dataset: null,
     })
 
     expect(preview.type).toBe("metadata")
@@ -1456,23 +1527,43 @@ describe("science.analysis.preview", () => {
   test("path traversal is rejected with FORBIDDEN", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     await expect(
-      h.caller.science.analysis.preview({ projectId: project.id, relPath: "../secret.txt" }),
+      h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath: "../secret.txt",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(
-      h.caller.science.analysis.preview({ projectId: project.id, relPath: "/etc/passwd" }),
+      h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath: "/etc/passwd",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
   test("a missing file is a clean NOT_FOUND", async () => {
     const project = await h.caller.projects.open({ path: h.repoDir })
     await expect(
-      h.caller.science.analysis.preview({ projectId: project.id, relPath: "nope.csv" }),
+      h.caller.science.analysis.preview({
+        projectId: project.id,
+        relPath: "nope.csv",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 
   test("an unknown projectId is a clean NOT_FOUND", async () => {
     await expect(
-      h.caller.science.analysis.preview({ projectId: "missing", relPath: "x.csv" }),
+      h.caller.science.analysis.preview({
+        projectId: "missing",
+        relPath: "x.csv",
+        load: false,
+        dataset: null,
+      }),
     ).rejects.toBeInstanceOf(TRPCError)
   })
 })
