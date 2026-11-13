@@ -2,7 +2,7 @@ import { appendFile, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test, vi } from "vitest"
-import { MAX_NPY_BYTES, previewDataFile } from "./discover"
+import { previewDataFile } from "./discover"
 
 // Only the overlap timing is injected. The preview and concurrent append use
 // real files, file handles, reads, and stats.
@@ -19,7 +19,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-test("NumPy growth after stat stops at the actual byte cap (real handles, injected timing)", async () => {
+test("NumPy growth after stat reads only the header and the shown cells (real handles, injected timing)", async () => {
   root = await mkdtemp(join(tmpdir(), "pi-lab-numpy-growth-"))
   const path = join(root, "growing.npy")
   const header = "{'descr': '<f8', 'fortran_order': False, 'shape': (1,), }\n"
@@ -36,7 +36,7 @@ test("NumPy growth after stat stops at the actual byte cap (real handles, inject
     const before = await actualFs.stat(...args)
     if (!grew) {
       grew = true
-      await appendFile(path, Buffer.alloc(MAX_NPY_BYTES + 1024 - initial.length))
+      await appendFile(path, Buffer.alloc(64 * 1024 * 1024))
     }
     return before
   })
@@ -56,8 +56,8 @@ test("NumPy growth after stat stops at the actual byte cap (real handles, inject
     })
   })
 
-  const preview = await previewDataFile(path, "growing.npy")
-  expect(preview).toMatchObject({ type: "metadata", note: "Array too large to decode inline" })
+  const preview = await previewDataFile(path, "growing.npy", { load: false, dataset: null })
+  expect(preview).toMatchObject({ type: "chart", series: [{ values: [0] }] })
   expect(grew).toBe(true)
-  expect(bytesRead).toBe(MAX_NPY_BYTES + 1)
+  expect(bytesRead).toBe(initial.length + 8)
 })

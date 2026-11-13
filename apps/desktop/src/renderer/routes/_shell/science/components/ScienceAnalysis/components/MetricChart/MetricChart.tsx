@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts"
 import type { ChartPreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { formatChartNumber } from "./formatChartNumber"
 
 /**
  * Line-chart renderer for a {@link ChartPreview} — a numeric metric log (a
@@ -58,6 +59,56 @@ function useMeasuredWidth(): { ref: React.RefObject<HTMLDivElement | null>; widt
   return { ref, width }
 }
 
+/** Above this many series the legend is hidden: it would take more room than the chart. */
+const MAX_LEGEND_SERIES = 10
+
+/** The tooltip lists at most this many series, highest values first. */
+const MAX_TOOLTIP_SERIES = 10
+
+interface TooltipEntry {
+  name: string
+  value: number | null
+  color: string
+}
+
+/** Hover card: the x value, then up to MAX_TOOLTIP_SERIES series by value, then "+N more". */
+function ChartTooltip({
+  xText,
+  entries,
+  moreText,
+}: {
+  xText: string
+  entries: TooltipEntry[]
+  moreText: (count: number) => string
+}) {
+  const shown = entries
+    .filter((entry) => entry.value !== null)
+    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+  const listed = shown.slice(0, MAX_TOOLTIP_SERIES)
+  const hidden = shown.length - listed.length
+  return (
+    <div className="rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground text-xs shadow-md">
+      <p data-testid="analysis-chart-tooltip-label" className="mb-1 font-medium">
+        {xText}
+      </p>
+      {listed.map((entry) => (
+        <p
+          key={entry.name}
+          data-testid="analysis-chart-tooltip-item"
+          style={{ color: entry.color }}
+        >
+          {`${entry.name}: ${formatChartNumber(entry.value ?? 0)}`}
+        </p>
+      ))}
+      {hidden > 0 ? (
+        <p data-testid="analysis-chart-tooltip-more" className="mt-1 text-muted-foreground">
+          {moreText(hidden)}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export function MetricChart({ preview }: { preview: ChartPreview }) {
   const t = useTranslate()
   const { ref, width } = useMeasuredWidth()
@@ -85,18 +136,6 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
 
   return (
     <div data-testid="analysis-preview-chart" className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-x-4 gap-y-1" data-testid="analysis-chart-legend">
-        {preview.series.map((series, i) => (
-          <span key={series.label} className="flex items-center gap-1.5 text-xs">
-            <span
-              aria-hidden
-              className="size-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: colorFor(i) }}
-            />
-            <span className="text-muted-foreground">{series.label}</span>
-          </span>
-        ))}
-      </div>
       <div ref={ref} className="w-full">
         <LineChart
           width={width || FALLBACK_WIDTH}
@@ -110,6 +149,7 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
             type="number"
             domain={["dataMin", "dataMax"]}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            tickFormatter={formatChartNumber}
             label={{
               value: preview.xLabel,
               position: "insideBottom",
@@ -117,15 +157,24 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
               style: { fontSize: 11, fill: "var(--muted-foreground)" },
             }}
           />
-          <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+          <YAxis
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            tickFormatter={formatChartNumber}
+          />
           <Tooltip
-            contentStyle={{
-              background: "var(--popover)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontSize: 12,
-              color: "var(--popover-foreground)",
-            }}
+            content={({ active, label, payload }) =>
+              active && payload && payload.length > 0 ? (
+                <ChartTooltip
+                  xText={`${preview.xLabel} ${formatChartNumber(Number(label))}`}
+                  entries={payload.map((entry) => ({
+                    name: String(entry.name),
+                    value: typeof entry.value === "number" ? entry.value : null,
+                    color: String(entry.color),
+                  }))}
+                  moreText={(count) => t("+{count} more").replace("{count}", String(count))}
+                />
+              ) : null
+            }
           />
           {preview.series.map((series, i) => (
             <Line
@@ -141,6 +190,20 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
           ))}
         </LineChart>
       </div>
+      {preview.series.length <= MAX_LEGEND_SERIES ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1" data-testid="analysis-chart-legend">
+          {preview.series.map((series, i) => (
+            <span key={series.label} className="flex items-center gap-1.5 text-xs">
+              <span
+                aria-hidden
+                className="size-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: colorFor(i) }}
+              />
+              <span className="text-muted-foreground">{series.label}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
       {preview.truncated ? (
         <p className="text-amber-500 text-xs">
           {t("Chart downsampled — the file has more points than are plotted.")}

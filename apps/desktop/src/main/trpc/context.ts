@@ -30,6 +30,7 @@ import type { CredentialCipher } from "../setup/credentials"
 import { liveSetupProbe, type SetupProbe } from "../setup/probe"
 import type { ThumbnailImageProcessor } from "./projects/thumbnailImage"
 import type { AnalysisInteractivePort } from "./science/analysis/interactive"
+import type { AnalysisPreviewPort } from "./science/analysis/previewWorker"
 
 /**
  * Dependencies for the main-process router are injected so callers can run
@@ -75,6 +76,8 @@ export interface AppContext {
   discoverPythonEnvironments: PythonEnvironmentDiscoverer
   resolvePythonRuntime: PythonRuntimeResolver
   analysisInteractive: AnalysisInteractivePort
+  /** Runs Analysis file previews (a worker thread in the app). */
+  analysisPreview: AnalysisPreviewPort
   /** marimo and Jupyter servers shown in notebook tabs, stopped on tab close and app quit. */
   notebookServers: NotebookServerPort
   notifications: NotificationBrokers

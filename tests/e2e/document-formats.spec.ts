@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { openAnalysisRun } from "./fixtures/analysis"
+import { openAnalysisExperiment } from "./fixtures/analysis"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -102,7 +102,7 @@ test("Edit project sets the analysis format, and Analysis previews an .ipynb and
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
-  await openAnalysisRun(window, "run")
+  await openAnalysisExperiment(window, "run")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
     .click()

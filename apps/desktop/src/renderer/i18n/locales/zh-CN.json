@@ -231,6 +231,7 @@
   "Checking…": "正在检查…",
   "Environments unavailable": "环境不可用",
   "Auto-detect": "自动检测",
+  "Folders": "文件夹",
   "Choose environment folder…": "选择环境文件夹…",
   "Choose Python interpreter…": "选择 Python 解释器…",
   "Python type checking is on. Click to turn it off.": "Python 类型检查已开启。点击关闭。",
@@ -571,7 +572,7 @@
   "Open a project from the sidebar to browse the data files in its repo.": "从侧边栏打开项目，浏览其仓库中的数据文件。",
   "No data files found": "未找到数据文件",
   "Analysis lists the data files, images, notebooks, and plots discovered in the project's repo.": "分析会列出项目仓库中发现的数据文件、图像、笔记本和图表。",
-  "Select a file to preview its contents.": "选择文件以预览其内容。",
+  "Select a file to view it.": "选择文件即可查看。",
   "Monitor compute machines from your ssh config": "监控 SSH 配置中的计算机器",
   "Temporarily include machines hidden from the cluster grid": "临时显示集群列表中隐藏的机器",
   "Hide hidden": "隐藏已隐藏的机器",
@@ -1138,5 +1139,12 @@
   "List files and folders whose name starts with a dot in the file tree.": "在文件树中显示名称以点开头的文件和文件夹。",
   "Don't ask again": "不再询问",
   "Confirm before deleting files": "删除文件前确认",
-  "Ask before moving a file or folder in the file tree to the Trash.": "将文件树中的文件或文件夹移到废纸篓前进行确认。"
+  "Ask before moving a file or folder in the file tree to the Trash.": "将文件树中的文件或文件夹移到废纸篓前进行确认。",
+  "Large file": "大文件",
+  "loading may be slow": "加载可能较慢",
+  "Load": "加载",
+  "Dataset": "数据集",
+  "scalar": "标量",
+  "datasets": "个数据集",
+  "+{count} more": "还有 {count} 个"
 }
