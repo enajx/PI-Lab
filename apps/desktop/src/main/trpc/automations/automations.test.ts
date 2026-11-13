@@ -86,6 +86,7 @@ function harnessContext(): AppContext {
   return {
     db: h.db,
     skillsHomeDir: h.skillsHomeDir,
+    userDataDir: h.dataDir,
     getDaemonClient: async () => h.client,
     agentCatalog: [FAKE_AGENT, WORKFLOW_AGENT],
     resolveAgentExecutable: async (candidate) => candidate,

@@ -26,7 +26,9 @@ const {
   SciencePanelDiaryButton,
   useSciencePanel,
   useSciencePanelRow,
+  SESSIONS_TAB_ID,
 } = await import("./ScienceSessionPanel")
+const { DIARY_TAB_ID } = await import("../../../projects/components/RightSidebar")
 
 let ensured: string[]
 let started: Array<{ agentId: string; origin: string; projectId: string }>
@@ -78,7 +80,8 @@ function Harness({
   view: "tasks" | "analysis"
   project: { id: string; name: string } | null
 }) {
-  const row = useSciencePanelRow(useSciencePanel(view), useSciencePanelWidth(), 300, null, {
+  const panel = useSciencePanel(view, view === "analysis" ? SESSIONS_TAB_ID : DIARY_TAB_ID)
+  const row = useSciencePanelRow(panel, useSciencePanelWidth(), 300, null, {
     preferred: 320,
     min: 320,
   })
@@ -191,13 +194,24 @@ describe("ScienceSessionPanel", () => {
     expect(started).toEqual([])
   })
 
-  test("with the diary on (the default), the panel starts open on the Diary tab", async () => {
+  test("with the diary on (the default), Tasks starts open on the Diary tab", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
-    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+    window.sessionStorage.clear()
+    renderPanel("tasks", { id: "p-1", name: "Project 1" }, handlers())
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
     expect(screen.getByTestId("diary-button").getAttribute("aria-pressed")).toBe("true")
     expect(await screen.findByTestId("research-diary-panel")).toBeTruthy()
     expect(tabSelected("diary")).toBe("true")
+  })
+
+  test("Analysis starts open on the Sessions tab", async () => {
+    window.localStorage.removeItem("pi-lab.researchDiary.open")
+    window.sessionStorage.clear()
+    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+    expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
+    await screen.findByTestId("panel-tab-sessions")
+    expect(tabSelected("sessions")).toBe("true")
+    expect(screen.getByTestId("diary-button").getAttribute("aria-pressed")).toBe("false")
   })
 
   test("the diary button opens the panel on the Diary tab, and while it shows hides the panel", async () => {
@@ -236,7 +250,8 @@ describe("ScienceSessionPanel", () => {
     expect(within(sidebar).getByTestId("panel-tab-todos")).toBeTruthy()
     expect(within(sidebar).getByTestId("panel-tab-files")).toBeTruthy()
     expect(within(sidebar).getByTestId("panel-tab-pinned:notes/plan.md")).toBeTruthy()
-    expect(tabSelected("diary")).toBe("true")
+    // Analysis opens on Sessions.
+    expect(tabSelected("sessions")).toBe("true")
 
     // On another tab the diary button shows the Diary tab again.
     const button = screen.getByTestId("diary-button")
@@ -258,7 +273,7 @@ describe("ScienceSessionPanel", () => {
 
   test("sessions stay mounted while another tab shows, and a new session shows the Sessions tab", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
-    renderPanel("analysis", { id: "p-3", name: "Project 3" }, handlers())
+    renderPanel("tasks", { id: "p-3", name: "Project 3" }, handlers())
     await agentReady()
     expect(tabSelected("diary")).toBe("true")
     const sessions = screen.getByTestId("panel-sessions")

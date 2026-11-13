@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
+import { openAnalysisRun } from "./fixtures/analysis"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -94,6 +95,7 @@ async function openNotebookTab(): Promise<number> {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await openAnalysisRun(window, "run")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
     .click()
@@ -140,6 +142,7 @@ test("an HTML report in the same window cannot reach a notebook server; the note
   const notebook = window.frames().find((each) => each.url().startsWith(origin))
   expect(await notebook?.evaluate(async () => (await fetch("/api/contents")).ok)).toBe(true)
 
+  await openAnalysisRun(window, "run")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/probe.html"]')
     .click()
@@ -160,11 +163,14 @@ test("with the right panel open on Sessions and the research diary, the preview'
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1200, 800))
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await openAnalysisRun(window, "run")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
     .click()
-  // The right panel starts open on the Diary tab.
+  // The right panel starts open on the Sessions tab; the diary button shows the Diary tab.
   const diaryToggle = window.getByTestId("analysis-research-diary")
+  await expect(diaryToggle).toHaveAttribute("aria-pressed", "false")
+  await diaryToggle.click()
   await expect(diaryToggle).toHaveAttribute("aria-pressed", "true")
   await expect(window.getByTestId("science-sessions")).toHaveAttribute("data-collapsed", "false")
   const button = window.getByTestId("analysis-open-notebook")
@@ -187,6 +193,7 @@ test("Open notebook runs a Jupyter server in a tab, and closing the tab stops it
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
+  await openAnalysisRun(window, "run")
   await window
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/analysis.ipynb"]')
     .click()

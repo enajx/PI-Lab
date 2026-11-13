@@ -35,7 +35,8 @@ export function SettingsSection({
 }
 
 /** A label + supporting text on the left of a settings row. */
-function FieldLabel({ label, description }: { label: ReactNode; description?: ReactNode }) {
+/** A setting row's label and description, translated. */
+export function FieldLabel({ label, description }: { label: ReactNode; description?: ReactNode }) {
   const t = useTranslate()
   return (
     <div className="flex min-w-0 flex-col">
