@@ -24,6 +24,7 @@ import {
   previewDataFile,
 } from "./discover"
 import type { AnalysisInteractiveResult } from "./interactive"
+import { analysisMedia } from "./mediaGrants"
 import {
   effectiveStructureValue,
   readStructureFile,
@@ -421,6 +422,36 @@ export const analysisRouter = router({
     const repoPath = requireRepoPath(ctx.db, input.projectId)
     return readPdfSnapshot(await insideFile(repoPath, input.relPath))
   }),
+
+  /**
+   * Grant the renderer a `pi-lab-media://` URL that streams one project video
+   * or gif (with byte ranges, never read whole). The path and its symlink
+   * target must stay in the project. `closeMedia` revokes it.
+   */
+  openMedia: publicProcedure
+    .input(previewInput)
+    .mutation(async ({ ctx, input }): Promise<{ url: string }> => {
+      const kind = classifyDataFile(input.relPath)
+      if (kind !== "video" && kind !== "animation") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `${input.relPath} is not a video or gif`,
+        })
+      }
+      const repoPath = requireRepoPath(ctx.db, input.projectId)
+      const absPath = await insideFile(repoPath, input.relPath)
+      if (!(await stat(absPath)).isFile()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Not a file: ${input.relPath}` })
+      }
+      return { url: analysisMedia.grant(absPath) }
+    }),
+
+  /** Revoke a media URL from `openMedia`. Idempotent. */
+  closeMedia: publicProcedure
+    .input(z.object({ url: z.string().min(1) }))
+    .mutation(({ input }): void => {
+      analysisMedia.revoke(input.url)
+    }),
 
   /**
    * Open an interactive report or marimo notebook. The renderer receives only

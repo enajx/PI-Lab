@@ -21,6 +21,8 @@ export type DataFileKind =
   | "tsv"
   | "json"
   | "image"
+  | "animation"
+  | "video"
   | "notebook"
   | "marimo"
   | "parquet"
@@ -54,12 +56,20 @@ const KIND_BY_EXTENSION: Readonly<Record<string, DataFileKind>> = {
   png: "image",
   jpg: "image",
   jpeg: "image",
-  gif: "image",
   webp: "image",
   bmp: "image",
   svg: "image",
   tif: "image",
   tiff: "image",
+  // Animations: gifs and videos, streamed to the preview from the file
+  gif: "animation",
+  mp4: "video",
+  m4v: "video",
+  webm: "video",
+  mov: "video",
+  mkv: "video",
+  avi: "video",
+  ogv: "video",
   // Computational notebooks
   ipynb: "notebook",
   // Columnar binary data stores
@@ -127,6 +137,8 @@ export const ALL_DATA_FILE_KINDS: readonly DataFileKind[] = [
   "tsv",
   "json",
   "image",
+  "animation",
+  "video",
   "notebook",
   "marimo",
   "parquet",
@@ -148,6 +160,8 @@ export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
   tsv: "TSV",
   json: "JSON",
   image: "Figure",
+  animation: "Animation",
+  video: "Video",
   notebook: "Notebooks",
   marimo: "marimo",
   parquet: "Parquet",
@@ -165,13 +179,14 @@ export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
 
 /**
  * The categories of the Analysis filter chips: Data (tables, arrays, stores),
- * Figures (images, PDFs, plots), Markup (JSON, YAML, TOML, XML…), Text (text,
+ * Figures (images, PDFs, plots), Animations (gifs, videos), Markup (JSON, YAML, TOML, XML…), Text (text,
  * logs, Markdown), Notebooks, Reports (HTML) and Other. A chip with several
  * formats present ({@link fileFormatOf}) shows them as a second row of chips.
  */
 export type DataFileCategory =
   | "data"
   | "figure"
+  | "animation"
   | "markup"
   | "text"
   | "notebook"
@@ -189,6 +204,8 @@ const CATEGORY_BY_KIND: Readonly<Record<DataFileKind, DataFileCategory>> = {
   image: "figure",
   pdf: "figure",
   plot: "figure",
+  animation: "animation",
+  video: "animation",
   json: "markup",
   markup: "markup",
   text: "text",
@@ -211,6 +228,7 @@ export function categoryOf(kind: DataFileKind): DataFileCategory {
 export const ALL_DATA_FILE_CATEGORIES: readonly DataFileCategory[] = [
   "data",
   "figure",
+  "animation",
   "markup",
   "text",
   "notebook",
@@ -222,6 +240,7 @@ export const ALL_DATA_FILE_CATEGORIES: readonly DataFileCategory[] = [
 export const DATA_FILE_CATEGORY_LABELS: Readonly<Record<DataFileCategory, string>> = {
   data: "Data",
   figure: "Figures",
+  animation: "Animations",
   markup: "Markup",
   text: "Text",
   notebook: "Notebooks",
@@ -327,6 +346,8 @@ export function isPreviewableKind(kind: DataFileKind): boolean {
     kind === "markup" ||
     kind === "text" ||
     kind === "npy" ||
-    kind === "pdf"
+    kind === "pdf" ||
+    kind === "animation" ||
+    kind === "video"
   )
 }

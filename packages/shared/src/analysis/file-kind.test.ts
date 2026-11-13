@@ -40,6 +40,15 @@ describe("classifyDataFile", () => {
     expect(classifyDataFile("figure.eps")).toBe("plot")
   })
 
+  test("classifies videos and gifs as animations, and leaves model weights out", () => {
+    for (const ext of ["mp4", "m4v", "webm", "mov", "mkv", "avi", "ogv"]) {
+      expect(classifyAnalysisArtifact(`results/run/growth.${ext}`, "file")).toBe("video")
+    }
+    expect(classifyAnalysisArtifact("results/run/growth.GIF", "file")).toBe("animation")
+    expect(classifyAnalysisArtifact("results/run/model.pt", "file")).toBeNull()
+    expect(classifyAnalysisArtifact("results/run/model.pth", "file")).toBeNull()
+  })
+
   test("classifies NumPy arrays", () => {
     expect(classifyDataFile("runs/loss.npy")).toBe("npy")
     expect(classifyDataFile("checkpoints/weights.npz")).toBe("npz")
@@ -198,6 +207,8 @@ describe("categoryOf", () => {
 
   test("Figures merges images, PDFs and plots; Markup and Text split the text kinds", () => {
     expect(categoryOf("image")).toBe("figure")
+    expect(categoryOf("video")).toBe("animation")
+    expect(categoryOf("animation")).toBe("animation")
     expect(categoryOf("pdf")).toBe("figure")
     expect(categoryOf("plot")).toBe("figure")
     expect(categoryOf("json")).toBe("markup")
@@ -235,7 +246,7 @@ describe("category metadata", () => {
       expect(DATA_FILE_CATEGORY_LABELS[category]).toBeTruthy()
     }
     expect(ALL_DATA_FILE_CATEGORIES.map((category) => DATA_FILE_CATEGORY_LABELS[category])).toEqual(
-      ["Data", "Figures", "Markup", "Text", "Notebooks", "Reports", "Other"],
+      ["Data", "Figures", "Animations", "Markup", "Text", "Notebooks", "Reports", "Other"],
     )
     // The old labels are gone from chips and from the preview's kind label.
     const labels = [
@@ -268,6 +279,8 @@ describe("isPreviewableKind", () => {
     expect(isPreviewableKind("text")).toBe(true)
     expect(isPreviewableKind("npy")).toBe(true)
     expect(isPreviewableKind("pdf")).toBe(true)
+    expect(isPreviewableKind("video")).toBe(true)
+    expect(isPreviewableKind("animation")).toBe(true)
     expect(isPreviewableKind("markup")).toBe(true)
     expect(isPreviewableKind("report")).toBe(true)
     expect(isPreviewableKind("marimo")).toBe(true)

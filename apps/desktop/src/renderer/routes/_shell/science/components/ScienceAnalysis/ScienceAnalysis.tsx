@@ -85,8 +85,8 @@ import "./selectFolderPrompt.css"
  *
  * The filter chips are {@link DataFileCategory}s (Data, Figures, Markup, Text, …),
  * only those present. Below them, a row of smaller format chips shows the
- * formats present in the selected category (e.g. Figures: PDF, PNG, SVG), or
- * every format under All, when there is more than one. A format chip filters
+ * formats present in the selected category (e.g. Figures: PDF, PNG, SVG),
+ * always, or every format under All when there is more than one. A format chip filters
  * to that format; clicking it again shows all formats again.
  *
  * A project picker in the top bar remembers the last project; `initialProjectId`
@@ -267,7 +267,8 @@ export function ScienceAnalysis({
   }, [allFiles])
 
   // Formats present in the selected category (every format under All), sorted.
-  // More than one shows them as the row of format chips.
+  // A selected category always shows them as the row of format chips; All
+  // shows the row when there is more than one format.
   const formatsPresent = useMemo(() => {
     const set = new Set<string>()
     for (const file of allFiles) {
@@ -598,7 +599,7 @@ export function ScienceAnalysis({
                         ))}
                       </div>
                     ) : null}
-                    {formatsPresent.length > 1 ? (
+                    {formatsPresent.length > (categoryFilter === "all" ? 1 : 0) ? (
                       <div className="flex flex-wrap gap-1" data-testid="analysis-format-filters">
                         {formatsPresent.map((format) => (
                           <FilterChip

@@ -14,6 +14,7 @@ import {
   MAX_TABLE_ROWS,
   MAX_TEXT_BYTES,
 } from "./discover"
+import { analysisMedia } from "./mediaGrants"
 
 let h: Harness
 
@@ -734,6 +735,70 @@ describe("science.analysis PDF preview", () => {
     ).rejects.toThrow("Select a PDF file")
     await expect(
       h.caller.science.analysis.pdf({ ...input, relPath: "../outside.pdf" }),
+    ).rejects.toThrow()
+  })
+})
+
+describe("science.analysis media preview", () => {
+  test("videos and gifs are listed; .pt/.pth stay out", async () => {
+    await writeRepoFile("results/run/growth.mp4", "v")
+    await writeRepoFile("results/run/growth.gif", "g")
+    await writeRepoFile("results/run/model.pt", "w")
+    await writeRepoFile("results/run/model.pth", "w")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const listing = await h.caller.science.analysis.listFiles({
+      projectId: project.id,
+      defaultResultsFolder: "results",
+    })
+    const kinds = Object.fromEntries(
+      listing.groups.flatMap((group) => group.files.map((file) => [file.relPath, file.kind])),
+    )
+    expect(kinds).toEqual({
+      "results/run/growth.mp4": "video",
+      "results/run/growth.gif": "animation",
+    })
+  })
+
+  test("openMedia streams a project video with byte ranges, and closeMedia revokes it", async () => {
+    const bytes = Buffer.from("0123456789abcdef")
+    await writeRepoFile("results/run/growth.mp4", bytes)
+    await writeRepoFile("results/run/notes.txt", "x\n")
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const { url } = await h.caller.science.analysis.openMedia({
+      projectId: project.id,
+      relPath: "results/run/growth.mp4",
+    })
+    expect(url).toMatch(/^pi-lab-media:\/\/[0-9a-f-]+\/growth\.mp4$/)
+
+    const full = await analysisMedia.handle(new Request(url))
+    expect(full.status).toBe(200)
+    expect(full.headers.get("content-type")).toBe("video/mp4")
+    expect(full.headers.get("accept-ranges")).toBe("bytes")
+    expect(Buffer.from(await full.arrayBuffer())).toEqual(bytes)
+
+    const part = await analysisMedia.handle(new Request(url, { headers: { Range: "bytes=2-5" } }))
+    expect(part.status).toBe(206)
+    expect(part.headers.get("content-range")).toBe("bytes 2-5/16")
+    expect(Buffer.from(await part.arrayBuffer()).toString()).toBe("2345")
+    const tail = await analysisMedia.handle(new Request(url, { headers: { Range: "bytes=10-" } }))
+    expect(Buffer.from(await tail.arrayBuffer()).toString()).toBe("abcdef")
+
+    await h.caller.science.analysis.closeMedia({ url })
+    expect((await analysisMedia.handle(new Request(url))).status).toBe(404)
+
+    // Only videos and gifs, and only inside the project (symlinks too).
+    await expect(
+      h.caller.science.analysis.openMedia({
+        projectId: project.id,
+        relPath: "results/run/notes.txt",
+      }),
+    ).rejects.toThrow()
+    await symlink("/etc/hosts", join(h.repoDir, "results", "run", "escape.mp4"))
+    await expect(
+      h.caller.science.analysis.openMedia({
+        projectId: project.id,
+        relPath: "results/run/escape.mp4",
+      }),
     ).rejects.toThrow()
   })
 })

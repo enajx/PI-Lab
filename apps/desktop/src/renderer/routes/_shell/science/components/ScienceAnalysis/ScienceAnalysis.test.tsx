@@ -1081,17 +1081,29 @@ describe("ScienceAnalysis", () => {
     expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
   })
 
-  test("a category with a single format shows no format row", async () => {
+  test("a selected category always shows its format row, even with one format", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
         listing([
           { relPath: "figs/plot.png", name: "plot.png", kind: "image" },
-          { relPath: "data/m.csv", name: "m.csv", kind: "csv" },
+          { relPath: "runs/growth.mp4", name: "growth.mp4", kind: "video" },
+          { relPath: "runs/growth.gif", name: "growth.gif", kind: "animation" },
         ]),
     })
     fireEvent.click(await screen.findByTestId("analysis-category-figure"))
-    expect(screen.queryByTestId("analysis-format-filters")).toBeNull()
+    const formats = () =>
+      within(screen.getByTestId("analysis-format-filters"))
+        .getAllByRole("button")
+        .map((chip) => chip.textContent)
+    expect(formats()).toEqual(["PNG"])
+    // Animations: gifs and videos, with their own format chips.
+    fireEvent.click(screen.getByTestId("analysis-category-animation"))
+    expect(formats()).toEqual(["GIF", "MP4"])
+    fireEvent.click(screen.getByTestId("analysis-format-mp4"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "runs/growth.mp4",
+    ])
   })
 
   test("the project picker sits in the top bar and switches and remembers the project", async () => {
@@ -1252,6 +1264,42 @@ describe("Analysis preview formats (mocked server)", () => {
     expect(await within(pane).findByRole("heading", { name: "Loss went down" })).toBeTruthy()
     expect(within(pane).getByText("10%").tagName).toBe("STRONG")
     expect(within(pane).queryByText(/title: Run 1/)).toBeNull()
+  })
+
+  test("a video plays muted and looping with controls from a media grant, revoked on switch", async () => {
+    const openMedia = vi.fn(() => ({ url: "pi-lab-media://t1/growth.mp4" }))
+    const closeMedia = vi.fn(() => undefined)
+    const { unmount } = renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([{ relPath: "results/growth.mp4", name: "growth.mp4", kind: "video" }]),
+      "science.analysis.openMedia": openMedia,
+      "science.analysis.closeMedia": closeMedia,
+    })
+    fireEvent.click(await screen.findByTestId("analysis-file"))
+    const video = (await screen.findByTestId("analysis-preview-video")) as HTMLVideoElement
+    expect(openMedia).toHaveBeenCalledWith({ projectId: "p1", relPath: "results/growth.mp4" })
+    expect(video.getAttribute("src")).toBe("pi-lab-media://t1/growth.mp4")
+    expect(video.muted).toBe(true)
+    expect(video.loop).toBe(true)
+    expect(video.controls).toBe(true)
+    unmount()
+    await waitFor(() =>
+      expect(closeMedia).toHaveBeenCalledWith({ url: "pi-lab-media://t1/growth.mp4" }),
+    )
+  })
+
+  test("a gif shows as an animated image from a media grant", async () => {
+    const pane = await selectFile(
+      { relPath: "results/growth.gif", name: "growth.gif", kind: "animation" },
+      {
+        "science.analysis.openMedia": () => ({ url: "pi-lab-media://t2/growth.gif" }),
+        "science.analysis.closeMedia": () => undefined,
+      },
+    )
+    const image = await within(pane).findByTestId("analysis-preview-animation")
+    expect(image.tagName).toBe("IMG")
+    expect(image.getAttribute("src")).toBe("pi-lab-media://t2/growth.gif")
   })
 
   test("a Jupyter notebook shows Markdown cells, code cells and their stored outputs", async () => {

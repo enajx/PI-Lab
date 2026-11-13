@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createServer, type Server } from "node:http"
 import { createRequire } from "node:module"
 import type { AddressInfo } from "node:net"
@@ -371,6 +371,88 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   await pdf.click()
   await expect(pdf).toHaveAttribute("aria-pressed", "false")
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(2)
+})
+
+test("a results folder laid out like the user's shows Figures: PDF, PNG and Markup: YML format rows", async () => {
+  // The layout of a real project's results/ (multiplexing/<date>/plots, runs/<name>, …).
+  const files = [
+    "multiplexing/20260214_141942/best_loss_vs_n.csv",
+    "multiplexing/20260214_141942/plots/best_loss_vs_n_log.png",
+    "multiplexing/20260214_141942/runs/patterns_conditional_growth/gradient_magnitudes_7hf2hacr.pdf",
+    "multiplexing/20260214_141942/runs/patterns_conditional_growth/hidden_states.png",
+    "multiplexing/20260214_141942/runs/patterns_conditional_growth/config.yml",
+    "multiplexing/20260214_141942/runs/patterns_conditional_growth/states.npy",
+    "pattern_translation/fully-witty-marmot/training_curve_lly7qbhx.pdf",
+    "pattern_translation/fully-witty-marmot/grid.png",
+  ]
+  await rm(join(repoDir, "results"), { recursive: true })
+  for (const file of files) {
+    await mkdir(dirname(join(repoDir, "results", file)), { recursive: true })
+    await writeFile(join(repoDir, "results", file), "x")
+  }
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  const formats = window.getByTestId("analysis-format-filters").getByRole("button")
+  await window.getByTestId("analysis-category-figure").click({ timeout: 30_000 })
+  await expect(formats).toHaveText(["PDF", "PNG"])
+  for (const chip of await formats.all()) await expect(chip).toBeVisible()
+  // A category with a single format still shows its row.
+  await window.getByTestId("analysis-category-markup").click()
+  await expect(formats).toHaveText(["YML"])
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-user-layout.png") })
+})
+
+test("Animations lists videos and gifs; a video plays muted and looping, a gif animates", async () => {
+  const run = join(repoDir, "results", "multiplexing", "run_a")
+  await mkdir(run, { recursive: true })
+  await copyFile(join(HERE, "fixtures", "media", "tiny.mp4"), join(run, "growth.mp4"))
+  await copyFile(join(HERE, "fixtures", "media", "tiny.gif"), join(run, "growth.gif"))
+  await writeFile(join(run, "model.pt"), "weights")
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+
+  await window.getByTestId("analysis-category-animation").click({ timeout: 30_000 })
+  await expect(window.getByTestId("analysis-format-filters").getByRole("button")).toHaveText([
+    "GIF",
+    "MP4",
+  ])
+  await openAnalysisExperiment(window, "multiplexing")
+  await expect(window.getByTestId("analysis-file")).toHaveCount(2)
+  await expect(
+    window.locator('[data-testid="analysis-file"][data-rel-path$="model.pt"]'),
+  ).toHaveCount(0)
+
+  // The video streams from its media grant and loads (16x16 px), muted and looping.
+  await window.locator('[data-testid="analysis-file"][data-rel-path$="growth.mp4"]').click()
+  const video = window.getByTestId("analysis-preview-video")
+  await expect(video).toHaveAttribute("src", /^pi-lab-media:\/\//, { timeout: 30_000 })
+  await expect
+    .poll(() => video.evaluate((element: HTMLVideoElement) => element.videoWidth), {
+      timeout: 30_000,
+    })
+    .toBe(16)
+  expect(
+    await video.evaluate((element: HTMLVideoElement) => [
+      element.muted,
+      element.loop,
+      element.controls,
+      element.error,
+    ]),
+  ).toEqual([true, true, true, null])
+  await window.screenshot({ path: resolve(".cache", "screens", "analysis-video.png") })
+
+  // The gif loads as an image.
+  await window.locator('[data-testid="analysis-file"][data-rel-path$="growth.gif"]').click()
+  const gif = window.getByTestId("analysis-preview-animation")
+  await expect
+    .poll(() => gif.evaluate((element: HTMLImageElement) => element.naturalWidth), {
+      timeout: 30_000,
+    })
+    .toBe(16)
 })
 
 test("with no results folder, Analysis shows no folder and points to Select experiments folder", async () => {

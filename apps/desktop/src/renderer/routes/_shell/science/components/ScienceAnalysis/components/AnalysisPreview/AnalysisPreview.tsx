@@ -56,10 +56,11 @@ export function AnalysisPreview({
   const trpc = useTRPC()
   const interactive = kind === "report" || kind === "marimo"
   const pdf = kind === "pdf"
+  const media = kind === "video" || kind === "animation"
   const [pdfStatus, setPdfStatus] = useState("")
   const preview = useQuery({
     ...trpc.science.analysis.preview.queryOptions({ projectId, relPath }),
-    enabled: !interactive && !pdf,
+    enabled: !interactive && !pdf && !media,
     staleTime: 30_000,
   })
   const renderTool = documentToolForFile(
@@ -123,10 +124,17 @@ export function AnalysisPreview({
       </div>
       <div
         data-testid="analysis-preview"
-        className={`min-h-0 flex-1 ${interactive || shownRender || pdf ? "flex flex-col overflow-hidden" : "overflow-auto p-4"}`}
+        className={`min-h-0 flex-1 ${interactive || shownRender || pdf || media ? "flex flex-col overflow-hidden" : "overflow-auto p-4"}`}
       >
         {pdf ? (
           <AnalysisPdf projectId={projectId} relPath={relPath} onMessage={setPdfStatus} />
+        ) : media ? (
+          <MediaPreview
+            key={relPath}
+            projectId={projectId}
+            relPath={relPath}
+            kind={kind === "video" ? "video" : "animation"}
+          />
         ) : shownRender ? (
           <RenderedDocument
             projectId={projectId}
@@ -161,6 +169,81 @@ export function AnalysisPreview({
           <PreviewBody preview={preview.data} kind={kind} />
         ) : null}
       </div>
+    </div>
+  )
+}
+
+/**
+ * A project video (muted, looping, with controls) or gif (an animated image),
+ * streamed from a `pi-lab-media://` grant (`science.analysis.openMedia`) so a
+ * large file is never read whole. The grant is revoked when the preview closes.
+ */
+function MediaPreview({
+  projectId,
+  relPath,
+  kind,
+}: {
+  projectId: string
+  relPath: string
+  kind: "video" | "animation"
+}) {
+  const t = useTranslate()
+  const client = useTRPCClient()
+  const [url, setUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    let granted: string | null = null
+    client.science.analysis.openMedia
+      .mutate({ projectId, relPath })
+      .then((result) => {
+        granted = result.url
+        if (live) setUrl(result.url)
+        else
+          void client.science.analysis.closeMedia.mutate({ url: result.url }).catch(console.error)
+      })
+      .catch((cause: unknown) => {
+        if (live) setError(cause instanceof Error ? cause.message : String(cause))
+      })
+    return () => {
+      live = false
+      if (granted !== null)
+        void client.science.analysis.closeMedia.mutate({ url: granted }).catch(console.error)
+    }
+  }, [client, projectId, relPath])
+  if (error !== null) {
+    return (
+      <p data-testid="analysis-preview-error" className="p-4 text-destructive text-sm">
+        {error}
+      </p>
+    )
+  }
+  if (url === null)
+    return <p className="p-4 text-muted-foreground text-sm">{t("Loading preview…")}</p>
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto p-4">
+      {kind === "video" ? (
+        <video
+          data-testid="analysis-preview-video"
+          src={url}
+          muted
+          loop
+          controls
+          autoPlay
+          playsInline
+          onError={() =>
+            setError(t("This video cannot be played here (format or codec not supported)."))
+          }
+          className="max-h-full max-w-full"
+        />
+      ) : (
+        <img
+          data-testid="analysis-preview-animation"
+          src={url}
+          alt={relPath}
+          className="max-h-full max-w-full object-contain"
+        />
+      )}
     </div>
   )
 }
