@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -506,21 +515,23 @@ function onePagePdf(text: string): string {
 }
 
 /**
- * A paper with no main.tex and two documents: the one with a built PDF
- * (`build/paper.pdf`, newer than its source) is guessed as the main document.
- * Opening it with no saved tabs shows the .tex and its PDF side by side, with
- * no Show in PDF item in the footer. The footer's main document item changes
+ * A paper with no main.tex and two documents: the one with a PDF next to it
+ * (`paper.pdf`, older than its source, as after a checkout) is guessed as the
+ * main document. Opening it with no saved tabs and no build output shows the
+ * .tex and that PDF side by side without building, with no Show in PDF item in
+ * the footer. The footer's main document item changes
  * the main document, and the choice is kept after a reload.
  */
-test("LaTeX Editor opens the guessed main .tex and its PDF side by side, and the footer changes the main document", async () => {
+test("LaTeX Editor opens the guessed main .tex and its existing PDF side by side without building, and the footer changes the main document", async () => {
   test.setTimeout(120_000)
   const root = await mkdtemp(join(tmpdir(), "pi-lab-latex-main-doc-e2e-"))
   const { project, paper } = await setUp(root)
   await rm(join(paper, "main.tex"))
   await writeFile(join(paper, "paper.tex"), MAIN)
   await writeFile(join(paper, "notes.tex"), MAIN.replace("Introduction", "Notes"))
-  await mkdir(join(paper, "build"))
-  await writeFile(join(paper, "build", "paper.pdf"), onePagePdf("Guessed main PDF"))
+  await writeFile(join(paper, "paper.pdf"), onePagePdf("Guessed main PDF"))
+  const anHourAgo = new Date(Date.now() - 3_600_000)
+  await utimes(join(paper, "paper.pdf"), anHourAgo, anHourAgo)
   let app: ElectronApplication | null = null
   try {
     app = await launch(root, project, paper, {})
@@ -539,6 +550,10 @@ test("LaTeX Editor opens the guessed main .tex and its PDF side by side, and the
     expect(source && pdf && pdf.x > source.x + source.width / 2).toBe(true)
 
     const footer = page.getByTestId("editor-status-bar")
+    // The PDF shown is the one next to the .tex, and nothing was built.
+    await page.getByTestId("central-tab-select").filter({ hasText: "paper.pdf" }).click()
+    await expect(footer.getByTestId("editor-status-label")).toHaveText("paper.pdf")
+    expect(existsSync(join(paper, "build"))).toBe(false)
     await page.getByTestId("central-tab-select").filter({ hasText: "paper.tex" }).click()
     await expect(footer.getByTestId("editor-status-label")).toHaveText("paper.tex")
     await expect(footer.getByTestId("latex-show-pdf")).toHaveCount(0)

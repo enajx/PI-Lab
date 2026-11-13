@@ -445,6 +445,31 @@ describe("PaperEditor Start draft and Update paper (mocked server)", () => {
     cleanup()
   })
 
+  test("with no build output, a PDF next to the .tex (even an older one) shows at once without building", async () => {
+    const builds: unknown[] = []
+    const client = createFakeTrpcClient({
+      ...handlers(),
+      "files.stat": (input) => statFiles(input, { "main.tex": 2, "main.pdf": 1 }),
+      "pdf.build": (input) => {
+        builds.push(input)
+        return { relPath: "build/main.pdf", success: true, log: "" }
+      },
+    })
+    renderEditor(client, "p22", null, null, null)
+    await waitFor(() => expect(tabLabels()).toEqual(["main.tex", "main.pdf"]))
+    const pdfTab = screen
+      .getAllByTestId("central-tab-select")
+      .find((tab) => tab.textContent?.includes("main.pdf"))
+    if (!pdfTab) throw new Error("no main.pdf tab")
+    fireEvent.click(pdfTab)
+    // The status bar names the focused file by its path: the PDF next to the .tex.
+    await waitFor(() =>
+      expect(screen.getByTestId("editor-status-label").textContent).toBe("main.pdf"),
+    )
+    expect(builds).toEqual([])
+    cleanup()
+  })
+
   test("Update paper in the top bar starts a write-research agent as a focused tab", async () => {
     const slot = document.createElement("div")
     document.body.append(slot)

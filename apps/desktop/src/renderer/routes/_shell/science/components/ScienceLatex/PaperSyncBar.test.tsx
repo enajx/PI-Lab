@@ -309,6 +309,12 @@ describe("PaperSyncBar (mocked server)", () => {
     )
     // The popover stays open so the output folder can be changed too.
     expect(within(footer).getByTestId("paper-output-dir")).toBeTruthy()
+    // "What's this?" help: each control has its own title and body.
+    for (const id of ["paper-output-folder", "paper-main-doc", "paper-output-dir"]) {
+      const control = within(footer).getByTestId(id)
+      expect(control.dataset.featureLabel, id).toBeTruthy()
+      expect(control.dataset.featureHelp, id).toBeTruthy()
+    }
   })
   test("the footer's output folder item opens a popover that sets the folder on Enter and shows a rejected value", async () => {
     const setOutputDir = vi.fn((input: unknown) => {

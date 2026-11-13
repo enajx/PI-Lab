@@ -340,6 +340,9 @@ function MainDocOutputItem({
         data-testid="paper-output-folder"
         title={error ?? t("Main document and build output folder for this paper")}
         data-feature-label={t("Main document and output folder")}
+        data-feature-help={t(
+          "The paper's main .tex file, which builds the PDF, and the folder the build writes to. Click to change either.",
+        )}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -363,6 +366,10 @@ function MainDocOutputItem({
             {t("Main document")}
             <select
               data-testid="paper-main-doc"
+              data-feature-label={t("Main document")}
+              data-feature-help={t(
+                "The .tex file built as the paper. Saving a .tex with no \\documentclass or % !TeX root of its own builds this file. Automatic lets PI Lab guess it.",
+              )}
               value={chosenMainDoc ?? ""}
               disabled={setMainDoc.isPending}
               onChange={(event) => {
@@ -388,6 +395,10 @@ function MainDocOutputItem({
               {t("Output folder")}
               <input
                 data-testid="paper-output-dir"
+                data-feature-label={t("Output folder")}
+                data-feature-help={t(
+                  "Where this paper's builds write the PDF, relative to the main .tex file's folder (. for next to it). Leave empty to use the default from Settings > LaTeX.",
+                )}
                 // biome-ignore lint/a11y/noAutofocus: the popover opens to edit this field.
                 autoFocus
                 value={draft ?? outputDir ?? ""}
