@@ -346,10 +346,11 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   )
   // Under All, the second row has every format present.
   const formats = window.getByTestId("analysis-format-filters").getByRole("button")
-  await expect(formats).toHaveText(["CSV", "HTML", "PDF", "PNG", "PY", "SVG", "TXT"])
+  await expect(formats).toHaveText(["CSV", "PNG", "PDF", "SVG", "TXT", "PY", "HTML"])
 
   await window.getByTestId("analysis-category-figure").click()
-  await expect(formats).toHaveText(["PDF", "PNG", "SVG"])
+  await expect(formats).toHaveText(["PNG", "PDF", "SVG", "JPG"])
+  await expect(window.getByTestId("analysis-format-jpg")).toBeDisabled()
   await expect(window.getByText("All figures")).toHaveCount(0)
   const pdf = window.getByTestId("analysis-format-pdf")
   await pdf.click()
@@ -373,7 +374,7 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(2)
 })
 
-test("a results folder laid out like the user's shows Figures: PDF, PNG and Markup: YML format rows", async () => {
+test("a results folder laid out like the user's shows the Figures and Markup format rows", async () => {
   // The layout of a real project's results/ (multiplexing/<date>/plots, runs/<name>, …).
   const files = [
     "multiplexing/20260214_141942/best_loss_vs_n.csv",
@@ -396,11 +397,16 @@ test("a results folder laid out like the user's shows Figures: PDF, PNG and Mark
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   const formats = window.getByTestId("analysis-format-filters").getByRole("button")
   await window.getByTestId("analysis-category-figure").click({ timeout: 30_000 })
-  await expect(formats).toHaveText(["PDF", "PNG"])
+  await expect(formats).toHaveText(["PNG", "PDF", "SVG", "JPG"])
   for (const chip of await formats.all()) await expect(chip).toBeVisible()
-  // A category with a single format still shows its row.
+  await expect(window.getByTestId("analysis-format-png")).toBeEnabled()
+  await expect(window.getByTestId("analysis-format-pdf")).toBeEnabled()
+  await expect(window.getByTestId("analysis-format-svg")).toBeDisabled()
+  // Markup lists its fixed formats; only YAML (the .yml file) has files.
   await window.getByTestId("analysis-category-markup").click()
-  await expect(formats).toHaveText(["YML"])
+  await expect(formats).toHaveText(["YAML", "TOML", "JSON", "XML"])
+  await expect(window.getByTestId("analysis-format-yaml")).toBeEnabled()
+  await expect(window.getByTestId("analysis-format-toml")).toBeDisabled()
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-user-layout.png") })
 })
 
@@ -417,9 +423,19 @@ test("Animations lists videos and gifs; a video plays muted and looping, a gif a
 
   await window.getByTestId("analysis-category-animation").click({ timeout: 30_000 })
   await expect(window.getByTestId("analysis-format-filters").getByRole("button")).toHaveText([
-    "GIF",
     "MP4",
+    "GIF",
+    "WEBM",
+    "MOV",
+    "MKV",
   ])
+  await expect(window.getByTestId("analysis-format-webm")).toBeDisabled()
+  // The format row is one line: every chip sits at the same height.
+  const tops = await window
+    .getByTestId("analysis-format-filters")
+    .getByRole("button")
+    .evaluateAll((chips) => chips.map((chip) => Math.round(chip.getBoundingClientRect().top)))
+  expect(new Set(tops).size).toBe(1)
   await openAnalysisExperiment(window, "multiplexing")
   await expect(window.getByTestId("analysis-file")).toHaveCount(2)
   await expect(

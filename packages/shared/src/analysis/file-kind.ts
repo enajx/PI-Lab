@@ -264,6 +264,78 @@ function extensionOf(filePath: string): string {
   return base.slice(lastDot + 1).toLowerCase()
 }
 
+/** One chip of the format row: a label and the extensions it matches. */
+export interface FormatChip {
+  /** Unique id (the first extension), used in test ids and as the filter value. */
+  id: string
+  label: string
+  extensions: readonly string[]
+}
+
+/** A chip for one or more extensions; the id is the first extension. */
+function chip(label: string, extensions: readonly string[]): FormatChip {
+  return { id: extensions[0] ?? label.toLowerCase(), label, extensions }
+}
+
+/**
+ * The fixed, ordered format chips of each category: at most six of the most
+ * common ones, so the row fits one line at the default panel width. A selected
+ * category's row lists all of them (absent ones greyed out), then any other
+ * format present in the folder ({@link formatChipOf}).
+ */
+const FORMAT_CHIPS: Readonly<Record<DataFileCategory, readonly FormatChip[]>> = {
+  data: [
+    chip("CSV", ["csv"]),
+    chip("PARQUET", ["parquet", "pq"]),
+    chip("NPY", ["npy"]),
+    chip("NPZ", ["npz"]),
+    chip("H5", ["h5", "hdf5"]),
+    chip("DB", ["db", "sqlite", "sqlite3"]),
+  ],
+  figure: [
+    chip("PNG", ["png"]),
+    chip("PDF", ["pdf"]),
+    chip("SVG", ["svg"]),
+    chip("JPG", ["jpg", "jpeg"]),
+  ],
+  animation: [
+    chip("MP4", ["mp4"]),
+    chip("GIF", ["gif"]),
+    chip("WEBM", ["webm"]),
+    chip("MOV", ["mov"]),
+    chip("MKV", ["mkv"]),
+  ],
+  markup: [
+    chip("YAML", ["yaml", "yml"]),
+    chip("TOML", ["toml"]),
+    chip("JSON", ["json"]),
+    chip("XML", ["xml"]),
+  ],
+  text: [chip("TXT", ["txt"]), chip("MD", ["md"]), chip("LOG", ["log"])],
+  notebook: [chip("IPYNB", ["ipynb"]), chip("PY", ["py"])],
+  report: [chip("HTML", ["html", "htm"])],
+  other: [],
+}
+
+/** The fixed, ordered format chips of a category. */
+export function formatChipsOf(category: DataFileCategory): readonly FormatChip[] {
+  return FORMAT_CHIPS[category]
+}
+
+/**
+ * The chip an extension (from {@link fileFormatOf}) belongs to: its chip in
+ * the fixed lists (so `yml` is the YAML chip), else a chip of its own.
+ */
+export function formatChipOf(extension: string): FormatChip {
+  for (const category of ALL_DATA_FILE_CATEGORIES) {
+    const found = FORMAT_CHIPS[category].find((candidate) =>
+      candidate.extensions.includes(extension),
+    )
+    if (found) return found
+  }
+  return chip(extension.toUpperCase(), [extension])
+}
+
 /**
  * The file's format: its lowercase extension (`pdf`, `png`, `zarr`), or `""`
  * with none. A filter chip's sub-list offers one entry per format present.

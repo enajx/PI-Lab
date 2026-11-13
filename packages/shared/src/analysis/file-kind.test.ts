@@ -11,6 +11,8 @@ import {
   type DataFileCategory,
   type DataFileKind,
   fileFormatOf,
+  formatChipOf,
+  formatChipsOf,
   isMarimoNotebookSource,
   isPreviewableKind,
 } from "./file-kind"
@@ -257,6 +259,30 @@ describe("category metadata", () => {
     expect(DATA_FILE_KIND_LABELS.plot).toBe("Figure")
     expect(DATA_FILE_KIND_LABELS.pdf).toBe("Figure")
     expect(DATA_FILE_KIND_LABELS.image).toBe("Figure")
+  })
+})
+
+describe("format chips", () => {
+  test("each category has a short fixed list of format chips, in order", () => {
+    const labels = (category: DataFileCategory) => formatChipsOf(category).map((chip) => chip.label)
+    expect(labels("figure")).toEqual(["PNG", "PDF", "SVG", "JPG"])
+    expect(labels("animation")).toEqual(["MP4", "GIF", "WEBM", "MOV", "MKV"])
+    expect(labels("markup")).toEqual(["YAML", "TOML", "JSON", "XML"])
+    expect(labels("text")).toEqual(["TXT", "MD", "LOG"])
+    for (const category of ALL_DATA_FILE_CATEGORIES) {
+      expect(formatChipsOf(category).length).toBeLessThanOrEqual(6)
+    }
+  })
+
+  test("an extension maps to its chip; YAML and YML share one; others get their own", () => {
+    expect(formatChipOf("yml")).toEqual(formatChipOf("yaml"))
+    expect(formatChipOf("yml").label).toBe("YAML")
+    expect(formatChipOf("jpeg").label).toBe("JPG")
+    expect(formatChipOf("feather")).toEqual({
+      id: "feather",
+      label: "FEATHER",
+      extensions: ["feather"],
+    })
   })
 })
 

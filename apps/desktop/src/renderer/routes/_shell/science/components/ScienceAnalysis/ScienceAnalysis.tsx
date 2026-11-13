@@ -3,7 +3,10 @@ import {
   categoryOf,
   DATA_FILE_CATEGORY_LABELS,
   type DataFileCategory,
+  type FormatChip,
   fileFormatOf,
+  formatChipOf,
+  formatChipsOf,
 } from "@pi-lab/shared/analysis/file-kind"
 import { fuzzyMatch, highlightSegments } from "@pi-lab/shared/search/fuzzy"
 import { badgeVariants, cn, Input } from "@pi-lab/ui"
@@ -85,8 +88,9 @@ import "./selectFolderPrompt.css"
  *
  * The filter chips are {@link DataFileCategory}s (Data, Figures, Markup, Text, …),
  * only those present. Below them, a row of smaller format chips shows the
- * formats present in the selected category (e.g. Figures: PDF, PNG, SVG),
- * always, or every format under All when there is more than one. A format chip filters
+ * fixed formats of the selected category (e.g. Figures: PNG, PDF, SVG, JPG),
+ * those with no files greyed out, or the formats present under All when there
+ * is more than one. A format chip filters
  * to that format; clicking it again shows all formats again.
  *
  * A project picker in the top bar remembers the last project; `initialProjectId`
@@ -266,17 +270,30 @@ export function ScienceAnalysis({
     return ALL_DATA_FILE_CATEGORIES.filter((c) => set.has(c))
   }, [allFiles])
 
-  // Formats present in the selected category (every format under All), sorted.
-  // A selected category always shows them as the row of format chips; All
-  // shows the row when there is more than one format.
-  const formatsPresent = useMemo(() => {
-    const set = new Set<string>()
+  // The format row. A selected category lists its fixed chips (from
+  // file-kind.ts), absent ones greyed out, then any other format present; All
+  // lists only the formats present, category by category.
+  const formatRow = useMemo<Array<{ chip: FormatChip; present: boolean }>>(() => {
+    const presentByCategory = new Map<DataFileCategory, Map<string, FormatChip>>()
     for (const file of allFiles) {
-      if (categoryFilter === "all" || categoryOf(file.kind) === categoryFilter) {
-        set.add(fileFormatOf(file.relPath))
-      }
+      const category = categoryOf(file.kind)
+      const chip = formatChipOf(fileFormatOf(file.relPath))
+      const chips = presentByCategory.get(category) ?? new Map<string, FormatChip>()
+      chips.set(chip.id, chip)
+      presentByCategory.set(category, chips)
     }
-    return [...set].sort()
+    const rowOf = (category: DataFileCategory, onlyPresent: boolean) => {
+      const present = presentByCategory.get(category) ?? new Map<string, FormatChip>()
+      const fixed = formatChipsOf(category)
+      const extras = [...present.values()]
+        .filter((chip) => !fixed.some((candidate) => candidate.id === chip.id))
+        .sort((a, b) => a.label.localeCompare(b.label))
+      return [...fixed, ...extras]
+        .map((chip) => ({ chip, present: present.has(chip.id) }))
+        .filter((entry) => !onlyPresent || entry.present)
+    }
+    if (categoryFilter !== "all") return rowOf(categoryFilter, false)
+    return ALL_DATA_FILE_CATEGORIES.flatMap((category) => rowOf(category, true))
   }, [allFiles, categoryFilter])
 
   const filtered = useMemo(() => {
@@ -284,7 +301,9 @@ export function ScienceAnalysis({
     const ranked: RankedAnalysisFile[] = []
     for (const file of allFiles) {
       if (categoryFilter !== "all" && categoryOf(file.kind) !== categoryFilter) continue
-      if (formatFilter !== null && fileFormatOf(file.relPath) !== formatFilter) continue
+      if (formatFilter !== null && formatChipOf(fileFormatOf(file.relPath)).id !== formatFilter) {
+        continue
+      }
 
       const nameMatch = fuzzyMatch(needle, file.name)
       const pathMatch = fuzzyMatch(needle, file.relPath)
@@ -586,6 +605,7 @@ export function ScienceAnalysis({
                           onClick={() => selectCategory("all")}
                           testId="analysis-category-all"
                           size="category"
+                          disabled={false}
                         />
                         {categoriesPresent.map((category) => (
                           <FilterChip
@@ -595,22 +615,29 @@ export function ScienceAnalysis({
                             onClick={() => selectCategory(category)}
                             testId={`analysis-category-${category}`}
                             size="category"
+                            disabled={false}
                           />
                         ))}
                       </div>
                     ) : null}
-                    {formatsPresent.length > (categoryFilter === "all" ? 1 : 0) ? (
-                      <div className="flex flex-wrap gap-1" data-testid="analysis-format-filters">
-                        {formatsPresent.map((format) => (
+                    {/* A selected category always shows its row; All only with several formats. */}
+                    {formatRow.length > (categoryFilter === "all" ? 1 : 0) ? (
+                      // One line only: a row wider than the panel scrolls sideways.
+                      <div
+                        className="flex shrink-0 gap-1 overflow-x-auto [scrollbar-width:none] [&>*]:shrink-0"
+                        data-testid="analysis-format-filters"
+                      >
+                        {formatRow.map(({ chip, present }) => (
                           <FilterChip
-                            key={format}
-                            label={format.toUpperCase()}
-                            active={formatFilter === format}
+                            key={chip.id}
+                            label={chip.label}
+                            active={formatFilter === chip.id}
                             onClick={() =>
-                              setFormatFilter((current) => (current === format ? null : format))
+                              setFormatFilter((current) => (current === chip.id ? null : chip.id))
                             }
-                            testId={`analysis-format-${format}`}
+                            testId={`analysis-format-${chip.id}`}
                             size="format"
+                            disabled={!present}
                           />
                         ))}
                       </div>
@@ -1006,6 +1033,7 @@ function FilterChip({
   onClick,
   testId,
   size,
+  disabled,
 }: {
   label: string
   active: boolean
@@ -1013,6 +1041,8 @@ function FilterChip({
   testId: string
   /** "format" chips (the second row) have smaller text and padding. */
   size: "category" | "format"
+  /** A format with no files: greyed out and not clickable. */
+  disabled: boolean
 }) {
   const t = useTranslate()
   return (
@@ -1021,12 +1051,13 @@ function FilterChip({
       data-testid={testId}
       data-active={active}
       aria-pressed={active}
+      disabled={disabled}
       data-feature-label={`${label} ${t("filter")}`}
       data-feature-help={t("Filter the data-file list by format or analysis category.")}
       onClick={onClick}
       className={cn(
         badgeVariants({ variant: active ? "default" : "muted" }),
-        "cursor-pointer select-none",
+        "cursor-pointer select-none disabled:cursor-not-allowed disabled:opacity-40",
         size === "format" && "px-1.5 py-0 text-[10px]",
       )}
     >

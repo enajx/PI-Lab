@@ -1043,8 +1043,8 @@ describe("ScienceAnalysis", () => {
       within(screen.getByTestId("analysis-format-filters"))
         .getAllByRole("button")
         .map((chip) => chip.textContent)
-    // All shows every format present.
-    expect(formats()).toEqual(["CSV", "PDF", "PNG", "SVG"])
+    // All shows only the formats present, in the categories' fixed order.
+    expect(formats()).toEqual(["CSV", "PNG", "PDF", "SVG"])
     expect(screen.queryByTestId("analysis-format-menu")).toBeNull()
     // Format chips are smaller than category chips.
     expect(screen.getByTestId("analysis-format-pdf").className).toContain("text-[10px]")
@@ -1061,7 +1061,7 @@ describe("ScienceAnalysis", () => {
     // Figures: its formats in the second row, no "All figures".
     const figures = screen.getByTestId("analysis-category-figure")
     fireEvent.click(figures)
-    expect(formats()).toEqual(["PDF", "PNG", "SVG"])
+    expect(formats()).toEqual(["PNG", "PDF", "SVG", "JPG"])
     expect(screen.queryByText("All figures")).toBeNull()
     expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
 
@@ -1081,7 +1081,7 @@ describe("ScienceAnalysis", () => {
     expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
   })
 
-  test("a selected category always shows its format row, even with one format", async () => {
+  test("a selected category lists its fixed formats; absent ones are greyed out and not clickable", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
@@ -1089,21 +1089,59 @@ describe("ScienceAnalysis", () => {
           { relPath: "figs/plot.png", name: "plot.png", kind: "image" },
           { relPath: "runs/growth.mp4", name: "growth.mp4", kind: "video" },
           { relPath: "runs/growth.gif", name: "growth.gif", kind: "animation" },
+          { relPath: "runs/config.yml", name: "config.yml", kind: "markup" },
+          { relPath: "runs/params.yaml", name: "params.yaml", kind: "markup" },
         ]),
     })
-    fireEvent.click(await screen.findByTestId("analysis-category-figure"))
-    const formats = () =>
+    const chips = () =>
       within(screen.getByTestId("analysis-format-filters"))
         .getAllByRole("button")
-        .map((chip) => chip.textContent)
-    expect(formats()).toEqual(["PNG"])
-    // Animations: gifs and videos, with their own format chips.
+        .map((chip) => [chip.textContent, (chip as HTMLButtonElement).disabled])
+    const figures = await screen.findByTestId("analysis-category-figure")
+    // All: only the formats present (YAML and YML are one chip).
+    expect(chips()).toEqual([
+      ["PNG", false],
+      ["MP4", false],
+      ["GIF", false],
+      ["YAML", false],
+    ])
+    fireEvent.click(figures)
+    expect(chips()).toEqual([
+      ["PNG", false],
+      ["PDF", true],
+      ["SVG", true],
+      ["JPG", true],
+    ])
     fireEvent.click(screen.getByTestId("analysis-category-animation"))
-    expect(formats()).toEqual(["GIF", "MP4"])
+    expect(chips()).toEqual([
+      ["MP4", false],
+      ["GIF", false],
+      ["WEBM", true],
+      ["MOV", true],
+      ["MKV", true],
+    ])
+    // A greyed-out chip does nothing.
+    fireEvent.click(screen.getByTestId("analysis-format-webm"))
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(2)
     fireEvent.click(screen.getByTestId("analysis-format-mp4"))
     expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
       "runs/growth.mp4",
     ])
+    // Markup: YAML covers .yaml and .yml.
+    fireEvent.click(screen.getByTestId("analysis-category-markup"))
+    expect(chips()).toEqual([
+      ["YAML", false],
+      ["TOML", true],
+      ["JSON", true],
+      ["XML", true],
+    ])
+    fireEvent.click(screen.getByTestId("analysis-format-yaml"))
+    expect(
+      screen
+        .getAllByTestId("analysis-file")
+        .map((row) => row.dataset.relPath)
+        .sort(),
+    ).toEqual(["runs/config.yml", "runs/params.yaml"])
   })
 
   test("the project picker sits in the top bar and switches and remembers the project", async () => {
