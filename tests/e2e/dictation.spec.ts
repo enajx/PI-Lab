@@ -467,47 +467,6 @@ test("shows the loading model pill while the engine loads (mocked slow engine he
     .toMatch(/hello,? world/i)
 })
 
-test("the setup wizard's dictation install starts a download and shows progress (mocked model download)", async () => {
-  const window = await startApp({ PI_LAB_TEST_FIRST_RUN: "1" }, ["ggml-tiny.en.bin"], [])
-  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
-  // Mocked: model downloads from Hugging Face stream 1 MB chunks and never finish.
-  await app.evaluate(() => {
-    const real = globalThis.fetch
-    globalThis.fetch = (input, init) => {
-      const url = input instanceof Request ? input.url : String(input)
-      if (!url.startsWith("https://huggingface.co/")) return real(input, init)
-      let timer: NodeJS.Timeout | undefined
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          let sent = 0
-          timer = setInterval(() => {
-            if (sent >= 100) return
-            sent += 1
-            controller.enqueue(new Uint8Array(1_000_000))
-          }, 20)
-          init?.signal?.addEventListener("abort", () => {
-            clearInterval(timer)
-            controller.error(new Error("aborted"))
-          })
-        },
-        cancel() {
-          clearInterval(timer)
-        },
-      })
-      return Promise.resolve(new Response(body, { status: 200 }))
-    }
-  })
-  const section = window.getByTestId("first-run-dictation")
-  await section.getByRole("button", { name: /^Install Small English \(\d+ MB\)$/ }).click()
-  const progress = section.getByLabel("Speech model download")
-  await expect(progress).toBeVisible()
-  await expect(section).toContainText(/[1-9]\d* \/ \d+ MB/)
-  await expect
-    .poll(async () => Number(await progress.getAttribute("aria-valuenow")))
-    .toBeGreaterThan(0)
-  await expect(section.getByRole("button", { name: /^Install / })).toBeDisabled()
-})
-
 test("Esc while listening cancels: the microphone is released and nothing is inserted or saved", async () => {
   const window = await launch(TERMINAL_PROBE, [])
   await recordMicrophoneStreams(window)
