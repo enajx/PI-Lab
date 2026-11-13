@@ -196,14 +196,14 @@ describe("categoryOf", () => {
     expect(categoryOf("npz")).toBe("data")
   })
 
-  test("Figures merges images, PDFs and plots; Markup and Logs split the text kinds", () => {
+  test("Figures merges images, PDFs and plots; Markup and Text split the text kinds", () => {
     expect(categoryOf("image")).toBe("figure")
     expect(categoryOf("pdf")).toBe("figure")
     expect(categoryOf("plot")).toBe("figure")
     expect(categoryOf("json")).toBe("markup")
     expect(categoryOf("markup")).toBe("markup")
-    expect(categoryOf("text")).toBe("log")
-    expect(categoryOf("markdown")).toBe("log")
+    expect(categoryOf("text")).toBe("text")
+    expect(categoryOf("markdown")).toBe("text")
     expect(categoryOf("notebook")).toBe("notebook")
     expect(categoryOf("marimo")).toBe("notebook")
     expect(categoryOf("report")).toBe("report")
@@ -235,14 +235,14 @@ describe("category metadata", () => {
       expect(DATA_FILE_CATEGORY_LABELS[category]).toBeTruthy()
     }
     expect(ALL_DATA_FILE_CATEGORIES.map((category) => DATA_FILE_CATEGORY_LABELS[category])).toEqual(
-      ["Data", "Figures", "Markup", "Logs", "Notebooks", "Reports", "Other"],
+      ["Data", "Figures", "Markup", "Text", "Notebooks", "Reports", "Other"],
     )
     // The old labels are gone from chips and from the preview's kind label.
     const labels = [
       ...Object.values(DATA_FILE_CATEGORY_LABELS),
       ...Object.values(DATA_FILE_KIND_LABELS),
     ]
-    for (const old of ["Plots", "Images", "Text"]) expect(labels).not.toContain(old)
+    for (const old of ["Plots", "Images", "Logs"]) expect(labels).not.toContain(old)
     expect(DATA_FILE_KIND_LABELS.plot).toBe("Figure")
     expect(DATA_FILE_KIND_LABELS.pdf).toBe("Figure")
     expect(DATA_FILE_KIND_LABELS.image).toBe("Figure")

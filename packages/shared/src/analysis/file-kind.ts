@@ -159,21 +159,21 @@ export const DATA_FILE_KIND_LABELS: Readonly<Record<DataFileKind, string>> = {
   report: "Reports",
   markdown: "Markdown",
   markup: "Markup",
-  text: "Log",
+  text: "Text",
   other: "Other",
 }
 
 /**
  * The categories of the Analysis filter chips: Data (tables, arrays, stores),
- * Figures (images, PDFs, plots), Markup (JSON, YAML, TOML, XML…), Logs (text,
+ * Figures (images, PDFs, plots), Markup (JSON, YAML, TOML, XML…), Text (text,
  * logs, Markdown), Notebooks, Reports (HTML) and Other. A chip with several
- * formats present ({@link fileFormatOf}) offers a sub-list to pick one.
+ * formats present ({@link fileFormatOf}) shows them as a second row of chips.
  */
 export type DataFileCategory =
   | "data"
   | "figure"
   | "markup"
-  | "log"
+  | "text"
   | "notebook"
   | "report"
   | "other"
@@ -191,8 +191,8 @@ const CATEGORY_BY_KIND: Readonly<Record<DataFileKind, DataFileCategory>> = {
   plot: "figure",
   json: "markup",
   markup: "markup",
-  text: "log",
-  markdown: "log",
+  text: "text",
+  markdown: "text",
   notebook: "notebook",
   marimo: "notebook",
   report: "report",
@@ -212,7 +212,7 @@ export const ALL_DATA_FILE_CATEGORIES: readonly DataFileCategory[] = [
   "data",
   "figure",
   "markup",
-  "log",
+  "text",
   "notebook",
   "report",
   "other",
@@ -223,7 +223,7 @@ export const DATA_FILE_CATEGORY_LABELS: Readonly<Record<DataFileCategory, string
   data: "Data",
   figure: "Figures",
   markup: "Markup",
-  log: "Logs",
+  text: "Text",
   notebook: "Notebooks",
   report: "Reports",
   other: "Other",

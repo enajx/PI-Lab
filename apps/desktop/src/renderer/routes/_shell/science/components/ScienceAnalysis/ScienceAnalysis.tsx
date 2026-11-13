@@ -19,7 +19,7 @@ import {
   Microscope,
   Search,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import {
@@ -83,9 +83,11 @@ import "./selectFolderPrompt.css"
  * images inline, JSON pretty-printed, text as a head; everything else shows a
  * metadata card.
  *
- * The filter chips are {@link DataFileCategory}s (Data, Figures, Markup, Logs, …),
- * only those present. A chip whose category has several formats present opens
- * a small sub-list to pick one format (e.g. Figures: PDF, PNG, SVG) or all.
+ * The filter chips are {@link DataFileCategory}s (Data, Figures, Markup, Text, …),
+ * only those present. Below them, a row of smaller format chips shows the
+ * formats present in the selected category (e.g. Figures: PDF, PNG, SVG), or
+ * every format under All, when there is more than one. A format chip filters
+ * to that format; clicking it again shows all formats again.
  *
  * A project picker in the top bar remembers the last project; `initialProjectId`
  * (from `?projectId=`) selects one and becomes the remembered one, and the picker
@@ -152,13 +154,11 @@ export function ScienceAnalysis({
   // The filter is a category; an optional format (file extension) narrows within it.
   const [categoryFilter, setCategoryFilter] = useState<DataFileCategory | "all">("all")
   const [formatFilter, setFormatFilter] = useState<string | null>(null)
-  const [formatMenuOpen, setFormatMenuOpen] = useState(false)
   // Another project starts with no filter, since its categories may differ.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the project changes.
   useEffect(() => {
     setCategoryFilter("all")
     setFormatFilter(null)
-    setFormatMenuOpen(false)
   }, [selectedProjectId])
   const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
@@ -266,18 +266,17 @@ export function ScienceAnalysis({
     return ALL_DATA_FILE_CATEGORIES.filter((c) => set.has(c))
   }, [allFiles])
 
-  // Formats present in each category, sorted. A category with more than one
-  // offers them in its chip's sub-list.
-  const formatsByCategory = useMemo(() => {
-    const sets = new Map<DataFileCategory, Set<string>>()
+  // Formats present in the selected category (every format under All), sorted.
+  // More than one shows them as the row of format chips.
+  const formatsPresent = useMemo(() => {
+    const set = new Set<string>()
     for (const file of allFiles) {
-      const category = categoryOf(file.kind)
-      const set = sets.get(category) ?? new Set<string>()
-      set.add(fileFormatOf(file.relPath))
-      sets.set(category, set)
+      if (categoryFilter === "all" || categoryOf(file.kind) === categoryFilter) {
+        set.add(fileFormatOf(file.relPath))
+      }
     }
-    return new Map([...sets].map(([category, set]) => [category, [...set].sort()]))
-  }, [allFiles])
+    return [...set].sort()
+  }, [allFiles, categoryFilter])
 
   const filtered = useMemo(() => {
     const needle = query.trim()
@@ -372,13 +371,10 @@ export function ScienceAnalysis({
       />
     ))
 
-  // Selecting a category clears any narrower format; "All" clears both. A
-  // category with several formats opens its sub-list; clicking it again closes it.
+  // Selecting a category (or the selected one again) clears the format filter.
   const selectCategory = (category: DataFileCategory | "all") => {
-    const formats = category === "all" ? [] : (formatsByCategory.get(category) ?? [])
-    setFormatMenuOpen(formats.length > 1 && !(categoryFilter === category && formatMenuOpen))
-    if (categoryFilter !== category) setFormatFilter(null)
     setCategoryFilter(category)
+    setFormatFilter(null)
   }
 
   return (
@@ -588,40 +584,34 @@ export function ScienceAnalysis({
                           active={categoryFilter === "all"}
                           onClick={() => selectCategory("all")}
                           testId="analysis-category-all"
-                          hasFormats={false}
+                          size="category"
                         />
-                        {categoriesPresent.map((category) => {
-                          const formats = formatsByCategory.get(category) ?? []
-                          const active = categoryFilter === category
-                          const label = t(DATA_FILE_CATEGORY_LABELS[category])
-                          return (
-                            <div key={category} className="relative">
-                              <FilterChip
-                                label={
-                                  active && formatFilter !== null
-                                    ? `${label}: ${formatFilter.toUpperCase()}`
-                                    : label
-                                }
-                                active={active}
-                                onClick={() => selectCategory(category)}
-                                testId={`analysis-category-${category}`}
-                                hasFormats={formats.length > 1}
-                              />
-                              {active && formatMenuOpen ? (
-                                <FormatMenu
-                                  allLabel={`${t("All")} ${label.toLowerCase()}`}
-                                  formats={formats}
-                                  selected={formatFilter}
-                                  onPick={(format) => {
-                                    setFormatFilter(format)
-                                    setFormatMenuOpen(false)
-                                  }}
-                                  onClose={() => setFormatMenuOpen(false)}
-                                />
-                              ) : null}
-                            </div>
-                          )
-                        })}
+                        {categoriesPresent.map((category) => (
+                          <FilterChip
+                            key={category}
+                            label={t(DATA_FILE_CATEGORY_LABELS[category])}
+                            active={categoryFilter === category}
+                            onClick={() => selectCategory(category)}
+                            testId={`analysis-category-${category}`}
+                            size="category"
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    {formatsPresent.length > 1 ? (
+                      <div className="flex flex-wrap gap-1" data-testid="analysis-format-filters">
+                        {formatsPresent.map((format) => (
+                          <FilterChip
+                            key={format}
+                            label={format.toUpperCase()}
+                            active={formatFilter === format}
+                            onClick={() =>
+                              setFormatFilter((current) => (current === format ? null : format))
+                            }
+                            testId={`analysis-format-${format}`}
+                            size="format"
+                          />
+                        ))}
                       </div>
                     ) : null}
                   </div>
@@ -1008,20 +998,20 @@ function HighlightedText({ text, positions }: { text: string; positions: number[
   })
 }
 
-/** A clickable filter chip for a category or "All". */
+/** A clickable filter chip: a category or "All", or a (smaller) format chip. */
 function FilterChip({
   label,
   active,
   onClick,
   testId,
-  hasFormats,
+  size,
 }: {
   label: string
   active: boolean
   onClick: () => void
   testId: string
-  /** True when the chip opens a sub-list of formats. */
-  hasFormats: boolean
+  /** "format" chips (the second row) have smaller text and padding. */
+  size: "category" | "format"
 }) {
   const t = useTranslate()
   return (
@@ -1030,75 +1020,17 @@ function FilterChip({
       data-testid={testId}
       data-active={active}
       aria-pressed={active}
-      aria-haspopup={hasFormats ? "menu" : undefined}
       data-feature-label={`${label} ${t("filter")}`}
       data-feature-help={t("Filter the data-file list by format or analysis category.")}
       onClick={onClick}
       className={cn(
         badgeVariants({ variant: active ? "default" : "muted" }),
         "cursor-pointer select-none",
+        size === "format" && "px-1.5 py-0 text-[10px]",
       )}
     >
       {label}
     </button>
-  )
-}
-
-/**
- * The small sub-list under a chip: "All <category>" and one entry per format
- * present (e.g. PDF, PNG, SVG). Picking one closes it, as does a click outside.
- */
-function FormatMenu({
-  allLabel,
-  formats,
-  selected,
-  onPick,
-  onClose,
-}: {
-  allLabel: string
-  formats: string[]
-  /** The picked format, or null for all. */
-  selected: string | null
-  onPick: (format: string | null) => void
-  onClose: () => void
-}) {
-  const menu = useRef<HTMLDivElement>(null)
-  const close = useRef(onClose)
-  close.current = onClose
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent): void => {
-      const chip = menu.current?.parentElement
-      if (chip && event.target instanceof Node && !chip.contains(event.target)) close.current()
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    return () => document.removeEventListener("pointerdown", onPointerDown)
-  }, [])
-  const item = (format: string | null, label: string) => (
-    <button
-      key={format ?? ""}
-      type="button"
-      role="menuitemradio"
-      aria-checked={selected === format}
-      data-testid={`analysis-format-${format ?? "all"}`}
-      onClick={() => onPick(format)}
-      className={cn(
-        "w-full rounded px-2 py-1 text-left text-xs hover:bg-muted",
-        selected === format && "font-medium text-primary",
-      )}
-    >
-      {label}
-    </button>
-  )
-  return (
-    <div
-      ref={menu}
-      role="menu"
-      data-testid="analysis-format-menu"
-      className="absolute top-full left-0 z-20 mt-1 flex min-w-28 flex-col rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
-    >
-      {item(null, allLabel)}
-      {formats.map((format) => item(format, format.toUpperCase()))}
-    </div>
   )
 }
 

@@ -322,8 +322,8 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
   await expect(row("gecko")).toBeVisible()
 })
 
-test("Figures opens a sub-list of its formats; picking PDF lists the PDFs, and a PDF previews in PDF.js", async () => {
-  // A deep PDF figure (as in results/multiplexing/...) next to a PNG and an SVG.
+test("a category chip shows a row of format chips; picking PDF lists the PDFs, and a PDF previews in PDF.js", async () => {
+  // A deep PDF figure (as in results/multiplexing/...) next to an SVG.
   const pdfDir = join(repoDir, "results", "multiplexing", "grid_7hf2hacr")
   await mkdir(pdfDir, { recursive: true })
   await writeFile(
@@ -338,20 +338,22 @@ test("Figures opens a sub-list of its formats; picking PDF lists the PDFs, and a
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
-  // The chips: no Plots, Images or Text.
+  // The chips: Text (for .txt) and no Plots, Images or Logs.
   const chips = window.getByTestId("analysis-category-filters")
   await expect(chips.getByRole("button")).toHaveText(
-    ["All", "Data", "Figures", "Logs", "Notebooks", "Reports"],
+    ["All", "Data", "Figures", "Text", "Notebooks", "Reports"],
     { timeout: 30_000 },
   )
+  // Under All, the second row has every format present.
+  const formats = window.getByTestId("analysis-format-filters").getByRole("button")
+  await expect(formats).toHaveText(["CSV", "HTML", "PDF", "PNG", "PY", "SVG", "TXT"])
 
-  const figures = window.getByTestId("analysis-category-figure")
-  await figures.click()
-  const menu = window.getByTestId("analysis-format-menu")
-  await expect(menu.getByRole("menuitemradio")).toHaveText(["All figures", "PDF", "PNG", "SVG"])
-  await window.getByTestId("analysis-format-pdf").click()
-  await expect(menu).toHaveCount(0)
-  await expect(figures).toHaveText("Figures: PDF")
+  await window.getByTestId("analysis-category-figure").click()
+  await expect(formats).toHaveText(["PDF", "PNG", "SVG"])
+  await expect(window.getByText("All figures")).toHaveCount(0)
+  const pdf = window.getByTestId("analysis-format-pdf")
+  await pdf.click()
+  await expect(pdf).toHaveAttribute("aria-pressed", "true")
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(1)
   await openAnalysisExperiment(window, "multiplexing")
   await expect(window.getByTestId("analysis-file")).toHaveCount(1)
@@ -364,6 +366,11 @@ test("Figures opens a sub-list of its formats; picking PDF lists the PDFs, and a
   await expect(viewer.locator(".textLayer")).toContainText("Gradient magnitudes")
   await expect(window.getByTestId("analysis-pdf-status")).toHaveText("Page 1 / 1")
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-pdf-preview.png") })
+
+  // Clicking PDF again shows all figures again.
+  await pdf.click()
+  await expect(pdf).toHaveAttribute("aria-pressed", "false")
+  await expect(window.getByTestId("analysis-experiment")).toHaveCount(2)
 })
 
 test("with no results folder, Analysis shows no folder and points to Select experiments folder", async () => {

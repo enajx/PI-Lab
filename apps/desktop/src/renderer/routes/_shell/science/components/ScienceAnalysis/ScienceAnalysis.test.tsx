@@ -265,7 +265,7 @@ describe("ScienceAnalysis", () => {
     ).toEqual(["outputs/exp-a/plot.png"])
 
     // The category filters narrow the rows; the search opens the rows that match.
-    fireEvent.click(screen.getByTestId("analysis-category-log"))
+    fireEvent.click(screen.getByTestId("analysis-category-text"))
     expect(
       screen.getAllByTestId("analysis-experiment").map((row) => row.dataset.experiment),
     ).toEqual(["exp-b"])
@@ -1003,7 +1003,7 @@ describe("ScienceAnalysis", () => {
     })
   })
 
-  test("filter chips are Data, Figures, Markup and Logs, only those present", async () => {
+  test("filter chips are Data, Figures, Markup and Text, only those present", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
@@ -1023,11 +1023,11 @@ describe("ScienceAnalysis", () => {
       within(filters)
         .getAllByRole("button")
         .map((chip) => chip.textContent),
-    ).toEqual(["All", "Data", "Figures", "Markup", "Logs"])
-    for (const old of ["Plots", "Images", "Text"]) expect(filters.textContent).not.toContain(old)
+    ).toEqual(["All", "Data", "Figures", "Markup", "Text"])
+    for (const old of ["Plots", "Images", "Logs"]) expect(filters.textContent).not.toContain(old)
   })
 
-  test("a chip with several formats opens a sub-list to pick one format, or all", async () => {
+  test("a category shows a second row of smaller format chips; a format chip filters and clicking it again shows all", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
@@ -1039,41 +1039,59 @@ describe("ScienceAnalysis", () => {
         ]),
     })
     await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(4))
+    const formats = () =>
+      within(screen.getByTestId("analysis-format-filters"))
+        .getAllByRole("button")
+        .map((chip) => chip.textContent)
+    // All shows every format present.
+    expect(formats()).toEqual(["CSV", "PDF", "PNG", "SVG"])
     expect(screen.queryByTestId("analysis-format-menu")).toBeNull()
+    // Format chips are smaller than category chips.
+    expect(screen.getByTestId("analysis-format-pdf").className).toContain("text-[10px]")
+    expect(screen.getByTestId("analysis-category-all").className).not.toContain("text-[10px]")
 
+    // A format chip from All filters to that format.
+    fireEvent.click(screen.getByTestId("analysis-format-csv"))
+    expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
+      "data/metrics.csv",
+    ])
+    fireEvent.click(screen.getByTestId("analysis-format-csv"))
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(4)
+
+    // Figures: its formats in the second row, no "All figures".
     const figures = screen.getByTestId("analysis-category-figure")
     fireEvent.click(figures)
-    const menu = screen.getByTestId("analysis-format-menu")
-    expect(
-      within(menu)
-        .getAllByRole("menuitemradio")
-        .map((item) => item.textContent),
-    ).toEqual(["All figures", "PDF", "PNG", "SVG"])
-    // The category alone narrows to figures.
+    expect(formats()).toEqual(["PDF", "PNG", "SVG"])
+    expect(screen.queryByText("All figures")).toBeNull()
     expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
 
-    fireEvent.click(screen.getByTestId("analysis-format-pdf"))
-    expect(screen.queryByTestId("analysis-format-menu")).toBeNull()
+    const pdf = screen.getByTestId("analysis-format-pdf")
+    fireEvent.click(pdf)
+    expect(pdf.getAttribute("aria-pressed")).toBe("true")
     expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
       "figs/grad.pdf",
     ])
-    expect(figures.textContent).toBe("Figures: PDF")
-
-    // Opening it again and picking "All figures" shows every figure.
-    fireEvent.click(figures)
-    fireEvent.click(screen.getByTestId("analysis-format-all"))
+    // Clicking it again goes back to all figures.
+    fireEvent.click(pdf)
     expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
-    expect(figures.textContent).toBe("Figures")
+    // Clicking the selected category again does the same.
+    fireEvent.click(screen.getByTestId("analysis-format-png"))
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(1)
+    fireEvent.click(figures)
+    expect(screen.getAllByTestId("analysis-file")).toHaveLength(3)
   })
 
-  test("a chip with a single format opens no sub-list", async () => {
+  test("a category with a single format shows no format row", async () => {
     renderAnalysis({
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
-        listing([{ relPath: "figs/plot.png", name: "plot.png", kind: "image" }]),
+        listing([
+          { relPath: "figs/plot.png", name: "plot.png", kind: "image" },
+          { relPath: "data/m.csv", name: "m.csv", kind: "csv" },
+        ]),
     })
     fireEvent.click(await screen.findByTestId("analysis-category-figure"))
-    expect(screen.queryByTestId("analysis-format-menu")).toBeNull()
+    expect(screen.queryByTestId("analysis-format-filters")).toBeNull()
   })
 
   test("the project picker sits in the top bar and switches and remembers the project", async () => {
