@@ -78,7 +78,7 @@ const GRADIENT_LAYER_NAMES = ["a", "b", "c"] as const
 // on one row without wrapping; discoverability comes from the per-button
 // `data-feature-label` / `data-feature-help` hover-help and the native `title`.
 const CARD_ACTION_CLASS =
-  "inline-flex h-7 flex-1 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+  "inline-flex h-7 flex-1 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-hover-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
 
 interface ProjectCardProps {
   project: ProjectSummary

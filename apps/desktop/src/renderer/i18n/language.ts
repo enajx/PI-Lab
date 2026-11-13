@@ -3,12 +3,12 @@ import { hasMessages, loadMessages, translate } from "./messages"
 
 export const LANGUAGES = [
   { code: "en", label: "English" },
+  { code: "es", label: "Español" },
+  { code: "nb", label: "Norsk" },
   { code: "zh-CN", label: "简体中文" },
   { code: "ko", label: "한국어" },
   { code: "ja", label: "日本語" },
-  { code: "es", label: "Español" },
   { code: "ar", label: "العربية" },
-  { code: "nb", label: "Norsk bokmål" },
 ] as const
 
 export type InterfaceLanguage = (typeof LANGUAGES)[number]["code"]

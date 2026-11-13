@@ -69,7 +69,9 @@ const navRowClass = "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm tran
 
 /** Active/inactive colours for a nav row, layered on top of `navRowClass`. */
 const navStateClass = (isActive: boolean): string =>
-  isActive ? "bg-accent text-accent-foreground" : "text-sidebar-foreground hover:bg-accent/60"
+  isActive
+    ? "bg-selected text-selected-accent-foreground"
+    : "text-sidebar-foreground hover:bg-accent/60"
 
 /**
  * Default only; a persisted drag order takes priority. Editor is not listed: it is
@@ -477,7 +479,7 @@ export function Sidebar() {
               data-testid="nav-project-dashboard"
               data-feature-label={t("Projects Dashboard")}
               data-feature-help={t("Open Projects Dashboard to see every project at a glance")}
-              className="rounded px-2 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground focus-visible:text-foreground"
+              className="rounded px-2 pb-1 font-medium text-panel-title text-xs uppercase tracking-wide transition-colors hover:text-foreground focus-visible:text-foreground"
             >
               {t("Projects")}
             </Link>

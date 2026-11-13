@@ -223,16 +223,20 @@ test("dashboard shows a directly resizable project card", async () => {
   const item = window.getByTestId("project-card-grid-item")
   const resizeHandle = window.getByTestId("card-resize-handle")
   await expect(grid).toHaveAttribute("data-card-grid-base-column", "220")
-  await expect(grid).toHaveAttribute("data-card-grid-width", "1")
+  // The default width is one 10% step narrower than the base column (198px).
+  await expect(grid).toHaveAttribute("data-card-grid-width", "0.9")
   await expect(grid).toHaveAttribute("data-card-grid-height", "1")
   await expect(item).toHaveAttribute("data-card-span", "1x1")
+  await expect
+    .poll(() => item.evaluate((element) => element.getBoundingClientRect().width))
+    .toBe(198)
   await resizeHandle.focus()
   await window.keyboard.press("ArrowRight")
-  await expect(grid).toHaveAttribute("data-card-grid-width", "1.1")
+  await expect(grid).toHaveAttribute("data-card-grid-width", "1")
   await expect(grid).toHaveAttribute("data-card-grid-height", "1")
   await expect
     .poll(() => item.evaluate((element) => element.getBoundingClientRect().width))
-    .toBe(242)
+    .toBe(220)
   const imageHeight = () => image.evaluate((element) => element.getBoundingClientRect().height)
   const baseImageHeight = await imageHeight()
   await window.keyboard.press("ArrowDown")
@@ -251,7 +255,7 @@ test("dashboard shows a directly resizable project card", async () => {
   await window.mouse.down()
   await window.mouse.move(startX + 44, startY, { steps: 4 })
   await window.mouse.up()
-  await expect(grid).toHaveAttribute("data-card-grid-width", "1.3")
+  await expect(grid).toHaveAttribute("data-card-grid-width", "1.2")
   await expect(grid).toHaveAttribute("data-card-grid-height", "1.1")
 
   // The shared size keeps the grid within a narrow viewport without horizontal overflow.

@@ -41,7 +41,7 @@ export function IssueReportControl() {
         data-feature-label={label}
         data-feature-help={t("Report a bug or request a feature on GitHub")}
         onClick={() => setOpen((current) => !current)}
-        className="app-no-drag relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="app-no-drag relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-hover-foreground"
       >
         <Bug className="size-4" aria-hidden />
       </button>

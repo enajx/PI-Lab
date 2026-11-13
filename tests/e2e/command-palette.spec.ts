@@ -344,13 +344,16 @@ test("⌘P in a project opens the project palette and ⇧⌘P the global palette
 test("palette changes individual settings directly and preserves them after reload", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
-  for (const command of [
-    "settings-keep-running-after-close",
-    "settings-restore-project-tabs",
-    "settings-update-channel-beta",
+  // A toggle runs directly; a multi-choice setting opens its options as a sub-list.
+  for (const path of [
+    ["settings-keep-running-after-close"],
+    ["settings-restore-project-tabs"],
+    ["settings-update-channel", "beta"],
   ]) {
     await window.keyboard.press("ControlOrMeta+p")
-    await window.locator(`[data-command-id="${command}"]`).click({ timeout: 5000 })
+    for (const command of path) {
+      await window.locator(`[data-command-id="${command}"]`).click({ timeout: 5000 })
+    }
     await expect(window.getByTestId("command-palette")).toHaveCount(0)
     await expect(window.getByTestId("dashboard")).toBeVisible()
   }

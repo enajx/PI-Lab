@@ -103,6 +103,15 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-brand: var(--accent-brand);
+  /* Set only by accent app themes; unset, each falls back to the color the same
+     place used before (see appThemes.ts ACCENT_THEME_TOKENS). */
+  --color-panel-border: var(--panel-border, var(--border));
+  --color-panel-title: var(--panel-title, var(--muted-foreground));
+  --color-heading: var(--heading, var(--foreground));
+  --color-selected: var(--selected, var(--accent));
+  --color-selected-foreground: var(--selected-foreground, var(--foreground));
+  --color-selected-accent-foreground: var(--selected-foreground, var(--accent-foreground));
+  --color-hover-foreground: var(--hover-foreground, var(--foreground));
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -119,6 +128,14 @@
   body,
   #root {
     height: 100%;
+  }
+
+  /* Accent app themes color headings; without --heading this is invalid at
+     computed time, so headings inherit their color as before. */
+  h1,
+  h2,
+  h3 {
+    color: var(--heading);
   }
 
   body {

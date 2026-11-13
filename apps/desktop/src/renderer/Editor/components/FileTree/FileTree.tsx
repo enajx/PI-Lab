@@ -406,7 +406,7 @@ export function FileTree({
           title={t("Use project root for new files and folders")}
           data-feature-label={t("Files")}
           onClick={() => setSelection(ROOT_SELECTION)}
-          className="mr-auto rounded px-1 font-medium text-muted-foreground text-xs uppercase tracking-wide hover:text-foreground"
+          className="mr-auto rounded px-1 font-medium text-panel-title text-xs uppercase tracking-wide hover:text-foreground"
         >
           {t("Files")}
         </button>
@@ -748,8 +748,8 @@ function TreeNode({
             style={indent}
             className={cn(
               "flex w-full cursor-pointer items-center gap-1 py-1 pr-2 text-left text-foreground/90 text-xs hover:bg-accent/60",
-              selected && "bg-accent/50 text-foreground",
-              selected && menuOpen && "bg-accent/60",
+              selected && "bg-selected/50 text-selected-foreground",
+              selected && menuOpen && "bg-selected/60",
             )}
           >
             {expanded ? (
@@ -812,8 +812,8 @@ function TreeNode({
         aria-current={active ? "true" : undefined}
         className={cn(
           "flex w-full cursor-pointer items-center gap-1 py-1 pr-2 text-left text-muted-foreground text-xs hover:bg-accent/60 hover:text-foreground",
-          selected && "bg-accent/50 text-foreground",
-          selected && menuOpen && "bg-accent/60",
+          selected && "bg-selected/50 text-selected-foreground",
+          selected && menuOpen && "bg-selected/60",
         )}
       >
         {/* Spacer the width of the dir chevron so files align under directories. */}
@@ -823,7 +823,7 @@ function TreeNode({
         {active ? (
           <Eye
             data-testid="file-tree-focused"
-            className="ml-auto size-3.5 shrink-0 text-muted-foreground"
+            className="ml-auto size-3.5 shrink-0 text-[var(--selected-foreground,var(--muted-foreground))]"
             aria-label={t("Focused in editor")}
           />
         ) : null}

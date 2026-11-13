@@ -223,7 +223,7 @@ export function ProjectTemplateSection() {
               className={cn(
                 "rounded-md px-2 py-1.5 text-left font-mono text-xs transition-colors",
                 file.relPath === activeRelPath
-                  ? "bg-accent font-medium text-accent-foreground"
+                  ? "bg-selected font-medium text-selected-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
               )}
             >

@@ -429,7 +429,7 @@ describe("FileTree file and folder management", () => {
     expect(onOpenFile).not.toHaveBeenCalled()
     expect(row.getAttribute("data-selected")).toBe("true")
     expect(row.getAttribute("data-menu-open")).toBe("true")
-    expect(row.className).toContain("bg-accent")
+    expect(row.className).toContain("bg-selected")
     // Moving the pointer into the menu leaves the row's highlight in place.
     fireEvent.mouseLeave(row)
     fireEvent.mouseEnter(screen.getByTestId("file-tree-context-menu"))
@@ -565,7 +565,7 @@ const selectedRows = () =>
 
 /** True when the row has a persistent background shade (hover classes excluded). */
 const shaded = (row: HTMLElement) =>
-  row.className.split(" ").some((name) => name.startsWith("bg-accent"))
+  row.className.split(" ").some((name) => name.startsWith("bg-selected"))
 
 describe("FileTree single selection and focus", () => {
   beforeEach(() => window.localStorage.clear())

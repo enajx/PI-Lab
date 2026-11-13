@@ -5,7 +5,11 @@ import {
   defaultEditorThemeId,
   EDITOR_THEMES,
   editorThemeExtension,
+  shownEditorThemeId,
 } from "./editorThemes"
+
+/** An app theme with Theme default: the editor keeps its own theme. */
+const PLAIN = { themeId: "default", accentId: "default" }
 
 describe("editorThemes registry", () => {
   test("offers several high-quality built-ins beyond the original eight", () => {
@@ -61,28 +65,28 @@ describe("editorThemeExtension", () => {
   test("resolves a known id to its registered extension", () => {
     const known = EDITOR_THEMES.find((theme) => theme.id === "one-dark")
     expect(known).toBeDefined()
-    expect(editorThemeExtension("one-dark", [], "light")).toBe(known?.extension)
+    expect(editorThemeExtension("one-dark", [], "light", PLAIN)).toBe(known?.extension)
     // An explicit choice is kept, even the old default palette.
     const solarized = EDITOR_THEMES.find((theme) => theme.id === "solarized-light")
-    expect(editorThemeExtension("solarized-light", [], "dark")).toBe(solarized?.extension)
+    expect(editorThemeExtension("solarized-light", [], "dark", PLAIN)).toBe(solarized?.extension)
   })
 
   test("resolves undefined/empty/unknown/default ids to GitHub for the app appearance", () => {
     for (const mode of ["light", "dark"] as const) {
       const fallback = EDITOR_THEMES.find((theme) => theme.id === `github-${mode}`)?.extension
       expect(fallback).toBeDefined()
-      expect(editorThemeExtension(undefined, [], mode)).toBe(fallback)
-      expect(editorThemeExtension("", [], mode)).toBe(fallback)
-      expect(editorThemeExtension("not-a-real-theme", [], mode)).toBe(fallback)
+      expect(editorThemeExtension(undefined, [], mode, PLAIN)).toBe(fallback)
+      expect(editorThemeExtension("", [], mode, PLAIN)).toBe(fallback)
+      expect(editorThemeExtension("not-a-real-theme", [], mode, PLAIN)).toBe(fallback)
       // "default" is the stored value when the user never picked a theme.
-      expect(editorThemeExtension("default", [], mode)).toBe(fallback)
+      expect(editorThemeExtension("default", [], mode, PLAIN)).toBe(fallback)
     }
   })
 
   test("never throws and never returns an unstyled buffer", () => {
     for (const id of [undefined, "", "default", "not-a-real-theme", "solarized-light"]) {
-      expect(() => editorThemeExtension(id, [], "light")).not.toThrow()
-      expect(editorThemeExtension(id, [], "light")).not.toEqual([])
+      expect(() => editorThemeExtension(id, [], "light", PLAIN)).not.toThrow()
+      expect(editorThemeExtension(id, [], "light", PLAIN)).not.toEqual([])
     }
   })
 
@@ -108,8 +112,41 @@ describe("editorThemeExtension", () => {
     expect(() =>
       EditorState.create({
         doc: "def run(): pass",
-        extensions: [editorThemeExtension(custom.id, [custom], "dark")],
+        extensions: [editorThemeExtension(custom.id, [custom], "dark", PLAIN)],
       }),
     ).not.toThrow()
+  })
+
+  test("a chosen accent colors the editor unless an editor theme was picked", () => {
+    for (const mode of ["light", "dark"] as const) {
+      const github = EDITOR_THEMES.find((theme) => theme.id === `github-${mode}`)?.extension
+      const pink = { themeId: "nord", accentId: "neon-pink" }
+      const accent = editorThemeExtension("default", [], mode, pink)
+      expect(accent).not.toBe(github)
+      expect(editorThemeExtension(undefined, [], mode, pink)).toBe(accent)
+      expect(() => EditorState.create({ doc: "x = 1", extensions: [accent] })).not.toThrow()
+      const custom = editorThemeExtension("default", [], mode, {
+        themeId: "default",
+        accentId: "#ff00aa",
+      })
+      expect(custom).not.toBe(github)
+      // Theme default keeps today's editor colors.
+      expect(
+        editorThemeExtension("default", [], mode, { themeId: "nord", accentId: "default" }),
+      ).toBe(github)
+    }
+    const monokai = EDITOR_THEMES.find((theme) => theme.id === "monokai")?.extension
+    expect(
+      editorThemeExtension("monokai", [], "dark", { themeId: "nord", accentId: "neon-pink" }),
+    ).toBe(monokai)
+  })
+})
+
+describe("shownEditorThemeId", () => {
+  test("names the theme the editor shows: a known choice, else GitHub for the mode", () => {
+    expect(shownEditorThemeId("monokai", [], "light")).toBe("monokai")
+    expect(shownEditorThemeId("default", [], "light")).toBe("github-light")
+    expect(shownEditorThemeId("default", [], "dark")).toBe("github-dark")
+    expect(shownEditorThemeId("removed-theme", [], "dark")).toBe("github-dark")
   })
 })
