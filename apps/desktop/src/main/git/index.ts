@@ -6,6 +6,7 @@ export {
   currentBranch,
   type GitChange,
   GitError,
+  hasChanges,
   isGitRepo,
   removeWorktree,
   repoName,

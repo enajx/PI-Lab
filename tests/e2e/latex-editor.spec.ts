@@ -1007,6 +1007,120 @@ test("LaTeX Editor creates a paper from the template and connects it to a blank 
 })
 
 /**
+ * Add Overleaf project in a project asks where to clone, through the real app.
+ * The "Overleaf" project is the LOCAL bare repo from {@link setUp} (a stand-in:
+ * no network, no Overleaf account): a test global Git config holds a
+ * `url.<bare repo>.insteadOf` rule for the Overleaf URL. First clone: inside
+ * the project (the default), hidden through `.git/info/exclude`. Second: another
+ * folder with "Remember my choice", which adds no exclude entry. Third: no
+ * question, the clone goes into `<remembered folder>/<Overleaf project id>`.
+ * Settings > LaTeX shows the remembered choice and Reset makes it ask again.
+ */
+test("LaTeX Editor asks where to clone an Overleaf project and remembers the choice", async () => {
+  test.setTimeout(180_000)
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-latex-clone-e2e-")))
+  const { project } = await setUp(root)
+  await execFileAsync("git", ["init", project])
+  const overleafId = "0123456789abcdef01234567"
+  const overleafUrl = `https://git@git.overleaf.com/${overleafId}`
+  const gitConfig = join(root, "gitconfig")
+  await writeFile(
+    gitConfig,
+    `[user]\n\tname = PI Lab Test\n\temail = test@example.invalid\n[url "${join(root, "remote.git")}"]\n\tinsteadOf = ${overleafUrl}\n`,
+  )
+  const exclude = join(project, ".git", "info", "exclude")
+  /** The entries of the project's `.git/info/exclude`, without git's comment lines. */
+  const excludeEntries = async (): Promise<string[]> =>
+    (await readFile(exclude, "utf8"))
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("#"))
+  /** Footer: Clear paper folder, back to the setup page. */
+  const clearPaper = async (page: Page): Promise<void> => {
+    await page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder").click()
+    await page.getByTestId("paper-folder-clear").click()
+    await expect(page.getByTestId("paper-setup-overleaf")).toBeVisible({ timeout: 15_000 })
+  }
+  /** Fill the Overleaf card and press Add (the token is asked for until one is saved). */
+  const addOverleaf = async (page: Page): Promise<void> => {
+    await page.getByTestId("paper-overleaf-url").fill(overleafUrl)
+    const token = page.getByTestId("paper-overleaf-token")
+    if ((await token.count()) > 0) await token.fill("olp_e2e_token")
+    await page.getByTestId("paper-overleaf-add").click()
+  }
+  let app: ElectronApplication | null = null
+  try {
+    app = await launch(root, project, root, {
+      GIT_CONFIG_GLOBAL: gitConfig,
+      GIT_CONFIG_NOSYSTEM: "1",
+    })
+    const page = await app.firstWindow()
+    await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await openLatexEditor(page)
+    await expectSetupCards(page)
+
+    // 1. Inside the project is the default.
+    await addOverleaf(page)
+    const dialog = page.getByTestId("overleaf-clone-dialog")
+    await expect(dialog).toBeVisible()
+    await expect(page.getByTestId("overleaf-clone-project")).toBeChecked()
+    await expect(dialog).toContainText("project/paper")
+    await expect(page.getByTestId("overleaf-clone-remember")).not.toBeChecked()
+    await page.screenshot({ path: test.info().outputPath("latex-clone-destination.png") })
+    await page.getByTestId("overleaf-clone-ok").click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 30_000 })
+    expect(existsSync(join(project, "paper", "main.tex"))).toBe(true)
+    expect(await excludeEntries()).toEqual(["/paper/"])
+
+    // 2. Another folder, remembered: no exclude entry, as for a paper folder outside the project.
+    await clearPaper(page)
+    await addOverleaf(page)
+    await expect(dialog).toBeVisible()
+    await page.getByTestId("overleaf-clone-folder").check()
+    const first = join(root, "elsewhere", "first")
+    await page.getByTestId("overleaf-clone-dir").fill(first)
+    await page.getByTestId("overleaf-clone-remember").check()
+    await page.getByTestId("overleaf-clone-ok").click()
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 30_000 })
+    await expect(
+      page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder"),
+    ).toHaveText(first)
+    expect(existsSync(join(first, "main.tex"))).toBe(true)
+    expect(await excludeEntries()).toEqual(["/paper/"])
+
+    // 3. Remembered: no question, the clone goes into <folder>/<Overleaf project id>.
+    await clearPaper(page)
+    await addOverleaf(page)
+    const second = join(root, "elsewhere", overleafId)
+    await expect(
+      page.getByTestId("editor-status-bar").getByTestId("editor-paper-folder"),
+    ).toHaveText(second, { timeout: 30_000 })
+    await expect(dialog).toHaveCount(0)
+    expect(existsSync(join(second, "main.tex"))).toBe(true)
+
+    // Settings > LaTeX shows the remembered folder; Reset makes it ask again.
+    await page.getByTestId("nav-settings").click()
+    await page.getByTestId("settings-nav-latex").click()
+    const remembered = page.getByTestId("settings-overleaf-clone-location")
+    await expect(remembered).toContainText(join(root, "elsewhere"))
+    await page.screenshot({ path: test.info().outputPath("latex-clone-settings.png") })
+    await page.getByTestId("settings-overleaf-clone-reset").click()
+    await expect(remembered).toHaveText("Ask each time")
+    await page.getByTestId("settings-back").click()
+    await openLatexEditor(page)
+    await expect(page.getByTestId("paper-editor")).toBeVisible({ timeout: 15_000 })
+    await clearPaper(page)
+    await addOverleaf(page)
+    await expect(dialog).toBeVisible()
+    await page.getByTestId("overleaf-clone-cancel").click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByTestId("paper-setup-overleaf")).toBeVisible()
+  } finally {
+    if (app) await close(app)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+/**
  * A paper added with no project, through the real app: New paper… in the
  * LaTeX Editor picker, Start draft into a folder typed in the folder question,
  * then its own Dashboard card (only the paper button), then Link to project,

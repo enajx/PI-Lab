@@ -242,6 +242,23 @@ describe("projects.open", () => {
     expect(await readFile(join(project.repoPath, "notes.md"), "utf8")).toBe("# Plain folder\n")
   })
 
+  test("gitState reports the checked-out branch and whether the working tree is dirty", async () => {
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    expect(await h.caller.projects.gitState({ id: project.id })).toEqual({
+      branch: "main",
+      dirty: false,
+    })
+    await execFileAsync("git", ["-C", h.repoDir, "checkout", "-b", "feature/x"])
+    await writeFile(join(h.repoDir, "new-file.txt"), "changed\n")
+    expect(await h.caller.projects.gitState({ id: project.id })).toEqual({
+      branch: "feature/x",
+      dirty: true,
+    })
+    const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-"))
+    const plainProject = await h.caller.projects.open({ path: plain })
+    expect(await h.caller.projects.gitState({ id: plainProject.id })).toBeNull()
+  })
+
   test("initializes Git explicitly, preserves existing files, and immediately supports worktrees", async () => {
     const plain = await mkdtemp(join(tmpdir(), "pi-lab-plain-"))
     await writeFile(join(plain, "notes.md"), "# Existing notes\n")

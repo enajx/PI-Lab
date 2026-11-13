@@ -6,7 +6,8 @@
 // accepts git.overleaf.com URLs (the host check itself is tested separately).
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { serviceCredentials } from "@pi-lab/local-db"
@@ -383,10 +384,10 @@ describe("link, get, outline, unlink", () => {
 describe("addOverleaf", () => {
   test("accepts only git.overleaf.com URLs and requires a saved token", async () => {
     await expect(
-      h.caller.paper.addOverleaf({ projectId, url: "https://github.com/u/p.git" }),
+      h.caller.paper.addOverleaf({ projectId, url: "https://github.com/u/p.git", dir: null }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
     await expect(
-      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc" }),
+      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc", dir: null }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "overleaf-token-required" })
   })
 
@@ -394,7 +395,7 @@ describe("addOverleaf", () => {
     await h.caller.paper.token.set({ token: "olp_secret" })
     await mkdir(join(h.repoDir, "paper"))
     await expect(
-      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc" }),
+      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc", dir: null }),
     ).rejects.toMatchObject({ code: "CONFLICT" })
   })
 
@@ -402,7 +403,7 @@ describe("addOverleaf", () => {
     await useTestCredentialHelper()
     await mkdir(join(h.repoDir, "paper"))
     await expect(
-      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc" }),
+      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc", dir: null }),
     ).rejects.toMatchObject({ code: "CONFLICT" })
   })
 
@@ -414,6 +415,7 @@ describe("addOverleaf", () => {
       h.caller.paper.addOverleaf({
         projectId,
         url: "https://git@git.overleaf.com/bad",
+        dir: null,
         token: "olp_wrong",
       }),
     ).rejects.toThrow("does not appear to be a git repository")
@@ -421,14 +423,65 @@ describe("addOverleaf", () => {
     const state = await h.caller.paper.addOverleaf({
       projectId,
       url: "https://git@git.overleaf.com/good",
+      dir: null,
       token: "olp_right",
     })
     expect(state.paper?.dir).toBe(join(h.repoDir, "paper"))
     expect(await h.caller.paper.token.status()).toEqual({ configured: true, source: "saved" })
   })
 
+  test("clones into a chosen folder outside the project, links it, and adds no exclude entry", async () => {
+    await useOverleafStandIn("https://git@git.overleaf.com/good", bare)
+    await h.caller.paper.token.set({ token: "olp_secret" })
+    // Missing parent folders are made, as for a paper added with no project.
+    const dir = join(h.dataDir, "elsewhere", "good")
+    const state = await h.caller.paper.addOverleaf({
+      projectId,
+      url: "https://git@git.overleaf.com/good",
+      dir,
+    })
+    expect(state.paper?.dir).toBe(await realpath(dir))
+    expect(await readFile(join(dir, "main.tex"), "utf8")).toContain("\\section{Intro}")
+    expect(existsSync(join(h.repoDir, "paper"))).toBe(false)
+    const exclude = await readFile(join(h.repoDir, ".git", "info", "exclude"), "utf8")
+    // Only git's own comment lines: no entry was added.
+    expect(exclude.split("\n").filter((line) => line !== "" && !line.startsWith("#"))).toEqual([])
+  })
+
+  test("a chosen folder inside the project is excluded from the project repo", async () => {
+    await useOverleafStandIn("https://git@git.overleaf.com/good", bare)
+    await h.caller.paper.token.set({ token: "olp_secret" })
+    const dir = join(h.repoDir, "papers", "good")
+    await h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/good", dir })
+    const exclude = await readFile(join(h.repoDir, ".git", "info", "exclude"), "utf8")
+    expect(exclude.split("\n")).toContain("/papers/good/")
+  })
+
+  test("refuses a chosen folder that has files in it, before cloning", async () => {
+    await h.caller.paper.token.set({ token: "olp_secret" })
+    const dir = join(h.dataDir, "full")
+    await mkdir(dir)
+    await writeFile(join(dir, "notes.txt"), "x")
+    await expect(
+      h.caller.paper.addOverleaf({ projectId, url: "https://git@git.overleaf.com/abc", dir }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+  })
+
+  test("cloneTarget puts a remembered folder's clone in <folder>/<Overleaf project id>", async () => {
+    expect(
+      await h.caller.paper.cloneTarget({
+        folder: join(h.dataDir, "Papers"),
+        url: "https://git@git.overleaf.com/0123abcd",
+      }),
+    ).toEqual({ dir: join(h.dataDir, "Papers", "0123abcd") })
+    expect(
+      (await h.caller.paper.cloneTarget({ folder: "~/Papers", url: "https://git.overleaf.com/x1" }))
+        .dir,
+    ).toBe(join(homedir(), "Papers", "x1"))
+  })
+
   test("clonePaper clones into <project>/paper, excludes it from the project repo, and links it", async () => {
-    await clonePaper(h.db, projectId, bare, { env: null })
+    await clonePaper(h.db, projectId, bare, null, { env: null })
     const dir = join(h.repoDir, "paper")
     expect(await readFile(join(dir, "main.tex"), "utf8")).toContain("\\section{Intro}")
     const exclude = await readFile(join(h.repoDir, ".git", "info", "exclude"), "utf8")
@@ -1265,10 +1318,12 @@ describe("Overleaf URLs with credentials", () => {
       "https://git:olp_secret@git.overleaf.com/abc",
       "https://olp_secret@git.overleaf.com/abc",
     ]) {
-      await expect(h.caller.paper.addOverleaf({ projectId, url })).rejects.toMatchObject({
-        code: "BAD_REQUEST",
-        message: "Paste the Git URL without the token; enter the token in the token field.",
-      })
+      await expect(h.caller.paper.addOverleaf({ projectId, url, dir: null })).rejects.toMatchObject(
+        {
+          code: "BAD_REQUEST",
+          message: "Paste the Git URL without the token; enter the token in the token field.",
+        },
+      )
       await expect(h.caller.paper.connectOverleaf({ projectId, url })).rejects.toMatchObject({
         code: "BAD_REQUEST",
         message: "Paste the Git URL without the token; enter the token in the token field.",

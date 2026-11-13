@@ -60,6 +60,8 @@ const DEFAULT_SETTINGS: EditorSettings = {
   confirmOverleafCommit: true,
   papersFolder: "~/Papers",
   askPapersFolder: true,
+  overleafCloneLocation: "ask",
+  overleafCloneFolder: "",
   researchDiaryFormat: "md",
   analysisFormat: "md",
   reportSkill: "experiment-report",
