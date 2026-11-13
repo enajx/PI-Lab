@@ -178,7 +178,7 @@ const REPORTS_FOLDER = "reports"
 const EMPTY_LISTING: DataFileListing = {
   groups: [],
   total: 0,
-  truncatedGroups: [],
+  truncatedExperiments: [],
   partial: false,
   skipped: [],
 }
@@ -217,7 +217,7 @@ function mergeListings(results: DataFileListing, reports: DataFileListing): Data
   return {
     groups,
     total: results.total + added,
-    truncatedGroups: [...results.truncatedGroups, ...reports.truncatedGroups],
+    truncatedExperiments: [...results.truncatedExperiments, ...reports.truncatedExperiments],
     partial: skipped.length > 0,
     skipped,
   }
@@ -315,16 +315,16 @@ export const analysisRouter = router({
   /**
    * Discover and classify the data/analysis files in a project's results folder
    * (the project's own folder, else the default from Settings). Every file
-   * carries its experiment (group) and run from the project's experiments
-   * folder structure (see `getStructure`); an invalid structure file is
+   * carries its group, experiment and path inside them from the project's
+   * experiments folder structure (see `getStructure`); an invalid structure file is
    * BAD_REQUEST. Walks the tree (skipping
    * noise dirs), tags each file with its data-file kind, and returns them
    * grouped by kind with per-file metadata (size, mtime) and repo-relative
    * paths. The project's `reports/` folder is
    * listed too, marked `inReportsFolder`, each file once; no `reports/` folder
    * adds nothing. A missing results folder is `exists: false`; a folder outside the
-   * project (or the project folder itself) is FORBIDDEN. Each list row (see
-   * `listGroup`) is capped, and `truncatedGroups` names the rows that were cut.
+   * project (or the project folder itself) is FORBIDDEN. Each experiment is
+   * capped, and `truncatedExperiments` names the ones that were cut.
    */
   listFiles: publicProcedure
     .input(listInput)

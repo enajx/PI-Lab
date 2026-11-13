@@ -310,68 +310,34 @@ export function ScienceAnalysis({
       if (nameMatch === null && pathMatch === null) continue
       ranked.push({
         file,
-        fuzzyScore: Math.max(nameMatch?.score ?? -1, pathMatch?.score ?? -1),
-        likelihood: analysisLikelihood(file.relPath),
         namePositions: nameMatch?.positions ?? [],
         // When the basename already carries the match, highlighting it again in
         // the path is visual noise; directory-only matches remain visible here.
         pathPositions: nameMatch === null ? (pathMatch?.positions ?? []) : [],
       })
     }
-    ranked.sort(
-      (a, b) =>
-        b.fuzzyScore - a.fuzzyScore ||
-        b.likelihood - a.likelihood ||
-        a.file.relPath.localeCompare(b.file.relPath),
-    )
+    // The list shows them in its folder tree, sorted by name.
     return ranked
   }, [allFiles, query, categoryFilter, formatFilter])
 
-  // Re-group the filtered files into the list's rows: one per experiment
-  // (`listGroup`), sorted by name (numbers in order), with the loose files
-  // ("No experiment") last, then the project's reports/ folder. Within a row
-  // the ranking order is kept.
-  const rows = useMemo<ListRow[]>(() => {
-    const byGroup = new Map<string | null, RankedAnalysisFile[]>()
-    const reports: RankedAnalysisFile[] = []
-    for (const rankedFile of filtered) {
-      if (rankedFile.file.inReportsFolder) {
-        reports.push(rankedFile)
-        continue
-      }
-      const key = rankedFile.file.listGroup
-      const files = byGroup.get(key)
-      if (files) files.push(rankedFile)
-      else byGroup.set(key, [rankedFile])
-    }
-    const named = [...byGroup.keys()]
-      .filter((key): key is string => key !== null)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    const order: Array<string | null> = byGroup.has(null) ? [...named, null] : named
-    const truncated = listing.data?.truncatedGroups ?? []
-    const result: ListRow[] = order.map((listGroup) => ({
-      id: `results\u0000${listGroup ?? ""}`,
-      listGroup,
-      inReportsFolder: false,
-      files: byGroup.get(listGroup) ?? [],
-      truncated: truncated.some((group) => group.listGroup === listGroup && !group.inReportsFolder),
-    }))
-    if (reports.length > 0) {
-      result.push({
-        id: "reports",
-        listGroup: null,
-        inReportsFolder: true,
-        files: reports,
-        truncated: truncated.some((group) => group.inReportsFolder),
-      })
-    }
-    return result
-  }, [filtered, listing.data])
-  // A list with only the loose results files (a flat list) shows them with no row.
+  // The list model from the filtered files: group rows (folders above the
+  // experiment level) holding experiment rows, experiment rows with no group,
+  // the loose files ("No experiment") and the project's reports/ folder. Each
+  // row's files keep their folder tree.
+  const model = useMemo(
+    () => buildListModel(filtered, listing.data?.truncatedExperiments ?? []),
+    [filtered, listing.data],
+  )
+  // A list of only loose results files (a flat list) shows them with no row.
   const onlyLooseFiles =
-    rows.length === 1 && rows[0]?.listGroup === null && rows[0].inReportsFolder === false
-  // Rows the user opened. A search opens every row with a match.
+    model.groups.length === 0 &&
+    model.experiments.length === 0 &&
+    model.reports === null &&
+    model.loose !== null
+  // Rows and folders the user opened. A search opens every row and folder with a match.
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set())
+  const searching = query.trim() !== ""
+  const isOpen = (id: string): boolean => searching || openRows.has(id)
   const toggleRow = (id: string): void =>
     setOpenRows((current) => {
       const next = new Set(current)
@@ -379,17 +345,86 @@ export function ScienceAnalysis({
       else next.add(id)
       return next
     })
-  const fileRows = (files: RankedAnalysisFile[]) =>
-    files.map((rankedFile) => (
-      <FileRow
-        key={rankedFile.file.relPath}
-        file={rankedFile.file}
-        namePositions={rankedFile.namePositions}
-        pathPositions={rankedFile.pathPositions}
-        selected={rankedFile.file.relPath === selectedRelPath}
-        onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
-      />
-    ))
+  const fileRow = (rankedFile: RankedAnalysisFile) => (
+    <FileRow
+      key={rankedFile.file.relPath}
+      file={rankedFile.file}
+      namePositions={rankedFile.namePositions}
+      pathPositions={rankedFile.pathPositions}
+      selected={rankedFile.file.relPath === selectedRelPath}
+      onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+    />
+  )
+  /** A folder's contents like the project file tree: subfolders first, then files. */
+  const treeContents = (rowId: string, folder: TreeFolder) => (
+    <>
+      {folder.folders.map((child) => {
+        const id = `${rowId}/${child.path}`
+        const open = isOpen(id)
+        return (
+          <div key={child.path} className="flex flex-col gap-1">
+            <FolderRow
+              testId="analysis-folder"
+              dataName={child.path}
+              label={child.name}
+              isPath={false}
+              open={open}
+              onToggle={() => toggleRow(id)}
+              help={t("Show or hide the files of this folder.")}
+            />
+            {open ? (
+              <div
+                data-testid="analysis-folder-contents"
+                className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
+              >
+                {treeContents(rowId, child)}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {folder.files.map(fileRow)}
+    </>
+  )
+  /** An experiment row (or the loose files, or reports/) and, when open, its tree. */
+  const experimentBlock = (
+    id: string,
+    testId: string,
+    dataExperiment: string,
+    label: string,
+    node: { tree: TreeFolder; truncated: boolean },
+  ) => {
+    const open = isOpen(id)
+    return (
+      <div
+        key={id}
+        data-testid={testId}
+        data-experiment={dataExperiment}
+        className="flex flex-col gap-1"
+      >
+        <FolderRow
+          testId="analysis-experiment"
+          dataName={dataExperiment}
+          label={label}
+          isPath={false}
+          open={open}
+          onToggle={() => toggleRow(id)}
+          help={t("Show or hide the files of this experiment.")}
+        />
+        {open ? (
+          <div
+            data-testid="analysis-experiment-files"
+            className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
+          >
+            {node.truncated ? <TruncatedNotice /> : null}
+            {treeContents(id, node.tree)}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+  const experimentNodeBlock = (node: ExperimentNode) =>
+    experimentBlock(node.id, "analysis-experiment-group", node.experiment, node.experiment, node)
 
   // Selecting a category (or the selected one again) clears the format filter.
   const selectCategory = (category: DataFileCategory | "all") => {
@@ -679,53 +714,64 @@ export function ScienceAnalysis({
                             )}
                           </p>
                         ) : null}
-                        {onlyLooseFiles && rows[0] ? (
+                        {onlyLooseFiles && model.loose ? (
                           <div data-testid="analysis-flat-files" className="flex flex-col gap-1">
-                            {rows[0].truncated ? <TruncatedNotice /> : null}
-                            {fileRows(rows[0].files)}
+                            {model.loose.truncated ? <TruncatedNotice /> : null}
+                            {treeContents("loose", model.loose.tree)}
                           </div>
                         ) : (
-                          rows.map((row) => {
-                            const open = query.trim() !== "" || openRows.has(row.id)
-                            const label = row.inReportsFolder
-                              ? t("Reports (reports/)")
-                              : row.listGroup === null
-                                ? t("No experiment")
-                                : row.listGroup
-                            return (
-                              <div
-                                key={row.id}
-                                data-testid={
-                                  row.inReportsFolder
-                                    ? "analysis-reports-group"
-                                    : "analysis-experiment-group"
-                                }
-                                data-experiment={
-                                  row.inReportsFolder ? "reports/" : (row.listGroup ?? "")
-                                }
-                                className="flex flex-col gap-1"
-                              >
-                                <ExperimentRow
-                                  experiment={
-                                    row.inReportsFolder ? "reports/" : (row.listGroup ?? "")
-                                  }
-                                  label={label}
-                                  isPath={!row.inReportsFolder && row.listGroup !== null}
-                                  open={open}
-                                  onToggle={() => toggleRow(row.id)}
-                                />
-                                {open ? (
-                                  <div
-                                    data-testid="analysis-experiment-files"
-                                    className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
-                                  >
-                                    {row.truncated ? <TruncatedNotice /> : null}
-                                    {fileRows(row.files)}
-                                  </div>
-                                ) : null}
-                              </div>
-                            )
-                          })
+                          <>
+                            {model.groups.map((group) => {
+                              const open = isOpen(group.id)
+                              return (
+                                <div
+                                  key={group.id}
+                                  data-testid="analysis-group-block"
+                                  data-group={group.group}
+                                  className="flex flex-col gap-1"
+                                >
+                                  <FolderRow
+                                    testId="analysis-group"
+                                    dataName={group.group}
+                                    label={group.group}
+                                    isPath
+                                    open={open}
+                                    onToggle={() => toggleRow(group.id)}
+                                    help={t("Show or hide the experiments of this group.")}
+                                  />
+                                  {open ? (
+                                    <div
+                                      data-testid="analysis-group-contents"
+                                      className="ml-3 flex flex-col gap-1 border-border border-l pl-1"
+                                    >
+                                      {group.experiments.map(experimentNodeBlock)}
+                                      {group.truncated ? <TruncatedNotice /> : null}
+                                      {treeContents(group.id, group.tree)}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              )
+                            })}
+                            {model.experiments.map(experimentNodeBlock)}
+                            {model.loose
+                              ? experimentBlock(
+                                  "loose",
+                                  "analysis-experiment-group",
+                                  "",
+                                  t("No experiment"),
+                                  model.loose,
+                                )
+                              : null}
+                            {model.reports
+                              ? experimentBlock(
+                                  "reports",
+                                  "analysis-reports-group",
+                                  "reports/",
+                                  t("Reports (reports/)"),
+                                  model.reports,
+                                )
+                              : null}
+                          </>
                         )}
 
                         {filtered.length === 0 && allFiles.length > 0 ? (
@@ -813,45 +859,182 @@ function PathWithBreaks({ path }: { path: string }) {
   ))
 }
 
-/** One row of the file list: an experiment (or the loose files, or reports/) and its files. */
-interface ListRow {
+/** A folder of a row's file tree: its subfolders and files (both sorted by name). */
+interface TreeFolder {
+  name: string
+  /** Its path inside the row ("" for the row itself). */
+  path: string
+  folders: TreeFolder[]
+  files: RankedAnalysisFile[]
+}
+
+/** An experiment row: its files as a tree. */
+interface ExperimentNode {
   /** Unique id, also the key of its open state. */
   id: string
-  /** The experiment, else the run, of its files (null for the loose files). */
-  listGroup: string | null
-  /** True for the project's reports/ folder. */
-  inReportsFolder: boolean
-  /** Its files that pass the filters, in ranking order. */
-  files: RankedAnalysisFile[]
-  /** True when the listing kept only the row's first files. */
+  experiment: string
+  tree: TreeFolder
+  /** True when the listing kept only the experiment's first files. */
   truncated: boolean
 }
 
-/** An experiment row: its name, no count; clicking shows or hides its files. */
-function ExperimentRow({
-  experiment,
+/** A group row: the folders above the experiment level, its experiments and its own files. */
+interface GroupNode {
+  id: string
+  group: string
+  experiments: ExperimentNode[]
+  tree: TreeFolder
+  truncated: boolean
+}
+
+/** The file list: group rows, experiments with no group, loose files, reports/. */
+interface ListModel {
+  groups: GroupNode[]
+  experiments: ExperimentNode[]
+  loose: { tree: TreeFolder; truncated: boolean } | null
+  reports: { tree: TreeFolder; truncated: boolean } | null
+}
+
+/** Sort names like the file tree: numbers in order. */
+function byName(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true })
+}
+
+/** Build the folder tree of a row's files from their `innerPath`. */
+function buildTree(files: RankedAnalysisFile[]): TreeFolder {
+  const root: TreeFolder = { name: "", path: "", folders: [], files: [] }
+  for (const rankedFile of files) {
+    const parts = rankedFile.file.innerPath.split("/").slice(0, -1)
+    let folder = root
+    for (const part of parts) {
+      const path = folder.path === "" ? part : `${folder.path}/${part}`
+      let child = folder.folders.find((candidate) => candidate.name === part)
+      if (!child) {
+        child = { name: part, path, folders: [], files: [] }
+        folder.folders.push(child)
+      }
+      folder = child
+    }
+    folder.files.push(rankedFile)
+  }
+  const sort = (folder: TreeFolder): void => {
+    folder.folders.sort((a, b) => byName(a.name, b.name))
+    folder.files.sort((a, b) => byName(a.file.name, b.file.name))
+    for (const child of folder.folders) sort(child)
+  }
+  sort(root)
+  return root
+}
+
+/**
+ * Group the filtered files into the list model. Groups and experiments are
+ * sorted by name; a row with no matching files is left out.
+ */
+function buildListModel(
+  files: RankedAnalysisFile[],
+  truncated: Array<{ group: string | null; experiment: string | null; inReportsFolder: boolean }>,
+): ListModel {
+  const isCut = (group: string | null, experiment: string | null, inReportsFolder: boolean) =>
+    truncated.some(
+      (entry) =>
+        entry.group === group &&
+        entry.experiment === experiment &&
+        entry.inReportsFolder === inReportsFolder,
+    )
+  const byRow = new Map<string, RankedAnalysisFile[]>()
+  const reports: RankedAnalysisFile[] = []
+  for (const rankedFile of files) {
+    if (rankedFile.file.inReportsFolder) {
+      reports.push(rankedFile)
+      continue
+    }
+    const key = `${rankedFile.file.group ?? ""}\u0000${rankedFile.file.experiment ?? ""}`
+    const row = byRow.get(key)
+    if (row) row.push(rankedFile)
+    else byRow.set(key, [rankedFile])
+  }
+  const groups = new Map<string, GroupNode>()
+  const experiments: ExperimentNode[] = []
+  let loose: ListModel["loose"] = null
+  for (const rowFiles of byRow.values()) {
+    const { group, experiment } = rowFiles[0]?.file ?? { group: null, experiment: null }
+    if (group === null && experiment === null) {
+      loose = { tree: buildTree(rowFiles), truncated: isCut(null, null, false) }
+      continue
+    }
+    if (group !== null && !groups.has(group)) {
+      groups.set(group, {
+        id: `g:${group}`,
+        group,
+        experiments: [],
+        tree: buildTree([]),
+        truncated: false,
+      })
+    }
+    const groupNode = group === null ? null : (groups.get(group) ?? null)
+    if (experiment === null) {
+      if (groupNode) {
+        groupNode.tree = buildTree(rowFiles)
+        groupNode.truncated = isCut(group, null, false)
+      }
+      continue
+    }
+    const node: ExperimentNode = {
+      id: `e:${group ?? ""}\u0000${experiment}`,
+      experiment,
+      tree: buildTree(rowFiles),
+      truncated: isCut(group, experiment, false),
+    }
+    if (groupNode) groupNode.experiments.push(node)
+    else experiments.push(node)
+  }
+  for (const group of groups.values()) {
+    group.experiments.sort((a, b) => byName(a.experiment, b.experiment))
+  }
+  experiments.sort((a, b) => byName(a.experiment, b.experiment))
+  return {
+    groups: [...groups.values()].sort((a, b) => byName(a.group, b.group)),
+    experiments,
+    loose,
+    reports:
+      reports.length > 0 ? { tree: buildTree(reports), truncated: isCut(null, null, true) } : null,
+  }
+}
+
+/** A collapsible row of the list (a group, an experiment or a folder); no counts. */
+function FolderRow({
+  testId,
+  dataName,
   label,
   isPath,
   open,
   onToggle,
+  help,
 }: {
-  /** The `data-experiment` value: the experiment, "" for none, "reports/" for reports/. */
-  experiment: string
+  testId: "analysis-group" | "analysis-experiment" | "analysis-folder"
+  /** The row's `data-group`, `data-experiment` or `data-folder` value. */
+  dataName: string
   label: string
   /** True when `label` is a folder path (it then wraps after each "/"). */
   isPath: boolean
   open: boolean
   onToggle: () => void
+  help: string
 }) {
-  const t = useTranslate()
+  const dataAttribute =
+    testId === "analysis-group"
+      ? { "data-group": dataName }
+      : testId === "analysis-experiment"
+        ? { "data-experiment": dataName }
+        : { "data-folder": dataName }
   return (
     <button
       type="button"
-      data-testid="analysis-experiment"
-      data-experiment={experiment}
+      data-testid={testId}
+      {...dataAttribute}
       aria-expanded={open}
       data-feature-label={label}
-      data-feature-help={t("Show or hide the files of this experiment.")}
+      data-feature-help={help}
       onClick={onToggle}
       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
     >
@@ -865,8 +1048,11 @@ function ExperimentRow({
       <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       {/* A long name wraps (after a "/" first) and shows in full on hover. */}
       <span
-        data-testid="analysis-experiment-label"
-        className="min-w-0 flex-1 font-medium [overflow-wrap:anywhere]"
+        data-testid={`${testId}-label`}
+        className={cn(
+          "min-w-0 flex-1 [overflow-wrap:anywhere]",
+          testId !== "analysis-folder" && "font-medium",
+        )}
         title={label}
       >
         {isPath ? <PathWithBreaks path={label} /> : label}
@@ -935,76 +1121,11 @@ function FileRow({
   )
 }
 
+/** A file that passes the filters, with its search match positions. */
 interface RankedAnalysisFile {
   file: DataFileEntry
-  fuzzyScore: number
-  likelihood: number
   namePositions: number[]
   pathPositions: number[]
-}
-
-const LIKELY_ANALYSIS_TERMS = new Set([
-  "analysis",
-  "artifact",
-  "artifacts",
-  "eval",
-  "evaluation",
-  "experiment",
-  "experiments",
-  "figure",
-  "figures",
-  "metric",
-  "metrics",
-  "output",
-  "outputs",
-  "plot",
-  "plots",
-  "prediction",
-  "predictions",
-  "report",
-  "reports",
-  "result",
-  "results",
-  "run",
-  "runs",
-  "score",
-  "scores",
-  "summary",
-])
-
-const UNLIKELY_ANALYSIS_TERMS = new Set([
-  "code",
-  "config",
-  "configs",
-  "configuration",
-  "fixture",
-  "fixtures",
-  "license",
-  "package",
-  "params",
-  "parameters",
-  "readme",
-  "script",
-  "scripts",
-  "setup",
-  "source",
-  "src",
-  "test",
-  "tests",
-])
-
-/** Lightweight path/name prior; fuzzy relevance remains the primary sort key. */
-function analysisLikelihood(relPath: string): number {
-  const terms = relPath
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-  let score = 0
-  for (const term of terms) {
-    if (LIKELY_ANALYSIS_TERMS.has(term)) score += 10
-    if (UNLIKELY_ANALYSIS_TERMS.has(term)) score -= 10
-  }
-  return score
 }
 
 function HighlightedText({ text, positions }: { text: string; positions: number[] }) {

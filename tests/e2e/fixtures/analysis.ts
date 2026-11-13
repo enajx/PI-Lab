@@ -12,3 +12,19 @@ export async function openAnalysisExperiment(window: Page, experiment: string): 
   if ((await row.getAttribute("aria-expanded")) !== "true") await row.click()
   await expect(row).toHaveAttribute("aria-expanded", "true")
 }
+
+/** Open a group row (the folders above the experiment level). */
+export async function openAnalysisGroup(window: Page, group: string): Promise<void> {
+  const row = window.locator(`[data-testid="analysis-group"][data-group="${group}"]`)
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  if ((await row.getAttribute("aria-expanded")) !== "true") await row.click()
+  await expect(row).toHaveAttribute("aria-expanded", "true")
+}
+
+/** Open a folder row inside an experiment (`folder` is its path inside the row). */
+export async function openAnalysisFolder(window: Page, folder: string): Promise<void> {
+  const row = window.locator(`[data-testid="analysis-folder"][data-folder="${folder}"]`).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  if ((await row.getAttribute("aria-expanded")) !== "true") await row.click()
+  await expect(row).toHaveAttribute("aria-expanded", "true")
+}

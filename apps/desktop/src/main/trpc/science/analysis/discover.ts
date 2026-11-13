@@ -17,11 +17,11 @@ import type { ExperimentsStructure } from "./structure"
 // ── Discovery ────────────────────────────────────────────────────────────────
 
 /**
- * Cap on the files listed for one row of the Analysis list (an experiment, a
- * run without an experiment, or the loose files). The walk itself goes through
- * the whole folder, so every row is listed however many files there are; a row
- * over the cap keeps its first files and is named in `truncatedGroups` so the UI
- * says so in that row.
+ * Cap on the files listed for one experiment (or the files of a group, or the
+ * loose files). The walk itself goes through the whole folder, so every
+ * experiment is listed however many files there are; one over the cap keeps
+ * its first files and is named in `truncatedExperiments` so the UI says so in
+ * that row.
  */
 export const MAX_LISTED_FILES = 2000
 /** Max Python prefix read while deciding whether a `.py` file is a marimo notebook. */
@@ -43,17 +43,19 @@ export interface DataFileEntry {
   size: number
   mtime: number
   /**
-   * The group the file belongs to under the experiments folder structure (see
-   * {@link assignExperimentRun}), or null for no group ("No experiment").
+   * The folder path above the experiment (e.g. `pattern_translation`), shown as
+   * a group row, or null when the experiments are at the top (see
+   * {@link assignRow}). A file above the experiment level has its group and no
+   * experiment.
    */
+  group: string | null
+  /** The experiment folder the file is in, or null (a file of its group, or loose). */
   experiment: string | null
-  /** The run the file belongs to, or null for a loose file. */
-  run: string | null
   /**
-   * The row of the Analysis list the file is under (see {@link listGroupOf}):
-   * its experiment, else its run, else null for a loose file.
+   * The file's path inside its row (experiment, group, or the results folder
+   * for loose files), POSIX separators; the list shows its folders as a tree.
    */
-  listGroup: string | null
+  innerPath: string
   /** True for a file in the project's `reports/` folder, listed as its own group. */
   inReportsFolder: boolean
 }
@@ -63,17 +65,18 @@ export interface DataFileGroup {
   files: DataFileEntry[]
 }
 
-/** A row of the Analysis list that had more than {@link MAX_LISTED_FILES} files. */
-export interface TruncatedGroup {
-  listGroup: string | null
+/** An experiment (or group, or loose row) that had more than {@link MAX_LISTED_FILES} files. */
+export interface TruncatedExperiment {
+  group: string | null
+  experiment: string | null
   inReportsFolder: boolean
 }
 
 export interface DataFileListing {
   groups: DataFileGroup[]
   total: number
-  /** The rows that kept only their first {@link MAX_LISTED_FILES} files. */
-  truncatedGroups: TruncatedGroup[]
+  /** The experiments that kept only their first {@link MAX_LISTED_FILES} files. */
+  truncatedExperiments: TruncatedExperiment[]
   /** True when an artifact or child directory vanished or could not be read. */
   partial: boolean
   /** Repo-relative paths skipped due to expected access or disappearance errors. */
@@ -84,13 +87,13 @@ export interface DataFileListing {
  * Walk `rootPath` (a folder inside the repo, e.g. its results folder) for
  * explicitly whitelisted data/analysis artifacts. Source, compiled, and unknown
  * files never enter the candidate set. The whole folder is walked; the
- * {@link MAX_LISTED_FILES} cap applies per list row, so a row with many files
+ * {@link MAX_LISTED_FILES} cap applies per experiment, so one with many files
  * cannot hide other experiments. `.zarr` directories are
  * collected as one metadata-only dataset and pruned. Paths are returned relative
  * to `repoPath`. For the results folder (`folder: "results"`) each entry's
- * experiment and run come from `structure` (see {@link assignExperimentRun});
+ * group, experiment and inner path come from `structure` (see {@link assignRow});
  * for the project's reports folder (`folder: "reports"`) entries have no
- * experiment or run and are marked `inReportsFolder`.
+ * group or experiment, keep their folder tree, and are marked `inReportsFolder`.
  */
 export async function discoverDataFiles(
   repoPath: string,
@@ -99,31 +102,41 @@ export async function discoverDataFiles(
   structure: ExperimentsStructure,
 ): Promise<DataFileListing> {
   const walk = await walkAnalysisArtifacts(rootPath)
+  const located = walk.artifacts.map(({ abs, kind }) => {
+    const underRoot = toPosix(relative(rootPath, abs)).split("/")
+    return { abs, kind, folders: underRoot.slice(0, -1), name: underRoot.at(-1) ?? "" }
+  })
+  const level =
+    folder === "results" && structure.kind === "auto"
+      ? detectExperimentLevel(located.map((file) => file.folders))
+      : 1
 
   const entries: DataFileEntry[] = []
   const skipped = walk.skipped.map((path) => toPosix(relative(repoPath, join(rootPath, path))))
-  // Files kept so far per list row; a row past the cap is recorded once.
-  const keptPerGroup = new Map<string | null, number>()
-  const truncatedGroups: TruncatedGroup[] = []
-  for (const { abs, kind } of walk.artifacts) {
+  // Files kept so far per experiment; one past the cap is recorded once.
+  const keptPerExperiment = new Map<string, number>()
+  const truncatedExperiments: TruncatedExperiment[] = []
+  for (const { abs, kind, folders, name: fileName } of located) {
     const relPath = toPosix(relative(repoPath, abs))
     const name = relPath.slice(relPath.lastIndexOf("/") + 1)
-    const underRoot = toPosix(relative(rootPath, abs))
-    const folders = underRoot.split("/").slice(0, -1)
-    const { experiment, run } =
+    const row =
       folder === "results"
-        ? assignExperimentRun(folders, structure)
-        : { experiment: null, run: null }
-    const listGroup = listGroupOf(experiment, run)
-    const kept = keptPerGroup.get(listGroup) ?? 0
+        ? assignRow(folders, fileName, structure, level)
+        : { group: null, experiment: null, innerPath: [...folders, fileName].join("/") }
+    const key = `${row.group ?? ""}\u0000${row.experiment ?? ""}`
+    const kept = keptPerExperiment.get(key) ?? 0
     if (kept >= MAX_LISTED_FILES) {
       if (kept === MAX_LISTED_FILES) {
-        truncatedGroups.push({ listGroup, inReportsFolder: folder === "reports" })
-        keptPerGroup.set(listGroup, kept + 1)
+        truncatedExperiments.push({
+          group: row.group,
+          experiment: row.experiment,
+          inReportsFolder: folder === "reports",
+        })
+        keptPerExperiment.set(key, kept + 1)
       }
       continue
     }
-    keptPerGroup.set(listGroup, kept + 1)
+    keptPerExperiment.set(key, kept + 1)
     let info: Awaited<ReturnType<typeof stat>>
     try {
       info = await stat(abs)
@@ -138,9 +151,9 @@ export async function discoverDataFiles(
       kind,
       size: info.size,
       mtime: info.mtimeMs,
-      experiment,
-      run,
-      listGroup,
+      group: row.group,
+      experiment: row.experiment,
+      innerPath: row.innerPath,
       inReportsFolder: folder === "reports",
     })
   }
@@ -163,56 +176,106 @@ export async function discoverDataFiles(
   return {
     groups,
     total: entries.length,
-    truncatedGroups,
+    truncatedExperiments,
     partial: skipped.length > 0,
     skipped,
   }
 }
 
 /**
- * The row of the Analysis list a file is under: its experiment, else its run
- * (a run with no experiment, such as a folder at the top of the results folder
- * under Auto-detect), else null (a loose file).
+ * Output folders inside a run (figures, videos, checkpoints…). Auto-detect
+ * cuts a path at the first of these, so they never decide the experiment level.
  */
-export function listGroupOf(experiment: string | null, run: string | null): string | null {
-  return experiment ?? run
+const OUTPUT_FOLDER_NAMES = new Set([
+  "animations",
+  "plots",
+  "figures",
+  "runs",
+  "checkpoints",
+  "logs",
+  "videos",
+])
+
+/**
+ * Auto-detect's experiment level: the folder depth where most runs start.
+ * Each file's folders are cut at the first output folder ({@link
+ * OUTPUT_FOLDER_NAMES}); the distinct folders left are the runs, and the most
+ * common depth among them wins, the shallower one on a tie. 1 means the
+ * experiments are the top folders of the results folder (no groups); with no
+ * folders at all it is 1 too.
+ */
+export function detectExperimentLevel(foldersOfFiles: string[][]): number {
+  const runs = new Set<string>()
+  for (const folders of foldersOfFiles) {
+    const cut = folders.findIndex((name) => OUTPUT_FOLDER_NAMES.has(name.toLowerCase()))
+    const run = cut === -1 ? folders : folders.slice(0, cut)
+    if (run.length > 0) runs.add(run.join("/"))
+  }
+  const countByDepth = new Map<number, number>()
+  for (const run of runs) {
+    const depth = run.split("/").length
+    countByDepth.set(depth, (countByDepth.get(depth) ?? 0) + 1)
+  }
+  let level = 1
+  let best = 0
+  for (const [depth, count] of [...countByDepth].sort((a, b) => a[0] - b[0])) {
+    if (count > best) {
+      best = count
+      level = depth
+    }
+  }
+  return level
 }
 
 /**
- * The experiment (group) and run of a file from the folders between the
+ * The group, experiment and inner path of a file from the folders between the
  * results folder and the file (`folders`, outermost first).
  *
- * - `auto`: every folder that holds data files is a run, grouped by its parent
- *   folder (its path under the results folder, or null when the parent is the
- *   results folder). For `gecko/fl-shape_s0/run.db` the group is `gecko` and
- *   the run `fl-shape_s0`. Files directly in the results folder are loose.
- * - `flat`: no group, no run.
- * - `pattern`: the leading folders are matched segment by segment; a file whose
- *   folders do not match a literal segment is loose with no group. A file
- *   above a placeholder's depth leaves that placeholder null.
+ * - `auto`: the experiment is the folder at depth `level` (see
+ *   {@link detectExperimentLevel}), and the folders above it are its group.
+ * - `pattern`: the experiment is the folder at `{experiment}` (else `{run}`);
+ *   the folders before it are its group and must match their literal segments
+ *   (`*` matches any folder), else the file is loose. One folder per
+ *   experiment and Experiment / run folders are the patterns `{experiment}`
+ *   and `{experiment}/{run}`.
+ * - `flat`: no group, no experiment, no folders (the inner path is the name).
+ *
+ * A file above the experiment level belongs to its group (its folders), with
+ * no experiment. The inner path is the rest of the path below the experiment
+ * (or group), so the list can show subfolders as a tree.
  */
-export function assignExperimentRun(
+export function assignRow(
   folders: string[],
+  name: string,
   structure: ExperimentsStructure,
-): { experiment: string | null; run: string | null } {
-  if (structure.kind === "flat" || folders.length === 0) return { experiment: null, run: null }
-  if (structure.kind === "auto") {
-    const parent = folders.slice(0, -1)
-    return {
-      experiment: parent.length === 0 ? null : parent.join("/"),
-      run: folders[folders.length - 1] ?? null,
+  level: number,
+): { group: string | null; experiment: string | null; innerPath: string } {
+  if (structure.kind === "flat") return { group: null, experiment: null, innerPath: name }
+  let experimentIndex = level - 1
+  if (structure.kind === "pattern") {
+    const at = structure.segments.indexOf("{experiment}")
+    experimentIndex = at === -1 ? structure.segments.indexOf("{run}") : at
+    for (const [index, segment] of structure.segments.slice(0, experimentIndex).entries()) {
+      const folderName = folders[index]
+      if (folderName === undefined) break
+      if (segment !== "*" && segment !== folderName) {
+        return { group: null, experiment: null, innerPath: [...folders, name].join("/") }
+      }
     }
   }
-  let experiment: string | null = null
-  let run: string | null = null
-  for (const [index, segment] of structure.segments.entries()) {
-    const name = folders[index]
-    if (name === undefined) break
-    if (segment === "{experiment}") experiment = name
-    else if (segment === "{run}") run = name
-    else if (segment !== "*" && segment !== name) return { experiment: null, run: null }
+  const inner = (from: number): string => [...folders.slice(from), name].join("/")
+  if (folders.length <= experimentIndex) {
+    return {
+      group: folders.length === 0 ? null : folders.join("/"),
+      experiment: null,
+      innerPath: name,
+    }
   }
-  return { experiment, run }
+  return {
+    group: experimentIndex === 0 ? null : folders.slice(0, experimentIndex).join("/"),
+    experiment: folders[experimentIndex] ?? null,
+    innerPath: inner(experimentIndex + 1),
+  }
 }
 
 interface AnalysisArtifactCandidate {

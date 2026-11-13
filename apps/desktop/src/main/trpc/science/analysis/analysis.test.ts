@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createHarness, type Harness } from "../../testHarness"
 import {
+  detectExperimentLevel,
   MAX_CHART_POINTS,
   MAX_LISTED_FILES,
   MAX_NPY_BYTES,
@@ -81,18 +82,62 @@ function makeRawNpy(shape: string, descr: string, fortran: boolean, data: Buffer
   return Buffer.concat([prefix, Buffer.from(header, "ascii"), data])
 }
 
-/** Each listed file as relPath → [experiment, run]. */
+/** Each listed file as relPath → [group, experiment, path inside its row]. */
 function experimentRuns(listing: {
   groups: Array<{
-    files: Array<{ relPath: string; experiment: string | null; run: string | null }>
+    files: Array<{
+      relPath: string
+      group: string | null
+      experiment: string | null
+      innerPath: string
+    }>
   }>
-}): Record<string, [string | null, string | null]> {
+}): Record<string, [string | null, string | null, string]> {
   return Object.fromEntries(
     listing.groups.flatMap((group) =>
-      group.files.map((file) => [file.relPath, [file.experiment, file.run]] as const),
+      group.files.map(
+        (file) => [file.relPath, [file.group, file.experiment, file.innerPath]] as const,
+      ),
     ),
   )
 }
+
+describe("detectExperimentLevel (Auto-detect)", () => {
+  /** The folders of each path, as discovery passes them. */
+  const folders = (paths: string[]) => paths.map((path) => path.split("/").slice(0, -1))
+
+  test("a results/<group>/<experiment>/ layout like the user's is level 2; output folders do not count", () => {
+    expect(
+      detectExperimentLevel(
+        folders([
+          "multiplexing/20260214_141942/best_loss_vs_n.csv",
+          "multiplexing/20260214_141942/plots/best_loss_vs_n_log.png",
+          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run0/a.png",
+          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run1/a.png",
+          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n04_run0/a.png",
+          "pattern_translation/easily-boss-grouse/training_curve.pdf",
+          "pattern_translation/easily-boss-grouse/animations/growth.mp4",
+          "pattern_translation/FAIL-wholly-calm-badger/training_curve.pdf",
+          "pattern_translation/fully-witty-marmot/grid.png",
+          "pattern_translation/fully-witty-marmot/targets/t0.png",
+          "patterns_conditional_growth/firmly-key-amoeba/grid.png",
+          "patterns_conditional_growth/firmly-key-amoeba/targets/t0.png",
+        ]),
+      ),
+    ).toBe(2)
+  })
+
+  test("a results/<experiment>/ layout is level 1, and so is a flat one", () => {
+    expect(
+      detectExperimentLevel(folders(["exp-a/m.csv", "exp-b/m.csv", "exp-b/plots/p.png", "s.json"])),
+    ).toBe(1)
+    expect(detectExperimentLevel(folders(["a.csv", "b.png"]))).toBe(1)
+  })
+
+  test("a tie goes to the shallower level", () => {
+    expect(detectExperimentLevel(folders(["bulk/a.csv", "late/run-1/x.csv"]))).toBe(1)
+  })
+})
 
 describe("experiments folder structure", () => {
   const structurePath = () => join(h.dataDir, "experiments-structure.yaml")
@@ -109,15 +154,16 @@ describe("experiments folder structure", () => {
     return h.caller.science.analysis.listFiles({ projectId, defaultResultsFolder: "results" })
   }
 
-  test("auto-detect (the default): folders that hold data files are runs, grouped by their parent folder", async () => {
+  test("auto-detect (the default): the most common run depth is the experiment level, the folders above it are groups", async () => {
     await writeGecko()
     const project = await h.caller.projects.open({ path: h.repoDir })
     expect(experimentRuns(await list(project.id))).toEqual({
-      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0"],
-      "results/gecko/fl-shape_s1/run.db": ["gecko", "fl-shape_s1"],
-      "results/gecko/fl-shape_s1/metrics.csv": ["gecko", "fl-shape_s1"],
-      "results/exp-a/plot.png": [null, "exp-a"],
-      "results/summary.json": [null, null],
+      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0", "run.db"],
+      "results/gecko/fl-shape_s1/run.db": ["gecko", "fl-shape_s1", "run.db"],
+      "results/gecko/fl-shape_s1/metrics.csv": ["gecko", "fl-shape_s1", "metrics.csv"],
+      // Above the experiment level: a file of the group itself.
+      "results/exp-a/plot.png": ["exp-a", null, "plot.png"],
+      "results/summary.json": [null, null, "summary.json"],
     })
     expect(await h.caller.science.analysis.getStructure({ projectId: project.id })).toEqual({
       filePath: structurePath(),
@@ -134,22 +180,26 @@ describe("experiments folder structure", () => {
 
     await set("one-folder-per-experiment")
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/gecko/fl-shape_s0/run.db": ["gecko", null],
-      "results/exp-a/plot.png": ["exp-a", null],
-      "results/summary.json": [null, null],
+      "results/gecko/fl-shape_s0/run.db": [null, "gecko", "fl-shape_s0/run.db"],
+      "results/exp-a/plot.png": [null, "exp-a", "plot.png"],
+      "results/summary.json": [null, null, "summary.json"],
     })
 
+    // Experiment / run folders: the runs are folders inside each experiment.
     await set("experiment-run")
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0"],
-      "results/exp-a/plot.png": ["exp-a", null],
+      "results/gecko/fl-shape_s0/run.db": [null, "gecko", "fl-shape_s0/run.db"],
+      "results/exp-a/plot.png": [null, "exp-a", "plot.png"],
     })
 
     const saved = await set("flat")
     expect(saved).toEqual({ filePath: structurePath(), defaultValue: "auto", projectValue: "flat" })
-    expect(Object.values(experimentRuns(await list(project.id)))).toEqual(
-      Array(5).fill([null, null]),
-    )
+    // A flat list: no groups, no experiments, no folders.
+    expect(
+      Object.entries(experimentRuns(await list(project.id))).map(
+        ([relPath, row]) => row[0] === null && row[1] === null && relPath.endsWith(`/${row[2]}`),
+      ),
+    ).toEqual(Array(5).fill(true))
     const text = await readFile(structurePath(), "utf8")
     expect(text).toContain("default: auto")
     expect(text).toContain(`${project.repoPath}: flat`)
@@ -160,8 +210,9 @@ describe("experiments folder structure", () => {
       (await h.caller.science.analysis.getStructure({ projectId: project.id })).projectValue,
     ).toBeNull()
     expect(experimentRuns(await list(project.id))["results/exp-a/plot.png"]).toEqual([
-      null,
       "exp-a",
+      null,
+      "plot.png",
     ])
   })
 
@@ -173,8 +224,9 @@ describe("experiments folder structure", () => {
       value: "one-folder-per-experiment",
     })
     expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
-      "gecko",
       null,
+      "gecko",
+      "fl-shape_s0/run.db",
     ])
     expect(await h.caller.science.analysis.getStructure({ projectId: null })).toMatchObject({
       defaultValue: "one-folder-per-experiment",
@@ -192,17 +244,18 @@ describe("experiments folder structure", () => {
       value: "{experiment}/*/{run}/",
     })
     expect(experimentRuns(await list(project.id))).toEqual({
-      "results/sweep/seeds/s0/a.csv": ["sweep", "s0"],
-      "results/sweep/seeds/s1/deep/b.csv": ["sweep", "s1"],
-      "results/other/c.csv": ["other", null],
+      "results/sweep/seeds/s0/a.csv": [null, "sweep", "seeds/s0/a.csv"],
+      "results/sweep/seeds/s1/deep/b.csv": [null, "sweep", "seeds/s1/deep/b.csv"],
+      "results/other/c.csv": [null, "other", "c.csv"],
     })
+    // Folders before {experiment} are groups; a literal folder must match.
     await h.caller.science.analysis.setStructure({
       projectId: project.id,
-      value: "{experiment}/seeds/{run}",
+      value: "sweep/{experiment}/{run}",
     })
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/sweep/seeds/s0/a.csv": ["sweep", "s0"],
-      "results/other/c.csv": ["other", null],
+      "results/sweep/seeds/s0/a.csv": ["sweep", "seeds", "s0/a.csv"],
+      "results/other/c.csv": [null, null, "other/c.csv"],
     })
   })
 
@@ -245,8 +298,9 @@ describe("experiments folder structure", () => {
       `# mine\ndefault: flat\nprojects:\n  "${project.repoPath}": "{experiment}/"\n`,
     )
     expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
-      "gecko",
       null,
+      "gecko",
+      "fl-shape_s0/run.db",
     ])
   })
 })
@@ -310,7 +364,7 @@ describe("science.analysis.listFiles", () => {
     expect(npyKind.get("results/runs/loss.npy")).toBe("npy")
     expect(npyKind.get("results/checkpoints/weights.npz")).toBe("npz")
 
-    expect(listing.truncatedGroups).toEqual([])
+    expect(listing.truncatedExperiments).toEqual([])
     expect(listing.total).toBeGreaterThanOrEqual(5)
   })
 
@@ -490,13 +544,15 @@ describe("science.analysis.listFiles", () => {
       defaultResultsFolder: "results",
     })
     const files = listing.groups.flatMap((group) => group.files)
-    // Each file names its list row: the experiment, else the run.
-    expect(files.filter((file) => file.listGroup === "bulk")).toHaveLength(MAX_LISTED_FILES)
-    expect(files.find((file) => file.relPath === "results/zz-late/run-1/x.csv")?.listGroup).toBe(
+    // The cap is per experiment.
+    expect(files.filter((file) => file.experiment === "bulk")).toHaveLength(MAX_LISTED_FILES)
+    expect(files.find((file) => file.relPath === "results/zz-late/run-1/x.csv")?.experiment).toBe(
       "zz-late",
     )
-    // Only the row that was cut is flagged.
-    expect(listing.truncatedGroups).toEqual([{ listGroup: "bulk", inReportsFolder: false }])
+    // Only the experiment that was cut is flagged.
+    expect(listing.truncatedExperiments).toEqual([
+      { group: null, experiment: "bulk", inReportsFolder: false },
+    ])
   })
 
   test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", async () => {
@@ -516,7 +572,7 @@ describe("science.analysis.listFiles", () => {
 
     expect(paths).toContain("results/deep/results/metrics.csv")
     expect(paths.some((path) => path.endsWith(".py"))).toBe(false)
-    expect(listing.truncatedGroups).toEqual([])
+    expect(listing.truncatedExperiments).toEqual([])
   })
 
   test("lists only the results folder, grouping files by experiment folder", async () => {
@@ -586,8 +642,8 @@ describe("science.analysis.listFiles", () => {
     expect(listing.resultsFolder).toBe("runs/out")
     expect(listing.overridden).toBe(true)
     expect(
-      listing.groups.flatMap((g) => g.files.map((f) => [f.relPath, f.experiment, f.run])),
-    ).toEqual([["runs/out/exp-c/log.txt", null, "exp-c"]])
+      listing.groups.flatMap((g) => g.files.map((f) => [f.relPath, f.experiment, f.innerPath])),
+    ).toEqual([["runs/out/exp-c/log.txt", "exp-c", "log.txt"]])
 
     await h.caller.science.analysis.setResultsFolder({ projectId: project.id, dir: null })
     const reset = await h.caller.science.analysis.listFiles({
@@ -626,16 +682,18 @@ describe("science.analysis.listFiles", () => {
     const byRel = Object.fromEntries(
       listing.groups.flatMap((group) =>
         group.files.map(
-          (file) => [file.relPath, [file.experiment, file.run, file.inReportsFolder]] as const,
+          (file) =>
+            [file.relPath, [file.experiment, file.innerPath, file.inReportsFolder]] as const,
         ),
       ),
     )
     expect(byRel).toEqual({
-      "results/exp-a/log.txt": [null, "exp-a", false],
-      // A reports/ folder inside the results folder stays a run of the results folder.
-      "results/reports/inner.html": [null, "reports", false],
-      "reports/report.html": [null, null, true],
-      "reports/nested/summary.md": [null, null, true],
+      "results/exp-a/log.txt": ["exp-a", "log.txt", false],
+      // A reports/ folder inside the results folder stays an experiment of the results folder.
+      "results/reports/inner.html": ["reports", "inner.html", false],
+      // The project's reports/ folder keeps its folder tree.
+      "reports/report.html": [null, "report.html", true],
+      "reports/nested/summary.md": [null, "nested/summary.md", true],
     })
     expect(listing.total).toBe(4)
   })

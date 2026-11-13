@@ -7,7 +7,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { openAnalysisExperiment } from "./fixtures/analysis"
+import { openAnalysisExperiment, openAnalysisFolder, openAnalysisGroup } from "./fixtures/analysis"
 import { onePagePdf } from "./fixtures/pdf"
 import {
   type ElectronApplication,
@@ -240,10 +240,13 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
     .toEqual(["data", "exp-a", "exp-b", "gecko", "reports"].map((name) => [name, "false", name]))
   await expect(window.getByTestId("analysis-file-count")).toHaveCount(0)
   await expect(window.getByTestId("analysis-file")).toHaveCount(0)
+  // gecko's runs are folders inside it (collapsed), each with its files.
   await row("gecko").click()
+  await expect(window.getByTestId("analysis-folder")).toHaveText(["fl-shape_s0", "fl-shape_s1"])
+  await openAnalysisFolder(window, "fl-shape_s0")
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path^="results/gecko/"]'),
-  ).toHaveCount(2)
+  ).toHaveCount(1)
   await row("gecko").click()
   await openAnalysisExperiment(window, "exp-a")
   await expect(
@@ -287,6 +290,7 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
       ]),
     )
   await openAnalysisExperiment(window, "gecko")
+  await openAnalysisFolder(window, "fl-shape_s0")
   await expect(
     window.locator(
       '[data-testid="analysis-file"][data-rel-path="results/gecko/fl-shape_s0/run.db"]',
@@ -357,6 +361,7 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   await expect(pdf).toHaveAttribute("aria-pressed", "true")
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(1)
   await openAnalysisExperiment(window, "multiplexing")
+  await openAnalysisFolder(window, "grid_7hf2hacr")
   await expect(window.getByTestId("analysis-file")).toHaveCount(1)
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-figures-pdf.png") })
 
@@ -372,6 +377,68 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   await pdf.click()
   await expect(pdf).toHaveAttribute("aria-pressed", "false")
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(2)
+})
+
+test("a results folder laid out like the user's lists groups, then experiments, then their folder tree", async () => {
+  // results/<group>/<experiment>/…, with output folders (plots/, runs/, animations/).
+  const files = [
+    "multiplexing/20260214_141942/best_loss_vs_n.csv",
+    "multiplexing/20260214_141942/plots/best_loss_vs_n_log.png",
+    "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run0_141944/grid.png",
+    "multiplexing/20260214_141942/runs/patterns_conditional_growth/n04_run0_141944/grid.png",
+    "pattern_translation/easily-boss-grouse/training_curve.pdf",
+    "pattern_translation/easily-boss-grouse/animations/growth.gif",
+    "pattern_translation/FAIL-wholly-calm-badger/training_curve.pdf",
+    "pattern_translation/fully-witty-marmot/grid.png",
+    "pattern_translation/fully-witty-marmot/targets/t0.png",
+    "patterns_conditional_growth/firmly-key-amoeba/grid.png",
+  ]
+  await rm(join(repoDir, "results"), { recursive: true })
+  for (const file of files) {
+    await mkdir(dirname(join(repoDir, "results", file)), { recursive: true })
+    await writeFile(join(repoDir, "results", file), "x")
+  }
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+
+  // Top rows: the groups, collapsed; no experiment rows with deep paths.
+  const groups = window.getByTestId("analysis-group")
+  await expect(groups).toHaveText(
+    ["multiplexing", "pattern_translation", "patterns_conditional_growth"],
+    {
+      timeout: 30_000,
+    },
+  )
+  // No experiment rows at the top: they are inside their groups.
+  await expect(window.getByTestId("analysis-experiment")).toHaveCount(0)
+  // A group lists its experiments.
+  await openAnalysisGroup(window, "pattern_translation")
+  await expect(window.getByTestId("analysis-experiment")).toHaveText([
+    "easily-boss-grouse",
+    "FAIL-wholly-calm-badger",
+    "fully-witty-marmot",
+  ])
+  // An experiment shows its tree: animations/ is a folder row before the files.
+  await openAnalysisExperiment(window, "easily-boss-grouse")
+  const grouse = window
+    .locator('[data-testid="analysis-experiment-group"][data-experiment="easily-boss-grouse"]')
+    .getByTestId("analysis-experiment-files")
+  await expect(grouse.getByTestId("analysis-folder")).toHaveText(["animations"])
+  await expect(grouse.getByTestId("analysis-file")).toHaveCount(1)
+  await openAnalysisFolder(window, "animations")
+  await expect(grouse.getByTestId("analysis-file")).toHaveCount(2)
+  // multiplexing's experiment keeps plots/ and runs/ as folders.
+  await openAnalysisGroup(window, "multiplexing")
+  await openAnalysisExperiment(window, "20260214_141942")
+  const multiplexing = window
+    .locator('[data-testid="analysis-experiment-group"][data-experiment="20260214_141942"]')
+    .getByTestId("analysis-experiment-files")
+  await expect(multiplexing.getByTestId("analysis-folder")).toHaveText(["plots", "runs"])
+  await window.screenshot({
+    path: "/private/tmp/claude-501/-Users-enaj-code-PI-Lab/1ca26459-f122-4cc9-9c1d-bc6c1ee58855/scratchpad/analysis-tree.png",
+  })
 })
 
 test("a results folder laid out like the user's shows the Figures and Markup format rows", async () => {
@@ -437,6 +504,7 @@ test("Animations lists videos and gifs; a video plays muted and looping, a gif a
     .evaluateAll((chips) => chips.map((chip) => Math.round(chip.getBoundingClientRect().top)))
   expect(new Set(tops).size).toBe(1)
   await openAnalysisExperiment(window, "multiplexing")
+  await openAnalysisFolder(window, "run_a")
   await expect(window.getByTestId("analysis-file")).toHaveCount(2)
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path$="model.pt"]'),
@@ -522,11 +590,10 @@ async function selectTextFits(locator: Locator): Promise<boolean> {
 }
 
 test("at the default window width the prompt, the Structure select and long group names are not cut", async () => {
-  // A long group name: blastocyst-profile/morpheus_s0 (its morpheus_out folder is a run).
-  const run = join(repoDir, "results", "blastocyst-profile", "morpheus_s0")
-  await mkdir(join(run, "morpheus_out"), { recursive: true })
-  await writeFile(join(run, "metrics.csv"), "a\n1\n")
-  await writeFile(join(run, "morpheus_out", "x.csv"), "a\n1\n")
+  // A long experiment name.
+  const longName = "blastocyst-profile-morpheus_s0-sweep-gradient-noise"
+  await mkdir(join(repoDir, "results", longName), { recursive: true })
+  await writeFile(join(repoDir, "results", longName, "metrics.csv"), "a\n1\n")
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
@@ -539,13 +606,9 @@ test("at the default window width the prompt, the Structure select and long grou
   expect(await selectTextFits(structure)).toBe(true)
 
   const label = window
-    .locator(
-      '[data-testid="analysis-experiment"][data-experiment="blastocyst-profile/morpheus_s0"]',
-    )
+    .locator(`[data-testid="analysis-experiment"][data-experiment="${longName}"]`)
     .getByTestId("analysis-experiment-label")
-  await expect(label).toHaveAttribute("title", "blastocyst-profile/morpheus_s0", {
-    timeout: 30_000,
-  })
+  await expect(label).toHaveAttribute("title", longName, { timeout: 30_000 })
   expect(await textOverflow(label)).toBeLessThanOrEqual(0)
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-default-width.png") })
 
