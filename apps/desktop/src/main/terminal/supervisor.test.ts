@@ -186,7 +186,10 @@ describe("explicit Quit", () => {
     await supervisor.shutdownDaemon(2_000, warn)
     expect(warn).not.toHaveBeenCalled()
     expect(await isDaemonListening(socketPath)).toBe(false)
-    expect(() => process.kill(shell.pid as number, 0)).toThrow(/ESRCH/)
+    // The daemon signals the shell and does not wait for it, so it can exit a few ms later.
+    await vi.waitFor(() => expect(() => process.kill(shell.pid as number, 0)).toThrow(/ESRCH/), {
+      timeout: 2_000,
+    })
     await new Promise((resolve) => setTimeout(resolve, 50))
     await expect(supervisor.ensureClient()).rejects.toThrow(/disposed/)
   })
