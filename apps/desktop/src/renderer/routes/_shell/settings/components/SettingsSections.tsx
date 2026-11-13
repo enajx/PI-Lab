@@ -41,6 +41,7 @@ import {
   EDITOR_FONT_MAX_SIZE,
   EDITOR_FONT_MIN_SIZE,
   type NewSessionKind,
+  useAnalysisFlatList,
   useDefaultAgentId,
   useDefaultResultsFolder,
   useDigitalRainDensity,
@@ -1388,6 +1389,7 @@ export function ExperimentsSection() {
   const [runsSource, setRunsSource] = useExperimentRunsSource()
   const [runsFile, setRunsFile] = useExperimentRunsFile()
   const [resultsFolder, setResultsFolder] = useDefaultResultsFolder()
+  const [flatList, setFlatList] = useAnalysisFlatList()
   return (
     <SettingsSection
       testId="settings-section-experiments"
@@ -1437,6 +1439,13 @@ export function ExperimentsSection() {
           <ExperimentsStructureSelect projectId={null} testId="settings-experiments-structure" />
         </div>
       </div>
+      <ToggleField
+        testId="settings-analysis-flat-list"
+        label="Hide folders"
+        description="Analysis lists the files directly, each with its path, without folders."
+        checked={flatList}
+        onChange={setFlatList}
+      />
     </SettingsSection>
   )
 }

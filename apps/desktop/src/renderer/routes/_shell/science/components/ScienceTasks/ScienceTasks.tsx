@@ -34,9 +34,10 @@ function selectorFor(task: TaskRecord): { id: string } | { sourceStart: number }
 
 /**
  * Global Tasks science tab. TODO Markdown remains the only task store. A project
- * picker in the top bar shows All projects (the default) or one project; it
- * remembers the last choice. `initialProjectId` (from `?projectId=`) selects a
- * project and becomes the remembered one; the picker always wins afterwards.
+ * picker in the top bar shows the current project (see `useTasksProject`) or All
+ * projects, which holds until another project becomes current. `initialProjectId`
+ * (from `?projectId=`) selects a project and makes it the current one; the picker
+ * always wins afterwards.
  */
 export function ScienceTasks({
   initialProjectId,
@@ -51,7 +52,7 @@ export function ScienceTasks({
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [savedProjectId, setSavedProjectId] = useTasksProject()
-  // The picker remembers the choice and replaces the address ("" = All projects).
+  // The picker makes the choice current and replaces the address ("" = All projects).
   const chooseProject = (projectId: string): void => {
     setSavedProjectId(projectId)
     void navigate({
@@ -60,7 +61,7 @@ export function ScienceTasks({
       replace: true,
     })
   }
-  // A project given in the address wins and becomes the remembered one.
+  // A project given in the address wins and becomes the current one.
   useEffect(() => {
     if (initialProjectId) setSavedProjectId(initialProjectId)
   }, [initialProjectId, setSavedProjectId])
@@ -225,7 +226,7 @@ export function ScienceTasks({
       layout="cards"
       testId="science-tasks"
       title={t("Tasks")}
-      subtitle={t("Every project's TODO Markdown, in one place")}
+      subtitle={t("Project tasks")}
       actions={
         <HeaderShortcuts
           view="tasks"

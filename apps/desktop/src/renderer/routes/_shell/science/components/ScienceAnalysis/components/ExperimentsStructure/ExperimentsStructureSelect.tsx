@@ -7,13 +7,13 @@ import { useTRPC } from "../../../../../../../trpc/react"
 /** The presets in the order offered, with their labels (ids match the main process). */
 const PRESETS: ReadonlyArray<{ id: StructurePreset; label: string }> = [
   { id: "auto", label: "Auto-detect" },
+  { id: "folders", label: "Folders" },
   { id: "one-folder-per-experiment", label: "One folder per experiment" },
   { id: "experiment-run", label: "Experiment / run folders" },
   { id: "flat", label: "Flat file list" },
 ]
 
-/** Select option ids that are not presets. */
-const DEFAULT_OPTION = "default"
+/** The select option id that is not a preset. */
 const CUSTOM_OPTION = "custom"
 /** The pattern offered when the user first picks a custom pattern. */
 const PATTERN_PLACEHOLDER = "{experiment}/{run}/"
@@ -23,17 +23,13 @@ function isPreset(value: string): value is StructurePreset {
   return PRESETS.some((preset) => preset.id === value)
 }
 
-/** The label of a stored value: the preset's label, or the pattern itself. */
-function valueLabel(value: string): string {
-  return PRESETS.find((preset) => preset.id === value)?.label ?? value
-}
-
 /**
  * The experiments folder structure choice, read from and written to the global
  * YAML file in PI Lab's data folder through `science.analysis.getStructure` /
- * `setStructure`. With `projectId: null` it sets the default (Settings); with a
- * project it sets that project's own entry, and "Default (…)" removes it. A
- * custom pattern is typed and saved with Save. An invalid file or a refused
+ * `setStructure`. With `projectId: null` it shows and sets the default
+ * (Settings); with a project it shows the project's effective choice (its own
+ * entry, else the default) and picking an option saves it as the project's own
+ * entry. A custom pattern is typed and saved with Save. An invalid file or a refused
  * value shows the error from the main process.
  */
 export function ExperimentsStructureSelect({
@@ -66,11 +62,17 @@ export function ExperimentsStructureSelect({
   const [draft, setDraft] = useState<string | null>(null)
 
   const data = settings.data
-  const stored = data ? (projectId === null ? data.defaultValue : data.projectValue) : null
+  // The effective value: the project's own entry, else the default.
+  const stored = data
+    ? projectId === null
+      ? data.defaultValue
+      : (data.projectValue ?? data.defaultValue)
+    : null
+  // Before the settings load, the select shows Auto-detect (it is disabled then).
   const selected = customOpen
     ? CUSTOM_OPTION
     : stored === null
-      ? DEFAULT_OPTION
+      ? "auto"
       : isPreset(stored)
         ? stored
         : CUSTOM_OPTION
@@ -78,7 +80,7 @@ export function ExperimentsStructureSelect({
   // The pattern field shows whenever the custom option is selected, also for a saved pattern.
   const patternShown = selected === CUSTOM_OPTION
   const patternValue = draft ?? storedPattern ?? PATTERN_PLACEHOLDER
-  const save = (value: string | null): void => setStructure.mutate({ projectId, value })
+  const save = (value: string): void => setStructure.mutate({ projectId, value })
   const choose = (next: string): void => {
     setStructure.reset()
     setDraft(null)
@@ -87,7 +89,7 @@ export function ExperimentsStructureSelect({
       return
     }
     setCustomOpen(false)
-    save(next === DEFAULT_OPTION ? null : next)
+    save(next)
   }
   const error = settings.error ?? setStructure.error
   const help = data
@@ -110,11 +112,6 @@ export function ExperimentsStructureSelect({
           onChange={(event) => choose(event.target.value)}
           className="min-w-0 flex-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-foreground text-xs outline-none disabled:opacity-50"
         >
-          {projectId !== null && data ? (
-            <option value={DEFAULT_OPTION}>
-              {t("Default ({value})").replace("{value}", t(valueLabel(data.defaultValue)))}
-            </option>
-          ) : null}
           {PRESETS.map((preset) => (
             <option key={preset.id} value={preset.id}>
               {t(preset.label)}

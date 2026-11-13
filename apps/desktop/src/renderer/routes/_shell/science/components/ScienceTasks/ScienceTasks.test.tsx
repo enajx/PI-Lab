@@ -22,7 +22,7 @@ vi.mock("../../../../../Terminal", () => ({
 
 const { ScienceTasks } = await import("./ScienceTasks")
 
-const PREF_KEY = "pi-lab.tasks.project"
+const PREF_KEY = "pi-lab.currentProject"
 
 /** A ready TODO.md source for one project. */
 function source(projectId: string, projectName: string): TaskSource {
@@ -92,7 +92,7 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-test("the top bar picker defaults to All projects and narrows the tasks to the chosen project", async () => {
+test("with no current project the top bar picker shows All projects and narrows the tasks to the chosen project", async () => {
   renderTasks(undefined)
   const header = screen.getByRole("banner")
   const select = (await within(header).findByTestId("tasks-project-select")) as HTMLButtonElement
@@ -121,7 +121,7 @@ test("the top bar picker defaults to All projects and narrows the tasks to the c
   expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("p2")
 })
 
-test("arriving with ?projectId selects and remembers it; the picker then wins", async () => {
+test("arriving with ?projectId selects it and makes it current; the picker then wins", async () => {
   renderTasks("p2")
   const select = (await screen.findByTestId("tasks-project-select")) as HTMLButtonElement
   await waitFor(() => expect(select.value).toBe("p2"))
@@ -135,10 +135,12 @@ test("arriving with ?projectId selects and remembers it; the picker then wins", 
     }),
   )
   expect(mocks.navigate).toHaveBeenCalledWith({ to: "/science/tasks", search: {}, replace: true })
-  expect(window.localStorage.getItem(PREF_KEY)).toBe("")
+  // All projects is kept for Tasks; the current project stays p2.
+  expect(window.localStorage.getItem("pi-lab.tasks.allProjects")).toBe("true")
+  expect(window.localStorage.getItem(PREF_KEY)).toBe("p2")
 })
 
-test("opens on the remembered project", async () => {
+test("opens on the current project", async () => {
   window.localStorage.setItem(PREF_KEY, "p1")
   renderTasks(undefined)
   const select = (await screen.findByTestId("tasks-project-select")) as HTMLButtonElement

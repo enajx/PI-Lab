@@ -9,7 +9,9 @@ test("CSV chart skips blank x cells and leaves gaps for blank y cells while pres
   try {
     const path = join(root, "metrics.csv")
     await writeFile(path, "step,loss\n0,1\n1, \n ,99\n2,0\n3,\n")
-    expect(await previewDataFile(path, "metrics.csv")).toMatchObject({
+    expect(
+      await previewDataFile(path, "metrics.csv", { load: false, dataset: null }),
+    ).toMatchObject({
       type: "chart",
       x: [0, 1, 2, 3],
       series: [{ label: "loss", values: [1, null, 0, null] }],

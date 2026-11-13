@@ -156,17 +156,43 @@ function useStringPref(key: string, fallback: string): [string, (next: string) =
   return [value, set]
 }
 
-/** The project last chosen in the LaTeX Editor tab ("" when none yet). */
-export const useLatexEditorProject = (): [string, (next: string) => void] =>
-  useStringPref("pi-lab.latexEditor.project", "")
+// --- Current project: the one Tasks, Analysis, LaTeX Editor and Skills open on ---
+const CURRENT_PROJECT_KEY = "pi-lab.currentProject"
+const TASKS_ALL_PROJECTS_KEY = "pi-lab.tasks.allProjects"
 
-/** The project last chosen in the Tasks tab ("" for All projects, the default). */
-export const useTasksProject = (): [string, (next: string) => void] =>
-  useStringPref("pi-lab.tasks.project", "")
+/**
+ * Make `projectId` the current project: the project the user last opened or
+ * clicked (project view, Dashboard card, sidebar) or picked in a science view's
+ * project picker. A different project ends an "All projects" choice in Tasks.
+ */
+export function setCurrentProject(projectId: string): void {
+  if (readString(CURRENT_PROJECT_KEY, "") !== projectId) writePref(TASKS_ALL_PROJECTS_KEY, "false")
+  writePref(CURRENT_PROJECT_KEY, projectId)
+}
 
-/** The project last chosen in the Analysis tab ("" when none yet). */
-export const useAnalysisProject = (): [string, (next: string) => void] =>
-  useStringPref("pi-lab.analysis.project", "")
+/** The current project ("" when none yet) and its setter (see `setCurrentProject`). */
+export function useCurrentProject(): [string, (next: string) => void] {
+  const [current] = useStringPref(CURRENT_PROJECT_KEY, "")
+  return [current, setCurrentProject]
+}
+
+/**
+ * The Tasks tab's project: the current project, or "" for All projects. Choosing
+ * "" shows All projects until another project becomes current; choosing a project
+ * makes it the current one.
+ */
+export function useTasksProject(): [string, (next: string) => void] {
+  const [current] = useStringPref(CURRENT_PROJECT_KEY, "")
+  const [allProjects, setAllProjects] = useBooleanPref(TASKS_ALL_PROJECTS_KEY, false)
+  const choose = useCallback(
+    (projectId: string) => {
+      if (projectId) setCurrentProject(projectId)
+      setAllProjects(projectId === "")
+    },
+    [setAllProjects],
+  )
+  return [allProjects ? "" : current, choose]
+}
 
 /** Whether the LaTeX Editor shows its left column (Files and Outline); hidden by default. */
 export const useLatexEditorLeftColumn = (): [boolean, (next: boolean) => void] =>
@@ -398,7 +424,11 @@ export const useSciencePanelWidth = (): [number, (next: number) => void] =>
 // start at the minimum once -------------------------------------------------------
 export const ANALYSIS_FILES_MIN_WIDTH = 200
 export const ANALYSIS_FILES_MAX_WIDTH = 480
-export const ANALYSIS_FILES_DEFAULT_WIDTH = ANALYSIS_FILES_MIN_WIDTH
+/** About 29% of the content width at the default window size; a dragged width is kept. */
+export const ANALYSIS_FILES_DEFAULT_WIDTH = 280
+/** Analysis lists the files directly (no group, experiment or folder rows). Off by default. */
+export const useAnalysisFlatList = (): [boolean, (next: boolean) => void] =>
+  useBooleanPref("pi-lab.analysis.flatList", false)
 export const useAnalysisFilesWidth = (): [number, (next: number) => void] =>
   useNumberPref("pi-lab.analysis.filesWidth.v2", ANALYSIS_FILES_DEFAULT_WIDTH)
 

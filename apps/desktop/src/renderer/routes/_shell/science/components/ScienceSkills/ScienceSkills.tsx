@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { FlaskConical, Search } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslate } from "../../../../../i18n/language"
+import { useCurrentProject } from "../../../../../preferences/preferences"
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import {
@@ -31,8 +32,8 @@ const EMPTY_SKILLS: SkillCatalogItem[] = []
  * harness, and source labels. Triggering a skill from here is a later (v2)
  * concern and is intentionally absent.
  *
- * The project defaults to the most-recently-opened (`projects.list` is ordered
- * that way), with a selector to switch. A client-side search narrows the list;
+ * The project is the current one (the one last opened or picked, see
+ * `useCurrentProject`), else the first listed, with a selector to switch. A client-side search narrows the list;
  * the body owns its own scroll.
  *
  * Context-aware ⌘F (the quick-open shortcut): opens a {@link QuickFind} over the
@@ -48,18 +49,10 @@ export function ScienceSkills() {
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
 
-  // Default to the most-recently-opened project (first in the ordered list) and
-  // keep the selection valid as the project list loads / changes.
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  useEffect(() => {
-    if (projects.length === 0) {
-      if (selectedId !== null) setSelectedId(null)
-      return
-    }
-    if (!selectedId || !projects.some((p) => p.id === selectedId)) {
-      setSelectedId(projects[0]?.id ?? null)
-    }
-  }, [projects, selectedId])
+  // Open on the current project; an unknown or missing one falls back to the first listed.
+  const [currentProjectId, setCurrentProject] = useCurrentProject()
+  const selectedId =
+    (projects.find((project) => project.id === currentProjectId) ?? projects[0])?.id ?? null
   useReportViewProject(selectedId)
 
   const [query, setQuery] = useState("")
@@ -121,7 +114,7 @@ export function ScienceSkills() {
         projects={projects.map((project) => ({ id: project.id, name: project.name }))}
         allLabel={null}
         onChange={(projectId) => {
-          setSelectedId(projectId)
+          setCurrentProject(projectId)
           setSelectedKey(null) // drop a stale finder highlight when the skill list changes
         }}
       />

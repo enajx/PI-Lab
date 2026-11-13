@@ -8,20 +8,22 @@ import {
   workspaces,
 } from "@pi-lab/local-db"
 import { classifyDataFile } from "@pi-lab/shared"
+import { type FileStat, statFile } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
 import { resolveWorkspacePythonRuntime } from "../../../python"
 import { resolveInsideDir } from "../../files/files"
+import { insideFile, type PdfSnapshot, readPdfSnapshot } from "../../pdf/pdf"
 import { publicProcedure, router } from "../../trpc"
 import {
   type DataFileListing,
   type DataFilePreview,
   discoverDataFiles,
   isMarimoNotebookFile,
-  previewDataFile,
 } from "./discover"
 import type { AnalysisInteractiveResult } from "./interactive"
+import { analysisMedia } from "./mediaGrants"
 import {
   effectiveStructureValue,
   readStructureFile,
@@ -68,6 +70,11 @@ export interface ResultsListing extends DataFileListing {
   overridden: boolean
   /** False when the results folder does not exist (the listing is then empty). */
   exists: boolean
+  /**
+   * True for the Folders structure: the results files are shown as the plain
+   * folder tree, with no "No experiment" row.
+   */
+  plainFolders: boolean
 }
 
 const getStructureInput = z.object({
@@ -96,6 +103,13 @@ const previewInput = z.object({
   projectId: z.string().min(1),
   /** Repo-relative path of the file to preview (POSIX or native separators). */
   relPath: z.string().min(1),
+})
+
+const dataPreviewInput = previewInput.extend({
+  /** Read the file even when it is above its format's size limit (the Load button). */
+  load: z.boolean(),
+  /** The HDF5 dataset to preview, or null for the first one. */
+  dataset: z.string().min(1).nullable(),
 })
 
 const interactiveInput = previewInput.extend({
@@ -175,7 +189,7 @@ const REPORTS_FOLDER = "reports"
 const EMPTY_LISTING: DataFileListing = {
   groups: [],
   total: 0,
-  truncated: false,
+  truncatedExperiments: [],
   partial: false,
   skipped: [],
 }
@@ -214,7 +228,7 @@ function mergeListings(results: DataFileListing, reports: DataFileListing): Data
   return {
     groups,
     total: results.total + added,
-    truncated: results.truncated || reports.truncated,
+    truncatedExperiments: [...results.truncatedExperiments, ...reports.truncatedExperiments],
     partial: skipped.length > 0,
     skipped,
   }
@@ -312,16 +326,16 @@ export const analysisRouter = router({
   /**
    * Discover and classify the data/analysis files in a project's results folder
    * (the project's own folder, else the default from Settings). Every file
-   * carries its experiment (group) and run from the project's experiments
-   * folder structure (see `getStructure`); an invalid structure file is
+   * carries its group, experiment and path inside them from the project's
+   * experiments folder structure (see `getStructure`); an invalid structure file is
    * BAD_REQUEST. Walks the tree (skipping
    * noise dirs), tags each file with its data-file kind, and returns them
    * grouped by kind with per-file metadata (size, mtime) and repo-relative
    * paths. The project's `reports/` folder is
    * listed too, marked `inReportsFolder`, each file once; no `reports/` folder
    * adds nothing. A missing results folder is `exists: false`; a folder outside the
-   * project (or the project folder itself) is FORBIDDEN. The walk is capped,
-   * and `truncated` flags when the cap was hit.
+   * project (or the project folder itself) is FORBIDDEN. Each experiment is
+   * capped, and `truncatedExperiments` names the ones that were cut.
    */
   listFiles: publicProcedure
     .input(listInput)
@@ -333,6 +347,7 @@ export const analysisRouter = router({
       const root = resolveInsideDir(project.repoPath, resultsFolder)
       const info = await statOrNull(root)
       let results: DataFileListing = EMPTY_LISTING
+      let plainFolders = false
       if (info !== null) {
         await realPathInside(project.repoPath, root, resultsFolder)
         if (!info.isDirectory()) {
@@ -348,6 +363,7 @@ export const analysisRouter = router({
           structureFile,
         )
         results = await discoverDataFiles(project.repoPath, root, "results", structure)
+        plainFolders = structure.kind === "folders"
       }
       const reports = await listReportsFolder(project.repoPath)
       return {
@@ -355,6 +371,7 @@ export const analysisRouter = router({
         resultsFolder,
         overridden,
         exists: info !== null,
+        plainFolders,
       }
     }),
 
@@ -395,11 +412,64 @@ export const analysisRouter = router({
    * can never balloon the IPC response.
    */
   preview: publicProcedure
-    .input(previewInput)
+    .input(dataPreviewInput)
     .query(async ({ ctx, input }): Promise<DataFilePreview> => {
       const repoPath = requireRepoPath(ctx.db, input.projectId)
-      const abs = resolveInsideDir(repoPath, input.relPath)
-      return previewDataFile(abs, input.relPath)
+      const absPath = resolveInsideDir(repoPath, input.relPath)
+      return ctx.analysisPreview.preview({
+        absPath,
+        relPath: input.relPath,
+        load: input.load,
+        dataset: input.dataset,
+      })
+    }),
+
+  /**
+   * Size and time of a project PDF, polled by the PDF.js viewer to reload the
+   * preview when the file changes. The path is jailed to the project.
+   */
+  pdfStat: publicProcedure.input(previewInput).query(async ({ ctx, input }): Promise<FileStat> => {
+    const repoPath = requireRepoPath(ctx.db, input.projectId)
+    return statFile(resolveInsideDir(repoPath, input.relPath))
+  }),
+
+  /**
+   * The bytes of a project PDF for the bundled PDF.js viewer (the same reader
+   * as PDF tabs). The path and its symlink target must stay in the project.
+   */
+  pdf: publicProcedure.input(previewInput).query(async ({ ctx, input }): Promise<PdfSnapshot> => {
+    const repoPath = requireRepoPath(ctx.db, input.projectId)
+    return readPdfSnapshot(await insideFile(repoPath, input.relPath))
+  }),
+
+  /**
+   * Grant the renderer a `pi-lab-media://` URL that streams one project video
+   * or gif (with byte ranges, never read whole). The path and its symlink
+   * target must stay in the project. `closeMedia` revokes it.
+   */
+  openMedia: publicProcedure
+    .input(previewInput)
+    .mutation(async ({ ctx, input }): Promise<{ url: string }> => {
+      const kind = classifyDataFile(input.relPath)
+      if (kind !== "video" && kind !== "animation") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `${input.relPath} is not a video or gif`,
+        })
+      }
+      const repoPath = requireRepoPath(ctx.db, input.projectId)
+      const absPath = await insideFile(repoPath, input.relPath)
+      if (!(await stat(absPath)).isFile()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Not a file: ${input.relPath}` })
+      }
+      return { url: analysisMedia.grant(absPath) }
+    }),
+
+  /** Revoke a media URL from `openMedia`. Idempotent. */
+  closeMedia: publicProcedure
+    .input(z.object({ url: z.string().min(1) }))
+    .mutation(({ input }): void => {
+      analysisMedia.revoke(input.url)
     }),
 
   /**

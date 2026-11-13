@@ -45,8 +45,9 @@ const NOTEBOOK_FILE = {
   relPath: "results/run/analysis.ipynb",
   name: "analysis.ipynb",
   kind: "notebook",
+  group: null,
   experiment: "run",
-  run: null,
+  innerPath: "analysis.ipynb",
   inReportsFolder: false,
   size: 10,
   mtime: 0,
@@ -59,7 +60,7 @@ function handlers(extra: FakeHandlers): FakeHandlers {
     "science.analysis.listFiles": () => ({
       groups: [{ kind: "notebook", files: [NOTEBOOK_FILE] }],
       total: 1,
-      truncated: false,
+      truncatedExperiments: [],
       partial: false,
       skipped: [],
       resultsFolder: "results",
@@ -110,6 +111,8 @@ describe("Open notebook in Analysis", () => {
         "notebooks.addToProject": addToProject,
       }),
     )
+    // The experiment row opens to show its files.
+    fireEvent.click(await screen.findByTestId("analysis-experiment"))
     fireEvent.click(await screen.findByTestId("analysis-file"))
     fireEvent.click(await screen.findByTestId("analysis-open-notebook"))
 
@@ -172,6 +175,8 @@ describe("Open notebook in Analysis", () => {
         "notebooks.stop": stop,
       }),
     )
+    // The experiment row opens to show its files.
+    fireEvent.click(await screen.findByTestId("analysis-experiment"))
     fireEvent.click(await screen.findByTestId("analysis-file"))
     fireEvent.click(await screen.findByTestId("analysis-open-notebook"))
     const frame = await screen.findByTestId("notebook-frame")
@@ -206,6 +211,8 @@ describe("Open notebook in Analysis", () => {
         "notebooks.stop": () => undefined,
       }),
     )
+    // The experiment row opens to show its files.
+    fireEvent.click(await screen.findByTestId("analysis-experiment"))
     fireEvent.click(await screen.findByTestId("analysis-file"))
     fireEvent.click(await screen.findByTestId("analysis-open-notebook"))
     expect((await screen.findByTestId("notebook-error")).textContent).toContain("uv was not found")

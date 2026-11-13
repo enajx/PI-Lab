@@ -13,7 +13,16 @@ import {
   worktrees,
 } from "@pi-lab/local-db"
 import { eq, max, ne, sql } from "drizzle-orm"
-import { app, type BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron"
+import {
+  app,
+  type BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  safeStorage,
+  session,
+  shell,
+} from "electron"
 import { createIPCHandler } from "trpc-electron/main"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
@@ -81,6 +90,8 @@ import {
   reconcilePlanningSessions,
 } from "./trpc/projects/planning"
 import { AnalysisInteractiveController } from "./trpc/science/analysis/interactiveController"
+import { analysisMedia, MEDIA_SCHEME } from "./trpc/science/analysis/mediaGrants"
+import { WorkerAnalysisPreview } from "./trpc/science/analysis/previewWorker"
 import { writeGeneralSettings } from "./trpc/settings/settings"
 import { seedWritableTemplate } from "./trpc/template"
 import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "./trpc/workflows/workflows"
@@ -116,6 +127,7 @@ export class FullRuntime {
   )
   private readonly processFinalizers = new Set<Promise<void>>()
   private readonly analysisInteractive = new AnalysisInteractiveController()
+  private readonly analysisPreview = new WorkerAnalysisPreview(__dirname)
   // A first uvx run downloads marimo or JupyterLab, so a server may take minutes to start.
   private readonly notebookServers = new NotebookServers(
     { start: 42_700, end: 42_799 },
@@ -180,6 +192,8 @@ export class FullRuntime {
       if (saveNativeLanguage(app.getPath("userData"), language)) installAppMenu()
     })
     this.analysisInteractive.installProtocolHandler()
+    // Analysis videos and gifs stream from the one file each grant names.
+    session.defaultSession.protocol.handle(MEDIA_SCHEME, (request) => analysisMedia.handle(request))
     installNotebookFrameHeaders((port) => this.notebookServers.servesPort(port), isAppPageUrl)
     console.log(
       `[pi-lab] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
@@ -571,6 +585,8 @@ export class FullRuntime {
     this.managedProcesses.dispose()
     this.terminalSupervisor.dispose()
     this.analysisInteractive.dispose()
+    this.analysisPreview.dispose()
+    analysisMedia.clear()
     this.notebookServers.dispose()
   }
 
@@ -640,6 +656,7 @@ export class FullRuntime {
       discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
       resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
       analysisInteractive: this.analysisInteractive,
+      analysisPreview: this.analysisPreview,
       notebookServers: this.notebookServers,
       notifications: this.notificationBrokers,
       activityStatus: this.activityStatus,

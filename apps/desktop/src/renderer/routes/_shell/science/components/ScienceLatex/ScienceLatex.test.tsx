@@ -27,7 +27,7 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-test("after arriving with a project in the address, the picker still switches project and is remembered", async () => {
+test("after arriving with a project in the address, the picker still switches project and makes it current", async () => {
   const client = createFakeTrpcClient({
     "projects.list": () => [
       { id: "p1", name: "One" },
@@ -58,7 +58,7 @@ test("after arriving with a project in the address, the picker still switches pr
     search: { projectId: "p2" },
     replace: true,
   })
-  expect(window.localStorage.getItem("pi-lab.latexEditor.project")).toContain("p2")
+  expect(window.localStorage.getItem("pi-lab.currentProject")).toBe("p2")
 })
 
 /** Mount the page for project p1 with the given `paper.get` answer. */

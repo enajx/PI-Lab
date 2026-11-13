@@ -3,6 +3,7 @@
 // in-process pty-daemon + fake agent. Covers CRUD, prompt-version snapshotting,
 // the computed nextRunAt, runNow firing through the real session-start flow, and
 // the scheduler firing a due automation via the SAME dispatch path.
+
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { agentSessions, automationRuns, automations } from "@pi-lab/local-db"
@@ -19,6 +20,7 @@ import { AutomationScheduler } from "../../automations/scheduler"
 import { NotebookServers } from "../../notebooks/notebookServers"
 import { createNotificationBrokers } from "../../notifications"
 import type { AppContext } from "../context"
+import { inProcessAnalysisPreview } from "../science/analysis/previewWorker"
 import { createHarness, FAKE_AGENT, type Harness } from "../testHarness"
 
 const DAILY_9 = "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
@@ -112,6 +114,7 @@ function harnessContext(): AppContext {
       runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
     }),
     analysisInteractive: h.analysisInteractive,
+    analysisPreview: inProcessAnalysisPreview,
     notebookServers: new NotebookServers(
       { start: 42_800, end: 42_899 },
       10_000,

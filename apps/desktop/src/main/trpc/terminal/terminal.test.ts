@@ -17,6 +17,7 @@ import { NotebookServers } from "../../notebooks/notebookServers"
 import { createNotificationBrokers, NotificationService } from "../../notifications"
 import { appRouter } from "../appRouter"
 import { type AppContext, DEFAULT_AGENT_CATALOG } from "../context"
+import { inProcessAnalysisPreview } from "../science/analysis/previewWorker"
 import { createCallerFactory } from "../trpc"
 import type { TerminalEvent } from "./terminal"
 
@@ -73,6 +74,7 @@ beforeEach(async () => {
       interpreterPath: process.execPath,
       runStrategy: { kind: "python", command: process.execPath, argsPrefix: [] },
     }),
+    analysisPreview: inProcessAnalysisPreview,
     analysisInteractive: {
       begin: async () => 1,
       openReport: async () => ({ type: "html", url: "pi-lab-report://unused/" }),
