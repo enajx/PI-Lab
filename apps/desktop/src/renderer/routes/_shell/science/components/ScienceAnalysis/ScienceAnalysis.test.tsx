@@ -733,6 +733,41 @@ describe("ScienceAnalysis", () => {
     expect(screen.queryByTestId("analysis-preview-path")).toBeNull()
   })
 
+  test("a click on empty space deselects the file; clicks on files, controls or the preview content do not", async () => {
+    renderAnalysis({
+      "projects.list": () => [project({ id: "p1", name: "alpha" })],
+      "science.analysis.listFiles": () =>
+        listing([
+          { relPath: "plot.png", name: "plot.png", kind: "image" },
+          { relPath: "m.csv", name: "m.csv", kind: "csv" },
+        ]),
+      "science.analysis.preview": () => ({ type: "image", dataUrl: "data:image/png;base64," }),
+    })
+    const select = async (): Promise<void> => {
+      const row = (await screen.findAllByTestId("analysis-file")).find(
+        (element) => element.dataset.relPath === "plot.png",
+      ) as HTMLElement
+      fireEvent.click(row)
+      await screen.findByTestId("analysis-preview-path")
+    }
+    await select()
+    // Controls, the preview content and the right panel keep the selection.
+    fireEvent.click(screen.getByTestId("analysis-category-figure"))
+    fireEvent.click(screen.getByTestId("analysis-category-all"))
+    fireEvent.click(screen.getByTestId("analysis-search"))
+    fireEvent.click(await screen.findByTestId("analysis-preview-image"))
+    fireEvent.click(screen.getByTestId("science-sessions"))
+    expect(screen.getByTestId("analysis-preview-path")).toBeTruthy()
+
+    // The empty area of the list deselects.
+    fireEvent.click(screen.getByTestId("analysis-files-list"))
+    expect(await screen.findByTestId("analysis-no-selection")).toBeTruthy()
+    // So does the preview pane's empty area.
+    await select()
+    fireEvent.click(screen.getByTestId("analysis-preview"))
+    expect(await screen.findByTestId("analysis-no-selection")).toBeTruthy()
+  })
+
   test("the folder tree can be hidden: files are listed directly with their path, and the choice is kept", async () => {
     const files = listing([
       {
@@ -759,6 +794,10 @@ describe("ScienceAnalysis", () => {
     const toggle = await screen.findByTestId("analysis-flat-toggle")
     // Off by default: the tree, with its group row.
     expect(toggle.getAttribute("aria-pressed")).toBe("false")
+    expect(toggle.getAttribute("aria-label")).toBe("Hide folders")
+    expect(toggle.dataset.featureLabel).toBe("Hide folders")
+    // The lucide ListTree icon.
+    expect(toggle.querySelector("svg")?.getAttribute("class")).toContain("lucide-list-tree")
     expect(toggle.dataset.featureHelp).toBeTruthy()
     await screen.findAllByTestId("analysis-group")
 

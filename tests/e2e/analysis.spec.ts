@@ -573,9 +573,30 @@ test("Escape deselects the previewed file, and the folder tree can be hidden fro
     "Select a file to preview its contents.",
   )
 
-  // The toggle next to the Structure select lists the files without folders.
+  // A click on empty space in the list deselects too; a click on a chip does not.
+  await window
+    .locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]')
+    .click()
+  await expect(window.getByTestId("analysis-preview-path")).toBeVisible()
+  await window.getByTestId("analysis-category-figure").click()
+  await window.getByTestId("analysis-category-all").click()
+  await expect(window.getByTestId("analysis-preview-path")).toBeVisible()
+  const list = await window.getByTestId("analysis-files-list").boundingBox()
+  if (!list) throw new Error("No file list")
+  await window.mouse.click(list.x + list.width / 2, list.y + list.height - 20)
+  await expect(window.getByTestId("analysis-no-selection")).toBeVisible()
+
+  // The "Hide folders" toggle (ListTree icon) lists the files without folders.
   const toggle = window.getByTestId("analysis-flat-toggle")
   await expect(toggle).toHaveAttribute("aria-pressed", "false")
+  await expect(toggle).toHaveAttribute("aria-label", "Hide folders")
+  // Its "What's this?" box shows the label and help in full.
+  await toggle.hover()
+  const helpLabel = window.getByTestId("sidebar-feature-help-label")
+  await expect(helpLabel).toHaveText("Hide folders")
+  expect(await helpLabel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+  const helpText = window.getByTestId("sidebar-feature-help-description")
+  expect(await helpText.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0)
   await toggle.click()
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(0)
   await expect(window.getByTestId("analysis-file")).toHaveCount(5)
@@ -589,6 +610,12 @@ test("Escape deselects the previewed file, and the folder tree can be hidden fro
   await window.getByTestId("settings-nav-experiments").click()
   const setting = window.getByTestId("settings-analysis-flat-list")
   await expect(setting).toHaveAttribute("aria-checked", "true", { timeout: 30_000 })
+  // The Settings label shows in full.
+  const settingLabel = window.getByText("Hide folders", { exact: true })
+  await expect(settingLabel).toBeVisible()
+  expect(await settingLabel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(
+    0,
+  )
   await setting.click()
   await expect(setting).toHaveAttribute("aria-checked", "false")
   await window.getByTestId("settings-back").click()

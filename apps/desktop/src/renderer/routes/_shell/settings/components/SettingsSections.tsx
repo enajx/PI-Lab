@@ -1441,8 +1441,8 @@ export function ExperimentsSection() {
       </div>
       <ToggleField
         testId="settings-analysis-flat-list"
-        label="List Analysis files without folders"
-        description="Analysis lists the files directly, each with its path, instead of groups, experiments and folders. The same choice as the toggle next to the Structure select in Analysis."
+        label="Hide folders"
+        description="Analysis lists the files directly, each with its path, without folders."
         checked={flatList}
         onChange={setFlatList}
       />

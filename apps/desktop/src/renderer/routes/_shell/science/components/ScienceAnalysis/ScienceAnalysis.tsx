@@ -19,7 +19,7 @@ import {
   FileCode2,
   FileText,
   Folder,
-  List,
+  ListTree,
   Microscope,
   Search,
 } from "lucide-react"
@@ -621,7 +621,22 @@ export function ScienceAnalysis({
               <NoProjectsState />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 gap-3">
+            // A click on empty space (an element marked data-deselect-area itself, not
+            // a file, control or preview content inside it) deselects, like Escape.
+            // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is the keyboard way to deselect.
+            // biome-ignore lint/a11y/noStaticElementInteractions: only empty backgrounds react.
+            <div
+              data-deselect-area
+              className="flex min-h-0 flex-1 gap-3"
+              onClick={(event) => {
+                if (
+                  event.target instanceof HTMLElement &&
+                  event.target.hasAttribute("data-deselect-area")
+                ) {
+                  setSelectedRelPath(null)
+                }
+              }}
+            >
               {/* Left card: search + category filter + file list, resizable from the gap on its right. */}
               <div
                 data-testid="analysis-files-column"
@@ -637,8 +652,14 @@ export function ScienceAnalysis({
                   max={ANALYSIS_FILES_MAX_WIDTH}
                   testId="analysis-files-edge-drag"
                 />
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border">
-                  <div className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2">
+                <div
+                  data-deselect-area
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
+                >
+                  <div
+                    data-deselect-area
+                    className="flex shrink-0 flex-col gap-2 border-border border-b px-4 py-2"
+                  >
                     {selectedProjectId ? (
                       <ResultsFolderField
                         key={selectedProjectId}
@@ -711,7 +732,11 @@ export function ScienceAnalysis({
                     ) : null}
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto">
+                  <div
+                    data-testid="analysis-files-list"
+                    data-deselect-area
+                    className="min-h-0 flex-1 overflow-y-auto"
+                  >
                     {listing.data?.partial ? (
                       <p
                         data-testid="analysis-partial"
@@ -734,7 +759,7 @@ export function ScienceAnalysis({
                       !listing.isLoading ? (
                       <EmptyState />
                     ) : (
-                      <div className="flex flex-col gap-3 p-3">
+                      <div data-deselect-area className="flex flex-col gap-3 p-3">
                         {resultsMissing ? (
                           <p
                             data-testid="analysis-results-missing"
@@ -830,6 +855,7 @@ export function ScienceAnalysis({
               {/* Middle card: preview pane for the selected file. */}
               <div
                 data-testid="analysis-preview-column"
+                data-deselect-area
                 className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
               >
                 {selectedProjectId && selectedRelPath ? (
@@ -1383,7 +1409,7 @@ function ResultsFolderField({
 function FlatListToggle() {
   const t = useTranslate()
   const [flatList, setFlatList] = useAnalysisFlatList()
-  const label = t("List files without folders")
+  const label = t("Hide folders")
   return (
     <button
       type="button"
@@ -1392,16 +1418,14 @@ function FlatListToggle() {
       aria-label={label}
       title={label}
       data-feature-label={label}
-      data-feature-help={t(
-        "Hide the groups, experiments and folders and list the files directly, each with its path. Filters and search still apply. Also in Settings > Remote experiments.",
-      )}
+      data-feature-help={t("List the files directly, each with its path, without folders.")}
       onClick={() => setFlatList(!flatList)}
       className={cn(
         "flex size-6 shrink-0 items-center justify-center rounded-md border border-border hover:bg-accent",
         flatList && "bg-accent text-accent-foreground",
       )}
     >
-      <List className="size-3.5" aria-hidden />
+      <ListTree className="size-3.5" aria-hidden />
     </button>
   )
 }
