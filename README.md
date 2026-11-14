@@ -11,9 +11,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform">
+  <sub><img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform">
     <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license"></a></sub>
 </p>
 
 <p align="center">
