@@ -9,13 +9,22 @@ interface CollectionRowProps {
   /** Highlighted as the keyboard-navigation cursor (also marked `data-selected`). */
   selected?: boolean
   testId?: string
+  /** Muted text after the name, e.g. the parent of a sub-collection found by typing. */
+  hint?: string
 }
 
 /**
  * One clickable collection row in the library browser — a folder name, its item
  * count, and a chevron. Also used for the synthetic "All items" entry at the root.
  */
-export function CollectionRow({ name, itemCount, onClick, selected, testId }: CollectionRowProps) {
+export function CollectionRow({
+  name,
+  itemCount,
+  onClick,
+  selected,
+  testId,
+  hint,
+}: CollectionRowProps) {
   return (
     <button
       type="button"
@@ -28,6 +37,9 @@ export function CollectionRow({ name, itemCount, onClick, selected, testId }: Co
     >
       <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">{name}</span>
+      {hint ? (
+        <span className="shrink-0 truncate text-muted-foreground text-xs">{hint}</span>
+      ) : null}
       {typeof itemCount === "number" ? (
         <span className="shrink-0 text-muted-foreground text-xs">{itemCount}</span>
       ) : null}

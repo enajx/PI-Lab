@@ -1171,5 +1171,8 @@
   "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "Skillen som Planlegg forskning-knappen kjører: mappenavnet i prosjektets eller brukerens skill-mapper. Tomt betyr ikke koblet.",
   "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "Skillen som Automatisk forskning-knappen starter en agent med: mappenavnet i prosjektets eller brukerens skill-mapper. Tomt betyr ikke koblet.",
   "Not linked": "Ikke koblet",
-  "Use agent to generate project summary": "Bruk en agent til å lage prosjektsammendrag"
+  "Use agent to generate project summary": "Bruk en agent til å lage prosjektsammendrag",
+  "This item has no local copy and no web address.": "Dette elementet har verken lokal kopi eller nettadresse.",
+  "No local copy in Zotero. Showing the web page.": "Ingen lokal kopi i Zotero. Viser nettsiden.",
+  "Status bar (footer)": "Statuslinje (bunntekst)"
 }

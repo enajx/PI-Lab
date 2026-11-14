@@ -1171,5 +1171,8 @@
   "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "规划研究按钮运行的技能：它在项目或用户技能文件夹中的文件夹名。留空表示未关联。",
   "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "自动研究按钮启动智能体时使用的技能：它在项目或用户技能文件夹中的文件夹名。留空表示未关联。",
   "Not linked": "未关联",
-  "Use agent to generate project summary": "使用智能体生成项目摘要"
+  "Use agent to generate project summary": "使用智能体生成项目摘要",
+  "This item has no local copy and no web address.": "此条目没有本地副本，也没有网址。",
+  "No local copy in Zotero. Showing the web page.": "Zotero 中没有本地副本。正在显示网页。",
+  "Status bar (footer)": "状态栏（页脚）"
 }

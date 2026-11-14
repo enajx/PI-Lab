@@ -309,7 +309,7 @@ export function AppearanceSection() {
       <AppThemeGallery />
       <ToggleField
         testId="settings-status-bar"
-        label="Status bar"
+        label="Status bar (footer)"
         description="Show a small status bar at the bottom of the window."
         checked={statusBar}
         onChange={setStatusBar}

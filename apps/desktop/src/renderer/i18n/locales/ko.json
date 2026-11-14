@@ -1171,5 +1171,8 @@
   "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "연구 계획 버튼이 실행하는 스킬: 프로젝트 또는 사용자 스킬 폴더 안의 폴더 이름. 비워 두면 연결되지 않습니다.",
   "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "자동 연구 버튼이 에이전트를 시작할 때 쓰는 스킬: 프로젝트 또는 사용자 스킬 폴더 안의 폴더 이름. 비워 두면 연결되지 않습니다.",
   "Not linked": "연결 안 됨",
-  "Use agent to generate project summary": "에이전트로 프로젝트 요약 생성"
+  "Use agent to generate project summary": "에이전트로 프로젝트 요약 생성",
+  "This item has no local copy and no web address.": "이 항목에는 로컬 사본도 웹 주소도 없습니다.",
+  "No local copy in Zotero. Showing the web page.": "Zotero에 로컬 사본이 없습니다. 웹 페이지를 표시합니다.",
+  "Status bar (footer)": "상태 표시줄(푸터)"
 }
