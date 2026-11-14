@@ -63,6 +63,7 @@ import {
   useShowResearchHeartbeatSection,
   useShowSkillsPanel,
   useShowStatusBar,
+  useSidebarFeatureHelp,
 } from "../../../../preferences/preferences"
 import { type ThemeMode, useTheme } from "../../../../providers/ThemeProvider"
 import {
@@ -285,6 +286,7 @@ export function AppearanceSection() {
   const [digitalRainDensity, setDigitalRainDensity] = useDigitalRainDensity()
   const [digitalRainSpeed, setDigitalRainSpeed] = useDigitalRainSpeed()
   const [statusBar, setStatusBar] = useShowStatusBar()
+  const [featureHelp, setFeatureHelp] = useSidebarFeatureHelp()
 
   return (
     <SettingsSection
@@ -311,6 +313,13 @@ export function AppearanceSection() {
         description="Show a small status bar at the bottom of the window."
         checked={statusBar}
         onChange={setStatusBar}
+      />
+      <ToggleField
+        testId="settings-feature-help"
+        label="Feature help box"
+        description="Show the “What’s this?” box in the sidebar, which explains the control under the pointer."
+        checked={featureHelp}
+        onChange={setFeatureHelp}
       />
       <div
         id="appearance-advanced"

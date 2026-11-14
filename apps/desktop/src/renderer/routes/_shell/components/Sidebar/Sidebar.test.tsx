@@ -896,17 +896,30 @@ describe("Sidebar", () => {
     }
   })
 
-  test("persists hiding feature help and leaves a compact restore control", async () => {
+  test("hiding feature help persists and leaves no restore button in the sidebar", async () => {
     renderSidebar()
     await waitFor(() => expect(screen.getByTestId("sidebar-feature-help")).toBeTruthy())
 
     fireEvent.click(screen.getByRole("button", { name: "Hide feature help" }))
     expect(screen.queryByTestId("sidebar-feature-help")).toBeNull()
     expect(window.localStorage.getItem("pi-lab.sidebar.showFeatureHelp")).toBe("false")
+    // It comes back from Settings or the command palette, not from the sidebar.
+    expect(screen.queryByRole("button", { name: "Show feature help" })).toBeNull()
+  })
 
-    fireEvent.click(screen.getByRole("button", { name: "Show feature help" }))
-    expect(screen.getByTestId("sidebar-feature-help")).toBeTruthy()
-    expect(window.localStorage.getItem("pi-lab.sidebar.showFeatureHelp")).toBe("true")
+  test("hovering the help box's own × keeps the box's text, so the × stays put", async () => {
+    renderSidebar()
+    await waitFor(() => expect(screen.getByTestId("sidebar-feature-help")).toBeTruthy())
+    const cluster = screen
+      .getAllByTestId("science-nav-item")
+      .find((item) => item.getAttribute("data-science-tab") === "cluster")
+    if (!cluster) throw new Error("Cluster nav item missing")
+    fireEvent.pointerOver(cluster)
+    const hide = screen.getByRole("button", { name: "Hide feature help" })
+    // jsdom has no PointerEvent, so fireEvent would drop relatedTarget; a MouseEvent keeps it.
+    cluster.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: hide }))
+    fireEvent.pointerOver(hide)
+    expect(screen.getByTestId("sidebar-feature-help-label").textContent).toBe("Cluster")
   })
 
   test("keeps the feature-help card out of the collapsed icon rail", async () => {

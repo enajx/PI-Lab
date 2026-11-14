@@ -6,7 +6,7 @@ import { useTranslate } from "../../../i18n/language"
 import { useSidebarFeatureHelp } from "../../../preferences/preferences"
 import { readSettingsReturnRoute } from "../-settingsReturnRoute"
 import type { SettingsSearch, SettingsSectionId } from "../-settingsSearch"
-import { FeatureHelpPanel, FeatureHelpRestoreButton } from "../components/Sidebar"
+import { FeatureHelpPanel } from "../components/Sidebar"
 import { TitleBarSystemControls } from "../titleBar"
 import { DictationSection } from "./components/DictationSection"
 import { DocumentToolsSection } from "./components/DocumentToolsSection"
@@ -264,16 +264,11 @@ export function SettingsView() {
               {t(section.label)}
             </button>
           ))}
-          <div className="mt-auto border-sidebar-border border-t pt-3">
-            {showFeatureHelp ? (
+          {showFeatureHelp ? (
+            <div className="mt-auto border-sidebar-border border-t pt-3">
               <FeatureHelpPanel onHide={() => setShowFeatureHelp(false)} />
-            ) : (
-              <FeatureHelpRestoreButton
-                collapsed={false}
-                onRestore={() => setShowFeatureHelp(true)}
-              />
-            )}
-          </div>
+            </div>
+          ) : null}
         </nav>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">{active.render()}</div>

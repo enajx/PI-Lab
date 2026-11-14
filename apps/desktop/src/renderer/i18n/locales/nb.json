@@ -1157,5 +1157,7 @@
   "Open in browser": "Åpne i nettleseren",
   "Loading PDF viewer…": "Laster PDF-visning…",
   "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "Denne filen er {size}, over visningsgrensen på {limit}. Det kan ta tid å laste den.",
-  "Load anyway": "Last likevel"
+  "Load anyway": "Last likevel",
+  "Feature help box": "Hjelpeboks",
+  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "Vis «Hva er dette?»-boksen i sidefeltet, som forklarer kontrollen under pekeren."
 }

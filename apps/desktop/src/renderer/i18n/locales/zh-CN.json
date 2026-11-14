@@ -1157,5 +1157,7 @@
   "Open in browser": "在浏览器中打开",
   "Loading PDF viewer…": "正在加载 PDF 查看器…",
   "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "此文件大小为 {size}，超过查看器的 {limit} 限制。加载可能较慢。",
-  "Load anyway": "仍然加载"
+  "Load anyway": "仍然加载",
+  "Feature help box": "功能帮助框",
+  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "在侧边栏显示“这是什么？”框，说明指针下方的控件。"
 }
