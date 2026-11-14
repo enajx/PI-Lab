@@ -198,7 +198,7 @@ describe("link, get, outline, unlink", () => {
     expect(read).toMatchObject({ content: expect.stringContaining("\\section{Method}") })
     await writeFile(join(dir, "main.pdf"), "%PDF-1.4\n%%EOF\n")
     const pdf = await h.caller.pdf.read({ workspaceId, relPath: "main.pdf" })
-    expect(Buffer.from(pdf.data).toString("utf8")).toBe("%PDF-1.4\n%%EOF\n")
+    expect(Buffer.from(pdf.base64, "base64").toString("utf8")).toBe("%PDF-1.4\n%%EOF\n")
     // The paper workspace is not listed with the project's normal workspaces.
     const listed = await h.caller.workspaces.list({ projectId })
     expect(listed.some((workspace) => workspace.id === workspaceId)).toBe(false)

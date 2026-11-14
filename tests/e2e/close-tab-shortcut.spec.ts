@@ -224,3 +224,21 @@ test("Cmd+W on an agent tab asks first; Cancel keeps the agent, Stop agent close
   await window.waitForTimeout(FALLBACK_WINDOW_MS)
   await expectWindowVisible()
 })
+
+test("⌘1 and ⌘2 switch to the first and second tab", async () => {
+  const window = await openSeedFile()
+  await window.getByTestId("file-tree-file").filter({ hasText: "README.md" }).click()
+  const tabs = window.getByTestId("central-tab")
+  await expect(tabs).toHaveCount(2)
+  await expect(tabs.nth(1)).toHaveAttribute("data-active", "true")
+
+  await window.keyboard.press("Meta+1")
+  await expect(tabs.nth(0)).toHaveAttribute("data-active", "true")
+  await expect(tabs.nth(1)).toHaveAttribute("data-active", "false")
+
+  await window.keyboard.press("Meta+2")
+  await expect(tabs.nth(1)).toHaveAttribute("data-active", "true")
+  // No third tab: ⌘3 changes nothing.
+  await window.keyboard.press("Meta+3")
+  await expect(tabs.nth(1)).toHaveAttribute("data-active", "true")
+})

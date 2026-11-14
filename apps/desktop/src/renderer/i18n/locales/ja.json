@@ -1155,5 +1155,7 @@
   "PI Lab can't show this file type.": "PI Lab はこの種類のファイルを表示できません。",
   "Open in default app": "既定のアプリで開く",
   "Open in browser": "ブラウザーで開く",
-  "Loading PDF viewer…": "PDF ビューアーを読み込み中…"
+  "Loading PDF viewer…": "PDF ビューアーを読み込み中…",
+  "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "このファイルは {size} で、ビューアーの上限 {limit} を超えています。読み込みに時間がかかる場合があります。",
+  "Load anyway": "それでも読み込む"
 }

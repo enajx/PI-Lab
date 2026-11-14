@@ -4,7 +4,8 @@ import { extname } from "node:path"
 /** How a Library viewer tab shows a file. */
 export type ViewerKind = "pdf" | "html" | "markdown" | "other"
 
-const MAX_TEXT_BYTES = 20 * 1024 * 1024
+/** Largest HTML or Markdown file the viewer reads unless the user chooses "Load anyway". */
+export const MAX_TEXT_BYTES = 20 * 1024 * 1024
 
 /**
  * Paths that `resolveFile` returned this run. The viewer reads only these, so the renderer
@@ -32,10 +33,14 @@ export function viewerKind(path: string): ViewerKind {
   return "other"
 }
 
-/** The UTF-8 text of an HTML or Markdown viewer file; throws for other kinds or over 20 MB. */
-export async function readViewerText(path: string): Promise<string> {
+/**
+ * The UTF-8 text of an HTML or Markdown viewer file; throws for other kinds, and over 20 MB
+ * unless `allowLarge`.
+ */
+export async function readViewerText(path: string, allowLarge: boolean): Promise<string> {
   const kind = viewerKind(path)
   if (kind !== "html" && kind !== "markdown") throw new Error("Not an HTML or Markdown file.")
-  if ((await stat(path)).size > MAX_TEXT_BYTES) throw new Error("File exceeds the 20 MB limit.")
+  if (!allowLarge && (await stat(path)).size > MAX_TEXT_BYTES)
+    throw new Error("File exceeds the 20 MB limit.")
   return readFile(path, "utf8")
 }

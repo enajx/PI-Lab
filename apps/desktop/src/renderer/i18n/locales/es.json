@@ -1155,5 +1155,7 @@
   "PI Lab can't show this file type.": "PI Lab no puede mostrar este tipo de archivo.",
   "Open in default app": "Abrir en la aplicación predeterminada",
   "Open in browser": "Abrir en el navegador",
-  "Loading PDF viewer…": "Cargando visor de PDF…"
+  "Loading PDF viewer…": "Cargando visor de PDF…",
+  "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "Este archivo ocupa {size}, más que el límite de {limit} del visor. Cargarlo puede ser lento.",
+  "Load anyway": "Cargar de todos modos"
 }

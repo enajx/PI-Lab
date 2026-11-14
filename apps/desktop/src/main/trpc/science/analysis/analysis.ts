@@ -439,7 +439,7 @@ export const analysisRouter = router({
    */
   pdf: publicProcedure.input(previewInput).query(async ({ ctx, input }): Promise<PdfSnapshot> => {
     const repoPath = requireRepoPath(ctx.db, input.projectId)
-    return readPdfSnapshot(await insideFile(repoPath, input.relPath))
+    return readPdfSnapshot(await insideFile(repoPath, input.relPath), false)
   }),
 
   /**

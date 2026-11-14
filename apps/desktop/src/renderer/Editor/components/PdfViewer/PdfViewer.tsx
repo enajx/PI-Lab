@@ -51,7 +51,7 @@ interface Position {
  */
 export interface PdfSource {
   stat: () => Promise<{ exists: boolean; mtimeMs: number; size: number }>
-  read: () => Promise<{ data: Uint8Array; baseline: { mtimeMs: number; size: number } }>
+  read: () => Promise<{ base64: string; baseline: { mtimeMs: number; size: number } }>
   reverseSync: ((point: { page: number; x: number; y: number }) => Promise<SourceLocation>) | null
 }
 
@@ -143,7 +143,7 @@ export function PdfViewer({
         >[0])
         const task = getDocument({
           worker,
-          data: new Uint8Array(snapshot.data),
+          data: base64ToBytes(snapshot.base64),
           cMapUrl: `${assets}cmaps/`,
           cMapPacked: true,
           standardFontDataUrl: `${assets}standard_fonts/`,
@@ -425,4 +425,12 @@ export function PdfViewer({
       <div ref={host} className="relative min-h-0 flex-1 overflow-hidden bg-muted/40" />
     </div>
   )
+}
+
+/** Decode the base64 PDF bytes sent by the main process. */
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
 }
