@@ -323,39 +323,39 @@ describe("ScienceAnalysis", () => {
       "science.analysis.listFiles": () =>
         listing([
           {
-            relPath: "results/pattern_translation/easily-boss-grouse/training_curve.pdf",
+            relPath: "results/group_b/early-run/training_curve.pdf",
             name: "training_curve.pdf",
             kind: "pdf",
-            group: "pattern_translation",
-            experiment: "easily-boss-grouse",
+            group: "group_b",
+            experiment: "early-run",
           },
           {
-            relPath: "results/pattern_translation/easily-boss-grouse/animations/growth.mp4",
+            relPath: "results/group_b/early-run/animations/growth.mp4",
             name: "growth.mp4",
             kind: "video",
-            group: "pattern_translation",
-            experiment: "easily-boss-grouse",
+            group: "group_b",
+            experiment: "early-run",
             innerPath: "animations/growth.mp4",
           },
           {
-            relPath: "results/pattern_translation/fully-witty-marmot/grid.png",
+            relPath: "results/group_b/full-run/grid.png",
             name: "grid.png",
             kind: "image",
-            group: "pattern_translation",
-            experiment: "fully-witty-marmot",
+            group: "group_b",
+            experiment: "full-run",
           },
           {
-            relPath: "results/multiplexing/20260214_141942/best.csv",
+            relPath: "results/group_a/20250101_120000/best.csv",
             name: "best.csv",
             kind: "csv",
-            group: "multiplexing",
-            experiment: "20260214_141942",
+            group: "group_a",
+            experiment: "20250101_120000",
           },
           {
-            relPath: "results/multiplexing/notes.txt",
+            relPath: "results/group_a/notes.txt",
             name: "notes.txt",
             kind: "text",
-            group: "multiplexing",
+            group: "group_a",
           },
           { relPath: "results/summary.json", name: "summary.json", kind: "json" },
         ]),
@@ -363,8 +363,8 @@ describe("ScienceAnalysis", () => {
     // Top rows: the groups, then the loose files; all collapsed, no counts.
     const groups = await screen.findAllByTestId("analysis-group")
     expect(groups.map((row) => [row.dataset.group, row.textContent, row.ariaExpanded])).toEqual([
-      ["multiplexing", "multiplexing", "false"],
-      ["pattern_translation", "pattern_translation", "false"],
+      ["group_a", "group_a", "false"],
+      ["group_b", "group_b", "false"],
     ])
     expect(
       screen.getAllByTestId("analysis-experiment").map((row) => row.dataset.experiment),
@@ -377,29 +377,29 @@ describe("ScienceAnalysis", () => {
       .getAllByTestId("analysis-experiment")
       .map((row) => [row.dataset.experiment, row.ariaExpanded])
     expect(experiments).toEqual([
-      ["easily-boss-grouse", "false"],
-      ["fully-witty-marmot", "false"],
+      ["early-run", "false"],
+      ["full-run", "false"],
       ["", "false"],
     ])
     fireEvent.click(groups[0] as HTMLElement)
-    const multiplexing = screen.getAllByTestId("analysis-group-contents")[0] as HTMLElement
+    const group_a = screen.getAllByTestId("analysis-group-contents")[0] as HTMLElement
     expect(
-      within(multiplexing)
+      within(group_a)
         .getAllByTestId("analysis-file")
         .map((row) => row.dataset.relPath),
-    ).toEqual(["results/multiplexing/notes.txt"])
+    ).toEqual(["results/group_a/notes.txt"])
 
     // An experiment shows its tree: the animations/ folder (collapsed) before its files.
     const grouse = screen
       .getAllByTestId("analysis-experiment")
-      .find((row) => row.dataset.experiment === "easily-boss-grouse") as HTMLElement
+      .find((row) => row.dataset.experiment === "early-run") as HTMLElement
     fireEvent.click(grouse)
     const files = screen.getAllByTestId("analysis-experiment-files")[0] as HTMLElement
     expect(
       [
         ...files.querySelectorAll('[data-testid="analysis-folder"], [data-testid="analysis-file"]'),
       ].map((row) => (row as HTMLElement).dataset.folder ?? (row as HTMLElement).dataset.relPath),
-    ).toEqual(["animations", "results/pattern_translation/easily-boss-grouse/training_curve.pdf"])
+    ).toEqual(["animations", "results/group_b/early-run/training_curve.pdf"])
     fireEvent.click(within(files).getByTestId("analysis-folder"))
     expect(within(files).getAllByTestId("analysis-file")).toHaveLength(2)
 
@@ -410,7 +410,7 @@ describe("ScienceAnalysis", () => {
     fireEvent.click(grouse)
     fireEvent.change(screen.getByTestId("analysis-search"), { target: { value: "growth" } })
     expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
-      "results/pattern_translation/easily-boss-grouse/animations/growth.mp4",
+      "results/group_b/early-run/animations/growth.mp4",
     ])
     expect(screen.getByTestId("analysis-folder").ariaExpanded).toBe("true")
   })
@@ -816,19 +816,19 @@ describe("ScienceAnalysis", () => {
   test("the folder tree can be hidden: files are listed directly with their path, and the choice is kept", async () => {
     const files = listing([
       {
-        relPath: "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+        relPath: "results/group_b/early-run/animations/growth.gif",
         name: "growth.gif",
         kind: "animation",
-        group: "pattern_translation",
-        experiment: "easily-boss-grouse",
+        group: "group_b",
+        experiment: "early-run",
         innerPath: "animations/growth.gif",
       },
       {
-        relPath: "results/pattern_translation/easily-boss-grouse/curve.pdf",
+        relPath: "results/group_b/early-run/curve.pdf",
         name: "curve.pdf",
         kind: "pdf",
-        group: "pattern_translation",
-        experiment: "easily-boss-grouse",
+        group: "group_b",
+        experiment: "early-run",
       },
       { relPath: "results/summary.json", name: "summary.json", kind: "json" },
     ])
@@ -852,19 +852,19 @@ describe("ScienceAnalysis", () => {
     expect(screen.queryAllByTestId("analysis-folder")).toHaveLength(0)
     const rows = screen.getAllByTestId("analysis-file")
     expect(rows.map((row) => row.dataset.relPath)).toEqual([
-      "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
-      "results/pattern_translation/easily-boss-grouse/curve.pdf",
+      "results/group_b/early-run/animations/growth.gif",
+      "results/group_b/early-run/curve.pdf",
       "results/summary.json",
     ])
     expect(rows[0]?.textContent).toContain(
-      "results/pattern_translation/easily-boss-grouse/animations/growth.gif",
+      "results/group_b/early-run/animations/growth.gif",
     )
     expect(window.localStorage.getItem("pi-lab.analysis.flatList")).toBe("true")
 
     // Chips still apply.
     fireEvent.click(screen.getByTestId("analysis-category-figure"))
     expect(screen.getAllByTestId("analysis-file").map((row) => row.dataset.relPath)).toEqual([
-      "results/pattern_translation/easily-boss-grouse/curve.pdf",
+      "results/group_b/early-run/curve.pdf",
     ])
   })
 

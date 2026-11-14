@@ -64,7 +64,7 @@ export interface DataFileEntry {
   size: number
   mtime: number
   /**
-   * The folder path above the experiment (e.g. `pattern_translation`), shown as
+   * The folder path above the experiment (e.g. `group_b`), shown as
    * a group row, or null when the experiments are at the top (see
    * {@link assignRow}). A file above the experiment level has its group and no
    * experiment.

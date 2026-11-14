@@ -370,15 +370,15 @@ test("the Folders structure shows the results folder as a plain folder tree with
 })
 
 test("a category chip shows a row of format chips; picking PDF lists the PDFs, and a PDF previews in PDF.js", async () => {
-  // A deep PDF figure (as in results/multiplexing/...) next to an SVG.
-  const pdfDir = join(repoDir, "results", "multiplexing", "grid_7hf2hacr")
+  // A deep PDF figure (as in results/group_a/...) next to an SVG.
+  const pdfDir = join(repoDir, "results", "group_a", "grid_7hf2hacr")
   await mkdir(pdfDir, { recursive: true })
   await writeFile(
-    join(pdfDir, "gradient_magnitudes_7hf2hacr.pdf"),
+    join(pdfDir, "grad_norms.pdf"),
     onePagePdf("Gradient magnitudes"),
   )
   await writeFile(join(pdfDir, "arch.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>")
-  const pdfRel = "results/multiplexing/grid_7hf2hacr/gradient_magnitudes_7hf2hacr.pdf"
+  const pdfRel = "results/group_a/grid_7hf2hacr/grad_norms.pdf"
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
@@ -403,7 +403,7 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   await pdf.click()
   await expect(pdf).toHaveAttribute("aria-pressed", "true")
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(1)
-  await openAnalysisExperiment(window, "multiplexing")
+  await openAnalysisExperiment(window, "group_a")
   await openAnalysisFolder(window, "grid_7hf2hacr")
   await expect(window.getByTestId("analysis-file")).toHaveCount(1)
   await window.screenshot({ path: resolve(".cache", "screens", "analysis-figures-pdf.png") })
@@ -422,19 +422,19 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(2)
 })
 
-test("a results folder laid out like the user's lists groups, then experiments, then their folder tree", async () => {
+test("a results folder with groups lists groups, then experiments, then their folder tree", async () => {
   // results/<group>/<experiment>/…, with output folders (plots/, runs/, animations/).
   const files = [
-    "multiplexing/20260214_141942/best_loss_vs_n.csv",
-    "multiplexing/20260214_141942/plots/best_loss_vs_n_log.png",
-    "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run0_141944/grid.png",
-    "multiplexing/20260214_141942/runs/patterns_conditional_growth/n04_run0_141944/grid.png",
-    "pattern_translation/easily-boss-grouse/training_curve.pdf",
-    "pattern_translation/easily-boss-grouse/animations/growth.gif",
-    "pattern_translation/FAIL-wholly-calm-badger/training_curve.pdf",
-    "pattern_translation/fully-witty-marmot/grid.png",
-    "pattern_translation/fully-witty-marmot/targets/t0.png",
-    "patterns_conditional_growth/firmly-key-amoeba/grid.png",
+    "group_a/20250101_120000/loss_vs_n.csv",
+    "group_a/20250101_120000/plots/loss_vs_n_log.png",
+    "group_a/20250101_120000/runs/group_c/n01_run0_120002/grid.png",
+    "group_a/20250101_120000/runs/group_c/n04_run0_120002/grid.png",
+    "group_b/early-run/training_curve.pdf",
+    "group_b/early-run/animations/growth.gif",
+    "group_b/FAIL-mid-run/training_curve.pdf",
+    "group_b/full-run/grid.png",
+    "group_b/full-run/targets/t0.png",
+    "group_c/first-run/grid.png",
   ]
   await rm(join(repoDir, "results"), { recursive: true })
   for (const file of files) {
@@ -449,7 +449,7 @@ test("a results folder laid out like the user's lists groups, then experiments, 
   // Top rows: the groups, collapsed; no experiment rows with deep paths.
   const groups = window.getByTestId("analysis-group")
   await expect(groups).toHaveText(
-    ["multiplexing", "pattern_translation", "patterns_conditional_growth"],
+    ["group_a", "group_b", "group_c"],
     {
       timeout: 30_000,
     },
@@ -457,41 +457,41 @@ test("a results folder laid out like the user's lists groups, then experiments, 
   // No experiment rows at the top: they are inside their groups.
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(0)
   // A group lists its experiments.
-  await openAnalysisGroup(window, "pattern_translation")
+  await openAnalysisGroup(window, "group_b")
   await expect(window.getByTestId("analysis-experiment")).toHaveText([
-    "easily-boss-grouse",
-    "FAIL-wholly-calm-badger",
-    "fully-witty-marmot",
+    "early-run",
+    "FAIL-mid-run",
+    "full-run",
   ])
   // An experiment shows its tree: animations/ is a folder row before the files.
-  await openAnalysisExperiment(window, "easily-boss-grouse")
+  await openAnalysisExperiment(window, "early-run")
   const grouse = window
-    .locator('[data-testid="analysis-experiment-group"][data-experiment="easily-boss-grouse"]')
+    .locator('[data-testid="analysis-experiment-group"][data-experiment="early-run"]')
     .getByTestId("analysis-experiment-files")
   await expect(grouse.getByTestId("analysis-folder")).toHaveText(["animations"])
   await expect(grouse.getByTestId("analysis-file")).toHaveCount(1)
   await openAnalysisFolder(window, "animations")
   await expect(grouse.getByTestId("analysis-file")).toHaveCount(2)
-  // multiplexing's experiment keeps plots/ and runs/ as folders.
-  await openAnalysisGroup(window, "multiplexing")
-  await openAnalysisExperiment(window, "20260214_141942")
-  const multiplexing = window
-    .locator('[data-testid="analysis-experiment-group"][data-experiment="20260214_141942"]')
+  // group_a's experiment keeps plots/ and runs/ as folders.
+  await openAnalysisGroup(window, "group_a")
+  await openAnalysisExperiment(window, "20250101_120000")
+  const group_a = window
+    .locator('[data-testid="analysis-experiment-group"][data-experiment="20250101_120000"]')
     .getByTestId("analysis-experiment-files")
-  await expect(multiplexing.getByTestId("analysis-folder")).toHaveText(["plots", "runs"])
+  await expect(group_a.getByTestId("analysis-folder")).toHaveText(["plots", "runs"])
 })
 
-test("a results folder laid out like the user's shows the Figures and Markup format rows", async () => {
-  // The layout of a real project's results/ (multiplexing/<date>/plots, runs/<name>, …).
+test("a results folder with groups shows the Figures and Markup format rows", async () => {
+  // A results/ with groups (group_a/<date>/plots, runs/<name>, …).
   const files = [
-    "multiplexing/20260214_141942/best_loss_vs_n.csv",
-    "multiplexing/20260214_141942/plots/best_loss_vs_n_log.png",
-    "multiplexing/20260214_141942/runs/patterns_conditional_growth/gradient_magnitudes_7hf2hacr.pdf",
-    "multiplexing/20260214_141942/runs/patterns_conditional_growth/hidden_states.png",
-    "multiplexing/20260214_141942/runs/patterns_conditional_growth/config.yml",
-    "multiplexing/20260214_141942/runs/patterns_conditional_growth/states.npy",
-    "pattern_translation/fully-witty-marmot/training_curve_lly7qbhx.pdf",
-    "pattern_translation/fully-witty-marmot/grid.png",
+    "group_a/20250101_120000/loss_vs_n.csv",
+    "group_a/20250101_120000/plots/loss_vs_n_log.png",
+    "group_a/20250101_120000/runs/group_c/grad_norms.pdf",
+    "group_a/20250101_120000/runs/group_c/hidden_states.png",
+    "group_a/20250101_120000/runs/group_c/config.yml",
+    "group_a/20250101_120000/runs/group_c/states.npy",
+    "group_b/full-run/training_curve_lly7qbhx.pdf",
+    "group_b/full-run/grid.png",
   ]
   await rm(join(repoDir, "results"), { recursive: true })
   for (const file of files) {
@@ -518,7 +518,7 @@ test("a results folder laid out like the user's shows the Figures and Markup for
 })
 
 test("Animations lists videos and gifs; a video plays muted and looping, a gif animates", async () => {
-  const run = join(repoDir, "results", "multiplexing", "run_a")
+  const run = join(repoDir, "results", "group_a", "run_a")
   await mkdir(run, { recursive: true })
   await copyFile(join(HERE, "fixtures", "media", "tiny.mp4"), join(run, "growth.mp4"))
   await copyFile(join(HERE, "fixtures", "media", "tiny.gif"), join(run, "growth.gif"))
@@ -543,7 +543,7 @@ test("Animations lists videos and gifs; a video plays muted and looping, a gif a
     .getByRole("button")
     .evaluateAll((chips) => chips.map((chip) => Math.round(chip.getBoundingClientRect().top)))
   expect(new Set(tops).size).toBe(1)
-  await openAnalysisExperiment(window, "multiplexing")
+  await openAnalysisExperiment(window, "group_a")
   await openAnalysisFolder(window, "run_a")
   await expect(window.getByTestId("analysis-file")).toHaveCount(2)
   await expect(

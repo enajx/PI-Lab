@@ -106,22 +106,22 @@ describe("detectExperimentLevel (Auto-detect)", () => {
   /** The folders of each path, as discovery passes them. */
   const folders = (paths: string[]) => paths.map((path) => path.split("/").slice(0, -1))
 
-  test("a results/<group>/<experiment>/ layout like the user's is level 2; output folders do not count", () => {
+  test("a results/<group>/<experiment>/ layout is level 2; output folders do not count", () => {
     expect(
       detectExperimentLevel(
         folders([
-          "multiplexing/20260214_141942/best_loss_vs_n.csv",
-          "multiplexing/20260214_141942/plots/best_loss_vs_n_log.png",
-          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run0/a.png",
-          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n01_run1/a.png",
-          "multiplexing/20260214_141942/runs/patterns_conditional_growth/n04_run0/a.png",
-          "pattern_translation/easily-boss-grouse/training_curve.pdf",
-          "pattern_translation/easily-boss-grouse/animations/growth.mp4",
-          "pattern_translation/FAIL-wholly-calm-badger/training_curve.pdf",
-          "pattern_translation/fully-witty-marmot/grid.png",
-          "pattern_translation/fully-witty-marmot/targets/t0.png",
-          "patterns_conditional_growth/firmly-key-amoeba/grid.png",
-          "patterns_conditional_growth/firmly-key-amoeba/targets/t0.png",
+          "group_a/20250101_120000/loss_vs_n.csv",
+          "group_a/20250101_120000/plots/loss_vs_n_log.png",
+          "group_a/20250101_120000/runs/group_c/n01_run0/a.png",
+          "group_a/20250101_120000/runs/group_c/n01_run1/a.png",
+          "group_a/20250101_120000/runs/group_c/n04_run0/a.png",
+          "group_b/early-run/training_curve.pdf",
+          "group_b/early-run/animations/growth.mp4",
+          "group_b/FAIL-mid-run/training_curve.pdf",
+          "group_b/full-run/grid.png",
+          "group_b/full-run/targets/t0.png",
+          "group_c/first-run/grid.png",
+          "group_c/first-run/targets/t0.png",
         ]),
       ),
     ).toBe(2)
@@ -840,10 +840,10 @@ describe("science.analysis.listFiles", () => {
 describe("science.analysis PDF preview", () => {
   test("pdfStat and pdf read a project PDF for the bundled PDF.js viewer", async () => {
     const body = "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
-    await writeRepoFile("results/multiplexing/run/gradient.pdf", body)
-    await writeRepoFile("results/multiplexing/run/notes.txt", "x\n")
+    await writeRepoFile("results/group_a/run/gradient.pdf", body)
+    await writeRepoFile("results/group_a/run/notes.txt", "x\n")
     const project = await h.caller.projects.open({ path: h.repoDir })
-    const input = { projectId: project.id, relPath: "results/multiplexing/run/gradient.pdf" }
+    const input = { projectId: project.id, relPath: "results/group_a/run/gradient.pdf" }
 
     const stat = await h.caller.science.analysis.pdfStat(input)
     expect(stat).toMatchObject({ exists: true, size: body.length })
@@ -852,7 +852,7 @@ describe("science.analysis PDF preview", () => {
     expect(snapshot.baseline).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size })
 
     await expect(
-      h.caller.science.analysis.pdf({ ...input, relPath: "results/multiplexing/run/notes.txt" }),
+      h.caller.science.analysis.pdf({ ...input, relPath: "results/group_a/run/notes.txt" }),
     ).rejects.toThrow("Select a PDF file")
     await expect(
       h.caller.science.analysis.pdf({ ...input, relPath: "../outside.pdf" }),
