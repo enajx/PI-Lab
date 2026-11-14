@@ -38,7 +38,7 @@ afterEach(async () => {
 test("reads PDF bytes and rejects non-PDF and escaped symlink files", async () => {
   await writeFile(join(h.repoDir, "paper.pdf"), "%PDF-1.4\nfixture")
   const result = await h.caller.pdf.read({ workspaceId, relPath: "paper.pdf" })
-  expect(Buffer.from(result.data).toString()).toBe("%PDF-1.4\nfixture")
+  expect(Buffer.from(result.base64, "base64").toString()).toBe("%PDF-1.4\nfixture")
   expect(result.baseline.size).toBe(16)
   await writeFile(join(h.repoDir, "fake.pdf"), "ordinary text")
   await expect(h.caller.pdf.read({ workspaceId, relPath: "fake.pdf" })).rejects.toThrow("PDF")

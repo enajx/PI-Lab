@@ -848,7 +848,7 @@ describe("science.analysis PDF preview", () => {
     const stat = await h.caller.science.analysis.pdfStat(input)
     expect(stat).toMatchObject({ exists: true, size: body.length })
     const snapshot = await h.caller.science.analysis.pdf(input)
-    expect(Buffer.from(snapshot.data).toString("utf8")).toBe(body)
+    expect(Buffer.from(snapshot.base64, "base64").toString("utf8")).toBe(body)
     expect(snapshot.baseline).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size })
 
     await expect(

@@ -1155,5 +1155,7 @@
   "PI Lab can't show this file type.": "PI Lab에서 이 파일 형식을 표시할 수 없습니다.",
   "Open in default app": "기본 앱으로 열기",
   "Open in browser": "브라우저에서 열기",
-  "Loading PDF viewer…": "PDF 뷰어 불러오는 중…"
+  "Loading PDF viewer…": "PDF 뷰어 불러오는 중…",
+  "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "이 파일은 {size}로 뷰어 한도 {limit}를 넘습니다. 불러오는 데 시간이 걸릴 수 있습니다.",
+  "Load anyway": "그래도 불러오기"
 }

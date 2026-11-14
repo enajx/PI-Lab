@@ -157,6 +157,8 @@ describe("ScienceLibrary", () => {
       ok: true,
       path: `/papers/neuro/${(input as { itemId: string }).itemId}`,
       kind: "markdown",
+      size: 100,
+      limitBytes: 20 * 1024 * 1024,
     }),
     "science.library.readText": (input) => `# Heading of ${(input as { path: string }).path}`,
   }
@@ -196,5 +198,43 @@ describe("ScienceLibrary", () => {
     renderLibrary(viewerHandlers)
     expect(await screen.findByText("Heading of /papers/neuro/notes.md")).toBeTruthy()
     expect(screen.getAllByTestId("library-viewer-tab")).toHaveLength(1)
+  })
+
+  test("a tab stays loaded after switching away and back", async () => {
+    renderLibrary(viewerHandlers)
+    fireEvent.click(await screen.findByTestId("library-all-items"))
+    fireEvent.click((await screen.findAllByTestId("library-item"))[0] as Element)
+    expect(await screen.findByText("Heading of /papers/neuro/notes.md")).toBeTruthy()
+    fireEvent.click(screen.getAllByTestId("library-item")[1] as Element)
+    expect(await screen.findByText("Heading of /papers/neuro/other.md")).toBeTruthy()
+    // The first tab's content is still in the page (hidden), not read again.
+    expect(screen.getByText("Heading of /papers/neuro/notes.md")).toBeTruthy()
+  })
+
+  test("a file over the limit shows its size and loads on Load anyway", async () => {
+    const reads: unknown[] = []
+    renderLibrary({
+      ...viewerHandlers,
+      "science.library.resolveFile": () => ({
+        ok: true,
+        path: "/papers/neuro/notes.md",
+        kind: "markdown",
+        size: 30 * 1024 * 1024,
+        limitBytes: 20 * 1024 * 1024,
+      }),
+      "science.library.readText": (input) => {
+        reads.push(input)
+        return "# Big notes"
+      },
+    })
+    fireEvent.click(await screen.findByTestId("library-all-items"))
+    fireEvent.click((await screen.findAllByTestId("library-item"))[0] as Element)
+    expect((await screen.findByTestId("library-viewer-large")).textContent).toContain(
+      "This file is 30.0 MB, over the viewer's 20.0 MB limit.",
+    )
+    expect(reads).toEqual([])
+    fireEvent.click(screen.getByTestId("library-viewer-load-anyway"))
+    expect(await screen.findByText("Big notes")).toBeTruthy()
+    expect(reads).toEqual([{ path: "/papers/neuro/notes.md", allowLarge: true }])
   })
 })

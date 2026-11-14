@@ -71,7 +71,9 @@ test.skipIf(!process.env.PI_LAB_TECTONIC_TEST_CACHE)(
     })
     expect(rebuilt.success, rebuilt.log).toBe(true)
     const after = await h.caller.pdf.read({ workspaceId: workspace.id, relPath: rebuilt.relPath })
-    expect(Buffer.compare(Buffer.from(before.data), Buffer.from(after.data))).not.toBe(0)
+    expect(
+      Buffer.compare(Buffer.from(before.base64, "base64"), Buffer.from(after.base64, "base64")),
+    ).not.toBe(0)
     await h.caller.settings.updateEditor({ latexProvider: "system" })
     await expect(
       h.caller.pdf.build({ workspaceId: workspace.id, relPath: "paper/main.tex" }),

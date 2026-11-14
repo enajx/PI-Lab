@@ -65,6 +65,8 @@ export interface SplitDockHandle {
    * doing nothing, when the focused split is already empty (a split still waiting).
    */
   splitFocused: (direction: "right" | "below") => boolean
+  /** Focus the Nth tab (1-based) of the focused split; false when it has no such tab. */
+  selectTab: (position: number) => boolean
 }
 
 export function fileItemId(relPath: string): string {
@@ -240,6 +242,12 @@ export function SplitDock({
           reference ? { referenceGroup: reference, direction } : { direction },
         )
         group.api.setActive()
+        return true
+      },
+      selectTab: (position) => {
+        const panel = api?.activeGroup?.panels[position - 1]
+        if (!panel) return false
+        panel.api.setActive()
         return true
       },
     }),

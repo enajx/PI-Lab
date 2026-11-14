@@ -263,6 +263,22 @@ export function CentralPanel({
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [])
 
+  // ⌘1–⌘9 (Ctrl elsewhere) focus the Nth tab of the focused split.
+  const selectTabBlockedRef = useRef(false)
+  selectTabBlockedRef.current = hidden || quickOpen || controller.agentChooserOpen
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = IS_MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+      if (!mod || event.shiftKey || event.altKey || !/^[1-9]$/.test(event.key)) return
+      if (selectTabBlockedRef.current) return
+      if (!dock.current?.selectTab(Number(event.key))) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [])
+
   // Split shortcuts (⌘D right, ⇧⌘D down) split a focused terminal: a new terminal opens in
   // a new split. They run in the capture phase so the terminal never sees the key; on any
   // other tab the key is left alone (⌘D stays "select next match" in the editor).

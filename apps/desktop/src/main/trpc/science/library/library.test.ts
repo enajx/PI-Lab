@@ -877,10 +877,19 @@ describe("science.library viewer reads (resolveFile / readPdf / readText)", () =
     await writeFile(join(root, "Top.pdf"), "%PDF-1.4 body")
     await h.caller.science.library.connect({ kind: "folder", folderPath: root })
     const resolved = await h.caller.science.library.resolveFile({ itemId: "Top.pdf" })
-    expect(resolved).toEqual({ ok: true, path: join(root, "Top.pdf"), kind: "pdf" })
+    expect(resolved).toEqual({
+      ok: true,
+      path: join(root, "Top.pdf"),
+      kind: "pdf",
+      size: 13,
+      limitBytes: 100_000_000,
+    })
     if (!resolved.ok) throw new Error("expected ok result")
-    const snapshot = await h.caller.science.library.readPdf({ path: resolved.path })
-    expect(new TextDecoder().decode(snapshot.data)).toBe("%PDF-1.4 body")
+    const snapshot = await h.caller.science.library.readPdf({
+      path: resolved.path,
+      allowLarge: false,
+    })
+    expect(Buffer.from(snapshot.base64, "base64").toString()).toBe("%PDF-1.4 body")
     const stat = await h.caller.science.library.fileStat({ path: resolved.path })
     expect(stat.exists).toBe(true)
   })
@@ -896,12 +905,12 @@ describe("science.library viewer reads (resolveFile / readPdf / readText)", () =
   test("reads refuse a path that resolveFile did not return", async () => {
     h = await createHarness()
     const file = await tempFile("secret.md", "# secret")
-    await expect(h.caller.science.library.readText({ path: file })).rejects.toThrow(
-      /not opened from the library/i,
-    )
-    await expect(h.caller.science.library.readPdf({ path: file })).rejects.toThrow(
-      /not opened from the library/i,
-    )
+    await expect(
+      h.caller.science.library.readText({ path: file, allowLarge: false }),
+    ).rejects.toThrow(/not opened from the library/i)
+    await expect(
+      h.caller.science.library.readPdf({ path: file, allowLarge: false }),
+    ).rejects.toThrow(/not opened from the library/i)
   })
 
   test("resolveFile gives a Zotero HTML snapshot as html; readText returns it", async () => {
@@ -931,8 +940,16 @@ describe("science.library viewer reads (resolveFile / readPdf / readText)", () =
       libraryId: "42",
     })
     const resolved = await h.caller.science.library.resolveFile({ itemId: "ABCD1234" })
-    expect(resolved).toEqual({ ok: true, path: file, kind: "html" })
-    expect(await h.caller.science.library.readText({ path: file })).toBe("<p>saved page</p>")
+    expect(resolved).toEqual({
+      ok: true,
+      path: file,
+      kind: "html",
+      size: 17,
+      limitBytes: 20 * 1024 * 1024,
+    })
+    expect(await h.caller.science.library.readText({ path: file, allowLarge: false })).toBe(
+      "<p>saved page</p>",
+    )
   })
 
   test("resolveFile reports no-local-file for a Zotero item with nothing on disk", async () => {
@@ -956,5 +973,21 @@ describe("science.library viewer reads (resolveFile / readPdf / readText)", () =
     if (resolved.ok) throw new Error("expected error result")
     expect(resolved.reason).toBe("no-local-file")
     expect(resolved.message).toContain("No local copy available")
+  })
+
+  test("a text file over the limit is refused unless allowLarge is set", async () => {
+    h = await createHarness()
+    const root = await folderFixture()
+    const big = join(root, "big.md")
+    await writeFile(big, `# big\n${"x".repeat(20 * 1024 * 1024)}`)
+    await h.caller.science.library.connect({ kind: "folder", folderPath: root })
+    const resolved = await h.caller.science.library.resolveFile({ itemId: "big.md" })
+    if (!resolved.ok) throw new Error("expected ok result")
+    expect(resolved.size).toBeGreaterThan(resolved.limitBytes ?? 0)
+    await expect(
+      h.caller.science.library.readText({ path: big, allowLarge: false }),
+    ).rejects.toThrow(/20 MB limit/)
+    const text = await h.caller.science.library.readText({ path: big, allowLarge: true })
+    expect(text.startsWith("# big")).toBe(true)
   })
 })

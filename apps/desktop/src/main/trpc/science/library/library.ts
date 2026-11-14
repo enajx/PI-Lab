@@ -14,7 +14,7 @@ import { statFile } from "@pi-lab/workspace-fs"
 import { z } from "zod"
 import { withMeaningfulActivity } from "../../../caffeine"
 import type { HttpFetch } from "../../context"
-import { readPdfSnapshot } from "../../pdf/pdf"
+import { MAX_PDF_BYTES, readPdfSnapshot } from "../../pdf/pdf"
 import { publicProcedure, router } from "../../trpc"
 import { attachViaBridge, attachViaWebApi } from "./attach"
 import { listFolderCollections, listFolderItems, resolveWithin } from "./folder"
@@ -26,6 +26,7 @@ import {
 } from "./parse"
 import {
   grantViewerPath,
+  MAX_TEXT_BYTES,
   readViewerText,
   requireGranted,
   type ViewerKind,
@@ -116,7 +117,15 @@ export type OpenItemResult =
 
 /** A library item's local file for a viewer tab, or why there is none. */
 export type ResolveFileResult =
-  | { ok: true; path: string; kind: ViewerKind }
+  | {
+      ok: true
+      path: string
+      kind: ViewerKind
+      /** File size in bytes. */
+      size: number
+      /** The viewer reads files up to this size unless the user chooses "Load anyway"; null when it does not read the file. */
+      limitBytes: number | null
+    }
   | {
       ok: false
       reason: "not-connected" | "no-local-file" | "error"
@@ -176,6 +185,7 @@ const openZoteroItemInput = z.object({ itemKey: z.string().min(1) })
 /** A library item id: a folder item's path key or a Zotero item key. */
 const resolveFileInput = z.object({ itemId: z.string().min(1) })
 const viewerPathInput = z.object({ path: z.string().min(1) })
+const viewerReadInput = z.object({ path: z.string().min(1), allowLarge: z.boolean() })
 
 /**
  * Read the stored library source (or null when not configured), normalizing legacy rows
@@ -581,7 +591,9 @@ export const libraryRouter = router({
       }
       if (!path) return { ok: false, reason: "no-local-file", message: NO_LOCAL_FILE_MESSAGE }
       grantViewerPath(path)
-      return { ok: true, path, kind: viewerKind(path) }
+      const kind = viewerKind(path)
+      const limitBytes = kind === "pdf" ? MAX_PDF_BYTES : kind === "other" ? null : MAX_TEXT_BYTES
+      return { ok: true, path, kind, size: (await stat(path)).size, limitBytes }
     }),
 
   /** Size and time of a granted viewer file, polled by the PDF viewer to refresh. */
@@ -589,13 +601,13 @@ export const libraryRouter = router({
     .input(viewerPathInput)
     .query(({ input }) => statFile(requireGranted(input.path))),
 
-  /** The bytes of a granted PDF for the bundled PDF.js viewer. */
+  /** The bytes of a granted PDF for the bundled PDF.js viewer (over 100 MB only with `allowLarge`). */
   readPdf: publicProcedure
-    .input(viewerPathInput)
-    .query(({ input }) => readPdfSnapshot(requireGranted(input.path))),
+    .input(viewerReadInput)
+    .query(({ input }) => readPdfSnapshot(requireGranted(input.path), input.allowLarge)),
 
-  /** The text of a granted HTML or Markdown file (at most 20 MB). */
+  /** The text of a granted HTML or Markdown file (over 20 MB only with `allowLarge`). */
   readText: publicProcedure
-    .input(viewerPathInput)
-    .query(({ input }) => readViewerText(requireGranted(input.path))),
+    .input(viewerReadInput)
+    .query(({ input }) => readViewerText(requireGranted(input.path), input.allowLarge)),
 })

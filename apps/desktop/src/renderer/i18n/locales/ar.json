@@ -1155,5 +1155,7 @@
   "PI Lab can't show this file type.": "لا يستطيع PI Lab عرض هذا النوع من الملفات.",
   "Open in default app": "فتح في التطبيق الافتراضي",
   "Open in browser": "فتح في المتصفح",
-  "Loading PDF viewer…": "جارٍ تحميل عارض PDF…"
+  "Loading PDF viewer…": "جارٍ تحميل عارض PDF…",
+  "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "حجم هذا الملف {size}، وهو أكبر من حد العارض البالغ {limit}. قد يكون تحميله بطيئًا.",
+  "Load anyway": "تحميل على أي حال"
 }

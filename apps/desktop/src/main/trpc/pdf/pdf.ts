@@ -23,7 +23,8 @@ import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
 import { workspaceWorkingDir } from "../workspaces/workspaces"
 
-const MAX_PDF_BYTES = 100_000_000
+/** Largest PDF the viewer reads unless the caller allows a larger one. */
+export const MAX_PDF_BYTES = 100_000_000
 const MAX_TEX_BYTES = 2_000_000
 const pathInput = z.object({ workspaceId: z.string().min(1), relPath: z.string().min(1) })
 const builds = new Map<string, Promise<BuildResult>>()
@@ -122,23 +123,28 @@ export async function insideFile(dir: string, relPath: string): Promise<string> 
   return target
 }
 
-/** The bytes of a PDF file and the size and time they were read at. */
+/**
+ * The bytes of a PDF file, base64-encoded, and the size and time they were read at.
+ * Base64 because the IPC transformer (superjson) turns a `Uint8Array` into a plain number
+ * array, which takes seconds for a large PDF; a string crosses IPC unchanged.
+ */
 export interface PdfSnapshot {
-  data: Uint8Array
+  base64: string
   baseline: { mtimeMs: number; size: number }
 }
 
 /**
- * Read a whole PDF file (at most 100 MB) for the PDF.js viewer. Throws when
+ * Read a whole PDF file for the PDF.js viewer (at most 100 MB unless `allowLarge`). Throws when
  * the path is not a `.pdf`, the file changes while it is read, or it has no PDF
  * header. `path` must already be checked to be inside its folder.
  */
-export async function readPdfSnapshot(path: string): Promise<PdfSnapshot> {
+export async function readPdfSnapshot(path: string, allowLarge: boolean): Promise<PdfSnapshot> {
   if (extname(path).toLowerCase() !== ".pdf") throw new Error("Select a PDF file")
   const handle = await open(path, "r")
   return (async () => {
     const baseline = await handle.stat()
-    if (!baseline.isFile() || baseline.size > MAX_PDF_BYTES)
+    if (!baseline.isFile()) throw new Error("Not a file")
+    if (!allowLarge && baseline.size > MAX_PDF_BYTES)
       throw new Error("PDF exceeds the 100 MB limit")
     const bytes = Buffer.alloc(baseline.size)
     let offset = 0
@@ -154,7 +160,7 @@ export async function readPdfSnapshot(path: string): Promise<PdfSnapshot> {
     if (bytes.subarray(0, 1024).indexOf("%PDF-") < 0)
       throw new Error("This file does not contain a PDF header")
     return {
-      data: new Uint8Array(bytes),
+      base64: bytes.toString("base64"),
       baseline: { mtimeMs: baseline.mtimeMs, size: baseline.size },
     }
   })().finally(() => handle.close())
@@ -460,7 +466,7 @@ export const pdfRouter = router({
   read: publicProcedure.input(pathInput).query(async ({ ctx, input }) => {
     const { dir } = await workspaceDirectory(ctx.db, input.workspaceId)
     const path = await insideFile(dir, input.relPath)
-    return readPdfSnapshot(path)
+    return readPdfSnapshot(path, false)
   }),
   build: publicProcedure.input(pathInput).mutation(async ({ ctx, input }): Promise<BuildResult> => {
     const target = await workspaceDirectory(ctx.db, input.workspaceId)

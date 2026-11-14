@@ -126,12 +126,31 @@ test("library: type to filter, Escape goes up, Enter opens a PDF in a viewer tab
   // A second paper opens a second tab; closing both returns to the centered layout.
   await window.getByTestId("library-collection").filter({ hasText: "results" }).click()
   await window.getByTestId("library-item").click()
-  await expect(viewer.locator(".textLayer").first()).toContainText("Beta paper text", {
+  await expect(viewer.locator(".textLayer").filter({ hasText: "Beta paper text" })).toBeVisible({
     timeout: 30_000,
   })
-  await expect(window.getByTestId("library-viewer-tab")).toHaveCount(2)
-  await window.getByTestId("library-viewer-tab-close").first().click()
-  await window.getByTestId("library-viewer-tab-close").first().click()
+  const viewerTabs = window.getByTestId("library-viewer-tab")
+  await expect(viewerTabs).toHaveCount(2)
+  await expect(viewerTabs.nth(1)).toHaveAttribute("data-active", "true")
+
+  // ⌘1 / ⌘2 switch tabs; the first PDF is still loaded, so it shows at once.
+  await window.keyboard.press("Meta+1")
+  await expect(viewerTabs.nth(0)).toHaveAttribute("data-active", "true")
+  await expect(viewer.locator(".textLayer").filter({ hasText: "Alpha paper text" })).toBeVisible()
+  await window.keyboard.press("Meta+2")
+  await expect(viewerTabs.nth(1)).toHaveAttribute("data-active", "true")
+
+  // Cmd+W (the native menu item) closes the active tab; the × closes the other.
+  const clicked = await app.evaluate(({ Menu }) => {
+    const items = Menu.getApplicationMenu()?.items.flatMap((item) => item.submenu?.items ?? [])
+    const item = items?.find((entry) => entry.accelerator === "Command+W")
+    item?.click()
+    return item !== undefined
+  })
+  expect(clicked).toBe(true)
+  await expect(viewerTabs).toHaveCount(1)
+  await expect(viewerTabs).toContainText("alpha")
+  await window.getByTestId("library-viewer-tab-close").click()
   await expect(viewer).toHaveCount(0)
   await expect(window.getByTestId("library-list-pane")).not.toHaveAttribute("data-split", "true")
 })
