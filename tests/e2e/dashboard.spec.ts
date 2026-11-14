@@ -94,7 +94,8 @@ test("title bar agent status shows installed agents and current sessions", async
   await control.click()
   const panel = window.getByRole("dialog", { name: "Agents status" })
   await expect(panel).toBeVisible()
-  await expect(panel).toContainText("Claude Code")
+  // The agent check waits for the user's login shell, which can take seconds under load.
+  await expect(panel).toContainText("Claude Code", { timeout: 25_000 })
   await expect(panel).toContainText("Codex")
   await expect(panel).toContainText("Current sessions")
   await expect(panel).toContainText("No current sessions.")

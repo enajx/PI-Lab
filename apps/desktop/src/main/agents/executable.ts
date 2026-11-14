@@ -8,6 +8,12 @@ export type AgentExecutableResolver = (candidate: string) => Promise<string | nu
 export type AgentLaunchEnvironmentResolver = () => Promise<Record<string, string>>
 
 const execFileAsync = promisify(execFile)
+/**
+ * How long the login shell may take to print its environment. A shell that loads
+ * version managers or rebuilds its completion cache can take several seconds on a
+ * busy machine; 5 s was too short (agents showed "Could not check agents").
+ */
+const LOGIN_SHELL_TIMEOUT_MS = 20_000
 let loginEnvironment: Promise<Record<string, string>> | null = null
 
 function parseNullEnvironment(stdout: string): Record<string, string> {
@@ -40,7 +46,7 @@ export const liveAgentLaunchEnvironment: AgentLaunchEnvironmentResolver = () => 
     const probe = execFileAsync(shell, ["-ilc", "env -0"], {
       env: process.env,
       maxBuffer: 2 * 1024 * 1024,
-      timeout: 5_000,
+      timeout: LOGIN_SHELL_TIMEOUT_MS,
     }).then(
       ({ stdout }) =>
         ({ ...process.env, ...parseNullEnvironment(stdout) }) as Record<string, string>,
