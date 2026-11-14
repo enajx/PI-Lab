@@ -1,7 +1,7 @@
-<h2 align="center">
+<h3 align="center">
   <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
   PI lab
-</h2>
+</h3>
 
 <p align="center">مساحة عمل مفتوحة المصدر للبحث الحاسوبي.</p>
 
