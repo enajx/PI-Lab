@@ -1,8 +1,5 @@
 <h2 align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/assets/icons/icon.png">
-    <img src="docs/icon-dark.png" width="96" alt="PI lab icon">
-  </picture><br>
+  <img src="docs/icon-dark.png" width="96" alt="PI lab icon"><br>
   PI lab
 </h2>
 
