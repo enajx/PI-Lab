@@ -819,6 +819,8 @@ test("the project stage set in Edit project shows in the project view and surviv
 })
 
 test("dragging a project card moves it on the Dashboard and in the sidebar, and the order survives a restart", async () => {
+  // Four launches and quits: under parallel load a quit alone can take up to 10 s.
+  test.setTimeout(90_000)
   // Add two more projects by launching with each one in turn: a new project goes first.
   for (const [index, name] of ["repo", "beta", "gamma"].entries()) {
     if (index > 0) {
