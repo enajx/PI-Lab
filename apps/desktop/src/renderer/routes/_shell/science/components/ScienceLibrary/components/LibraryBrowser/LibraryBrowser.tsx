@@ -88,6 +88,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
     ...trpc.science.library.listCollections.queryOptions(current ? { parentKey: current.key } : {}),
     enabled: !viewAll,
     staleTime: 30_000,
+    refetchInterval: recheckWhileFailing,
   })
   // Keyboard "open" for folder items (the per-item Open button has its own mutation).
   const openItem = useMutation(trpc.science.library.openItem.mutationOptions())
@@ -99,6 +100,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
     ...trpc.science.library.listItems.queryOptions(current ? { collectionKey: current.key } : {}),
     enabled: showItems,
     staleTime: 30_000,
+    refetchInterval: recheckWhileFailing,
   })
 
   const collections: LibraryCollection[] = collectionsQuery.data?.ok
@@ -619,4 +621,12 @@ function filterByQuery<T>(list: T[], label: (entry: T) => string, query: string)
     .filter((e): e is { entry: T; match: NonNullable<typeof e.match> } => e.match !== null)
     .sort((a, b) => b.match.score - a.match.score)
     .map((e) => e.entry)
+}
+
+/**
+ * Re-check every 2 s while a listing shows an error (e.g. Zotero was closed), so the error
+ * clears by itself once the source answers again; no polling while it is fine.
+ */
+function recheckWhileFailing(query: { state: { data?: { ok: boolean } } }): number | false {
+  return query.state.data && !query.state.data.ok ? 2000 : false
 }

@@ -85,6 +85,29 @@ describe("LibraryBrowser", () => {
     ).toBe(2)
   })
 
+  test("a Zotero error clears by itself once Zotero answers again, without Refresh", async () => {
+    let zoteroOpen = false
+    renderBrowser(
+      { kind: "zotero", canWrite: false, rootLabel: "Zotero library" },
+      {
+        "science.library.listCollections": () =>
+          zoteroOpen
+            ? { ok: true, collections: [collection("C1", "Methods")] }
+            : {
+                ok: false,
+                reason: "error",
+                message: "Zotero needs to be open for this to work. Open Zotero and try again.",
+              },
+      },
+    )
+    await screen.findByTestId("library-error")
+    zoteroOpen = true
+    await waitFor(() => expect(screen.queryByTestId("library-error")).toBeNull(), {
+      timeout: 4000,
+    })
+    expect(screen.getByText("Methods")).toBeTruthy()
+  })
+
   test("renders the root view: All items + collections, with the cursor on All items", async () => {
     renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
     await waitFor(() => {
