@@ -28,6 +28,7 @@
     "link:apps": "bun run --cwd apps/desktop link:apps",
     "package:prod": "bun run --cwd apps/desktop package:prod",
     "package:prod:stable": "bun run --cwd apps/desktop package:prod:stable",
+    "postinstall": "node apps/desktop/scripts/setup-native.cjs",
     "clean": "rm -rf node_modules"
   },
   "trustedDependencies": [
