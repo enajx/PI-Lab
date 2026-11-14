@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/enajx/PI-Lab/releases">Download for macOS</a> · <a href="https://github.com/enajx/PI-Lab/releases">Releases</a> · <a href="LICENSE">License</a>
+  <a href="https://github.com/enajx/PI-Lab/releases">Download for macOS</a>
 </p>
 
 <p align="center">
