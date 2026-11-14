@@ -42,6 +42,15 @@ describe("LibrarySourceChooser", () => {
     })
   })
 
+  test("installed but closed Zotero shows 'Zotero is not open', not 'Not detected'", async () => {
+    renderChooser(vi.fn(), {
+      "science.library.detectLocal": () => ({ reachable: false, installed: true }),
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("zotero-local-detected").textContent).toBe("Zotero is not open"),
+    )
+  })
+
   test("zero-config local Zotero connects to the personal library", () => {
     const onConnect = vi.fn()
     renderChooser(onConnect)

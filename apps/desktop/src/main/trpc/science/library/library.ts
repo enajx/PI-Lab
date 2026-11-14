@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs"
 import { stat } from "node:fs/promises"
-import { basename, resolve } from "node:path"
+import { homedir } from "node:os"
+import { basename, join, resolve } from "node:path"
 import {
   coerceLibrarySource,
   type FolderSource,
@@ -38,6 +40,7 @@ import {
   parseZoteroAttachments,
   pickBestAttachment,
   resolveAttachmentPath,
+  ZOTERO_NOT_OPEN_MESSAGE,
   type ZoteroAttachment,
 } from "./zoteroAttachments"
 
@@ -94,7 +97,19 @@ export type ListCollectionsResult =
   | { ok: false; reason: "not-connected" | "error"; message?: string }
 
 /** Whether the local Zotero desktop API is reachable (backs the connect chooser). */
-export type DetectLocalResult = { reachable: boolean; message?: string }
+/**
+ * Local Zotero detection: `reachable` when its API answers; `installed` when Zotero.app is
+ * found, so the chooser can say "not open" rather than "not detected".
+ */
+export type DetectLocalResult = { reachable: boolean; installed: boolean; message?: string }
+
+/** Where macOS apps are usually installed. */
+const ZOTERO_APP_PATHS = ["/Applications/Zotero.app", join(homedir(), "Applications", "Zotero.app")]
+
+/** Whether Zotero.app exists at any of `paths`. */
+export function zoteroAppInstalled(paths: string[]): boolean {
+  return paths.some((path) => existsSync(path))
+}
 
 /** Outcome of attaching a file to a library item — typed, never a throw. */
 export type AttachFileResult =
@@ -330,6 +345,8 @@ async function zoteroGet(
     }
     return { ok: true, data: await res.json() }
   } catch (error) {
+    // The local app not answering (closed, or the request timed out) gets a plain message.
+    if (source.mode === "local") return { ok: false, message: ZOTERO_NOT_OPEN_MESSAGE }
     return { ok: false, message: error instanceof Error ? error.message : "Zotero request failed" }
   } finally {
     clearTimeout(timer)
@@ -362,9 +379,13 @@ export const libraryRouter = router({
           signal: controller.signal,
         },
       )
-      return { reachable: res.ok }
+      return { reachable: res.ok, installed: res.ok || zoteroAppInstalled(ZOTERO_APP_PATHS) }
     } catch (error) {
-      return { reachable: false, message: error instanceof Error ? error.message : "unreachable" }
+      return {
+        reachable: false,
+        installed: zoteroAppInstalled(ZOTERO_APP_PATHS),
+        message: error instanceof Error ? error.message : "unreachable",
+      }
     } finally {
       clearTimeout(timer)
     }

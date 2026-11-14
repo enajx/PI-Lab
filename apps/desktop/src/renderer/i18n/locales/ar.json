@@ -1159,5 +1159,9 @@
   "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "حجم هذا الملف {size}، وهو أكبر من حد العارض البالغ {limit}. قد يكون تحميله بطيئًا.",
   "Load anyway": "تحميل على أي حال",
   "Feature help box": "مربع المساعدة",
-  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "اعرض مربع «ما هذا؟» في الشريط الجانبي، الذي يشرح عنصر التحكم تحت المؤشر."
+  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "اعرض مربع «ما هذا؟» في الشريط الجانبي، الذي يشرح عنصر التحكم تحت المؤشر.",
+  "Zotero is not open": "Zotero غير مفتوح",
+  "Unlink Zotero": "إلغاء ربط Zotero",
+  "Unlink folder": "إلغاء ربط المجلد",
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "ألغِ ربط مصدر المكتبة هذا لتختار مكتبة Zotero أخرى أو مجلد PDF آخر."
 }

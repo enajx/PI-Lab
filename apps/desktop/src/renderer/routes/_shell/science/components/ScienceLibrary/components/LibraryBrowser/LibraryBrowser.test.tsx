@@ -331,6 +331,8 @@ describe("LibraryBrowser", () => {
     await waitFor(() => expect(screen.getAllByTestId("library-collection")).toHaveLength(2))
     press("r", "s", "l") // fuzzy: R-e-S-u-L-ts
     expect(screen.queryByTestId("quick-find")).toBeNull()
+    // While typing, the hint gives way to the typed text.
+    expect(screen.queryByTestId("library-type-hint")).toBeNull()
     expect(screen.getByTestId("library-type-query").textContent).toContain("rsl")
     expect(screen.getAllByTestId("library-collection").map((el) => el.textContent)).toEqual([
       "Results0",

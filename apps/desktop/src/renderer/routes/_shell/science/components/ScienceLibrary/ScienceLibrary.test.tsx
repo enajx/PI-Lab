@@ -77,7 +77,7 @@ describe("ScienceLibrary", () => {
       expect(screen.getAllByTestId("library-collection")).toHaveLength(2)
     })
     expect(screen.getByTestId("library-breadcrumb")).toBeTruthy()
-    expect(screen.getByTestId("library-disconnect")).toBeTruthy()
+    expect(screen.getByTestId("library-disconnect").textContent).toBe("Unlink Zotero")
     expect(screen.queryByTestId("library-source-chooser")).toBeNull()
     // Default view = collections (+ an "All items" entry), not a flat item list.
     expect(screen.getByTestId("library-all-items")).toBeTruthy()

@@ -13,6 +13,10 @@ import { isAbsolute, join } from "node:path"
 /** Shown when no on-disk file resolves for a Zotero item (web copy, not downloaded, no file attachment). */
 export const NO_LOCAL_FILE_MESSAGE = "No local copy available (not downloaded)."
 
+/** Shown instead of the raw network error when the local Zotero app does not answer. */
+export const ZOTERO_NOT_OPEN_MESSAGE =
+  "Zotero needs to be open for this to work. Open Zotero and try again."
+
 /** Default Zotero data directory (storage lives at `~/Zotero/storage`). A Settings override is a later follow-up. */
 export function defaultZoteroDataDir(): string {
   return join(homedir(), "Zotero")

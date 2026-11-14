@@ -38,6 +38,7 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
     retry: false,
   })
   const reachable = detect.data?.reachable ?? false
+  const installed = detect.data?.installed ?? false
 
   // The native folder picker that backs the "Folder" card (parented to the window).
   const pickFolder = useMutation(trpc.system.pickDirectory.mutationOptions())
@@ -82,7 +83,13 @@ export function LibrarySourceChooser({ onConnect, isPending, error }: LibrarySou
                   : "ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground"
               }
             >
-              {detect.isLoading ? t("Checking…") : reachable ? t("Detected ✓") : t("Not detected")}
+              {detect.isLoading
+                ? t("Checking…")
+                : reachable
+                  ? t("Detected ✓")
+                  : installed
+                    ? t("Zotero is not open")
+                    : t("Not detected")}
             </span>
           </div>
           <p className="text-muted-foreground text-xs leading-relaxed">
