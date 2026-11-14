@@ -27,7 +27,11 @@ const { execFileSync } = require("node:child_process")
 process.env.CUSTOM_DMGBUILD_PATH = join(__dirname, "scripts/dmg-background.cjs")
 
 const { channelDefinition } = require("./scripts/package-channel.cjs")
-const { publicReleaseDefinition, publicUpdateUrl } = require("./scripts/public-release.cjs")
+const {
+  alphaVersion,
+  publicReleaseDefinition,
+  publicUpdateUrl,
+} = require("./scripts/public-release.cjs")
 const publicReleaseChannel = process.env.PI_LAB_PUBLIC_RELEASE_CHANNEL
 const publicRelease = publicReleaseChannel
   ? publicReleaseDefinition(publicReleaseChannel, process.env.PI_LAB_RELEASE_VERSION)
@@ -92,7 +96,13 @@ const config = {
     ...(channel === "alpha"
       ? {
           piLabBuildId: process.env.PI_LAB_BUILD_ID?.trim() || randomUUID(),
-          // Alpha builds keep version 0.0.0, so issue reports name the commit instead.
+          // One patch above the newest release tag, e.g. 0.1.2-alpha after v0.1.1-beta.
+          version: alphaVersion(
+            execFileSync("git", ["tag", "--list", "v*"], { cwd: __dirname, encoding: "utf8" })
+              .split("\n")
+              .filter(Boolean),
+          ),
+          // Several Alpha builds share a version, so issue reports also name the commit.
           piLabCommit: execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
             cwd: __dirname,
             encoding: "utf8",

@@ -4,6 +4,7 @@ const { test } = require("node:test")
 const { tmpdir } = require("node:os")
 const { join } = require("node:path")
 const {
+  alphaVersion,
   assertPublicReleaseCredentials,
   publicReleaseDefinition,
   publicUpdateUrl,
@@ -215,4 +216,11 @@ test("packaged runtime includes electron-updater and its required dependencies",
   } finally {
     rmSync(output, { recursive: true, force: true })
   }
+})
+
+test("an Alpha build is one patch above the newest release tag, with -alpha", () => {
+  assert.equal(alphaVersion(["v0.1.0-beta.7", "v0.1.0-beta.8"]), "0.1.1-alpha")
+  assert.equal(alphaVersion(["v0.1.0-beta.8", "v0.1.1-beta", "v0.1.0"]), "0.1.2-alpha")
+  assert.equal(alphaVersion(["v0.1.9-beta", "v0.2.0"]), "0.2.1-alpha")
+  assert.throws(() => alphaVersion(["not-a-tag"]), /no release tag/i)
 })

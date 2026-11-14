@@ -51,4 +51,30 @@ function assertPublicReleaseCredentials(env, testBuild) {
   }
 }
 
-module.exports = { assertPublicReleaseCredentials, publicReleaseDefinition, publicUpdateUrl }
+/**
+ * The version an Alpha build shows: one patch above the newest published release tag
+ * (`v0.1.1-beta` or `v0.1.1` → `0.1.2-alpha`). Throws when no `vX.Y.Z…` tag is given, so a
+ * clone without fetched tags fails loudly instead of building a wrong version.
+ * @param {string[]} tags
+ */
+function alphaVersion(tags) {
+  const versions = tags
+    .map((tag) => /^v(\d+)\.(\d+)\.(\d+)(?:-.+)?$/.exec(tag.trim()))
+    .filter((match) => match !== null)
+    .map((match) => match.slice(1, 4).map(Number))
+  if (versions.length === 0) {
+    throw new Error("No release tag (vX.Y.Z) found for the Alpha version; run git fetch --tags")
+  }
+  const [major, minor, patch] = versions.reduce((newest, version) => {
+    const difference = version.findIndex((part, index) => part !== newest[index])
+    return difference >= 0 && version[difference] > newest[difference] ? version : newest
+  })
+  return `${major}.${minor}.${patch + 1}-alpha`
+}
+
+module.exports = {
+  alphaVersion,
+  assertPublicReleaseCredentials,
+  publicReleaseDefinition,
+  publicUpdateUrl,
+}

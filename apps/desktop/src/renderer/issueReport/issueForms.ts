@@ -30,7 +30,7 @@ export const ISSUE_ACTION_LABELS: Record<IssueKind, string> = {
   feature: "Request a feature",
 }
 
-/** Alpha builds keep version 0.0.0, so they name their commit instead. */
+/** Several Alpha builds share a version, so they name their commit instead. */
 function appLabel(environment: AppEnvironment): string {
   if (environment.channel === "alpha") {
     if (!environment.commit) throw new Error("Alpha build has no commit")
