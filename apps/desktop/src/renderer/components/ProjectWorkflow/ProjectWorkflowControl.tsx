@@ -6,6 +6,7 @@ import { lazy, Suspense, useState } from "react"
 import { useTranslate } from "../../i18n/language"
 import { useTRPC } from "../../trpc/react"
 import type { RouterOutputs } from "../../trpc/types"
+import { useSkillLink } from "./SkillNotLinkedDialog"
 
 type ProjectWorkflowStatusData = RouterOutputs["workflows"]["status"]
 type ProjectWorkflowRecordData = ProjectWorkflowStatusData["summary"]
@@ -188,6 +189,8 @@ export function ProjectWorkflowControl({
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
+  // Plan research needs a skill linked in Settings; without one it shows a popup instead.
+  const skillLink = useSkillLink("plan-research")
 
   const statusQuery = useQuery(
     trpc.workflows.status.queryOptions(
@@ -237,6 +240,10 @@ export function ProjectWorkflowControl({
 
   const onClick = () => {
     if (disabled) return
+    if (task === "plan-research" && !skillLink.linked) {
+      skillLink.showNotLinked()
+      return
+    }
     // Every click opens the window so the run is watchable from the first click.
     // triggerRun is a no-op while a run is already in flight (it guards on
     // `running`), so a running control just opens the window to watch; an idle
@@ -279,6 +286,7 @@ export function ProjectWorkflowControl({
 
   return (
     <>
+      {skillLink.dialog}
       <button
         type="button"
         data-testid={testId}

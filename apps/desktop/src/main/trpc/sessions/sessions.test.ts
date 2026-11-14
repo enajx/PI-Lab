@@ -493,6 +493,22 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
 })
 
 describe("sessions.startAutoResearch — placeholder worktree launch", () => {
+  /** Link Auto-research to a user skill so it can launch. */
+  async function linkAutoResearchSkill(): Promise<void> {
+    const directory = join(h.skillsHomeDir, ".agents", "skills", "auto-research")
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, "SKILL.md"), "---\nname: Auto-research\n---\nResearch.\n")
+    await h.caller.settings.updateEditor({ autoResearchSkill: "auto-research" })
+  }
+
+  test("with no skill linked, it says so and starts nothing", async () => {
+    await h.caller.agents.setProjectChoice({ projectId, agentId: "fake-agent" })
+    await expect(h.caller.sessions.startAutoResearch({ projectId })).rejects.toThrow(
+      "Auto-research is not linked to a skill yet",
+    )
+    expect(h.db.select().from(agentSessions).all()).toHaveLength(0)
+  })
+
   test("keeps a selected Git subfolder as the agent and seed directory", async () => {
     const selected = join(h.repoDir, "research", "python")
     await mkdir(selected, { recursive: true })
@@ -501,6 +517,7 @@ describe("sessions.startAutoResearch — placeholder worktree launch", () => {
     await runGit(h.repoDir, ["commit", "-m", "Add nested project"])
     const project = await h.caller.projects.open({ path: selected })
     await h.caller.agents.setProjectChoice({ projectId: project.id, agentId: "fake-agent" })
+    await linkAutoResearchSkill()
     const result = await h.caller.sessions.startAutoResearch({ projectId: project.id })
     const workspace = await h.caller.workspaces.get({ id: result.workspaceId })
     const checkout = h.db
@@ -523,6 +540,7 @@ describe("sessions.startAutoResearch — placeholder worktree launch", () => {
     // Remember a launchable test agent so the default (`claude-code`, absent from
     // the harness catalog) isn't resolved.
     await h.caller.agents.setProjectChoice({ projectId, agentId: "fake-agent" })
+    await linkAutoResearchSkill()
 
     const result = await h.caller.sessions.startAutoResearch({ projectId })
 

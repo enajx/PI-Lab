@@ -3,6 +3,7 @@ import { realpath } from "node:fs/promises"
 import { join } from "node:path"
 import {
   getAgentSettingsOrDefaults,
+  getSettingsOrDefaults,
   type PiLabDatabase,
   type Project,
   type ProjectWorkflowRun,
@@ -360,7 +361,12 @@ async function executeWorkflow(
 
   const prompt =
     input.task === "plan-research"
-      ? await planResearchPrompt(project.repoPath, ctx.skillsHomeDir, ctx.bundledSkillsDir)
+      ? await planResearchPrompt(
+          getSettingsOrDefaults(ctx.db).editor.planResearchSkill,
+          project.repoPath,
+          ctx.skillsHomeDir,
+          ctx.bundledSkillsDir,
+        )
       : input.task === "latex-merge"
         ? latexMergePrompt(target.conflictedFiles)
         : promptForTask(input.task, input.instructions)

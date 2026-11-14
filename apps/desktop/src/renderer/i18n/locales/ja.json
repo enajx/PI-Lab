@@ -1163,5 +1163,13 @@
   "Zotero is not open": "Zotero が開いていません",
   "Unlink Zotero": "Zotero のリンクを解除",
   "Unlink folder": "フォルダーのリンクを解除",
-  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "このライブラリソースのリンクを解除して、別の Zotero ライブラリまたは PDF フォルダーを選べるようにします。"
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "このライブラリソースのリンクを解除して、別の Zotero ライブラリまたは PDF フォルダーを選べるようにします。",
+  "{label} is not linked to a skill yet. Link one in Settings → Agents & worktrees.": "{label} はまだスキルにリンクされていません。設定 → エージェントと作業ツリーでリンクしてください。",
+  "Plan research": "研究計画",
+  "Plan research skill": "研究計画スキル",
+  "Auto-research skill": "自動研究スキル",
+  "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "研究計画ボタンが実行するスキル: プロジェクトまたはユーザーのスキルフォルダー内のフォルダー名。空欄はリンクなしです。",
+  "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "自動研究ボタンがエージェントを起動するときのスキル: プロジェクトまたはユーザーのスキルフォルダー内のフォルダー名。空欄はリンクなしです。",
+  "Not linked": "リンクなし",
+  "Use agent to generate project summary": "エージェントでプロジェクト概要を生成"
 }

@@ -25,7 +25,7 @@ import type { AppContext } from "../context"
 import { effectiveAnalysisFormat } from "../science/analysis/format"
 import { discoverSkills } from "../science/skills/skills"
 import { publicProcedure, router } from "../trpc"
-import { findSkill } from "../workflows/planResearchSkill"
+import { findSkill, notLinkedMessage } from "../workflows/planResearchSkill"
 import { runningProjectWorkflowTasks } from "../workflows/running"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
 
@@ -348,11 +348,12 @@ async function projectAgentId(ctx: AppContext, project: Project): Promise<string
 }
 
 /**
- * Placeholder "Auto-research" trigger for a Dashboard project card. Opens an
- * isolated git-worktree agent session for the project — separate from its main
- * checkout — using the project's remembered agent (or the catalog default), then
- * seeds a placeholder {@link AUTORESEARCH_FILENAME} into that worktree. The real
- * auto-research loop is out of scope; this only opens the worktree agent session.
+ * "Auto-research" trigger for a project. Needs the skill linked in Settings
+ * (`autoResearchSkill`): with none it throws a "not linked" error and starts nothing.
+ * Opens an isolated git-worktree agent session for the project — separate from its main
+ * checkout — using the project's remembered agent (or the catalog default), with a prompt
+ * that runs the linked skill, and seeds a placeholder {@link AUTORESEARCH_FILENAME} into
+ * that worktree.
  *
  * Reuses the shared {@link startAgentSession} launch policy (worktree mode) so
  * worktree creation, agent resolution, and activity bookkeeping stay in one
@@ -368,6 +369,17 @@ export async function startAutoResearch(
     throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
   }
 
+  const slug = getSettingsOrDefaults(ctx.db).editor.autoResearchSkill
+  if (!slug) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: notLinkedMessage("Auto-research") })
+  }
+  const skill = await findSkill(
+    slug,
+    "Auto-research",
+    project.repoPath,
+    ctx.skillsHomeDir,
+    ctx.bundledSkillsDir,
+  )
   const agentId = await projectAgentId(ctx, project)
 
   // Seed the placeholder BEFORE the agent launches, via the pre-spawn hook, so the
@@ -379,6 +391,7 @@ export async function startAutoResearch(
     name: `auto-research-${Date.now().toString(36)}`,
     workspaceMode: "worktree",
     origin: "project",
+    prompt: `Use the ${slug} skill. Its SKILL.md is at ${skill.path}. Follow its instructions.`,
     onWorkspaceReady: async (dir) => {
       await writeTextFile(join(dir, AUTORESEARCH_FILENAME), AUTORESEARCH_PLACEHOLDER)
     },

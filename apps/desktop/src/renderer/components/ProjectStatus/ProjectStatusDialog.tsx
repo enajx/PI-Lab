@@ -234,7 +234,7 @@ export function ProjectStatusDialog({
             task="summary"
             variant="labeled"
             testId="project-status-update-summary"
-            label={t("Generate project summary")}
+            label={t("Use agent to generate project summary")}
             disabled={!gitAvailable}
             disabledReason={gitAvailable ? undefined : gitDisabledReason}
           />

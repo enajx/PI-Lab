@@ -16,6 +16,11 @@ import { fireEvent, render, screen, waitFor, within } from "../../../test/render
 import { ProjectWorkspace } from "./-ProjectWorkspace"
 import { setPendingLaunch } from "./-pendingLaunch"
 
+/** Settings with Plan research and Auto-research linked to a skill, so their buttons launch. */
+const LINKED_SETTINGS = {
+  editor: { planResearchSkill: "plan-research", autoResearchSkill: "auto-research" },
+}
+
 // A card-launched session attaches to the central panel, which mounts a Terminal
 // per pane; stub it so a pane needs no live PTY (mirrors CentralPanel's own test).
 vi.mock("../../../Terminal", () => ({
@@ -34,7 +39,7 @@ function renderWorkspace(handlers: FakeHandlers = {}) {
     }),
     "projects.touch": () => ({}),
     "projects.capabilities": () => ({ git: true }),
-    "settings.get": () => ({}),
+    "settings.get": () => LINKED_SETTINGS,
     "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
     "workspaces.ensureMain": () => new Promise(() => {}),
     ...handlers,
@@ -135,7 +140,7 @@ describe("Project header", () => {
       "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
       "projects.touch": () => ({}),
       "projects.capabilities": () => ({ git: true }),
-      "settings.get": () => ({}),
+      "settings.get": () => LINKED_SETTINGS,
       "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
       "workspaces.ensureMain": () => new Promise(() => {}),
     })
@@ -208,7 +213,7 @@ describe("Project header", () => {
       "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
       "projects.touch": () => ({}),
       "projects.capabilities": () => ({ git: true }),
-      "settings.get": () => ({}),
+      "settings.get": () => LINKED_SETTINGS,
       "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
       "workspaces.ensureMain": () => new Promise(() => {}),
     })
@@ -612,7 +617,7 @@ describe("Project header shortcuts menu", () => {
       "projects.get": () => ({ id: "p1", name: "Photon Drift", repoPath: "/tmp/photon-drift" }),
       "projects.touch": () => ({}),
       "projects.capabilities": () => ({ git: true }),
-      "settings.get": () => ({}),
+      "settings.get": () => LINKED_SETTINGS,
       "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
       "workspaces.ensureMain": () => new Promise(() => {}),
       "science.skills.list": skillsCatalog,
@@ -697,7 +702,7 @@ describe("Card-triggered launch on the project view", () => {
         repoPath: "/tmp/photon-drift",
       }),
       "projects.capabilities": () => ({ git: true }),
-      "settings.get": () => ({}),
+      "settings.get": () => LINKED_SETTINGS,
       "workflows.status": () => ({ planResearch: null, fetchExperiments: null }),
       "workspaces.ensureMain": () => ({ id: "w1" }),
       "agents.list": () => [],

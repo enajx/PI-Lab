@@ -1163,5 +1163,13 @@
   "Zotero is not open": "Zotero غير مفتوح",
   "Unlink Zotero": "إلغاء ربط Zotero",
   "Unlink folder": "إلغاء ربط المجلد",
-  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "ألغِ ربط مصدر المكتبة هذا لتختار مكتبة Zotero أخرى أو مجلد PDF آخر."
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "ألغِ ربط مصدر المكتبة هذا لتختار مكتبة Zotero أخرى أو مجلد PDF آخر.",
+  "{label} is not linked to a skill yet. Link one in Settings → Agents & worktrees.": "{label} غير مرتبط بمهارة بعد. اربط واحدة في الإعدادات ← الوكلاء وأشجار العمل.",
+  "Plan research": "تخطيط البحث",
+  "Plan research skill": "مهارة تخطيط البحث",
+  "Auto-research skill": "مهارة البحث التلقائي",
+  "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "المهارة التي يشغّلها زر تخطيط البحث: اسم مجلدها في مجلدات مهارات المشروع أو المستخدم. الفراغ يعني غير مرتبط.",
+  "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "المهارة التي يبدأ بها زر البحث التلقائي وكيلًا: اسم مجلدها في مجلدات مهارات المشروع أو المستخدم. الفراغ يعني غير مرتبط.",
+  "Not linked": "غير مرتبط",
+  "Use agent to generate project summary": "استخدم وكيلًا لإنشاء ملخص المشروع"
 }

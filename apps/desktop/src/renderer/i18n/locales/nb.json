@@ -1163,5 +1163,13 @@
   "Zotero is not open": "Zotero er ikke åpen",
   "Unlink Zotero": "Koble fra Zotero",
   "Unlink folder": "Koble fra mappe",
-  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "Koble fra denne bibliotekskilden slik at du kan velge et annet Zotero-bibliotek eller en annen PDF-mappe."
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "Koble fra denne bibliotekskilden slik at du kan velge et annet Zotero-bibliotek eller en annen PDF-mappe.",
+  "{label} is not linked to a skill yet. Link one in Settings → Agents & worktrees.": "{label} er ikke koblet til en skill ennå. Koble til en i Innstillinger → Agenter og arbeidstrær.",
+  "Plan research": "Planlegg forskning",
+  "Plan research skill": "Skill for planlegging av forskning",
+  "Auto-research skill": "Skill for automatisk forskning",
+  "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "Skillen som Planlegg forskning-knappen kjører: mappenavnet i prosjektets eller brukerens skill-mapper. Tomt betyr ikke koblet.",
+  "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "Skillen som Automatisk forskning-knappen starter en agent med: mappenavnet i prosjektets eller brukerens skill-mapper. Tomt betyr ikke koblet.",
+  "Not linked": "Ikke koblet",
+  "Use agent to generate project summary": "Bruk en agent til å lage prosjektsammendrag"
 }

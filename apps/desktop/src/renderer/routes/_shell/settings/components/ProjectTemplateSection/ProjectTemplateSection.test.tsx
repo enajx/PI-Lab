@@ -65,6 +65,8 @@ const DEFAULT_SETTINGS: EditorSettings = {
   researchDiaryFormat: "md",
   analysisFormat: "md",
   reportSkill: "experiment-report",
+  planResearchSkill: "",
+  autoResearchSkill: "",
 }
 
 let store: Record<string, string>

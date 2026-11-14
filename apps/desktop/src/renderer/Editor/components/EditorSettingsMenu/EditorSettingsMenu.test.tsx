@@ -39,6 +39,8 @@ const SETTINGS: EditorSettings = {
   researchDiaryFormat: "md",
   analysisFormat: "md",
   reportSkill: "experiment-report",
+  planResearchSkill: "",
+  autoResearchSkill: "",
 }
 
 describe("EditorSettingsMenu", () => {

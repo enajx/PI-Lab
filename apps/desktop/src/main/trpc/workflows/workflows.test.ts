@@ -636,13 +636,31 @@ describe("workflows.run — fetch-experiments task", () => {
 })
 
 describe("Plan research skill", () => {
-  test("missing skill becomes a visible error without launching an agent, including without Git", async () => {
+  test("with no skill linked, it says so without launching an agent, including without Git", async () => {
     const { calls, runner } = makeRunner(() => ok("must not run"))
     const harness = await createHarness([CODEX_AGENT], {
       runNonInteractiveProcess: runner,
       git: false,
     })
     try {
+      const project = await harness.caller.projects.open({ path: harness.repoDir })
+      await harness.caller.workflows.run({ projectId: project.id, task: "plan-research" })
+      const record = await settle(harness, project.id, "plan-research")
+      expect(record.errorMessage).toContain("Plan research is not linked to a skill yet")
+      expect(calls).toHaveLength(0)
+    } finally {
+      await harness.dispose()
+    }
+  })
+
+  test("a linked skill that is missing becomes a visible error without launching an agent", async () => {
+    const { calls, runner } = makeRunner(() => ok("must not run"))
+    const harness = await createHarness([CODEX_AGENT], {
+      runNonInteractiveProcess: runner,
+      git: false,
+    })
+    try {
+      await harness.caller.settings.updateEditor({ planResearchSkill: "no-such-skill" })
       const project = await harness.caller.projects.open({ path: harness.repoDir })
       await harness.caller.workflows.run({ projectId: project.id, task: "plan-research" })
       const record = await settle(harness, project.id, "plan-research")
@@ -657,6 +675,7 @@ describe("Plan research skill", () => {
     const { calls, runner } = makeRunner(() => ok("Research plan ready"))
     const { harness, projectId } = await openProject(runner)
     try {
+      await harness.caller.settings.updateEditor({ planResearchSkill: "plan-research" })
       const directory = join(harness.skillsHomeDir, ".agents", "skills", "plan-research")
       await mkdir(directory, { recursive: true })
       const path = join(directory, "SKILL.md")

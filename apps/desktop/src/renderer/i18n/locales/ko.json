@@ -1163,5 +1163,13 @@
   "Zotero is not open": "Zotero가 열려 있지 않음",
   "Unlink Zotero": "Zotero 연결 해제",
   "Unlink folder": "폴더 연결 해제",
-  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "이 라이브러리 소스의 연결을 해제하여 다른 Zotero 라이브러리나 PDF 폴더를 선택할 수 있게 합니다."
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "이 라이브러리 소스의 연결을 해제하여 다른 Zotero 라이브러리나 PDF 폴더를 선택할 수 있게 합니다.",
+  "{label} is not linked to a skill yet. Link one in Settings → Agents & worktrees.": "{label}이(가) 아직 스킬에 연결되지 않았습니다. 설정 → 에이전트 및 작업 트리에서 연결하세요.",
+  "Plan research": "연구 계획",
+  "Plan research skill": "연구 계획 스킬",
+  "Auto-research skill": "자동 연구 스킬",
+  "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "연구 계획 버튼이 실행하는 스킬: 프로젝트 또는 사용자 스킬 폴더 안의 폴더 이름. 비워 두면 연결되지 않습니다.",
+  "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "자동 연구 버튼이 에이전트를 시작할 때 쓰는 스킬: 프로젝트 또는 사용자 스킬 폴더 안의 폴더 이름. 비워 두면 연결되지 않습니다.",
+  "Not linked": "연결 안 됨",
+  "Use agent to generate project summary": "에이전트로 프로젝트 요약 생성"
 }

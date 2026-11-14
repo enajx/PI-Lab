@@ -77,6 +77,8 @@ describe("settings.get", () => {
       researchDiaryFormat: "md",
       analysisFormat: "md",
       reportSkill: "experiment-report",
+      planResearchSkill: "",
+      autoResearchSkill: "",
     })
   })
 })
@@ -212,6 +214,8 @@ describe("settings.updateEditor", () => {
       researchDiaryFormat: "md",
       analysisFormat: "md",
       reportSkill: "experiment-report",
+      planResearchSkill: "",
+      autoResearchSkill: "",
     })
 
     // The patch persisted and `get` reflects it.
@@ -243,6 +247,8 @@ describe("settings.updateEditor", () => {
       researchDiaryFormat: "md",
       analysisFormat: "md",
       reportSkill: "experiment-report",
+      planResearchSkill: "",
+      autoResearchSkill: "",
     })
   })
 

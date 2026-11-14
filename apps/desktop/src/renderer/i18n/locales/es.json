@@ -1163,5 +1163,13 @@
   "Zotero is not open": "Zotero no está abierto",
   "Unlink Zotero": "Desvincular Zotero",
   "Unlink folder": "Desvincular carpeta",
-  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "Desvincula esta fuente de la biblioteca para elegir otra biblioteca de Zotero u otra carpeta de PDF."
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "Desvincula esta fuente de la biblioteca para elegir otra biblioteca de Zotero u otra carpeta de PDF.",
+  "{label} is not linked to a skill yet. Link one in Settings → Agents & worktrees.": "{label} aún no está vinculado a una skill. Vincula una en Configuración → Agentes y árboles de trabajo.",
+  "Plan research": "Planificar investigación",
+  "Plan research skill": "Skill de planificar investigación",
+  "Auto-research skill": "Skill de investigación automática",
+  "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "Skill que ejecuta el botón Planificar investigación: el nombre de su carpeta en las carpetas de skills del proyecto o del usuario. Vacío significa sin vincular.",
+  "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "Skill con la que el botón Investigación automática inicia un agente: el nombre de su carpeta en las carpetas de skills del proyecto o del usuario. Vacío significa sin vincular.",
+  "Not linked": "Sin vincular",
+  "Use agent to generate project summary": "Usar un agente para generar el resumen del proyecto"
 }

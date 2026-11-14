@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { agentSessions } from "@pi-lab/local-db"
 import { eq } from "drizzle-orm"
 import { afterEach, expect, test } from "vitest"
@@ -57,6 +59,10 @@ test("Auto-research with no project override uses the persisted Settings agent",
   harness = await createHarness([FAKE_AGENT])
   await harness.caller.settings.updateAgents({ defaultAgentId: FAKE_AGENT.id })
   const project = await harness.caller.projects.open({ path: harness.repoDir })
+  const skill = join(harness.skillsHomeDir, ".agents", "skills", "auto-research")
+  await mkdir(skill, { recursive: true })
+  await writeFile(join(skill, "SKILL.md"), "---\nname: Auto-research\n---\nResearch.\n")
+  await harness.caller.settings.updateEditor({ autoResearchSkill: "auto-research" })
   const launched = await harness.caller.sessions.startAutoResearch({ projectId: project.id })
   expect(
     harness.db
