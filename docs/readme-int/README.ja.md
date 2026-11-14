@@ -1,5 +1,5 @@
 <h2 align="center">
-  <img src="../icon-dark.png" width="96" alt="PI lab icon"><br>
+  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
   PI lab
 </h2>
 
