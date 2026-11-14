@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI Lab icon">
-</p>
-
-<h1 align="center">PI Lab</h1>
+<h2 align="center">
+  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
+  PI lab
+</h2>
 
 <p align="center">面向计算研究的开源工作区。</p>
 
@@ -11,9 +10,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform">
-    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release"></a>
-  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform" height="16">
+    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release" height="16"></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license" height="16"></a>
 </p>
 
 <p align="center">
@@ -21,10 +20,10 @@
 </p>
 
 <p align="center">
-  <img src="../screenshot.png" width="80%" alt="PI Lab screenshot">
+  <img src="../screenshot.png" width="80%" alt="PI lab screenshot">
 </p>
 
-PI Lab 是一个与编程智能体协同工作的工作区和编辑器，专为计算科学和研究项目设计。设计理念：开源，不使用专有格式：凡是能用 Markdown 的，都用 Markdown。
+PI lab 是一个与编程智能体协同工作的工作区和编辑器，专为计算科学和研究项目设计。设计理念：开源，不使用专有格式：凡是能用 Markdown 的，都用 Markdown。
 
 ## 功能
 
@@ -63,4 +62,4 @@ bun run test
 
 ## 许可证
 
-PI Lab 以 [MIT](../../LICENSE) 许可证开源，可免费使用。
+PI lab 以 [MIT](../../LICENSE) 许可证开源，可免费使用。

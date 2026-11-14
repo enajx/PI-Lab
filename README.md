@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="apps/desktop/assets/icons/icon.png" width="96" alt="PI Lab icon">
-</p>
-
-<h1 align="center">PI Lab</h1>
+<h2 align="center">
+  <img src="apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
+  PI lab
+</h2>
 
 <p align="center">An open-source workspace for computational research.</p>
 
@@ -11,9 +10,9 @@
 </p>
 
 <p align="center">
-  <sub><img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform">
-    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license"></a></sub>
+  <sub><img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform" height="16">
+    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release" height="16"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license" height="16"></a></sub>
 </p>
 
 <p align="center">
@@ -21,10 +20,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="80%" alt="PI Lab screenshot">
+  <img src="docs/screenshot.png" width="80%" alt="PI lab screenshot">
 </p>
 
-PI Lab is a workspace and editor for working with coding agents designed specifically for computational science and research projects. Design philosophy: open-source and no proprietary formats: everything that can be markdown, should be markdown.
+PI lab is a workspace and editor for working with coding agents designed specifically for computational science and research projects. Design philosophy: open-source and no proprietary formats: everything that can be markdown, should be markdown.
 
 ## Features
 
@@ -63,4 +62,4 @@ Then open a pull request into `main`.
 
 ## License
 
-PI Lab is free and open source under [MIT](LICENSE) licence.
+PI lab is free and open source under [MIT](LICENSE) licence.

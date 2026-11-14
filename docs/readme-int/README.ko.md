@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI Lab icon">
-</p>
-
-<h1 align="center">PI Lab</h1>
+<h2 align="center">
+  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
+  PI lab
+</h2>
 
 <p align="center">전산 연구를 위한 오픈소스 워크스페이스.</p>
 
@@ -11,9 +10,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform">
-    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release"></a>
-  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform" height="16">
+    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release" height="16"></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license" height="16"></a>
 </p>
 
 <p align="center">
@@ -21,10 +20,10 @@
 </p>
 
 <p align="center">
-  <img src="../screenshot.png" width="80%" alt="PI Lab screenshot">
+  <img src="../screenshot.png" width="80%" alt="PI lab screenshot">
 </p>
 
-PI Lab은 코딩 에이전트와 함께 작업하기 위한 워크스페이스이자 편집기로, 전산 과학 및 연구 프로젝트를 위해 특별히 설계되었습니다. 설계 철학: 오픈소스이며 독점 형식을 쓰지 않습니다. Markdown으로 만들 수 있는 것은 모두 Markdown으로 만듭니다.
+PI lab은 코딩 에이전트와 함께 작업하기 위한 워크스페이스이자 편집기로, 전산 과학 및 연구 프로젝트를 위해 특별히 설계되었습니다. 설계 철학: 오픈소스이며 독점 형식을 쓰지 않습니다. Markdown으로 만들 수 있는 것은 모두 Markdown으로 만듭니다.
 
 ## 기능
 
@@ -63,4 +62,4 @@ bun run test
 
 ## 라이선스
 
-PI Lab은 [MIT](../../LICENSE) 라이선스의 무료 오픈소스입니다.
+PI lab은 [MIT](../../LICENSE) 라이선스의 무료 오픈소스입니다.
