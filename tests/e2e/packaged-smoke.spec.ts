@@ -154,7 +154,7 @@ test("packaged public app keeps its release icon and hides icon choices", async 
   test.skip(EXPECTED_CHANNEL_NAME !== "PI Lab", "Public app package only")
   const resources = join(dirname(PACKAGED_BINARY), "..", "Resources")
   const version = await app.evaluate(({ app }) => app.getVersion())
-  const icon = version.includes("-beta.") ? "icon-beta.png" : "icon.png"
+  const icon = version.includes("-beta") ? "icon-beta.png" : "icon.png"
   expect(await readFile(join(resources, "pi-lab-icon.png"))).toEqual(
     await readFile(join(DESKTOP_DIR, "assets", "icons", icon)),
   )

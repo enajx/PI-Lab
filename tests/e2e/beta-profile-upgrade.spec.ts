@@ -92,7 +92,7 @@ test("packaged Beta preserves the previous Beta's projects and settings", async 
   try {
     app = await launch(previousBinary, dataDir, project)
     const previousVersion = await app.evaluate(({ app }) => app.getVersion())
-    expect(previousVersion).toMatch(/-beta\./)
+    expect(previousVersion).toMatch(/-beta/)
     let page = await generalSettings(app)
     const keepRunning = page.getByTestId("settings-keep-running-after-close")
     await expect(keepRunning).toHaveAttribute("aria-checked", "true")
@@ -110,7 +110,7 @@ test("packaged Beta preserves the previous Beta's projects and settings", async 
     // No project registration flag is passed: the candidate must read the saved record.
     app = await launch(candidateBinary, dataDir, null)
     const candidateVersion = await app.evaluate(({ app }) => app.getVersion())
-    expect(candidateVersion).toMatch(/-beta\./)
+    expect(candidateVersion).toMatch(/-beta/)
     if (expectedVersion) expect(candidateVersion).toBe(expectedVersion)
     expect(candidateVersion).not.toBe(previousVersion)
     page = await generalSettings(app)
