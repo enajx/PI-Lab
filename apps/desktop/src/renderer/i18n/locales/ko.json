@@ -1147,5 +1147,13 @@
   "Dataset": "데이터셋",
   "scalar": "스칼라",
   "datasets": "개 데이터셋",
-  "+{count} more": "외 {count}개"
+  "+{count} more": "외 {count}개",
+  "Zotero Library: type to navigate library": "Zotero 라이브러리: 입력하여 라이브러리 탐색",
+  "type to navigate library": "입력하여 라이브러리 탐색",
+  "Close tab": "탭 닫기",
+  "Saved web page": "저장된 웹 페이지",
+  "PI Lab can't show this file type.": "PI Lab에서 이 파일 형식을 표시할 수 없습니다.",
+  "Open in default app": "기본 앱으로 열기",
+  "Open in browser": "브라우저에서 열기",
+  "Loading PDF viewer…": "PDF 뷰어 불러오는 중…"
 }

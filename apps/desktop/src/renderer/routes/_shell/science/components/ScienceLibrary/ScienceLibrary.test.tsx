@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, test } from "vitest"
 import { setInterfaceLanguage } from "../../../../../i18n/language"
 import { AppProviders } from "../../../../../providers/AppProviders"
@@ -27,7 +27,10 @@ function collection(key: string, name: string, itemCount = 0, subcollectionCount
 }
 
 describe("ScienceLibrary", () => {
-  afterEach(() => setInterfaceLanguage("en"))
+  afterEach(() => {
+    setInterfaceLanguage("en")
+    window.localStorage.clear()
+  })
 
   test("shows the source choice in the selected interface language", async () => {
     setInterfaceLanguage("es")
@@ -132,5 +135,66 @@ describe("ScienceLibrary", () => {
     await waitFor(() => {
       expect(screen.getByTestId("library-error").textContent).toContain("500")
     })
+  })
+
+  /** A connected folder library whose "All items" lists one Markdown note and one PDF. */
+  const viewerHandlers: FakeHandlers = {
+    "science.library.getStatus": () => ({
+      connected: true,
+      kind: "folder",
+      folderPath: "/papers/neuro",
+      canWrite: false,
+    }),
+    "science.library.listCollections": () => ({ ok: true, collections: [] }),
+    "science.library.listItems": () => ({
+      ok: true,
+      items: [
+        { id: "notes.md", title: "Notes", authors: [] },
+        { id: "other.md", title: "Other", authors: [] },
+      ],
+    }),
+    "science.library.resolveFile": (input) => ({
+      ok: true,
+      path: `/papers/neuro/${(input as { itemId: string }).itemId}`,
+      kind: "markdown",
+    }),
+    "science.library.readText": (input) => `# Heading of ${(input as { path: string }).path}`,
+  }
+
+  test("stays centered until a file opens; then shows the viewer tab on the right", async () => {
+    renderLibrary(viewerHandlers)
+    fireEvent.click(await screen.findByTestId("library-all-items"))
+    expect(screen.queryByTestId("library-viewer")).toBeNull()
+    expect(screen.getByTestId("library-list-pane").getAttribute("data-split")).toBeNull()
+
+    fireEvent.click((await screen.findAllByTestId("library-item"))[0] as Element)
+    expect(await screen.findByText("Heading of /papers/neuro/notes.md")).toBeTruthy()
+    expect(screen.getByTestId("library-list-pane").getAttribute("data-split")).toBe("true")
+    // The browser kept its place (All items), it was not remounted.
+    expect(screen.getByTestId("library-breadcrumb").textContent).toContain("All items")
+
+    // A second file opens a second tab; opening the first again switches back to it.
+    fireEvent.click(screen.getAllByTestId("library-item")[1] as Element)
+    expect(await screen.findByText("Heading of /papers/neuro/other.md")).toBeTruthy()
+    fireEvent.click(screen.getAllByTestId("library-item")[0] as Element)
+    expect(await screen.findByText("Heading of /papers/neuro/notes.md")).toBeTruthy()
+    expect(screen.getAllByTestId("library-viewer-tab")).toHaveLength(2)
+
+    // Closing every tab returns to the centered layout.
+    for (const close of screen.getAllByTestId("library-viewer-tab-close")) fireEvent.click(close)
+    await waitFor(() => expect(screen.queryByTestId("library-viewer")).toBeNull())
+    expect(screen.getByTestId("library-list-pane").getAttribute("data-split")).toBeNull()
+  })
+
+  test("open tabs come back after the Library is opened again", async () => {
+    const first = renderLibrary(viewerHandlers)
+    fireEvent.click(await screen.findByTestId("library-all-items"))
+    fireEvent.click((await screen.findAllByTestId("library-item"))[0] as Element)
+    expect(await screen.findByText("Heading of /papers/neuro/notes.md")).toBeTruthy()
+    first.unmount()
+
+    renderLibrary(viewerHandlers)
+    expect(await screen.findByText("Heading of /papers/neuro/notes.md")).toBeTruthy()
+    expect(screen.getAllByTestId("library-viewer-tab")).toHaveLength(1)
   })
 })

@@ -869,3 +869,92 @@ describe("science.library.listCollections", () => {
     expect(reqs.some((r) => r.url.includes("/users/42/collections/COLL1/items/top"))).toBe(true)
   })
 })
+
+describe("science.library viewer reads (resolveFile / readPdf / readText)", () => {
+  test("resolveFile gives a folder PDF's path and kind; readPdf returns its bytes", async () => {
+    h = await createHarness()
+    const root = await folderFixture()
+    await writeFile(join(root, "Top.pdf"), "%PDF-1.4 body")
+    await h.caller.science.library.connect({ kind: "folder", folderPath: root })
+    const resolved = await h.caller.science.library.resolveFile({ itemId: "Top.pdf" })
+    expect(resolved).toEqual({ ok: true, path: join(root, "Top.pdf"), kind: "pdf" })
+    if (!resolved.ok) throw new Error("expected ok result")
+    const snapshot = await h.caller.science.library.readPdf({ path: resolved.path })
+    expect(new TextDecoder().decode(snapshot.data)).toBe("%PDF-1.4 body")
+    const stat = await h.caller.science.library.fileStat({ path: resolved.path })
+    expect(stat.exists).toBe(true)
+  })
+
+  test("resolveFile rejects a folder path that escapes the root", async () => {
+    h = await createHarness()
+    const root = await folderFixture()
+    await h.caller.science.library.connect({ kind: "folder", folderPath: root })
+    const resolved = await h.caller.science.library.resolveFile({ itemId: "../../etc/passwd" })
+    expect(resolved.ok).toBe(false)
+  })
+
+  test("reads refuse a path that resolveFile did not return", async () => {
+    h = await createHarness()
+    const file = await tempFile("secret.md", "# secret")
+    await expect(h.caller.science.library.readText({ path: file })).rejects.toThrow(
+      /not opened from the library/i,
+    )
+    await expect(h.caller.science.library.readPdf({ path: file })).rejects.toThrow(
+      /not opened from the library/i,
+    )
+  })
+
+  test("resolveFile gives a Zotero HTML snapshot as html; readText returns it", async () => {
+    const file = await tempFile("snapshot.html", "<p>saved page</p>")
+    h = await createHarness([FAKE_AGENT], {
+      httpFetch: stubFetch({
+        "/items?limit=1": () => jsonResponse([]),
+        "/children": () =>
+          jsonResponse([
+            {
+              key: "ATT1",
+              data: {
+                itemType: "attachment",
+                linkMode: "linked_file",
+                path: file,
+                contentType: "text/html",
+              },
+            },
+          ]),
+      }),
+    })
+    await h.caller.science.library.connect({
+      kind: "zotero",
+      mode: "web",
+      apiKey: "k",
+      libraryType: "user",
+      libraryId: "42",
+    })
+    const resolved = await h.caller.science.library.resolveFile({ itemId: "ABCD1234" })
+    expect(resolved).toEqual({ ok: true, path: file, kind: "html" })
+    expect(await h.caller.science.library.readText({ path: file })).toBe("<p>saved page</p>")
+  })
+
+  test("resolveFile reports no-local-file for a Zotero item with nothing on disk", async () => {
+    h = await createHarness([FAKE_AGENT], {
+      httpFetch: stubFetch({
+        "/items?limit=1": () => jsonResponse([]),
+        "/children": () => jsonResponse([]),
+        "/items/ABCD1234": () =>
+          jsonResponse({ key: "ABCD1234", data: { itemType: "journalArticle" } }),
+      }),
+    })
+    await h.caller.science.library.connect({
+      kind: "zotero",
+      mode: "web",
+      apiKey: "k",
+      libraryType: "user",
+      libraryId: "42",
+    })
+    const resolved = await h.caller.science.library.resolveFile({ itemId: "ABCD1234" })
+    expect(resolved.ok).toBe(false)
+    if (resolved.ok) throw new Error("expected error result")
+    expect(resolved.reason).toBe("no-local-file")
+    expect(resolved.message).toContain("No local copy available")
+  })
+})

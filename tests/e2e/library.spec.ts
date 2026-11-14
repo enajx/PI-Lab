@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { onePagePdf } from "./fixtures/pdf"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -67,4 +68,70 @@ test("library tab shows the source chooser (three sources) when unconfigured", a
   await window.getByTestId("zotero-use-web").click()
   await expect(window.getByTestId("zotero-api-key-input")).toBeVisible()
   await expect(window.getByTestId("zotero-connect-submit")).toBeVisible()
+})
+
+test("library: type to filter, Escape goes up, Enter opens a PDF in a viewer tab", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+
+  // A folder library: papers/methods/alpha.pdf and papers/results/beta.pdf.
+  const root = join(dataDir, "papers")
+  await mkdir(join(root, "methods"), { recursive: true })
+  await mkdir(join(root, "results"), { recursive: true })
+  await writeFile(join(root, "methods", "alpha.pdf"), onePagePdf("Alpha paper text"))
+  await writeFile(join(root, "results", "beta.pdf"), onePagePdf("Beta paper text"))
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
+  }, root)
+
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="library"]').click()
+  await window.getByTestId("library-source-folder-pick").click()
+  await expect(window.getByTestId("library-type-hint")).toHaveText(
+    "papers: type to navigate library",
+  )
+  await expect(window.getByTestId("library-collection")).toHaveCount(2)
+
+  // Typing filters this level; no ⌘F finder opens.
+  await window.keyboard.type("mth")
+  await expect(window.getByTestId("library-type-query")).toContainText("mth")
+  await expect(window.getByTestId("library-collection")).toHaveCount(1)
+  await expect(window.getByTestId("library-collection")).toContainText("methods")
+  await expect(window.getByTestId("quick-find")).toHaveCount(0)
+
+  // Enter drills in; Enter on the paper opens it in a viewer tab on the right.
+  await window.keyboard.press("Enter")
+  await expect(window.getByTestId("library-item")).toHaveCount(1)
+
+  // Escape in the ⌘F finder only closes the finder; the view stays in "methods".
+  await window.keyboard.press("Meta+f")
+  await expect(window.getByTestId("quick-find")).toBeVisible()
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("quick-find")).toHaveCount(0)
+  await expect(window.getByTestId("library-breadcrumb")).toContainText("methods")
+  await expect(window.getByTestId("library-item")).toHaveCount(1)
+  await expect(window.getByTestId("library-list-pane")).not.toHaveAttribute("data-split", "true")
+  await window.keyboard.press("Enter")
+  const viewer = window.getByTestId("library-viewer")
+  await expect(viewer.locator(".textLayer").first()).toContainText("Alpha paper text", {
+    timeout: 30_000,
+  })
+  await expect(window.getByTestId("library-list-pane")).toHaveAttribute("data-split", "true")
+  await window.screenshot({ path: resolve(".cache", "screens", "library-viewer.png") })
+
+  // Escape goes back to the parent folder; the tab stays open.
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("library-all-items")).toBeVisible()
+  await expect(window.getByTestId("library-viewer-tab")).toHaveCount(1)
+
+  // A second paper opens a second tab; closing both returns to the centered layout.
+  await window.getByTestId("library-collection").filter({ hasText: "results" }).click()
+  await window.getByTestId("library-item").click()
+  await expect(viewer.locator(".textLayer").first()).toContainText("Beta paper text", {
+    timeout: 30_000,
+  })
+  await expect(window.getByTestId("library-viewer-tab")).toHaveCount(2)
+  await window.getByTestId("library-viewer-tab-close").first().click()
+  await window.getByTestId("library-viewer-tab-close").first().click()
+  await expect(viewer).toHaveCount(0)
+  await expect(window.getByTestId("library-list-pane")).not.toHaveAttribute("data-split", "true")
 })

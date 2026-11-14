@@ -10,6 +10,8 @@ interface LibraryItemProps {
   action?: ReactNode
   /** Highlighted as the keyboard-navigation cursor (also marked `data-selected`). */
   selected?: boolean
+  /** Open the paper in a viewer tab; called on a click outside the card's links and buttons. */
+  onOpen: () => void
 }
 
 /**
@@ -18,14 +20,19 @@ interface LibraryItemProps {
  * carries a URL. An optional `action` slot carries the per-source affordance (Zotero
  * "Attach", folder "Open").
  */
-export function LibraryItem({ paper, testId, action, selected }: LibraryItemProps) {
+export function LibraryItem({ paper, testId, action, selected, onOpen }: LibraryItemProps) {
   const authors = paper.authors.join(", ")
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Enter on the keyboard cursor opens the paper (LibraryBrowser).
     <article
+      onClick={(event) => {
+        if (event.target instanceof Element && event.target.closest("a, button")) return
+        onOpen()
+      }}
       data-testid={testId}
       data-paper-id={paper.id}
       data-selected={selected || undefined}
-      className={`flex flex-col gap-1.5 rounded-lg border p-3 ${
+      className={`flex cursor-pointer flex-col gap-1.5 rounded-lg border p-3 ${
         selected ? "border-primary bg-accent/60 ring-1 ring-primary" : "border-border bg-card/40"
       }`}
     >

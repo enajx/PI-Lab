@@ -10,9 +10,11 @@ import {
   settings,
   type ZoteroSource,
 } from "@pi-lab/local-db"
+import { statFile } from "@pi-lab/workspace-fs"
 import { z } from "zod"
 import { withMeaningfulActivity } from "../../../caffeine"
 import type { HttpFetch } from "../../context"
+import { readPdfSnapshot } from "../../pdf/pdf"
 import { publicProcedure, router } from "../../trpc"
 import { attachViaBridge, attachViaWebApi } from "./attach"
 import { listFolderCollections, listFolderItems, resolveWithin } from "./folder"
@@ -22,6 +24,13 @@ import {
   parseZoteroCollections,
   parseZoteroItems,
 } from "./parse"
+import {
+  grantViewerPath,
+  readViewerText,
+  requireGranted,
+  type ViewerKind,
+  viewerKind,
+} from "./viewerFiles"
 import {
   defaultZoteroDataDir,
   NO_LOCAL_FILE_MESSAGE,
@@ -105,6 +114,15 @@ export type OpenItemResult =
       message?: string
     }
 
+/** A library item's local file for a viewer tab, or why there is none. */
+export type ResolveFileResult =
+  | { ok: true; path: string; kind: ViewerKind }
+  | {
+      ok: false
+      reason: "not-connected" | "no-local-file" | "error"
+      message: string
+    }
+
 const connectInput = z.union([
   z.object({
     kind: z.literal("zotero"),
@@ -155,6 +173,9 @@ const openItemInput = z.object({ path: z.string().min(1) })
 
 /** Open a Zotero item's best local attachment by its item key (a `LibraryPaper.id`). */
 const openZoteroItemInput = z.object({ itemKey: z.string().min(1) })
+/** A library item id: a folder item's path key or a Zotero item key. */
+const resolveFileInput = z.object({ itemId: z.string().min(1) })
+const viewerPathInput = z.object({ path: z.string().min(1) })
 
 /**
  * Read the stored library source (or null when not configured), normalizing legacy rows
@@ -227,6 +248,44 @@ function zoteroReadTarget(source: ZoteroSource): {
     base: ZOTERO_API,
     headers: { "Zotero-API-Version": "3", "Zotero-API-Key": source.apiKey },
   }
+}
+
+/**
+ * A Zotero item's best file attachment as an existing on-disk path (null when nothing is on
+ * disk). Reads the item's children first (a paper and its PDF/snapshot), then the item itself
+ * (a standalone attachment). Link modes: `linked_file` → `data.path`;
+ * `imported_file`/`imported_url` → `{zoteroDataDir}/storage/{key}/{filename}`.
+ */
+async function resolveZoteroLocalFile(
+  httpFetch: HttpFetch,
+  source: ZoteroSource,
+  itemKey: string,
+): Promise<{ ok: true; path: string | null } | { ok: false; message: string }> {
+  const dataDir = defaultZoteroDataDir()
+  const resolveExisting = async (atts: ZoteroAttachment[]): Promise<string | null> => {
+    const attachment = pickBestAttachment(atts)
+    const candidate = attachment ? resolveAttachmentPath(attachment, dataDir) : null
+    if (!candidate) return null
+    return (await isFile(candidate)) ? candidate : null
+  }
+  const childrenRes = await zoteroGet(
+    httpFetch,
+    source,
+    `${libraryBase(source)}/items/${itemKey}/children`,
+  )
+  if (!childrenRes.ok) return { ok: false, message: childrenRes.message }
+  const fromChildren = await resolveExisting(parseZoteroAttachments(childrenRes.data))
+  if (fromChildren) return { ok: true, path: fromChildren }
+  const itemRes = await zoteroGet(httpFetch, source, `${libraryBase(source)}/items/${itemKey}`)
+  if (!itemRes.ok) return { ok: true, path: null }
+  return { ok: true, path: await resolveExisting(parseZoteroAttachments([itemRes.data])) }
+}
+
+/** Whether `path` is an existing regular file. */
+async function isFile(path: string): Promise<boolean> {
+  return stat(path)
+    .then((s) => s.isFile())
+    .catch(() => false)
 }
 
 /**
@@ -490,41 +549,53 @@ export const libraryRouter = router({
           message: "Opening a Zotero local copy needs a Zotero connection.",
         }
       }
-      const dataDir = defaultZoteroDataDir()
-      // Pick the best attachment, resolve its on-disk path, and return it only if the file exists.
-      const resolveExisting = async (atts: ZoteroAttachment[]): Promise<string | null> => {
-        const attachment = pickBestAttachment(atts)
-        const candidate = attachment ? resolveAttachmentPath(attachment, dataDir) : null
-        if (!candidate) return null
-        const exists = await stat(candidate)
-          .then((s) => s.isFile())
-          .catch(() => false)
-        return exists ? candidate : null
-      }
-
-      // 1) The common case: a parent item with child attachments (a paper + its downloaded PDF/snapshot).
-      const childrenRes = await zoteroGet(
-        ctx.httpFetch,
-        source,
-        `${libraryBase(source)}/items/${input.itemKey}/children`,
-      )
-      if (!childrenRes.ok) return { ok: false, reason: "error", message: childrenRes.message }
-      let abs = await resolveExisting(parseZoteroAttachments(childrenRes.data))
-
-      // 2) Fallback: the item is itself a standalone attachment (a raw PDF or saved web page with
-      //    no parent) — resolve the item's own file rather than its (nonexistent) children.
-      if (!abs) {
-        const itemRes = await zoteroGet(
-          ctx.httpFetch,
-          source,
-          `${libraryBase(source)}/items/${input.itemKey}`,
-        )
-        if (itemRes.ok) abs = await resolveExisting(parseZoteroAttachments([itemRes.data]))
-      }
-
-      if (!abs) return { ok: false, reason: "no-local-file", message: NO_LOCAL_FILE_MESSAGE }
-      const error = await ctx.openPath(abs)
+      const found = await resolveZoteroLocalFile(ctx.httpFetch, source, input.itemKey)
+      if (!found.ok) return { ok: false, reason: "error", message: found.message }
+      if (!found.path) return { ok: false, reason: "no-local-file", message: NO_LOCAL_FILE_MESSAGE }
+      const error = await ctx.openPath(found.path)
       if (error) return { ok: false, reason: "error", message: error }
       return { ok: true }
     }),
+
+  /**
+   * Find a library item's local file for the Library viewer tabs: the folder item's file
+   * (traversal guarded) or a Zotero item's best attachment on disk, with its viewer kind.
+   * The returned path is granted for {@link readPdf}, {@link readText} and {@link fileStat}
+   * until the app quits; reads of any other path are refused.
+   */
+  resolveFile: publicProcedure
+    .input(resolveFileInput)
+    .query(async ({ ctx, input }): Promise<ResolveFileResult> => {
+      const source = readSource(ctx.db)
+      if (!source) return { ok: false, reason: "not-connected", message: "No library connected." }
+      let path: string | null
+      if (source.kind === "folder") {
+        path = resolveWithin(source.folderPath, input.itemId)
+        if (path == null)
+          return { ok: false, reason: "error", message: "Path is outside the folder." }
+        if (!(await isFile(path))) return { ok: false, reason: "error", message: "File not found." }
+      } else {
+        const found = await resolveZoteroLocalFile(ctx.httpFetch, source, input.itemId)
+        if (!found.ok) return { ok: false, reason: "error", message: found.message }
+        path = found.path
+      }
+      if (!path) return { ok: false, reason: "no-local-file", message: NO_LOCAL_FILE_MESSAGE }
+      grantViewerPath(path)
+      return { ok: true, path, kind: viewerKind(path) }
+    }),
+
+  /** Size and time of a granted viewer file, polled by the PDF viewer to refresh. */
+  fileStat: publicProcedure
+    .input(viewerPathInput)
+    .query(({ input }) => statFile(requireGranted(input.path))),
+
+  /** The bytes of a granted PDF for the bundled PDF.js viewer. */
+  readPdf: publicProcedure
+    .input(viewerPathInput)
+    .query(({ input }) => readPdfSnapshot(requireGranted(input.path))),
+
+  /** The text of a granted HTML or Markdown file (at most 20 MB). */
+  readText: publicProcedure
+    .input(viewerPathInput)
+    .query(({ input }) => readViewerText(requireGranted(input.path))),
 })
