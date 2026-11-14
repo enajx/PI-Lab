@@ -9,11 +9,15 @@ const compatibility: DataCompatibility = {
 
 /** Drive update events through the same methods used by the Electron adapter. */
 function harness() {
+  let available: ((version: string) => void) | null = null
   let downloaded: ((candidate: { version: string; compatibility: unknown }) => void) | null = null
   let unavailable: (() => void) | null = null
   let failed: ((error: Error) => void) | null = null
   const engine: UpdateEngine = {
     configure: vi.fn(),
+    onAvailable: (listener) => {
+      available = listener
+    },
     onDownloaded: (listener) => {
       downloaded = listener
     },
@@ -44,12 +48,22 @@ function harness() {
     controller,
     downloaded: (version: string, candidateCompatibility: unknown = compatibility) =>
       downloaded?.({ version, compatibility: candidateCompatibility }),
+    available: (version: string) => available?.(version),
     unavailable: () => unavailable?.(),
     failed: (error: Error) => failed?.(error),
   }
 }
 
 describe("public update controller", () => {
+  test("a found update is reported as downloading until it is ready", async () => {
+    const h = harness()
+    await h.controller.start("beta")
+    h.available("0.1.3-beta")
+    expect(h.status).toHaveBeenLastCalledWith({ kind: "downloading", version: "0.1.3-beta" })
+    h.downloaded("0.1.3-beta")
+    expect(h.controller.current()).toEqual({ kind: "ready", version: "0.1.3-beta" })
+  })
+
   test("checks the selected feed after start and keeps downloaded updates for full Quit", async () => {
     const h = harness()
     await h.controller.start("beta")
