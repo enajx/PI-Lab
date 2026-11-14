@@ -83,3 +83,7 @@ apps/desktop/build/Assets.car
 /apps/desktop/resources/latex/*/
 # Built bundled whisper.cpp dictation engines are generated before packaging.
 /apps/desktop/resources/whisper/*/
+
+# Agent files created inside test projects
+tests/test-projects/**/.claude/
+tests/test-projects/**/.codex/
