@@ -568,6 +568,38 @@
   }
 }
 
+/*
+ * Every menu option (menu items and listbox options, across the app) shows a visible
+ * highlight on hover and keyboard focus that fades in, like the Projects Dashboard cards.
+ * A soft overlay of the text colour, so it stands out on any menu background in both
+ * light and dark themes. Unlayered, so it applies over each menu's own hover colour.
+ */
+[role="menuitem"],
+[role="menuitemradio"],
+[role="menuitemcheckbox"],
+[role="option"] {
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+:is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    :hover,
+    :focus-visible
+  ):not(:disabled, [aria-disabled="true"]) {
+  background-color: color-mix(in oklch, var(--foreground) 14%, transparent);
+  color: var(--color-hover-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="menuitemcheckbox"],
+  [role="option"] {
+    transition: none;
+  }
+}
+
 /* Arabic interface copy reads right to left; source code and terminal output keep their own order. */
 html[dir="rtl"] .cm-editor,
 html[dir="rtl"] .xterm {
