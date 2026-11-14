@@ -22,7 +22,7 @@
   </picture>
 </p>
 
-PI lab is a workspace and editor for working with coding agents designed specifically for computational science and research projects. Design philosophy: open-source and no proprietary formats: everything that can be markdown, should be markdown.
+PI lab is a workspace and editor for working with coding agents designed specifically for computational science and research. Design philosophy: open-source and no proprietary formats: everything that can be markdown, should be markdown.
 
 ## Features
 
