@@ -451,20 +451,19 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
         </Button>
       </div>
 
-      <div className="flex items-baseline gap-6 text-xs">
-        <p data-testid="library-type-hint" className="shrink-0 text-muted-foreground">
-          {kind === "zotero"
-            ? t("Zotero Library: type to navigate library")
-            : `${rootLabel}: ${t("type to navigate library")}`}
-        </p>
+      {/* The hint, replaced by the typed text while the user types. */}
+      <div className="text-xs">
         {query ? (
-          <p
-            data-testid="library-type-query"
-            className="min-w-0 truncate font-mono text-foreground"
-          >
+          <p data-testid="library-type-query" className="truncate font-mono text-foreground">
             {">"} {query}
           </p>
-        ) : null}
+        ) : (
+          <p data-testid="library-type-hint" className="text-muted-foreground">
+            {kind === "zotero"
+              ? t("Zotero Library: type to navigate library")
+              : `${rootLabel}: ${t("type to navigate library")}`}
+          </p>
+        )}
       </div>
 
       {error ? (

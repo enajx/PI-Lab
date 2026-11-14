@@ -12,6 +12,7 @@ import { type LibrarySource, SETTINGS_ROW_ID, settings } from "@pi-lab/local-db"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { HttpFetch } from "../../context"
 import { createHarness as createFullHarness, FAKE_AGENT, type Harness } from "../../testHarness"
+import { zoteroAppInstalled } from "./library"
 
 // Keep a fresh database and temp tree per test without unused Git or PTY startup.
 const createHarness: typeof createFullHarness = (agentCatalog, options) =>
@@ -219,6 +220,38 @@ describe("science.library local mode", () => {
     expect(result.items).toHaveLength(2)
     expect(reqs.some((r) => r.url.includes("localhost:23119/api/users/0/items/top"))).toBe(true)
     expect(reqs.every((r) => headerOf(r.init, "Zotero-API-Key") === undefined)).toBe(true)
+  })
+
+  test("local Zotero not running: connect and browse say Zotero needs to be open", async () => {
+    let zoteroOpen = true
+    h = await createHarness([FAKE_AGENT], {
+      httpFetch: async () => {
+        if (!zoteroOpen) throw new TypeError("fetch failed")
+        return jsonResponse([])
+      },
+    })
+    zoteroOpen = false
+    await expect(
+      h.caller.science.library.connect({ kind: "zotero", mode: "local" }),
+    ).rejects.toThrow("Zotero needs to be open for this to work. Open Zotero and try again.")
+
+    zoteroOpen = true
+    await h.caller.science.library.connect({ kind: "zotero", mode: "local" })
+    zoteroOpen = false
+    const result = await h.caller.science.library.listCollections()
+    expect(result).toEqual({
+      ok: false,
+      reason: "error",
+      message: "Zotero needs to be open for this to work. Open Zotero and try again.",
+    })
+  })
+
+  test("zoteroAppInstalled finds Zotero.app in any of the given folders", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-lab-apps-"))
+    tmpDirs.push(dir)
+    expect(zoteroAppInstalled([join(dir, "Zotero.app")])).toBe(false)
+    await mkdir(join(dir, "Zotero.app"))
+    expect(zoteroAppInstalled(["/no/such/Zotero.app", join(dir, "Zotero.app")])).toBe(true)
   })
 
   test("a stored bridge token enables writes (canWrite) without surfacing the token", async () => {
@@ -529,7 +562,7 @@ describe("science.library.detectLocal", () => {
     h = await createHarness([FAKE_AGENT], {
       httpFetch: stubFetch({ "localhost:23119/api": () => jsonResponse([]) }),
     })
-    expect(await h.caller.science.library.detectLocal()).toEqual({ reachable: true })
+    expect(await h.caller.science.library.detectLocal()).toEqual({ reachable: true, installed: true })
   })
 
   test("not reachable (no throw) when the local server is down", async () => {

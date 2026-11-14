@@ -1159,5 +1159,9 @@
   "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "Denne filen er {size}, over visningsgrensen på {limit}. Det kan ta tid å laste den.",
   "Load anyway": "Last likevel",
   "Feature help box": "Hjelpeboks",
-  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "Vis «Hva er dette?»-boksen i sidefeltet, som forklarer kontrollen under pekeren."
+  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "Vis «Hva er dette?»-boksen i sidefeltet, som forklarer kontrollen under pekeren.",
+  "Zotero is not open": "Zotero er ikke åpen",
+  "Unlink Zotero": "Koble fra Zotero",
+  "Unlink folder": "Koble fra mappe",
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "Koble fra denne bibliotekskilden slik at du kan velge et annet Zotero-bibliotek eller en annen PDF-mappe."
 }

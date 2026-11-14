@@ -1159,5 +1159,9 @@
   "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "此文件大小为 {size}，超过查看器的 {limit} 限制。加载可能较慢。",
   "Load anyway": "仍然加载",
   "Feature help box": "功能帮助框",
-  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "在侧边栏显示“这是什么？”框，说明指针下方的控件。"
+  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "在侧边栏显示“这是什么？”框，说明指针下方的控件。",
+  "Zotero is not open": "Zotero 未打开",
+  "Unlink Zotero": "取消关联 Zotero",
+  "Unlink folder": "取消关联文件夹",
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "取消关联此文献库来源，以便选择其他 Zotero 文献库或 PDF 文件夹。"
 }

@@ -97,9 +97,9 @@ export function ScienceLibrary() {
         connected ? (
           <Button
             data-testid="library-disconnect"
-            data-feature-label={t("Disconnect library")}
+            data-feature-label={kind === "folder" ? t("Unlink folder") : t("Unlink Zotero")}
             data-feature-help={t(
-              "Disconnect this library source so you can choose a different Zotero library or PDF folder.",
+              "Unlink this library source so you can choose a different Zotero library or PDF folder.",
             )}
             variant="ghost"
             size="sm"
@@ -108,7 +108,7 @@ export function ScienceLibrary() {
             onClick={() => disconnect.mutate()}
           >
             <LogOut />
-            {t("Disconnect")}
+            {kind === "folder" ? t("Unlink folder") : t("Unlink Zotero")}
           </Button>
         ) : null
       }
