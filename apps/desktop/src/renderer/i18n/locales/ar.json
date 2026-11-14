@@ -1173,5 +1173,6 @@
   "Not linked": "غير مرتبط",
   "Use agent to generate project summary": "استخدم وكيلًا لإنشاء ملخص المشروع",
   "This item has no local copy and no web address.": "لا توجد لهذا العنصر نسخة محلية ولا عنوان ويب.",
-  "No local copy in Zotero. Showing the web page.": "لا توجد نسخة محلية في Zotero. يتم عرض صفحة الويب."
+  "No local copy in Zotero. Showing the web page.": "لا توجد نسخة محلية في Zotero. يتم عرض صفحة الويب.",
+  "Status bar (footer)": "شريط الحالة (التذييل)"
 }

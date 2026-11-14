@@ -1173,5 +1173,6 @@
   "Not linked": "연결 안 됨",
   "Use agent to generate project summary": "에이전트로 프로젝트 요약 생성",
   "This item has no local copy and no web address.": "이 항목에는 로컬 사본도 웹 주소도 없습니다.",
-  "No local copy in Zotero. Showing the web page.": "Zotero에 로컬 사본이 없습니다. 웹 페이지를 표시합니다."
+  "No local copy in Zotero. Showing the web page.": "Zotero에 로컬 사본이 없습니다. 웹 페이지를 표시합니다.",
+  "Status bar (footer)": "상태 표시줄(푸터)"
 }

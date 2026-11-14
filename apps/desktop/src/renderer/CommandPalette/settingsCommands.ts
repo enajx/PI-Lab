@@ -139,7 +139,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
     toggle("show-skills", "Skills panel", skills, setSkills),
     toggle("show-cluster-section", "Cluster section", cluster, setCluster),
     toggle("show-analysis-section", "Analysis section", analysis, setAnalysis),
-    toggle("status-bar", "Status bar", statusBar, setStatusBar),
+    toggle("status-bar", "Status bar (footer)", statusBar, setStatusBar),
     toggle("feature-help", "Feature help box", featureHelp, setFeatureHelp),
     toggle(
       "quick-editor-autocomplete",
