@@ -10,6 +10,7 @@ test("manual checks show unavailable builds and network errors instead of silent
   expect(feedback.updateSnapshot().message).toContain("This build does not auto-update")
   const engine: UpdateEngine = {
     configure: vi.fn(),
+    onAvailable: vi.fn(),
     onDownloaded: vi.fn(),
     onUnavailable: vi.fn(),
     onError: vi.fn(),
@@ -39,6 +40,10 @@ test("automatic checks stay quiet and ready updates always show restart feedback
   feedback.publishUpdateStatus({ kind: "checking" })
   feedback.publishUpdateStatus({ kind: "idle" })
   expect(feedback.updateSnapshot().message).toBeNull()
+  feedback.publishUpdateStatus({ kind: "downloading", version: "1.2.0" })
+  expect(feedback.updateSnapshot().message).toBe(
+    "Downloading PI Lab 1.2.0 in the background. It installs when you restart PI Lab.",
+  )
   feedback.publishUpdateStatus({ kind: "ready", version: "1.2.0" })
   expect(feedback.updateSnapshot().message).toBe("PI Lab 1.2.0 is ready to install on restart.")
 })
@@ -60,6 +65,7 @@ test("manual checks reuse an in-progress check and report no update or a ready d
   const compatibility = { formatVersion: 1, migrations: [] }
   const engine: UpdateEngine = {
     configure: vi.fn(),
+    onAvailable: vi.fn(),
     onDownloaded: (listener) => {
       downloaded = listener
     },

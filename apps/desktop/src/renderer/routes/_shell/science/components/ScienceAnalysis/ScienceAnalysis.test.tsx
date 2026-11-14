@@ -456,10 +456,10 @@ describe("ScienceAnalysis", () => {
     const button = screen.getByTestId("analysis-results-folder-change")
     expect(button.textContent).toBe("Select…")
     expect(button.getAttribute("data-highlighted")).toBe("true")
-    expect(button.className).toContain("analysis-select-folder-wave")
+    expect(button.className).toContain("analysis-select-folder-glow")
     fireEvent.click(button)
     expect(button.getAttribute("data-highlighted")).toBe("false")
-    expect(button.className).not.toContain("analysis-select-folder-wave")
+    expect(button.className).not.toContain("analysis-select-folder-glow")
     // The prompt stays until a folder is chosen.
     expect(screen.getByTestId("analysis-select-folder-prompt")).toBeTruthy()
   })

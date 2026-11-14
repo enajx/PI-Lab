@@ -18,6 +18,10 @@ export class ElectronUpdateEngine implements UpdateEngine {
     this.updater.allowDowngrade = false
   }
 
+  onAvailable(listener: (version: string) => void): void {
+    this.updater.on("update-available", (info) => listener(info.version))
+  }
+
   onDownloaded(listener: (candidate: { version: string; compatibility: unknown }) => void): void {
     this.updater.on("update-downloaded", (event) => {
       const metadata = event as typeof event & { piLabCompatibility?: unknown }

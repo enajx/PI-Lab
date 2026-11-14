@@ -4,6 +4,7 @@ import type { PublicUpdateChannel } from "./release"
 export type UpdateStatus =
   | { kind: "checking" }
   | { kind: "idle" }
+  | { kind: "downloading"; version: string }
   | { kind: "ready"; version: string }
   | { kind: "restart-required" }
   | { kind: "waiting-for-compatible-release"; version: string; reason: string }
@@ -12,6 +13,8 @@ export type UpdateStatus =
 /** Keep Electron's updater behind a small boundary that can be tested. */
 export interface UpdateEngine {
   configure(channel: PublicUpdateChannel): void
+  /** A newer release was found and its download started. */
+  onAvailable(listener: (version: string) => void): void
   onDownloaded(listener: (candidate: { version: string; compatibility: unknown }) => void): void
   onUnavailable(listener: () => void): void
   onError(listener: (error: Error) => void): void
@@ -46,6 +49,10 @@ export class PublicUpdateController {
   async start(channel: PublicUpdateChannel): Promise<void> {
     this.selectedChannel = channel
     this.engine.configure(channel)
+    this.engine.onAvailable((version) => {
+      if (this.status.kind === "restart-required") return
+      this.setStatus({ kind: "downloading", version })
+    })
     this.engine.onDownloaded(({ version, compatibility }) => {
       if (this.status.kind === "restart-required") return
       const reason = assessReleaseCompatibility(this.currentCompatibility, compatibility)

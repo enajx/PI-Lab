@@ -27,11 +27,20 @@ export function connectUpdateFeedback(value: PublicUpdateController): void {
   snapshot = { ...snapshot, available: true }
 }
 
-/** Automatic checks stay quiet unless an update is ready; explicit checks report outcomes. */
+/**
+ * Automatic checks stay quiet unless an update is found (downloading) or ready; explicit
+ * checks report every outcome.
+ */
 export function publishUpdateStatus(status: UpdateStatus): void {
   if (status.kind === "ready") {
     manual = false
     publishUpdateMessage(`PI Lab ${status.version} is ready to install on restart.`, false)
+  } else if (status.kind === "downloading") {
+    manual = false
+    publishUpdateMessage(
+      `Downloading PI Lab ${status.version} in the background. It installs when you restart PI Lab.`,
+      false,
+    )
   } else if (manual) {
     const message =
       status.kind === "checking"
