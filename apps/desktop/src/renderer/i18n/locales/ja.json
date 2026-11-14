@@ -1171,5 +1171,7 @@
   "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "研究計画ボタンが実行するスキル: プロジェクトまたはユーザーのスキルフォルダー内のフォルダー名。空欄はリンクなしです。",
   "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "自動研究ボタンがエージェントを起動するときのスキル: プロジェクトまたはユーザーのスキルフォルダー内のフォルダー名。空欄はリンクなしです。",
   "Not linked": "リンクなし",
-  "Use agent to generate project summary": "エージェントでプロジェクト概要を生成"
+  "Use agent to generate project summary": "エージェントでプロジェクト概要を生成",
+  "This item has no local copy and no web address.": "この項目にはローカルコピーも Web アドレスもありません。",
+  "No local copy in Zotero. Showing the web page.": "Zotero にローカルコピーがありません。Web ページを表示しています。"
 }

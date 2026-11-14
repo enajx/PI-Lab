@@ -237,7 +237,7 @@ describe("LibraryBrowser", () => {
     expect(screen.queryByTestId("library-open-error")).toBeNull()
   })
 
-  test("Enter on a Zotero paper with no local copy shows the message and opens its URL in a tab", async () => {
+  test("Enter on a Zotero paper with no local copy opens its URL in a tab, with no error line", async () => {
     const { onOpenTab } = renderBrowser(
       { kind: "zotero", canWrite: false, rootLabel: "Zotero library" },
       {
@@ -257,17 +257,38 @@ describe("LibraryBrowser", () => {
     fireEvent.click(screen.getByTestId("library-all-items"))
     await waitFor(() => expect(screen.getAllByTestId("library-item")).toHaveLength(1))
     fireEvent.keyDown(screen.getByTestId("library-browser"), { key: "Enter" })
-    await waitFor(() => {
-      expect(screen.getByTestId("library-open-error").textContent).toContain(
-        "No local copy available",
-      )
-    })
-    expect(onOpenTab).toHaveBeenCalledWith({
-      type: "url",
-      id: "url:https://example.org/paper",
-      url: "https://example.org/paper",
-      title: "Web paper",
-    })
+    await waitFor(() =>
+      expect(onOpenTab).toHaveBeenCalledWith({
+        type: "url",
+        id: "url:https://example.org/paper",
+        url: "https://example.org/paper",
+        title: "Web paper",
+      }),
+    )
+    expect(screen.queryByTestId("library-open-error")).toBeNull()
+    expect(screen.queryByTestId("library-open-note")).toBeNull()
+  })
+
+  test("a Zotero paper with no local copy and no web address gets a plain note, not an error", async () => {
+    const { onOpenTab } = renderBrowser(
+      { kind: "zotero", canWrite: false, rootLabel: "Zotero library" },
+      {
+        ...browseHandlers,
+        "science.library.resolveFile": () => ({
+          ok: false,
+          reason: "no-local-file",
+          message: "No local copy available (not downloaded).",
+        }),
+      },
+    )
+    fireEvent.click(await screen.findByTestId("library-all-items"))
+    await waitFor(() => expect(screen.getAllByTestId("library-item")).toHaveLength(1))
+    fireEvent.keyDown(screen.getByTestId("library-browser"), { key: "Enter" })
+    expect((await screen.findByTestId("library-open-note")).textContent).toBe(
+      "This item has no local copy and no web address.",
+    )
+    expect(screen.queryByTestId("library-open-error")).toBeNull()
+    expect(onOpenTab).not.toHaveBeenCalled()
   })
 
   test("Enter on a selected collection drills into it (universal activate)", async () => {
@@ -350,14 +371,37 @@ describe("LibraryBrowser", () => {
     expect(screen.queryByTestId("library-type-query")).toBeNull()
   })
 
+  test("typing also finds sub-collections one level down, like ⌘F, and Enter opens them", async () => {
+    renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
+    await waitFor(() => expect(screen.getAllByTestId("library-collection")).toHaveLength(2))
+    // Wait for the sub-collection lookups (the same ones ⌘F uses) to load.
+    fireEvent.keyDown(window, { key: "f", metaKey: true })
+    await screen.findByText("Sub-methods")
+    fireEvent.keyDown(screen.getByTestId("quick-find-input"), { key: "Escape" })
+    await waitFor(() => expect(screen.queryByTestId("quick-find")).toBeNull())
+
+    press("s", "u", "b")
+    const rows = screen.getAllByTestId("library-collection")
+    expect(rows.map((el) => el.textContent)).toEqual(["Sub-methodsMethods0"])
+    expect(rows[0]?.getAttribute("data-selected")).toBe("true")
+    press("Enter")
+    await waitFor(() => {
+      const crumb = screen.getByTestId("library-breadcrumb").textContent ?? ""
+      expect(crumb).toContain("Methods")
+      expect(crumb).toContain("Sub-methods")
+    })
+  })
+
   test("Backspace edits the typed text", async () => {
     renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
     await waitFor(() => expect(screen.getAllByTestId("library-collection")).toHaveLength(2))
     press("m", "x")
     expect(screen.queryAllByTestId("library-collection")).toHaveLength(0)
     press("Backspace")
+    // "m" matches Methods and, one level down, Sub-methods (as ⌘F does).
     expect(screen.getAllByTestId("library-collection").map((el) => el.textContent)).toEqual([
       "Methods2",
+      "Sub-methodsMethods0",
     ])
   })
 

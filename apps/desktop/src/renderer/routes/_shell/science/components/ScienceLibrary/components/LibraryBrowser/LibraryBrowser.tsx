@@ -38,6 +38,7 @@ interface Crumb {
 type Row =
   | { type: "all-items" }
   | { type: "collection"; key: string; name: string }
+  | { type: "deep"; parent: LibraryCollection; child: LibraryCollection }
   | { type: "paper"; id: string }
 
 /**
@@ -77,6 +78,8 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
   // Surfaced when an "open externally" gesture (Enter / ⌘↵, or ⌘→/⌘↓ on a folder paper) can't
   // open the item — e.g. the file is gone, or a Zotero item has no local copy on disk.
   const [openError, setOpenError] = useState<string | null>(null)
+  // A plain (not error) note, e.g. an item with no local copy and no web address.
+  const [openNote, setOpenNote] = useState<string | null>(null)
   const paneRef = useRef<HTMLElement>(null)
   const current = trail.length > 0 ? trail[trail.length - 1] : null
 
@@ -129,6 +132,10 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
   const visibleCollections = filterByQuery(collections, (c) => c.name, query)
   const visibleItems = filterByQuery(items, (p) => p.title, query)
   const showAllItemsRow = fuzzyMatch(query, t("All items")) !== null
+  // Typing also finds sub-collections one level down, like the ⌘F finder.
+  const visibleDeep =
+    query && !viewAll ? filterByQuery(subCollections, ({ child }) => child.name, query) : []
+  const deepRows: Row[] = visibleDeep.map(({ parent, child }) => ({ type: "deep", parent, child }))
 
   // The navigable rows for this view, in render order (root: All items + collections;
   // drilled: collections + items; All items: items). The cursor index points into this.
@@ -138,9 +145,10 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
         ? [
             ...(showAllItemsRow ? [{ type: "all-items" } as Row] : []),
             ...visibleCollections.map((c) => collectionToRow(c)),
+            ...deepRows,
           ]
         : !viewAll
-          ? visibleCollections.map((c) => collectionToRow(c))
+          ? [...visibleCollections.map((c) => collectionToRow(c)), ...deepRows]
           : []
     const paperRows: Row[] = showItems
       ? visibleItems.map((p) => ({ type: "paper", id: p.id }) as Row)
@@ -154,6 +162,15 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
   const openCollection = (c: Crumb) => {
     setViewAll(false)
     setTrail((t) => [...t, c])
+  }
+  // Open a sub-collection one level down (parent, then child), as a ⌘F pick does.
+  const openDeep = (parent: LibraryCollection, child: LibraryCollection) => {
+    setViewAll(false)
+    setTrail((t) => [
+      ...t,
+      { key: parent.key, name: parent.name },
+      { key: child.key, name: child.name },
+    ])
   }
   const openAll = () => {
     setTrail([])
@@ -194,6 +211,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
   // the "no local copy" message plus its URL in a tab. Other failures show inline.
   const openInViewer = async (paper: LibraryPaper) => {
     setOpenError(null)
+    setOpenNote(null)
     const result = await queryClient.fetchQuery(
       trpc.science.library.resolveFile.queryOptions({ itemId: paper.id }),
     )
@@ -201,10 +219,17 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
       onOpenTab({ type: "file", id: `file:${paper.id}`, itemId: paper.id, title: paper.title })
       return
     }
-    setOpenError(result.message)
-    if (result.reason === "no-local-file" && paper.url) {
-      onOpenTab({ type: "url", id: `url:${paper.url}`, url: paper.url, title: paper.title })
+    // No local copy: the item's web page opens in a tab instead (no error line); with no web
+    // address either, a plain note says so.
+    if (result.reason === "no-local-file") {
+      if (paper.url) {
+        onOpenTab({ type: "url", id: `url:${paper.url}`, url: paper.url, title: paper.title })
+      } else {
+        setOpenNote(t("This item has no local copy and no web address."))
+      }
+      return
     }
+    setOpenError(result.message)
   }
   const openPaperRow = (id: string) => {
     const paper = items.find((p) => p.id === id)
@@ -216,6 +241,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
     const row = rows[cursor]
     if (row?.type === "all-items") openAll()
     else if (row?.type === "collection") openCollection({ key: row.key, name: row.name })
+    else if (row?.type === "deep") openDeep(row.parent, row.child)
     else if (row?.type === "paper") openPaperRow(row.id)
   }
   const refresh = () => {
@@ -338,6 +364,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
   useEffect(() => {
     setSelectedIndex(0)
     setOpenError(null)
+    setOpenNote(null)
     setQuery("")
   }, [trail, viewAll])
   // Each change to the typed text puts the cursor on the best match.
@@ -362,6 +389,17 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
     />
   )
 
+  const deepRow = ({ parent, child }: { parent: LibraryCollection; child: LibraryCollection }) => (
+    <CollectionRow
+      key={`deep:${child.key}`}
+      name={child.name}
+      hint={parent.name}
+      itemCount={child.itemCount}
+      selected={selectedRow?.type === "deep" && selectedRow.child.key === child.key}
+      onClick={() => openDeep(parent, child)}
+    />
+  )
+
   // The ⌘F finder's rows, in display order: this level's collections, then their immediate
   // sub-collections (a `deep:` pick drills two levels at once), then papers once they show at
   // this level. A `run` per row keeps onSelect uniform across the three id kinds.
@@ -372,12 +410,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
     })),
     ...subCollections.map(({ parent, child }) => ({
       item: { id: `deep:${child.key}`, label: child.name, hint: parent.name, icon: Folder },
-      run: () =>
-        setTrail([
-          ...trail,
-          { key: parent.key, name: parent.name },
-          { key: child.key, name: child.name },
-        ]),
+      run: () => openDeep(parent, child),
     })),
     ...(showItems
       ? items.map((p) => ({
@@ -481,6 +514,12 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
         </p>
       ) : null}
 
+      {openNote ? (
+        <p data-testid="library-open-note" className="text-muted-foreground text-xs">
+          {openNote}
+        </p>
+      ) : null}
+
       {!viewAll && !current ? (
         <div className="flex flex-col gap-2">
           {showAllItemsRow ? (
@@ -496,6 +535,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
           ) : (
             visibleCollections.map(collectionRow)
           )}
+          {visibleDeep.map(deepRow)}
           {!collectionsQuery.isLoading && collections.length === 0 && !error ? (
             <p data-testid="library-collections-empty" className="text-muted-foreground text-xs">
               {t("No collections — open “All items” to browse everything.")}
@@ -505,6 +545,7 @@ export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: Library
       ) : (
         <div className="flex flex-col gap-2">
           {!viewAll ? visibleCollections.map(collectionRow) : null}
+          {visibleDeep.map(deepRow)}
           {itemsQuery.isLoading ? (
             <p className="text-muted-foreground text-xs">{t("Loading items…")}</p>
           ) : (

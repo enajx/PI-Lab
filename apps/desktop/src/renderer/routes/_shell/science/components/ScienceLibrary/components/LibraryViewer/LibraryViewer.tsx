@@ -338,7 +338,10 @@ function UrlTab({ url, title }: { url: string; title: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-border border-b px-3 py-1.5 text-xs">
-        <span className="min-w-0 flex-1 cursor-text select-text truncate text-muted-foreground">
+        <span className="shrink-0 text-muted-foreground">
+          {t("No local copy in Zotero. Showing the web page.")}
+        </span>
+        <span className="min-w-0 flex-1 cursor-text select-text truncate text-muted-foreground/70">
           {url}
         </span>
         <a

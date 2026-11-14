@@ -1171,5 +1171,7 @@
   "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "Skill que ejecuta el botón Planificar investigación: el nombre de su carpeta en las carpetas de skills del proyecto o del usuario. Vacío significa sin vincular.",
   "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "Skill con la que el botón Investigación automática inicia un agente: el nombre de su carpeta en las carpetas de skills del proyecto o del usuario. Vacío significa sin vincular.",
   "Not linked": "Sin vincular",
-  "Use agent to generate project summary": "Usar un agente para generar el resumen del proyecto"
+  "Use agent to generate project summary": "Usar un agente para generar el resumen del proyecto",
+  "This item has no local copy and no web address.": "Este elemento no tiene copia local ni dirección web.",
+  "No local copy in Zotero. Showing the web page.": "Sin copia local en Zotero. Se muestra la página web."
 }
