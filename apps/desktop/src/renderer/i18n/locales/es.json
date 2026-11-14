@@ -1157,5 +1157,7 @@
   "Open in browser": "Abrir en el navegador",
   "Loading PDF viewer…": "Cargando visor de PDF…",
   "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "Este archivo ocupa {size}, más que el límite de {limit} del visor. Cargarlo puede ser lento.",
-  "Load anyway": "Cargar de todos modos"
+  "Load anyway": "Cargar de todos modos",
+  "Feature help box": "Recuadro de ayuda",
+  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "Muestra el recuadro «¿Qué es esto?» en la barra lateral, que explica el control bajo el puntero."
 }

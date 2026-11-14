@@ -14,6 +14,7 @@ import {
   useShowClusterSection,
   useShowSkillsPanel,
   useShowStatusBar,
+  useSidebarFeatureHelp,
 } from "../preferences/preferences"
 import {
   APP_ACCENTS,
@@ -125,6 +126,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
   const [cluster, setCluster] = useShowClusterSection()
   const [analysis, setAnalysis] = useShowAnalysisSection()
   const [statusBar, setStatusBar] = useShowStatusBar()
+  const [featureHelp, setFeatureHelp] = useSidebarFeatureHelp()
   const [autocomplete, setAutocomplete] = useQuickEditorAutocomplete()
   const [runPython, setRunPython] = useQuickEditorRunPython()
   const [markdown, setMarkdown] = useQuickEditorMarkdownMode()
@@ -138,6 +140,7 @@ export function useDirectSettingsCommands(): PaletteCommand[] {
     toggle("show-cluster-section", "Cluster section", cluster, setCluster),
     toggle("show-analysis-section", "Analysis section", analysis, setAnalysis),
     toggle("status-bar", "Status bar", statusBar, setStatusBar),
+    toggle("feature-help", "Feature help box", featureHelp, setFeatureHelp),
     toggle(
       "quick-editor-autocomplete",
       "Quick Editor word autocomplete",

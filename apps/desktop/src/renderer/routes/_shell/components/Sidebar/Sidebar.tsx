@@ -8,7 +8,6 @@ import {
   Eye,
   EyeOff,
   FileCode2,
-  Info,
   LayoutDashboard,
   PanelLeft,
   PanelLeftClose,
@@ -113,6 +112,9 @@ export interface FeatureHelp {
   description: string
 }
 
+/** The "What's this?" box itself; hovering inside it does not change its text. */
+const FEATURE_HELP_BOX = "[data-feature-help-box]"
+
 /** Elements the "What's this?" card describes when hovered or focused. */
 export const FEATURE_HELP_CONTROLS = [
   "[data-feature-help]",
@@ -173,14 +175,19 @@ function useFeatureHelp(active: boolean): FeatureHelp | null {
       return
     }
 
+    // Pointer and focus moves inside the help box itself keep its text, so the box keeps its
+    // size and its × stays under the cursor.
+    const inBox = (target: EventTarget | null) =>
+      target instanceof Element && target.closest(FEATURE_HELP_BOX) !== null
     const show = (event: Event) => {
+      if (inBox(event.target)) return
       const element = featureElement(event.target)
       setHelp(element ? featureHelpFromElement(element) : null)
     }
     const clear = (event: FocusEvent | PointerEvent) => {
       const current = featureElement(event.target)
       const related = featureElement(event.relatedTarget)
-      if (current && current === related) return
+      if ((current && current === related) || inBox(event.relatedTarget)) return
       setHelp(related ? featureHelpFromElement(related) : null)
     }
 
@@ -533,12 +540,6 @@ export function Sidebar() {
           compact divider between the two as well (no large blank). Add project is a
           dropdown with three ways in (folder / clone / template). */}
         <div className="flex shrink-0 flex-col gap-1.5 border-sidebar-border border-t pt-3">
-          {!showFeatureHelp ? (
-            <FeatureHelpRestoreButton
-              collapsed={collapsed}
-              onRestore={() => setShowFeatureHelp(true)}
-            />
-          ) : null}
           <AddProjectMenu variant="sidebar" collapsed={collapsed} onAdded={invalidateProjects} />
           <SettingsNav collapsed={collapsed} />
         </div>
@@ -598,6 +599,7 @@ export function FeatureHelpPanel({ onHide }: { onHide: () => void }) {
     <section
       aria-label={t("Feature help")}
       data-testid="sidebar-feature-help"
+      data-feature-help-box
       className="min-h-20 shrink-0 rounded-md border border-sidebar-border bg-sidebar-accent/35 p-2"
     >
       <div className="flex items-start gap-1">
@@ -629,31 +631,6 @@ export function FeatureHelpPanel({ onHide }: { onHide: () => void }) {
         </p>
       ) : null}
     </section>
-  )
-}
-
-export function FeatureHelpRestoreButton({
-  collapsed,
-  onRestore,
-}: {
-  collapsed: boolean
-  onRestore: () => void
-}) {
-  const t = useTranslate()
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      aria-label={t("Show feature help")}
-      title={t("Show feature help")}
-      data-feature-help={t("Restore the lower-left panel that explains hovered controls")}
-      onClick={onRestore}
-      className={cn("text-muted-foreground", collapsed ? "justify-center px-0" : "justify-start")}
-    >
-      <Info aria-hidden />
-      {collapsed ? null : t("Show help")}
-    </Button>
   )
 }
 

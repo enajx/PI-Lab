@@ -146,6 +146,15 @@ describe("Settings sections", () => {
     expect(screen.getByTestId("shortcut-command-palette").textContent).toBe("⌘K")
   })
 
+  test("Appearance turns the sidebar feature help box back on", () => {
+    window.localStorage.setItem("pi-lab.sidebar.showFeatureHelp", "false")
+    renderSection(<AppearanceSection />)
+    const toggle = screen.getByTestId("settings-feature-help")
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(toggle)
+    expect(window.localStorage.getItem("pi-lab.sidebar.showFeatureHelp")).toBe("true")
+  })
+
   test("Appearance mode picker toggles the .dark class", async () => {
     renderSection(<AppearanceSection />)
     // ThemeProvider defaults to light and applies it on mount (no .dark).

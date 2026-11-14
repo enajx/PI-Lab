@@ -1157,5 +1157,7 @@
   "Open in browser": "브라우저에서 열기",
   "Loading PDF viewer…": "PDF 뷰어 불러오는 중…",
   "This file is {size}, over the viewer's {limit} limit. Loading it may be slow.": "이 파일은 {size}로 뷰어 한도 {limit}를 넘습니다. 불러오는 데 시간이 걸릴 수 있습니다.",
-  "Load anyway": "그래도 불러오기"
+  "Load anyway": "그래도 불러오기",
+  "Feature help box": "기능 도움말 상자",
+  "Show the “What’s this?” box in the sidebar, which explains the control under the pointer.": "사이드바에 \"이게 무엇인가요?\" 상자를 표시하여 포인터 아래의 컨트롤을 설명합니다."
 }
