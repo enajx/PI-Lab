@@ -852,9 +852,26 @@ test("marimo starts interactively, stops on artifact switch, and is reaped on ap
   await expect.poll(() => pidIsAlive(finalPid)).toBe(false)
 })
 
+/**
+ * Fetch experiments runs the project's agent (Claude Code by default). A local fixture
+ * executable stands in for it, so the test never starts the real Claude Code CLI,
+ * which took 12-20 s, used the network and once ran past the test's limit.
+ */
 test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", async () => {
   const window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const executable = join(dataDir, "fixture-agent")
+  await writeFile(
+    executable,
+    `#!/bin/sh\nprintf '{"type":"result","result":"FETCH-FIXTURE-DONE","is_error":false}\\n'\n`,
+    { mode: 0o755 },
+  )
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-agents").click()
+  const executableInput = window.getByTestId("settings-agent-executable-claude-code")
+  await executableInput.fill(executable)
+  await executableInput.blur()
+  await window.getByTestId("settings-back").click()
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("analysis-new-marimo-notebook")).toHaveCount(0)
   await openAnalysisExperiment(window, "reports")
@@ -863,7 +880,9 @@ test("Analysis owns Fetch experiments and keeps existing Marimo notebooks", asyn
   ).toBeVisible()
   await window.getByTestId("analysis-fetch-experiments").click()
   await expect(window.getByTestId("workflow-result-dialog")).toBeVisible()
-  await expect(window.getByTestId("workflow-result-text")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("workflow-result-text")).toContainText("FETCH-FIXTURE-DONE", {
+    timeout: 30_000,
+  })
 })
 
 /** Drag a resize handle horizontally by `dx` px with the real mouse. */

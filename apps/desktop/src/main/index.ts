@@ -87,6 +87,12 @@ export type { AppRouter } from "./trpc/appRouter"
 if (isTestMode && !testNativeDialogs)
   installTestDialogResponder(dialog, (line) => console.log(line))
 
+// Test mode never reads the login keychain: safeStorage uses Chromium's fixed mock
+// key instead. Each Alpha build has a new ad-hoc signature, so macOS may ask again
+// for keychain access, and a refused or failed request leaves safeStorage
+// unavailable until the app restarts.
+if (isTestMode) app.commandLine.appendSwitch("use-mock-keychain")
+
 // Set the channel before reading userData or opening the database. The packaged
 // metadata is injected by electron-builder; source runs use Alpha.
 const channel = resolveAppChannel(app.isPackaged, app.getAppPath())
