@@ -39,18 +39,22 @@ export async function findSkill(
   return { path, content }
 }
 
-/** Resolve the shipped skill first, then project and user skills, without creating placeholders. */
+/** The error for an action (e.g. "Plan research") that has no skill linked in Settings. */
+export function notLinkedMessage(label: string): string {
+  return `${label} is not linked to a skill yet. Link one in Settings → Agents & worktrees.`
+}
+
+/**
+ * The prompt for Plan research with the skill linked in Settings (`slug`): PI Lab's bundled
+ * copy first, then project and user skills. Throws when no skill is linked or it is missing.
+ */
 export async function planResearchPrompt(
+  slug: string,
   projectDir: string,
   homeDir: string,
   bundledDir: string | undefined,
 ): Promise<string> {
-  const { path, content } = await findSkill(
-    "plan-research",
-    "Plan research",
-    projectDir,
-    homeDir,
-    bundledDir,
-  )
-  return `Use the plan-research skill for this project. The skill is at ${path}. Resolve its relative file references from ${dirname(path)}. Follow its instructions and print the result for the user.\n\n${content}`
+  if (!slug) throw new Error(notLinkedMessage("Plan research"))
+  const { path, content } = await findSkill(slug, "Plan research", projectDir, homeDir, bundledDir)
+  return `Use the ${slug} skill for this project. The skill is at ${path}. Resolve its relative file references from ${dirname(path)}. Follow its instructions and print the result for the user.\n\n${content}`
 }

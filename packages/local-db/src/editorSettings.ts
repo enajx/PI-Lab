@@ -101,6 +101,10 @@ export interface EditorSettings {
    * with, found in the project and user skills folders (default `experiment-report`).
    */
   reportSkill: string
+  /** Folder name of the skill Plan research runs; empty until the user links one. */
+  planResearchSkill: string
+  /** Folder name of the skill Auto-research starts an agent with; empty until the user links one. */
+  autoResearchSkill: string
 }
 
 /** Spec defaults for {@link EditorSettings}. */
@@ -125,4 +129,6 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   researchDiaryFormat: "md",
   analysisFormat: "md",
   reportSkill: "experiment-report",
+  planResearchSkill: "",
+  autoResearchSkill: "",
 }

@@ -452,6 +452,70 @@ function EditorTypography() {
 
 /** Editor preferences persisted in the DB, including the in-editor gear controls. */
 /**
+ * A skill linked to an action (Plan research, Auto-research), by its folder name in the
+ * project or user skills folders. Typed, then saved with Save; saving an empty name unlinks.
+ */
+function SkillLinkField({
+  testId,
+  label,
+  description,
+  setting,
+  saved,
+}: {
+  testId: string
+  label: string
+  description: string
+  setting: "planResearchSkill" | "autoResearchSkill"
+  saved: string
+}) {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  // The typed name, or null while it shows the saved one.
+  const [draft, setDraft] = useState<string | null>(null)
+  const update = useMutation(
+    trpc.settings.updateEditor.mutationOptions({
+      onSuccess: () => {
+        setDraft(null)
+        void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
+      },
+    }),
+  )
+  const typed = (draft ?? saved).trim()
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3 text-sm">
+      <span>{t(label)}</span>
+      <p className="text-muted-foreground text-xs">{t(description)}</p>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          data-testid={testId}
+          aria-label={t(label)}
+          value={draft ?? saved}
+          placeholder={t("Not linked")}
+          onChange={(event) => setDraft(event.target.value)}
+          className="w-56 rounded-md border border-border bg-background px-2 py-1 font-mono text-foreground text-xs outline-none"
+        />
+        <Button
+          data-testid={`${testId}-save`}
+          variant="outline"
+          size="sm"
+          disabled={typed === saved || update.isPending}
+          onClick={() => update.mutate({ [setting]: typed })}
+        >
+          {t("Save")}
+        </Button>
+      </div>
+      {update.error ? (
+        <p role="alert" className="cursor-text select-text text-destructive text-xs">
+          {update.error.message}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/**
  * The skill the Analysis view's Report button starts an agent with, by its
  * folder name in the project or user skills folders. Typed, then saved with Save.
  */
@@ -852,6 +916,20 @@ export function AgentsSection() {
           {updateAgents.error?.message ?? defaultAgentError}
         </p>
       ) : null}
+      <SkillLinkField
+        testId="settings-plan-research-skill"
+        label="Plan research skill"
+        description="Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked."
+        setting="planResearchSkill"
+        saved={settingsQuery.data?.editor?.planResearchSkill ?? ""}
+      />
+      <SkillLinkField
+        testId="settings-auto-research-skill"
+        label="Auto-research skill"
+        description="Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked."
+        setting="autoResearchSkill"
+        saved={settingsQuery.data?.editor?.autoResearchSkill ?? ""}
+      />
     </SettingsSection>
   )
 }

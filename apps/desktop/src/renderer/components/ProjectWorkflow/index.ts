@@ -5,3 +5,4 @@ export {
   workflowTaskLabel,
 } from "./ProjectWorkflowControl"
 export { formatRelativeTime } from "./relativeTime"
+export { type SkillLinkedAction, useSkillLink } from "./SkillNotLinkedDialog"

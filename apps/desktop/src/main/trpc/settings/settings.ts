@@ -96,6 +96,19 @@ const editorPatch = z.object({
     .regex(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/)
     .max(128)
     .optional(),
+  /** Skill folder names linked to Plan research and Auto-research; empty unlinks. */
+  planResearchSkill: z
+    .string()
+    .trim()
+    .regex(/^(|[A-Za-z0-9_-][A-Za-z0-9._-]*)$/)
+    .max(128)
+    .optional(),
+  autoResearchSkill: z
+    .string()
+    .trim()
+    .regex(/^(|[A-Za-z0-9_-][A-Za-z0-9._-]*)$/)
+    .max(128)
+    .optional(),
 })
 
 /** Validation for a general-settings patch — all fields optional, merged onto current. */

@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useCardGridHeightScale } from "../../../../../components/CardGrid"
 import { ProjectStageRow } from "../../../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
+import { useSkillLink } from "../../../../../components/ProjectWorkflow"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
 import {
@@ -166,8 +167,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
   // attaches the returned session to its central panel (a failed launch surfaces
   // there). Navigating first means opening the project never waits on — nor gets
   // wedged by — the launch RPC.
+  // Auto-research needs a skill linked in Settings; without one it shows a popup instead.
+  const autoResearchLink = useSkillLink("auto-research")
   const onAutoResearch = () => {
     if (!gitAvailable) return
+    if (!autoResearchLink.linked) {
+      autoResearchLink.showNotLinked()
+      return
+    }
     setPendingLaunch(project.id, { kind: "auto-research" })
     openProject()
   }
@@ -308,6 +315,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
         setMenu({ x: event.clientX, y: event.clientY })
       }}
     >
+      {autoResearchLink.dialog}
       {/* Hidden picker for the "Set thumbnail" menu item; accepts images incl. `.gif`. */}
       <input
         ref={fileInputRef}

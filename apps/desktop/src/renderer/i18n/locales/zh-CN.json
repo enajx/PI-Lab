@@ -1163,5 +1163,13 @@
   "Zotero is not open": "Zotero 未打开",
   "Unlink Zotero": "取消关联 Zotero",
   "Unlink folder": "取消关联文件夹",
-  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "取消关联此文献库来源，以便选择其他 Zotero 文献库或 PDF 文件夹。"
+  "Unlink this library source so you can choose a different Zotero library or PDF folder.": "取消关联此文献库来源，以便选择其他 Zotero 文献库或 PDF 文件夹。",
+  "{label} is not linked to a skill yet. Link one in Settings → Agents & worktrees.": "{label} 尚未关联技能。请在 设置 → 代理与工作树 中关联一个。",
+  "Plan research": "规划研究",
+  "Plan research skill": "规划研究技能",
+  "Auto-research skill": "自动研究技能",
+  "Skill the Plan research button runs: its folder name in the project or user skills folders. Empty means not linked.": "规划研究按钮运行的技能：它在项目或用户技能文件夹中的文件夹名。留空表示未关联。",
+  "Skill the Auto-research button starts an agent with: its folder name in the project or user skills folders. Empty means not linked.": "自动研究按钮启动智能体时使用的技能：它在项目或用户技能文件夹中的文件夹名。留空表示未关联。",
+  "Not linked": "未关联",
+  "Use agent to generate project summary": "使用智能体生成项目摘要"
 }

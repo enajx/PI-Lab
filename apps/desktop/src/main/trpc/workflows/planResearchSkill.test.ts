@@ -16,7 +16,7 @@ test("bundled Plan research takes priority over a user copy", async () => {
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, "SKILL.md"), content)
     }
-    const prompt = await planResearchPrompt(join(root, "project"), home, bundled)
+    const prompt = await planResearchPrompt("plan-research", join(root, "project"), home, bundled)
     expect(prompt).toContain("BUNDLED INSTRUCTIONS")
     expect(prompt).not.toContain("USER INSTRUCTIONS")
     expect(prompt).toContain(join(bundled, "plan-research", "SKILL.md"))

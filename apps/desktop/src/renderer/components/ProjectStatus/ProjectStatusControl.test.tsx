@@ -276,7 +276,7 @@ describe("Project status card", () => {
     const card = await openCard()
     await within(card).findByTestId("project-status-no-summary")
     const update = within(card).getByTestId("project-status-update-summary")
-    expect(update.textContent).toContain("Generate project summary")
+    expect(update.textContent).toContain("Use agent to generate project summary")
     fireEvent.click(update)
 
     await waitFor(() => expect(calls).toEqual([{ projectId: "p1", task: "summary" }]))

@@ -12,7 +12,7 @@ import {
 } from "../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectStageRow } from "../../../components/ProjectStage"
 import { ProjectStatusControl } from "../../../components/ProjectStatus"
-import { ProjectWorkflowControl } from "../../../components/ProjectWorkflow"
+import { ProjectWorkflowControl, useSkillLink } from "../../../components/ProjectWorkflow"
 import type { OpenBuffer } from "../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { translateKnownError } from "../../../i18n/errors"
@@ -276,7 +276,13 @@ export function ProjectWorkspace({
   // Auto-research: open an isolated worktree agent session for the project and
   // attach it so it appears (and is selectable) in the central panel.
   const startAutoResearch = useMutation(trpc.sessions.startAutoResearch.mutationOptions())
+  // Auto-research needs a skill linked in Settings; without one it shows a popup instead.
+  const autoResearchLink = useSkillLink("auto-research")
   const onAutoResearch = () => {
+    if (!autoResearchLink.linked) {
+      autoResearchLink.showNotLinked()
+      return
+    }
     startAutoResearch.mutate(
       { projectId },
       {
@@ -388,6 +394,7 @@ export function ProjectWorkspace({
 
   return (
     <div data-testid="project-view" className="flex h-full flex-col gap-3 p-4">
+      {autoResearchLink.dialog}
       {touchProject.isError ? (
         <p role="alert" className="text-sm text-muted-foreground">
           {t("Could not record this project's recent activity:")} {touchProject.error.message}
