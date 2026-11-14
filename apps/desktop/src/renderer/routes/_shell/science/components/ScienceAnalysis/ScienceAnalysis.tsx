@@ -1294,8 +1294,8 @@ function NoProjectsState() {
  * project and stores it for this project) and, when the project uses its own
  * folder, "Reset to default". A refused folder shows the reason. When the
  * folder does not exist (`exists: false`) no folder is shown; the one-liner
- * "Select experiments folder" and an accent ring on its "Select…" button (it
- * pulses a few times, then stays until clicked) point the user to it. Below
+ * "Select experiments folder" and an accent glow on its "Select…" button (it
+ * fades in and out until clicked) point the user to it. Below
  * it, the project's experiments folder structure.
  */
 function ResultsFolderField({
@@ -1369,7 +1369,7 @@ function ResultsFolderField({
           )}
           disabled={busy}
           onClick={change}
-          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-wave")}
+          className={cn(buttonClass, missing && !ringClicked && "analysis-select-folder-glow")}
         >
           {missing ? t("Select…") : t("Change…")}
         </button>

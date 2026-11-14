@@ -5,15 +5,15 @@ import { describe, expect, test } from "vitest"
 const css = readFileSync(resolve(__dirname, "selectFolderPrompt.css"), "utf8")
 
 describe("Select experiments folder cue", () => {
-  test("moves a soft wave across the button face instead of pulsing its edge", () => {
-    expect(css).toMatch(/\.analysis-select-folder-wave::before\s*\{[^}]*animation/)
-    expect(css).toMatch(/@keyframes analysis-select-folder-wave\s*\{[\s\S]*translateX/)
-    expect(css).not.toMatch(/box-shadow/)
+  test("glows evenly in and out over the whole button, with nothing moving", () => {
+    expect(css).toMatch(/\.analysis-select-folder-glow::before\s*\{[^}]*animation/)
+    expect(css).toMatch(/@keyframes analysis-select-folder-glow\s*\{[\s\S]*opacity/)
+    expect(css).not.toMatch(/translate|gradient/)
   })
 
-  test("stops the wave when reduced motion is requested", () => {
+  test("stops the glow when reduced motion is requested", () => {
     expect(css).toMatch(
-      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.analysis-select-folder-wave::before[\s\S]*animation:\s*none/,
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.analysis-select-folder-glow::before[\s\S]*animation:\s*none/,
     )
   })
 })

@@ -1,42 +1,37 @@
 /*
- * "Select experiments folder": a soft accent wave moves back and forth across the
- * face of the Select… button (not its edge) until the button is clicked. The wave
- * is a pseudo-element that only translates, so it stays on the compositor. With
- * reduced motion it is a still accent tint.
+ * "Select experiments folder": the Select… button glows with the accent colour,
+ * fading in and out evenly over the whole button (nothing moves), until it is
+ * clicked. Only opacity animates. With reduced motion it is a still accent tint.
  */
-.analysis-select-folder-wave {
+.analysis-select-folder-glow {
   position: relative;
-  overflow: hidden;
   isolation: isolate;
 }
 
-.analysis-select-folder-wave::before {
+.analysis-select-folder-glow::before {
   position: absolute;
-  inset: 0 -100%;
+  inset: 0;
   z-index: -1;
-  background: repeating-linear-gradient(
-    100deg,
-    transparent 0,
-    color-mix(in oklch, var(--accent-brand) 22%, transparent) 1.25rem,
-    transparent 2.5rem
-  );
+  border-radius: inherit;
+  background: color-mix(in oklch, var(--accent-brand) 28%, transparent);
+  box-shadow: 0 0 0.6rem color-mix(in oklch, var(--accent-brand) 45%, transparent);
   content: "";
   pointer-events: none;
-  animation: analysis-select-folder-wave 3.2s ease-in-out infinite alternate;
+  animation: analysis-select-folder-glow 1.8s ease-in-out infinite alternate;
 }
 
-@keyframes analysis-select-folder-wave {
+@keyframes analysis-select-folder-glow {
   from {
-    transform: translateX(-2.5rem);
+    opacity: 0.15;
   }
   to {
-    transform: translateX(2.5rem);
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .analysis-select-folder-wave::before {
+  .analysis-select-folder-glow::before {
     animation: none;
-    transform: none;
+    opacity: 0.6;
   }
 }
