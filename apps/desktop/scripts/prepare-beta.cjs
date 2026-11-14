@@ -15,27 +15,37 @@ const { publicReleaseDefinition } = require("./public-release.cjs")
 
 const MAX_METADATA_BYTES = 2 * 1024 * 1024
 const MAX_ASSET_BYTES = 3 * 1024 ** 3
-const BETA_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.(0|[1-9]\d*)$/
+// `0.1.1-beta` is the current scheme; `0.1.0-beta.8` (an older scheme) stays valid so earlier
+// releases still compare correctly.
+const BETA_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta(?:\.(0|[1-9]\d*))?$/
 
 /** @typedef {{name: string, size: number, sha256: string}} BetaAsset */
 /** @typedef {{schemaVersion: number, version: string, tag: string, commit: string, previousTag: string|null, repo: string, arch: string, assets: BetaAsset[], notesSha256: string}} BetaManifest */
 /** @typedef {{version: string, commit: string, artifactDir: string, previousTag: string|null, repo: string}} ManifestOptions */
 /** @typedef {(args: string[]) => string} GitHubRunner */
 
-/** Accept only the numeric Beta versions supported by this release action. */
+/** Accept only the Beta versions supported by this release action. */
 function validateBetaVersion(version) {
   if (typeof version !== "string" || version.length > 64 || !BETA_VERSION.test(version))
-    throw new Error("Beta version must look like 0.1.0-beta.4, with no leading zeroes")
+    throw new Error("Beta version must look like 0.1.1-beta, with no leading zeroes")
   publicReleaseDefinition("beta", version)
   return version
 }
 
-/** Compare numeric Beta versions without relying on installed dependencies. */
+/**
+ * Compare Beta versions by semver without relying on installed dependencies: major, minor,
+ * patch, then a plain `-beta` sorts before `-beta.N` of the same version.
+ */
 function compareBetaVersions(left, right) {
   validateBetaVersion(left)
   validateBetaVersion(right)
-  const a = left.match(BETA_VERSION).slice(1).map(BigInt)
-  const b = right.match(BETA_VERSION).slice(1).map(BigInt)
+  const parts = (version) =>
+    version
+      .match(BETA_VERSION)
+      .slice(1)
+      .map((part) => (part === undefined ? -1n : BigInt(part)))
+  const a = parts(left)
+  const b = parts(right)
   const difference = a.findIndex((part, index) => part !== b[index])
   if (difference < 0) return 0
   return a[difference] < b[difference] ? -1 : 1

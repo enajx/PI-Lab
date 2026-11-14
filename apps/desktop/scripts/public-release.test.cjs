@@ -32,6 +32,7 @@ test("public release tracks share the installed PI Lab identity", () => {
 test("public release version must match its track", () => {
   assert.throws(() => publicReleaseDefinition("stable", "0.0.0"), /positive version/)
   assert.throws(() => publicReleaseDefinition("beta", "1.3.0"), /beta version/)
+  assert.equal(publicReleaseDefinition("beta", "0.1.1-beta").version, "0.1.1-beta")
   assert.throws(
     () => publicReleaseDefinition("nightly", "1.3.0-alpha.20261016"),
     /Unknown public release channel/,
