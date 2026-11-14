@@ -1,5 +1,8 @@
 <h2 align="center">
-  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../apps/desktop/assets/icons/icon.png">
+    <img src="../icon-dark.png" width="96" alt="PI lab icon">
+  </picture><br>
   PI lab
 </h2>
 
@@ -20,7 +23,10 @@
 </p>
 
 <p align="center">
-  <img src="../screenshot.png" width="80%" alt="PI lab screenshot">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../screenshots/dark-dracula.png">
+    <img src="../screenshots/light-github.png" width="80%" alt="PI lab screenshot">
+  </picture>
 </p>
 
 PI lab은 코딩 에이전트와 함께 작업하기 위한 워크스페이스이자 편집기로, 전산 과학 및 연구 프로젝트를 위해 특별히 설계되었습니다. 설계 철학: 오픈소스이며 독점 형식을 쓰지 않습니다. Markdown으로 만들 수 있는 것은 모두 Markdown으로 만듭니다.

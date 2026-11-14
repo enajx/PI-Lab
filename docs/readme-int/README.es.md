@@ -1,5 +1,8 @@
 <h2 align="center">
-  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../apps/desktop/assets/icons/icon.png">
+    <img src="../icon-dark.png" width="96" alt="PI lab icon">
+  </picture><br>
   PI lab
 </h2>
 
@@ -20,7 +23,10 @@
 </p>
 
 <p align="center">
-  <img src="../screenshot.png" width="80%" alt="PI lab screenshot">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../screenshots/dark-dracula.png">
+    <img src="../screenshots/light-github.png" width="80%" alt="PI lab screenshot">
+  </picture>
 </p>
 
 PI lab es un espacio de trabajo y editor para trabajar con agentes de programación, diseñado específicamente para proyectos de ciencia e investigación computacional. Filosofía de diseño: código abierto y sin formatos propietarios: todo lo que pueda ser markdown, debe ser markdown.

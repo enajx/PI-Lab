@@ -1,5 +1,8 @@
 <h2 align="center">
-  <img src="apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/assets/icons/icon.png">
+    <img src="docs/icon-dark.png" width="96" alt="PI lab icon">
+  </picture><br>
   PI lab
 </h2>
 
@@ -20,7 +23,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="80%" alt="PI lab screenshot">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark-dracula.png">
+    <img src="docs/screenshots/light-github.png" width="80%" alt="PI lab screenshot">
+  </picture>
 </p>
 
 PI lab is a workspace and editor for working with coding agents designed specifically for computational science and research projects. Design philosophy: open-source and no proprietary formats: everything that can be markdown, should be markdown.

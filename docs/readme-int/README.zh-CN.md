@@ -1,5 +1,8 @@
 <h2 align="center">
-  <img src="../../apps/desktop/assets/icons/icon.png" width="96" alt="PI lab icon"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../apps/desktop/assets/icons/icon.png">
+    <img src="../icon-dark.png" width="96" alt="PI lab icon">
+  </picture><br>
   PI lab
 </h2>
 
@@ -20,7 +23,10 @@
 </p>
 
 <p align="center">
-  <img src="../screenshot.png" width="80%" alt="PI lab screenshot">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../screenshots/dark-dracula.png">
+    <img src="../screenshots/light-github.png" width="80%" alt="PI lab screenshot">
+  </picture>
 </p>
 
 PI lab 是一个与编程智能体协同工作的工作区和编辑器，专为计算科学和研究项目设计。设计理念：开源，不使用专有格式：凡是能用 Markdown 的，都用 Markdown。
