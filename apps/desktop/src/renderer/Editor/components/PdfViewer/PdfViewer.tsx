@@ -345,7 +345,7 @@ export function PdfViewer({
     return () => observer.disconnect()
   }, [])
 
-  // A trackpad pinch (ctrl + wheel) or Shift + wheel zooms instead of scrolling. The
+  // A trackpad pinch (ctrl + wheel), ⌘ + wheel or Shift + wheel zooms instead of scrolling. The
   // listener is not passive so preventDefault also stops Electron zooming the window.
   // The page point under the pointer stays under it: PDF.js lays out the pages again
   // synchronously when the scale is set, so the scroll is corrected right after.

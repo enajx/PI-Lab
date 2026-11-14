@@ -4,11 +4,14 @@ const MIN_ZOOM = 0.5
 const MAX_ZOOM = 3
 /** Wheel delta that changes a pinch zoom by a factor of e. */
 const PINCH_SENSITIVITY = 100
+/** Wheel delta that changes a ⌘ + scroll zoom by a factor of e (gentler than a pinch). */
+const COMMAND_SCROLL_SENSITIVITY = 300
 /** Treat scales this close to a preset as that preset. */
 const EPSILON = 0.001
 
 export interface ZoomWheel {
   ctrlKey: boolean
+  metaKey: boolean
   shiftKey: boolean
   deltaX: number
   deltaY: number
@@ -19,10 +22,12 @@ const clamp = (scale: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, s
 /**
  * The new PDF scale for a zoom wheel event, or null when the event should scroll.
  * Chromium reports a trackpad pinch as a wheel with ctrlKey set. A Shift + wheel steps
- * between presets; macOS may report its delta in deltaX instead of deltaY.
+ * between presets; macOS may report its delta in deltaX instead of deltaY. ⌘ + wheel zooms
+ * smoothly, more gently than a pinch.
  */
 export function wheelZoom(scale: number, event: ZoomWheel): number | null {
   if (event.ctrlKey) return clamp(scale * Math.exp(-event.deltaY / PINCH_SENSITIVITY))
+  if (event.metaKey) return clamp(scale * Math.exp(-event.deltaY / COMMAND_SCROLL_SENSITIVITY))
   if (!event.shiftKey) return null
   const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX
   if (delta < 0) return ZOOM_PRESETS.find((preset) => preset > scale + EPSILON) ?? MAX_ZOOM

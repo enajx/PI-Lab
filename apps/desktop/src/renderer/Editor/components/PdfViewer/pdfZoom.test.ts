@@ -2,10 +2,26 @@ import { describe, expect, it } from "vitest"
 import { anchorScroll, pdfStatusText, wheelZoom } from "./pdfZoom"
 
 const wheel = (
-  init: Partial<{ ctrlKey: boolean; shiftKey: boolean; deltaX: number; deltaY: number }>,
-) => ({ ctrlKey: false, shiftKey: false, deltaX: 0, deltaY: 0, ...init })
+  init: Partial<{
+    ctrlKey: boolean
+    metaKey: boolean
+    shiftKey: boolean
+    deltaX: number
+    deltaY: number
+  }>,
+) => ({ ctrlKey: false, metaKey: false, shiftKey: false, deltaX: 0, deltaY: 0, ...init })
 
 describe("wheelZoom", () => {
+  it("⌘ + scroll zooms in and out, more gently than a pinch", () => {
+    const zoomedIn = wheelZoom(1, wheel({ metaKey: true, deltaY: -100 }))
+    const zoomedOut = wheelZoom(1, wheel({ metaKey: true, deltaY: 100 }))
+    const pinch = wheelZoom(1, wheel({ ctrlKey: true, deltaY: -100 }))
+    if (zoomedIn === null || zoomedOut === null || pinch === null) throw new Error("expected zoom")
+    expect(zoomedIn).toBeGreaterThan(1)
+    expect(zoomedOut).toBeLessThan(1)
+    expect(zoomedIn).toBeLessThan(pinch)
+  })
+
   it("ignores a plain wheel so the pages scroll", () => {
     expect(wheelZoom(1, wheel({ deltaY: 40 }))).toBeNull()
   })
