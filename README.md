@@ -6,13 +6,9 @@
 <p align="center">An open-source workspace for computational research.</p>
 
 <p align="center">
-  <sub><b>English</b> · <a href="docs/readme-int/README.es.md">Español</a> · <a href="docs/readme-int/README.nb.md">Norsk</a> · <a href="docs/readme-int/README.zh-CN.md">简体中文</a> · <a href="docs/readme-int/README.ko.md">한국어</a> · <a href="docs/readme-int/README.ja.md">日本語</a> · <a href="docs/readme-int/README.ar.md">العربية</a></sub>
-</p>
-
-<p align="center">
-  <sub><img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform" height="16">
+  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform" height="16">
     <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release" height="16"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license" height="16"></a></sub>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license" height="16"></a>
 </p>
 
 <p align="center">
