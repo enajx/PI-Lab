@@ -142,10 +142,10 @@ describe("detectExperimentLevel (Auto-detect)", () => {
 describe("assignRow (Folders)", () => {
   test("every file is loose with its whole path inside the results folder", () => {
     const folders = { kind: "folders" } as const
-    expect(assignRow(["gecko", "s0", "plots"], "a.png", folders, 1)).toEqual({
+    expect(assignRow(["exp-runs", "s0", "plots"], "a.png", folders, 1)).toEqual({
       group: null,
       experiment: null,
-      innerPath: "gecko/s0/plots/a.png",
+      innerPath: "exp-runs/s0/plots/a.png",
     })
     expect(assignRow([], "summary.json", folders, 1)).toEqual({
       group: null,
@@ -158,10 +158,10 @@ describe("assignRow (Folders)", () => {
 describe("experiments folder structure", () => {
   const structurePath = () => join(h.dataDir, "experiments-structure.yaml")
 
-  async function writeGecko(): Promise<void> {
-    await writeRepoFile("results/gecko/fl-shape_s0/run.db", "")
-    await writeRepoFile("results/gecko/fl-shape_s1/run.db", "")
-    await writeRepoFile("results/gecko/fl-shape_s1/metrics.csv", "a\n1\n")
+  async function writeRuns(): Promise<void> {
+    await writeRepoFile("results/exp-runs/seed_s0/run.db", "")
+    await writeRepoFile("results/exp-runs/seed_s1/run.db", "")
+    await writeRepoFile("results/exp-runs/seed_s1/metrics.csv", "a\n1\n")
     await writeRepoFile("results/exp-a/plot.png", TINY_PNG)
     await writeRepoFile("results/summary.json", "{}")
   }
@@ -171,12 +171,12 @@ describe("experiments folder structure", () => {
   }
 
   test("auto-detect (the default): the most common run depth is the experiment level, the folders above it are groups", async () => {
-    await writeGecko()
+    await writeRuns()
     const project = await h.caller.projects.open({ path: h.repoDir })
     expect(experimentRuns(await list(project.id))).toEqual({
-      "results/gecko/fl-shape_s0/run.db": ["gecko", "fl-shape_s0", "run.db"],
-      "results/gecko/fl-shape_s1/run.db": ["gecko", "fl-shape_s1", "run.db"],
-      "results/gecko/fl-shape_s1/metrics.csv": ["gecko", "fl-shape_s1", "metrics.csv"],
+      "results/exp-runs/seed_s0/run.db": ["exp-runs", "seed_s0", "run.db"],
+      "results/exp-runs/seed_s1/run.db": ["exp-runs", "seed_s1", "run.db"],
+      "results/exp-runs/seed_s1/metrics.csv": ["exp-runs", "seed_s1", "metrics.csv"],
       // Above the experiment level: a file of the group itself.
       "results/exp-a/plot.png": ["exp-a", null, "plot.png"],
       "results/summary.json": [null, null, "summary.json"],
@@ -189,14 +189,14 @@ describe("experiments folder structure", () => {
   })
 
   test("each preset groups the listing and is stored per project in the YAML file", async () => {
-    await writeGecko()
+    await writeRuns()
     const project = await h.caller.projects.open({ path: h.repoDir })
     const set = (value: string) =>
       h.caller.science.analysis.setStructure({ projectId: project.id, value })
 
     await set("one-folder-per-experiment")
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/gecko/fl-shape_s0/run.db": [null, "gecko", "fl-shape_s0/run.db"],
+      "results/exp-runs/seed_s0/run.db": [null, "exp-runs", "seed_s0/run.db"],
       "results/exp-a/plot.png": [null, "exp-a", "plot.png"],
       "results/summary.json": [null, null, "summary.json"],
     })
@@ -204,7 +204,7 @@ describe("experiments folder structure", () => {
     // Experiment / run folders: the runs are folders inside each experiment.
     await set("experiment-run")
     expect(experimentRuns(await list(project.id))).toMatchObject({
-      "results/gecko/fl-shape_s0/run.db": [null, "gecko", "fl-shape_s0/run.db"],
+      "results/exp-runs/seed_s0/run.db": [null, "exp-runs", "seed_s0/run.db"],
       "results/exp-a/plot.png": [null, "exp-a", "plot.png"],
     })
 
@@ -233,7 +233,7 @@ describe("experiments folder structure", () => {
   })
 
   test("folders: the results folder as a plain folder tree, no groups or experiments, stored as `folders`", async () => {
-    await writeGecko()
+    await writeRuns()
     const project = await h.caller.projects.open({ path: h.repoDir })
     const saved = await h.caller.science.analysis.setStructure({
       projectId: project.id,
@@ -249,9 +249,9 @@ describe("experiments folder structure", () => {
     expect(listing.plainFolders).toBe(true)
     // Every file is a loose file of the results folder; its inner path is the real path under it.
     expect(experimentRuns(listing)).toEqual({
-      "results/gecko/fl-shape_s0/run.db": [null, null, "gecko/fl-shape_s0/run.db"],
-      "results/gecko/fl-shape_s1/run.db": [null, null, "gecko/fl-shape_s1/run.db"],
-      "results/gecko/fl-shape_s1/metrics.csv": [null, null, "gecko/fl-shape_s1/metrics.csv"],
+      "results/exp-runs/seed_s0/run.db": [null, null, "exp-runs/seed_s0/run.db"],
+      "results/exp-runs/seed_s1/run.db": [null, null, "exp-runs/seed_s1/run.db"],
+      "results/exp-runs/seed_s1/metrics.csv": [null, null, "exp-runs/seed_s1/metrics.csv"],
       "results/exp-a/plot.png": [null, null, "exp-a/plot.png"],
       "results/summary.json": [null, null, "summary.json"],
     })
@@ -260,16 +260,16 @@ describe("experiments folder structure", () => {
   })
 
   test("the default from Settings applies to projects without their own entry", async () => {
-    await writeGecko()
+    await writeRuns()
     const project = await h.caller.projects.open({ path: h.repoDir })
     await h.caller.science.analysis.setStructure({
       projectId: null,
       value: "one-folder-per-experiment",
     })
-    expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
+    expect(experimentRuns(await list(project.id))["results/exp-runs/seed_s0/run.db"]).toEqual([
       null,
-      "gecko",
-      "fl-shape_s0/run.db",
+      "exp-runs",
+      "seed_s0/run.db",
     ])
     expect(await h.caller.science.analysis.getStructure({ projectId: null })).toMatchObject({
       defaultValue: "one-folder-per-experiment",
@@ -315,7 +315,7 @@ describe("experiments folder structure", () => {
   })
 
   test("an invalid YAML file or unknown preset in the file is a visible error, never a fallback", async () => {
-    await writeGecko()
+    await writeRuns()
     const project = await h.caller.projects.open({ path: h.repoDir })
 
     await writeFile(structurePath(), "default: [auto\nprojects: {\n")
@@ -340,10 +340,10 @@ describe("experiments folder structure", () => {
       structurePath(),
       `# mine\ndefault: flat\nprojects:\n  "${project.repoPath}": "{experiment}/"\n`,
     )
-    expect(experimentRuns(await list(project.id))["results/gecko/fl-shape_s0/run.db"]).toEqual([
+    expect(experimentRuns(await list(project.id))["results/exp-runs/seed_s0/run.db"]).toEqual([
       null,
-      "gecko",
-      "fl-shape_s0/run.db",
+      "exp-runs",
+      "seed_s0/run.db",
     ])
   })
 })

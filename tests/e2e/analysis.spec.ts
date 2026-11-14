@@ -204,10 +204,10 @@ test("analysis tab previews a CSV discovered in the opened project", async () =>
 })
 
 test("Analysis lists one collapsed row per experiment with no counts, the structure is set per project and survives a restart, and Change… picks another folder", async () => {
-  // Runs of the gecko experiment (written before Analysis first lists the folder).
-  for (const run of ["fl-shape_s0", "fl-shape_s1"]) {
-    await mkdir(join(repoDir, "results", "gecko", run), { recursive: true })
-    await writeFile(join(repoDir, "results", "gecko", run, "run.db"), "")
+  // Runs of the exp-runs experiment (written before Analysis first lists the folder).
+  for (const run of ["seed_s0", "seed_s1"]) {
+    await mkdir(join(repoDir, "results", "exp-runs", run), { recursive: true })
+    await writeFile(join(repoDir, "results", "exp-runs", run, "run.db"), "")
   }
   let window = await app.firstWindow()
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
@@ -221,7 +221,7 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
   })
   await expect(window.getByTestId("analysis-results-folder-reset")).toHaveCount(0)
 
-  // Auto-detect: one row per experiment (gecko), and per run at the top of the
+  // Auto-detect: one row per experiment (exp-runs), and per run at the top of the
   // results folder. Rows start collapsed and show no file counts.
   const row = (experiment: string) =>
     window.locator(`[data-testid="analysis-experiment"][data-experiment="${experiment}"]`)
@@ -237,17 +237,17 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
       )
   await expect
     .poll(rows, { timeout: 30_000 })
-    .toEqual(["data", "exp-a", "exp-b", "gecko", "reports"].map((name) => [name, "false", name]))
+    .toEqual(["data", "exp-a", "exp-b", "exp-runs", "reports"].map((name) => [name, "false", name]))
   await expect(window.getByTestId("analysis-file-count")).toHaveCount(0)
   await expect(window.getByTestId("analysis-file")).toHaveCount(0)
-  // gecko's runs are folders inside it (collapsed), each with its files.
-  await row("gecko").click()
-  await expect(window.getByTestId("analysis-folder")).toHaveText(["fl-shape_s0", "fl-shape_s1"])
-  await openAnalysisFolder(window, "fl-shape_s0")
+  // exp-runs's runs are folders inside it (collapsed), each with its files.
+  await row("exp-runs").click()
+  await expect(window.getByTestId("analysis-folder")).toHaveText(["seed_s0", "seed_s1"])
+  await openAnalysisFolder(window, "seed_s0")
   await expect(
-    window.locator('[data-testid="analysis-file"][data-rel-path^="results/gecko/"]'),
+    window.locator('[data-testid="analysis-file"][data-rel-path^="results/exp-runs/"]'),
   ).toHaveCount(1)
-  await row("gecko").click()
+  await row("exp-runs").click()
   await openAnalysisExperiment(window, "exp-a")
   await expect(
     window.locator('[data-testid="analysis-file"][data-rel-path="results/exp-a/plot.png"]'),
@@ -284,17 +284,17 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
   await expect
     .poll(rows)
     .toEqual(
-      ["data", "exp-a", "exp-b", "gecko", "reports"].map((name) => [
+      ["data", "exp-a", "exp-b", "exp-runs", "reports"].map((name) => [
         name,
         name === "exp-a" ? "true" : "false",
         name,
       ]),
     )
-  await openAnalysisExperiment(window, "gecko")
-  await openAnalysisFolder(window, "fl-shape_s0")
+  await openAnalysisExperiment(window, "exp-runs")
+  await openAnalysisFolder(window, "seed_s0")
   await expect(
     window.locator(
-      '[data-testid="analysis-file"][data-rel-path="results/gecko/fl-shape_s0/run.db"]',
+      '[data-testid="analysis-file"][data-rel-path="results/exp-runs/seed_s0/run.db"]',
     ),
   ).toBeVisible()
   const yamlText = await readFile(join(dataDir, "experiments-structure.yaml"), "utf8")
@@ -319,12 +319,12 @@ test("Analysis lists one collapsed row per experiment with no counts, the struct
   await window.getByTestId("analysis-results-folder-change").click()
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("outputs/")
   await expect.poll(() => rows().then((all) => all.map((entry) => entry[0]))).toEqual(["exp-c"])
-  await expect(row("gecko")).toHaveCount(0)
+  await expect(row("exp-runs")).toHaveCount(0)
 
   // Reset to default goes back to results/.
   await window.getByTestId("analysis-results-folder-reset").click()
   await expect(window.getByTestId("analysis-results-folder-path")).toHaveText("results/")
-  await expect(row("gecko")).toBeVisible()
+  await expect(row("exp-runs")).toBeVisible()
 })
 
 test("the Folders structure shows the results folder as a plain folder tree with no experiment rows", async () => {
@@ -479,9 +479,6 @@ test("a results folder laid out like the user's lists groups, then experiments, 
     .locator('[data-testid="analysis-experiment-group"][data-experiment="20260214_141942"]')
     .getByTestId("analysis-experiment-files")
   await expect(multiplexing.getByTestId("analysis-folder")).toHaveText(["plots", "runs"])
-  await window.screenshot({
-    path: "/private/tmp/claude-501/-Users-enaj-code-PI-Lab/1ca26459-f122-4cc9-9c1d-bc6c1ee58855/scratchpad/analysis-tree.png",
-  })
 })
 
 test("a results folder laid out like the user's shows the Figures and Markup format rows", async () => {
