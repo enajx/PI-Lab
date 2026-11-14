@@ -1147,5 +1147,13 @@
   "Dataset": "مجموعة بيانات",
   "scalar": "قيمة مفردة",
   "datasets": "مجموعات بيانات",
-  "+{count} more": "+{count} أخرى"
+  "+{count} more": "+{count} أخرى",
+  "Zotero Library: type to navigate library": "مكتبة Zotero: اكتب للتنقل في المكتبة",
+  "type to navigate library": "اكتب للتنقل في المكتبة",
+  "Close tab": "إغلاق علامة التبويب",
+  "Saved web page": "صفحة ويب محفوظة",
+  "PI Lab can't show this file type.": "لا يستطيع PI Lab عرض هذا النوع من الملفات.",
+  "Open in default app": "فتح في التطبيق الافتراضي",
+  "Open in browser": "فتح في المتصفح",
+  "Loading PDF viewer…": "جارٍ تحميل عارض PDF…"
 }

@@ -1147,5 +1147,13 @@
   "Dataset": "数据集",
   "scalar": "标量",
   "datasets": "个数据集",
-  "+{count} more": "还有 {count} 个"
+  "+{count} more": "还有 {count} 个",
+  "Zotero Library: type to navigate library": "Zotero 文献库：输入以浏览文献库",
+  "type to navigate library": "输入以浏览文献库",
+  "Close tab": "关闭标签页",
+  "Saved web page": "已保存的网页",
+  "PI Lab can't show this file type.": "PI Lab 无法显示此文件类型。",
+  "Open in default app": "用默认应用打开",
+  "Open in browser": "在浏览器中打开",
+  "Loading PDF viewer…": "正在加载 PDF 查看器…"
 }

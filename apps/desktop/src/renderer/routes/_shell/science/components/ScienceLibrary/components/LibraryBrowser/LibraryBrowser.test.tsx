@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../../../../test/fakeTrpcClient"
+import type { ViewerTab } from "../../libraryTabs"
 import { LibraryBrowser } from "./LibraryBrowser"
 
 /**
@@ -13,8 +14,8 @@ import { LibraryBrowser } from "./LibraryBrowser"
 function collection(key: string, name: string, itemCount = 0) {
   return { key, name, itemCount, subcollectionCount: 0 }
 }
-function paper(id: string, title: string) {
-  return { id, title, authors: [] as string[], itemType: "PDF" }
+function paper(id: string, title: string, url?: string) {
+  return { id, title, authors: [] as string[], itemType: "PDF", ...(url ? { url } : {}) }
 }
 
 function renderBrowser(
@@ -25,11 +26,23 @@ function renderBrowser(
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const client = createFakeTrpcClient(handlers)
+  const onOpenTab = vi.fn((_tab: ViewerTab) => undefined)
   render(
     <AppProviders client={client} queryClient={queryClient}>
-      <LibraryBrowser {...props} />
+      <LibraryBrowser {...props} onOpenTab={onOpenTab} />
     </AppProviders>,
   )
+  return { onOpenTab }
+}
+
+/** A `resolveFile` fake that finds every item's local PDF. */
+const resolvesToPdf = {
+  "science.library.resolveFile": () => ({ ok: true, path: "/x.pdf", kind: "pdf" }),
+}
+
+/** Press keys on `window`, one keydown each (typing goes to the library, not a field). */
+function press(...keys: string[]) {
+  for (const key of keys) fireEvent.keyDown(window, { key })
 }
 
 /** Two top-level collections at root; C1 (Methods) has one sub-collection (C1a) plus items. */
@@ -139,11 +152,10 @@ describe("LibraryBrowser", () => {
     })
   })
 
-  test("⌘→ on a folder paper opens it via openItem (keyboard)", async () => {
-    const openItem = vi.fn(() => ({ ok: true }))
-    renderBrowser(
+  test("⌘→ on a paper opens it in a viewer tab, like Enter", async () => {
+    const { onOpenTab } = renderBrowser(
       { kind: "folder", canWrite: false, rootLabel: "neuro" },
-      { ...browseHandlers, "science.library.openItem": openItem },
+      { ...browseHandlers, ...resolvesToPdf },
     )
     await waitFor(() => expect(screen.getByTestId("library-all-items")).toBeTruthy())
     fireEvent.click(screen.getByTestId("library-all-items")) // → All items (papers shown)
@@ -151,22 +163,45 @@ describe("LibraryBrowser", () => {
     // Cursor starts on the first paper; ⌘→ activates it.
     fireEvent.keyDown(screen.getByTestId("library-browser"), { key: "ArrowRight", metaKey: true })
     await waitFor(() => {
-      expect(openItem).toHaveBeenCalledWith({ path: "top.pdf" })
+      expect(onOpenTab).toHaveBeenCalledWith({
+        type: "file",
+        id: "file:top.pdf",
+        itemId: "top.pdf",
+        title: "Top",
+      })
     })
   })
 
-  test("Enter on a selected folder paper opens its local copy via openItem", async () => {
+  test("Enter on a selected folder paper opens it in a viewer tab, not the OS app", async () => {
     const openItem = vi.fn(() => ({ ok: true }))
-    renderBrowser(
+    const { onOpenTab } = renderBrowser(
       { kind: "folder", canWrite: false, rootLabel: "neuro" },
-      { ...browseHandlers, "science.library.openItem": openItem },
+      { ...browseHandlers, ...resolvesToPdf, "science.library.openItem": openItem },
     )
     await waitFor(() => expect(screen.getByTestId("library-all-items")).toBeTruthy())
     fireEvent.click(screen.getByTestId("library-all-items")) // → All items (cursor lands on the paper)
     await waitFor(() => expect(screen.getAllByTestId("library-item")).toHaveLength(1))
     fireEvent.keyDown(screen.getByTestId("library-browser"), { key: "Enter" })
     await waitFor(() => {
-      expect(openItem).toHaveBeenCalledWith({ path: "top.pdf" })
+      expect(onOpenTab).toHaveBeenCalledWith({
+        type: "file",
+        id: "file:top.pdf",
+        itemId: "top.pdf",
+        title: "Top",
+      })
+    })
+    expect(openItem).not.toHaveBeenCalled()
+  })
+
+  test("clicking a paper card opens it in a viewer tab", async () => {
+    const { onOpenTab } = renderBrowser(
+      { kind: "zotero", canWrite: false, rootLabel: "Zotero library" },
+      { ...browseHandlers, ...resolvesToPdf },
+    )
+    fireEvent.click(await screen.findByTestId("library-all-items"))
+    fireEvent.click(await screen.findByTestId("library-item"))
+    await waitFor(() => {
+      expect(onOpenTab).toHaveBeenCalledWith(expect.objectContaining({ itemId: "top.pdf" }))
     })
   })
 
@@ -185,31 +220,38 @@ describe("LibraryBrowser", () => {
     })
   })
 
-  test("Enter on a Zotero paper opens its local copy via openZoteroItem", async () => {
+  test("⌘↵ on a Zotero paper opens its local copy in the OS app via openZoteroItem", async () => {
     const openZoteroItem = vi.fn(() => ({ ok: true }))
-    renderBrowser(
+    const { onOpenTab } = renderBrowser(
       { kind: "zotero", canWrite: false, rootLabel: "Zotero library" },
       { ...browseHandlers, "science.library.openZoteroItem": openZoteroItem },
     )
     await waitFor(() => expect(screen.getByTestId("library-all-items")).toBeTruthy())
     fireEvent.click(screen.getByTestId("library-all-items"))
     await waitFor(() => expect(screen.getAllByTestId("library-item")).toHaveLength(1))
-    fireEvent.keyDown(screen.getByTestId("library-browser"), { key: "Enter" })
+    fireEvent.keyDown(screen.getByTestId("library-browser"), { key: "Enter", metaKey: true })
     await waitFor(() => {
       expect(openZoteroItem).toHaveBeenCalledWith({ itemKey: "top.pdf" })
     })
+    expect(onOpenTab).not.toHaveBeenCalled()
     expect(screen.queryByTestId("library-open-error")).toBeNull()
   })
 
-  test("Enter on a Zotero paper with no local copy surfaces the resolver's message", async () => {
-    const openZoteroItem = vi.fn(() => ({
-      ok: false,
-      reason: "no-local-file",
-      message: "No local copy available (not downloaded).",
-    }))
-    renderBrowser(
+  test("Enter on a Zotero paper with no local copy shows the message and opens its URL in a tab", async () => {
+    const { onOpenTab } = renderBrowser(
       { kind: "zotero", canWrite: false, rootLabel: "Zotero library" },
-      { ...browseHandlers, "science.library.openZoteroItem": openZoteroItem },
+      {
+        ...browseHandlers,
+        "science.library.listItems": () => ({
+          ok: true,
+          items: [paper("K1", "Web paper", "https://example.org/paper")],
+        }),
+        "science.library.resolveFile": () => ({
+          ok: false,
+          reason: "no-local-file",
+          message: "No local copy available (not downloaded).",
+        }),
+      },
     )
     await waitFor(() => expect(screen.getByTestId("library-all-items")).toBeTruthy())
     fireEvent.click(screen.getByTestId("library-all-items"))
@@ -220,7 +262,12 @@ describe("LibraryBrowser", () => {
         "No local copy available",
       )
     })
-    expect(openZoteroItem).toHaveBeenCalledWith({ itemKey: "top.pdf" })
+    expect(onOpenTab).toHaveBeenCalledWith({
+      type: "url",
+      id: "url:https://example.org/paper",
+      url: "https://example.org/paper",
+      title: "Web paper",
+    })
   })
 
   test("Enter on a selected collection drills into it (universal activate)", async () => {
@@ -244,10 +291,16 @@ describe("LibraryBrowser", () => {
   })
 
   test("a failed open surfaces the error message inline", async () => {
-    const openItem = vi.fn(() => ({ ok: false, reason: "error", message: "File is gone." }))
-    renderBrowser(
+    const { onOpenTab } = renderBrowser(
       { kind: "folder", canWrite: false, rootLabel: "neuro" },
-      { ...browseHandlers, "science.library.openItem": openItem },
+      {
+        ...browseHandlers,
+        "science.library.resolveFile": () => ({
+          ok: false,
+          reason: "error",
+          message: "File is gone.",
+        }),
+      },
     )
     await waitFor(() => expect(screen.getByTestId("library-all-items")).toBeTruthy())
     fireEvent.click(screen.getByTestId("library-all-items"))
@@ -256,6 +309,72 @@ describe("LibraryBrowser", () => {
     await waitFor(() => {
       expect(screen.getByTestId("library-open-error").textContent).toContain("File is gone.")
     })
+    expect(onOpenTab).not.toHaveBeenCalled()
+  })
+
+  test("shows the type-to-navigate hint for each source", async () => {
+    renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
+    expect((await screen.findByTestId("library-type-hint")).textContent).toBe(
+      "Zotero Library: type to navigate library",
+    )
+  })
+
+  test("the folder hint names the folder", async () => {
+    renderBrowser({ kind: "folder", canWrite: false, rootLabel: "neuro" }, browseHandlers)
+    expect((await screen.findByTestId("library-type-hint")).textContent).toBe(
+      "neuro: type to navigate library",
+    )
+  })
+
+  test("typing fuzzy-filters this level's rows without opening the finder", async () => {
+    renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
+    await waitFor(() => expect(screen.getAllByTestId("library-collection")).toHaveLength(2))
+    press("r", "s", "l") // fuzzy: R-e-S-u-L-ts
+    expect(screen.queryByTestId("quick-find")).toBeNull()
+    expect(screen.getByTestId("library-type-query").textContent).toContain("rsl")
+    expect(screen.getAllByTestId("library-collection").map((el) => el.textContent)).toEqual([
+      "Results0",
+    ])
+    expect(screen.queryByTestId("library-all-items")).toBeNull()
+    expect(screen.getAllByTestId("library-collection")[0]?.getAttribute("data-selected")).toBe(
+      "true",
+    )
+    // Enter activates the filtered match.
+    press("Enter")
+    await waitFor(() => {
+      expect(screen.getByTestId("library-breadcrumb").textContent).toContain("Results")
+    })
+    // A new level starts with no typed text.
+    expect(screen.queryByTestId("library-type-query")).toBeNull()
+  })
+
+  test("Backspace edits the typed text", async () => {
+    renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
+    await waitFor(() => expect(screen.getAllByTestId("library-collection")).toHaveLength(2))
+    press("m", "x")
+    expect(screen.queryAllByTestId("library-collection")).toHaveLength(0)
+    press("Backspace")
+    expect(screen.getAllByTestId("library-collection").map((el) => el.textContent)).toEqual([
+      "Methods2",
+    ])
+  })
+
+  test("Escape clears the typed text first, then goes to the parent folder", async () => {
+    renderBrowser({ kind: "zotero", canWrite: false, rootLabel: "Zotero library" }, browseHandlers)
+    await waitFor(() => expect(screen.getAllByTestId("library-collection")).toHaveLength(2))
+    press("ArrowDown", "Enter") // → Methods
+    await waitFor(() => expect(screen.getAllByTestId("library-item")).toHaveLength(2))
+    press("p", "2")
+    expect(screen.getAllByTestId("library-item")).toHaveLength(1)
+    press("Escape") // clears the text, stays in Methods
+    expect(screen.queryByTestId("library-type-query")).toBeNull()
+    expect(screen.getAllByTestId("library-item")).toHaveLength(2)
+    expect(screen.getByTestId("library-breadcrumb").textContent).toContain("Methods")
+    press("Escape") // → root
+    await waitFor(() => expect(screen.getByTestId("library-all-items")).toBeTruthy())
+    expect(screen.getByTestId("library-breadcrumb").textContent).not.toContain("Methods")
+    press("Escape") // at the root: nothing changes
+    expect(screen.getByTestId("library-all-items")).toBeTruthy()
   })
 
   test("⌘F opens the collection finder; picking one drills in", async () => {

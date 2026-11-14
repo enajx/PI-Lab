@@ -1147,5 +1147,13 @@
   "Dataset": "データセット",
   "scalar": "スカラー",
   "datasets": "個のデータセット",
-  "+{count} more": "他 {count} 件"
+  "+{count} more": "他 {count} 件",
+  "Zotero Library: type to navigate library": "Zotero ライブラリ: 入力してライブラリ内を移動",
+  "type to navigate library": "入力してライブラリ内を移動",
+  "Close tab": "タブを閉じる",
+  "Saved web page": "保存済みのウェブページ",
+  "PI Lab can't show this file type.": "PI Lab はこの種類のファイルを表示できません。",
+  "Open in default app": "既定のアプリで開く",
+  "Open in browser": "ブラウザーで開く",
+  "Loading PDF viewer…": "PDF ビューアーを読み込み中…"
 }

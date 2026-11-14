@@ -1,3 +1,4 @@
+import { fuzzyMatch } from "@pi-lab/shared/search/fuzzy"
 import { Button } from "@pi-lab/ui"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronRight, FileText, Folder, RefreshCw } from "lucide-react"
@@ -8,8 +9,10 @@ import type {
 } from "../../../../../../../../main/trpc/science/library"
 import { useTranslate } from "../../../../../../../i18n/language"
 import { QuickFind, type QuickFindItem } from "../../../../../../../QuickFind"
+import { overlayIsOpen } from "../../../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../../../trpc/react"
+import type { ViewerTab } from "../../libraryTabs"
 import { AttachFileFlow } from "../AttachFileFlow"
 import { CollectionRow } from "../CollectionRow"
 import { LibraryItem } from "../LibraryItem"
@@ -22,6 +25,8 @@ interface LibraryBrowserProps {
   canWrite: boolean
   /** Root-breadcrumb label (the folder name for a folder source, else "Zotero library"). */
   rootLabel: string
+  /** Open a viewer tab on the right (a paper's local file, or its URL when none is on disk). */
+  onOpenTab: (tab: ViewerTab) => void
 }
 
 interface Crumb {
@@ -46,18 +51,26 @@ type Row =
  * Keyboard navigation lives on a `window` listener, so it works regardless of focus and never
  * scrolls the page (the pane stays focusable for click-to-focus). `↓`/`↑` move the row cursor;
  * `⌘→` and `⌘↓` activate the selected row — entering a collection (or "All items"), or opening
- * a folder file; `⌘←`/`⌘↑` go back one level. `⌃` works as an alias for `⌘`. `Enter`/`⌘↵` is a
- * universal **activate**: it drills into a selected collection / "All items" row (like `⌘→`), or
- * opens a selected paper's local copy externally — a folder PDF via `openItem`, a Zotero item's
- * resolved attachment via `openZoteroItem` (surfacing a clear message when none is on disk).
+ * a paper; `⌘←`/`⌘↑` go back one level. `⌃` works as an alias for `⌘`. `Enter` is a universal
+ * **activate**: it drills into a selected collection / "All items" row (like `⌘→`), or opens a
+ * selected paper's local file in a viewer tab (`onOpenTab`); clicking a paper card does the same.
+ * When a Zotero item has no file on disk, the "no local copy" message shows and its URL (if any)
+ * opens in a tab. `⌘↵` opens the paper's local copy in the OS default app instead — a folder PDF
+ * via `openItem`, a Zotero item's attachment via `openZoteroItem`.
+ *
+ * Typing a character fuzzy-filters this level's rows (the same matcher as `⌘F`), Backspace edits
+ * the text, and Escape clears it, or goes up one level when nothing is typed. Keys are ignored
+ * while an overlay is open or focus is in a text field or the viewer pane (`data-library-viewer`).
  */
-export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProps) {
+export function LibraryBrowser({ kind, canWrite, rootLabel, onOpenTab }: LibraryBrowserProps) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [trail, setTrail] = useState<Crumb[]>([])
   const [viewAll, setViewAll] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  // Text typed to filter this level's rows; cleared on every level change.
+  const [query, setQuery] = useState("")
   // The context-aware ⌘F finder over this level's collections, their immediate sub-collections
   // (one level deeper), and papers once they show at this level — see `finderEntries` below.
   const [findOpen, setFindOpen] = useState(false)
@@ -112,16 +125,26 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
       return data?.ok ? data.collections.map((child) => ({ parent, child })) : []
     })
 
+  // This level's rows that match the typed text, best match first.
+  const visibleCollections = filterByQuery(collections, (c) => c.name, query)
+  const visibleItems = filterByQuery(items, (p) => p.title, query)
+  const showAllItemsRow = fuzzyMatch(query, t("All items")) !== null
+
   // The navigable rows for this view, in render order (root: All items + collections;
   // drilled: collections + items; All items: items). The cursor index points into this.
   const rows: Row[] = (() => {
     const collectionRows: Row[] =
       !viewAll && current == null
-        ? [{ type: "all-items" }, ...collections.map((c) => collectionToRow(c))]
+        ? [
+            ...(showAllItemsRow ? [{ type: "all-items" } as Row] : []),
+            ...visibleCollections.map((c) => collectionToRow(c)),
+          ]
         : !viewAll
-          ? collections.map((c) => collectionToRow(c))
+          ? visibleCollections.map((c) => collectionToRow(c))
           : []
-    const paperRows: Row[] = showItems ? items.map((p) => ({ type: "paper", id: p.id }) as Row) : []
+    const paperRows: Row[] = showItems
+      ? visibleItems.map((p) => ({ type: "paper", id: p.id }) as Row)
+      : []
     return [...collectionRows, ...paperRows]
   })()
   // Clamp the raw cursor for reading (rows can shrink on refresh between view resets).
@@ -167,20 +190,33 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
       setOpenError(err instanceof Error ? err.message : t("Open failed."))
     }
   }
-  // Activate the cursor row for ⌘→/⌘↓: enter a collection (or "All items"), or open a folder file.
-  const enterSelected = () => {
-    const row = rows[cursor]
-    if (row?.type === "all-items") openAll()
-    else if (row?.type === "collection") openCollection({ key: row.key, name: row.name })
-    else if (row?.type === "paper" && kind === "folder") void openSelectedItem()
+  // Open a paper in a viewer tab: its local file, or — when a Zotero item has nothing on disk —
+  // the "no local copy" message plus its URL in a tab. Other failures show inline.
+  const openInViewer = async (paper: LibraryPaper) => {
+    setOpenError(null)
+    const result = await queryClient.fetchQuery(
+      trpc.science.library.resolveFile.queryOptions({ itemId: paper.id }),
+    )
+    if (result.ok) {
+      onOpenTab({ type: "file", id: `file:${paper.id}`, itemId: paper.id, title: paper.title })
+      return
+    }
+    setOpenError(result.message)
+    if (result.reason === "no-local-file" && paper.url) {
+      onOpenTab({ type: "url", id: `url:${paper.url}`, url: paper.url, title: paper.title })
+    }
   }
-  // Universal Enter / ⌘↵ activate: drill into a selected collection / "All items" row (like ⌘→),
-  // or open a selected paper's local copy (folder or Zotero).
+  const openPaperRow = (id: string) => {
+    const paper = items.find((p) => p.id === id)
+    if (paper) void openInViewer(paper)
+  }
+  // Enter / ⌘→ / ⌘↓ activate: drill into a selected collection / "All items" row, or open a
+  // selected paper in a viewer tab.
   const activateSelected = () => {
     const row = rows[cursor]
     if (row?.type === "all-items") openAll()
     else if (row?.type === "collection") openCollection({ key: row.key, name: row.name })
-    else if (row?.type === "paper") void openSelectedItem()
+    else if (row?.type === "paper") openPaperRow(row.id)
   }
   const refresh = () => {
     void queryClient.invalidateQueries({
@@ -190,20 +226,43 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
-    // The finder owns the keyboard while open, and we never hijack typing inside form fields.
-    if (findOpen) return
+    // The finder and other overlays own the keyboard while open, and we never hijack typing
+    // inside form fields or the viewer pane. A key another handler already took (Escape or
+    // Enter in the ⌘F finder, which closes before this window listener runs) is ignored too.
+    if (event.defaultPrevented || findOpen || overlayIsOpen()) return
     const active = document.activeElement
     if (
       active instanceof HTMLElement &&
-      (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)
+      (active.tagName === "INPUT" ||
+        active.tagName === "TEXTAREA" ||
+        active.isContentEditable ||
+        active.closest("[data-library-viewer]"))
     )
       return
     const mod = event.metaKey || event.ctrlKey
+    // Type-to-filter: a printable character adds to the text; Backspace removes one.
+    if (event.key.length === 1 && !mod && !(event.key === " " && !query)) {
+      event.preventDefault()
+      setQuery((q) => q + event.key)
+      return
+    }
     switch (event.key) {
+      case "Backspace":
+        if (!query) return
+        event.preventDefault()
+        setQuery((q) => q.slice(0, -1))
+        return
+      case "Escape":
+        // Clear the typed text first; with none, go up one level (nothing at the root).
+        if (query) setQuery("")
+        else if (viewAll || trail.length > 0) goBack()
+        else return
+        event.preventDefault()
+        return
       case "ArrowDown":
         event.preventDefault()
         if (mod) {
-          enterSelected() // ⌘↓ activates the row, same as ⌘→
+          activateSelected() // ⌘↓ activates the row, same as ⌘→
           return
         }
         setSelectedIndex((i) => Math.min(i + 1, Math.max(rows.length - 1, 0)))
@@ -223,18 +282,18 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
       case "ArrowRight":
         if (mod) {
           event.preventDefault()
-          enterSelected()
+          activateSelected()
         }
         return
       case "Enter":
-        // Enter / ⌘↵ are a universal activate: drill into a selected collection / "All items"
-        // row, or open a selected paper's local copy externally (folder or Zotero). We only bail
-        // for text fields (handled above) — NOT for focused buttons: arrow-nav moves the cursor
-        // without changing DOM focus, so after clicking any control (Open, Refresh) focus lingers
-        // there; gating on button focus would wrongly swallow Enter for the navigated row.
+        // Enter activates the row (a paper opens in a viewer tab); ⌘↵ on a paper opens it in the
+        // OS default app. We only bail for text fields (handled above) — NOT for focused buttons:
+        // arrow-nav moves the cursor without changing DOM focus, so after clicking any control
+        // (Open, Refresh) focus lingers there; gating on button focus would swallow Enter.
         if (!selectedRow) return
         event.preventDefault()
-        activateSelected()
+        if (mod && selectedRow.type === "paper") void openSelectedItem()
+        else activateSelected()
         return
     }
   }
@@ -279,7 +338,13 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
   useEffect(() => {
     setSelectedIndex(0)
     setOpenError(null)
+    setQuery("")
   }, [trail, viewAll])
+  // Each change to the typed text puts the cursor on the best match.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: query is the intended trigger.
+  useEffect(() => {
+    setSelectedIndex(0)
+  }, [query])
 
   // Keep the highlighted row in view as the cursor moves.
   // biome-ignore lint/correctness/useExhaustiveDependencies: cursor is the intended trigger.
@@ -322,16 +387,8 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
             hint: p.authors.length > 0 ? p.authors.join(", ") : undefined,
             icon: FileText,
           },
-          // Folder papers open like Enter does; Zotero papers (whose action is a flow) just get
-          // the row cursor so the user can reach the row's Attach action.
-          run: () => {
-            if (kind === "folder") {
-              openItem.mutate({ path: p.id })
-              return
-            }
-            const index = rows.findIndex((row) => row.type === "paper" && row.id === p.id)
-            if (index >= 0) setSelectedIndex(index)
-          },
+          // A picked paper opens in a viewer tab, like Enter.
+          run: () => void openInViewer(p),
         }))
       : []),
   ]
@@ -394,6 +451,19 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
         </Button>
       </div>
 
+      <div className="flex flex-col gap-1 text-xs">
+        <p data-testid="library-type-hint" className="text-muted-foreground">
+          {kind === "zotero"
+            ? t("Zotero Library: type to navigate library")
+            : `${rootLabel}: ${t("type to navigate library")}`}
+        </p>
+        {query ? (
+          <p data-testid="library-type-query" className="font-mono text-foreground">
+            {">"} {query}
+          </p>
+        ) : null}
+      </div>
+
       {error ? (
         <p data-testid="library-error" className="cursor-text select-text text-destructive text-xs">
           {error}
@@ -411,16 +481,18 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
 
       {!viewAll && !current ? (
         <div className="flex flex-col gap-2">
-          <CollectionRow
-            name={t("All items")}
-            testId="library-all-items"
-            selected={selectedRow?.type === "all-items"}
-            onClick={openAll}
-          />
+          {showAllItemsRow ? (
+            <CollectionRow
+              name={t("All items")}
+              testId="library-all-items"
+              selected={selectedRow?.type === "all-items"}
+              onClick={openAll}
+            />
+          ) : null}
           {collectionsQuery.isLoading ? (
             <p className="text-muted-foreground text-xs">{t("Loading collections…")}</p>
           ) : (
-            collections.map(collectionRow)
+            visibleCollections.map(collectionRow)
           )}
           {!collectionsQuery.isLoading && collections.length === 0 && !error ? (
             <p data-testid="library-collections-empty" className="text-muted-foreground text-xs">
@@ -430,15 +502,16 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {!viewAll ? collections.map(collectionRow) : null}
+          {!viewAll ? visibleCollections.map(collectionRow) : null}
           {itemsQuery.isLoading ? (
             <p className="text-muted-foreground text-xs">{t("Loading items…")}</p>
           ) : (
-            items.map((paper) => (
+            visibleItems.map((paper) => (
               <LibraryItem
                 key={paper.id}
                 paper={paper}
                 testId="library-item"
+                onOpen={() => void openInViewer(paper)}
                 selected={selectedRow?.type === "paper" && selectedRow.id === paper.id}
                 action={
                   kind === "folder" ? (
@@ -467,6 +540,12 @@ export function LibraryBrowser({ kind, canWrite, rootLabel }: LibraryBrowserProp
         </div>
       )}
 
+      {query && rows.length === 0 ? (
+        <p data-testid="library-type-empty" className="text-muted-foreground text-xs">
+          {t("Nothing matches at this level")}
+        </p>
+      ) : null}
+
       {findOpen ? (
         <QuickFind
           ariaLabel={t("Find in library")}
@@ -488,3 +567,13 @@ const collectionToRow = (c: LibraryCollection): Row => ({
   key: c.key,
   name: c.name,
 })
+
+/** The entries whose label fuzzy-matches `query`, best match first (all, in order, when empty). */
+function filterByQuery<T>(list: T[], label: (entry: T) => string, query: string): T[] {
+  if (!query) return list
+  return list
+    .map((entry) => ({ entry, match: fuzzyMatch(query, label(entry)) }))
+    .filter((e): e is { entry: T; match: NonNullable<typeof e.match> } => e.match !== null)
+    .sort((a, b) => b.match.score - a.match.score)
+    .map((e) => e.entry)
+}

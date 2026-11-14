@@ -1147,5 +1147,13 @@
   "Dataset": "Datasett",
   "scalar": "skalar",
   "datasets": "datasett",
-  "+{count} more": "+{count} til"
+  "+{count} more": "+{count} til",
+  "Zotero Library: type to navigate library": "Zotero-bibliotek: skriv for å navigere i biblioteket",
+  "type to navigate library": "skriv for å navigere i biblioteket",
+  "Close tab": "Lukk fane",
+  "Saved web page": "Lagret nettside",
+  "PI Lab can't show this file type.": "PI Lab kan ikke vise denne filtypen.",
+  "Open in default app": "Åpne i standardappen",
+  "Open in browser": "Åpne i nettleseren",
+  "Loading PDF viewer…": "Laster PDF-visning…"
 }

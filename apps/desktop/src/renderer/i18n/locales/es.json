@@ -1147,5 +1147,13 @@
   "Dataset": "Conjunto de datos",
   "scalar": "escalar",
   "datasets": "conjuntos de datos",
-  "+{count} more": "+{count} más"
+  "+{count} more": "+{count} más",
+  "Zotero Library: type to navigate library": "Biblioteca Zotero: escribe para navegar por la biblioteca",
+  "type to navigate library": "escribe para navegar por la biblioteca",
+  "Close tab": "Cerrar pestaña",
+  "Saved web page": "Página web guardada",
+  "PI Lab can't show this file type.": "PI Lab no puede mostrar este tipo de archivo.",
+  "Open in default app": "Abrir en la aplicación predeterminada",
+  "Open in browser": "Abrir en el navegador",
+  "Loading PDF viewer…": "Cargando visor de PDF…"
 }
