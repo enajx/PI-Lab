@@ -14,6 +14,13 @@ let marker: string
 let servers: NotebookServers
 let opened: string[]
 
+/**
+ * This run's port block. Agents run the suite in several checkouts at once, and two
+ * runs that start a server on the same fixed port at the same moment collide
+ * (EADDRINUSE: "stopped before it was ready"), so each run picks its own block.
+ */
+const PORT_BASE = 20_000 + 30 * Math.floor(Math.random() * 333)
+
 beforeEach(async () => {
   opened = []
   dir = await mkdtemp(join(tmpdir(), "pi-lab-notebook-servers-"))
@@ -22,12 +29,20 @@ beforeEach(async () => {
   uvx = join(dir, "uvx")
   await writeFile(uvx, `#!/bin/sh\nexec "${process.execPath}" "${FIXTURE}" "$@"\n`)
   await chmod(uvx, 0o755)
-  servers = new NotebookServers({ start: 42_740, end: 42_759 }, 10_000, null, async (url) => {
-    opened.push(url)
-  })
+  servers = new NotebookServers(
+    { start: PORT_BASE, end: PORT_BASE + 19 },
+    10_000,
+    null,
+    async (url) => {
+      opened.push(url)
+    },
+  )
 })
 
 afterEach(async () => {
+  // Wait for the servers to exit: a server still shutting down writes to its marker
+  // in `dir` and makes the removal fail with ENOTEMPTY.
+  await servers.stopAll()
   servers.dispose()
   await rm(dir, { recursive: true, force: true })
 })
@@ -80,7 +95,8 @@ function alive(pid: number): boolean {
 describe("NotebookServers", () => {
   test("starts a stand-in server, serves the notebook URL, and stop ends the process", async () => {
     const started = await startJupyter("one", {})
-    expect(started.url).toMatch(/^http:\/\/127\.0\.0\.1:427[45]\d\/lab\/tree\/a\.ipynb\?token=/)
+    expect(started.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/lab\/tree\/a\.ipynb\?token=/)
+    expect(Number(new URL(started.url).port) - PORT_BASE).toBeLessThan(20)
     expect(servers.urlOf("one")).toBe(started.url)
     const port = Number(new URL(started.url).port)
     expect(servers.servesPort(port)).toBe(true)
@@ -120,7 +136,12 @@ describe("NotebookServers", () => {
   })
 
   test("a server that printed its URL but never answered fails at the timeout and is stopped", async () => {
-    const quick = new NotebookServers({ start: 42_760, end: 42_769 }, 1_000, null, async () => {})
+    const quick = new NotebookServers(
+      { start: PORT_BASE + 20, end: PORT_BASE + 29 },
+      1_000,
+      null,
+      async () => {},
+    )
     await expect(
       startJupyterOn(quick, "silent", { PI_LAB_TEST_NOTEBOOK_LISTEN_DELAY_MS: "20000" }),
     ).rejects.toThrow("did not start within 1 seconds")

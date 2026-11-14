@@ -86,6 +86,16 @@ describe("worktrees", () => {
     await removeWorktree(repoDir, wtDir)
     expect(await isGitRepo(wtDir)).toBe(false)
   })
+  test("adds and removes running at the same time in one repository all succeed", async () => {
+    // Git fails one of two adds that overlap ("failed to read .git/worktrees/<name>/commondir").
+    const names = Array.from({ length: 12 }, (_, i) => `wt-${i}`)
+    await Promise.all(names.map((name) => addWorktree(repoDir, join(root, name), name, "main")))
+    await Promise.all([
+      ...names.slice(0, 6).map((name) => removeWorktree(repoDir, join(root, name))),
+      ...names.map((name) => addWorktree(repoDir, join(root, `${name}-b`), `${name}-b`, "main")),
+    ])
+    for (const name of names) expect(await currentBranch(join(root, `${name}-b`))).toBe(`${name}-b`)
+  }, 20_000)
 })
 
 describe("status", () => {

@@ -614,7 +614,11 @@ describe("science.analysis.listFiles", () => {
     expect(listing.truncatedExperiments).toEqual([])
   })
 
-  test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", async () => {
+  // Writes and lists over 2000 files: about 0.4 s alone, but past the 5 s default
+  // when the machine runs other test suites at the same time.
+  test("applies the cap after whitelist filtering so source-heavy repos cannot starve results", {
+    timeout: 20_000,
+  }, async () => {
     await Promise.all(
       Array.from({ length: MAX_LISTED_FILES + 5 }, (_, i) =>
         writeRepoFile(`results/source-${i}.py`, "print('source')\n"),
