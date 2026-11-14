@@ -60,7 +60,7 @@ function selectPreviousBeta(version, releases) {
         release.draft === false &&
         release.prerelease === true &&
         typeof release.tag_name === "string" &&
-        /^v\d+\.\d+\.\d+-beta\.\d+$/.test(release.tag_name),
+        /^v\d+\.\d+\.\d+-beta(\.\d+)?$/.test(release.tag_name),
     )
     .sort((left, right) => compareBetaVersions(right.tag_name.slice(1), left.tag_name.slice(1)))
   const previous = betas[0]

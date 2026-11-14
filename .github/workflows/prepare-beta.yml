@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Beta version, for example 0.1.0-beta.4
+        description: Beta version, for example 0.1.1-beta
         required: true
         type: string
       commit:
@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main || { echo "::error::Run Prepare Beta from main. Select the app commit in the commit input."; exit 1; }
-          [[ "$BETA_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.(0|[1-9][0-9]*)$ ]] || { echo "::error::Choose a numeric Beta version such as 0.1.0-beta.4"; exit 1; }
+          [[ "$BETA_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta(\.(0|[1-9][0-9]*))?$ ]] || { echo "::error::Choose a Beta version such as 0.1.1-beta"; exit 1; }
           [[ "$SOURCE_COMMIT" =~ ^(main|[a-f0-9]{40})$ ]] || { echo "::error::Choose main or a full lowercase main commit SHA"; exit 1; }
           sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_COMMIT" --jq .sha)
           [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::Could not resolve the selected commit"; exit 1; }
@@ -107,7 +107,7 @@ jobs:
           const names = ['RELEASE_REPO_SSH_KEY', 'CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'];
           const missing = names.filter(name => !process.env[name]);
           if (missing.length) throw new Error('Configure these Actions secrets before preparing a Beta: ' + missing.join(', '));
-          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.(0|[1-9]\d*)$/.test(process.env.BETA_VERSION)) throw new Error('Choose a numeric Beta version such as 0.1.0-beta.4');
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta(\.(0|[1-9]\d*))?$/.test(process.env.BETA_VERSION)) throw new Error('Choose a Beta version such as 0.1.1-beta');
           if (!/^(main|[a-f0-9]{40})$/.test(process.env.SOURCE_COMMIT)) throw new Error('Choose main or a full lowercase main commit SHA');
           NODE
 
