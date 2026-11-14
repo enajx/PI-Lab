@@ -14,6 +14,8 @@ export default defineConfig({
             "apps/desktop/scripts/**/*.test.ts",
             "tests/support/**/*.test.ts",
           ],
+          // Git calls read a test config, not the developer's (see the file).
+          setupFiles: ["tests/support/gitTestEnv.ts"],
         },
       },
       {

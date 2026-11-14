@@ -6,6 +6,15 @@ import { runNonInteractiveProcess } from "./nonInteractiveRunner"
 
 const tempDirs: string[] = []
 
+/** True while the process exists (signal 0 only checks). */
+function isAlive(pid: number): boolean {
+  try {
+    return process.kill(pid, 0)
+  } catch {
+    return false
+  }
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
@@ -15,6 +24,9 @@ describe("runNonInteractiveProcess", () => {
     const cwd = await mkdtemp(join(tmpdir(), "pi-lab-process-tree-"))
     tempDirs.push(cwd)
     const pidFile = join(cwd, "descendant.pid")
+    // Long enough for the fixture's Node to start and spawn its descendant under a
+    // loaded machine; a shorter cap kills it before the descendant exists.
+    const timeoutMs = 2_000
     const started = await runNonInteractiveProcess({
       command: process.execPath,
       args: [
@@ -23,7 +35,7 @@ describe("runNonInteractiveProcess", () => {
         pidFile,
       ],
       cwd,
-      timeoutMs: 500,
+      timeoutMs,
     })
     let result: Awaited<typeof started.completion>
     let alive = true
@@ -31,22 +43,26 @@ describe("runNonInteractiveProcess", () => {
       result = await Promise.race([
         started.completion,
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("completion stayed pending")), 2500).unref(),
+          setTimeout(
+            () => reject(new Error("completion stayed pending")),
+            timeoutMs + 2_500,
+          ).unref(),
         ),
       ])
     } finally {
       const descendant = Number(await readFile(pidFile, "utf8"))
-      // A failed assertion must not leave the fixture child alive.
-      try {
-        process.kill(descendant, 0)
-      } catch {
-        alive = false
+      // A killed descendant still exists until its new parent reaps it; allow for that.
+      const deadline = Date.now() + 2_000
+      while (isAlive(descendant) && Date.now() < deadline) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 20))
       }
+      alive = isAlive(descendant)
+      // A failed assertion must not leave the fixture child alive.
       if (alive) process.kill(descendant, "SIGKILL")
     }
-    expect(result.error).toBe("Timed out after 500ms")
+    expect(result.error).toBe(`Timed out after ${timeoutMs}ms`)
     expect(alive).toBe(false)
-  })
+  }, 10_000)
 
   test("inherits the app environment, applies agent env, and uses the exact project cwd", async () => {
     const cwd = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-one-shot-")))

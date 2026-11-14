@@ -95,6 +95,29 @@ export interface AddWorktreeOptions {
   createBranch?: boolean
 }
 
+/** The last queued worktree add or remove per repository folder; it never rejects. */
+const worktreeQueues = new Map<string, Promise<void>>()
+
+/**
+ * Run worktree adds and removes of one repository one at a time. Git does not
+ * guard `.git/worktrees` against itself: a `git worktree add` that runs while
+ * another add is writing there can fail with "failed to read
+ * .git/worktrees/<name>/commondir", e.g. when two agents start at once.
+ */
+function oneWorktreeChangeAtATime<T>(repoDir: string, change: () => Promise<T>): Promise<T> {
+  const previous = worktreeQueues.get(repoDir) ?? Promise.resolve()
+  const result = previous.then(change)
+  const done = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  worktreeQueues.set(repoDir, done)
+  void done.then(() => {
+    if (worktreeQueues.get(repoDir) === done) worktreeQueues.delete(repoDir)
+  })
+  return result
+}
+
 /** Add a worktree, creating its branch unless `createBranch` is false. */
 export async function addWorktree(
   repoDir: string,
@@ -111,7 +134,7 @@ export async function addWorktree(
   } else {
     args.push(worktreeDir, branch)
   }
-  await runGit(repoDir, args)
+  await oneWorktreeChangeAtATime(repoDir, () => runGit(repoDir, args))
 }
 
 /**
@@ -131,15 +154,17 @@ export async function hasChanges(dir: string): Promise<boolean> {
 
 /** Force-remove a worktree and prune Git metadata; tolerate one already gone. */
 export async function removeWorktree(repoDir: string, worktreeDir: string): Promise<void> {
-  try {
-    await runGit(repoDir, ["worktree", "remove", "--force", worktreeDir])
-  } catch (error) {
-    if (!(error instanceof GitError)) throw error
-    const stderr = error.stderr.toLowerCase()
-    const alreadyGone = stderr.includes("is not a working tree") || stderr.includes("not found")
-    if (!alreadyGone) throw error
-  }
-  await runGit(repoDir, ["worktree", "prune"], { allowFailure: true })
+  await oneWorktreeChangeAtATime(repoDir, async () => {
+    try {
+      await runGit(repoDir, ["worktree", "remove", "--force", worktreeDir])
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error
+      const stderr = error.stderr.toLowerCase()
+      const alreadyGone = stderr.includes("is not a working tree") || stderr.includes("not found")
+      if (!alreadyGone) throw error
+    }
+    await runGit(repoDir, ["worktree", "prune"], { allowFailure: true })
+  })
 }
 
 export async function status(dir: string): Promise<GitChange[]> {
