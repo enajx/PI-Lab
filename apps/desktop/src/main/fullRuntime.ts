@@ -634,13 +634,17 @@ export class FullRuntime {
       credentialCipher: {
         encrypt: (value) => {
           if (!safeStorage.isEncryptionAvailable()) {
-            throw new Error("Your operating system keychain is unavailable for API-key storage")
+            throw new Error(
+              "PI Lab could not use your system keychain to save this key. If you denied keychain access, quit and reopen PI Lab, then allow access when asked.",
+            )
           }
           return safeStorage.encryptString(value).toString("base64")
         },
         decrypt: (encrypted) => {
           if (!safeStorage.isEncryptionAvailable()) {
-            throw new Error("Your operating system keychain is unavailable for reading credentials")
+            throw new Error(
+              "PI Lab could not use your system keychain to read saved keys. If you denied keychain access, quit and reopen PI Lab, then allow access when asked.",
+            )
           }
           return safeStorage.decryptString(Buffer.from(encrypted, "base64"))
         },
