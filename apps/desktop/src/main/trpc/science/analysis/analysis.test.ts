@@ -1671,7 +1671,7 @@ describe("science.analysis.preview", () => {
     expect(preview.note).toBeTruthy()
   })
 
-  test(".npz is metadata-only (zips are not unpacked)", async () => {
+  test("a .npz cut to its first zip bytes is a note, not an error", async () => {
     await writeRepoFile("arrays.npz", Buffer.from([0x50, 0x4b, 0x03, 0x04]))
     const project = await h.caller.projects.open({ path: h.repoDir })
     const preview = await h.caller.science.analysis.preview({
@@ -1683,6 +1683,7 @@ describe("science.analysis.preview", () => {
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
     expect(preview.kind).toBe("npz")
+    expect(preview.note).toMatch(/not a zip/i)
   })
 
   test("a pickle that names os.system is refused without running it", async () => {

@@ -120,6 +120,16 @@ describe("table operations", () => {
     expect(page.rows[0]?.slice(0, 3)).toEqual(["1", "0.16", "18"])
   })
 
+  test("group by with no value columns counts the rows per group", async () => {
+    const page = await rowsOf({
+      ...NONE,
+      aggregation: { kind: "groupBy", by: ["question"], values: [] },
+    })
+    expect(page.headers).toEqual(["question", "count"])
+    expect(page.rows[0]).toEqual(["1", "18"])
+    expect(page.defaultSpec).not.toBeNull()
+  })
+
   test("pivot table", async () => {
     const page = await rowsOf({
       ...NONE,

@@ -311,12 +311,16 @@ export const MAX_NOTEBOOK_BYTES = 16 * 1024 * 1024
  * (a {@link LargeFilePreview}), or null for no limit. Measured preview times
  * (`md/specs/analysis-artifacts.md`): only pickles, read whole, pass about 1 s
  * (near 45 MB of Python objects); HDF5 and Parquet read only the shown part and
- * stay under 20 ms at 100 MB, as do CSV and numeric NumPy.
+ * stay under 20 ms at 100 MB, as do CSV and numeric NumPy. SQLite reads by
+ * page, so only what is shown is read.
  */
-export const LARGE_FILE_BYTES: Readonly<Record<"pickle" | "hdf5" | "parquet", number | null>> = {
+export const LARGE_FILE_BYTES: Readonly<
+  Record<"pickle" | "hdf5" | "parquet" | "sqlite", number | null>
+> = {
   pickle: 32 * 1024 * 1024,
   hdf5: null,
   parquet: null,
+  sqlite: null,
 }
 
 // ── Chart helpers ────────────────────────────────────────────────────────────

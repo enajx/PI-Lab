@@ -206,6 +206,23 @@ describe("metric logs and row limit", () => {
     expect(table.headers[0]).toBe("step")
   })
 
+  test("a CSV with no header row names its columns column 1, column 2, ...", async () => {
+    const table = await csvTable(
+      "1,0.0152026591822505,Y2Jk,12\n2,0.0086536910384893,Y2Jl,12\n3,0.0057,Y2Jm,13\n",
+    )
+    expect(table.headers).toEqual(["column 1", "column 2", "column 3", "column 4"])
+    expect(table.totalRows).toBe(3)
+    expect(table.rows[0]?.[1]).toBe("0.0152026591822505")
+  })
+
+  test("a header of names stays the header, also when the first data row is numbers", async () => {
+    const table = await csvTable("step,loss\n1,0.5\n2,0.25\n")
+    expect(table.headers).toEqual(["step", "loss"])
+    // Only text columns: the first line is taken as the header, as before.
+    const text = await csvTable("name,city\nada,london\nalan,wilmslow\n")
+    expect(text.headers).toEqual(["name", "city"])
+  })
+
   test("charts read at most 100,000 rows and say so", async () => {
     dir = await mkdtemp(join(tmpdir(), "pi-lab-tables-"))
     const path = join(dir, "long-log.csv")
@@ -226,5 +243,78 @@ describe("metric logs and row limit", () => {
     })
     expect(plot.rowsUsed).toBe(100_000)
     expect(plot.partial).toBe(true)
+  })
+})
+
+describe("CSV delimiter detection and blank lines", () => {
+  let dir = ""
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true })
+  })
+
+  /** Write `body` to a temp file named `name` and return its table preview. */
+  async function table(name: string, body: string): Promise<TablePreview> {
+    dir = await mkdtemp(join(tmpdir(), "pi-lab-delim-"))
+    const path = join(dir, name)
+    await writeFile(path, body)
+    return tableOf(await previewDataFile(path, name, NO_LOAD))
+  }
+
+  const HEADER = ["time", "cell.id", "cell.type", "cell.center.x", "G"]
+
+  /** Synthetic time blocks of cell rows, joined by `sep`, a blank line between blocks. */
+  function blocks(sep: string): string {
+    const out = [HEADER.join(sep)]
+    for (const time of [400, 410]) {
+      for (let cell = 1; cell <= 3; cell++) {
+        out.push([time, cell, 1, 100 + cell * 0.5, 8.2e-5 * cell].join(sep))
+      }
+      out.push("")
+    }
+    return `${out.join("\n")}\n`
+  }
+
+  test("a .csv separated by tabs with blank lines between blocks", async () => {
+    const t = await table("cells.csv", blocks("\t"))
+    expect(t.headers).toEqual(HEADER)
+    expect(t.totalRows).toBe(6)
+    expect(t.rows.every((row) => row.length === 5 && row[0] !== "")).toBe(true)
+  })
+
+  test("a .csv separated by runs of spaces", async () => {
+    const lines = [
+      "  time   cell.id  value",
+      "  400    1        0.5",
+      "  400    2        0.25  ",
+      "",
+      "",
+    ]
+    const t = await table("spaces.csv", lines.join("\n"))
+    expect(t.headers).toEqual(["time", "cell.id", "value"])
+    expect(t.rows).toEqual([
+      ["400", "1", "0.5"],
+      ["400", "2", "0.25"],
+    ])
+  })
+
+  test("a .csv separated by semicolons", async () => {
+    const t = await table("semi.csv", "a;b;c\n1;2,5;3\n4;5;6\n")
+    expect(t.headers).toEqual(["a", "b", "c"])
+    expect(t.rows[0]).toEqual(["1", "2,5", "3"])
+  })
+
+  test("a comma CSV with quoted ; and spaces still splits on commas", async () => {
+    const t = await table("quoted.csv", 'name,note,score\n"a b","x; y",1\n"c d","p; q r",2\n')
+    expect(t.headers).toEqual(["name", "note", "score"])
+    expect(t.rows).toEqual([
+      ["a b", "x; y", "1"],
+      ["c d", "p; q r", "2"],
+    ])
+  })
+
+  test("a one-column CSV stays one column", async () => {
+    const t = await table("one.csv", "loss\n0.5\n0.25\n\n0.125\n")
+    expect(t.headers).toEqual(["loss"])
+    expect(t.rows).toEqual([["0.5"], ["0.25"], ["0.125"]])
   })
 })

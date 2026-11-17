@@ -1,8 +1,11 @@
-"""Write the HDF5 and Parquet fixtures for the Analysis reader tests.
+"""Write the HDF5, Parquet, SQLite and NumPy zip fixtures for the Analysis reader tests.
 
 Run from this folder:
   uv run --no-project --with h5py --with pandas --with pyarrow python make_fixtures.py
 """
+
+import os
+import sqlite3
 
 import h5py
 import numpy as np
@@ -68,3 +71,26 @@ with h5py.File("long.h5", "w") as f:
         table[name] = long[name].to_numpy()
     f["table"] = table
 long.to_csv("long.csv", index=False)
+
+# A small SQLite run database: a metric log, a text table and a view. Synthetic.
+if os.path.exists("runs.db"):
+    os.remove("runs.db")
+db = sqlite3.connect("runs.db")
+db.execute("CREATE TABLE metrics (step INTEGER, loss REAL, acc REAL)")
+db.executemany(
+    "INSERT INTO metrics VALUES (?, ?, ?)",
+    [(step, round(1.0 / (step + 1), 6), round(step / 50, 4)) for step in range(50)],
+)
+db.execute("CREATE TABLE config (key TEXT, value TEXT)")
+db.executemany(
+    "INSERT INTO config VALUES (?, ?)",
+    [("model", "model-x"), ("optimizer", "adam"), ("seed", "0")],
+)
+db.execute("CREATE VIEW late_metrics AS SELECT * FROM metrics WHERE step >= 25")
+db.commit()
+db.close()
+
+# NumPy zips: a 1-D float array and a 2-D int array, stored and deflated. Synthetic.
+npz_arrays = {"loss": 1.0 / (np.arange(100) + 1), "grid": np.arange(12, dtype="<i4").reshape(3, 4)}
+np.savez("arrays.npz", **npz_arrays)
+np.savez_compressed("arrays-compressed.npz", **npz_arrays)

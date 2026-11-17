@@ -247,6 +247,17 @@ function groupBy(
   const by = spec.by.map((name) => columnOf(frame, name))
   const values = spec.values.map((v) => ({ ...v, column: columnOf(frame, v.column) }))
   const groups = groupRows(rows, by)
+  // With no value columns, the rows per group are counted (pandas `size()`), so there is always a result to show.
+  if (values.length === 0) {
+    const columns: Cell[][] = [...spec.by.map(() => [] as Cell[]), []]
+    for (const group of groups) {
+      group.key.forEach((cell, i) => {
+        columns[i]?.push(cell)
+      })
+      columns[by.length]?.push(group.rows.length)
+    }
+    return frameOf([...spec.by, "count"], columns, frame.partial)
+  }
   const headers = [...spec.by, ...spec.values.map((v) => `${v.column} (${v.fn})`)]
   const columns: Cell[][] = headers.map(() => [])
   for (const group of groups) {

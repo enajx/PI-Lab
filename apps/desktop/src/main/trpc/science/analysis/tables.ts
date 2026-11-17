@@ -261,6 +261,13 @@ export function defaultSpecOf(frame: Frame, columns: ColumnInfo[]): ChartSpec | 
           columns.find((c) => c.kind === "bool") ??
           columns.find((c) => c.kind === "number" && c.name !== x.name && c.role !== "index"),
       ].filter((c): c is ColumnInfo => c !== undefined)
+  // No measure: plot the first other numeric column (e.g. a group's row count).
+  if (y.length === 0) {
+    const other = columns.find(
+      (c) => (c.kind === "number" || c.kind === "bool") && c.name !== x.name && c.role !== "index",
+    )
+    if (other) y.push(other)
+  }
   if (y.length === 0) return null
   const xColumn = frame.columns.find((c) => c.name === x.name)
   return {
@@ -502,13 +509,60 @@ export function buildPlot(frame: Frame, spec: ChartSpec): PlotPreview {
 // ── CSV/TSV ──────────────────────────────────────────────────────────────────
 
 /**
- * Read a CSV/TSV into a frame: at most `maxBytes` and {@link MAX_FRAME_ROWS}
- * rows. A row cut by the byte limit is dropped. Quoted fields may hold the
- * delimiter but not line breaks.
+ * How the fields of a delimited file are split: one character (with
+ * double-quote quoting, see {@link parseDelimited}) or runs of whitespace
+ * (leading and trailing spaces ignored, quotes are plain characters).
+ */
+export type Delimiter = { kind: "char"; char: string } | { kind: "whitespace" }
+
+/** Non-blank lines sampled to choose the delimiter. */
+const DELIMITER_SAMPLE_LINES = 20
+/** Character delimiters tried, after the extension's own. */
+const CHAR_DELIMITERS = [",", "\t", ";", "|"] as const
+
+/** Split one line with `delimiter`. */
+function splitLine(line: string, delimiter: Delimiter): string[] {
+  if (delimiter.kind === "whitespace") return line.trim().split(/\s+/)
+  return parseDelimited(line, delimiter.char)
+}
+
+/**
+ * Choose how to split a file from its first non-blank lines (header first).
+ * A delimiter qualifies when it splits the header into more than one field
+ * and more than half of the sampled lines into the same number of fields.
+ * `hint` (the extension's delimiter) is tried first, then `,`, tab, `;`,
+ * `|`, and runs of whitespace last. When none qualifies, the file is one
+ * column split by `hint`.
+ */
+export function detectDelimiter(lines: ReadonlyArray<string>, hint: string): Delimiter {
+  const sample = lines.slice(0, DELIMITER_SAMPLE_LINES)
+  const candidates: Delimiter[] = [
+    { kind: "char", char: hint },
+    ...CHAR_DELIMITERS.filter((char) => char !== hint).map(
+      (char): Delimiter => ({ kind: "char", char }),
+    ),
+    { kind: "whitespace" },
+  ]
+  for (const delimiter of candidates) {
+    const counts = sample.map((line) => splitLine(line, delimiter).length)
+    const headerCount = counts[0] ?? 0
+    if (headerCount < 2) continue
+    const matching = counts.filter((count) => count === headerCount).length
+    if (matching * 2 > counts.length) return delimiter
+  }
+  return { kind: "char", char: hint }
+}
+
+/**
+ * Read a delimited text file (CSV/TSV) into a frame: at most `maxBytes` and
+ * {@link MAX_FRAME_ROWS} rows. The delimiter is chosen from the first lines
+ * ({@link detectDelimiter}), with `hint` (the extension's: `,` or tab) first.
+ * Blank lines are skipped. A row cut by the byte limit is dropped. Quoted
+ * fields may hold the delimiter but not line breaks.
  */
 export async function readDelimitedFrame(
   abs: string,
-  delimiter: string,
+  hint: string,
   maxBytes: number,
 ): Promise<Frame | null> {
   const file = await open(abs, "r")
@@ -528,17 +582,41 @@ export async function readDelimitedFrame(
   } finally {
     await file.close()
   }
-  const lines = text.split(/\r?\n/)
-  if (bytesCut) lines.pop()
-  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
-  if (lines.length === 0) return null
+  const allLines = text.split(/\r?\n/)
+  if (bytesCut) allLines.pop()
   // Excel and others start the file with a byte order mark; it is not part of the header.
-  const headers = parseDelimited((lines[0] ?? "").replace(/^\uFEFF/, ""), delimiter)
-  const body = lines.slice(1)
+  if (allLines.length > 0) allLines[0] = (allLines[0] ?? "").replace(/^\uFEFF/, "")
+  const lines = allLines.filter((line) => line.trim() !== "")
+  if (lines.length === 0) return null
+  const delimiter = detectDelimiter(lines, hint)
+  const first = splitLine(lines[0] ?? "", delimiter)
+  const hasHeader = looksLikeHeader(
+    first,
+    lines.slice(1, 21).map((line) => splitLine(line, delimiter)),
+  )
+  const headers = hasHeader ? first : first.map((_, col) => `column ${col + 1}`)
+  const body = hasHeader ? lines.slice(1) : lines
   const rowsCut = body.length > MAX_FRAME_ROWS
-  const rows = body.slice(0, MAX_FRAME_ROWS).map((line) => parseDelimited(line, delimiter))
+  const rows = body.slice(0, MAX_FRAME_ROWS).map((line) => splitLine(line, delimiter))
   const partial = bytesCut || rowsCut
   return frameFromText(headers, rows, partial ? rows.length : body.length, partial)
+}
+
+/**
+ * Whether a file's first line is a header, as Python's `csv.Sniffer.has_header`
+ * decides: when every column whose later values are numbers also has a number
+ * on the first line, that line is data. With no numeric column the first line
+ * is taken as the header.
+ */
+function looksLikeHeader(first: string[], sample: string[][]): boolean {
+  let numericColumns = 0
+  for (let col = 0; col < first.length; col++) {
+    const values = sample.map((row) => row[col] ?? "").filter((cell) => !isBlank(cell))
+    if (values.length === 0 || values.some((cell) => numberOf(cell) === null)) continue
+    numericColumns++
+    if (numberOf(first[col]) === null) return true
+  }
+  return numericColumns === 0
 }
 
 /** Split one CSV/TSV line into fields, honouring double quotes. */
