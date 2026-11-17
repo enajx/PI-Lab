@@ -119,6 +119,13 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Animatable colour for the default hover overlay (see the base layer). */
+@property --hover-overlay {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
@@ -136,6 +143,62 @@
   h2,
   h3 {
     color: var(--heading);
+  }
+
+  /*
+   * Default hover feedback for everything clickable: the same soft overlay of the
+   * text colour as the menu highlight below, fading in over 120 ms. It is drawn as a
+   * background-image layer, so it shows on top of any background colour (plain,
+   * primary, selected) without replacing it. In the base layer, so a component's own
+   * background-image or transition utilities still win. It applies only where no
+   * hover was designed: elements with their own `hover:` styles, elements whose
+   * icons or labels have one, and everything inside a container that has one
+   * (cards, rows) keep their designed hover. A card or row whose inner element is
+   * the click target can take the same highlight with `hover-overlay`.
+   * Menu options keep their own highlight (below). Opt out with `data-no-hover`.
+   */
+  :is(button, a[href], [role="button"], select, summary):not(
+    :disabled,
+    [aria-disabled="true"],
+    [data-no-hover] *,
+    [data-no-hover],
+    [role^="menuitem"],
+    [role="option"],
+    [class*="hover:"],
+    [class*="hover:"] *,
+    :has([class*="hover:"]),
+    .hover-overlay,
+    .hover-overlay *
+  ) {
+    background-image: linear-gradient(var(--hover-overlay), var(--hover-overlay));
+    transition: --hover-overlay 120ms ease;
+  }
+
+  :is(button, a[href], [role="button"], select, summary):not(
+    :disabled,
+    [aria-disabled="true"],
+    [data-no-hover] *,
+    [data-no-hover],
+    [role^="menuitem"],
+    [role="option"],
+    [class*="hover:"],
+    [class*="hover:"] *,
+    :has([class*="hover:"]),
+    .hover-overlay,
+    .hover-overlay *
+  ):hover {
+    --hover-overlay: color-mix(in oklch, var(--foreground) 14%, transparent);
+  }
+
+  /* The same highlight for a whole card or row whose inner link or button is the
+     click target; everything inside it then skips the default. */
+  .hover-overlay {
+    background-image: linear-gradient(var(--hover-overlay), var(--hover-overlay));
+    transition: --hover-overlay 120ms ease;
+  }
+
+  .hover-overlay:hover {
+    --hover-overlay: color-mix(in oklch, var(--foreground) 14%, transparent);
   }
 
   body {
@@ -584,9 +647,9 @@
 }
 
 :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
-    :hover,
-    :focus-visible
-  ):not(:disabled, [aria-disabled="true"]) {
+  :hover,
+  :focus-visible
+):not(:disabled, [aria-disabled="true"]) {
   background-color: color-mix(in oklch, var(--foreground) 14%, transparent);
   color: var(--color-hover-foreground);
 }

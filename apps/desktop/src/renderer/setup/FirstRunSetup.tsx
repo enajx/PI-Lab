@@ -577,13 +577,17 @@ function HarnessCard({
   return (
     <div
       className={cn(
-        "rounded-lg border px-3 py-2",
+        // The whole card highlights when its select area is hovered; the area itself
+        // opts out of the default button hover, which would draw a hard-edged block.
+        "rounded-lg border px-3 py-2 transition-colors has-[[data-card-select]:enabled:hover]:bg-muted/60",
         selected ? "border-primary bg-primary/5" : "border-border",
       )}
     >
       <div className="flex items-start gap-3">
         <button
           type="button"
+          data-card-select
+          data-no-hover
           className="min-w-0 flex-1 text-start"
           onClick={detected ? onSelect : undefined}
           disabled={!detected}

@@ -69,7 +69,7 @@ const navRowClass = "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm tran
 /** Active/inactive colours for a nav row, layered on top of `navRowClass`. */
 const navStateClass = (isActive: boolean): string =>
   isActive
-    ? "bg-selected text-selected-accent-foreground"
+    ? "hover-overlay bg-selected text-selected-accent-foreground"
     : "text-sidebar-foreground hover:bg-accent/60"
 
 /**
