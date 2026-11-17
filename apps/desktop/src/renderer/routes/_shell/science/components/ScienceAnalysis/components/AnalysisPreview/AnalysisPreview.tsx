@@ -15,6 +15,7 @@ import { useTRPC, useTRPCClient } from "../../../../../../../trpc/react"
 import { Markdown } from "../../../../../projects/components/RightSidebar/components/Markdown"
 import { ArrayGrid } from "../ArrayGrid"
 import { MetricChart } from "../MetricChart"
+import { TableChart } from "../TableChart"
 
 /** The app's bundled PDF.js viewer (the one PDF tabs use), loaded on first use. */
 const PdfViewer = lazy(() =>
@@ -69,6 +70,13 @@ export function AnalysisPreview({
   const preview = useQuery({
     ...trpc.science.analysis.preview.queryOptions({ projectId, relPath, load, dataset }),
     enabled: !interactive && !pdf && !media,
+    staleTime: 30_000,
+  })
+  // A load that fails (out of memory or time) falls back to what can be read without it.
+  const loadFailed = load && preview.isError
+  const fallback = useQuery({
+    ...trpc.science.analysis.preview.queryOptions({ projectId, relPath, load: false, dataset }),
+    enabled: loadFailed,
     staleTime: 30_000,
   })
   const renderTool = documentToolForFile(
@@ -170,6 +178,35 @@ export function AnalysisPreview({
           />
         ) : preview.isLoading ? (
           <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
+        ) : loadFailed ? (
+          <div className="flex flex-col gap-3">
+            <div
+              data-testid="analysis-preview-load-failed"
+              className="flex select-text cursor-text flex-col gap-1 text-sm"
+            >
+              <p className="text-destructive">
+                {`${t("Loading the whole file failed:")} ${preview.error?.message ?? ""}`}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t("Showing what can be read without loading it.")}
+              </p>
+            </div>
+            {fallback.data ? (
+              <PreviewBody
+                preview={fallback.data}
+                kind={kind}
+                projectId={projectId}
+                relPath={relPath}
+                dataset={dataset}
+                onLoad={() => void preview.refetch()}
+                onDataset={(next) => setChoice({ relPath, load: false, dataset: next })}
+              />
+            ) : fallback.isError ? (
+              <p className="select-text cursor-text text-destructive text-sm">
+                {fallback.error.message}
+              </p>
+            ) : null}
+          </div>
         ) : preview.isError ? (
           <p
             data-testid="analysis-preview-error"
@@ -181,6 +218,9 @@ export function AnalysisPreview({
           <PreviewBody
             preview={preview.data}
             kind={kind}
+            projectId={projectId}
+            relPath={relPath}
+            dataset={dataset}
             onLoad={() => setChoice({ relPath, load: true, dataset })}
             onDataset={(next) => setChoice({ relPath, load, dataset: next })}
           />
@@ -559,11 +599,18 @@ function NotebookOutputView({ output }: { output: NotebookOutput }) {
 function PreviewBody({
   preview,
   kind,
+  projectId,
+  relPath,
+  dataset,
   onLoad,
   onDataset,
 }: {
   preview: DataFilePreview
   kind: DataFileKind
+  projectId: string
+  relPath: string
+  /** The chosen HDF5 dataset, or null. */
+  dataset: string | null
   /** Read a file above its size limit (the Large file prompt's Load button). */
   onLoad: () => void
   /** Preview another dataset of an HDF5 file. */
@@ -573,21 +620,49 @@ function PreviewBody({
   switch (preview.type) {
     case "large":
       return (
-        <div
-          data-testid="analysis-preview-large"
-          className="flex flex-col items-start gap-3 rounded-md border border-border bg-card/40 p-4 text-sm"
-        >
-          <p className="select-text cursor-text">
-            {`${t("Large file")} (${formatMegabytes(preview.size)}), ${t("loading may be slow")}`}
-          </p>
-          <button
-            type="button"
-            data-testid="analysis-preview-load"
-            onClick={onLoad}
-            className="rounded-md border border-border px-2 py-1 text-xs"
+        <div className="flex flex-col gap-3">
+          <div
+            data-testid="analysis-preview-large"
+            className="flex flex-col items-start gap-3 rounded-md border border-border bg-card/40 p-4 text-sm"
           >
-            {t("Load")}
-          </button>
+            <p className="select-text cursor-text">
+              {preview.huge
+                ? `${t("Large file")} (${formatMegabytes(preview.size)}). ${t("Loading it may be slow or fail; if it fails, Analysis shows what it can read without loading.")}`
+                : `${t("Large file")} (${formatMegabytes(preview.size)}), ${t("loading may be slow")}`}
+            </p>
+            <button
+              type="button"
+              data-testid="analysis-preview-load"
+              onClick={onLoad}
+              className="rounded-md border border-border px-2 py-1 text-xs"
+            >
+              {preview.huge ? t("Load anyway") : t("Load")}
+            </button>
+          </div>
+          {preview.partial ? (
+            <div data-testid="analysis-preview-partial" className="flex flex-col gap-2">
+              <p className="text-muted-foreground text-xs">
+                {t("The start of the file, read without loading it:")}
+              </p>
+              {preview.partial.type === "table" ? (
+                <TableBody preview={preview.partial} />
+              ) : (
+                <PreviewBody
+                  preview={preview.partial}
+                  kind={kind}
+                  projectId={projectId}
+                  relPath={relPath}
+                  dataset={dataset}
+                  onLoad={onLoad}
+                  onDataset={onDataset}
+                />
+              )}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-xs">
+              {t("Nothing of this file is shown until it is loaded.")}
+            </p>
+          )}
         </div>
       )
     case "datasets":
@@ -616,6 +691,9 @@ function PreviewBody({
           <PreviewBody
             preview={preview.preview}
             kind={kind}
+            projectId={projectId}
+            relPath={relPath}
+            dataset={preview.selected}
             onLoad={onLoad}
             onDataset={onDataset}
           />
@@ -624,7 +702,15 @@ function PreviewBody({
     case "notebook":
       return <NotebookBody cells={preview.cells} />
     case "table":
-      return <TableBody preview={preview} />
+      return (
+        <TableChart
+          projectId={projectId}
+          relPath={relPath}
+          dataset={dataset}
+          preview={preview}
+          renderTable={() => <TableBody preview={preview} />}
+        />
+      )
     case "chart":
       return <MetricChart preview={preview} />
     case "array":
@@ -707,7 +793,7 @@ function TableBody({ preview }: { preview: Extract<DataFilePreview, { type: "tab
       </div>
       <p data-testid="analysis-preview-rowcount" className="text-muted-foreground text-xs">
         {preview.truncated
-          ? `${t("Showing first")} ${preview.rows.length} ${t("of")} ${preview.totalRows}+ ${t("rows")}`
+          ? `${t("Showing first")} ${preview.rows.length} ${t("of")} ${preview.totalRows}${preview.partial ? "+" : ""} ${t("rows")}`
           : `${preview.totalRows} ${preview.totalRows === 1 ? t("row") : t("rows")}`}
       </p>
     </div>

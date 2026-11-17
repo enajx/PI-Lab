@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process"
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { openAnalysisExperiment } from "./fixtures/analysis"
+import { openAnalysisExperiment, openAnalysisFolder } from "./fixtures/analysis"
 import {
   type ElectronApplication,
   _electron as electron,
@@ -80,29 +80,33 @@ test.beforeEach(async () => {
   await copyFile(join(FIXTURES, "data", "runs.h5"), join(run, "runs.h5"))
   await copyFile(join(FIXTURES, "data", "frame-zstd.parquet"), join(run, "frame.parquet"))
   await writeFile(join(run, "big.pkl"), largePickle(LARGE_BYTES))
+  // The same long-format table twice under one file name (synthetic).
+  await copyFile(join(FIXTURES, "data", "long.csv"), join(run, "options.csv"))
+  await mkdir(join(run, "other"), { recursive: true })
+  await copyFile(join(FIXTURES, "data", "long.csv"), join(run, "other", "options.csv"))
   await writeFile(join(repo, "README.md"), "# fixture\n")
   await execFileAsync("git", ["-C", repo, "add", "."])
   await execFileAsync("git", ["-C", repo, "commit", "-m", "fixture"])
 })
 
 test.afterEach(async () => {
-  if (app) {
-    const child = app.process()
-    const forceExit = setTimeout(() => child.kill("SIGKILL"), 5_000)
-    await app
-      .evaluate(({ BrowserWindow }) => {
-        for (const window of BrowserWindow.getAllWindows()) window.destroy()
-      })
-      .catch(() => undefined)
-    await app.close().catch(() => child.kill("SIGKILL"))
-    clearTimeout(forceExit)
-    app = undefined
-  }
+  await closeApp()
   await rm(dataDir, { recursive: true, force: true })
 })
 
 /** Launch the app on the temp project and open its Analysis tab on `run-a`. */
 async function openAnalysis(): Promise<Page> {
+  await launch()
+  const window = await (app as ElectronApplication).firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await openAnalysisExperiment(window, "run-a")
+  return window
+}
+
+/** Launch the real app on the temp project. */
+async function launch(): Promise<void> {
   app = await electron.launch({
     executablePath: packagedBinary ?? ELECTRON,
     args: packagedBinary ? [] : [MAIN],
@@ -116,12 +120,21 @@ async function openAnalysis(): Promise<Page> {
       PI_LAB_TEST_OPEN_PROJECT: repo,
     },
   })
-  const window = await app.firstWindow()
-  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
-  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
-  await openAnalysisExperiment(window, "run-a")
-  return window
+}
+
+/** Close the app as afterEach does (used to restart it). */
+async function closeApp(): Promise<void> {
+  if (!app) return
+  const child = app.process()
+  const forceExit = setTimeout(() => child.kill("SIGKILL"), 5_000)
+  await app
+    .evaluate(({ BrowserWindow }) => {
+      for (const window of BrowserWindow.getAllWindows()) window.destroy()
+    })
+    .catch(() => undefined)
+  await app.close().catch(() => child.kill("SIGKILL"))
+  clearTimeout(forceExit)
+  app = undefined
 }
 
 /** Click a listed file of `run-a` by its name. */
@@ -159,8 +172,11 @@ test("an object .npy of None says what it stores, and a pandas pickle is a table
     "Stores Python objects; all 200 values are None",
   )
   await selectFile(window, "frame.pkl")
+  // A metric log (step, loss): it opens as a chart; Table shows the rows.
+  await expect(window.getByTestId("analysis-plot")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("analysis-view-table").click()
   const table = window.getByTestId("analysis-preview-table")
-  await expect(table.locator("thead th")).toHaveText(["", "step", "loss", "name", "when"])
+  await expect(table.locator("thead th")).toHaveText(["index", "step", "loss", "name", "when"])
   await expect(table.locator("tbody tr").first().locator("td")).toHaveText([
     "0",
     "0",
@@ -181,6 +197,8 @@ test("an HDF5 file lists its datasets and previews the chosen one", async () => 
   await expect(window.getByTestId("analysis-preview-chart")).toBeVisible()
   await expect(window.getByTestId("analysis-chart-legend")).toContainText("loss")
   await select.selectOption("/eval/table")
+  await expect(window.getByTestId("analysis-plot-legend")).toHaveText("acc")
+  await window.getByTestId("analysis-view-table").click()
   const table = window.getByTestId("analysis-preview-table")
   await expect(table.locator("thead th")).toHaveText(["step", "acc"])
   await expect(table.locator("tbody tr")).toHaveCount(3)
@@ -190,6 +208,8 @@ test("a Parquet file previews its first rows", async () => {
   test.setTimeout(120_000)
   const window = await openAnalysis()
   await selectFile(window, "frame.parquet")
+  await expect(window.getByTestId("analysis-plot")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("analysis-view-table").click()
   const table = window.getByTestId("analysis-preview-table")
   await expect(table.locator("thead th")).toHaveText(["step", "loss", "name", "when"])
   await expect(table.locator("tbody tr").last().locator("td")).toHaveText([
@@ -211,4 +231,91 @@ test("a large file asks before loading and loads on Load", async () => {
   await expect(window.getByTestId("analysis-preview-json")).toContainText("b'", {
     timeout: 30_000,
   })
+})
+
+test("a long-format table opens as a table; the chart builder plots it and the choice is kept for that file name", async () => {
+  test.setTimeout(180_000)
+  let window = await openAnalysis()
+  await selectFile(window, "options.csv")
+  await expect(window.getByTestId("analysis-preview-table")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("analysis-view-table")).toHaveAttribute("aria-selected", "true")
+
+  // Chart: mean probability per question.
+  await window.getByTestId("analysis-view-chart").click()
+  const plot = window.getByTestId("analysis-plot")
+  await expect(plot).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("analysis-plot-legend")).toHaveText("probability")
+  await expect(plot.locator(".recharts-xAxis")).toContainText("question")
+
+  // Split by option, with a min-to-max band, as bars.
+  await window.getByTestId("analysis-chart-settings").click()
+  await window.getByTestId("analysis-chart-split").selectOption("option")
+  await expect(window.getByTestId("analysis-plot-legend")).toHaveText(
+    /option=a.*option=b.*option=c/,
+  )
+  await window.getByTestId("analysis-chart-band").selectOption("minmax")
+  await expect(plot.locator(".recharts-area")).toHaveCount(3)
+  await window.getByTestId("analysis-chart-type").selectOption("bar")
+  await expect(plot.locator(".recharts-bar-rectangle").first()).toBeVisible()
+  // Error bars are drawn (zero length here: the fixture's values do not vary within a group).
+  await expect(plot.locator(".recharts-errorBar")).not.toHaveCount(0)
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("analysis-chart-settings-panel")).toHaveCount(0)
+
+  // Another options.csv in the project opens with the same chart, also after a restart.
+  await openAnalysisFolder(window, "other")
+  await selectFile(window, "other/options.csv")
+  await expect(window.getByTestId("analysis-plot-legend")).toHaveText(/option=a.*option=c/)
+  await closeApp()
+  window = await openAnalysis()
+  await openAnalysisFolder(window, "other")
+  await selectFile(window, "other/options.csv")
+  await expect(window.getByTestId("analysis-view-chart")).toHaveAttribute("aria-selected", "true")
+  await expect(
+    window.getByTestId("analysis-plot").locator(".recharts-bar-rectangle").first(),
+  ).toBeVisible({
+    timeout: 30_000,
+  })
+
+  // Reset to default goes back to the table.
+  await window.getByTestId("analysis-chart-settings").click()
+  await window.getByTestId("analysis-chart-reset").click()
+  await expect(window.getByTestId("analysis-preview-table")).toBeVisible()
+})
+
+test("a file over 1 GB warns and shows its first rows; Load anyway reads it", async () => {
+  test.setTimeout(120_000)
+  // A sparse file: the first rows, then zeros up to just over 1 GiB.
+  const huge = join(repo, "results", "run-a", "huge.csv")
+  await writeFile(huge, "step,loss\n0,1.0\n1,0.5\n2,0.25\n")
+  await truncate(huge, 1024 * 1024 * 1024 + 1)
+  const window = await openAnalysis()
+  await selectFile(window, "huge.csv")
+  await expect(window.getByTestId("analysis-preview-large")).toContainText(
+    "Loading it may be slow or fail",
+  )
+  const partial = window.getByTestId("analysis-preview-partial")
+  await expect(partial.locator("tbody tr")).toHaveCount(3)
+  await window.getByTestId("analysis-preview-load").click()
+  await expect(window.getByTestId("analysis-table-chart")).toBeVisible({ timeout: 60_000 })
+})
+
+test("a load that fails says why and falls back to the view without loading", async () => {
+  test.setTimeout(120_000)
+  // A sparse pickle over 2 GiB: Node cannot read it whole, so Load anyway fails.
+  const huge = join(repo, "results", "run-a", "huge.pkl")
+  await writeFile(huge, Buffer.from([0x80, 4]))
+  await truncate(huge, 2 * 1024 * 1024 * 1024 + 1)
+  const window = await openAnalysis()
+  await selectFile(window, "huge.pkl")
+  await expect(window.getByTestId("analysis-preview-large")).toContainText(
+    "Loading it may be slow or fail",
+  )
+  await window.getByTestId("analysis-preview-load").click()
+  await expect(window.getByTestId("analysis-preview-load-failed")).toBeVisible({ timeout: 60_000 })
+  await expect(window.getByTestId("analysis-preview-load-failed")).toContainText("2 GiB")
+  await expect(window.getByTestId("analysis-preview-large")).toBeVisible()
+  // The app keeps working: another file still previews.
+  await selectFile(window, "options.csv")
+  await expect(window.getByTestId("analysis-preview-table")).toBeVisible({ timeout: 30_000 })
 })

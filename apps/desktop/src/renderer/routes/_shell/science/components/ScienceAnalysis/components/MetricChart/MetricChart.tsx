@@ -19,9 +19,9 @@ import { formatChartNumber } from "./formatChartNumber"
  */
 
 /** Chart height; the width is measured from the container (with a fallback). */
-const CHART_HEIGHT = 288
+export const CHART_HEIGHT = 288
 /** Width used until the container is measured (and where measuring is a no-op). */
-const FALLBACK_WIDTH = 640
+export const FALLBACK_WIDTH = 640
 
 /** Per-series stroke palette in OKLCH so it reads on both light and dark themes. */
 const SERIES_COLORS = [
@@ -35,12 +35,12 @@ const SERIES_COLORS = [
   "oklch(0.65 0.18 210)",
 ] as const
 
-function colorFor(index: number): string {
+export function colorFor(index: number): string {
   return SERIES_COLORS[index % SERIES_COLORS.length] ?? SERIES_COLORS[0]
 }
 
 /** Track an element's content width, updating on resize where supported. */
-function useMeasuredWidth(): { ref: React.RefObject<HTMLDivElement | null>; width: number } {
+export function useMeasuredWidth(): { ref: React.RefObject<HTMLDivElement | null>; width: number } {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
 
@@ -60,7 +60,7 @@ function useMeasuredWidth(): { ref: React.RefObject<HTMLDivElement | null>; widt
 }
 
 /** Above this many series the legend is hidden: it would take more room than the chart. */
-const MAX_LEGEND_SERIES = 10
+export const MAX_LEGEND_SERIES = 10
 
 /** The tooltip lists at most this many series, highest values first. */
 const MAX_TOOLTIP_SERIES = 10
@@ -72,7 +72,7 @@ interface TooltipEntry {
 }
 
 /** Hover card: the x value, then up to MAX_TOOLTIP_SERIES series by value, then "+N more". */
-function ChartTooltip({
+export function ChartTooltip({
   xText,
   entries,
   moreText,

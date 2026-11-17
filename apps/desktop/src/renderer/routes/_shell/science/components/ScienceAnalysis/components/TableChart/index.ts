@@ -1,0 +1,1 @@
+export { TableChart } from "./TableChart"
