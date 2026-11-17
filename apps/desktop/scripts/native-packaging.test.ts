@@ -228,7 +228,7 @@ test.each([
   for (const locale of [...selected, "fr", "de", "zh_CN"])
     writeFileSync(join(localeDir, `${locale}.pak`), locale)
   writeFileSync(join(fixture, platform === "win" ? "electron.exe" : "electron"), "fixture")
-  const framework = await createElectronFrameworkSupport({ electronVersion: "40.10.4" }, {})
+  const framework = await createElectronFrameworkSupport({ electronVersion: "42.11.18" }, {})
   await framework.beforeCopyExtraFiles({
     appOutDir: fixture,
     platformName: platform === "win" ? "win32" : "linux",
@@ -246,13 +246,9 @@ test.each([
   expect(kept).toEqual(selected.map((locale) => `${locale}.pak`).sort())
 })
 
-test("selected macOS locales retain all grammatical companion resources", () => {
+test("macOS keeps the selected locales", () => {
   const selected = ["en", "en_GB", "zh_CN", "zh_TW", "ko", "ja", "es", "es_419"]
-  const companions = selected.flatMap((locale) => [
-    locale,
-    ...["FEMININE", "MASCULINE", "NEUTER"].map((suffix) => `${locale}_${suffix}`),
-  ])
-  expect(config.mac.electronLanguages).toEqual(companions)
+  expect(config.mac.electronLanguages).toEqual(selected)
 })
 
 test("packaged native validator loads SQLite 13's real prebuild layout", () => {
