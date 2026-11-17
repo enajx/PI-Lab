@@ -82,7 +82,7 @@ function renderAnalysis(fake: FakeHandlers) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <AppProviders client={createFakeTrpcClient(fake)} queryClient={queryClient}>
-      <ScienceAnalysis focusSession={null} />
+      <ScienceAnalysis initialFile={null} focusSession={null} />
     </AppProviders>,
   )
 }
@@ -127,7 +127,9 @@ describe("Open notebook in Analysis", () => {
       serverId,
     })
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
-    const tab = screen.getByTestId("central-tab")
+    // The Sessions panel has the notebook tab; the preview dock has its own tab for the file.
+    const tab = within(screen.getByTestId("science-sessions")).getByTestId("central-tab")
+    expect(tab.getAttribute("data-tab-kind")).toBe("notebook")
     expect(tab.textContent).toContain("analysis.ipynb")
     expect(screen.getByTestId("notebook-environment").textContent).toContain("PI Lab copy (uvx)")
 

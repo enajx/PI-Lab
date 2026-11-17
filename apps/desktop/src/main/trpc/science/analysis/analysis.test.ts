@@ -1245,7 +1245,7 @@ describe("science.analysis.preview", () => {
     expect(preview.kind).toBe("parquet")
   })
 
-  test("numeric metric CSV → a line chart (monotonic step + series)", async () => {
+  test("numeric metric CSV opens as a chart of step against its measures", async () => {
     await writeRepoFile("metrics.csv", "step,loss,reward\n0,1.0,0.1\n1,0.6,0.4\n2,0.3,0.7\n")
     const project = await h.caller.projects.open({ path: h.repoDir })
     const preview = await h.caller.science.analysis.preview({
@@ -1254,13 +1254,148 @@ describe("science.analysis.preview", () => {
       load: false,
       dataset: null,
     })
-    expect(preview.type).toBe("chart")
-    if (preview.type !== "chart") throw new Error("expected chart")
-    expect(preview.xLabel).toBe("step")
-    expect(preview.x).toEqual([0, 1, 2])
-    expect(preview.series.map((s) => s.label)).toEqual(["loss", "reward"])
-    expect(preview.series[0]?.values).toEqual([1.0, 0.6, 0.3])
-    expect(preview.truncated).toBe(false)
+    if (preview.type !== "table") throw new Error(`expected table, got ${preview.type}`)
+    expect(preview.defaultView).toBe("chart")
+    const spec = preview.defaultSpec
+    if (!spec) throw new Error("expected a default chart")
+    expect(spec).toMatchObject({ x: "step", y: ["loss", "reward"], aggregate: "none" })
+    const plot = await h.caller.science.analysis.chart({
+      projectId: project.id,
+      relPath: "metrics.csv",
+      dataset: null,
+      ops: { filters: [], aggregation: null, sort: [] },
+      spec,
+    })
+    expect(plot.series.map((s) => s.label)).toEqual(["loss", "reward"])
+    expect(plot.series[0]?.x).toEqual([0, 1, 2])
+    expect(plot.series[0]?.y).toEqual([1.0, 0.6, 0.3])
+  })
+
+  test("a long-format CSV opens as a table; table settings are kept per file name", async () => {
+    const body = "question,repetition,probability\n1,0,0.2\n1,1,0.4\n2,0,0.6\n2,1,0.8\n"
+    await writeRepoFile("results/a/options.csv", body)
+    await writeRepoFile("results/b/options.csv", body)
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "results/a/options.csv",
+      load: false,
+      dataset: null,
+    })
+    if (preview.type !== "table") throw new Error(`expected table, got ${preview.type}`)
+    expect(preview.defaultView).toBe("table")
+    expect(
+      await h.caller.science.analysis.tableSettings({
+        projectId: project.id,
+        relPath: "results/b/options.csv",
+      }),
+    ).toBeNull()
+    const settings = {
+      view: "chart" as const,
+      spec: {
+        x: "question",
+        y: ["probability"],
+        splitBy: null,
+        chartType: "bar" as const,
+        aggregate: "mean" as const,
+        band: "std" as const,
+      },
+      ops: {
+        filters: [{ column: "repetition", op: "eq" as const, value: "0", values: [] }],
+        aggregation: null,
+        sort: [{ column: "probability", descending: true }],
+      },
+      display: { hidden: ["repetition"], order: [], decimals: 2, scientific: false },
+      chartColors: "viridis",
+    }
+    await h.caller.science.analysis.setTableSettings({
+      projectId: project.id,
+      relPath: "results/a/options.csv",
+      settings,
+    })
+    // Kept when the project card's metadata is edited.
+    await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "NeurIPS" } })
+    expect(
+      await h.caller.science.analysis.tableSettings({
+        projectId: project.id,
+        relPath: "results/b/options.csv",
+      }),
+    ).toEqual(settings)
+    await h.caller.science.analysis.setTableSettings({
+      projectId: project.id,
+      relPath: "results/b/options.csv",
+      settings: null,
+    })
+    expect(
+      await h.caller.science.analysis.tableSettings({
+        projectId: project.id,
+        relPath: "results/a/options.csv",
+      }),
+    ).toBeNull()
+  })
+
+  test("table pages apply the operations, and Export CSV writes the result", async () => {
+    await writeRepoFile(
+      "results/a/options.csv",
+      "question,repetition,probability\n1,0,0.2\n1,1,0.4\n2,0,0.6\n2,1,0.8\n",
+    )
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const ops = {
+      filters: [],
+      aggregation: {
+        kind: "groupBy" as const,
+        by: ["question"],
+        values: [{ column: "probability", fn: "mean" as const }],
+      },
+      sort: [],
+    }
+    const page = await h.caller.science.analysis.table({
+      projectId: project.id,
+      relPath: "results/a/options.csv",
+      dataset: null,
+      ops,
+      offset: 0,
+      limit: 100,
+    })
+    expect(page.headers).toEqual(["question", "probability (mean)"])
+    expect(page.rows).toEqual([
+      ["1", "0.3"],
+      ["2", "0.7"],
+    ])
+    const out = join(h.repoDir, "results", "a", "options.grouped.csv")
+    expect(
+      await h.caller.science.analysis.exportTable({
+        projectId: project.id,
+        relPath: "results/a/options.csv",
+        dataset: null,
+        ops,
+        path: out,
+        columns: null,
+      }),
+    ).toEqual({ rows: 2 })
+    expect(await readFile(out, "utf8")).toBe("question,probability (mean)\n1,0.3\n2,0.7\n")
+    await expect(
+      h.caller.science.analysis.exportTable({
+        projectId: project.id,
+        relPath: "results/a/options.csv",
+        dataset: null,
+        ops,
+        path: join(h.repoDir, "results", "a", "options.csv"),
+        columns: null,
+      }),
+    ).rejects.toThrow(/never replaces/)
+    // Also through another spelling of the same file (case, or a symlinked folder).
+    await symlink(join(h.repoDir, "results", "a"), join(h.repoDir, "linked"))
+    await expect(
+      h.caller.science.analysis.exportTable({
+        projectId: project.id,
+        relPath: "results/a/options.csv",
+        dataset: null,
+        ops,
+        path: join(h.repoDir, "linked", "OPTIONS.csv"),
+        columns: null,
+      }),
+    ).rejects.toThrow(/never replaces/)
   })
 
   test("a non-metric CSV (single numeric column) stays a table", async () => {
@@ -1536,7 +1671,7 @@ describe("science.analysis.preview", () => {
     expect(preview.note).toBeTruthy()
   })
 
-  test(".npz is metadata-only (zips are not unpacked)", async () => {
+  test("a .npz cut to its first zip bytes is a note, not an error", async () => {
     await writeRepoFile("arrays.npz", Buffer.from([0x50, 0x4b, 0x03, 0x04]))
     const project = await h.caller.projects.open({ path: h.repoDir })
     const preview = await h.caller.science.analysis.preview({
@@ -1548,6 +1683,7 @@ describe("science.analysis.preview", () => {
     expect(preview.type).toBe("metadata")
     if (preview.type !== "metadata") throw new Error("expected metadata")
     expect(preview.kind).toBe("npz")
+    expect(preview.note).toMatch(/not a zip/i)
   })
 
   test("a pickle that names os.system is refused without running it", async () => {

@@ -103,6 +103,8 @@ interface CentralPanelProps {
    */
   onPinFile?: (relPath: string) => void
   onSetMainFile?: (relPath: string) => void
+  /** Open a data file in the Analysis view, from the file tree's menu. */
+  onOpenInAnalysis?: (relPath: string) => void
   onSaveUntitled?: (relPath: string) => void
   /** LaTeX Editor layout: open PDFs to the right of the LaTeX source. */
   pdfBesideSource?: boolean
@@ -130,6 +132,8 @@ interface CentralPanelProps {
    * panel): no rounded border of its own.
    */
   frameless?: boolean
+  /** Leave out the shared toolbar row (Analysis's Sessions card, whose view header has these actions). */
+  hideToolbar?: boolean
 }
 
 /**
@@ -157,6 +161,7 @@ export function CentralPanel({
   onFilesPanelOpenChange: setShowFilesPanel,
   onPinFile,
   onSetMainFile,
+  onOpenInAnalysis,
   onSaveUntitled,
   pdfBesideSource: placePdfBesideSource,
   sourceRequest,
@@ -166,6 +171,7 @@ export function CentralPanel({
   toolbarTitle,
   toolbarEnd,
   frameless,
+  hideToolbar,
 }: CentralPanelProps) {
   const t = useTranslate()
   const { editor, sessions, active } = controller
@@ -602,6 +608,7 @@ export function CentralPanel({
       activeRelPath={editor.active?.relPath}
       onPinFile={onPinFile}
       onSetMainFile={onSetMainFile}
+      onOpenInAnalysis={onOpenInAnalysis}
       editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
     />
   )
@@ -658,6 +665,7 @@ export function CentralPanel({
               activeRelPath={editor.active?.relPath}
               onPinFile={onPinFile}
               onSetMainFile={onSetMainFile}
+              onOpenInAnalysis={onOpenInAnalysis}
               editorTabs={{ tabs: editor.tabs, closeFile: controller.closeFile }}
               onCollapse={() => leftColumn.onFilesOpenChange(false)}
               headerEnd={filesToggle}
@@ -699,7 +707,13 @@ export function CentralPanel({
       {/* Below 320px wide (the Analysis and Tasks Sessions card at its narrow widths) the
           title is hidden and the New agent, New terminal and New markdown buttons are left
           out (Add pane has them), so the toolbar fits down to 200px. */}
-      <div className="@container flex shrink-0 items-stretch border-border border-b bg-muted/30">
+      <div
+        hidden={hideToolbar}
+        className={cn(
+          "@container flex shrink-0 items-stretch border-border border-b bg-muted/30",
+          hideToolbar && "hidden",
+        )}
+      >
         {/* Files-panel toggle, upper left. The LaTeX Editor's open column has it in its own top bar. */}
         {leftColumnCard ? null : (
           <div className="flex shrink-0 items-center border-border border-r px-1">
@@ -1382,7 +1396,7 @@ function isMarkdownPath(relPath: string): boolean {
   return /\.(?:md|markdown|mdx)$/i.test(relPath)
 }
 
-interface CentralTabProps {
+export interface CentralTabProps {
   kind: SessionPane["kind"] | "file" | "notebook"
   label: string
   active: boolean
@@ -1394,7 +1408,15 @@ interface CentralTabProps {
 }
 
 /** One central-panel tab: kind icon, label, a dirty dot for files, close button. */
-function CentralTab({ kind, label, active, dirty, badge, onSelect, onClose }: CentralTabProps) {
+export function CentralTab({
+  kind,
+  label,
+  active,
+  dirty,
+  badge,
+  onSelect,
+  onClose,
+}: CentralTabProps) {
   const t = useTranslate()
   const Icon =
     kind === "agent"

@@ -9,7 +9,7 @@ import {
 } from "../../fonts/systemFonts"
 import { readBuildCommit } from "../../identity/buildCommit"
 import { type PiLabChannel, resolveAppChannel } from "../../identity/channel"
-import { pickDirectoryOverride, testFontFamilies } from "../../runtime/env"
+import { pickDirectoryOverride, saveFileOverride, testFontFamilies } from "../../runtime/env"
 import { publicReleaseFromPackage } from "../../updates/release"
 import { fitWindowToContent, restoreWindowSize } from "../../window/contentFit"
 import { liveStartAtLoginService, type StartAtLoginService } from "../../window/startAtLogin"
@@ -77,19 +77,45 @@ export function createSystemRouter(
       .mutation(({ input }) => menuBarIcon.set(input.visible)),
     /**
      * Open the native single-directory picker, parented to the focused window so it
-     * presents as a sheet on macOS. Returns the chosen absolute path, or `null`
-     * when the user cancels (so the caller can no-op cleanly).
+     * presents as a sheet on macOS. It opens in `defaultPath` when given (e.g. the
+     * project's folder), else where the system last left it. Returns the chosen
+     * absolute path, or `null` when the user cancels (so the caller can no-op cleanly).
      */
-    pickDirectory: publicProcedure.mutation(async (): Promise<string | null> => {
-      if (pickDirectoryOverride) return pickDirectoryOverride
-      const parent =
-        BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
-      const result = parent
-        ? await dialog.showOpenDialog(parent, { properties: ["openDirectory", "createDirectory"] })
-        : await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] })
-      if (result.canceled || result.filePaths.length === 0) return null
-      return result.filePaths[0] ?? null
-    }),
+    pickDirectory: publicProcedure
+      .input(z.object({ defaultPath: z.string().min(1) }).optional())
+      .mutation(async ({ input }): Promise<string | null> => {
+        if (pickDirectoryOverride) return pickDirectoryOverride
+        const parent =
+          BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
+        const options: OpenDialogOptions = {
+          properties: ["openDirectory", "createDirectory"],
+          defaultPath: input?.defaultPath,
+        }
+        const result = parent
+          ? await dialog.showOpenDialog(parent, options)
+          : await dialog.showOpenDialog(options)
+        if (result.canceled || result.filePaths.length === 0) return null
+        return result.filePaths[0] ?? null
+      }),
+
+    /**
+     * Open the native save dialog in `defaultPath` (a folder plus a suggested file
+     * name), parented like `pickDirectory`. Returns the chosen path, or `null` when
+     * the user cancels. Test mode can return `PI_LAB_TEST_SAVE_FILE` instead.
+     */
+    pickSaveFile: publicProcedure
+      .input(z.object({ defaultPath: z.string().min(1) }))
+      .mutation(async ({ input }): Promise<string | null> => {
+        if (saveFileOverride) return saveFileOverride
+        const parent =
+          BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
+        const options = { defaultPath: input.defaultPath, properties: ["createDirectory" as const] }
+        const result = parent
+          ? await dialog.showSaveDialog(parent, options)
+          : await dialog.showSaveDialog(options)
+        if (result.canceled || !result.filePath) return null
+        return result.filePath
+      }),
 
     /**
      * Open the native single-file picker (parented like `pickDirectory`), returning the

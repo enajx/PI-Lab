@@ -651,6 +651,9 @@ export function ProjectWorkspace({
               onSetMainFile={(relPath) =>
                 setMainFile.mutate({ id: projectId, kind: "main", relPath })
               }
+              onOpenInAnalysis={(relPath) =>
+                void navigate({ to: "/science/analysis", search: { projectId, file: relPath } })
+              }
               onSaveUntitled={
                 newFileController
                   ? (relPath) => {

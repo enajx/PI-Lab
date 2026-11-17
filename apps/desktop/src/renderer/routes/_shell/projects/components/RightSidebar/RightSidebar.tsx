@@ -1,5 +1,6 @@
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { Check, PanelRightClose, Pin, Settings2, X } from "lucide-react"
 import {
   type DragEvent,
@@ -36,6 +37,8 @@ interface PanelRenderContext {
   /** Pin a `.md` file as a right-sidebar panel (from the Files tree's right-click menu). */
   onPinFile: (relPath: string) => void
   onSetMainFile: (relPath: string) => void
+  /** Open a data file in the Analysis view (from the Files tree's right-click menu). */
+  onOpenInAnalysis: (relPath: string) => void
   /** Open editor tabs, closed or moved when the Files tree deletes or renames their files. */
   editorTabs?: FileTreeEditorTabs
 }
@@ -113,13 +116,22 @@ const FILES_TAB: PanelTab = {
   id: FILES_TAB_ID,
   label: "Files",
   description: "Browse workspace files and open them in the built-in editor.",
-  render: ({ workspaceId, onOpenFile, activeRelPath, onPinFile, onSetMainFile, editorTabs }) => (
+  render: ({
+    workspaceId,
+    onOpenFile,
+    activeRelPath,
+    onPinFile,
+    onSetMainFile,
+    onOpenInAnalysis,
+    editorTabs,
+  }) => (
     <FilesPanel
       workspaceId={workspaceId}
       onOpenFile={onOpenFile}
       activeRelPath={activeRelPath}
       onPinFile={onPinFile}
       onSetMainFile={onSetMainFile}
+      onOpenInAnalysis={onOpenInAnalysis}
       editorTabs={editorTabs}
     />
   ),
@@ -314,6 +326,7 @@ export function RightSidebar({
   onUnpinFile,
   gitAvailable,
   editorTabs,
+  settingsMenu,
   filesPanelOpen,
   leadingTab,
   tabVisibility,
@@ -341,6 +354,8 @@ export function RightSidebar({
   gitAvailable?: boolean
   /** Open editor tabs, closed or moved when the Files tree deletes or renames their files. */
   editorTabs?: FileTreeEditorTabs
+  /** Shown in place of the View options menu (Analysis puts the session editor settings there). */
+  settingsMenu?: ReactNode
   /** Whether this project's left Files column is open; Files then leaves this sidebar. */
   filesPanelOpen: boolean
   /** A tab shown first, whose content stays mounted; the project view leaves it out. */
@@ -351,6 +366,7 @@ export function RightSidebar({
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const setMain = useMutation(
     trpc.projects.setDocumentPath.mutationOptions({
       onSuccess: () => {
@@ -614,13 +630,15 @@ export function RightSidebar({
         >
           <Pin className="size-3.5" aria-hidden />
         </button>
-        <ViewOptionsMenu
-          showCodeChanges={showCodeChanges}
-          showSkills={showSkills}
-          gitAvailable={gitEnabled}
-          onToggleCodeChanges={() => setShowCodeChanges(!showCodeChanges)}
-          onToggleSkills={() => setShowSkills(!showSkills)}
-        />
+        {settingsMenu ?? (
+          <ViewOptionsMenu
+            showCodeChanges={showCodeChanges}
+            showSkills={showSkills}
+            gitAvailable={gitEnabled}
+            onToggleCodeChanges={() => setShowCodeChanges(!showCodeChanges)}
+            onToggleSkills={() => setShowSkills(!showSkills)}
+          />
+        )}
         {onCollapse ? (
           <button
             type="button"
@@ -657,6 +675,8 @@ export function RightSidebar({
           activeRelPath,
           onPinFile: pinFile,
           onSetMainFile: (relPath) => setMain.mutate({ id: projectId, kind: "main", relPath }),
+          onOpenInAnalysis: (relPath) =>
+            void navigate({ to: "/science/analysis", search: { projectId, file: relPath } }),
           editorTabs,
         })}
       </div>

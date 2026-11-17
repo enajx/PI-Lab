@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import {
   describeClass,
   NdArray,
@@ -23,10 +24,12 @@ import {
   formatCell,
   MAX_ARRAY_COLS,
   MAX_ARRAY_ROWS,
+  MAX_FRAME_ROWS,
   MAX_TABLE_ROWS,
   MAX_TEXT_BYTES,
   type MetadataPreview,
 } from "./previewShapes"
+import { type Frame, frameFromValues, tableFromFrame } from "./tables"
 
 /**
  * Turn a pickle (a `.pkl` file or the payload of an object `.npy`) into a
@@ -104,35 +107,85 @@ function previewSequence(
   }
   const first = items[0]
   if (first instanceof PyDict && items.every((item) => item instanceof PyDict)) {
-    const headers = first.entries.map(([key]) => cellText(key))
-    const rows = items
-      .slice(0, MAX_TABLE_ROWS)
-      .map((item) => (item instanceof PyDict ? item.entries.map(([, v]) => cellText(v)) : []))
-    return {
-      type: "table",
-      headers,
-      rows,
-      totalRows: items.length,
-      truncated: items.length > MAX_TABLE_ROWS,
-    }
+    return tableFromFrame(dictListFrame(items))
   }
   return null
 }
 
 /** A DataFrame as a table: the index first, then each column. */
 function previewFrame(frame: PdFrame): DataFilePreview {
+  return tableFromFrame(dataFrameFrame(frame))
+}
+
+/**
+ * The first {@link MAX_FRAME_ROWS} rows of a DataFrame as a frame: the index
+ * first (named "index" and marked as the index when it has no name), then
+ * each column.
+ */
+function dataFrameFrame(frame: PdFrame): Frame {
   const index = frame.index
   const length = index?.length ?? 0
-  const shown = Math.min(length, MAX_TABLE_ROWS)
-  const headers = [indexName(index?.name ?? null), ...frame.columns.map((c) => cellText(c.label))]
-  const rows: string[][] = []
-  for (let row = 0; row < shown; row++) {
-    rows.push([
-      cellText(index?.at(row) ?? null),
-      ...frame.columns.map((column) => cellText(column.at(row))),
-    ])
+  const kept = Math.min(length, MAX_FRAME_ROWS)
+  const unnamed = (index?.name ?? null) === null
+  const headers = [
+    unnamed ? "index" : indexName(index?.name ?? null),
+    ...frame.columns.map((c) => cellText(c.label)),
+  ]
+  const at: Array<(row: number) => PyValue> = [
+    (row) => index?.at(row) ?? null,
+    ...frame.columns.map((column) => (row: number) => column.at(row)),
+  ]
+  const columns = at.map((get) => Array.from({ length: kept }, (_, row) => get(row)))
+  return frameFromValues({
+    headers,
+    columns,
+    head: Array.from({ length: Math.min(kept, MAX_TABLE_ROWS) }, (_, row) =>
+      at.map((get) => cellText(get(row))),
+    ),
+    totalRows: length,
+    indexColumn: unnamed ? 0 : null,
+    text: (value) => cellText(value as PyValue),
+  })
+}
+
+/** A list of dicts as a frame, one column per key of the first dict. */
+function dictListFrame(items: PyValue[]): Frame {
+  const first = items[0]
+  const keys = first instanceof PyDict ? first.entries.map(([key]) => key) : []
+  const kept = items.slice(0, MAX_FRAME_ROWS)
+  const cellOf = (item: PyValue, col: number): PyValue =>
+    item instanceof PyDict ? (item.entries[col]?.[1] ?? null) : null
+  return frameFromValues({
+    headers: keys.map(cellText),
+    columns: keys.map((_, col) => kept.map((item) => cellOf(item, col))),
+    head: kept
+      .slice(0, MAX_TABLE_ROWS)
+      .map((item) => keys.map((_, col) => cellText(cellOf(item, col)))),
+    totalRows: items.length,
+    indexColumn: null,
+    text: (value) => cellText(value as PyValue),
+  })
+}
+
+/**
+ * A pickle's table (a DataFrame or a list of dicts) as a frame, for the chart
+ * builder. Anything else is a BAD_REQUEST.
+ */
+export function pickleFrame(data: Uint8Array): Frame {
+  let value: PyValue
+  try {
+    value = unpickle(data)
+  } catch (error: unknown) {
+    if (error instanceof PickleRefusedError || error instanceof PickleFormatError) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: error.message })
+    }
+    throw error
   }
-  return { type: "table", headers, rows, totalRows: length, truncated: length > MAX_TABLE_ROWS }
+  if (value instanceof PdFrame) return dataFrameFrame(value)
+  if (Array.isArray(value) && value.length > 0 && value.every((item) => item instanceof PyDict)) {
+    return dictListFrame(value)
+  }
+  throw new TRPCError({ code: "BAD_REQUEST", message: "This pickle does not hold a table" })
 }
 
 /** A numeric Series as a chart over its index (when numeric), else a table. */
@@ -157,18 +210,24 @@ function previewSeries(series: PdSeries, label: string): DataFilePreview {
     }
     return downsampleChart(indexName(index.name) || "index", xAll, [name], [yAll])
   }
-  const shown = Math.min(length, MAX_TABLE_ROWS)
-  const rows: string[][] = []
-  for (let row = 0; row < shown; row++) {
-    rows.push([cellText(index.at(row)), cellText(values.at(row))])
-  }
-  return {
-    type: "table",
-    headers: [indexName(index.name), name],
-    rows,
-    totalRows: length,
-    truncated: length > MAX_TABLE_ROWS,
-  }
+  const kept = Math.min(length, MAX_FRAME_ROWS)
+  const unnamed = index.name === null
+  return tableFromFrame(
+    frameFromValues({
+      headers: [unnamed ? "index" : indexName(index.name), name],
+      columns: [
+        Array.from({ length: kept }, (_, row) => index.at(row)),
+        Array.from({ length: kept }, (_, row) => values.at(row)),
+      ],
+      head: Array.from({ length: Math.min(kept, MAX_TABLE_ROWS) }, (_, row) => [
+        cellText(index.at(row)),
+        cellText(values.at(row)),
+      ]),
+      totalRows: length,
+      indexColumn: unnamed ? 0 : null,
+      text: (value) => cellText(value as PyValue),
+    }),
+  )
 }
 
 /** An index's name as a header: empty when it has none. */

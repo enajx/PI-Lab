@@ -1,10 +1,11 @@
 import { mkdir, realpath, stat, writeFile } from "node:fs/promises"
-import { dirname, isAbsolute, relative, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path"
 import {
   type PiLabDatabase,
   type Project,
   type ProjectMetadata,
   projects,
+  type TableSettings,
   workspaces,
 } from "@pi-lab/local-db"
 import { classifyDataFile } from "@pi-lab/shared"
@@ -21,6 +22,8 @@ import {
   type DataFilePreview,
   discoverDataFiles,
   isMarimoNotebookFile,
+  type PlotPreview,
+  type TablePage,
 } from "./discover"
 import type { AnalysisInteractiveResult } from "./interactive"
 import { analysisMedia } from "./mediaGrants"
@@ -111,6 +114,104 @@ const dataPreviewInput = previewInput.extend({
   /** The HDF5 dataset to preview, or null for the first one. */
   dataset: z.string().min(1).nullable(),
 })
+
+const chartSpecInput = z.object({
+  x: z.string().min(1),
+  y: z.array(z.string().min(1)).min(1),
+  splitBy: z.string().min(1).nullable(),
+  chartType: z.enum(["line", "scatter", "bar"]),
+  aggregate: z.enum(["none", "mean", "median", "sum", "count"]),
+  band: z.enum(["none", "minmax", "std", "ci95"]),
+})
+
+const aggFunctionInput = z.enum([
+  "count",
+  "nunique",
+  "sum",
+  "mean",
+  "median",
+  "min",
+  "max",
+  "std",
+  "sem",
+  "first",
+  "last",
+])
+
+const tableOpsInput = z.object({
+  filters: z.array(
+    z.object({
+      column: z.string().min(1),
+      op: z.enum(["eq", "ne", "lt", "le", "gt", "ge", "contains", "in", "blank", "notBlank"]),
+      value: z.string(),
+      values: z.array(z.string()),
+    }),
+  ),
+  aggregation: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("groupBy"),
+        by: z.array(z.string().min(1)),
+        values: z.array(z.object({ column: z.string().min(1), fn: aggFunctionInput })),
+      }),
+      z.object({
+        kind: z.literal("pivot"),
+        index: z.string().min(1),
+        columns: z.string().min(1),
+        values: z.string().min(1),
+        fn: aggFunctionInput,
+      }),
+      z.object({ kind: z.literal("describe") }),
+      z.object({ kind: z.literal("valueCounts"), columns: z.array(z.string().min(1)) }),
+    ])
+    .nullable(),
+  sort: z.array(z.object({ column: z.string().min(1), descending: z.boolean() })),
+})
+
+const tableInput = previewInput.extend({
+  /** The HDF5 dataset holding the table, or null for other formats. */
+  dataset: z.string().min(1).nullable(),
+  ops: tableOpsInput,
+})
+
+const chartInput = tableInput.extend({ spec: chartSpecInput })
+
+const tablePageInput = tableInput.extend({
+  offset: z.number().int().min(0),
+  /** Rows per page, at most 1,000. */
+  limit: z.number().int().min(1).max(1000),
+})
+
+const exportTableInput = tableInput.extend({
+  /** Where to save the CSV (from the save dialog). */
+  path: z.string().min(1),
+  /** The shown columns, in order; null writes every column. */
+  columns: z.array(z.string().min(1)).nullable(),
+})
+
+const setTableSettingsInput = previewInput.extend({
+  /** The settings for this file's name, or null to forget them. */
+  settings: z
+    .object({
+      view: z.enum(["table", "chart"]),
+      spec: chartSpecInput.nullable(),
+      ops: tableOpsInput,
+      display: z.object({
+        hidden: z.array(z.string()),
+        order: z.array(z.string()),
+        decimals: z.number().int().min(0).max(12).nullable(),
+        scientific: z.boolean(),
+      }),
+      /** A palette id, or null for the default color map from Settings. */
+      chartColors: z.string().min(1).nullable(),
+    })
+    .nullable(),
+})
+
+/** The name table settings are kept under: the file name, e.g. `options.csv`. */
+function tableSettingsKey(relPath: string): string {
+  return basename(relPath.replaceAll("\\", "/"))
+}
 
 const interactiveInput = previewInput.extend({
   ownerId: z.string().min(1),
@@ -422,6 +523,100 @@ export const analysisRouter = router({
         load: input.load,
         dataset: input.dataset,
       })
+    }),
+
+  /**
+   * Plot a table file (CSV/TSV, Parquet, pickled DataFrame, HDF5 compound
+   * dataset) after its table operations, with the chart builder's settings, from
+   * its first rows (at most `MAX_FRAME_ROWS`). The path is jailed to the project.
+   */
+  chart: publicProcedure.input(chartInput).query(async ({ ctx, input }): Promise<PlotPreview> => {
+    const repoPath = requireRepoPath(ctx.db, input.projectId)
+    const absPath = resolveInsideDir(repoPath, input.relPath)
+    return ctx.analysisPreview.chart({
+      absPath,
+      relPath: input.relPath,
+      dataset: input.dataset,
+      ops: input.ops,
+      spec: input.spec,
+    })
+  }),
+
+  /** One page of a table file's rows after its table operations. */
+  table: publicProcedure.input(tablePageInput).query(async ({ ctx, input }): Promise<TablePage> => {
+    const repoPath = requireRepoPath(ctx.db, input.projectId)
+    const absPath = resolveInsideDir(repoPath, input.relPath)
+    return ctx.analysisPreview.table({
+      absPath,
+      relPath: input.relPath,
+      dataset: input.dataset,
+      ops: input.ops,
+      offset: input.offset,
+      limit: input.limit,
+    })
+  }),
+
+  /**
+   * Write a table file after its table operations as CSV to `path` (chosen by
+   * the user in the save dialog). The source file is never changed. Returns the
+   * rows written.
+   */
+  exportTable: publicProcedure
+    .input(exportTableInput)
+    .mutation(async ({ ctx, input }): Promise<{ rows: number }> => {
+      const repoPath = requireRepoPath(ctx.db, input.projectId)
+      const absPath = resolveInsideDir(repoPath, input.relPath)
+      if (!isAbsolute(input.path)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Not an absolute path: ${input.path}` })
+      }
+      // The same file can be named through a symlinked folder or, on macOS, another letter case.
+      const source = (await realpath(absPath)).toLowerCase()
+      const target = join(await realpath(dirname(input.path)), basename(input.path)).toLowerCase()
+      if (target === source) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Choose another file name: the export never replaces the file it comes from",
+        })
+      }
+      const { csv, rows } = await ctx.analysisPreview.csv({
+        absPath,
+        relPath: input.relPath,
+        dataset: input.dataset,
+        ops: input.ops,
+        columns: input.columns,
+      })
+      await writeFile(input.path, csv, "utf8")
+      return { rows }
+    }),
+
+  /** The saved table settings for this file's name in the project, or null. */
+  tableSettings: publicProcedure
+    .input(previewInput)
+    .query(({ ctx, input }): TableSettings | null => {
+      const project = requireProject(ctx.db, input.projectId)
+      return project.metadata?.tableSettings?.[tableSettingsKey(input.relPath)] ?? null
+    }),
+
+  /**
+   * Save (or with `settings: null` forget) the table settings for every file
+   * with this file's name in the project, in `metadata.tableSettings`.
+   */
+  setTableSettings: publicProcedure
+    .input(setTableSettingsInput)
+    .mutation(({ ctx, input }): void => {
+      const project = requireProject(ctx.db, input.projectId)
+      const key = tableSettingsKey(input.relPath)
+      const { tableSettings: old, ...rest } = project.metadata ?? {}
+      const tableSettings = { ...old }
+      if (input.settings === null) delete tableSettings[key]
+      else tableSettings[key] = input.settings
+      const metadata: ProjectMetadata =
+        Object.keys(tableSettings).length === 0 ? rest : { ...rest, tableSettings }
+      ctx.db
+        .update(projects)
+        .set({ metadata, updatedAt: Date.now() })
+        .where(eq(projects.id, input.projectId))
+        .run()
     }),
 
   /**

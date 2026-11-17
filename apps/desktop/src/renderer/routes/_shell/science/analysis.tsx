@@ -11,7 +11,7 @@ import {
  * Sibling routes (cluster / skills / library) live alongside; the nav registry
  * (`scienceNavItems`) lists the as-yet-unbuilt ones as "coming soon".
  *
- * `?projectId=` opens it on one project; `sessionId`, `agentId` and `agentLabel`
+ * `?projectId=` opens it on one project, `file` previews that file; `sessionId`, `agentId` and `agentLabel`
  * also focus that agent's tab in its session panel (Project Agents box, ⌥Tab).
  *
  * Guarded by the "Analysis" section preference (Settings → Sections): when the
@@ -31,6 +31,7 @@ function AnalysisRoute() {
   return (
     <ScienceAnalysis
       initialProjectId={search.projectId}
+      initialFile={search.file ?? null}
       focusSession={focusSessionFromSearch(search)}
     />
   )

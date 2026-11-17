@@ -429,6 +429,9 @@ export const ANALYSIS_FILES_DEFAULT_WIDTH = 280
 /** Analysis lists the files directly (no group, experiment or folder rows). Off by default. */
 export const useAnalysisFlatList = (): [boolean, (next: boolean) => void] =>
   useBooleanPref("pi-lab.analysis.flatList", false)
+/** The default color map of Analysis charts (a palette id from `MetricChart/palettes.ts`). */
+export const useAnalysisChartColors = (): [string, (next: string) => void] =>
+  useStringPref("pi-lab.analysis.chartColors", "default")
 export const useAnalysisFilesWidth = (): [number, (next: number) => void] =>
   useNumberPref("pi-lab.analysis.filesWidth.v2", ANALYSIS_FILES_DEFAULT_WIDTH)
 

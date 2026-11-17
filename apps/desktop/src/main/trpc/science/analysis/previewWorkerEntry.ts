@@ -1,21 +1,20 @@
 import { parentPort } from "node:worker_threads"
 import { TRPCError } from "@trpc/server"
-import { previewDataFile } from "./discover"
-import type { AnalysisPreviewRequest, PreviewWorkerReply } from "./previewWorker"
+import { type PreviewWorkerJob, type PreviewWorkerReply, runPreviewJob } from "./previewWorker"
 
 /**
  * The Analysis preview worker thread (built to `out/main/analysisPreviewWorker.js`).
- * It answers each `{ id, request }` with the preview or the error's tRPC code
+ * It answers each `{ id, job }` with the preview or chart, or the error's tRPC code
  * and message, so the router throws the same error as in process.
  */
 
 const port = parentPort
 if (!port) throw new Error("The Analysis preview worker must run in a worker thread")
 
-port.on("message", ({ id, request }: { id: number; request: AnalysisPreviewRequest }) => {
-  previewDataFile(request.absPath, request.relPath, request).then(
-    (preview) => {
-      const reply: PreviewWorkerReply = { id, ok: true, preview }
+port.on("message", ({ id, job }: { id: number; job: PreviewWorkerJob }) => {
+  runPreviewJob(job).then(
+    (result) => {
+      const reply: PreviewWorkerReply = { id, ok: true, result }
       port.postMessage(reply)
     },
     (error: unknown) => {

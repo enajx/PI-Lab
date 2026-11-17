@@ -4,8 +4,8 @@ import { copyFile, mkdtemp, rm, truncate, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, test } from "vitest"
-import { previewDataFile } from "./discover"
-import { LARGE_FILE_BYTES } from "./previewShapes"
+import { hugeFilePartial, previewDataFile } from "./discover"
+import { HUGE_FILE_BYTES, LARGE_FILE_BYTES } from "./previewShapes"
 
 const FIXTURES = join(__dirname, "__fixtures__", "data")
 const NO_LOAD = { load: false, dataset: null }
@@ -122,7 +122,13 @@ describe("Large file gate", () => {
     head.writeBigUInt64LE(BigInt(limit - 11), 3)
     await writeFile(path, Buffer.concat([head, Buffer.alloc(limit - 11), Buffer.from([0x2e])]))
     const gated = await previewDataFile(path, "big.pkl", NO_LOAD)
-    expect(gated).toEqual({ type: "large", kind: "other", size: limit + 1 })
+    expect(gated).toEqual({
+      type: "large",
+      kind: "other",
+      size: limit + 1,
+      huge: false,
+      partial: null,
+    })
     const loaded = await previewDataFile(path, "big.pkl", { load: true, dataset: null })
     expect(loaded.type).toBe("json")
   })
@@ -145,6 +151,52 @@ describe("Large file gate", () => {
     await writeFile(numbers, Buffer.concat([prefix, Buffer.from(padded)]))
     await truncate(numbers, prefix.length + padded.length + 5_000_000 * 8)
     expect(await previewDataFile(numbers, "numbers.npy", NO_LOAD)).toMatchObject({ type: "chart" })
+  })
+
+  test("a file over 1 GB warns first and shows its first rows; Load reads it", async () => {
+    dir = await mkdtemp(join(tmpdir(), "pi-lab-large-"))
+    const path = join(dir, "huge.csv")
+    await writeFile(path, "step,loss\n0,1.0\n1,0.5\n2,0.25\n")
+    await truncate(path, HUGE_FILE_BYTES + 1)
+    const gated = await previewDataFile(path, "huge.csv", NO_LOAD)
+    if (gated.type !== "large") throw new Error(`expected large, got ${gated.type}`)
+    expect(gated.huge).toBe(true)
+    expect(gated.partial).toMatchObject({
+      type: "table",
+      rows: [
+        ["0", "1.0"],
+        ["1", "0.5"],
+        ["2", "0.25"],
+      ],
+    })
+    const loaded = await previewDataFile(path, "huge.csv", { load: true, dataset: null })
+    expect(loaded).toMatchObject({ type: "table", partial: true })
+  })
+
+  test("a pickle over 1 GB warns with nothing read", async () => {
+    dir = await mkdtemp(join(tmpdir(), "pi-lab-large-"))
+    const path = join(dir, "huge.pkl")
+    await writeFile(path, Buffer.from([0x80, 4]))
+    await truncate(path, HUGE_FILE_BYTES + 1)
+    expect(await previewDataFile(path, "huge.pkl", NO_LOAD)).toEqual({
+      type: "large",
+      kind: "other",
+      size: HUGE_FILE_BYTES + 1,
+      huge: true,
+      partial: null,
+    })
+  })
+
+  test("over 1 GB, Parquet and HDF5 show their safe part before loading", async () => {
+    // A valid Parquet or HDF5 file cannot be made sparse, so the partial reader
+    // is called directly on the real fixtures.
+    const meta = () => ({ type: "metadata" as const, kind: "other" as const, size: 0, mtime: 0 })
+    expect(
+      await hugeFilePartial(join(FIXTURES, "frame-zstd.parquet"), "frame.parquet", null, meta),
+    ).toMatchObject({ type: "table", headers: ["step", "loss", "name", "when"], totalRows: 4 })
+    expect(await hugeFilePartial(join(FIXTURES, "runs.h5"), "runs.h5", null, meta)).toMatchObject({
+      type: "datasets",
+    })
   })
 
   test("at the limit the file is read", async () => {

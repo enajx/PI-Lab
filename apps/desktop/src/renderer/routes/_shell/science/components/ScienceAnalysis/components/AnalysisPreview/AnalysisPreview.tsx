@@ -2,6 +2,7 @@ import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysi
 import type { NotebookCell, NotebookOutput } from "@pi-lab/shared/analysis/ipynb"
 import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import { Bot, FileText, Plus, TerminalSquare } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import {
@@ -15,6 +16,7 @@ import { useTRPC, useTRPCClient } from "../../../../../../../trpc/react"
 import { Markdown } from "../../../../../projects/components/RightSidebar/components/Markdown"
 import { ArrayGrid } from "../ArrayGrid"
 import { MetricChart } from "../MetricChart"
+import { TableChart } from "../TableChart"
 
 /** The app's bundled PDF.js viewer (the one PDF tabs use), loaded on first use. */
 const PdfViewer = lazy(() =>
@@ -22,6 +24,18 @@ const PdfViewer = lazy(() =>
     default: module.PdfViewer,
   })),
 )
+
+/** Per file: whether Load was pressed and the chosen dataset, for this app session (`sessionStorage`). */
+const PREVIEW_CHOICES = {
+  key: (relPath: string): string => `pi-lab.analysis.previewChoice.${relPath}`,
+  get(relPath: string): { load: boolean; dataset: string | null } | undefined {
+    const raw = window.sessionStorage.getItem(this.key(relPath))
+    return raw === null ? undefined : (JSON.parse(raw) as { load: boolean; dataset: string | null })
+  },
+  set(relPath: string, choice: { load: boolean; dataset: string | null }): void {
+    window.sessionStorage.setItem(this.key(relPath), JSON.stringify(choice))
+  },
+}
 
 /**
  * Preview pane for a single selected data file (P8c). Fetches
@@ -39,16 +53,22 @@ const PdfViewer = lazy(() =>
  */
 export function AnalysisPreview({
   projectId,
+  projectPath,
   relPath,
   kind,
   onOpenNotebook,
+  onNewPane,
   headerEnd,
 }: {
   projectId: string
+  /** The project's folder (where Export CSV's save dialog opens); null while unknown. */
+  projectPath: string | null
   relPath: string
   kind: DataFileKind
   /** Open this Jupyter or marimo notebook in a notebook tab on its own server. */
   onOpenNotebook: (relPath: string) => void
+  /** Open a new pane in the Sessions panel (the + menu, agent, terminal and document buttons). */
+  onNewPane: (create: NewPaneKind) => void
   /** Shown at the right end of the header row (the collapsed right panel's expand button). */
   headerEnd: ReactNode
 }) {
@@ -58,17 +78,33 @@ export function AnalysisPreview({
   const pdf = kind === "pdf"
   const media = kind === "video" || kind === "animation"
   const [pdfStatus, setPdfStatus] = useState("")
-  // The Load click and the chosen HDF5 dataset belong to the file they were made on.
-  const [choice, setChoice] = useState<{ relPath: string; load: boolean; dataset: string | null }>({
-    relPath,
-    load: false,
-    dataset: null,
-  })
+  // The Load click and the chosen dataset (HDF5, SQLite table, .npz array) belong to the
+  // file they were made on, and are kept per file while the app runs.
+  const [choice, setChoiceState] = useState<{
+    relPath: string
+    load: boolean
+    dataset: string | null
+  }>(() => ({ relPath, load: false, dataset: null, ...PREVIEW_CHOICES.get(relPath) }))
+  const setChoice = (next: { relPath: string; load: boolean; dataset: string | null }): void => {
+    PREVIEW_CHOICES.set(next.relPath, { load: next.load, dataset: next.dataset })
+    setChoiceState(next)
+  }
+  // Another file shows with the choices last made on it.
+  if (choice.relPath !== relPath) {
+    setChoiceState({ relPath, load: false, dataset: null, ...PREVIEW_CHOICES.get(relPath) })
+  }
   const load = choice.relPath === relPath && choice.load
   const dataset = choice.relPath === relPath ? choice.dataset : null
   const preview = useQuery({
     ...trpc.science.analysis.preview.queryOptions({ projectId, relPath, load, dataset }),
     enabled: !interactive && !pdf && !media,
+    staleTime: 30_000,
+  })
+  // A load that fails (out of memory or time) falls back to what can be read without it.
+  const loadFailed = load && preview.isError
+  const fallback = useQuery({
+    ...trpc.science.analysis.preview.queryOptions({ projectId, relPath, load: false, dataset }),
+    enabled: loadFailed,
     staleTime: 30_000,
   })
   const renderTool = documentToolForFile(
@@ -91,11 +127,12 @@ export function AnalysisPreview({
       >
         <span
           data-testid="analysis-preview-path"
-          className="min-w-0 flex-1 truncate font-mono text-foreground text-xs"
+          className="min-w-0 max-w-[33%] truncate font-mono text-foreground/50 text-xs"
           title={relPath}
         >
           {relPath}
         </span>
+        <span className="flex-1" />
         {pdf && pdfStatus !== "" ? (
           <span
             data-testid="analysis-pdf-status"
@@ -131,6 +168,7 @@ export function AnalysisPreview({
             onRendered={(result) => setRendered({ relPath, result, at: Date.now() })}
           />
         ) : null}
+        <NewPaneButtons onNewPane={onNewPane} />
         {headerEnd ? <div className="-my-1 -me-2 flex shrink-0">{headerEnd}</div> : null}
       </div>
       <div
@@ -170,6 +208,36 @@ export function AnalysisPreview({
           />
         ) : preview.isLoading ? (
           <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
+        ) : loadFailed ? (
+          <div className="flex flex-col gap-3">
+            <div
+              data-testid="analysis-preview-load-failed"
+              className="flex select-text cursor-text flex-col gap-1 text-sm"
+            >
+              <p className="text-destructive">
+                {`${t("Loading the whole file failed:")} ${preview.error?.message ?? ""}`}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t("Showing what can be read without loading it.")}
+              </p>
+            </div>
+            {fallback.data ? (
+              <PreviewBody
+                preview={fallback.data}
+                kind={kind}
+                projectId={projectId}
+                projectPath={projectPath}
+                relPath={relPath}
+                dataset={dataset}
+                onLoad={() => void preview.refetch()}
+                onDataset={(next) => setChoice({ relPath, load: false, dataset: next })}
+              />
+            ) : fallback.isError ? (
+              <p className="select-text cursor-text text-destructive text-sm">
+                {fallback.error.message}
+              </p>
+            ) : null}
+          </div>
         ) : preview.isError ? (
           <p
             data-testid="analysis-preview-error"
@@ -181,6 +249,10 @@ export function AnalysisPreview({
           <PreviewBody
             preview={preview.data}
             kind={kind}
+            projectId={projectId}
+            projectPath={projectPath}
+            relPath={relPath}
+            dataset={dataset}
             onLoad={() => setChoice({ relPath, load: true, dataset })}
             onDataset={(next) => setChoice({ relPath, load, dataset: next })}
           />
@@ -559,11 +631,20 @@ function NotebookOutputView({ output }: { output: NotebookOutput }) {
 function PreviewBody({
   preview,
   kind,
+  projectId,
+  projectPath,
+  relPath,
+  dataset,
   onLoad,
   onDataset,
 }: {
   preview: DataFilePreview
   kind: DataFileKind
+  projectId: string
+  projectPath: string | null
+  relPath: string
+  /** The chosen HDF5 dataset, or null. */
+  dataset: string | null
   /** Read a file above its size limit (the Large file prompt's Load button). */
   onLoad: () => void
   /** Preview another dataset of an HDF5 file. */
@@ -573,28 +654,63 @@ function PreviewBody({
   switch (preview.type) {
     case "large":
       return (
-        <div
-          data-testid="analysis-preview-large"
-          className="flex flex-col items-start gap-3 rounded-md border border-border bg-card/40 p-4 text-sm"
-        >
-          <p className="select-text cursor-text">
-            {`${t("Large file")} (${formatMegabytes(preview.size)}), ${t("loading may be slow")}`}
-          </p>
-          <button
-            type="button"
-            data-testid="analysis-preview-load"
-            onClick={onLoad}
-            className="rounded-md border border-border px-2 py-1 text-xs"
+        <div className="flex flex-col gap-3">
+          <div
+            data-testid="analysis-preview-large"
+            className="flex flex-col items-start gap-3 rounded-md border border-border bg-card/40 p-4 text-sm"
           >
-            {t("Load")}
-          </button>
+            <p className="select-text cursor-text">
+              {preview.huge
+                ? `${t("Large file")} (${formatMegabytes(preview.size)}). ${t("Loading it may be slow or fail; if it fails, Analysis shows what it can read without loading.")}`
+                : `${t("Large file")} (${formatMegabytes(preview.size)}), ${t("loading may be slow")}`}
+            </p>
+            <button
+              type="button"
+              data-testid="analysis-preview-load"
+              onClick={onLoad}
+              className="rounded-md border border-border px-2 py-1 text-xs"
+            >
+              {preview.huge ? t("Load anyway") : t("Load")}
+            </button>
+          </div>
+          {preview.partial ? (
+            <div data-testid="analysis-preview-partial" className="flex flex-col gap-2">
+              <p className="text-muted-foreground text-xs">
+                {t("The start of the file, read without loading it:")}
+              </p>
+              {preview.partial.type === "table" ? (
+                <TableBody preview={preview.partial} />
+              ) : (
+                <PreviewBody
+                  preview={preview.partial}
+                  kind={kind}
+                  projectId={projectId}
+                  projectPath={projectPath}
+                  relPath={relPath}
+                  dataset={dataset}
+                  onLoad={onLoad}
+                  onDataset={onDataset}
+                />
+              )}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-xs">
+              {t("Nothing of this file is shown until it is loaded.")}
+            </p>
+          )}
         </div>
       )
     case "datasets":
       return (
         <div data-testid="analysis-preview-datasets" className="flex flex-col gap-3">
           <label className="flex items-center gap-2 text-xs">
-            <span className="shrink-0 text-muted-foreground">{t("Dataset")}</span>
+            <span className="shrink-0 text-muted-foreground">
+              {/\.(db|sqlite3?)$/i.test(relPath)
+                ? t("Table")
+                : /\.npz$/i.test(relPath)
+                  ? t("Array")
+                  : t("Dataset")}
+            </span>
             <select
               data-testid="analysis-preview-dataset"
               value={preview.selected}
@@ -609,13 +725,17 @@ function PreviewBody({
             </select>
           </label>
           {preview.truncated ? (
-            <p className="text-amber-500 text-xs">
-              {`${t("Showing the first")} ${preview.datasets.length} ${t("datasets")}`}
+            <p className="text-right text-muted-foreground text-xs">
+              {t("First {count} datasets").replace("{count}", String(preview.datasets.length))}
             </p>
           ) : null}
           <PreviewBody
             preview={preview.preview}
             kind={kind}
+            projectId={projectId}
+            projectPath={projectPath}
+            relPath={relPath}
+            dataset={preview.selected}
             onLoad={onLoad}
             onDataset={onDataset}
           />
@@ -624,7 +744,15 @@ function PreviewBody({
     case "notebook":
       return <NotebookBody cells={preview.cells} />
     case "table":
-      return <TableBody preview={preview} />
+      return (
+        <TableChart
+          projectId={projectId}
+          relPath={relPath}
+          dataset={dataset}
+          preview={preview}
+          projectPath={projectPath}
+        />
+      )
     case "chart":
       return <MetricChart preview={preview} />
     case "array":
@@ -707,7 +835,7 @@ function TableBody({ preview }: { preview: Extract<DataFilePreview, { type: "tab
       </div>
       <p data-testid="analysis-preview-rowcount" className="text-muted-foreground text-xs">
         {preview.truncated
-          ? `${t("Showing first")} ${preview.rows.length} ${t("of")} ${preview.totalRows}+ ${t("rows")}`
+          ? `${t("Showing first")} ${preview.rows.length} ${t("of")} ${preview.totalRows}${preview.partial ? "+" : ""} ${t("rows")}`
           : `${preview.totalRows} ${preview.totalRows === 1 ? t("row") : t("rows")}`}
       </p>
     </div>
@@ -745,9 +873,7 @@ function Row({ label, value }: { label: string; value: string }) {
 function TruncatedNote() {
   const t = useTranslate()
   return (
-    <p className="mt-2 text-amber-500 text-xs">
-      {t("Preview truncated — file is larger than shown.")}
-    </p>
+    <p className="mt-2 text-right text-muted-foreground text-xs">{t("Start of the file only")}</p>
   )
 }
 
@@ -760,4 +886,108 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** What a new-pane button opens in the Sessions panel. */
+export type NewPaneKind = "agentChooser" | "agent" | "terminal" | "markdown"
+
+/**
+ * The project view's pane buttons (+ menu, new agent, new terminal, new
+ * document), here opening their pane in the Sessions panel on the right.
+ */
+function NewPaneButtons({ onNewPane }: { onNewPane: (create: NewPaneKind) => void }) {
+  const t = useTranslate()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menu = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointer = (event: PointerEvent) => {
+      if (menu.current && !menu.current.contains(event.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointer)
+    return () => document.removeEventListener("pointerdown", onPointer)
+  }, [menuOpen])
+  const iconButton =
+    "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+  const menuItem = (create: NewPaneKind, label: string, icon: ReactNode) => (
+    <button
+      type="button"
+      role="menuitem"
+      data-testid={`analysis-add-${create}`}
+      onClick={() => {
+        setMenuOpen(false)
+        onNewPane(create)
+      }}
+      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
+    >
+      {icon}
+      {label}
+    </button>
+  )
+  return (
+    <div className="-my-1 flex shrink-0 items-center gap-0.5">
+      <div ref={menu} className="relative">
+        <button
+          type="button"
+          data-testid="analysis-add-menu"
+          title={t("Add pane")}
+          aria-label={t("Add pane")}
+          data-feature-help={t("Open an agent, a terminal, or a document in a new pane.")}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+          className={iconButton}
+        >
+          <Plus className="size-4" aria-hidden />
+        </button>
+        {menuOpen ? (
+          <div
+            role="menu"
+            className="absolute top-8 end-0 z-30 w-36 rounded-md border border-border bg-popover p-1 shadow-lg"
+          >
+            {menuItem("agentChooser", t("Agent CLI"), <Bot className="size-3.5" aria-hidden />)}
+            {menuItem(
+              "terminal",
+              t("Terminal"),
+              <TerminalSquare className="size-3.5" aria-hidden />,
+            )}
+            {menuItem("markdown", t("Document"), <FileText className="size-3.5" aria-hidden />)}
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        data-testid="analysis-new-agent"
+        title={t("New agent")}
+        aria-label={t("New agent")}
+        data-feature-help={t("Start the remembered coding agent in this project workspace")}
+        onClick={() => onNewPane("agent")}
+        className={iconButton}
+      >
+        <Bot className="size-4" aria-hidden />
+      </button>
+      <button
+        type="button"
+        data-testid="analysis-new-terminal"
+        title={t("New terminal")}
+        aria-label={t("New terminal")}
+        data-feature-help={t("Open an interactive shell in this project workspace")}
+        onClick={() => onNewPane("terminal")}
+        className={iconButton}
+      >
+        <TerminalSquare className="size-4" aria-hidden />
+      </button>
+      <button
+        type="button"
+        data-testid="analysis-new-markdown"
+        title={t("New markdown")}
+        aria-label={t("New markdown")}
+        data-feature-help={t("Create an untitled Markdown file in the built-in editor")}
+        onClick={() => onNewPane("markdown")}
+        className={iconButton}
+      >
+        <FileText className="size-4" aria-hidden />
+      </button>
+    </div>
+  )
 }

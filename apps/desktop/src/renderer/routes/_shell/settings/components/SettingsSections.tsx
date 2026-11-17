@@ -41,6 +41,7 @@ import {
   EDITOR_FONT_MAX_SIZE,
   EDITOR_FONT_MIN_SIZE,
   type NewSessionKind,
+  useAnalysisChartColors,
   useAnalysisFlatList,
   useDefaultAgentId,
   useDefaultResultsFolder,
@@ -77,6 +78,7 @@ import { useTRPC } from "../../../../trpc/react"
 import { requestUpdateCheck } from "../../../../updates/UpdateFeedback"
 import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
 import { ExperimentsStructureSelect } from "../../science/components/ScienceAnalysis/components/ExperimentsStructure"
+import { PALETTES } from "../../science/components/ScienceAnalysis/components/MetricChart/palettes"
 import { LibrarySourceChooser } from "../../science/components/ScienceLibrary/components/LibrarySourceChooser"
 import { AlphaTestingResets } from "./AlphaTestingResets"
 import { AppThemeGallery } from "./AppThemeGallery"
@@ -1577,6 +1579,7 @@ export function ExperimentsSection() {
   const [runsFile, setRunsFile] = useExperimentRunsFile()
   const [resultsFolder, setResultsFolder] = useDefaultResultsFolder()
   const [flatList, setFlatList] = useAnalysisFlatList()
+  const [chartColors, setChartColors] = useAnalysisChartColors()
   return (
     <SettingsSection
       testId="settings-section-experiments"
@@ -1626,6 +1629,14 @@ export function ExperimentsSection() {
           <ExperimentsStructureSelect projectId={null} testId="settings-experiments-structure" />
         </div>
       </div>
+      <SelectField
+        testId="settings-analysis-chart-colors"
+        label="Chart colors"
+        description="The color map of Analysis charts. A table's Chart settings can choose another for that file name."
+        value={chartColors}
+        options={PALETTES.map((palette) => ({ value: palette.id, label: palette.label }))}
+        onChange={setChartColors}
+      />
       <ToggleField
         testId="settings-analysis-flat-list"
         label="Hide folders"

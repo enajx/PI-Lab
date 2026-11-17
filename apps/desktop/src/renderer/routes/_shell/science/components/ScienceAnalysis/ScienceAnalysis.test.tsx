@@ -43,7 +43,11 @@ function renderAnalysis(
   })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceAnalysis initialProjectId={initialProjectId} focusSession={focusSession ?? null} />
+      <ScienceAnalysis
+        initialProjectId={initialProjectId}
+        initialFile={null}
+        focusSession={focusSession ?? null}
+      />
     </AppProviders>,
   )
 }
@@ -118,9 +122,42 @@ function listing(
   }
 }
 
+/**
+ * Stubbed (mocked) tRPC answers for a table file: the preview, no saved table
+ * settings, and its rows as the first table page. Every column is text.
+ */
+function tableStubs(headers: string[], rows: string[][]): Record<string, () => unknown> {
+  const columns = headers.map((name) => ({ name, role: "factor", kind: "text" }))
+  return {
+    "science.analysis.preview": () => ({
+      type: "table",
+      headers,
+      rows,
+      totalRows: rows.length,
+      truncated: false,
+      partial: false,
+      columns,
+      defaultView: "table",
+      defaultSpec: null,
+    }),
+    "science.analysis.tableSettings": () => null,
+    "science.analysis.table": () => ({
+      headers,
+      columns,
+      rows,
+      offset: 0,
+      totalRows: rows.length,
+      partial: false,
+      notes: [],
+      defaultSpec: null,
+    }),
+  }
+}
+
 describe("ScienceAnalysis", () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.sessionStorage.clear()
     mocks.navigate.mockReset()
   })
   afterEach(() => setInterfaceLanguage("en"))
@@ -856,9 +893,7 @@ describe("ScienceAnalysis", () => {
       "results/group_b/early-run/curve.pdf",
       "results/summary.json",
     ])
-    expect(rows[0]?.textContent).toContain(
-      "results/group_b/early-run/animations/growth.gif",
-    )
+    expect(rows[0]?.textContent).toContain("results/group_b/early-run/animations/growth.gif")
     expect(window.localStorage.getItem("pi-lab.analysis.flatList")).toBe("true")
 
     // Chips still apply.
@@ -873,16 +908,13 @@ describe("ScienceAnalysis", () => {
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
         listing([{ relPath: "d.csv", name: "d.csv", kind: "csv" }]),
-      "science.analysis.preview": () => ({
-        type: "table",
-        headers: ["name", "value"],
-        rows: [
+      ...tableStubs(
+        ["name", "value"],
+        [
           ["alpha", "1"],
           ["beta", "2"],
         ],
-        totalRows: 2,
-        truncated: false,
-      }),
+      ),
     })
 
     await waitFor(() => {
@@ -1019,13 +1051,7 @@ describe("ScienceAnalysis", () => {
       "science.analysis.closeInteractive": (input) => {
         closes.push(input)
       },
-      "science.analysis.preview": () => ({
-        type: "table",
-        headers: ["value"],
-        rows: [["1"]],
-        totalRows: 1,
-        truncated: false,
-      }),
+      ...tableStubs(["value"], [["1"]]),
     })
 
     await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(2))
@@ -1085,7 +1111,8 @@ describe("ScienceAnalysis", () => {
     await waitFor(() => expect(opens).toHaveLength(2))
     await waitFor(() => expect(closes).toHaveLength(1))
 
-    expect(opens[0]?.ownerId).toBe(opens[1]?.ownerId)
+    // The new file replaces the tab, so the old preview's close names its own owner and lease.
+    expect(closes[0]?.ownerId).toBe(opens[0]?.ownerId)
     expect(closes[0]?.leaseId).toBe(opens[0]?.leaseId)
     expect(closes[0]?.leaseId).not.toBe(opens[1]?.leaseId)
   })
@@ -1111,7 +1138,8 @@ describe("ScienceAnalysis", () => {
     expect(await screen.findByTestId("analysis-marimo-status")).toBeTruthy()
     expect(screen.getByTestId("analysis-marimo-status").textContent).toContain("project/.venv")
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
+    // The dock shows the active tab's content once it has placed it, so wait for the button.
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }))
     expect(await screen.findByTestId("analysis-interactive-stopping")).toBeTruthy()
     finishClose()
     expect(await screen.findByTestId("analysis-interactive-stopped")).toBeTruthy()
@@ -1155,13 +1183,7 @@ describe("ScienceAnalysis", () => {
           { relPath: "data/metrics.csv", name: "metrics.csv", kind: "csv" },
           { relPath: "config.json", name: "config.json", kind: "json" },
         ]),
-      "science.analysis.preview": () => ({
-        type: "table",
-        headers: ["name", "value"],
-        rows: [["alpha", "1"]],
-        totalRows: 1,
-        truncated: false,
-      }),
+      ...tableStubs(["name", "value"], [["alpha", "1"]]),
     })
 
     await waitFor(() => {

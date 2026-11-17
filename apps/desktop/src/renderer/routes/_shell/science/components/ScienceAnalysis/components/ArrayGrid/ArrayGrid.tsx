@@ -63,9 +63,10 @@ export function ArrayGrid({ preview }: { preview: ArrayPreview }) {
         </div>
       )}
       {preview.truncated ? (
-        <p className="text-amber-500 text-xs">
-          {t("Array truncated — showing the first")} {preview.rows.length} {t("rows and")}{" "}
-          {preview.columns.length} {t("columns.")}
+        <p className="text-right text-muted-foreground text-xs">
+          {t("First {rows} × {columns}")
+            .replace("{rows}", String(preview.rows.length))
+            .replace("{columns}", String(preview.columns.length))}
         </p>
       ) : null}
     </div>

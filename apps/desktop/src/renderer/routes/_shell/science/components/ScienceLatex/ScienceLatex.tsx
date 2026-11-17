@@ -364,6 +364,7 @@ function LatexDocumentsColumn({
         onOpenFile={onOpenFile}
         leadingTab={null}
         tabVisibility={null}
+        settingsMenu={null}
       />
     </aside>
   )

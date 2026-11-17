@@ -20,6 +20,8 @@ function searchText(value: unknown): string | undefined {
 /** The search of a Tasks or Analysis address: a project to show and an agent session to focus. */
 export interface SessionViewSearch {
   projectId?: string
+  /** Analysis: a project file to preview (project-relative). */
+  file?: string
   sessionId?: string
   agentId?: string
   agentLabel?: string
@@ -29,6 +31,7 @@ export interface SessionViewSearch {
 export function validateSessionViewSearch(search: Record<string, unknown>): SessionViewSearch {
   return {
     projectId: searchText(search.projectId),
+    file: searchText(search.file),
     sessionId: searchText(search.sessionId),
     agentId: searchText(search.agentId),
     agentLabel: searchText(search.agentLabel),

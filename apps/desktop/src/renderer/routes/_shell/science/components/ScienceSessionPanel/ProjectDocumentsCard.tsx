@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { useTranslate } from "../../../../../i18n/language"
 import { useTRPC } from "../../../../../trpc/react"
 import {
@@ -30,6 +30,7 @@ export function ProjectDocumentsCard({
   onOpenFile,
   leadingTab,
   tabVisibility,
+  settingsMenu,
 }: {
   projectId: string
   activeId: string
@@ -38,6 +39,8 @@ export function ProjectDocumentsCard({
   onOpenFile: (relPath: string) => void
   leadingTab: RightSidebarLeadingTab | null
   tabVisibility: RightSidebarTabVisibility | null
+  /** Shown in place of the header's View options menu, or null for that menu. */
+  settingsMenu: ReactNode | null
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -97,6 +100,7 @@ export function ProjectDocumentsCard({
       filesPanelOpen={false}
       leadingTab={leadingTab}
       tabVisibility={tabVisibility}
+      settingsMenu={settingsMenu ?? undefined}
     />
   )
 }
