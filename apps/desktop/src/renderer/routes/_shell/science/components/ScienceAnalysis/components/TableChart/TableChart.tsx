@@ -69,8 +69,9 @@ export function TableChart({
         }),
     }),
   )
-  // Changes made on this file, until it is left.
-  const [local, setLocal] = useState<{ relPath: string; settings: Settings } | null>(null)
+  // Changes made on this file (and HDF5 dataset), until it is left.
+  const shownKey = `${relPath}\u0000${dataset ?? ""}`
+  const [local, setLocal] = useState<{ key: string; settings: Settings } | null>(null)
 
   if (savedQuery.isLoading) {
     return <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
@@ -78,16 +79,16 @@ export function TableChart({
   const saved = savedQuery.data ?? null
   const savedFits = saved !== null && specFits(saved.spec, preview.columns)
   const settings: Settings =
-    local?.relPath === relPath
+    local?.key === shownKey
       ? local.settings
       : savedFits
         ? saved
         : { view: preview.defaultView, spec: preview.defaultSpec }
-  const mismatch = saved !== null && !savedFits && local?.relPath !== relPath
+  const mismatch = saved !== null && !savedFits && local?.key !== shownKey
   const fileName = relPath.slice(relPath.lastIndexOf("/") + 1)
 
   const change = (next: Settings): void => {
-    setLocal({ relPath, settings: next })
+    setLocal({ key: shownKey, settings: next })
     if (next.spec) {
       save.mutate({ projectId, relPath, settings: { view: next.view, spec: next.spec } })
     }

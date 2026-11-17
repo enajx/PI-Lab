@@ -159,6 +159,45 @@ describe("metric logs and row limit", () => {
     expect(table.defaultSpec).toMatchObject({ x: "step", y: ["loss", "acc"], aggregate: "none" })
   })
 
+  /** Write `body` to a temp CSV and return its table preview. */
+  async function csvTable(body: string): Promise<TablePreview> {
+    dir = await mkdtemp(join(tmpdir(), "pi-lab-tables-"))
+    const path = join(dir, "log.csv")
+    await writeFile(path, body)
+    return tableOf(await previewDataFile(path, "log.csv", NO_LOAD))
+  }
+
+  test("a step column after an epoch column is still the step", async () => {
+    const lines = ["epoch,step,loss"]
+    for (let step = 0; step < 40; step++)
+      lines.push(`${Math.floor(step / 10)},${step},${1 / (step + 1)}`)
+    const table = await csvTable(`${lines.join("\n")}\n`)
+    expect(table.defaultView).toBe("chart")
+    expect(table.defaultSpec).toMatchObject({ x: "step", y: ["loss"], aggregate: "none" })
+  })
+
+  test("a metric log does not plot few-valued integer columns", async () => {
+    const lines = ["step,epoch,lr_phase,loss"]
+    for (let step = 0; step < 40; step++) {
+      lines.push(`${step},${Math.floor(step / 10)},${step < 20 ? 0 : 1},${1 / (step + 1)}`)
+    }
+    const table = await csvTable(`${lines.join("\n")}\n`)
+    expect(table.defaultSpec?.y).toEqual(["loss"])
+  })
+
+  test("nan and inf cells are blanks in a numeric column", async () => {
+    const table = await csvTable("step,loss\n0,nan\n1,0.5\n2,inf\n3,-inf\n4,NaN\n")
+    expect(table.columns.find((c) => c.name === "loss")).toMatchObject({
+      kind: "number",
+      role: "measure",
+    })
+  })
+
+  test("a UTF-8 byte order mark is not part of the first header", async () => {
+    const table = await csvTable("\uFEFFstep,loss\n0,1.5\n1,0.5\n")
+    expect(table.headers[0]).toBe("step")
+  })
+
   test("charts read at most 100,000 rows and say so", async () => {
     dir = await mkdtemp(join(tmpdir(), "pi-lab-tables-"))
     const path = join(dir, "long-log.csv")

@@ -60,9 +60,18 @@ const MAX_SERIES = 40
 const TRUE_TEXT = new Set(["true", "True", "TRUE"])
 const FALSE_TEXT = new Set(["false", "False", "FALSE"])
 
-/** A number from table text, or null for empty or non-numeric cells. */
+/** Text that stands for a missing number (pandas and Python's csv write `nan`, `inf`). */
+const MISSING_NUMBER_TEXT = new Set(["nan", "-nan", "inf", "+inf", "-inf", "infinity", "-infinity"])
+
+/** Whether a cell is blank: empty, or a NaN / infinity written as text. */
+function isBlank(cell: string): boolean {
+  const trimmed = cell.trim()
+  return trimmed === "" || MISSING_NUMBER_TEXT.has(trimmed.toLowerCase())
+}
+
+/** A number from table text, or null for blank or non-numeric cells. */
 function numberOf(cell: string | undefined): number | null {
-  if (cell === undefined || cell.trim() === "") return null
+  if (cell === undefined || isBlank(cell)) return null
   const value = Number(cell)
   return Number.isFinite(value) ? value : null
 }
@@ -86,7 +95,8 @@ export function frameFromText(
     }
     const numbers = cells.map(numberOf)
     const numeric = numbers.filter((value) => value !== null).length
-    if (filled.length > 0 && numeric / filled.length >= NUMERIC_SHARE) {
+    const present = cells.filter((cell) => !isBlank(cell)).length
+    if (present > 0 && numeric / present >= NUMERIC_SHARE) {
       return { name, kind: "number", values: numbers }
     }
     return { name, kind: "text", values: cells.map((c) => (c === "" ? null : c)) }
@@ -175,7 +185,7 @@ function isStep(values: ReadonlyArray<number | null>): boolean {
   return pairs > 0 && increasing / pairs >= STEP_SHARE
 }
 
-/** A column's role; only the first numeric column (`mayBeStep`) can be the step. */
+/** A column's role; only a step candidate (`mayBeStep`) can be the step. */
 function roleOf(column: FrameColumn, isIndex: boolean, mayBeStep: boolean): ColumnRole {
   if (isIndex) return "index"
   if (column.kind === "bool") return "factor"
@@ -196,30 +206,26 @@ function roleOf(column: FrameColumn, isIndex: boolean, mayBeStep: boolean): Colu
   return "measure"
 }
 
+/** Column names that are a log's x axis, e.g. `step`, `global_step`, `epoch`, `time`. */
+const STEP_NAME =
+  /^(_?step|steps|global_?step|.*_step|iter|iters|iteration|iterations|update|updates|epoch|epochs|time|timestamp|wall_?time)$/i
+
 /**
- * What each column of a frame holds. Only the first numeric column can be
- * the step axis, as in a metric log. In a metric log (a table with a step
- * column) every row is a time point, so a numeric column that changes is a
- * measure; only constant ones (e.g. `seed`) stay factors.
+ * What each column of a frame holds. The step axis is the first column that
+ * increases row by row among the step-named columns (e.g. `step` after
+ * `epoch`) and the first numeric column; other increasing columns, such as a
+ * sorted measure, are not steps.
  */
 export function describeColumns(frame: Frame): ColumnInfo[] {
   const firstNumeric = frame.columns.findIndex(
     (column, col) => column.kind === "number" && col !== frame.indexColumn,
   )
-  const columns = frame.columns.map(
-    (column, col): ColumnInfo => ({
-      name: column.name,
-      kind: column.kind,
-      role: roleOf(column, col === frame.indexColumn, col === firstNumeric),
-    }),
-  )
-  const stepTaken = columns.some((info) => info.role === "step")
-  if (!stepTaken) return columns
-  return columns.map((info, col) => {
-    const values = frame.columns[col]?.values ?? []
-    return info.kind === "number" && info.role === "factor" && distinctCount(values, 1) > 1
-      ? { ...info, role: "measure" }
-      : info
+  let stepTaken = false
+  return frame.columns.map((column, col): ColumnInfo => {
+    const candidate = !stepTaken && (col === firstNumeric || STEP_NAME.test(column.name))
+    const role = roleOf(column, col === frame.indexColumn, candidate)
+    if (role === "step") stepTaken = true
+    return { name: column.name, kind: column.kind, role }
   })
 }
 
@@ -526,7 +532,8 @@ export async function readDelimitedFrame(
   if (bytesCut) lines.pop()
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
   if (lines.length === 0) return null
-  const headers = parseDelimited(lines[0] ?? "", delimiter)
+  // Excel and others start the file with a byte order mark; it is not part of the header.
+  const headers = parseDelimited((lines[0] ?? "").replace(/^\uFEFF/, ""), delimiter)
   const body = lines.slice(1)
   const rowsCut = body.length > MAX_FRAME_ROWS
   const rows = body.slice(0, MAX_FRAME_ROWS).map((line) => parseDelimited(line, delimiter))

@@ -424,7 +424,7 @@ export async function previewDataFile(
       kind,
       size: info.size,
       huge: true,
-      partial: await hugeFilePartial(abs, kind, meta),
+      partial: await hugeFilePartial(abs, relPath, options.dataset, meta),
     }
   }
 
@@ -470,18 +470,34 @@ export async function previewDataFile(
 
 /**
  * The part of a file over {@link HUGE_FILE_BYTES} that is safe to show
- * before the user loads it: a CSV/TSV's first rows or a text file's head.
- * Other formats show nothing until loaded.
+ * before the user loads it: a CSV/TSV's or Parquet file's first rows, a text
+ * head, an HDF5 file's datasets (h5wasm reads only what is shown), a numeric
+ * `.npy` (only the shown cells). Pickles, which are read whole, show nothing.
  */
-async function hugeFilePartial(
+export async function hugeFilePartial(
   abs: string,
-  kind: DataFileKind,
+  relPath: string,
+  dataset: string | null,
   meta: (note?: string) => MetadataPreview,
 ): Promise<DataFilePreview | null> {
+  const kind = classifyDataFile(relPath)
+  const reader = READER_BY_EXT[extname(relPath).toLowerCase()]
+  if (reader === "parquet") {
+    const read = await readParquetFrame(abs, false, MAX_TABLE_ROWS)
+    return read.kind === "frame" ? tableFromFrame(read.frame) : null
+  }
+  if (reader === "hdf5") return previewHdf5(abs, dataset, meta)
+  if (reader === "pickle") return null
   if (kind === "csv" || kind === "tsv") {
     return previewTable(abs, kind === "tsv" ? "\t" : ",", MAX_TEXT_BYTES, meta)
   }
   if (kind === "markdown" || kind === "markup" || kind === "text") return previewText(abs)
+  if (kind === "npy") {
+    // Numeric arrays read only the header and the shown cells; object arrays are pickles.
+    const { size } = await stat(abs)
+    const preview = await previewNpy(abs, relPath, size, false, meta)
+    return preview.type === "large" ? null : preview
+  }
   return null
 }
 
@@ -532,7 +548,7 @@ async function readTableFrame(
     return readHdf5Frame(abs, dataset)
   }
   if (reader === "parquet") {
-    const read = await readParquetFrame(abs, true)
+    const read = await readParquetFrame(abs, true, MAX_FRAME_ROWS)
     if (read.kind !== "frame") throw notTable(read.kind === "note" ? read.note : "not read")
     return read.frame
   }

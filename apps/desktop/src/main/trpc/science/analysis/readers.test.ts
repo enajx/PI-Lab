@@ -4,7 +4,7 @@ import { copyFile, mkdtemp, rm, truncate, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, test } from "vitest"
-import { previewDataFile } from "./discover"
+import { hugeFilePartial, previewDataFile } from "./discover"
 import { HUGE_FILE_BYTES, LARGE_FILE_BYTES } from "./previewShapes"
 
 const FIXTURES = join(__dirname, "__fixtures__", "data")
@@ -184,6 +184,18 @@ describe("Large file gate", () => {
       size: HUGE_FILE_BYTES + 1,
       huge: true,
       partial: null,
+    })
+  })
+
+  test("over 1 GB, Parquet and HDF5 show their safe part before loading", async () => {
+    // A valid Parquet or HDF5 file cannot be made sparse, so the partial reader
+    // is called directly on the real fixtures.
+    const meta = () => ({ type: "metadata" as const, kind: "other" as const, size: 0, mtime: 0 })
+    expect(
+      await hugeFilePartial(join(FIXTURES, "frame-zstd.parquet"), "frame.parquet", null, meta),
+    ).toMatchObject({ type: "table", headers: ["step", "loss", "name", "when"], totalRows: 4 })
+    expect(await hugeFilePartial(join(FIXTURES, "runs.h5"), "runs.h5", null, meta)).toMatchObject({
+      type: "datasets",
     })
   })
 

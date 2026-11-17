@@ -45,7 +45,7 @@ export async function previewParquet(
   load: boolean,
   meta: (note?: string) => MetadataPreview,
 ): Promise<DataFilePreview> {
-  const read = await readParquetFrame(abs, load)
+  const read = await readParquetFrame(abs, load, MAX_FRAME_ROWS)
   if (read.kind === "note") return meta(read.note)
   if (read.kind === "large")
     return { type: "large", kind: "parquet", size, huge: false, partial: null }
@@ -53,13 +53,14 @@ export async function previewParquet(
 }
 
 /**
- * Read the first {@link MAX_FRAME_ROWS} rows of a Parquet file into a frame. A
+ * Read the first `maxRows` rows of a Parquet file into a frame. A
  * file hyparquet cannot read, or an unsupported codec, is a note; a first row
  * group over {@link MAX_PARQUET_ROW_GROUP_BYTES} is "large" unless `load`.
  */
 export async function readParquetFrame(
   abs: string,
   load: boolean,
+  maxRows: number,
 ): Promise<{ kind: "frame"; frame: Frame } | { kind: "note"; note: string } | { kind: "large" }> {
   const file = await asyncBufferFromFile(abs)
   let metadata: Awaited<ReturnType<typeof parquetMetadataAsync>>
@@ -87,7 +88,7 @@ export async function readParquetFrame(
     file,
     metadata,
     rowStart: 0,
-    rowEnd: Math.min(totalRows, MAX_FRAME_ROWS),
+    rowEnd: Math.min(totalRows, maxRows),
     compressors: COMPRESSORS,
     useOffsetIndex: true,
   })
