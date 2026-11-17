@@ -249,13 +249,7 @@ const config = {
       "!**/node_modules/better-sqlite3/prebuilds/!(darwin-${arch}).node",
       "!**/node_modules/node-pty/prebuilds/!(darwin-${arch})/**",
     ],
-    // Electron 40 also ships grammatical variants for these same languages.
-    electronLanguages: ["en", "en_GB", "zh_CN", "zh_TW", "ko", "ja", "es", "es_419"].flatMap(
-      (locale) => [
-        locale,
-        ...["FEMININE", "MASCULINE", "NEUTER"].map((variant) => `${locale}_${variant}`),
-      ],
-    ),
+    electronLanguages: ["en", "en_GB", "zh_CN", "zh_TW", "ko", "ja", "es", "es_419"],
     target: publicRelease
       ? [
           { target: "dmg", arch: ["arm64"] },
