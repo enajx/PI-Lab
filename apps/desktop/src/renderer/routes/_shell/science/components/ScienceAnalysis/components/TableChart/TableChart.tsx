@@ -93,10 +93,8 @@ export function TableChart({
       save.mutate({ projectId, relPath, settings: { view: next.view, spec: next.spec } })
     }
   }
-  const reset = (): void => {
-    setLocal(null)
-    save.mutate({ projectId, relPath, settings: null })
-  }
+  // Back to the automatic chart settings, staying in Chart view.
+  const reset = (): void => change({ view: "chart", spec: preview.defaultSpec })
 
   return (
     <div data-testid="analysis-table-chart" className="flex flex-col gap-3">

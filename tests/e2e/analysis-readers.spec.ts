@@ -277,10 +277,12 @@ test("a long-format table opens as a table; the chart builder plots it and the c
     timeout: 30_000,
   })
 
-  // Reset to default goes back to the table.
+  // Reset to default stays in Chart view with the automatic settings.
   await window.getByTestId("analysis-chart-settings").click()
   await window.getByTestId("analysis-chart-reset").click()
-  await expect(window.getByTestId("analysis-preview-table")).toBeVisible()
+  await expect(window.getByTestId("analysis-view-chart")).toHaveAttribute("aria-selected", "true")
+  await expect(window.getByTestId("analysis-plot-legend")).toHaveText("probability")
+  await expect(window.getByTestId("analysis-plot").locator(".recharts-line")).toHaveCount(1)
 })
 
 test("a file over 1 GB warns and shows its first rows; Load anyway reads it", async () => {

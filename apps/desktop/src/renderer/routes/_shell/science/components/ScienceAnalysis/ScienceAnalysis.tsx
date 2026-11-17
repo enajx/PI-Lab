@@ -665,6 +665,7 @@ export function ScienceAnalysis({
                       <ResultsFolderField
                         key={selectedProjectId}
                         projectId={selectedProjectId}
+                        projectPath={selectedProject?.repoPath ?? null}
                         resultsFolder={listing.data?.resultsFolder ?? null}
                         overridden={listing.data?.overridden === true}
                         exists={listing.data?.exists ?? null}
@@ -1300,11 +1301,14 @@ function NoProjectsState() {
  */
 function ResultsFolderField({
   projectId,
+  projectPath,
   resultsFolder,
   overridden,
   exists,
 }: {
   projectId: string
+  /** The project's folder, where the folder picker opens; null while unknown. */
+  projectPath: string | null
   resultsFolder: string | null
   overridden: boolean
   /** Whether the folder exists; null while the listing loads. */
@@ -1328,7 +1332,7 @@ function ResultsFolderField({
   const change = (): void => {
     setRingClicked(true)
     setResultsFolder.reset()
-    pickDirectory.mutate(undefined, {
+    pickDirectory.mutate(projectPath ? { defaultPath: projectPath } : undefined, {
       onSuccess: (dir) => {
         if (dir) setResultsFolder.mutate({ projectId, dir })
       },

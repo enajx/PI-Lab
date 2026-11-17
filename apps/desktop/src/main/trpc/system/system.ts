@@ -77,19 +77,26 @@ export function createSystemRouter(
       .mutation(({ input }) => menuBarIcon.set(input.visible)),
     /**
      * Open the native single-directory picker, parented to the focused window so it
-     * presents as a sheet on macOS. Returns the chosen absolute path, or `null`
-     * when the user cancels (so the caller can no-op cleanly).
+     * presents as a sheet on macOS. It opens in `defaultPath` when given (e.g. the
+     * project's folder), else where the system last left it. Returns the chosen
+     * absolute path, or `null` when the user cancels (so the caller can no-op cleanly).
      */
-    pickDirectory: publicProcedure.mutation(async (): Promise<string | null> => {
-      if (pickDirectoryOverride) return pickDirectoryOverride
-      const parent =
-        BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
-      const result = parent
-        ? await dialog.showOpenDialog(parent, { properties: ["openDirectory", "createDirectory"] })
-        : await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] })
-      if (result.canceled || result.filePaths.length === 0) return null
-      return result.filePaths[0] ?? null
-    }),
+    pickDirectory: publicProcedure
+      .input(z.object({ defaultPath: z.string().min(1) }).optional())
+      .mutation(async ({ input }): Promise<string | null> => {
+        if (pickDirectoryOverride) return pickDirectoryOverride
+        const parent =
+          BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
+        const options: OpenDialogOptions = {
+          properties: ["openDirectory", "createDirectory"],
+          defaultPath: input?.defaultPath,
+        }
+        const result = parent
+          ? await dialog.showOpenDialog(parent, options)
+          : await dialog.showOpenDialog(options)
+        if (result.canceled || result.filePaths.length === 0) return null
+        return result.filePaths[0] ?? null
+      }),
 
     /**
      * Open the native single-file picker (parented like `pickDirectory`), returning the
