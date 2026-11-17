@@ -210,6 +210,62 @@ describe("explicit setup states", () => {
   })
 })
 
+describe("Gemini (agy) status", () => {
+  const GEMINI: TerminalAgent[] = [{ id: "gemini", label: "Gemini", command: "agy", detect: "agy" }]
+
+  async function geminiStatus(output: Awaited<ReturnType<SetupProbe>>) {
+    const probe = vi.fn<SetupProbe>(async () => output)
+    const [status] = await detectHarnesses(
+      GEMINI,
+      {},
+      { resolveExecutable: async (value) => `/bin/${value}`, probe, environment: {} },
+    )
+    return { status, probe }
+  }
+
+  test("signed in when `agy models` lists models", async () => {
+    const { status, probe } = await geminiStatus({
+      code: 0,
+      stdout: "Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\n",
+      stderr: "",
+      timedOut: false,
+    })
+    expect(probe).toHaveBeenCalledWith({ command: "/bin/agy", args: ["models"], env: {} })
+    expect(status).toEqual({
+      id: "gemini",
+      label: "Gemini",
+      executable: "/bin/agy",
+      state: "authenticated",
+    })
+  })
+
+  test("not signed in when `agy models` asks to sign in", async () => {
+    const { status } = await geminiStatus({
+      code: 1,
+      stdout: "Fetching available models...\n",
+      stderr: "Error: Please sign in to view available models.",
+      timedOut: false,
+    })
+    expect(status?.state).toBe("unauthenticated")
+  })
+
+  test("error on timeout", async () => {
+    const { status } = await geminiStatus({ code: null, stdout: "", stderr: "", timedOut: true })
+    expect(status).toMatchObject({ state: "error", message: "Status check timed out" })
+  })
+
+  test("missing when agy is not found", async () => {
+    const probe = vi.fn<SetupProbe>()
+    const [status] = await detectHarnesses(
+      GEMINI,
+      {},
+      { resolveExecutable: async () => null, probe, environment: {} },
+    )
+    expect(status).toEqual({ id: "gemini", label: "Gemini", executable: "agy", state: "missing" })
+    expect(probe).not.toHaveBeenCalled()
+  })
+})
+
 describe("GitHub status", () => {
   test("parses only the active successful account", async () => {
     const result = await detectGitHub({

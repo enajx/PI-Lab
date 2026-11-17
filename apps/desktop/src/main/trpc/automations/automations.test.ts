@@ -582,6 +582,33 @@ describe("runNow — non-interactive process lifecycle", () => {
     expect(activations).toEqual([{ type: "workflow", workflowId: created.id, runId }])
   })
 
+  test("with API key picked, the saved key is passed to the one-shot run", async () => {
+    const runner = vi.fn<NonInteractiveProcessRunner>(async () => ({
+      completion: new Promise<NonInteractiveProcessResult>(() => {}),
+    }))
+    await resetHarness([CODEX_ONE_SHOT_AGENT], runner)
+    await h.caller.setup.saveApiKey({ agentId: "codex", apiKey: "test-openai" })
+    await h.caller.settings.updateAgents({ launchDefaults: { codex: { authMethod: "api-key" } } })
+    const created = await h.caller.automations.create({
+      projectId,
+      agentId: "codex",
+      executionMode: "noninteractive",
+      name: "Keyed",
+      prompt: "review",
+      recurrenceRule: DAILY_9,
+      timezone: "UTC",
+    })
+    await h.caller.automations.runNow({ id: created.id })
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          CODEX_API_KEY: "test-openai",
+          OPENAI_API_KEY: "test-openai",
+        }),
+      }),
+    )
+  })
+
   test("uses the actual exit code and stderr for one failure notification", async () => {
     const runner: NonInteractiveProcessRunner = async () => ({
       completion: Promise.resolve({

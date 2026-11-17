@@ -28,12 +28,18 @@ export interface TerminalAgent {
    * get no extra folder.
    */
   addDirArg?: string
+  /**
+   * Flag placed before the initial prompt for agents that do not take a prompt
+   * as a plain argument (e.g. `agy -i <prompt>`). Without it the prompt follows
+   * the other args directly.
+   */
+  promptArg?: string
   /** Extra environment variables to set for the launched process. */
   env?: Record<string, string>
 }
 
 /**
- * Agents shipped by default. Others (Gemini, Amp, opencode, …) are added here.
+ * Agents shipped by default. Others (Amp, opencode, …) are added here.
  *
  * `defaultArgs` carry the permission/approval-bypass flags each agent needs to run
  * unattended inside PI Lab: without them the CLIs block on a first-run "trust this
@@ -58,6 +64,16 @@ export const BUILTIN_AGENTS: readonly TerminalAgent[] = [
     detect: "codex",
     defaultArgs: ["--dangerously-bypass-approvals-and-sandbox"],
     addDirArg: "--add-dir",
+  },
+  {
+    // Google Antigravity CLI.
+    id: "gemini",
+    label: "Gemini",
+    command: "agy",
+    detect: "agy",
+    defaultArgs: ["--dangerously-skip-permissions"],
+    addDirArg: "--add-dir",
+    promptArg: "-i",
   },
 ] as const
 

@@ -4,8 +4,11 @@ import type { SetupProbe, SetupProbeOutput } from "./probe"
 
 export type SetupConnectionState = "missing" | "authenticated" | "unauthenticated" | "error"
 
+/** Agents the setup wizard checks; other catalog entries stay out of setup. */
+export type SetupHarnessId = "claude-code" | "codex" | "gemini"
+
 export interface HarnessSetupStatus {
-  id: "claude-code" | "codex"
+  id: SetupHarnessId
   label: string
   executable: string
   state: SetupConnectionState
@@ -29,9 +32,16 @@ export interface SetupStatusDependencies {
   environment: Record<string, string>
 }
 
-const SUPPORTED_HARNESS_IDS = new Set(["claude-code", "codex"])
+const SUPPORTED_HARNESS_IDS = new Set<string>(["claude-code", "codex", "gemini"])
 
-/** Detect only the two v1 production harnesses; test/future catalog entries stay out of setup. */
+/** Status command per agent. `agy` (Gemini) has no auth command; `agy models` needs a sign-in. */
+const STATUS_ARGS: Readonly<Record<SetupHarnessId, string[]>> = {
+  "claude-code": ["auth", "status", "--json"],
+  codex: ["login", "status"],
+  gemini: ["models"],
+}
+
+/** Detect the production harnesses; test/future catalog entries stay out of setup. */
 export async function detectHarnesses(
   catalog: readonly TerminalAgent[],
   overrides: Record<string, string>,
@@ -39,7 +49,7 @@ export async function detectHarnesses(
 ): Promise<HarnessSetupStatus[]> {
   return Promise.all(
     catalog
-      .filter((agent): agent is TerminalAgent & { id: "claude-code" | "codex" } =>
+      .filter((agent): agent is TerminalAgent & { id: SetupHarnessId } =>
         SUPPORTED_HARNESS_IDS.has(agent.id),
       )
       .map((agent) => detectHarness(agent, overrides[agent.id], dependencies)),
@@ -47,7 +57,7 @@ export async function detectHarnesses(
 }
 
 async function detectHarness(
-  agent: TerminalAgent & { id: "claude-code" | "codex" },
+  agent: TerminalAgent & { id: SetupHarnessId },
   override: string | undefined,
   dependencies: SetupStatusDependencies,
 ): Promise<HarnessSetupStatus> {
@@ -59,12 +69,12 @@ async function detectHarness(
 
   const output = await dependencies.probe({
     command: executable,
-    args: agent.id === "claude-code" ? ["auth", "status", "--json"] : ["login", "status"],
+    args: STATUS_ARGS[agent.id],
     env: dependencies.environment,
   })
-  return agent.id === "claude-code"
-    ? parseClaudeStatus(agent.label, executable, output)
-    : parseCodexStatus(agent.label, executable, output)
+  if (agent.id === "claude-code") return parseClaudeStatus(agent.label, executable, output)
+  if (agent.id === "codex") return parseCodexStatus(agent.label, executable, output)
+  return parseGeminiStatus(agent.label, executable, output)
 }
 
 function parseClaudeStatus(
@@ -124,6 +134,20 @@ function parseCodexStatus(
     return { ...base, state: "authenticated", ...(method ? { method } : {}) }
   }
   return { ...base, state: "error", message: "Codex returned an unknown status" }
+}
+
+/** `agy models` exits 0 with a model list when signed in, non-zero with "Please sign in" when not. */
+function parseGeminiStatus(
+  label: string,
+  executable: string,
+  output: SetupProbeOutput,
+): HarnessSetupStatus {
+  const base = { id: "gemini" as const, label, executable }
+  if (output.timedOut) return { ...base, state: "error", message: "Status check timed out" }
+  if (output.code === 0) return { ...base, state: "authenticated" }
+  const normalized = `${output.stdout}\n${output.stderr}`.toLowerCase()
+  if (normalized.includes("sign in")) return { ...base, state: "unauthenticated" }
+  return { ...base, state: "error", message: "Gemini returned an unknown status" }
 }
 
 /** Detect `gh` independently; it is optional and never blocks setup completion. */

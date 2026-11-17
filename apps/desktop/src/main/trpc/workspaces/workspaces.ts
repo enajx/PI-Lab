@@ -16,6 +16,7 @@ import { TRPCError } from "@trpc/server"
 import { and, eq, ne } from "drizzle-orm"
 import { z } from "zod"
 import { addWorktree, type GitChange, GitError, isGitRepo, removeWorktree, status } from "../../git"
+import { apiKeyLaunchEnvironment } from "../../setup/apiKeyEnvironment"
 import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import { getOrCreateBranchWorkspace } from "../sessions/sessions"
 import { publicProcedure, router } from "../trpc"
@@ -391,10 +392,10 @@ export const workspacesRouter = router({
             "A non-Git project can run only one agent at a time. Close the live agent or Initialize Git.",
         })
       }
-      const [catalogCommand, ...args] = buildLaunchArgv(
-        agent,
-        getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
-      )
+      const [catalogCommand, ...args] = buildLaunchArgv(agent, {
+        ...getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
+        workingDir: dir,
+      })
       const configuredCommand = getAgentSettingsOrDefaults(ctx.db).executableOverrides[
         agent.id
       ]?.trim()
@@ -406,6 +407,12 @@ export const workspacesRouter = router({
           message: `${agent.label} is not available at ${candidate || "(no executable configured)"}. Configure its executable path in Settings → Agents & worktrees.`,
         })
       }
+      const keyEnvironment = apiKeyLaunchEnvironment(
+        ctx.db,
+        ctx.credentialCipher,
+        agent,
+        getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id]?.authMethod,
+      )
 
       const session = await withAgentLaunchGuard({
         projectId: workspace.projectId,
@@ -427,7 +434,7 @@ export const workspacesRouter = router({
             command,
             args,
             cwd: dir,
-            env: { ...launchEnvironment, ...agent.env },
+            env: { ...launchEnvironment, ...agent.env, ...keyEnvironment },
             cols: input.cols,
             rows: input.rows,
           })

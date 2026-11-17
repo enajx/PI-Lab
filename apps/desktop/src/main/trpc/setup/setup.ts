@@ -16,6 +16,7 @@ import {
   detectHarnesses,
   type GitHubSetupStatus,
   type HarnessSetupStatus,
+  type SetupHarnessId,
 } from "../../setup/status"
 import { detectLocalZotero, type LocalZoteroState, liveSetupPathExists } from "../../setup/zotero"
 import { type AppContext, DEFAULT_SETUP_PROBE } from "../context"
@@ -26,13 +27,13 @@ export interface SetupEnvironmentStatus {
   harnesses: HarnessSetupStatus[]
   github: GitHubSetupStatus
   zotero: LocalZoteroState
-  apiConfigured: Record<"claude-code" | "codex", boolean>
+  apiConfigured: Record<SetupHarnessId, boolean>
 }
 
 /** The coding agent rows of the setup wizard: CLI status and whether an API key is saved. */
 export interface SetupHarnessesStatus {
   harnesses: HarnessSetupStatus[]
-  apiConfigured: Record<"claude-code" | "codex", boolean>
+  apiConfigured: Record<SetupHarnessId, boolean>
 }
 
 /** What the status probes need: executable lookup, the probe and the agent launch environment. */
@@ -44,6 +45,20 @@ async function probeDependencies(ctx: AppContext) {
   }
 }
 
+/** Which agents have a saved API key (presence only, never the key). */
+function apiConfigured(ctx: AppContext): Record<SetupHarnessId, boolean> {
+  const credentials = ctx.db
+    .select({ agentId: agentCredentials.agentId })
+    .from(agentCredentials)
+    .all()
+  const configured = new Set(credentials.map((credential) => credential.agentId))
+  return {
+    "claude-code": configured.has("claude-code"),
+    codex: configured.has("codex"),
+    gemini: configured.has("gemini"),
+  }
+}
+
 async function checkHarnesses(ctx: AppContext): Promise<SetupHarnessesStatus> {
   const settings = getAgentSettingsOrDefaults(ctx.db)
   const harnesses = await detectHarnesses(
@@ -51,18 +66,7 @@ async function checkHarnesses(ctx: AppContext): Promise<SetupHarnessesStatus> {
     settings.executableOverrides,
     await probeDependencies(ctx),
   )
-  const credentials = ctx.db
-    .select({ agentId: agentCredentials.agentId })
-    .from(agentCredentials)
-    .all()
-  const configured = new Set(credentials.map((credential) => credential.agentId))
-  return {
-    harnesses,
-    apiConfigured: {
-      "claude-code": configured.has("claude-code"),
-      codex: configured.has("codex"),
-    },
-  }
+  return { harnesses, apiConfigured: apiConfigured(ctx) }
 }
 
 async function checkGitHub(ctx: AppContext): Promise<GitHubSetupStatus> {
@@ -78,7 +82,7 @@ const completeInput = z.object({
 })
 
 const apiKeyInput = z.object({
-  agentId: z.enum(["claude-code", "codex"]),
+  agentId: z.enum(["claude-code", "codex", "gemini"]),
   apiKey: z.string().trim().min(1).max(16_384),
 })
 
@@ -86,7 +90,7 @@ const apiKeyInput = z.object({
 export function saveApiCredential(
   db: PiLabDatabase,
   cipher: CredentialCipher,
-  agentId: "claude-code" | "codex",
+  agentId: SetupHarnessId,
   apiKey: string,
 ): void {
   db.insert(agentCredentials)
@@ -151,6 +155,8 @@ export const setupRouter = router({
   harnesses: publicProcedure.query(({ ctx }) => checkHarnesses(ctx)),
   github: publicProcedure.query(({ ctx }) => checkGitHub(ctx)),
   zotero: publicProcedure.query(({ ctx }) => checkZotero(ctx)),
+  /** Saved-key presence per agent, without running the CLI checks. */
+  apiKeys: publicProcedure.query(({ ctx }) => apiConfigured(ctx)),
 
   /** Store a key encrypted by Electron safeStorage; never return key material over tRPC. */
   saveApiKey: publicProcedure.input(apiKeyInput).mutation(({ ctx, input }) => {

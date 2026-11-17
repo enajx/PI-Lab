@@ -123,6 +123,7 @@ const generalPatch = z.object({
 const launchDefault = z.object({
   model: z.string().trim().max(256).optional(),
   effort: z.string().optional(),
+  authMethod: z.enum(["subscription", "api-key"]).optional(),
 })
 const launchDefaults = z.record(z.string(), launchDefault).superRefine((defaults, ctx) => {
   for (const [id, values] of Object.entries(defaults)) {

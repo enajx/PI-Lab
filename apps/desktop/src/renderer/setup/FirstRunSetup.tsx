@@ -1,7 +1,7 @@
 import type { NotificationSound } from "@pi-lab/local-db"
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, CircleAlert, CircleHelp, Loader2, RefreshCw } from "lucide-react"
+import { CheckCircle2, CircleAlert, CircleHelp, Loader2, Plus, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import {
   type InterfaceLanguage,
@@ -21,10 +21,21 @@ interface FirstRunSetupProps {
 const PLACEHOLDER_HARNESSES: HarnessStatus[] = [
   { id: "claude-code", label: "Claude Code", executable: "claude", state: "missing" },
   { id: "codex", label: "Codex", executable: "codex", state: "missing" },
+  { id: "gemini", label: "Gemini", executable: "agy", state: "missing" },
 ]
 
+type HarnessId = "claude-code" | "codex" | "gemini"
+type AuthMethod = "subscription" | "api-key"
+
+/** The command a user can run to see what the status check sees. */
+const STATUS_COMMAND: Readonly<Record<HarnessId, string>> = {
+  "claude-code": "auth status",
+  codex: "login status",
+  gemini: "models",
+}
+
 type HarnessStatus = {
-  id: "claude-code" | "codex"
+  id: HarnessId
   label: string
   executable: string
   state: "missing" | "authenticated" | "unauthenticated" | "error"
@@ -81,9 +92,10 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     }),
   )
   const [, setDefaultAgent, defaultAgentError, defaultAgentPending] = useDefaultAgentId()
-  const [selectedAgent, setSelectedAgent] = useState<"claude-code" | "codex" | null>(null)
+  const [selectedAgent, setSelectedAgent] = useState<HarnessId | null>(null)
   const [selectionTouched, setSelectionTouched] = useState(false)
-  const [apiOpenFor, setApiOpenFor] = useState<"claude-code" | "codex" | null>(null)
+  const [apiOpenFor, setApiOpenFor] = useState<HarnessId | null>(null)
+  const [moreAgentsOpen, setMoreAgentsOpen] = useState(false)
   const [apiKey, setApiKey] = useState("")
   const [completionSound, setCompletionSound] = useState<NotificationSound>("silent")
   const [soundPreview, setSoundPreview] = useState("")
@@ -109,11 +121,23 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     if (detected.length !== 1) setSelectedAgent(null)
   }, [harnessCheck.data?.harnesses, selectionTouched])
 
+  const updateAgents = useMutation(
+    trpc.settings.updateAgents.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() }),
+    }),
+  )
+  const authMethodFor = (agentId: HarnessId): AuthMethod =>
+    settings.data?.agents.launchDefaults?.[agentId]?.authMethod ?? "subscription"
+  const setAuthMethod = (agentId: HarnessId, authMethod: AuthMethod) =>
+    updateAgents.mutateAsync({ launchDefaults: { [agentId]: { authMethod } } })
+
   const saveApiKey = useMutation(
     trpc.setup.saveApiKey.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (_result, variables) => {
         setApiKey("")
         setApiOpenFor(null)
+        // Saving a key from the API key choice makes that agent use it.
+        await setAuthMethod(variables.agentId, "api-key")
         await queryClient.invalidateQueries({ queryKey: trpc.setup.harnesses.queryKey() })
         await queryClient.invalidateQueries({ queryKey: trpc.setup.environment.queryKey() })
       },
@@ -132,7 +156,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const [startAtLoginChoice, setStartAtLoginChoice] = useState(true)
   const loginAvailable = startAtLogin.data !== undefined && startAtLogin.data.available !== false
 
-  const chooseAgent = (agentId: "claude-code" | "codex") => {
+  const chooseAgent = (agentId: HarnessId) => {
     setSelectionTouched(true)
     setSelectedAgent((current) => (current === agentId ? null : agentId))
   }
@@ -185,6 +209,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     startAtLogin.error ??
     setStartAtLogin.error ??
     saveApiKey.error ??
+    updateAgents.error ??
     (defaultAgentError ? new Error(defaultAgentError) : null) ??
     complete.error ??
     skip.error
@@ -326,10 +351,21 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                   checking={checkingHarnesses}
                   selected={selectedAgent === harness.id}
                   apiConfigured={harnessCheck.data?.apiConfigured[harness.id] ?? false}
+                  authMethod={authMethodFor(harness.id)}
                   apiOpen={apiOpenFor === harness.id}
                   apiKey={apiOpenFor === harness.id ? apiKey : ""}
-                  saving={saveApiKey.isPending}
+                  saving={saveApiKey.isPending || updateAgents.isPending}
                   onSelect={() => chooseAgent(harness.id)}
+                  onChooseAuth={(method) => {
+                    const keySaved = harnessCheck.data?.apiConfigured[harness.id] ?? false
+                    if (method === "api-key" && !keySaved) {
+                      setApiOpenFor(harness.id)
+                      setApiKey("")
+                      return
+                    }
+                    setApiOpenFor(null)
+                    void setAuthMethod(harness.id, method).catch(() => undefined)
+                  }}
                   onOpenApi={() => {
                     setApiOpenFor(harness.id)
                     setApiKey("")
@@ -339,6 +375,23 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                   onRetry={() => void harnessCheck.refetch()}
                 />
               ))}
+              <button
+                type="button"
+                data-testid="setup-add-agent"
+                onClick={() => setMoreAgentsOpen((open) => !open)}
+                aria-expanded={moreAgentsOpen}
+                className="flex flex-col items-start justify-center gap-0.5 rounded-lg border border-border border-dashed px-3 py-2 text-start text-muted-foreground text-sm hover:bg-muted/50"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Plus className="size-3.5" aria-hidden />
+                  {t("Add another agent")}
+                </span>
+                {moreAgentsOpen ? (
+                  <span className="text-[11px]">
+                    {t("Coming soon: other agents and providers, such as OpenCode or OpenRouter.")}
+                  </span>
+                ) : null}
+              </button>
             </div>
             {selectedAgent === null && !checkingHarnesses ? (
               <p className="mt-2 text-muted-foreground text-xs">{t("No default selected.")}</p>
@@ -462,6 +515,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 complete.isPending ||
                 saveApiKey.isPending ||
                 updateGeneral.isPending ||
+                updateAgents.isPending ||
                 setStartAtLogin.isPending
               }
             >
@@ -489,10 +543,12 @@ function HarnessCard({
   checking,
   selected,
   apiConfigured,
+  authMethod,
   apiOpen,
   apiKey,
   saving,
   onSelect,
+  onChooseAuth,
   onOpenApi,
   onApiKeyChange,
   onSaveApi,
@@ -502,16 +558,21 @@ function HarnessCard({
   checking: boolean
   selected: boolean
   apiConfigured: boolean
+  authMethod: AuthMethod
   apiOpen: boolean
   apiKey: string
   saving: boolean
   onSelect: () => void
+  onChooseAuth: (method: AuthMethod) => void
   onOpenApi: () => void
   onApiKeyChange: (value: string) => void
   onSaveApi: () => void
   onRetry: () => void
 }) {
-  const detected = !checking && harness.state === "authenticated"
+  const signedIn = !checking && harness.state === "authenticated"
+  const usesApiKey = authMethod === "api-key" && apiConfigured
+  // Usable as the default when the picked sign-in method is ready.
+  const detected = usesApiKey || (authMethod === "subscription" && signedIn)
   const t = useTranslate()
   return (
     <div
@@ -539,11 +600,13 @@ function HarnessCard({
                   detected ? "text-emerald-600" : "text-muted-foreground",
                 )}
               >
-                {detected
-                  ? t("Detected")
-                  : harness.state === "missing"
-                    ? t("Not detected")
-                    : (harness.message ?? t("Not detected"))}
+                {usesApiKey
+                  ? t("API key")
+                  : signedIn
+                    ? t("Detected")
+                    : harness.state === "missing"
+                      ? t("Not detected")
+                      : (harness.message ?? t("Not detected"))}
               </span>
             )}
           </span>
@@ -553,22 +616,45 @@ function HarnessCard({
             </span>
           ) : null}
         </button>
-        {apiOpen ? null : (
-          <button
-            type="button"
-            className="shrink-0 text-[11px] text-muted-foreground underline underline-offset-4"
-            onClick={onOpenApi}
-          >
-            {apiConfigured ? t("API key saved · replace") : t("Use API instead")}
-          </button>
-        )}
+        <fieldset
+          aria-label={`${harness.label} ${t("sign-in method")}`}
+          className="m-0 flex min-w-0 shrink-0 overflow-hidden p-0 rounded-md border border-border text-[11px]"
+        >
+          {(["subscription", "api-key"] as const).map((method) => (
+            <button
+              key={method}
+              type="button"
+              aria-pressed={authMethod === method}
+              data-testid={`setup-auth-${harness.id}-${method}`}
+              disabled={saving}
+              onClick={() => onChooseAuth(method)}
+              className={cn(
+                "px-2 py-0.5",
+                authMethod === method
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {method === "subscription" ? t("Subscription") : t("API key")}
+            </button>
+          ))}
+        </fieldset>
       </div>
+      {authMethod === "api-key" && apiConfigured && !apiOpen ? (
+        <button
+          type="button"
+          className="mt-1 text-[11px] text-muted-foreground underline underline-offset-4"
+          onClick={onOpenApi}
+        >
+          {t("API key saved · replace")}
+        </button>
+      ) : null}
       {!checking && harness.state === "error" ? (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-muted/60 p-2 text-xs">
           <p className="min-w-0 flex-1 text-muted-foreground">
             {t("Run")}{" "}
             <code className="font-mono text-foreground" dir="ltr">
-              {harness.executable} login status
+              {harness.executable} {STATUS_COMMAND[harness.id]}
             </code>{" "}
             {t("in a terminal to inspect the CLI result, then try again.")}
           </p>

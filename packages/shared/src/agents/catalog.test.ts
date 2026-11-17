@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest"
 import { BUILTIN_AGENTS, DEFAULT_AGENT_ID, getAgent, listAgents } from "./catalog"
 
 describe("agent catalog", () => {
-  test("ships Claude Code and Codex by default", () => {
-    expect(BUILTIN_AGENTS.map((agent) => agent.id)).toEqual(["claude-code", "codex"])
+  test("ships Claude Code, Codex and Gemini by default", () => {
+    expect(BUILTIN_AGENTS.map((agent) => agent.id)).toEqual(["claude-code", "codex", "gemini"])
   })
   test("the default agent exists in the catalog", () => {
     expect(getAgent(DEFAULT_AGENT_ID)).toBeDefined()

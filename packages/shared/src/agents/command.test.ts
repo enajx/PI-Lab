@@ -190,3 +190,71 @@ describe("buildNonInteractiveLaunchArgv", () => {
     ).toThrow(/does not support non-interactive workflows/i)
   })
 })
+
+describe("Gemini (agy) launches", () => {
+  const gemini = getAgent("gemini")
+
+  test("interactive launch skips permissions, adds folders, model and effort, and passes the prompt with -i", () => {
+    if (!gemini) throw new Error("Missing built-in agent gemini")
+    expect(
+      buildLaunchArgv(gemini, {
+        model: "gemini-3.8-flash-high",
+        effort: "high",
+        extraDirs: ["/papers/p"],
+        args: ["hello"],
+      }),
+    ).toEqual([
+      "agy",
+      "--dangerously-skip-permissions",
+      "--model",
+      "gemini-3.8-flash-high",
+      "--effort",
+      "high",
+      "--settings",
+      '{"trustedWorkspaces":["/papers/p"]}',
+      "--add-dir",
+      "/papers/p",
+      "-i",
+      "hello",
+    ])
+  })
+
+  test("the working and extra folders are trusted for this session only", () => {
+    if (!gemini) throw new Error("Missing built-in agent gemini")
+    expect(
+      buildLaunchArgv(gemini, {
+        workingDir: "/repo",
+        extraDirs: ["/papers/p"],
+        authMethod: "api-key",
+      }),
+    ).toEqual([
+      "agy",
+      "--dangerously-skip-permissions",
+      "--settings",
+      '{"trustedWorkspaces":["/repo","/papers/p"],"modelProvider":"gemini"}',
+      "--add-dir",
+      "/papers/p",
+    ])
+  })
+
+  test("API key login sets the Gemini API provider for this session only", () => {
+    if (!gemini) throw new Error("Missing built-in agent gemini")
+    expect(buildLaunchArgv(gemini, { authMethod: "api-key" })).toEqual([
+      "agy",
+      "--dangerously-skip-permissions",
+      "--settings",
+      '{"modelProvider":"gemini"}',
+    ])
+    expect(buildLaunchArgv(gemini, { authMethod: "subscription" })).toEqual([
+      "agy",
+      "--dangerously-skip-permissions",
+    ])
+  })
+
+  test("one-shot runs are not supported", () => {
+    if (!gemini) throw new Error("Missing built-in agent gemini")
+    expect(() => buildNonInteractiveLaunchArgv(gemini, "prompt")).toThrow(
+      "does not support non-interactive",
+    )
+  })
+})

@@ -841,6 +841,14 @@ export function AgentsSection() {
     }),
   )
 
+  const apiKeysQuery = useQuery(trpc.setup.apiKeys.queryOptions())
+  const saveApiKey = useMutation(
+    trpc.setup.saveApiKey.mutationOptions({
+      onSuccess: () =>
+        void queryClient.invalidateQueries({ queryKey: trpc.setup.apiKeys.queryKey() }),
+    }),
+  )
+
   const agents = agentsQuery.data ?? []
   const worktreePerAgent = settingsQuery.data?.worktreePerAgent ?? false
   const agentSettings: AgentSettings = settingsQuery.data?.agents ?? {
@@ -866,13 +874,18 @@ export function AgentsSection() {
         onChange={setDefaultAgent}
       />
       {agents
-        .filter((agent) => agent.id === "codex" || agent.id === "claude-code")
+        .filter((agent): agent is typeof agent & { id: ApiKeyAgentId } =>
+          API_KEY_AGENT_IDS.includes(agent.id as ApiKeyAgentId),
+        )
         .map((agent) => (
           <AgentLaunchDefaultsField
             key={agent.id}
             agent={agent}
             configured={agentSettings.launchDefaults?.[agent.id] ?? {}}
+            apiKeySaved={apiKeysQuery.data?.[agent.id] ?? false}
+            savingKey={saveApiKey.isPending}
             onSave={(value) => updateAgents.mutate({ launchDefaults: { [agent.id]: value } })}
+            onSaveKey={(apiKey) => saveApiKey.mutateAsync({ agentId: agent.id, apiKey })}
           />
         ))}
       <ToggleField
@@ -911,9 +924,9 @@ export function AgentsSection() {
           />
         ))}
       </div>
-      {updateAgents.error || defaultAgentError ? (
+      {updateAgents.error || saveApiKey.error || defaultAgentError ? (
         <p data-testid="settings-agents-error" className="px-4 text-destructive text-xs">
-          {updateAgents.error?.message ?? defaultAgentError}
+          {updateAgents.error?.message ?? saveApiKey.error?.message ?? defaultAgentError}
         </p>
       ) : null}
       <SkillLinkField
@@ -934,20 +947,100 @@ export function AgentsSection() {
   )
 }
 
+/** Agents with launch defaults and a Subscription / API key choice in Settings. */
+const API_KEY_AGENT_IDS = ["claude-code", "codex", "gemini"] as const
+type ApiKeyAgentId = (typeof API_KEY_AGENT_IDS)[number]
+
 /** Per-provider launch choices; empty values leave the CLI's own defaults intact. */
 function AgentLaunchDefaultsField({
   agent,
   configured,
+  apiKeySaved,
+  savingKey,
   onSave,
+  onSaveKey,
 }: {
   agent: { id: string; label: string }
-  configured: { model?: string; effort?: string }
-  onSave: (value: { model?: string; effort?: string }) => void
+  configured: {
+    model?: string
+    effort?: string
+    authMethod?: "subscription" | "api-key"
+  }
+  apiKeySaved: boolean
+  savingKey: boolean
+  onSave: (value: {
+    model?: string
+    effort?: string
+    authMethod?: "subscription" | "api-key"
+  }) => void
+  onSaveKey: (apiKey: string) => Promise<unknown>
 }) {
   const [model, setModel] = useState(configured.model ?? "")
   useEffect(() => setModel(configured.model ?? ""), [configured.model])
+  const [apiKey, setApiKey] = useState("")
+  const [keyOpen, setKeyOpen] = useState(false)
+  const authMethod = configured.authMethod ?? "subscription"
+  const showKeyInput = authMethod === "api-key" && (!apiKeySaved || keyOpen)
   return (
     <div>
+      <SelectField
+        testId={`settings-agent-auth-${agent.id}`}
+        label={`${agent.label} sign-in`}
+        description={
+          authMethod === "api-key"
+            ? apiKeySaved
+              ? "New agents use the API key saved in PI Lab."
+              : "Save an API key below; agents cannot start until one is saved."
+            : "New agents use the CLI's own login (your subscription)."
+        }
+        value={authMethod}
+        options={[
+          { value: "subscription", label: "Subscription" },
+          { value: "api-key", label: "API key" },
+        ]}
+        onChange={(value) => onSave({ authMethod: value as "subscription" | "api-key" })}
+      />
+      {authMethod === "api-key" && apiKeySaved && !keyOpen ? (
+        <div className="flex justify-end px-4 pb-2">
+          <button
+            type="button"
+            className="text-muted-foreground text-xs underline underline-offset-4"
+            onClick={() => setKeyOpen(true)}
+          >
+            API key saved · replace
+          </button>
+        </div>
+      ) : null}
+      {showKeyInput ? (
+        <div className="flex items-center justify-end gap-2 px-4 pb-2">
+          <input
+            data-testid={`settings-agent-api-key-${agent.id}`}
+            aria-label={`${agent.label} API key`}
+            type="password"
+            autoComplete="off"
+            placeholder="API key"
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+            className="w-64 rounded border border-border bg-background px-2 py-1.5 text-xs"
+          />
+          <Button
+            type="button"
+            size="sm"
+            disabled={savingKey || apiKey.trim().length === 0}
+            onClick={() =>
+              void onSaveKey(apiKey).then(
+                () => {
+                  setApiKey("")
+                  setKeyOpen(false)
+                },
+                () => undefined,
+              )
+            }
+          >
+            Save
+          </Button>
+        </div>
+      ) : null}
       <label className="flex items-center justify-between gap-4 px-4 py-3">
         <span className="text-sm">{agent.label} model</span>
         <input
@@ -974,6 +1067,13 @@ function AgentLaunchDefaultsField({
       />
     </div>
   )
+}
+
+/** Command names shown as the empty executable field's placeholder. */
+const DEFAULT_EXECUTABLES: Readonly<Record<string, string>> = {
+  "claude-code": "claude",
+  codex: "codex",
+  gemini: "agy",
 }
 
 function AgentExecutableField({
@@ -1008,7 +1108,7 @@ function AgentExecutableField({
             : `${t("Not found:")} ${agent.executable}`
         }
         value={value}
-        placeholder={agent.id === "claude-code" ? "claude" : "codex"}
+        placeholder={DEFAULT_EXECUTABLES[agent.id] ?? ""}
         onChange={(event) => setValue(event.target.value)}
         onBlur={() => onSave(value.trim())}
         className="w-64 rounded border border-border bg-background px-2 py-1.5 text-xs"
