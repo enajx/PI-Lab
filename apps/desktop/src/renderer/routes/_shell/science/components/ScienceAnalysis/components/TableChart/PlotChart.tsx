@@ -7,6 +7,7 @@ import {
   ComposedChart,
   ErrorBar,
   Line,
+  ReferenceArea,
   Scatter,
   Tooltip,
   XAxis,
@@ -14,6 +15,13 @@ import {
 } from "recharts"
 import type { PlotPreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import {
+  inRange,
+  rangeOf,
+  useChartZoom,
+  xAtPixel,
+  zoomMouseHandlers,
+} from "../MetricChart/chartZoom"
 import { formatChartNumber } from "../MetricChart/formatChartNumber"
 import {
   CHART_HEIGHT,
@@ -21,14 +29,23 @@ import {
   colorFor,
   FALLBACK_WIDTH,
   MAX_LEGEND_SERIES,
+  PLOT_MARGIN,
+  SELECTION_FILL,
   useMeasuredWidth,
+  Y_AXIS_WIDTH,
+  ZOOMED_Y_DOMAIN,
 } from "../MetricChart/MetricChart"
+import { ZoomControls } from "../MetricChart/ZoomControls"
 
 /**
  * A table plotted by the chart builder ({@link PlotPreview}): lines, points or
  * bars, one per series, with an optional shaded band (lines, points) or error
  * bars (bars) for the spread. Each series has its own x values, so lines and
  * points get their own data; bars share one row per x value.
+ *
+ * Zoom (drag, +, −, reset, double-click) is view-only. Lines and points zoom
+ * the numeric x axis and draw only the points in view; bars are categories,
+ * so they keep the rows whose x is in the zoomed range.
  */
 
 const AXIS_TICK = { fontSize: 11, fill: "var(--muted-foreground)" }
@@ -51,7 +68,7 @@ export function PlotChart({ plot }: { plot: PlotPreview }) {
           {t("No plottable points with these settings.")}
         </p>
       ) : (
-        <div ref={ref} className="w-full">
+        <div ref={ref} className="relative w-full select-none">
           {plot.chartType === "bar" ? (
             <BarPlot plot={plot} width={width || FALLBACK_WIDTH} xText={xText} />
           ) : (
@@ -149,71 +166,107 @@ function PointPlot({
     [plot],
   )
   const categories = plot.xCategories
+  const values = useMemo(() => plot.series.flatMap((series) => series.x), [plot])
+  const full = useMemo(
+    () =>
+      categories
+        ? { min: -0.5, max: categories.length - 0.5 }
+        : (rangeOf(values) ?? { min: 0, max: 0 }),
+    [categories, values],
+  )
+  const zoom = useChartZoom(full, values)
+  const view = zoom.view
+  // Only the points in view are drawn, so the y axis fits them.
+  const shown = useMemo(
+    () =>
+      zoom.zoomed ? data.map((points) => points.filter((point) => inRange(point.x, view))) : data,
+    [data, view, zoom.zoomed],
+  )
+  const mouse = zoomMouseHandlers(zoom, (state) =>
+    xAtPixel(state.chartX ?? 0, PLOT_MARGIN.left + Y_AXIS_WIDTH, width - PLOT_MARGIN.right, view),
+  )
   return (
-    <ComposedChart
-      width={width}
-      height={CHART_HEIGHT}
-      margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
-    >
-      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-      <XAxis
-        dataKey="x"
-        type="number"
-        domain={categories ? [-0.5, categories.length - 0.5] : ["dataMin", "dataMax"]}
-        ticks={categories ? categories.map((_, i) => i) : undefined}
-        allowDuplicatedCategory={false}
-        tick={AXIS_TICK}
-        tickFormatter={xText}
-        label={{
-          value: plot.xLabel,
-          position: "insideBottom",
-          offset: -4,
-          style: AXIS_TICK,
-        }}
-      />
-      <YAxis tick={AXIS_TICK} tickFormatter={formatChartNumber} />
-      <Tooltip content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />} />
-      {plot.series.map((series, i) =>
-        series.lo ? (
-          <Area
-            key={`${series.label}-band`}
-            data={data[i]}
-            dataKey="band"
-            name={`${series.label} band`}
-            stroke="none"
-            fill={colorFor(i)}
+    <>
+      <ComposedChart width={width} height={CHART_HEIGHT} margin={PLOT_MARGIN} {...mouse}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis
+          dataKey="x"
+          type="number"
+          domain={[view.min, view.max]}
+          allowDataOverflow
+          ticks={
+            categories ? categories.map((_, i) => i).filter((i) => inRange(i, view)) : undefined
+          }
+          allowDuplicatedCategory={false}
+          tick={AXIS_TICK}
+          tickFormatter={xText}
+          label={{
+            value: plot.xLabel,
+            position: "insideBottom",
+            offset: -4,
+            style: AXIS_TICK,
+          }}
+        />
+        <YAxis
+          width={Y_AXIS_WIDTH}
+          {...(zoom.zoomed ? ZOOMED_Y_DOMAIN : {})}
+          tick={AXIS_TICK}
+          tickFormatter={formatChartNumber}
+        />
+        <Tooltip
+          content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />}
+        />
+        {plot.series.map((series, i) =>
+          series.lo ? (
+            <Area
+              key={`${series.label}-band`}
+              data={shown[i]}
+              dataKey="band"
+              name={`${series.label} band`}
+              stroke="none"
+              fill={colorFor(i)}
+              fillOpacity={0.15}
+              isAnimationActive={false}
+              legendType="none"
+              tooltipType="none"
+            />
+          ) : null,
+        )}
+        {plot.series.map((series, i) =>
+          plot.chartType === "scatter" ? (
+            <Scatter
+              key={series.label}
+              data={shown[i]}
+              dataKey="y"
+              name={series.label}
+              fill={colorFor(i)}
+              isAnimationActive={false}
+            />
+          ) : (
+            <Line
+              key={series.label}
+              data={shown[i]}
+              dataKey="y"
+              name={series.label}
+              type="linear"
+              stroke={colorFor(i)}
+              strokeWidth={1.5}
+              dot={series.x.length <= 50}
+              isAnimationActive={false}
+            />
+          ),
+        )}
+        {zoom.selection ? (
+          <ReferenceArea
+            x1={zoom.selection.min}
+            x2={zoom.selection.max}
+            fill={SELECTION_FILL}
             fillOpacity={0.15}
-            isAnimationActive={false}
-            legendType="none"
-            tooltipType="none"
           />
-        ) : null,
-      )}
-      {plot.series.map((series, i) =>
-        plot.chartType === "scatter" ? (
-          <Scatter
-            key={series.label}
-            data={data[i]}
-            dataKey="y"
-            name={series.label}
-            fill={colorFor(i)}
-            isAnimationActive={false}
-          />
-        ) : (
-          <Line
-            key={series.label}
-            data={data[i]}
-            dataKey="y"
-            name={series.label}
-            type="linear"
-            stroke={colorFor(i)}
-            strokeWidth={1.5}
-            dot={series.x.length <= 50}
-            isAnimationActive={false}
-          />
-        ),
-      )}
-    </ComposedChart>
+        ) : null}
+      </ComposedChart>
+      <ZoomControls zoom={zoom} />
+    </>
   )
 }
 
@@ -242,41 +295,62 @@ function BarPlot({
     })
     return [...byX.values()].sort((a, b) => Number(a.x) - Number(b.x))
   }, [plot])
+  const values = useMemo(() => rows.map((row) => Number(row.x)), [rows])
+  const full = useMemo(() => rangeOf(values) ?? { min: 0, max: 0 }, [values])
+  const zoom = useChartZoom(full, values)
+  const view = zoom.view
+  const shown = useMemo(
+    () => (zoom.zoomed ? rows.filter((row) => inRange(Number(row.x), view)) : rows),
+    [rows, view, zoom.zoomed],
+  )
+  // Bars are categories: the bar under the mouse gives the x value.
+  const mouse = zoomMouseHandlers(zoom, (state) => {
+    const x = Number(state.activeLabel)
+    return state.activeLabel === undefined || Number.isNaN(x) ? null : x
+  })
   return (
-    <BarChart
-      width={width}
-      height={CHART_HEIGHT}
-      data={rows}
-      margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
-    >
-      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-      <XAxis
-        dataKey="x"
-        type="category"
-        tick={AXIS_TICK}
-        tickFormatter={(value: number) => xText(Number(value))}
-        label={{
-          value: plot.xLabel,
-          position: "insideBottom",
-          offset: -4,
-          style: AXIS_TICK,
-        }}
-      />
-      <YAxis tick={AXIS_TICK} tickFormatter={formatChartNumber} />
-      <Tooltip content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />} />
-      {plot.series.map((series, i) => (
-        <Bar
-          key={series.label}
-          dataKey={`s${i}`}
-          name={series.label}
-          fill={colorFor(i)}
-          isAnimationActive={false}
-        >
-          {series.lo ? (
-            <ErrorBar dataKey={`e${i}`} stroke="var(--foreground)" strokeWidth={1} width={4} />
-          ) : null}
-        </Bar>
-      ))}
-    </BarChart>
+    <>
+      <BarChart width={width} height={CHART_HEIGHT} data={shown} margin={PLOT_MARGIN} {...mouse}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis
+          dataKey="x"
+          type="category"
+          tick={AXIS_TICK}
+          tickFormatter={(value: number) => xText(Number(value))}
+          label={{
+            value: plot.xLabel,
+            position: "insideBottom",
+            offset: -4,
+            style: AXIS_TICK,
+          }}
+        />
+        <YAxis width={Y_AXIS_WIDTH} tick={AXIS_TICK} tickFormatter={formatChartNumber} />
+        <Tooltip
+          content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />}
+        />
+        {plot.series.map((series, i) => (
+          <Bar
+            key={series.label}
+            dataKey={`s${i}`}
+            name={series.label}
+            fill={colorFor(i)}
+            isAnimationActive={false}
+          >
+            {series.lo ? (
+              <ErrorBar dataKey={`e${i}`} stroke="var(--foreground)" strokeWidth={1} width={4} />
+            ) : null}
+          </Bar>
+        ))}
+        {zoom.selection ? (
+          <ReferenceArea
+            x1={zoom.selection.min}
+            x2={zoom.selection.max}
+            fill={SELECTION_FILL}
+            fillOpacity={0.15}
+          />
+        ) : null}
+      </BarChart>
+      <ZoomControls zoom={zoom} />
+    </>
   )
 }

@@ -872,6 +872,7 @@ export function ScienceAnalysis({
                 {selectedProjectId && selectedRelPath ? (
                   <AnalysisPreview
                     projectId={selectedProjectId}
+                    projectPath={selectedProject?.repoPath ?? null}
                     relPath={selectedRelPath}
                     kind={
                       allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"

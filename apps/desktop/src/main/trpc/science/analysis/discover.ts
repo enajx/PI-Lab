@@ -31,10 +31,13 @@ import {
   MAX_TEXT_BYTES,
   type MetadataPreview,
   type PlotPreview,
+  type TableOps,
+  type TablePage,
   type TextPreview,
 } from "./previewShapes"
 import { pickleFrame, previewPickle } from "./pythonPreview"
 import type { ExperimentsStructure } from "./structure"
+import { applyOps, csvOf, type OpsResult, pageOf } from "./tableOps"
 import { buildPlot, type Frame, readDelimitedFrame, tableFromFrame } from "./tables"
 
 /** Filesystem discovery and preview for Analysis, independent of the tRPC router. */
@@ -505,33 +508,85 @@ export async function hugeFilePartial(
 export interface ChartOptions {
   /** The HDF5 dataset holding the table, or null for other formats. */
   dataset: string | null
+  /** What is done to the table before it is plotted. */
+  ops: TableOps
   spec: ChartSpec
+}
+
+/** What a table page request asks for besides the file. */
+export interface TablePageOptions {
+  dataset: string | null
+  ops: TableOps
+  offset: number
+  limit: number
 }
 
 /**
  * Plot a table file (CSV/TSV, Parquet, a pickled DataFrame or list of dicts,
- * an HDF5 compound dataset) with the chart builder's settings. The file's
- * first {@link MAX_FRAME_ROWS} rows are read once and kept for the next
- * request on the same unchanged file, so changing settings is quick.
+ * an HDF5 compound dataset) after its table operations, with the chart
+ * builder's settings.
  */
 export async function chartDataFile(
   abs: string,
   relPath: string,
   options: ChartOptions,
 ): Promise<PlotPreview> {
+  const result = await opsResultOf(abs, relPath, options.dataset, options.ops)
+  const plot = buildPlot(result.frame, options.spec)
+  return { ...plot, notes: [...result.notes, ...plot.notes] }
+}
+
+/** Rows of a table file after its table operations, one page at a time. */
+export async function tableDataFile(
+  abs: string,
+  relPath: string,
+  options: TablePageOptions,
+): Promise<TablePage> {
+  const result = await opsResultOf(abs, relPath, options.dataset, options.ops)
+  return pageOf(result, options.offset, options.limit)
+}
+
+/** A table file after its table operations, as CSV text (for Export CSV). */
+export async function csvOfDataFile(
+  abs: string,
+  relPath: string,
+  options: { dataset: string | null; ops: TableOps; columns: string[] | null },
+): Promise<{ csv: string; rows: number }> {
+  const result = await opsResultOf(abs, relPath, options.dataset, options.ops)
+  return { csv: csvOf(result.frame, options.columns), rows: result.frame.rowCount }
+}
+
+/**
+ * The first {@link MAX_FRAME_ROWS} rows of a table file after `ops`. The last
+ * table read and the last result are kept for the next request on the same
+ * unchanged file, so paging and changing settings are quick.
+ */
+async function opsResultOf(
+  abs: string,
+  relPath: string,
+  dataset: string | null,
+  ops: TableOps,
+): Promise<OpsResult> {
   const info = await stat(abs).catch(() => {
     throw new TRPCError({ code: "NOT_FOUND", message: `No file ${relPath}` })
   })
-  const key = [abs, options.dataset ?? "", info.size, info.mtimeMs].join("\0")
+  const key = [abs, dataset ?? "", info.size, info.mtimeMs].join("\0")
   if (frameCache?.key !== key) {
     frameCache = null
-    frameCache = { key, frame: await readTableFrame(abs, relPath, options.dataset) }
+    resultCache = null
+    frameCache = { key, frame: await readTableFrame(abs, relPath, dataset) }
   }
-  return buildPlot(frameCache.frame, options.spec)
+  const resultKey = `${key}\0${JSON.stringify(ops)}`
+  if (resultCache?.key !== resultKey) {
+    resultCache = { key: resultKey, result: applyOps(frameCache.frame, ops) }
+  }
+  return resultCache.result
 }
 
-/** The last table read by {@link chartDataFile}, keyed by path, dataset, size and time. */
+/** The last table read by {@link opsResultOf}, keyed by path, dataset, size and time. */
 let frameCache: { key: string; frame: Frame } | null = null
+/** The last result of table operations, keyed by the table and the operations. */
+let resultCache: { key: string; result: OpsResult } | null = null
 
 /** Read a table file into a frame; a file that holds no table is a BAD_REQUEST. */
 async function readTableFrame(

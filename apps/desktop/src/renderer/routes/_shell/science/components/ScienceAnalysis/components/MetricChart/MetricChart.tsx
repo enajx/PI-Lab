@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts"
+import { CartesianGrid, Line, LineChart, ReferenceArea, Tooltip, XAxis, YAxis } from "recharts"
 import type { ChartPreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { inRange, rangeOf, useChartZoom, xAtPixel, zoomMouseHandlers } from "./chartZoom"
 import { formatChartNumber } from "./formatChartNumber"
+import { ZoomControls } from "./ZoomControls"
 
 /**
  * Line-chart renderer for a {@link ChartPreview} — a numeric metric log (a
@@ -22,6 +24,17 @@ import { formatChartNumber } from "./formatChartNumber"
 export const CHART_HEIGHT = 288
 /** Width used until the container is measured (and where measuring is a no-op). */
 export const FALLBACK_WIDTH = 640
+/** Space around the plot area; the wider right margin holds the zoom buttons. */
+export const PLOT_MARGIN = { top: 8, right: 28, bottom: 8, left: 0 }
+/** Y axis width in pixels, fixed so a mouse pixel can be turned into an x value. */
+export const Y_AXIS_WIDTH = 60
+/** Shading of the x range being dragged over to zoom. */
+export const SELECTION_FILL = "var(--muted-foreground)"
+/**
+ * Y axis domain while zoomed: fit the points in view. Not zoomed, the axis
+ * keeps recharts' default, which starts at 0.
+ */
+export const ZOOMED_Y_DOMAIN = { domain: ["auto", "auto"] as [string, string] }
 
 /** Per-series stroke palette in OKLCH so it reads on both light and dark themes. */
 const SERIES_COLORS = [
@@ -122,6 +135,23 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
       return point
     })
   }, [preview])
+  const full = useMemo(() => rangeOf(preview.x) ?? { min: 0, max: 0 }, [preview])
+  const zoom = useChartZoom(full, preview.x)
+  const view = zoom.view
+  // Only the points in view are drawn, so the y axis fits them.
+  const shown = useMemo(
+    () => (zoom.zoomed ? points.filter((point) => inRange(point.x ?? Number.NaN, view)) : points),
+    [points, view, zoom.zoomed],
+  )
+  const chartWidth = width || FALLBACK_WIDTH
+  const mouse = zoomMouseHandlers(zoom, (state) =>
+    xAtPixel(
+      state.chartX ?? 0,
+      PLOT_MARGIN.left + Y_AXIS_WIDTH,
+      chartWidth - PLOT_MARGIN.right,
+      view,
+    ),
+  )
 
   if (points.length === 0) {
     return (
@@ -136,18 +166,20 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
 
   return (
     <div data-testid="analysis-preview-chart" className="flex flex-col gap-2">
-      <div ref={ref} className="w-full">
+      <div ref={ref} className="relative w-full select-none">
         <LineChart
-          width={width || FALLBACK_WIDTH}
+          width={chartWidth}
           height={CHART_HEIGHT}
-          data={points}
-          margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+          data={shown}
+          margin={PLOT_MARGIN}
+          {...mouse}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis
             dataKey="x"
             type="number"
-            domain={["dataMin", "dataMax"]}
+            domain={[view.min, view.max]}
+            allowDataOverflow
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             tickFormatter={formatChartNumber}
             label={{
@@ -158,6 +190,8 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
             }}
           />
           <YAxis
+            width={Y_AXIS_WIDTH}
+            {...(zoom.zoomed ? ZOOMED_Y_DOMAIN : {})}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             tickFormatter={formatChartNumber}
           />
@@ -188,7 +222,16 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
               connectNulls
             />
           ))}
+          {zoom.selection ? (
+            <ReferenceArea
+              x1={zoom.selection.min}
+              x2={zoom.selection.max}
+              fill={SELECTION_FILL}
+              fillOpacity={0.15}
+            />
+          ) : null}
         </LineChart>
+        <ZoomControls zoom={zoom} />
       </div>
       {preview.series.length <= MAX_LEGEND_SERIES ? (
         <div className="flex flex-wrap gap-x-4 gap-y-1" data-testid="analysis-chart-legend">

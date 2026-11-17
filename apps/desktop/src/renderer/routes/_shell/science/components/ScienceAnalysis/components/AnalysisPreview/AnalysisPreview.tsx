@@ -40,12 +40,15 @@ const PdfViewer = lazy(() =>
  */
 export function AnalysisPreview({
   projectId,
+  projectPath,
   relPath,
   kind,
   onOpenNotebook,
   headerEnd,
 }: {
   projectId: string
+  /** The project's folder (where Export CSV's save dialog opens); null while unknown. */
+  projectPath: string | null
   relPath: string
   kind: DataFileKind
   /** Open this Jupyter or marimo notebook in a notebook tab on its own server. */
@@ -196,6 +199,7 @@ export function AnalysisPreview({
                 preview={fallback.data}
                 kind={kind}
                 projectId={projectId}
+                projectPath={projectPath}
                 relPath={relPath}
                 dataset={dataset}
                 onLoad={() => void preview.refetch()}
@@ -219,6 +223,7 @@ export function AnalysisPreview({
             preview={preview.data}
             kind={kind}
             projectId={projectId}
+            projectPath={projectPath}
             relPath={relPath}
             dataset={dataset}
             onLoad={() => setChoice({ relPath, load: true, dataset })}
@@ -600,6 +605,7 @@ function PreviewBody({
   preview,
   kind,
   projectId,
+  projectPath,
   relPath,
   dataset,
   onLoad,
@@ -608,6 +614,7 @@ function PreviewBody({
   preview: DataFilePreview
   kind: DataFileKind
   projectId: string
+  projectPath: string | null
   relPath: string
   /** The chosen HDF5 dataset, or null. */
   dataset: string | null
@@ -651,6 +658,7 @@ function PreviewBody({
                   preview={preview.partial}
                   kind={kind}
                   projectId={projectId}
+                  projectPath={projectPath}
                   relPath={relPath}
                   dataset={dataset}
                   onLoad={onLoad}
@@ -692,6 +700,7 @@ function PreviewBody({
             preview={preview.preview}
             kind={kind}
             projectId={projectId}
+            projectPath={projectPath}
             relPath={relPath}
             dataset={preview.selected}
             onLoad={onLoad}
@@ -708,7 +717,7 @@ function PreviewBody({
           relPath={relPath}
           dataset={dataset}
           preview={preview}
-          renderTable={() => <TableBody preview={preview} />}
+          projectPath={projectPath}
         />
       )
     case "chart":

@@ -9,7 +9,7 @@ import {
 } from "../../fonts/systemFonts"
 import { readBuildCommit } from "../../identity/buildCommit"
 import { type PiLabChannel, resolveAppChannel } from "../../identity/channel"
-import { pickDirectoryOverride, testFontFamilies } from "../../runtime/env"
+import { pickDirectoryOverride, saveFileOverride, testFontFamilies } from "../../runtime/env"
 import { publicReleaseFromPackage } from "../../updates/release"
 import { fitWindowToContent, restoreWindowSize } from "../../window/contentFit"
 import { liveStartAtLoginService, type StartAtLoginService } from "../../window/startAtLogin"
@@ -96,6 +96,25 @@ export function createSystemRouter(
           : await dialog.showOpenDialog(options)
         if (result.canceled || result.filePaths.length === 0) return null
         return result.filePaths[0] ?? null
+      }),
+
+    /**
+     * Open the native save dialog in `defaultPath` (a folder plus a suggested file
+     * name), parented like `pickDirectory`. Returns the chosen path, or `null` when
+     * the user cancels. Test mode can return `PI_LAB_TEST_SAVE_FILE` instead.
+     */
+    pickSaveFile: publicProcedure
+      .input(z.object({ defaultPath: z.string().min(1) }))
+      .mutation(async ({ input }): Promise<string | null> => {
+        if (saveFileOverride) return saveFileOverride
+        const parent =
+          BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
+        const options = { defaultPath: input.defaultPath, properties: ["createDirectory" as const] }
+        const result = parent
+          ? await dialog.showSaveDialog(parent, options)
+          : await dialog.showSaveDialog(options)
+        if (result.canceled || !result.filePath) return null
+        return result.filePath
       }),
 
     /**

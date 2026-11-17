@@ -245,7 +245,7 @@ function hasRepeats(column: FrameColumn): boolean {
  * else the first numeric factor (e.g. `question`) against the first measure,
  * averaged when x repeats. Null when nothing can be plotted.
  */
-function defaultSpecOf(frame: Frame, columns: ColumnInfo[]): ChartSpec | null {
+export function defaultSpecOf(frame: Frame, columns: ColumnInfo[]): ChartSpec | null {
   const step = columns.find((c) => c.role === "step")
   const x =
     step ??

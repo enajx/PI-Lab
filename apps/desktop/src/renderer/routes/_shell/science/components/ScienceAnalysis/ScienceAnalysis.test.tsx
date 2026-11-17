@@ -118,6 +118,38 @@ function listing(
   }
 }
 
+/**
+ * Stubbed (mocked) tRPC answers for a table file: the preview, no saved table
+ * settings, and its rows as the first table page. Every column is text.
+ */
+function tableStubs(headers: string[], rows: string[][]): Record<string, () => unknown> {
+  const columns = headers.map((name) => ({ name, role: "factor", kind: "text" }))
+  return {
+    "science.analysis.preview": () => ({
+      type: "table",
+      headers,
+      rows,
+      totalRows: rows.length,
+      truncated: false,
+      partial: false,
+      columns,
+      defaultView: "table",
+      defaultSpec: null,
+    }),
+    "science.analysis.tableSettings": () => null,
+    "science.analysis.table": () => ({
+      headers,
+      columns,
+      rows,
+      offset: 0,
+      totalRows: rows.length,
+      partial: false,
+      notes: [],
+      defaultSpec: null,
+    }),
+  }
+}
+
 describe("ScienceAnalysis", () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -873,16 +905,10 @@ describe("ScienceAnalysis", () => {
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
         listing([{ relPath: "d.csv", name: "d.csv", kind: "csv" }]),
-      "science.analysis.preview": () => ({
-        type: "table",
-        headers: ["name", "value"],
-        rows: [
+      ...tableStubs(["name", "value"], [
           ["alpha", "1"],
           ["beta", "2"],
-        ],
-        totalRows: 2,
-        truncated: false,
-      }),
+        ]),
     })
 
     await waitFor(() => {
@@ -1019,13 +1045,7 @@ describe("ScienceAnalysis", () => {
       "science.analysis.closeInteractive": (input) => {
         closes.push(input)
       },
-      "science.analysis.preview": () => ({
-        type: "table",
-        headers: ["value"],
-        rows: [["1"]],
-        totalRows: 1,
-        truncated: false,
-      }),
+      ...tableStubs(["value"], [["1"]]),
     })
 
     await waitFor(() => expect(screen.getAllByTestId("analysis-file")).toHaveLength(2))
@@ -1155,13 +1175,7 @@ describe("ScienceAnalysis", () => {
           { relPath: "data/metrics.csv", name: "metrics.csv", kind: "csv" },
           { relPath: "config.json", name: "config.json", kind: "json" },
         ]),
-      "science.analysis.preview": () => ({
-        type: "table",
-        headers: ["name", "value"],
-        rows: [["alpha", "1"]],
-        totalRows: 1,
-        truncated: false,
-      }),
+      ...tableStubs(["name", "value"], [["alpha", "1"]]),
     })
 
     await waitFor(() => {

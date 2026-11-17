@@ -45,6 +45,11 @@ export const pickDirectoryOverride = isTestMode
   ? process.env.PI_LAB_TEST_PICK_DIRECTORY?.trim() || undefined
   : undefined
 
+/** Test-only deterministic replacement for the native save dialog (the path to save to). */
+export const saveFileOverride = isTestMode
+  ? process.env.PI_LAB_TEST_SAVE_FILE?.trim() || undefined
+  : undefined
+
 function readTestFontFamilies(): string[] | undefined {
   if (!isTestMode) return undefined
   const raw = process.env.PI_LAB_TEST_FONT_FAMILIES?.trim()

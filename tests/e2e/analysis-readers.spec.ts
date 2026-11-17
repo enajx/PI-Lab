@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { copyFile, mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -118,6 +118,8 @@ async function launch(): Promise<void> {
       PI_LAB_DATA_DIR: join(dataDir, "data"),
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       PI_LAB_TEST_OPEN_PROJECT: repo,
+      // Export CSV saves here instead of asking with the native save dialog.
+      PI_LAB_TEST_SAVE_FILE: join(dataDir, "export.csv"),
     },
   })
 }
@@ -320,4 +322,90 @@ test("a load that fails says why and falls back to the view without loading", as
   // The app keeps working: another file still previews.
   await selectFile(window, "options.csv")
   await expect(window.getByTestId("analysis-preview-table")).toBeVisible({ timeout: 30_000 })
+})
+
+test("table settings filter and sort, Aggregate groups rows, the chart plots the result, and Export CSV saves it", async () => {
+  test.setTimeout(180_000)
+  let window = await openAnalysis()
+  await selectFile(window, "options.csv")
+  await expect(window.getByTestId("analysis-preview-table")).toBeVisible({ timeout: 30_000 })
+
+  // Filter option = c, sorted by probability descending.
+  await window.getByTestId("analysis-table-settings").click()
+  await window.getByTestId("analysis-table-add-filter").click()
+  const filter = window.getByTestId("analysis-table-filter")
+  await filter.getByTestId("analysis-table-filter-column").selectOption("option")
+  await filter.getByTestId("analysis-table-filter-value").fill("c")
+  await expect(window.getByTestId("analysis-preview-rowcount")).toHaveText("36 rows")
+  await window.keyboard.press("Escape")
+  await window.getByTestId("analysis-table-header").filter({ hasText: "probability" }).click()
+  await window.getByTestId("analysis-table-header").filter({ hasText: "probability" }).click()
+  const firstRow = window.getByTestId("analysis-table-row").first()
+  await expect(firstRow).toContainText("0.26")
+  await expect(window.getByTestId("analysis-table-ops")).toHaveText(
+    /1 filter · Sorted by probability ↓/,
+  )
+
+  // Group by question with the mean probability: 6 rows, which the chart plots.
+  await window.getByTestId("analysis-table-aggregate").click()
+  await window.getByTestId("analysis-aggregate-kind").selectOption("groupBy")
+  await expect(window.getByTestId("analysis-preview-rowcount")).toHaveText("6 rows")
+  await expect(window.getByTestId("analysis-table-header")).toHaveText([
+    "question",
+    "probability (mean)",
+  ])
+  await window.keyboard.press("Escape")
+  await window.getByTestId("analysis-view-chart").click()
+  await expect(window.getByTestId("analysis-plot-legend")).toHaveText("probability (mean)")
+
+  // Export CSV writes the shown result.
+  await window.getByTestId("analysis-table-export").click()
+  await expect(window.getByTestId("analysis-table-exported")).toContainText("Saved 6 rows")
+  const exported = await readFile(join(dataDir, "export.csv"), "utf8")
+  expect(exported.split("\n")[0]).toBe("question,probability (mean)")
+  expect(exported.split("\n")[6]).toBe("6,0.26")
+
+  // Another options.csv opens with the same operations, also after a restart.
+  await closeApp()
+  window = await openAnalysis()
+  await openAnalysisFolder(window, "other")
+  await selectFile(window, "other/options.csv")
+  await expect(window.getByTestId("analysis-plot-legend")).toHaveText("probability (mean)", {
+    timeout: 30_000,
+  })
+  await window.getByTestId("analysis-table-clear-ops").click()
+  await window.getByTestId("analysis-view-table").click()
+  await expect(window.getByTestId("analysis-preview-rowcount")).toHaveText("108 rows")
+})
+
+test("the table scrolls to its last row, and text size and Fit are kept after a restart", async () => {
+  test.setTimeout(180_000)
+  const lines = ["id,group,value,note"]
+  for (let i = 0; i < 3000; i++) lines.push(`${i},g${i % 4},${(i * 0.37) % 11},row number ${i}`)
+  await writeFile(join(repo, "results", "run-a", "many.csv"), `${lines.join("\n")}\n`)
+  let window = await openAnalysis()
+  await selectFile(window, "many.csv")
+  // An increasing id and a number column read as a metric log, so it opens as a chart.
+  await window.getByTestId("analysis-view-table").click()
+  await expect(window.getByTestId("analysis-preview-rowcount")).toHaveText("3,000 rows", {
+    timeout: 30_000,
+  })
+  const scroll = window.getByTestId("analysis-table-scroll")
+  await scroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect(window.locator('[data-testid="analysis-table-row"][data-row="2999"]')).toContainText(
+    "row number 2999",
+  )
+
+  await window.getByTestId("analysis-table-zoom-in").click()
+  await expect(window.getByTestId("analysis-table-zoom")).toHaveText("110%")
+  await window.getByTestId("analysis-table-zoom-fit").click()
+  const zoom = await window.getByTestId("analysis-table-zoom").textContent()
+  const fits = await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
+  expect(fits).toBe(true)
+  await closeApp()
+  window = await openAnalysis()
+  await selectFile(window, "many.csv")
+  await expect(window.getByTestId("analysis-table-zoom")).toHaveText(zoom ?? "")
 })

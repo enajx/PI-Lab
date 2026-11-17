@@ -10,6 +10,7 @@ import type { ChartSpec, DataFilePreview, TablePreview } from "./previewShapes"
 
 const FIXTURES = join(__dirname, "__fixtures__", "data")
 const NO_LOAD = { load: false, dataset: null }
+const NO_OPS = { filters: [], aggregation: null, sort: [] }
 
 /** The table inside a preview (HDF5 wraps it in a dataset list). */
 function tableOf(preview: DataFilePreview): TablePreview {
@@ -69,7 +70,7 @@ describe("chart builder", () => {
 
   for (const { name, dataset } of LONG_FILES) {
     test(`${name}: mean probability per question with a min–max band`, async () => {
-      const plot = await chartDataFile(join(FIXTURES, name), name, { dataset, spec })
+      const plot = await chartDataFile(join(FIXTURES, name), name, { dataset, ops: NO_OPS, spec })
       expect(plot.series).toHaveLength(1)
       const series = plot.series[0]
       expect(series?.x).toEqual([1, 2, 3, 4, 5, 6])
@@ -87,6 +88,7 @@ describe("chart builder", () => {
   test("split by a column draws one line per value", async () => {
     const plot = await chartDataFile(join(FIXTURES, "long.csv"), "long.csv", {
       dataset: null,
+      ops: NO_OPS,
       spec: { ...spec, splitBy: "option", band: "none" },
     })
     expect(plot.series.map((s) => s.label)).toEqual(["option=a", "option=b", "option=c"])
@@ -97,11 +99,13 @@ describe("chart builder", () => {
     const file = join(FIXTURES, "long.csv")
     const gold = await chartDataFile(file, "long.csv", {
       dataset: null,
+      ops: NO_OPS,
       spec: { ...spec, y: ["is_gold"], band: "none" },
     })
     expect(gold.series[0]?.y.map((v) => Number(v?.toFixed(4)))).toEqual(Array(6).fill(0.3333))
     const count = await chartDataFile(file, "long.csv", {
       dataset: null,
+      ops: NO_OPS,
       spec: { ...spec, aggregate: "count", band: "none" },
     })
     expect(count.series[0]?.y).toEqual(Array(6).fill(18))
@@ -110,6 +114,7 @@ describe("chart builder", () => {
   test("a text x column is categorical", async () => {
     const plot = await chartDataFile(join(FIXTURES, "long.csv"), "long.csv", {
       dataset: null,
+      ops: NO_OPS,
       spec: { ...spec, x: "option", chartType: "bar", band: "none" },
     })
     expect(plot.xCategories).toEqual(["a", "b", "c"])
@@ -120,10 +125,12 @@ describe("chart builder", () => {
     const file = join(FIXTURES, "long.csv")
     const std = await chartDataFile(file, "long.csv", {
       dataset: null,
+      ops: NO_OPS,
       spec: { ...spec, band: "std" },
     })
     const ci = await chartDataFile(file, "long.csv", {
       dataset: null,
+      ops: NO_OPS,
       spec: { ...spec, band: "ci95" },
     })
     const mean = std.series[0]?.y[0] ?? 0
@@ -136,6 +143,7 @@ describe("chart builder", () => {
     await expect(
       chartDataFile(join(FIXTURES, "long.csv"), "long.csv", {
         dataset: null,
+        ops: NO_OPS,
         spec: { ...spec, y: ["nope"] },
       }),
     ).rejects.toThrow(/nope/)
@@ -206,6 +214,7 @@ describe("metric logs and row limit", () => {
     await writeFile(path, `${lines.join("\n")}\n`)
     const plot = await chartDataFile(path, "long-log.csv", {
       dataset: null,
+      ops: NO_OPS,
       spec: {
         x: "step",
         y: ["loss"],

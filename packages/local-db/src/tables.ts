@@ -354,15 +354,20 @@ export interface ProjectMetadata {
    */
   analysisFormat?: AnalysisFormat
   /**
-   * Analysis chart builder choices per table file name (e.g. `options.csv`):
+   * Analysis table and chart choices per table file name (e.g. `options.csv`):
    * every file with that name in the project opens with them.
    */
-  chartSettings?: Record<string, ChartSettings>
+  tableSettings?: Record<string, TableSettings>
 }
 
-/** How Analysis shows one table file name: as a table or a chart, and the chart's settings. */
-export interface ChartSettings {
+/**
+ * How Analysis shows one table file name: as a table or a chart, the table
+ * operations, how the table is displayed, and the chart's settings. The shapes
+ * match `TableOps` and `ChartSpec` in `science/analysis/previewShapes.ts`.
+ */
+export interface TableSettings {
   view: "table" | "chart"
+  /** Null when the table has no column to plot. */
   spec: {
     x: string
     y: string[]
@@ -370,8 +375,47 @@ export interface ChartSettings {
     chartType: "line" | "scatter" | "bar"
     aggregate: "none" | "mean" | "median" | "sum" | "count"
     band: "none" | "minmax" | "std" | "ci95"
+  } | null
+  ops: {
+    filters: Array<{
+      column: string
+      op: "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "contains" | "in" | "blank" | "notBlank"
+      value: string
+      values: string[]
+    }>
+    aggregation: TableAggregation | null
+    sort: Array<{ column: string; descending: boolean }>
+  }
+  display: {
+    /** Columns not shown. */
+    hidden: string[]
+    /** Column order, by name; columns not listed follow in table order. */
+    order: string[]
+    /** Decimal places for numbers, or null for up to 6 significant digits. */
+    decimals: number | null
+    /** Show numbers in scientific notation (e.g. 1.23e-4). */
+    scientific: boolean
   }
 }
+
+type TableAggFunction =
+  | "count"
+  | "nunique"
+  | "sum"
+  | "mean"
+  | "median"
+  | "min"
+  | "max"
+  | "std"
+  | "sem"
+  | "first"
+  | "last"
+
+type TableAggregation =
+  | { kind: "groupBy"; by: string[]; values: Array<{ column: string; fn: TableAggFunction }> }
+  | { kind: "pivot"; index: string; columns: string; values: string; fn: TableAggFunction }
+  | { kind: "describe" }
+  | { kind: "valueCounts"; columns: string[] }
 
 /** A locally-known v2 Team. */
 export interface KnownTeam {

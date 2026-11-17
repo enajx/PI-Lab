@@ -94,6 +94,63 @@ export interface PlotPreview {
   notes: string[]
 }
 
+/** A function that combines the values of a group into one. */
+export type AggFunction =
+  | "count"
+  | "nunique"
+  | "sum"
+  | "mean"
+  | "median"
+  | "min"
+  | "max"
+  | "std"
+  | "sem"
+  | "first"
+  | "last"
+
+/**
+ * One row filter. `eq`/`ne` compare as numbers on numeric columns, else as
+ * text; `lt`..`ge` need numbers; `contains` ignores case; `in` keeps rows whose
+ * value is one of `values`; `blank`/`notBlank` test for an empty cell.
+ */
+export interface RowFilter {
+  column: string
+  op: "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "contains" | "in" | "blank" | "notBlank"
+  value: string
+  values: string[]
+}
+
+/** The one optional aggregation of a table. */
+export type Aggregation =
+  | { kind: "groupBy"; by: string[]; values: Array<{ column: string; fn: AggFunction }> }
+  | { kind: "pivot"; index: string; columns: string; values: string; fn: AggFunction }
+  | { kind: "describe" }
+  | { kind: "valueCounts"; columns: string[] }
+
+/** What is done to a table before it is shown or charted: filters, then the aggregation, then the sort. */
+export interface TableOps {
+  filters: RowFilter[]
+  aggregation: Aggregation | null
+  sort: Array<{ column: string; descending: boolean }>
+}
+
+/** Rows `offset`.. of a table after its {@link TableOps} (`science.analysis.table`). */
+export interface TablePage {
+  headers: string[]
+  columns: ColumnInfo[]
+  /** The rows of this page as text; numbers keep up to 12 significant digits. */
+  rows: string[][]
+  offset: number
+  /** Rows in the result. */
+  totalRows: number
+  /** True when the file has more rows than were read, so the result covers only its first part. */
+  partial: boolean
+  /** Things the user should know, e.g. pivot columns that were left out. */
+  notes: string[]
+  /** The chart shown for this result when the saved one does not fit it; null when nothing can be plotted. */
+  defaultSpec: ChartSpec | null
+}
+
 /** Most rows read from a table for its column summary and charts. */
 export const MAX_FRAME_ROWS = 100_000
 /** Most bytes of a CSV/TSV read for its column summary and charts. */

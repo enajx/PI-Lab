@@ -1,8 +1,16 @@
 import { join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { TRPCError } from "@trpc/server"
-import { type ChartOptions, chartDataFile, type PreviewOptions, previewDataFile } from "./discover"
-import type { DataFilePreview, PlotPreview } from "./previewShapes"
+import {
+  type ChartOptions,
+  chartDataFile,
+  csvOfDataFile,
+  type PreviewOptions,
+  previewDataFile,
+  type TablePageOptions,
+  tableDataFile,
+} from "./discover"
+import type { DataFilePreview, PlotPreview, TableOps, TablePage } from "./previewShapes"
 
 /**
  * Analysis previews run off Electron's main thread: the format readers
@@ -26,34 +34,65 @@ export interface AnalysisChartRequest extends ChartOptions {
   relPath: string
 }
 
-/** A message to the worker: a preview or a chart. */
+/** One table page request. */
+export interface AnalysisTableRequest extends TablePageOptions {
+  absPath: string
+  relPath: string
+}
+
+/** One CSV export request: the table after `ops`, as CSV text. */
+export interface AnalysisCsvRequest {
+  absPath: string
+  relPath: string
+  dataset: string | null
+  ops: TableOps
+  /** The columns written, in order, or null for every column. */
+  columns: string[] | null
+}
+
+/** A message to the worker: a preview, a chart, a table page or a CSV export. */
 export type PreviewWorkerJob =
   | { op: "preview"; request: AnalysisPreviewRequest }
   | { op: "chart"; request: AnalysisChartRequest }
+  | { op: "table"; request: AnalysisTableRequest }
+  | { op: "csv"; request: AnalysisCsvRequest }
+
+/** What a job gives back. */
+export type PreviewWorkerResult =
+  | DataFilePreview
+  | PlotPreview
+  | TablePage
+  | { csv: string; rows: number }
 
 export interface AnalysisPreviewPort {
   preview(request: AnalysisPreviewRequest): Promise<DataFilePreview>
   chart(request: AnalysisChartRequest): Promise<PlotPreview>
+  table(request: AnalysisTableRequest): Promise<TablePage>
+  csv(request: AnalysisCsvRequest): Promise<{ csv: string; rows: number }>
   dispose(): void
 }
 
 /** Run one job in the calling thread. */
-export function runPreviewJob(job: PreviewWorkerJob): Promise<DataFilePreview | PlotPreview> {
-  if (job.op === "chart")
-    return chartDataFile(job.request.absPath, job.request.relPath, job.request)
-  return previewDataFile(job.request.absPath, job.request.relPath, job.request)
+export function runPreviewJob(job: PreviewWorkerJob): Promise<PreviewWorkerResult> {
+  const { absPath, relPath } = job.request
+  if (job.op === "chart") return chartDataFile(absPath, relPath, job.request)
+  if (job.op === "table") return tableDataFile(absPath, relPath, job.request)
+  if (job.op === "csv") return csvOfDataFile(absPath, relPath, job.request)
+  return previewDataFile(absPath, relPath, job.request)
 }
 
 /** Previews in the calling thread (router tests). */
 export const inProcessAnalysisPreview: AnalysisPreviewPort = {
   preview: (request) => previewDataFile(request.absPath, request.relPath, request),
   chart: (request) => chartDataFile(request.absPath, request.relPath, request),
+  table: (request) => tableDataFile(request.absPath, request.relPath, request),
+  csv: (request) => csvOfDataFile(request.absPath, request.relPath, request),
   dispose: () => undefined,
 }
 
 /** A worker's answer to one job. */
 export type PreviewWorkerReply =
-  | { id: number; ok: true; result: DataFilePreview | PlotPreview }
+  | { id: number; ok: true; result: PreviewWorkerResult }
   | { id: number; ok: false; code: TRPCError["code"]; message: string }
 
 /** The built worker script, next to the main bundle (`out/main`). */
@@ -68,7 +107,7 @@ const WORKER_HEAP_MB = 4096
 const PREVIEW_TIMEOUT_MS = 120_000
 
 interface Pending {
-  resolve: (result: DataFilePreview | PlotPreview) => void
+  resolve: (result: PreviewWorkerResult) => void
   reject: (error: Error) => void
 }
 
@@ -88,7 +127,15 @@ export class WorkerAnalysisPreview implements AnalysisPreviewPort {
     return this.run({ op: "chart", request }) as Promise<PlotPreview>
   }
 
-  private run(job: PreviewWorkerJob): Promise<DataFilePreview | PlotPreview> {
+  table(request: AnalysisTableRequest): Promise<TablePage> {
+    return this.run({ op: "table", request }) as Promise<TablePage>
+  }
+
+  csv(request: AnalysisCsvRequest): Promise<{ csv: string; rows: number }> {
+    return this.run({ op: "csv", request }) as Promise<{ csv: string; rows: number }>
+  }
+
+  private run(job: PreviewWorkerJob): Promise<PreviewWorkerResult> {
     const worker = this.ensureWorker()
     const id = this.nextId++
     return new Promise((resolve, reject) => {

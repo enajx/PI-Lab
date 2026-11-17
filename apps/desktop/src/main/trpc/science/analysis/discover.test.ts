@@ -13,7 +13,11 @@ test("CSV chart skips blank x cells and leaves gaps for blank y cells while pres
     if (preview.type !== "table" || !preview.defaultSpec) throw new Error("expected a table")
     expect(preview.defaultView).toBe("chart")
     expect(
-      await chartDataFile(path, "metrics.csv", { dataset: null, spec: preview.defaultSpec }),
+      await chartDataFile(path, "metrics.csv", {
+        dataset: null,
+        ops: { filters: [], aggregation: null, sort: [] },
+        spec: preview.defaultSpec,
+      }),
     ).toMatchObject({ series: [{ label: "loss", x: [0, 1, 2, 3], y: [1.5, null, 0, null] }] })
   } finally {
     await rm(root, { recursive: true, force: true })

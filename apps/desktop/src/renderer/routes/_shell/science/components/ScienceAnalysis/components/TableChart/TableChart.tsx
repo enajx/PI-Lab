@@ -1,33 +1,46 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Settings2 } from "lucide-react"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { Download } from "lucide-react"
+import { useState } from "react"
 import type {
-  ChartAggregate,
-  ChartBand,
+  Aggregation,
   ChartSpec,
-  ChartType,
   ColumnInfo,
+  TableOps,
+  TablePage,
   TablePreview,
 } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
+import { AggregateSettings } from "./AggregateSettings"
+import { ChartSettings } from "./ChartSettings"
+import { DataTable } from "./DataTable"
 import { PlotChart } from "./PlotChart"
+import { orderedColumns, type TableDisplay, TableSettings } from "./TableSettings"
 
 /**
- * A table file in Analysis: a `Table | Chart` switch and, in Chart view, a
- * "Chart settings" popover (chart type, x, y columns, split by, aggregation,
- * spread band). The view and settings are saved for the file's name in the
- * project (`science.analysis.setChartSettings`), so every file with that name
- * opens the same way. A table opens in its default view
+ * A table file in Analysis: a `Table | Chart` switch, the Aggregate, Table
+ * settings and Chart settings popovers, and Export CSV. The operations run in
+ * a fixed order (filters, then one aggregation, then the sort) on the first
+ * rows read; the table scrolls through the result and the chart plots it. The
+ * view, operations, display and chart settings are saved for the file's name in
+ * the project (`science.analysis.setTableSettings`), so every file with that
+ * name opens the same way. A table opens in its default view
  * ({@link TablePreview.defaultView}) until the user changes something.
  */
 
 interface Settings {
   view: "table" | "chart"
   spec: ChartSpec | null
+  ops: TableOps
+  display: TableDisplay
 }
 
-/** Whether every column a spec names exists in the table with a usable kind. */
+const NO_OPS: TableOps = { filters: [], aggregation: null, sort: [] }
+const PLAIN_DISPLAY: TableDisplay = { hidden: [], order: [], decimals: null, scientific: false }
+/** Rows in the first page (the rest load as the table scrolls). */
+const FIRST_PAGE_ROWS = 200
+
+/** Whether every column a spec names exists with a usable kind. */
 function specFits(spec: ChartSpec, columns: ColumnInfo[]): boolean {
   const byName = new Map(columns.map((c) => [c.name, c]))
   return (
@@ -40,32 +53,115 @@ function specFits(spec: ChartSpec, columns: ColumnInfo[]): boolean {
   )
 }
 
+/**
+ * Whether every column the operations name exists: filters and the
+ * aggregation name the file's columns, the sort names the result's columns
+ * (known here for every aggregation but a pivot, whose columns come from values).
+ */
+function opsFit(ops: TableOps, columns: ColumnInfo[]): boolean {
+  const names = columns.map((c) => c.name)
+  const has = (name: string) => names.includes(name)
+  const a = ops.aggregation
+  const aggregated: string[] =
+    a === null || a.kind === "describe"
+      ? []
+      : a.kind === "groupBy"
+        ? [...a.by, ...a.values.map((v) => v.column)]
+        : a.kind === "pivot"
+          ? [a.index, a.columns, a.values]
+          : a.columns
+  const resultNames: string[] | null =
+    a === null
+      ? names
+      : a.kind === "groupBy"
+        ? [...a.by, ...a.values.map((v) => `${v.column} (${v.fn})`)]
+        : a.kind === "describe"
+          ? ["statistic", ...names]
+          : a.kind === "valueCounts"
+            ? [...a.columns, "count"]
+            : null
+  return (
+    ops.filters.every((f) => has(f.column)) &&
+    aggregated.every(has) &&
+    (resultNames === null || ops.sort.every((key) => resultNames.includes(key.column)))
+  )
+}
+
+/** The suggested export file name, e.g. `options.grouped.csv`. */
+function exportName(relPath: string, ops: TableOps): string {
+  const base = relPath.slice(relPath.lastIndexOf("/") + 1).replace(/\.[^.]+$/, "")
+  const kind = ops.aggregation?.kind
+  const suffix =
+    kind === "groupBy"
+      ? "grouped"
+      : kind === "pivot"
+        ? "pivot"
+        : kind === "describe"
+          ? "describe"
+          : kind === "valueCounts"
+            ? "value-counts"
+            : ops.filters.length > 0
+              ? "filtered"
+              : ops.sort.length > 0
+                ? "sorted"
+                : "copy"
+  return `${base}.${suffix}.csv`
+}
+
+/** A short line of what the operations do, e.g. "2 filters · Group by question". */
+function useOpsSummary(): (ops: TableOps) => string {
+  const t = useTranslate()
+  const aggregationText = (a: Aggregation): string =>
+    a.kind === "groupBy"
+      ? `${t("Group by")} ${a.by.join(", ")}`
+      : a.kind === "pivot"
+        ? `${t("Pivot")} ${a.index} × ${a.columns}`
+        : a.kind === "describe"
+          ? t("Describe")
+          : `${t("Value counts of")} ${a.columns.join(", ")}`
+  return (ops) =>
+    [
+      ops.filters.length === 1
+        ? t("1 filter")
+        : ops.filters.length > 1
+          ? t("{count} filters").replace("{count}", String(ops.filters.length))
+          : "",
+      ops.aggregation ? aggregationText(ops.aggregation) : "",
+      ops.sort.length > 0
+        ? `${t("Sorted by")} ${ops.sort.map((k) => `${k.column} ${k.descending ? "↓" : "↑"}`).join(", ")}`
+        : "",
+    ]
+      .filter((part) => part !== "")
+      .join(" · ")
+}
+
 export function TableChart({
   projectId,
+  projectPath,
   relPath,
   dataset,
   preview,
-  renderTable,
 }: {
   projectId: string
+  /** The project's folder, where Export CSV's save dialog opens; null while unknown. */
+  projectPath: string | null
   relPath: string
   /** The HDF5 dataset holding the table, or null. */
   dataset: string | null
   preview: TablePreview
-  /** The table view. */
-  renderTable: () => ReactNode
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+  const summary = useOpsSummary()
   const savedQuery = useQuery(
-    trpc.science.analysis.chartSettings.queryOptions({ projectId, relPath }),
+    trpc.science.analysis.tableSettings.queryOptions({ projectId, relPath }),
   )
   const save = useMutation(
-    trpc.science.analysis.setChartSettings.mutationOptions({
+    trpc.science.analysis.setTableSettings.mutationOptions({
       onSuccess: () =>
         queryClient.invalidateQueries({
-          queryKey: trpc.science.analysis.chartSettings.queryKey(),
+          queryKey: trpc.science.analysis.tableSettings.queryKey(),
         }),
     }),
   )
@@ -73,28 +169,72 @@ export function TableChart({
   const shownKey = `${relPath}\u0000${dataset ?? ""}`
   const [local, setLocal] = useState<{ key: string; settings: Settings } | null>(null)
 
-  if (savedQuery.isLoading) {
-    return <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
-  }
   const saved = savedQuery.data ?? null
-  const savedFits = saved !== null && specFits(saved.spec, preview.columns)
+  const savedFits = saved !== null && opsFit(saved.ops, preview.columns)
   const settings: Settings =
     local?.key === shownKey
       ? local.settings
       : savedFits
         ? saved
-        : { view: preview.defaultView, spec: preview.defaultSpec }
+        : {
+            view: preview.defaultView,
+            spec: preview.defaultSpec,
+            ops: NO_OPS,
+            display: PLAIN_DISPLAY,
+          }
   const mismatch = saved !== null && !savedFits && local?.key !== shownKey
+
+  const firstPage = useQuery({
+    ...trpc.science.analysis.table.queryOptions({
+      projectId,
+      relPath,
+      dataset,
+      ops: settings.ops,
+      offset: 0,
+      limit: FIRST_PAGE_ROWS,
+    }),
+    enabled: !savedQuery.isLoading,
+    staleTime: 30_000,
+    placeholderData: (previous) => previous,
+  })
+
+  if (savedQuery.isLoading) {
+    return <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
+  }
+  const page: TablePage | undefined = firstPage.data
+  const resultColumns = page?.columns ?? preview.columns
+  // The chart follows the result: a saved chart that no longer fits it gives way to the result's default.
+  const spec =
+    settings.spec && specFits(settings.spec, resultColumns)
+      ? settings.spec
+      : (page?.defaultSpec ?? null)
   const fileName = relPath.slice(relPath.lastIndexOf("/") + 1)
 
   const change = (next: Settings): void => {
     setLocal({ key: shownKey, settings: next })
-    if (next.spec) {
-      save.mutate({ projectId, relPath, settings: { view: next.view, spec: next.spec } })
-    }
+    save.mutate({ projectId, relPath, settings: next })
   }
-  // Back to the automatic chart settings, staying in Chart view.
-  const reset = (): void => change({ view: "chart", spec: preview.defaultSpec })
+  const changeOps = (ops: TableOps): void => {
+    // Columns of the result change with the aggregation, so their display and sort start over.
+    const aggregationChanged =
+      JSON.stringify(ops.aggregation) !== JSON.stringify(settings.ops.aggregation)
+    change({
+      ...settings,
+      ops: aggregationChanged ? { ...ops, sort: [] } : ops,
+      display: aggregationChanged
+        ? { ...settings.display, hidden: [], order: [] }
+        : settings.display,
+    })
+  }
+  const resetChart = (): void =>
+    change({ ...settings, view: "chart", spec: page?.defaultSpec ?? preview.defaultSpec })
+
+  const headers = page?.headers ?? []
+  const shownNames = orderedColumns(headers, settings.display.order).filter(
+    (name) => !settings.display.hidden.includes(name),
+  )
+  const shown = shownNames.map((name) => headers.indexOf(name))
+  const opsText = summary(settings.ops)
 
   return (
     <div data-testid="analysis-table-chart" className="flex flex-col gap-3">
@@ -111,9 +251,9 @@ export function TableChart({
               role="tab"
               data-testid={`analysis-view-${view}`}
               aria-selected={settings.view === view}
-              disabled={view === "chart" && settings.spec === null}
+              disabled={view === "chart" && spec === null}
               title={
-                view === "chart" && settings.spec === null
+                view === "chart" && spec === null
                   ? t("This table has no numeric column to plot")
                   : undefined
               }
@@ -125,7 +265,7 @@ export function TableChart({
                       "Plot the table. The choice is kept for every file with this name in the project",
                     )
               }
-              onClick={() => change({ ...settings, view })}
+              onClick={() => change({ ...settings, view, spec })}
               className={
                 settings.view === view
                   ? "rounded bg-accent px-2 py-0.5 text-foreground"
@@ -137,31 +277,97 @@ export function TableChart({
           ))}
         </div>
         <span className="flex-1" />
-        {settings.view === "chart" && settings.spec ? (
-          <ChartSettingsButton
-            spec={settings.spec}
-            columns={preview.columns}
-            onChange={(spec) => change({ ...settings, spec })}
-            onReset={reset}
+        <AggregateSettings
+          columns={preview.columns}
+          aggregation={settings.ops.aggregation}
+          onChange={(aggregation) => changeOps({ ...settings.ops, aggregation })}
+        />
+        <TableSettings
+          sourceColumns={preview.columns}
+          resultColumns={resultColumns}
+          ops={settings.ops}
+          display={settings.display}
+          onOps={changeOps}
+          onDisplay={(display) => change({ ...settings, display })}
+        />
+        {settings.view === "chart" && spec ? (
+          <ChartSettings
+            spec={spec}
+            columns={resultColumns}
+            onChange={(next) => change({ ...settings, spec: next })}
+            onReset={resetChart}
           />
         ) : null}
+        <ExportButton
+          projectId={projectId}
+          projectPath={projectPath}
+          relPath={relPath}
+          dataset={dataset}
+          ops={settings.ops}
+          columns={shownNames.length > 0 ? shownNames : null}
+        />
       </div>
+      {opsText !== "" ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span data-testid="analysis-table-ops" className="text-muted-foreground">
+            {opsText}
+          </span>
+          <button
+            type="button"
+            data-testid="analysis-table-clear-ops"
+            onClick={() => changeOps(NO_OPS)}
+            className="rounded-md border border-border px-1.5 py-0.5 hover:bg-accent/60"
+          >
+            {t("Clear")}
+          </button>
+        </div>
+      ) : null}
       {save.isError ? (
         <p className="text-destructive text-xs">
-          {`${t("Could not save the chart settings:")} ${save.error.message}`}
+          {`${t("Could not save the table settings:")} ${save.error.message}`}
         </p>
       ) : null}
       {mismatch ? (
         <p data-testid="analysis-chart-settings-mismatch" className="text-amber-500 text-xs">
           {t(
-            "The saved chart settings for {name} name columns this file does not have; showing the default view.",
+            "The saved settings for {name} name columns this file does not have; showing the default view.",
           ).replace("{name}", fileName)}
         </p>
       ) : null}
-      {settings.view === "chart" && settings.spec ? (
-        <ChartView projectId={projectId} relPath={relPath} dataset={dataset} spec={settings.spec} />
+      {page?.notes.map((note) => (
+        <p key={note} className="text-amber-500 text-xs">
+          {note}
+        </p>
+      ))}
+      {firstPage.isError ? (
+        <p
+          data-testid="analysis-table-error"
+          className="select-text cursor-text text-destructive text-sm"
+        >
+          {firstPage.error.message}
+        </p>
+      ) : !page ? (
+        <p className="text-muted-foreground text-sm">{t("Loading preview…")}</p>
+      ) : settings.view === "chart" && spec ? (
+        <ChartView
+          projectId={projectId}
+          relPath={relPath}
+          dataset={dataset}
+          ops={settings.ops}
+          spec={spec}
+        />
       ) : (
-        renderTable()
+        <DataTable
+          projectId={projectId}
+          relPath={relPath}
+          dataset={dataset}
+          ops={settings.ops}
+          firstPage={page}
+          updating={firstPage.isPlaceholderData}
+          shown={shown}
+          format={settings.display}
+          onSort={(sort) => change({ ...settings, ops: { ...settings.ops, sort } })}
+        />
       )}
     </div>
   )
@@ -171,17 +377,19 @@ function ChartView({
   projectId,
   relPath,
   dataset,
+  ops,
   spec,
 }: {
   projectId: string
   relPath: string
   dataset: string | null
+  ops: TableOps
   spec: ChartSpec
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
   const plot = useQuery({
-    ...trpc.science.analysis.chart.queryOptions({ projectId, relPath, dataset, spec }),
+    ...trpc.science.analysis.chart.queryOptions({ projectId, relPath, dataset, ops, spec }),
     staleTime: 30_000,
     placeholderData: (previous) => previous,
   })
@@ -199,246 +407,74 @@ function ChartView({
   return <PlotChart plot={plot.data} />
 }
 
-const CHART_TYPES: Array<{ value: ChartType; label: string }> = [
-  { value: "line", label: "Line" },
-  { value: "scatter", label: "Scatter" },
-  { value: "bar", label: "Bar" },
-]
-const AGGREGATES: Array<{ value: ChartAggregate; label: string }> = [
-  { value: "none", label: "None (every row)" },
-  { value: "mean", label: "Mean" },
-  { value: "median", label: "Median" },
-  { value: "sum", label: "Sum" },
-  { value: "count", label: "Count" },
-]
-const BANDS: Array<{ value: ChartBand; label: string }> = [
-  { value: "none", label: "None" },
-  { value: "minmax", label: "Min to max" },
-  { value: "std", label: "± 1 std" },
-  { value: "ci95", label: "95% CI of the mean" },
-]
-const ROLE_LABELS: Record<ColumnInfo["role"], string> = {
-  step: "step",
-  factor: "factor",
-  measure: "measure",
-  text: "text",
-  index: "index",
-}
-
-/** The "Chart settings" button and its popover. */
-function ChartSettingsButton({
-  spec,
+/** Export CSV: a save dialog in the file's folder, then the shown result is written there. */
+function ExportButton({
+  projectId,
+  projectPath,
+  relPath,
+  dataset,
+  ops,
   columns,
-  onChange,
-  onReset,
 }: {
-  spec: ChartSpec
-  columns: ColumnInfo[]
-  onChange: (spec: ChartSpec) => void
-  onReset: () => void
+  projectId: string
+  projectPath: string | null
+  relPath: string
+  dataset: string | null
+  ops: TableOps
+  columns: string[] | null
 }) {
   const t = useTranslate()
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLDivElement>(null)
-
-  // Close on a click outside or Escape.
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (event: PointerEvent) => {
-      if (box.current && !box.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation()
-        setOpen(false)
-      }
-    }
-    document.addEventListener("pointerdown", onPointer)
-    document.addEventListener("keydown", onKey, true)
-    return () => {
-      document.removeEventListener("pointerdown", onPointer)
-      document.removeEventListener("keydown", onKey, true)
-    }
-  }, [open])
-
-  const plottable = columns.filter((c) => c.kind !== "text" && c.name !== spec.x)
-  const splittable = columns.filter(
-    (c) => (c.role === "factor" || c.role === "text") && c.name !== spec.x,
-  )
-  const bandAllowed = spec.aggregate === "mean" || spec.aggregate === "median"
-  const columnLabel = (c: ColumnInfo): string => `${c.name} (${t(ROLE_LABELS[c.role])})`
-
+  const trpc = useTRPC()
+  const pick = useMutation(trpc.system.pickSaveFile.mutationOptions())
+  const write = useMutation(trpc.science.analysis.exportTable.mutationOptions())
+  const [done, setDone] = useState<{ path: string; rows: number } | null>(null)
+  const folder = relPath.includes("/") ? relPath.slice(0, relPath.lastIndexOf("/")) : ""
+  const start = (): void => {
+    if (!projectPath) return
+    setDone(null)
+    write.reset()
+    const defaultPath = [projectPath, folder, exportName(relPath, ops)]
+      .filter((part) => part !== "")
+      .join("/")
+    pick.mutate(
+      { defaultPath },
+      {
+        onSuccess: (path) => {
+          if (!path) return
+          write.mutate(
+            { projectId, relPath, dataset, ops, columns, path },
+            { onSuccess: ({ rows }) => setDone({ path, rows }) },
+          )
+        },
+      },
+    )
+  }
+  const error = pick.error ?? write.error
   return (
-    <div ref={box} className="relative">
+    <div className="flex items-center gap-2">
       <button
         type="button"
-        data-testid="analysis-chart-settings"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        data-feature-label={t("Chart settings")}
+        data-testid="analysis-table-export"
+        disabled={!projectPath || pick.isPending || write.isPending}
+        data-feature-label={t("Export CSV")}
         data-feature-help={t(
-          "Choose the x and y columns, a column to split lines by, the chart type, how rows with the same x are combined, and the spread band",
+          "Save the table as it is shown (filters, aggregation, sort, shown columns) as a new CSV file. The source file is not changed",
         )}
-        onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs hover:bg-accent/60"
+        aria-label={t("Export CSV")}
+        title={t("Export CSV")}
+        onClick={start}
+        className="flex size-6 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-50"
       >
-        <Settings2 className="size-3.5" aria-hidden />
-        {t("Chart settings")}
+        <Download className="size-3.5" aria-hidden />
       </button>
-      {open ? (
-        <div
-          role="dialog"
-          aria-label={t("Chart settings")}
-          data-testid="analysis-chart-settings-panel"
-          className="absolute top-full right-0 z-20 mt-1 flex w-72 flex-col gap-3 rounded-lg border border-border bg-popover p-3 text-popover-foreground text-xs shadow-lg"
-        >
-          <Field label={t("Chart type")}>
-            <select
-              data-testid="analysis-chart-type"
-              value={spec.chartType}
-              onChange={(event) =>
-                onChange({ ...spec, chartType: event.target.value as ChartType })
-              }
-              className="w-full rounded-md border border-border bg-background px-2 py-1"
-            >
-              {CHART_TYPES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.label)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("X axis")}>
-            <select
-              data-testid="analysis-chart-x"
-              value={spec.x}
-              onChange={(event) => {
-                const x = event.target.value
-                const y = spec.y.filter((name) => name !== x)
-                const fallback = columns.find((c) => c.kind !== "text" && c.name !== x)
-                onChange({
-                  ...spec,
-                  x,
-                  y: y.length > 0 ? y : fallback ? [fallback.name] : spec.y,
-                  splitBy: spec.splitBy === x ? null : spec.splitBy,
-                })
-              }}
-              className="w-full rounded-md border border-border bg-background px-2 py-1"
-            >
-              {columns.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {columnLabel(c)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("Y axis")}>
-            <div
-              data-testid="analysis-chart-y"
-              className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-md border border-border p-1.5"
-            >
-              {plottable.map((c) => {
-                const checked = spec.y.includes(c.name)
-                return (
-                  <label key={c.name} className="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      // At least one y column stays ticked.
-                      disabled={checked && spec.y.length === 1}
-                      onChange={() =>
-                        onChange({
-                          ...spec,
-                          y: checked
-                            ? spec.y.filter((name) => name !== c.name)
-                            : columns
-                                .map((col) => col.name)
-                                .filter((name) => name === c.name || spec.y.includes(name)),
-                        })
-                      }
-                    />
-                    <span className="truncate">{columnLabel(c)}</span>
-                  </label>
-                )
-              })}
-            </div>
-          </Field>
-          <Field label={t("Split by")}>
-            <select
-              data-testid="analysis-chart-split"
-              value={spec.splitBy ?? ""}
-              onChange={(event) =>
-                onChange({
-                  ...spec,
-                  splitBy: event.target.value === "" ? null : event.target.value,
-                })
-              }
-              className="w-full rounded-md border border-border bg-background px-2 py-1"
-            >
-              <option value="">{t("None")}</option>
-              {splittable.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {columnLabel(c)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("Combine rows with the same x")}>
-            <select
-              data-testid="analysis-chart-aggregate"
-              value={spec.aggregate}
-              onChange={(event) => {
-                const aggregate = event.target.value as ChartAggregate
-                const keepsBand = aggregate === "mean" || aggregate === "median"
-                onChange({ ...spec, aggregate, band: keepsBand ? spec.band : "none" })
-              }}
-              className="w-full rounded-md border border-border bg-background px-2 py-1"
-            >
-              {AGGREGATES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.label)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("Spread")}>
-            <select
-              data-testid="analysis-chart-band"
-              value={bandAllowed ? spec.band : "none"}
-              disabled={!bandAllowed}
-              title={bandAllowed ? undefined : t("The spread band needs mean or median.")}
-              onChange={(event) => onChange({ ...spec, band: event.target.value as ChartBand })}
-              className="w-full rounded-md border border-border bg-background px-2 py-1 disabled:opacity-50"
-            >
-              {BANDS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.label)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <button
-            type="button"
-            data-testid="analysis-chart-reset"
-            onClick={() => {
-              setOpen(false)
-              onReset()
-            }}
-            className="self-start rounded-md border border-border px-2 py-0.5 hover:bg-accent/60"
-          >
-            {t("Reset to default")}
-          </button>
-        </div>
+      {done ? (
+        <span data-testid="analysis-table-exported" className="text-muted-foreground text-xs">
+          {t("Saved {count} rows to {name}")
+            .replace("{count}", done.rows.toLocaleString())
+            .replace("{name}", done.path.slice(done.path.lastIndexOf("/") + 1))}
+        </span>
       ) : null}
-    </div>
-  )
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-muted-foreground">{label}</span>
-      {children}
+      {error ? <span className="text-destructive text-xs">{error.message}</span> : null}
     </div>
   )
 }
