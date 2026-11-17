@@ -13,7 +13,7 @@ import { useTranslate } from "../../../../../../../i18n/language"
 import { useAnalysisChartColors } from "../../../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { AggregateSettings } from "./AggregateSettings"
-import { ChartSettings } from "./ChartSettings"
+import { AxisPickers, ChartFields } from "./ChartSettings"
 import { DataTable } from "./DataTable"
 import { PlotChart } from "./PlotChart"
 import { orderedColumns, type TableDisplay, TableSettings } from "./TableSettings"
@@ -282,20 +282,32 @@ export function TableChart({
             </button>
           ))}
         </div>
+        {settings.view === "chart" && spec ? (
+          <span aria-hidden className="h-5 w-px bg-border" />
+        ) : null}
+        {settings.view === "chart" && spec ? (
+          <AxisPickers
+            spec={spec}
+            columns={resultColumns}
+            onChange={(next) => change({ ...settings, spec: next })}
+          />
+        ) : null}
         <span className="flex-1" />
         <AggregateSettings
           columns={preview.columns}
           aggregation={settings.ops.aggregation}
           onChange={(aggregation) => changeOps({ ...settings.ops, aggregation })}
         />
-        <ExportButton
-          projectId={projectId}
-          projectPath={projectPath}
-          relPath={relPath}
-          dataset={dataset}
-          ops={settings.ops}
-          columns={shownNames.length > 0 ? shownNames : null}
-        />
+        {settings.ops.aggregation !== null ? (
+          <ExportButton
+            projectId={projectId}
+            projectPath={projectPath}
+            relPath={relPath}
+            dataset={dataset}
+            ops={settings.ops}
+            columns={shownNames.length > 0 ? shownNames : null}
+          />
+        ) : null}
         <TableSettings
           sourceColumns={preview.columns}
           resultColumns={resultColumns}
@@ -303,17 +315,19 @@ export function TableChart({
           display={settings.display}
           onOps={changeOps}
           onDisplay={(display) => change({ ...settings, display })}
+          colors={settings.chartColors}
+          onColors={(chartColors) => change({ ...settings, chartColors })}
+          chart={
+            settings.view === "chart" && spec ? (
+              <ChartFields
+                spec={spec}
+                columns={resultColumns}
+                onChange={(next) => change({ ...settings, spec: next })}
+                onReset={resetChart}
+              />
+            ) : null
+          }
         />
-        {settings.view === "chart" && spec ? (
-          <ChartSettings
-            spec={spec}
-            columns={resultColumns}
-            colors={settings.chartColors}
-            onColors={(chartColors) => change({ ...settings, chartColors })}
-            onChange={(next) => change({ ...settings, spec: next })}
-            onReset={resetChart}
-          />
-        ) : null}
       </div>
       {opsText !== "" ? (
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -336,14 +350,15 @@ export function TableChart({
         </p>
       ) : null}
       {mismatch ? (
-        <p data-testid="analysis-chart-settings-mismatch" className="text-amber-500 text-xs">
-          {t(
-            "The saved settings for {name} name columns this file does not have; showing the default view.",
-          ).replace("{name}", fileName)}
+        <p
+          data-testid="analysis-chart-settings-mismatch"
+          className="text-right text-muted-foreground text-xs"
+        >
+          {t("Saved settings for {name} do not fit this file").replace("{name}", fileName)}
         </p>
       ) : null}
       {page?.notes.map((note) => (
-        <p key={note} className="text-amber-500 text-xs">
+        <p key={note} className="text-right text-muted-foreground text-xs">
           {note}
         </p>
       ))}

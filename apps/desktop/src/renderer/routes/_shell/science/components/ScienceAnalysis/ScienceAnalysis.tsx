@@ -1,6 +1,7 @@
 import {
   ALL_DATA_FILE_CATEGORIES,
   categoryOf,
+  classifyDataFile,
   DATA_FILE_CATEGORY_LABELS,
   type DataFileCategory,
   type FormatChip,
@@ -20,10 +21,11 @@ import {
   FileText,
   Folder,
   ListTree,
+  Loader2,
   Microscope,
   Search,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { DataFileEntry } from "../../../../../../main/trpc/science/analysis"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import {
@@ -31,6 +33,8 @@ import {
   headerIconButtonClass,
 } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflow"
+import type { TreeMenuState } from "../../../../../Editor/components/FileTree/FileTreeManage"
+import { FILE_DRAG_TYPE } from "../../../../../Editor/fileDrag"
 import { useTranslate } from "../../../../../i18n/language"
 import {
   ANALYSIS_FILES_MAX_WIDTH,
@@ -48,6 +52,12 @@ import { KEEPS_ESCAPE, OPEN_OVERLAY } from "../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../../trpc/react"
 import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
+import { CentralTab } from "../../../projects/components/CentralPanel/CentralPanel"
+import {
+  type DockItem,
+  fileItemId,
+  SplitDock,
+} from "../../../projects/components/SplitDock/SplitDock"
 import { ProjectPicker } from "../ProjectPicker"
 import {
   type FocusSessionRequest,
@@ -68,10 +78,32 @@ import {
 } from "../ScienceSessionPanel/panelFit"
 import { ScienceTabShell } from "../ScienceTabShell"
 import { AnalysisPreview } from "./components/AnalysisPreview"
+import { useAnalysisTabs } from "./components/AnalysisTabs/useAnalysisTabs"
 import { ExperimentsStructureSelect } from "./components/ExperimentsStructure"
+import { AnalysisFileMenu } from "./components/FileMenu/AnalysisFileMenu"
 import "./selectFolderPrompt.css"
 
 /** The preview column's smallest width in px, beside the resizable file list. */
+
+/** A project's Analysis view, kept while the app runs (see `ANALYSIS_VIEWS`). */
+interface AnalysisViewState {
+  query: string
+  category: DataFileCategory | "all"
+  format: string | null
+  openRows: string[]
+}
+
+/** Each project's Analysis view, kept in `sessionStorage`: for this app session, not saved to disk. */
+const ANALYSIS_VIEWS = {
+  key: (projectId: string): string => `pi-lab.analysis.view.${projectId}`,
+  get(projectId: string): AnalysisViewState | undefined {
+    const raw = window.sessionStorage.getItem(this.key(projectId))
+    return raw === null ? undefined : (JSON.parse(raw) as AnalysisViewState)
+  },
+  set(projectId: string, state: AnalysisViewState): void {
+    window.sessionStorage.setItem(this.key(projectId), JSON.stringify(state))
+  },
+}
 
 /**
  * Analysis science tab — a **read-only data
@@ -105,9 +137,12 @@ import "./selectFolderPrompt.css"
  */
 export function ScienceAnalysis({
   initialProjectId,
+  initialFile,
   focusSession,
 }: {
   initialProjectId?: string
+  /** A project file to preview (from "Open in Analysis"), or null. */
+  initialFile: string | null
   /** An agent session of the initial project to open and focus in the session panel, or null. */
   focusSession: FocusSessionRequest | null
 }) {
@@ -162,14 +197,40 @@ export function ScienceAnalysis({
   // The filter is a category; an optional format (file extension) narrows within it.
   const [categoryFilter, setCategoryFilter] = useState<DataFileCategory | "all">("all")
   const [formatFilter, setFormatFilter] = useState<string | null>(null)
-  // Another project starts with no filter, since its categories may differ.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the project changes.
+  // The open preview tabs (saved per project); the active one is the selected file.
+  const tabs = useAnalysisTabs(selectedProjectId, initialFile)
+  const selectedRelPath = tabs.active
+  const closeActiveRef = useRef(() => {})
+  closeActiveRef.current = () => {
+    if (tabs.active) tabs.close(tabs.active)
+  }
+  // Rows and folders the user opened. A search opens every row and folder with a match.
+  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set())
+  // Each project's view (file, open rows, search, filters) is kept while the app runs,
+  // so leaving Analysis and coming back, or switching projects, shows it as it was.
+  // `restoredFor` is the project whose view the state holds; it is saved only then.
+  const [restoredFor, setRestoredFor] = useState<string | null>(null)
   useEffect(() => {
-    setCategoryFilter("all")
-    setFormatFilter(null)
+    if (!selectedProjectId) return
+    const saved = ANALYSIS_VIEWS.get(selectedProjectId)
+    setQuery(saved?.query ?? "")
+    setCategoryFilter(saved?.category ?? "all")
+    setFormatFilter(saved?.format ?? null)
+    setOpenRows(new Set(saved?.openRows ?? []))
+    setRestoredFor(selectedProjectId)
   }, [selectedProjectId])
-  const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null)
+  useEffect(() => {
+    if (!selectedProjectId || restoredFor !== selectedProjectId) return
+    ANALYSIS_VIEWS.set(selectedProjectId, {
+      query,
+      category: categoryFilter,
+      format: formatFilter,
+      openRows: [...openRows],
+    })
+  }, [categoryFilter, formatFilter, openRows, query, restoredFor, selectedProjectId])
   const [findOpen, setFindOpen] = useState(false)
+  const [fileMenu, setFileMenu] = useState<TreeMenuState | null>(null)
+  const closeFileMenu = useCallback(() => setFileMenu(null), [])
   // A session a top bar button started, until the session panel opens it.
   const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
   const clearSessionRequest = useCallback(() => setSessionRequest(null), [])
@@ -230,12 +291,13 @@ export function ScienceAnalysis({
     [listing.data],
   )
 
-  // Reset the selection when the project changes / the file is gone.
+  // Tabs of files that are no longer listed close ("Open in Analysis" files stay).
+  const retainTabs = tabs.retain
   useEffect(() => {
-    if (selectedRelPath && !allFiles.some((f) => f.relPath === selectedRelPath)) {
-      setSelectedRelPath(null)
-    }
-  }, [allFiles, selectedRelPath])
+    if (!listing.data || tabs.loadedFor !== selectedProjectId) return
+    const listed = new Set(allFiles.map((file) => file.relPath))
+    retainTabs((relPath) => relPath === initialFile || listed.has(relPath))
+  }, [allFiles, initialFile, listing.data, retainTabs, selectedProjectId, tabs.loadedFor])
 
   // Escape deselects the file (the preview shows "Select a file…"), unless focus
   // is in a field, terminal or editor, an inner handler took the key, or a
@@ -250,7 +312,7 @@ export function ScienceAnalysis({
       if (event.key !== "Escape" || event.defaultPrevented || overlayOpen) return
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
       if (event.target instanceof Element && event.target.closest(KEEPS_ESCAPE)) return
-      setSelectedRelPath(null)
+      closeActiveRef.current()
     }
     window.addEventListener("keydown", onKeyDownCapture, true)
     window.addEventListener("keydown", onKeyDown)
@@ -367,8 +429,6 @@ export function ScienceAnalysis({
     model.experiments.length === 0 &&
     model.reports === null &&
     model.loose !== null
-  // Rows and folders the user opened. A search opens every row and folder with a match.
-  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set())
   const searching = query.trim() !== ""
   const isOpen = (id: string): boolean => searching || openRows.has(id)
   const toggleRow = (id: string): void =>
@@ -385,7 +445,15 @@ export function ScienceAnalysis({
       namePositions={rankedFile.namePositions}
       pathPositions={rankedFile.pathPositions}
       selected={rankedFile.file.relPath === selectedRelPath}
-      onSelect={() => setSelectedRelPath(rankedFile.file.relPath)}
+      onSelect={() => tabs.openInActiveTab(rankedFile.file.relPath)}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        setFileMenu({
+          entry: { relPath: rankedFile.file.relPath, name: rankedFile.file.name, kind: "file" },
+          x: event.clientX,
+          y: event.clientY,
+        })
+      }}
     />
   )
   /** A folder's contents like the project file tree: subfolders first, then files. */
@@ -634,7 +702,7 @@ export function ScienceAnalysis({
                   event.target instanceof HTMLElement &&
                   event.target.hasAttribute("data-deselect-area")
                 ) {
-                  setSelectedRelPath(null)
+                  closeActiveRef.current()
                 }
               }}
             >
@@ -737,19 +805,24 @@ export function ScienceAnalysis({
                     ) : null}
                   </div>
 
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: the arrow keys move the focus between the row buttons inside. */}
                   <div
                     data-testid="analysis-files-list"
                     data-deselect-area
+                    onKeyDown={moveListFocus}
                     className="min-h-0 flex-1 overflow-y-auto"
                   >
                     {listing.data?.partial ? (
                       <p
                         data-testid="analysis-partial"
                         role="status"
-                        className="m-3 rounded border border-amber-500/40 px-2 py-1 text-amber-600 text-xs"
+                        className="m-3 text-right text-muted-foreground text-xs"
                         title={listing.data.skipped.join("\n")}
                       >
-                        {t("Some project paths could not be read")} ({listing.data.skipped.length}).
+                        {t("{count} paths could not be read").replace(
+                          "{count}",
+                          String(listing.data.skipped.length),
+                        )}
                       </p>
                     ) : null}
                     {listing.isError ? (
@@ -869,21 +942,53 @@ export function ScienceAnalysis({
                 data-deselect-area
                 className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-border"
               >
-                {selectedProjectId && selectedRelPath ? (
-                  <AnalysisPreview
-                    projectId={selectedProjectId}
-                    projectPath={selectedProject?.repoPath ?? null}
-                    relPath={selectedRelPath}
-                    kind={
-                      allFiles.find((file) => file.relPath === selectedRelPath)?.kind ?? "other"
-                    }
-                    onOpenNotebook={(notebookRelPath) =>
-                      setSessionRequest({ projectId: selectedProjectId, notebookRelPath })
-                    }
-                    onNewPane={(create) =>
-                      setSessionRequest({ projectId: selectedProjectId, create })
-                    }
-                    headerEnd={null}
+                {selectedProjectId &&
+                tabs.loadedFor === selectedProjectId &&
+                tabs.files.length > 0 ? (
+                  <SplitDock
+                    key={selectedProjectId}
+                    items={tabs.files.map(
+                      (relPath): DockItem => ({
+                        id: fileItemId(relPath),
+                        tab: ({ visible, activate }) => (
+                          <CentralTab
+                            kind="file"
+                            label={relPath.slice(relPath.lastIndexOf("/") + 1)}
+                            active={visible}
+                            onSelect={activate}
+                            onClose={() => tabs.close(relPath)}
+                          />
+                        ),
+                        content: () => (
+                          <AnalysisPreview
+                            projectId={selectedProjectId}
+                            projectPath={selectedProject?.repoPath ?? null}
+                            relPath={relPath}
+                            kind={
+                              allFiles.find((file) => file.relPath === relPath)?.kind ??
+                              classifyDataFile(relPath)
+                            }
+                            onOpenNotebook={(notebookRelPath) =>
+                              setSessionRequest({ projectId: selectedProjectId, notebookRelPath })
+                            }
+                            onNewPane={(create) =>
+                              setSessionRequest({ projectId: selectedProjectId, create })
+                            }
+                            headerEnd={null}
+                          />
+                        ),
+                      }),
+                    )}
+                    restoringIds={[]}
+                    activeId={tabs.active ? fileItemId(tabs.active) : null}
+                    onActivate={(id) => tabs.activate(id.slice("file:".length))}
+                    onOpenDroppedFile={tabs.openNewTab}
+                    placementFor={tabs.placementFor}
+                    empty={<NoSelectionState />}
+                    initialLayout={tabs.initialLayout}
+                    onLayoutChange={tabs.onLayoutChange}
+                    onRestoreFailed={(message) => setShortcutError(message)}
+                    handle={null}
                   />
                 ) : resultsMissing && allFiles.length === 0 && !listing.isError ? (
                   <ResultsMissingState resultsFolder={listing.data?.resultsFolder ?? ""} />
@@ -907,6 +1012,15 @@ export function ScienceAnalysis({
         />
       </div>
 
+      {selectedProjectId ? (
+        <AnalysisFileMenu
+          projectId={selectedProjectId}
+          menu={fileMenu}
+          onClose={closeFileMenu}
+          onOpen={tabs.openInActiveTab}
+          onMoved={tabs.moved}
+        />
+      ) : null}
       {findOpen ? (
         <QuickFind
           ariaLabel={t("Find a file")}
@@ -915,7 +1029,7 @@ export function ScienceAnalysis({
           allowGlobalSearch
           items={findItems}
           emptyText={t("No matching files")}
-          onSelect={(item) => setSelectedRelPath(item.id)}
+          onSelect={(item) => tabs.openInActiveTab(item.id)}
           onClose={() => setFindOpen(false)}
         />
       ) : null}
@@ -1148,9 +1262,9 @@ function TruncatedNotice() {
     <p
       data-testid="analysis-experiment-truncated"
       role="status"
-      className="px-2 text-[10px] text-amber-600"
+      className="px-2 text-right text-[10px] text-muted-foreground"
     >
-      {t("This experiment has more files than are listed here.")}
+      {t("More files than listed")}
     </p>
   )
 }
@@ -1162,12 +1276,15 @@ function FileRow({
   pathPositions,
   selected,
   onSelect,
+  onContextMenu,
 }: {
   file: DataFileEntry
   namePositions: number[]
   pathPositions: number[]
   selected: boolean
   onSelect: () => void
+  /** Right-click: the file's menu. */
+  onContextMenu: (event: React.MouseEvent) => void
 }) {
   const t = useTranslate()
   return (
@@ -1180,6 +1297,13 @@ function FileRow({
       data-feature-label={file.name}
       data-feature-help={t("Open a read-only preview of this repository data file.")}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
+      // Dragged onto the preview, the file opens as another tab or split.
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.setData(FILE_DRAG_TYPE, file.relPath)
+        event.dataTransfer.effectAllowed = "copyMove"
+      }}
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
         selected ? "bg-accent text-accent-foreground" : "hover:bg-muted/60",
@@ -1346,19 +1470,17 @@ function ResultsFolderField({
     "shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
   return (
     <div data-testid="analysis-results-folder" className="flex flex-col gap-1">
-      <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
-        {t("Results folder")}
+      {/* With no folder yet, the heading asks for one; once there is one it names it. */}
+      <span
+        data-testid={missing ? "analysis-select-folder-prompt" : "analysis-results-folder-heading"}
+        className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider"
+      >
+        {missing ? t("Select experiments folder") : t("Results folder")}
       </span>
-      {/* The prompt takes its own line (the buttons wrap below it) so it is never cut. */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {missing ? (
-          <span
-            data-testid="analysis-select-folder-prompt"
-            className="min-w-0 basis-full text-muted-foreground text-xs"
-          >
-            {t("Select experiments folder")}
-          </span>
-        ) : (
+        {exists === null ? (
+          <LoadingDots label={t("Finding the results folder…")} />
+        ) : missing ? null : (
           <span
             data-testid="analysis-results-folder-path"
             className="min-w-0 flex-1 truncate font-mono text-xs"
@@ -1507,5 +1629,51 @@ function NoSelectionState() {
     >
       <p className="max-w-xs text-muted-foreground text-sm">{t("Select a file to view it.")}</p>
     </div>
+  )
+}
+
+/** The rows of the Analysis file list that the arrow keys move between, in list order. */
+const LIST_ROWS = [
+  '[data-testid="analysis-group"]',
+  '[data-testid="analysis-experiment"]',
+  '[data-testid="analysis-folder"]',
+  '[data-testid="analysis-file"]',
+].join(", ")
+
+/**
+ * Up and down arrows move the focus between the file list's rows (groups,
+ * experiments, folders and files); Enter or Space then opens the focused row,
+ * as a click does.
+ */
+function moveListFocus(event: React.KeyboardEvent<HTMLElement>): void {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+  const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(LIST_ROWS)]
+  if (rows.length === 0) return
+  event.preventDefault()
+  const current = rows.indexOf(document.activeElement as HTMLElement)
+  const next =
+    current === -1
+      ? event.key === "ArrowDown"
+        ? 0
+        : rows.length - 1
+      : Math.min(rows.length - 1, Math.max(0, current + (event.key === "ArrowDown" ? 1 : -1)))
+  const row = rows[next]
+  row?.focus()
+  row?.scrollIntoView({ block: "nearest" })
+}
+
+/** The setup wizard's "Checking…" spinner: something is being read (the results folder while it is scanned). */
+function LoadingDots({ label }: { label: string }) {
+  const t = useTranslate()
+  return (
+    <span
+      data-testid="analysis-loading-dots"
+      role="status"
+      title={label}
+      className="inline-flex min-w-0 flex-1 items-center gap-1 text-muted-foreground text-xs"
+    >
+      <Loader2 className="size-3 animate-spin" aria-hidden />
+      {t("Checking…")}
+    </span>
   )
 }

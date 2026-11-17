@@ -117,7 +117,10 @@ export function AggregateSettings({
       {columns.map((c) => {
         const checked = picked.includes(c.name)
         return (
-          <label key={c.name} className="flex items-center gap-1.5">
+          <label
+            key={c.name}
+            className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent/60"
+          >
             <input
               type="checkbox"
               checked={checked}
@@ -146,6 +149,7 @@ export function AggregateSettings({
       )}
       testId="analysis-table-aggregate"
       iconOnly={true}
+      chevron={false}
       active={aggregation !== null}
     >
       {() => (

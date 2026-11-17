@@ -1,4 +1,6 @@
+import { classifyAnalysisArtifact } from "@pi-lab/shared"
 import {
+  ChartLine,
   ClipboardCopy,
   Copy,
   CopyPlus,
@@ -82,6 +84,8 @@ export interface TreeMenuActions {
   onPin?: (entry: TreeEntryRef) => void
   /** Present only when the host can make a `.md` file the project's main readme. */
   onSetMain?: (entry: TreeEntryRef) => void
+  /** Present only when the host can open a data file in Analysis (shown for files Analysis lists). */
+  onOpenInAnalysis?: (entry: TreeEntryRef) => void
 }
 
 interface MenuItem {
@@ -207,6 +211,17 @@ export function FileTreeContextMenu({
                       "Pin this Markdown file as a persistent panel in the project's right sidebar",
                     ),
                     run: run(() => actions.onPin?.(entry)),
+                  },
+                ]
+              : []),
+            ...(actions.onOpenInAnalysis && classifyAnalysisArtifact(entry.relPath, "file") !== null
+              ? [
+                  {
+                    label: t("Open in Analysis"),
+                    testId: "file-tree-open-in-analysis",
+                    icon: ChartLine,
+                    featureHelp: t("Preview this data file in the Analysis view"),
+                    run: run(() => actions.onOpenInAnalysis?.(entry)),
                   },
                 ]
               : []),

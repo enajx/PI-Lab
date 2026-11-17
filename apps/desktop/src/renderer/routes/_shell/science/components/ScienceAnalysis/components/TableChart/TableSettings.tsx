@@ -1,11 +1,12 @@
 import { ArrowDown, ArrowUp, SlidersHorizontal, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import type {
   ColumnInfo,
   RowFilter,
   TableOps,
 } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { PALETTES } from "../MetricChart/palettes"
 import type { NumberFormat } from "./formatNumber"
 import { CONTROL_CLASS, Field, SettingsPopover } from "./SettingsPopover"
 
@@ -47,6 +48,9 @@ export function TableSettings({
   display,
   onOps,
   onDisplay,
+  colors,
+  onColors,
+  chart,
 }: {
   /** The file's columns (filters run on them). */
   sourceColumns: ColumnInfo[]
@@ -56,6 +60,11 @@ export function TableSettings({
   display: TableDisplay
   onOps: (ops: TableOps) => void
   onDisplay: (display: TableDisplay) => void
+  /** This file name's chart color map, or null for the default from Settings. */
+  colors: string | null
+  onColors: (colors: string | null) => void
+  /** The chart's fields, shown first in Chart view; null in Table view. */
+  chart: ReactNode | null
 }) {
   const t = useTranslate()
   const names = resultColumns.map((c) => c.name)
@@ -79,16 +88,24 @@ export function TableSettings({
   return (
     <SettingsPopover
       icon={<SlidersHorizontal className="size-3.5" aria-hidden />}
-      label={t("Table settings")}
+      label={t("Settings")}
       help={t(
-        "Show, hide and reorder columns, sort rows, filter rows, and set how numbers are shown",
+        "Chart type and options (in Chart view), filters, sort, columns, number format and chart colors",
       )}
       testId="analysis-table-settings"
       iconOnly={true}
+      chevron={false}
       active={active}
     >
       {() => (
         <>
+          {chart ? (
+            <>
+              <SectionTitle>{t("Chart")}</SectionTitle>
+              {chart}
+              <SectionTitle>{t("Table")}</SectionTitle>
+            </>
+          ) : null}
           <Field label={t("Filter rows (all must match)")}>
             <div data-testid="analysis-table-filters" className="flex flex-col gap-1.5">
               {ops.filters.map((filter, index) => (
@@ -193,7 +210,7 @@ export function TableSettings({
                 const shown = !display.hidden.includes(name)
                 return (
                   <div key={name} className="flex items-center gap-1.5">
-                    <label className="flex min-w-0 flex-1 items-center gap-1.5">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent/60">
                       <input
                         type="checkbox"
                         checked={shown}
@@ -212,7 +229,8 @@ export function TableSettings({
                     </label>
                     <button
                       type="button"
-                      aria-label={t("Move up")}
+                      aria-label={t("Move left")}
+                      title={t("Move left")}
                       disabled={index === 0}
                       onClick={() => move(name, -1)}
                       className="rounded p-0.5 hover:bg-accent/60 disabled:opacity-30"
@@ -221,7 +239,8 @@ export function TableSettings({
                     </button>
                     <button
                       type="button"
-                      aria-label={t("Move down")}
+                      aria-label={t("Move right")}
+                      title={t("Move right")}
                       disabled={index === ordered.length - 1}
                       onClick={() => move(name, 1)}
                       className="rounded p-0.5 hover:bg-accent/60 disabled:opacity-30"
@@ -234,35 +253,39 @@ export function TableSettings({
             </div>
           </Field>
           <Field label={t("Number format")}>
-            <div className="flex items-center gap-2">
-              <select
-                data-testid="analysis-table-decimals"
-                value={display.decimals === null ? "auto" : String(display.decimals)}
-                onChange={(event) =>
-                  onDisplay({
-                    ...display,
-                    decimals: event.target.value === "auto" ? null : Number(event.target.value),
-                  })
-                }
-                className={CONTROL_CLASS}
-              >
-                <option value="auto">{t("Auto (6 significant digits)")}</option>
-                {[0, 1, 2, 3, 4, 5, 6, 8].map((n) => (
-                  <option key={n} value={n}>
-                    {t("{count} decimals").replace("{count}", String(n))}
-                  </option>
-                ))}
-              </select>
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="checkbox"
-                  data-testid="analysis-table-scientific"
-                  checked={display.scientific}
-                  onChange={() => onDisplay({ ...display, scientific: !display.scientific })}
-                />
-                {t("Scientific")}
-              </label>
+            <div className="inline-flex self-start rounded-md border border-border p-0.5">
+              {([false, true] as const).map((scientific) => (
+                <button
+                  key={String(scientific)}
+                  type="button"
+                  aria-pressed={display.scientific === scientific}
+                  data-testid={scientific ? "analysis-table-scientific" : "analysis-table-decimal"}
+                  onClick={() => onDisplay({ ...display, decimals: null, scientific })}
+                  className={
+                    display.scientific === scientific
+                      ? "rounded bg-accent px-2 py-0.5 text-foreground"
+                      : "rounded px-2 py-0.5 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  }
+                >
+                  {scientific ? t("Scientific") : t("Decimal")}
+                </button>
+              ))}
             </div>
+          </Field>
+          <Field label={t("Chart colors")}>
+            <select
+              data-testid="analysis-chart-colors"
+              value={colors ?? ""}
+              onChange={(event) => onColors(event.target.value === "" ? null : event.target.value)}
+              className={`w-full ${CONTROL_CLASS}`}
+            >
+              <option value="">{t("Default (from Settings)")}</option>
+              {PALETTES.map((palette) => (
+                <option key={palette.id} value={palette.id}>
+                  {palette.label}
+                </option>
+              ))}
+            </select>
           </Field>
         </>
       )}
@@ -361,5 +384,14 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
     >
       <X className="size-3.5" aria-hidden />
     </button>
+  )
+}
+
+/** A section heading inside the Settings popover. */
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <p className="border-border border-b pb-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+      {children}
+    </p>
   )
 }

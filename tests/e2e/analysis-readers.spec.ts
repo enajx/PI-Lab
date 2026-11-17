@@ -159,7 +159,7 @@ test("hovering the line chart shows the x value and each series value", async ()
   if (!box) throw new Error("Expected the chart to have a size")
   await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   // The x line names the axis, and values have about 4 significant digits.
-  await expect(chart.getByTestId("analysis-chart-tooltip-label")).toHaveText(/^index \d+$/)
+  await expect(chart.getByTestId("analysis-chart-tooltip-label")).toHaveText(/^index: \d+$/)
   await expect(chart.getByTestId("analysis-chart-tooltip-item")).toHaveText(
     /^training_losses: 0\.\d{1,5}$/,
   )
@@ -250,7 +250,8 @@ test("a long-format table opens as a table; the chart builder plots it and the c
   await expect(plot.locator(".recharts-xAxis")).toContainText("question")
 
   // Split by option, with a min-to-max band, as bars.
-  await window.getByTestId("analysis-chart-settings").click()
+  // The Settings popover holds the chart's fields (first) and the table's, with the colors.
+  await window.getByTestId("analysis-table-settings").click()
   await window.getByTestId("analysis-chart-split").selectOption("option")
   await expect(window.getByTestId("analysis-plot-legend")).toHaveText(
     /option=a.*option=b.*option=c/,
@@ -264,7 +265,7 @@ test("a long-format table opens as a table; the chart builder plots it and the c
   // Error bars are drawn (zero length here: the fixture's values do not vary within a group).
   await expect(plot.locator(".recharts-errorBar")).not.toHaveCount(0)
   await window.keyboard.press("Escape")
-  await expect(window.getByTestId("analysis-chart-settings-panel")).toHaveCount(0)
+  await expect(window.getByTestId("analysis-table-settings-panel")).toHaveCount(0)
 
   // Another options.csv in the project opens with the same chart, also after a restart.
   await openAnalysisFolder(window, "other")
@@ -285,7 +286,7 @@ test("a long-format table opens as a table; the chart builder plots it and the c
   ).toHaveAttribute("fill", "#1f77b4")
 
   // Reset to default stays in Chart view with the automatic settings.
-  await window.getByTestId("analysis-chart-settings").click()
+  await window.getByTestId("analysis-table-settings").click()
   await window.getByTestId("analysis-chart-reset").click()
   await expect(window.getByTestId("analysis-view-chart")).toHaveAttribute("aria-selected", "true")
   await expect(window.getByTestId("analysis-plot-legend")).toHaveText("probability")
@@ -406,14 +407,14 @@ test("the table scrolls to its last row, and text size and Fit are kept after a 
   await window.getByTestId("analysis-table-zoom-in").click()
   await expect(window.getByTestId("analysis-table-zoom")).toHaveText("110%")
   await window.getByTestId("analysis-table-zoom-fit").click()
-  const zoom = await window.getByTestId("analysis-table-zoom").textContent()
   const fits = await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
   expect(fits).toBe(true)
-  // A second click goes back to 100%, a third fits again.
+  // A second click goes back to 100%; the size chosen then is kept.
   await window.getByTestId("analysis-table-zoom-fit").click()
   await expect(window.getByTestId("analysis-table-zoom")).toHaveText("100%")
-  await window.getByTestId("analysis-table-zoom-fit").click()
-  await expect(window.getByTestId("analysis-table-zoom")).toHaveText(zoom ?? "")
+  await window.getByTestId("analysis-table-zoom-in").click()
+  const zoom = await window.getByTestId("analysis-table-zoom").textContent()
+  expect(zoom).toBe("110%")
   await closeApp()
   window = await openAnalysis()
   await selectFile(window, "many.csv")

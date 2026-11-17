@@ -43,7 +43,11 @@ function renderAnalysis(
   })
   return render(
     <AppProviders client={client} queryClient={queryClient}>
-      <ScienceAnalysis initialProjectId={initialProjectId} focusSession={focusSession ?? null} />
+      <ScienceAnalysis
+        initialProjectId={initialProjectId}
+        initialFile={null}
+        focusSession={focusSession ?? null}
+      />
     </AppProviders>,
   )
 }
@@ -153,6 +157,7 @@ function tableStubs(headers: string[], rows: string[][]): Record<string, () => u
 describe("ScienceAnalysis", () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.sessionStorage.clear()
     mocks.navigate.mockReset()
   })
   afterEach(() => setInterfaceLanguage("en"))
@@ -1106,7 +1111,8 @@ describe("ScienceAnalysis", () => {
     await waitFor(() => expect(opens).toHaveLength(2))
     await waitFor(() => expect(closes).toHaveLength(1))
 
-    expect(opens[0]?.ownerId).toBe(opens[1]?.ownerId)
+    // The new file replaces the tab, so the old preview's close names its own owner and lease.
+    expect(closes[0]?.ownerId).toBe(opens[0]?.ownerId)
     expect(closes[0]?.leaseId).toBe(opens[0]?.leaseId)
     expect(closes[0]?.leaseId).not.toBe(opens[1]?.leaseId)
   })
@@ -1132,7 +1138,8 @@ describe("ScienceAnalysis", () => {
     expect(await screen.findByTestId("analysis-marimo-status")).toBeTruthy()
     expect(screen.getByTestId("analysis-marimo-status").textContent).toContain("project/.venv")
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
+    // The dock shows the active tab's content once it has placed it, so wait for the button.
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }))
     expect(await screen.findByTestId("analysis-interactive-stopping")).toBeTruthy()
     finishClose()
     expect(await screen.findByTestId("analysis-interactive-stopped")).toBeTruthy()

@@ -131,6 +131,12 @@ function tabSelected(id: string): string | null {
   return screen.getByTestId(`panel-tab-${id}`).getAttribute("aria-selected")
 }
 
+/** Open the collapsed panel with its expand button, as Analysis starts collapsed. */
+async function expandPanel(): Promise<void> {
+  fireEvent.click(screen.getByTestId("science-sessions-expand"))
+  await screen.findByTestId("right-sidebar")
+}
+
 /** The right sidebar tab ids in their shown order. */
 function tabIds(): string[] {
   return screen
@@ -211,12 +217,14 @@ describe("ScienceSessionPanel", () => {
     expect(tabSelected("diary")).toBe("true")
   })
 
-  test("Analysis starts open on the Sessions tab", async () => {
+  test("Analysis starts collapsed even with the diary on, and opens on the Sessions tab", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
     window.sessionStorage.clear()
-    renderPanel("analysis", { id: "p-1", name: "Project 1" }, handlers())
+    // A project with no tabs saved by the tests above (restored tabs open the panel).
+    renderPanel("analysis", { id: "p-7", name: "Project 7" }, handlers())
+    expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("true")
+    await expandPanel()
     expect(screen.getByTestId("science-sessions").getAttribute("data-collapsed")).toBe("false")
-    await screen.findByTestId("panel-tab-sessions")
     expect(tabSelected("sessions")).toBe("true")
     expect(screen.getByTestId("diary-button").getAttribute("aria-pressed")).toBe("false")
   })
@@ -303,7 +311,7 @@ describe("ScienceSessionPanel", () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
     writeProjectPinnedPanels("p-4", ["notes/plan.md"])
     const analysis = renderPanel("analysis", { id: "p-4", name: "Project 4" }, handlers())
-    await screen.findByTestId("right-sidebar")
+    await expandPanel()
     expect(tabIds()).toEqual(["sessions", "files", "diary"])
     analysis.unmount()
 
@@ -322,7 +330,7 @@ describe("ScienceSessionPanel", () => {
   test("the pin menu lists the tabs with which are shown, and a shown tab is kept per view", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
     const first = renderPanel("analysis", { id: "p-5", name: "Project 5" }, handlers())
-    await screen.findByTestId("right-sidebar")
+    await expandPanel()
     fireEvent.click(screen.getByTestId("right-sidebar-pin"))
     const menu = screen.getByTestId("pin-menu")
     const rows = within(menu).getAllByRole("menuitemcheckbox")
@@ -347,7 +355,7 @@ describe("ScienceSessionPanel", () => {
 
     // Kept after a reload, and only for Analysis.
     const second = renderPanel("analysis", { id: "p-5", name: "Project 5" }, handlers())
-    await screen.findByTestId("right-sidebar")
+    await expandPanel()
     expect(tabIds()).toEqual(["sessions", "files", "research", "diary"])
     second.unmount()
     renderPanel("tasks", { id: "p-5", name: "Project 5" }, handlers())
@@ -358,7 +366,7 @@ describe("ScienceSessionPanel", () => {
   test("hiding the shown tab moves to another tab, and a tab that is asked for shows again", async () => {
     window.localStorage.removeItem("pi-lab.researchDiary.open")
     renderPanel("analysis", { id: "p-6", name: "Project 6" }, handlers())
-    await screen.findByTestId("right-sidebar")
+    await expandPanel()
     fireEvent.click(screen.getByTestId("panel-tab-diary"))
     fireEvent.click(screen.getByTestId("right-sidebar-pin"))
     fireEvent.click(screen.getByTestId("pin-menu-tab-diary"))

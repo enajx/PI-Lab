@@ -12,6 +12,7 @@ export function FilesPanel({
   activeRelPath,
   onPinFile,
   onSetMainFile,
+  onOpenInAnalysis,
   editorTabs,
   onCollapse,
   headerEnd,
@@ -22,6 +23,7 @@ export function FilesPanel({
   /** Pin a `.md` file as a right-sidebar panel (via the file row's right-click menu). */
   onPinFile?: (relPath: string) => void
   onSetMainFile?: (relPath: string) => void
+  onOpenInAnalysis?: (relPath: string) => void
   /** Open editor tabs, closed or moved when the tree deletes or renames their files. */
   editorTabs?: FileTreeEditorTabs
   /** Show a collapse chevron in the tree header (LaTeX Editor column). */
@@ -37,6 +39,7 @@ export function FilesPanel({
         activeRelPath={activeRelPath}
         onPinFile={onPinFile}
         onSetMainFile={onSetMainFile}
+        onOpenInAnalysis={onOpenInAnalysis}
         editorTabs={editorTabs}
         onCollapse={onCollapse}
         headerEnd={headerEnd}

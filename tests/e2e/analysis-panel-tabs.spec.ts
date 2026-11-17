@@ -60,6 +60,8 @@ test("Analysis right panel shows Sessions, Files and Diary, and the pin menu sho
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
 
   const panel = window.getByTestId("science-sessions")
+  // Analysis opens with the right panel collapsed.
+  await window.getByTestId("science-sessions-expand").click()
   const tabs = panel.getByRole("tab")
   await expect(tabs).toHaveText(["Sessions", "Files", "Diary"], { timeout: 30_000 })
 
@@ -95,6 +97,7 @@ test("Analysis right panel shows Sessions, Files and Diary, and the pin menu sho
   // The reload stays on Analysis.
   await window.reload()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("science-sessions-expand").click()
   await expect(tabs).toHaveText(["Sessions", "Files", "Research", "Diary"], { timeout: 30_000 })
 
   // The file search pins a Markdown file as a shown tab.

@@ -1,9 +1,10 @@
 import { useQueries } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { TableOps, TablePage } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
 import { useTRPC } from "../../../../../../../trpc/react"
+import { useWheel, wheelFactor } from "../MetricChart/chartZoom"
 import { formatNumber, type NumberFormat } from "./formatNumber"
 
 /**
@@ -66,7 +67,12 @@ export function DataTable({
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
-  const scroller = useRef<HTMLDivElement>(null)
+  const scroller = useRef<HTMLDivElement | null>(null)
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const scrollerRef = useCallback((node: HTMLDivElement | null) => {
+    scroller.current = node
+    setScrollElement(node)
+  }, [])
   const [zoom, setZoomState] = useState(readZoom)
   /** The zoom Fit last set, so a second click can go back to 100%. */
   const fitZoom = useRef<number | null>(null)
@@ -127,10 +133,17 @@ export function DataTable({
     else if (!key.descending) onSort([{ column: name, descending: true }])
     else onSort([])
   }
+  // A trackpad pinch (a wheel event with Ctrl held) changes the text size; plain scrolling scrolls.
+  useWheel(scrollElement, (event) => {
+    if (!event.ctrlKey) return false
+    setZoom(zoom / wheelFactor(event.deltaY, true))
+    return true
+  })
   // Fit, then a second click goes back to 100%.
   const fitted = fitZoom.current !== null && Math.abs(zoom - fitZoom.current) < 0.005
   const fit = (): void => {
-    if (fitted) {
+    // Read the ref here: a Fit that did not change the zoom has not re-rendered.
+    if (fitZoom.current !== null && Math.abs(zoom - fitZoom.current) < 0.005) {
       fitZoom.current = null
       setZoom(1)
       return
@@ -150,7 +163,7 @@ export function DataTable({
     <div className="flex min-h-0 flex-col gap-2">
       <div className="flex min-h-0 gap-1.5">
         <div
-          ref={scroller}
+          ref={scrollerRef}
           data-testid="analysis-table-scroll"
           onScroll={(event) =>
             setView({
@@ -165,7 +178,7 @@ export function DataTable({
         >
           <table
             data-testid="analysis-preview-table"
-            className="border-collapse"
+            className="min-w-full border-collapse"
             style={{ fontSize: FONT_SIZE * zoom }}
           >
             <thead className="sticky top-0 z-10 bg-muted">

@@ -245,9 +245,7 @@ test("⌘T in Analysis opens a terminal in the session panel, kept after leaving
   await analysisNav.click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
   const panel = window.getByTestId("science-sessions")
-  // The panel starts open (the diary is on by default); collapse it first.
-  await expect(panel).toHaveAttribute("data-collapsed", "false")
-  await panel.getByTestId("right-sidebar-collapse").click()
+  // Analysis opens with the panel collapsed.
   await expect(panel).toHaveAttribute("data-collapsed", "true")
 
   await blurFocus(window)
@@ -282,11 +280,11 @@ test("an Analysis agent shows in the Project Agents box and opens back in Analys
   await analysisNav.click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
   const panel = window.getByTestId("science-sessions")
-  // The panel starts open on the Diary tab (the diary is on by default).
+  // Analysis opens with the panel collapsed; its empty Sessions tab offers New agent.
+  await window.getByTestId("science-sessions-expand").click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await panel.getByTestId("panel-tab-sessions").click()
-  await panel.getByTestId("central-add-menu").click()
-  await window.getByTestId("central-add-agent").click()
+  await panel.getByTestId("launcher-agent").click()
   const chooser = window.getByTestId("new-agent-dialog")
   await chooser.locator("label", { hasText: "Test Waiting" }).click()
   await chooser.getByRole("button", { name: "Start agent" }).click()

@@ -84,6 +84,8 @@ interface FileTreeProps {
   onPinFile?: (relPath: string) => void
   /** Make a Markdown file the project's main readme. */
   onSetMainFile?: (relPath: string) => void
+  /** Open a data file in the Analysis view (the right-click menu's "Open in Analysis"). */
+  onOpenInAnalysis?: (relPath: string) => void
   /**
    * The host editor's open tabs: delete closes the tabs of removed paths and
    * rename moves them. Omitted only where no editor tabs exist.
@@ -143,6 +145,7 @@ export function FileTree({
   activeRelPath,
   onPinFile,
   onSetMainFile,
+  onOpenInAnalysis,
   editorTabs,
   onCollapse,
   headerEnd,
@@ -505,6 +508,9 @@ export function FileTree({
           onDelete: requestDelete,
           onPin: onPinFile ? (entry) => onPinFile(entry.relPath) : undefined,
           onSetMain: onSetMainFile ? (entry) => onSetMainFile(entry.relPath) : undefined,
+          onOpenInAnalysis: onOpenInAnalysis
+            ? (entry) => onOpenInAnalysis(entry.relPath)
+            : undefined,
         }}
       />
       {pendingDelete ? (
@@ -1014,7 +1020,7 @@ function entryType(entry: FileTreeEntry): string {
   return dot > 0 ? entry.name.slice(dot + 1).toLowerCase() : "file"
 }
 
-function validateEntryName(name: string): string | null {
+export function validateEntryName(name: string): string | null {
   if (!name) return "Enter a name"
   if (name === "." || name === "..") return "Choose a regular file or folder name"
   if (name.includes("/") || name.includes("\\")) return "Names cannot contain path separators"

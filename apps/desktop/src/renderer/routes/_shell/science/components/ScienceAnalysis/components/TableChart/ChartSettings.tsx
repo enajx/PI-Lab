@@ -1,4 +1,3 @@
-import { Settings } from "lucide-react"
 import type {
   ChartAggregate,
   ChartBand,
@@ -7,13 +6,13 @@ import type {
   ColumnInfo,
 } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
-import { PALETTES } from "../MetricChart/palettes"
 import { CONTROL_CLASS, Field, SettingsPopover } from "./SettingsPopover"
 
 /**
- * The "Chart settings" popover: chart type, x and y columns, split by a
- * column, how rows with the same x combine, and the spread band. Columns are
- * those of the table after its operations.
+ * The chart's fields in the Settings popover (Chart view): chart type, split
+ * by a column, how rows with the same x combine, and the spread band. Columns
+ * are those of the table after its operations. X and Y are in the toolbar
+ * ({@link AxisPickers}).
  */
 
 const CHART_TYPES: Array<{ value: ChartType; label: string }> = [
@@ -41,91 +40,154 @@ export function useColumnLabel(): (column: ColumnInfo) => string {
   return (column) => `${column.name} (${t(column.role)})`
 }
 
-export function ChartSettings({
+export function ChartFields({
   spec,
   columns,
-  colors,
-  onColors,
   onChange,
   onReset,
 }: {
   spec: ChartSpec
   columns: ColumnInfo[]
-  /** This file name's color map, or null for the default from Settings. */
-  colors: string | null
-  onColors: (colors: string | null) => void
   onChange: (spec: ChartSpec) => void
   onReset: () => void
 }) {
   const t = useTranslate()
   const columnLabel = useColumnLabel()
-  const plottable = columns.filter((c) => c.kind !== "text" && c.name !== spec.x)
   const splittable = columns.filter(
     (c) => (c.role === "factor" || c.role === "text") && c.name !== spec.x,
   )
   const bandAllowed = spec.aggregate === "mean" || spec.aggregate === "median"
   return (
-    <SettingsPopover
-      icon={<Settings className="size-3.5" aria-hidden />}
-      label={t("Chart settings")}
-      help={t(
-        "Choose the x and y columns, a column to split lines by, the chart type, how rows with the same x are combined, and the spread band",
-      )}
-      testId="analysis-chart-settings"
-      iconOnly={true}
-      active={false}
-    >
-      {(close) => (
-        <>
-          <Field label={t("Chart type")}>
-            <select
-              data-testid="analysis-chart-type"
-              value={spec.chartType}
-              onChange={(event) =>
-                onChange({ ...spec, chartType: event.target.value as ChartType })
-              }
-              className={`w-full ${CONTROL_CLASS}`}
-            >
-              {CHART_TYPES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.label)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("X axis")}>
-            <select
-              data-testid="analysis-chart-x"
-              value={spec.x}
-              onChange={(event) => {
-                const x = event.target.value
-                const y = spec.y.filter((name) => name !== x)
-                const fallback = columns.find((c) => c.kind !== "text" && c.name !== x)
-                onChange({
-                  ...spec,
-                  x,
-                  y: y.length > 0 ? y : fallback ? [fallback.name] : spec.y,
-                  splitBy: spec.splitBy === x ? null : spec.splitBy,
-                })
-              }}
-              className={`w-full ${CONTROL_CLASS}`}
-            >
-              {columns.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {columnLabel(c)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("Y axis")}>
-            <div
-              data-testid="analysis-chart-y"
-              className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-md border border-border p-1.5"
-            >
+    <>
+      <Field label={t("Chart type")}>
+        <select
+          data-testid="analysis-chart-type"
+          value={spec.chartType}
+          onChange={(event) => onChange({ ...spec, chartType: event.target.value as ChartType })}
+          className={`w-full ${CONTROL_CLASS}`}
+        >
+          {CHART_TYPES.map((option) => (
+            <option key={option.value} value={option.value}>
+              {t(option.label)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label={t("Split by")}>
+        <select
+          data-testid="analysis-chart-split"
+          value={spec.splitBy ?? ""}
+          onChange={(event) =>
+            onChange({
+              ...spec,
+              splitBy: event.target.value === "" ? null : event.target.value,
+            })
+          }
+          className={`w-full ${CONTROL_CLASS}`}
+        >
+          <option value="">{t("None")}</option>
+          {splittable.map((c) => (
+            <option key={c.name} value={c.name}>
+              {columnLabel(c)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label={t("Combine rows with the same x")}>
+        <select
+          data-testid="analysis-chart-aggregate"
+          value={spec.aggregate}
+          onChange={(event) => {
+            const aggregate = event.target.value as ChartAggregate
+            const keepsBand = aggregate === "mean" || aggregate === "median"
+            onChange({ ...spec, aggregate, band: keepsBand ? spec.band : "none" })
+          }}
+          className={`w-full ${CONTROL_CLASS}`}
+        >
+          {AGGREGATES.map((option) => (
+            <option key={option.value} value={option.value}>
+              {t(option.label)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label={t("Spread")}>
+        <select
+          data-testid="analysis-chart-band"
+          value={bandAllowed ? spec.band : "none"}
+          disabled={!bandAllowed}
+          title={bandAllowed ? undefined : t("The spread band needs mean or median.")}
+          onChange={(event) => onChange({ ...spec, band: event.target.value as ChartBand })}
+          className={`w-full ${CONTROL_CLASS}`}
+        >
+          {BANDS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {t(option.label)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <button
+        type="button"
+        data-testid="analysis-chart-reset"
+        onClick={onReset}
+        className="self-start rounded-md border border-border px-2 py-0.5 hover:bg-accent/60"
+      >
+        {t("Reset chart to default")}
+      </button>
+    </>
+  )
+}
+
+/**
+ * The chart's x column (a select) and y columns (a button that opens a list of
+ * checkboxes), shown in the toolbar in Chart view.
+ */
+export function AxisPickers({
+  spec,
+  columns,
+  onChange,
+}: {
+  spec: ChartSpec
+  columns: ColumnInfo[]
+  onChange: (spec: ChartSpec) => void
+}) {
+  const t = useTranslate()
+  const columnLabel = useColumnLabel()
+  const plottable = columns.filter((c) => c.kind !== "text" && c.name !== spec.x)
+  const xColumn = columns.find((c) => c.name === spec.x)
+  const pickX = (x: string): void => {
+    const y = spec.y.filter((name) => name !== x)
+    const fallback = columns.find((c) => c.kind !== "text" && c.name !== x)
+    onChange({
+      ...spec,
+      x,
+      y: y.length > 0 ? y : fallback ? [fallback.name] : spec.y,
+      splitBy: spec.splitBy === x ? null : spec.splitBy,
+    })
+  }
+  return (
+    <div className="flex min-w-0 items-center gap-3 text-xs">
+      <div className="flex min-w-0 items-center gap-1">
+        <span className="text-muted-foreground">{t("Y:")}</span>
+        <SettingsPopover
+          icon={null}
+          label={spec.y.join(", ")}
+          help={t("Choose the columns plotted on the y axis")}
+          testId="analysis-chart-y-button"
+          iconOnly={false}
+          chevron={true}
+          active={false}
+        >
+          {() => (
+            <div data-testid="analysis-chart-y" className="flex flex-col gap-1">
               {plottable.map((c) => {
                 const checked = spec.y.includes(c.name)
                 return (
-                  <label key={c.name} className="flex items-center gap-1.5">
+                  <label
+                    key={c.name}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent/60"
+                  >
                     <input
                       type="checkbox"
                       checked={checked}
@@ -147,89 +209,44 @@ export function ChartSettings({
                 )
               })}
             </div>
-          </Field>
-          <Field label={t("Split by")}>
-            <select
-              data-testid="analysis-chart-split"
-              value={spec.splitBy ?? ""}
-              onChange={(event) =>
-                onChange({
-                  ...spec,
-                  splitBy: event.target.value === "" ? null : event.target.value,
-                })
-              }
-              className={`w-full ${CONTROL_CLASS}`}
-            >
-              <option value="">{t("None")}</option>
-              {splittable.map((c) => (
-                <option key={c.name} value={c.name}>
+          )}
+        </SettingsPopover>
+      </div>
+      <div className="flex min-w-0 items-center gap-1">
+        <span className="text-muted-foreground">{t("X:")}</span>
+        <SettingsPopover
+          icon={null}
+          label={xColumn ? columnLabel(xColumn) : spec.x}
+          help={t("Choose the column on the x axis")}
+          testId="analysis-chart-x"
+          iconOnly={false}
+          chevron={true}
+          active={false}
+        >
+          {(close) => (
+            <div data-testid="analysis-chart-x-list" className="flex flex-col">
+              {columns.map((c) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  role="option"
+                  aria-selected={c.name === spec.x}
+                  data-testid="analysis-chart-x-option"
+                  onClick={() => {
+                    close()
+                    if (c.name !== spec.x) pickX(c.name)
+                  }}
+                  className={`truncate rounded px-1 py-0.5 text-left hover:bg-accent/60 ${
+                    c.name === spec.x ? "font-medium text-foreground" : ""
+                  }`}
+                >
                   {columnLabel(c)}
-                </option>
+                </button>
               ))}
-            </select>
-          </Field>
-          <Field label={t("Combine rows with the same x")}>
-            <select
-              data-testid="analysis-chart-aggregate"
-              value={spec.aggregate}
-              onChange={(event) => {
-                const aggregate = event.target.value as ChartAggregate
-                const keepsBand = aggregate === "mean" || aggregate === "median"
-                onChange({ ...spec, aggregate, band: keepsBand ? spec.band : "none" })
-              }}
-              className={`w-full ${CONTROL_CLASS}`}
-            >
-              {AGGREGATES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.label)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("Spread")}>
-            <select
-              data-testid="analysis-chart-band"
-              value={bandAllowed ? spec.band : "none"}
-              disabled={!bandAllowed}
-              title={bandAllowed ? undefined : t("The spread band needs mean or median.")}
-              onChange={(event) => onChange({ ...spec, band: event.target.value as ChartBand })}
-              className={`w-full ${CONTROL_CLASS}`}
-            >
-              {BANDS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.label)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("Colors")}>
-            <select
-              data-testid="analysis-chart-colors"
-              value={colors ?? ""}
-              onChange={(event) => onColors(event.target.value === "" ? null : event.target.value)}
-              className={`w-full ${CONTROL_CLASS}`}
-            >
-              <option value="">{t("Default (from Settings)")}</option>
-              {PALETTES.map((palette) => (
-                <option key={palette.id} value={palette.id}>
-                  {palette.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <button
-            type="button"
-            data-testid="analysis-chart-reset"
-            onClick={() => {
-              close()
-              onReset()
-            }}
-            className="self-start rounded-md border border-border px-2 py-0.5 hover:bg-accent/60"
-          >
-            {t("Reset to default")}
-          </button>
-        </>
-      )}
-    </SettingsPopover>
+            </div>
+          )}
+        </SettingsPopover>
+      </div>
+    </div>
   )
 }

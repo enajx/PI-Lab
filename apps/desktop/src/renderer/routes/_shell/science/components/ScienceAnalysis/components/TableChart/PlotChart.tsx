@@ -19,17 +19,18 @@ import {
   inRange,
   rangeOf,
   useChartZoom,
+  useWheelZoom,
   xAtPixel,
   zoomMouseHandlers,
 } from "../MetricChart/chartZoom"
 import { formatChartNumber } from "../MetricChart/formatChartNumber"
 import {
-  CHART_HEIGHT,
   ChartTooltip,
   FALLBACK_WIDTH,
   MAX_LEGEND_SERIES,
   PLOT_MARGIN,
   SELECTION_FILL,
+  useChartHeight,
   useMeasuredWidth,
   Y_AXIS_WIDTH,
   ZOOMED_Y_DOMAIN,
@@ -54,6 +55,7 @@ export function PlotChart({ plot, palette }: { plot: PlotPreview; palette: strin
   const colorFor = (index: number): string => paletteColor(palette, index, plot.series.length)
   const t = useTranslate()
   const { ref, width } = useMeasuredWidth()
+  const chartHeight = useChartHeight(ref)
   const categories = plot.xCategories
   const xText = (value: number): string =>
     categories ? (categories[value] ?? "") : formatChartNumber(value)
@@ -74,6 +76,7 @@ export function PlotChart({ plot, palette }: { plot: PlotPreview; palette: strin
             <BarPlot
               plot={plot}
               width={width || FALLBACK_WIDTH}
+              height={chartHeight}
               xText={xText}
               colorFor={colorFor}
             />
@@ -81,6 +84,7 @@ export function PlotChart({ plot, palette }: { plot: PlotPreview; palette: strin
             <PointPlot
               plot={plot}
               width={width || FALLBACK_WIDTH}
+              height={chartHeight}
               xText={xText}
               colorFor={colorFor}
             />
@@ -88,7 +92,10 @@ export function PlotChart({ plot, palette }: { plot: PlotPreview; palette: strin
         </div>
       )}
       {plot.series.length <= MAX_LEGEND_SERIES ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-1" data-testid="analysis-plot-legend">
+        <div
+          className="flex flex-wrap justify-end gap-x-4 gap-y-1"
+          data-testid="analysis-plot-legend"
+        >
           {plot.series.map((series, i) => (
             <span key={series.label} className="flex items-center gap-1.5 text-xs">
               <span
@@ -102,20 +109,16 @@ export function PlotChart({ plot, palette }: { plot: PlotPreview; palette: strin
         </div>
       ) : null}
       {plot.partial ? (
-        <p data-testid="analysis-plot-partial" className="text-amber-500 text-xs">
-          {t("The chart uses the first {count} rows; the file has more.").replace(
-            "{count}",
-            plot.rowsUsed.toLocaleString(),
-          )}
-        </p>
-      ) : null}
-      {plot.downsampled ? (
-        <p className="text-amber-500 text-xs">
-          {t("Chart downsampled — the file has more points than are plotted.")}
+        <p data-testid="analysis-plot-partial" className="text-right text-muted-foreground text-xs">
+          {t("First {count} rows of the file").replace("{count}", plot.rowsUsed.toLocaleString())}
         </p>
       ) : null}
       {plot.notes.map((note) => (
-        <p key={note} data-testid="analysis-plot-note" className="text-amber-500 text-xs">
+        <p
+          key={note}
+          data-testid="analysis-plot-note"
+          className="text-right text-muted-foreground text-xs"
+        >
           {note}
         </p>
       ))}
@@ -142,7 +145,7 @@ function PlotTooltip({
   const x = typeof label === "number" ? label : (payload[0]?.payload?.x ?? 0)
   return (
     <ChartTooltip
-      xText={`${xLabel} ${xText(x)}`}
+      xText={`${xLabel}: ${xText(x)}`}
       entries={payload
         .filter((entry) => typeof entry.value === "number")
         .map((entry) => ({
@@ -160,12 +163,14 @@ function PointPlot({
   plot,
   colorFor,
   width,
+  height,
   xText,
 }: {
   plot: PlotPreview
   /** The color of series `index`. */
   colorFor: (index: number) => string
   width: number
+  height: number
   xText: (value: number) => string
 }) {
   const data = useMemo(
@@ -199,86 +204,91 @@ function PointPlot({
   const mouse = zoomMouseHandlers(zoom, (state) =>
     xAtPixel(state.chartX ?? 0, PLOT_MARGIN.left + Y_AXIS_WIDTH, width - PLOT_MARGIN.right, view),
   )
+  const wheelRef = useWheelZoom(zoom, (px) =>
+    xAtPixel(px, PLOT_MARGIN.left + Y_AXIS_WIDTH, width - PLOT_MARGIN.right, view),
+  )
   return (
     <>
-      <ComposedChart width={width} height={CHART_HEIGHT} margin={PLOT_MARGIN} {...mouse}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis
-          dataKey="x"
-          type="number"
-          domain={[view.min, view.max]}
-          allowDataOverflow
-          ticks={
-            categories ? categories.map((_, i) => i).filter((i) => inRange(i, view)) : undefined
-          }
-          allowDuplicatedCategory={false}
-          tick={AXIS_TICK}
-          tickFormatter={xText}
-          label={{
-            value: plot.xLabel,
-            position: "insideBottom",
-            offset: -4,
-            style: AXIS_TICK,
-          }}
-        />
-        <YAxis
-          width={Y_AXIS_WIDTH}
-          {...(zoom.zoomed ? ZOOMED_Y_DOMAIN : {})}
-          tick={AXIS_TICK}
-          tickFormatter={formatChartNumber}
-        />
-        <Tooltip
-          content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />}
-        />
-        {plot.series.map((series, i) =>
-          series.lo ? (
-            <Area
-              key={`${series.label}-band`}
-              data={shown[i]}
-              dataKey="band"
-              name={`${series.label} band`}
-              stroke="none"
-              fill={colorFor(i)}
-              fillOpacity={0.15}
-              isAnimationActive={false}
-              legendType="none"
-              tooltipType="none"
-            />
-          ) : null,
-        )}
-        {plot.series.map((series, i) =>
-          plot.chartType === "scatter" ? (
-            <Scatter
-              key={series.label}
-              data={shown[i]}
-              dataKey="y"
-              name={series.label}
-              fill={colorFor(i)}
-              isAnimationActive={false}
-            />
-          ) : (
-            <Line
-              key={series.label}
-              data={shown[i]}
-              dataKey="y"
-              name={series.label}
-              type="linear"
-              stroke={colorFor(i)}
-              strokeWidth={1.5}
-              dot={series.x.length <= 50}
-              isAnimationActive={false}
-            />
-          ),
-        )}
-        {zoom.selection ? (
-          <ReferenceArea
-            x1={zoom.selection.min}
-            x2={zoom.selection.max}
-            fill={SELECTION_FILL}
-            fillOpacity={0.15}
+      <div ref={wheelRef}>
+        <ComposedChart width={width} height={height} margin={PLOT_MARGIN} {...mouse}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis
+            dataKey="x"
+            type="number"
+            domain={[view.min, view.max]}
+            allowDataOverflow
+            ticks={
+              categories ? categories.map((_, i) => i).filter((i) => inRange(i, view)) : undefined
+            }
+            allowDuplicatedCategory={false}
+            tick={AXIS_TICK}
+            tickFormatter={xText}
+            label={{
+              value: plot.xLabel,
+              position: "insideBottom",
+              offset: -4,
+              style: AXIS_TICK,
+            }}
           />
-        ) : null}
-      </ComposedChart>
+          <YAxis
+            width={Y_AXIS_WIDTH}
+            {...(zoom.zoomed ? ZOOMED_Y_DOMAIN : {})}
+            tick={AXIS_TICK}
+            tickFormatter={formatChartNumber}
+          />
+          <Tooltip
+            content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />}
+          />
+          {plot.series.map((series, i) =>
+            series.lo ? (
+              <Area
+                key={`${series.label}-band`}
+                data={shown[i]}
+                dataKey="band"
+                name={`${series.label} band`}
+                stroke="none"
+                fill={colorFor(i)}
+                fillOpacity={0.15}
+                isAnimationActive={false}
+                legendType="none"
+                tooltipType="none"
+              />
+            ) : null,
+          )}
+          {plot.series.map((series, i) =>
+            plot.chartType === "scatter" ? (
+              <Scatter
+                key={series.label}
+                data={shown[i]}
+                dataKey="y"
+                name={series.label}
+                fill={colorFor(i)}
+                isAnimationActive={false}
+              />
+            ) : (
+              <Line
+                key={series.label}
+                data={shown[i]}
+                dataKey="y"
+                name={series.label}
+                type="linear"
+                stroke={colorFor(i)}
+                strokeWidth={1.5}
+                dot={series.x.length <= 50}
+                isAnimationActive={false}
+              />
+            ),
+          )}
+          {zoom.selection ? (
+            <ReferenceArea
+              x1={zoom.selection.min}
+              x2={zoom.selection.max}
+              fill={SELECTION_FILL}
+              fillOpacity={0.15}
+            />
+          ) : null}
+        </ComposedChart>
+      </div>
       <ZoomControls zoom={zoom} />
     </>
   )
@@ -289,12 +299,14 @@ function BarPlot({
   plot,
   colorFor,
   width,
+  height,
   xText,
 }: {
   plot: PlotPreview
   /** The color of series `index`. */
   colorFor: (index: number) => string
   width: number
+  height: number
   xText: (value: number) => string
 }) {
   const rows = useMemo(() => {
@@ -325,48 +337,53 @@ function BarPlot({
     const x = Number(state.activeLabel)
     return state.activeLabel === undefined || Number.isNaN(x) ? null : x
   })
+  const wheelRef = useWheelZoom(zoom, (px) =>
+    xAtPixel(px, PLOT_MARGIN.left + Y_AXIS_WIDTH, width - PLOT_MARGIN.right, view),
+  )
   return (
     <>
-      <BarChart width={width} height={CHART_HEIGHT} data={shown} margin={PLOT_MARGIN} {...mouse}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis
-          dataKey="x"
-          type="category"
-          tick={AXIS_TICK}
-          tickFormatter={(value: number) => xText(Number(value))}
-          label={{
-            value: plot.xLabel,
-            position: "insideBottom",
-            offset: -4,
-            style: AXIS_TICK,
-          }}
-        />
-        <YAxis width={Y_AXIS_WIDTH} tick={AXIS_TICK} tickFormatter={formatChartNumber} />
-        <Tooltip
-          content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />}
-        />
-        {plot.series.map((series, i) => (
-          <Bar
-            key={series.label}
-            dataKey={`s${i}`}
-            name={series.label}
-            fill={colorFor(i)}
-            isAnimationActive={false}
-          >
-            {series.lo ? (
-              <ErrorBar dataKey={`e${i}`} stroke="var(--foreground)" strokeWidth={1} width={4} />
-            ) : null}
-          </Bar>
-        ))}
-        {zoom.selection ? (
-          <ReferenceArea
-            x1={zoom.selection.min}
-            x2={zoom.selection.max}
-            fill={SELECTION_FILL}
-            fillOpacity={0.15}
+      <div ref={wheelRef}>
+        <BarChart width={width} height={height} data={shown} margin={PLOT_MARGIN} {...mouse}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis
+            dataKey="x"
+            type="category"
+            tick={AXIS_TICK}
+            tickFormatter={(value: number) => xText(Number(value))}
+            label={{
+              value: plot.xLabel,
+              position: "insideBottom",
+              offset: -4,
+              style: AXIS_TICK,
+            }}
           />
-        ) : null}
-      </BarChart>
+          <YAxis width={Y_AXIS_WIDTH} tick={AXIS_TICK} tickFormatter={formatChartNumber} />
+          <Tooltip
+            content={(props) => <PlotTooltip {...props} xLabel={plot.xLabel} xText={xText} />}
+          />
+          {plot.series.map((series, i) => (
+            <Bar
+              key={series.label}
+              dataKey={`s${i}`}
+              name={series.label}
+              fill={colorFor(i)}
+              isAnimationActive={false}
+            >
+              {series.lo ? (
+                <ErrorBar dataKey={`e${i}`} stroke="var(--foreground)" strokeWidth={1} width={4} />
+              ) : null}
+            </Bar>
+          ))}
+          {zoom.selection ? (
+            <ReferenceArea
+              x1={zoom.selection.min}
+              x2={zoom.selection.max}
+              fill={SELECTION_FILL}
+              fillOpacity={0.15}
+            />
+          ) : null}
+        </BarChart>
+      </div>
       <ZoomControls zoom={zoom} />
     </>
   )

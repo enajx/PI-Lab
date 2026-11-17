@@ -373,10 +373,7 @@ test("a category chip shows a row of format chips; picking PDF lists the PDFs, a
   // A deep PDF figure (as in results/group_a/...) next to an SVG.
   const pdfDir = join(repoDir, "results", "group_a", "grid_7hf2hacr")
   await mkdir(pdfDir, { recursive: true })
-  await writeFile(
-    join(pdfDir, "grad_norms.pdf"),
-    onePagePdf("Gradient magnitudes"),
-  )
+  await writeFile(join(pdfDir, "grad_norms.pdf"), onePagePdf("Gradient magnitudes"))
   await writeFile(join(pdfDir, "arch.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>")
   const pdfRel = "results/group_a/grid_7hf2hacr/grad_norms.pdf"
   const window = await app.firstWindow()
@@ -448,12 +445,9 @@ test("a results folder with groups lists groups, then experiments, then their fo
 
   // Top rows: the groups, collapsed; no experiment rows with deep paths.
   const groups = window.getByTestId("analysis-group")
-  await expect(groups).toHaveText(
-    ["group_a", "group_b", "group_c"],
-    {
-      timeout: 30_000,
-    },
-  )
+  await expect(groups).toHaveText(["group_a", "group_b", "group_c"], {
+    timeout: 30_000,
+  })
   // No experiment rows at the top: they are inside their groups.
   await expect(window.getByTestId("analysis-experiment")).toHaveCount(0)
   // A group lists its experiments.
@@ -918,6 +912,8 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
 
   const files = window.getByTestId("analysis-files-column")
   const panel = window.getByTestId("science-sessions")
+  // Analysis opens with the right panel collapsed.
+  await window.getByTestId("science-sessions-expand").click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   const sidebar = panel.getByTestId("right-sidebar")
   await expect(sidebar).toBeVisible({ timeout: 30_000 })
@@ -986,6 +982,8 @@ test("Analysis file list and right panel resize from the gaps and keep the size 
   // The reload stays on Analysis.
   await window.reload()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  // Analysis opens with the right panel collapsed.
+  await window.getByTestId("science-sessions-expand").click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await expect.poll(() => widthOf(files)).toBe(filesBefore + 80)
   await expect.poll(() => widthOf(panel)).toBe(panelBefore + 100)
@@ -1045,6 +1043,8 @@ test("Analysis and Tasks cards fit narrow windows, collapsing the right panel wh
   ]
   await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
   await expect(window.getByTestId("science-analysis")).toBeVisible({ timeout: 30_000 })
+  // Analysis opens with the right panel collapsed.
+  await window.getByTestId("science-sessions-expand").click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
 
   await setSize(1100, 800)

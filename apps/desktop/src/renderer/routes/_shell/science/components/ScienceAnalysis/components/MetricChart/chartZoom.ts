@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 /**
  * View-only zoom on a chart's x axis, shared by the Analysis charts. The user
@@ -54,6 +54,55 @@ export function zoomOutRange(view: XRange, full: XRange): XRange {
   return { min, max }
 }
 
+/**
+ * `view` scaled by `factor` (below 1 zooms in) around `x`, which keeps its
+ * place on the axis; kept inside `full`, and `full` once it would be wider.
+ */
+export function zoomAroundRange(view: XRange, full: XRange, x: number, factor: number): XRange {
+  const width = (view.max - view.min) * factor
+  if (width >= full.max - full.min) return full
+  const share = view.max > view.min ? (x - view.min) / (view.max - view.min) : 0.5
+  let min = x - share * width
+  let max = min + width
+  if (min < full.min) {
+    max += full.min - min
+    min = full.min
+  }
+  if (max > full.max) {
+    min -= max - full.max
+    max = full.max
+  }
+  return { min, max }
+}
+
+/**
+ * The zoom factor of one wheel event: a trackpad pinch (which browsers send
+ * as a wheel event with Ctrl held) or a mouse wheel. Scrolling up zooms in.
+ */
+export function wheelFactor(deltaY: number, pinch: boolean): number {
+  return Math.exp(deltaY * (pinch ? 0.01 : 0.002))
+}
+
+/**
+ * Call `onWheel` for wheel events over `element`, which then do not scroll
+ * the page. React's own wheel handler cannot stop the scroll (it is passive).
+ */
+export function useWheel(
+  element: HTMLElement | null,
+  onWheel: (event: WheelEvent) => boolean,
+): void {
+  const latest = useRef(onWheel)
+  latest.current = onWheel
+  useEffect(() => {
+    if (!element) return
+    const handle = (event: WheelEvent) => {
+      if (latest.current(event)) event.preventDefault()
+    }
+    element.addEventListener("wheel", handle, { passive: false })
+    return () => element.removeEventListener("wheel", handle)
+  }, [element])
+}
+
 /** How many of `values` fall inside `range`. */
 export function countInRange(values: readonly number[], range: XRange): number {
   let count = 0
@@ -100,6 +149,8 @@ export interface ChartZoom {
   canZoomIn: boolean
   zoomIn: () => void
   zoomOut: () => void
+  /** Scale the view by `factor` around `x` (a pinch or the mouse wheel). */
+  zoomAround: (x: number, factor: number) => void
   reset: () => void
   /** Begin a drag at x value `x`, at pixel `px` from the chart's left edge. */
   startDrag: (x: number, px: number) => void
@@ -142,6 +193,11 @@ export function useChartZoom(full: XRange, values: readonly number[]): ChartZoom
       if (canZoomIn) show(zoomInRange(view))
     },
     zoomOut: () => show(zoomOutRange(view, full)),
+    zoomAround: (x, factor) => {
+      const range = zoomAroundRange(view, full, x, factor)
+      if (factor < 1 && countInRange(values, range) < MIN_ZOOM_POINTS) return
+      show(range)
+    },
     reset: () => setZoom(null),
     startDrag: (x, px) => setDrag({ startX: x, endX: x, startPx: px, endPx: px }),
     moveDrag: (x, px) =>
@@ -204,4 +260,23 @@ export function zoomMouseHandlers(
     onMouseLeave: () => zoom.endDrag(null),
     onDoubleClick: () => zoom.reset(),
   }
+}
+
+/**
+ * A ref for a chart's element: a pinch or mouse wheel over it zooms the x
+ * axis around the pointer. `xOfPixel` turns a pixel from the element's left
+ * edge into an x value.
+ */
+export function useWheelZoom(
+  zoom: ChartZoom,
+  xOfPixel: (px: number) => number,
+): (node: HTMLElement | null) => void {
+  const [element, setElement] = useState<HTMLElement | null>(null)
+  useWheel(element, (event) => {
+    if (event.deltaY === 0) return false
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    zoom.zoomAround(xOfPixel(event.clientX - rect.left), wheelFactor(event.deltaY, event.ctrlKey))
+    return true
+  })
+  return setElement
 }

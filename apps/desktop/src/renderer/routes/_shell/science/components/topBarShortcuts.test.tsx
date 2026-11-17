@@ -177,7 +177,7 @@ describe("Tasks top bar shortcuts", () => {
 describe("Analysis top bar shortcuts", () => {
   test("Analyze experiments is in the top bar by default and opens its agent in the Analysis session panel", async () => {
     const started: unknown[] = []
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, {
+    mount(<ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />, {
       ...sessionHandlers(),
       "projects.list": () => [project("p1", "alpha")],
       "projects.capabilities": () => ({ git: true }),
@@ -237,7 +237,7 @@ describe("Analysis top bar shortcuts", () => {
       .map((item) => [item.textContent, item.getAttribute("aria-checked")])
 
   test("the top bar has the + button, then the project picker, then icon-only buttons named in their hover tip", async () => {
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, {
+    mount(<ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />, {
       ...sessionHandlers(),
       "projects.list": () => [project("p1", "alpha")],
       "projects.capabilities": () => ({ git: true }),
@@ -275,7 +275,7 @@ describe("Analysis top bar shortcuts", () => {
 
   test("Report starts its agent in the Analysis session panel", async () => {
     const started: unknown[] = []
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, {
+    mount(<ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />, {
       ...analysisHandlers(),
       "sessions.startReport": (input) => {
         started.push(input)
@@ -310,7 +310,7 @@ describe("Analysis top bar shortcuts", () => {
   })
 
   test("Report shows the error when the report skill is missing", async () => {
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, {
+    mount(<ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />, {
       ...analysisHandlers(),
       "sessions.startReport": () => {
         throw new Error('The report skill "experiment-report" was not found.')
@@ -330,7 +330,10 @@ describe("Analysis top bar shortcuts", () => {
       JSON.stringify(["html-report", "analyze-experiments"]),
     )
     window.localStorage.setItem("pi-lab.analysis.headerShortcutsVersion", "4")
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
+    mount(
+      <ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />,
+      analysisHandlers(),
+    )
     const banner = screen.getByRole("banner")
     await within(banner).findByTestId("analysis-report")
     const menu = await openAnalysisMenu()
@@ -343,7 +346,10 @@ describe("Analysis top bar shortcuts", () => {
   })
 
   test("the menu lists Analyze experiments, Report and Fetch experiments, all checked; Report can be removed and added back", async () => {
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
+    mount(
+      <ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />,
+      analysisHandlers(),
+    )
     const banner = screen.getByRole("banner")
     await within(banner).findByTestId("analysis-analyze-experiments")
     expect(within(banner).getByTestId("analysis-report")).toBeTruthy()
@@ -370,7 +376,10 @@ describe("Analysis top bar shortcuts", () => {
       "pi-lab.analysis.headerShortcuts",
       JSON.stringify(["analyze-experiments", "skill:review-notes"]),
     )
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
+    mount(
+      <ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />,
+      analysisHandlers(),
+    )
     const banner = screen.getByRole("banner")
     await within(banner).findByTestId("analysis-report")
     expect(within(banner).getByTestId("analysis-fetch-experiments")).toBeTruthy()
@@ -389,7 +398,10 @@ describe("Analysis top bar shortcuts", () => {
     ).toEqual(["analyze-experiments", "fetch-experiments", "research-diary", "skill:review-notes"])
 
     cleanup()
-    mount(<ScienceAnalysis initialProjectId={undefined} focusSession={null} />, analysisHandlers())
+    mount(
+      <ScienceAnalysis initialProjectId={undefined} initialFile={null} focusSession={null} />,
+      analysisHandlers(),
+    )
     const again = screen.getByRole("banner")
     await within(again).findByTestId("analysis-analyze-experiments")
     expect(within(again).queryByTestId("analysis-report")).toBeNull()

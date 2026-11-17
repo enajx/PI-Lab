@@ -62,9 +62,14 @@ describe("MetricChart tooltip", () => {
     if (!plot) throw new Error("Expected the chart to render")
     // The plot spans x 60..612 of the 640 px fallback width; the middle (336 px) is step 1.
     fireEvent.mouseMove(plot, { clientX: 342, clientY: 100, pageX: 342, pageY: 100 })
-    expect(screen.getByTestId("analysis-chart-tooltip-label").textContent).toBe("step 1")
+    const label = screen.getByTestId("analysis-chart-tooltip-label")
+    expect(label.textContent).toBe("step: 1")
     const items = screen.getAllByTestId("analysis-chart-tooltip-item")
     expect(items.map((item) => item.textContent)).toEqual(["loss.train: 0.04545", "lr: 1.234e-6"])
+    // The series values come first and the x value last.
+    const lastItem = items[items.length - 1]
+    if (!lastItem) throw new Error("Expected tooltip items")
+    expect(lastItem.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   test("lists at most 10 series, highest values first, and counts the rest", () => {

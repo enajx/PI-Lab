@@ -107,6 +107,8 @@ test("right-click Delete and ⌘⌫ confirm, trash the file, and close its tab",
   const menu = window.getByTestId("file-tree-context-menu")
   await expect(menu.getByRole("menuitem")).toHaveText([
     "Open",
+    // A text file is one Analysis lists, so it can be opened there.
+    "Open in Analysis",
     "Reveal in Finder",
     "Copy Path",
     "Copy Relative Path",

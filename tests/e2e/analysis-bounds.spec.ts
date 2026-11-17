@@ -113,13 +113,12 @@ test("Analysis keeps research output, previews bounded NumPy arrays and reports 
     await expect(largeGrid.locator("tbody tr")).toHaveCount(200)
     await expect(largeGrid.locator("tbody tr").first().locator("td").nth(1)).toHaveText("11")
     await expect(largeGrid.locator("tbody tr").last().locator("td").last()).toHaveText("22")
-    await expect(window.getByTestId("analysis-preview")).toContainText("Array truncated")
+    await expect(window.getByTestId("analysis-preview")).toContainText("First 200 × 32")
 
     await window
       .locator('[data-testid="analysis-file"][data-rel-path="results/build/long-series.npy"]')
       .click()
     await expect(window.getByTestId("analysis-preview-chart")).toBeVisible()
-    await expect(window.getByTestId("analysis-preview")).toContainText("Chart downsampled")
   } finally {
     if (app) {
       const child = app.process()

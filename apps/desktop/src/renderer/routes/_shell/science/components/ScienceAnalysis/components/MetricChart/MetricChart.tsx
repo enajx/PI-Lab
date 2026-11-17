@@ -3,7 +3,14 @@ import { CartesianGrid, Line, LineChart, ReferenceArea, Tooltip, XAxis, YAxis } 
 import type { ChartPreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
 import { useAnalysisChartColors } from "../../../../../../../preferences/preferences"
-import { inRange, rangeOf, useChartZoom, xAtPixel, zoomMouseHandlers } from "./chartZoom"
+import {
+  inRange,
+  rangeOf,
+  useChartZoom,
+  useWheelZoom,
+  xAtPixel,
+  zoomMouseHandlers,
+} from "./chartZoom"
 import { formatChartNumber } from "./formatChartNumber"
 import { paletteColor } from "./palettes"
 import { ZoomControls } from "./ZoomControls"
@@ -24,6 +31,42 @@ import { ZoomControls } from "./ZoomControls"
 
 /** Chart height; the width is measured from the container (with a fallback). */
 export const CHART_HEIGHT = 288
+/** The smallest chart height, in a short split. */
+export const MIN_CHART_HEIGHT = 160
+/** Room kept below the chart for the legend and the preview's padding. */
+const ROOM_BELOW_CHART = 56
+
+/**
+ * The chart height that fits the preview below the chart's top (so a chart in
+ * a short split above or below another fits, as it fits a narrow split's width),
+ * capped in tall panes at half the preview's height (at least {@link CHART_HEIGHT})
+ * and 0.6 × the chart's width, and at least {@link MIN_CHART_HEIGHT}. Outside a preview (tests) it is {@link CHART_HEIGHT}.
+ */
+export function useChartHeight(ref: React.RefObject<HTMLElement | null>): number {
+  const [height, setHeight] = useState(CHART_HEIGHT)
+  useEffect(() => {
+    const element = ref.current
+    const area = element?.closest<HTMLElement>('[data-testid="analysis-preview"]')
+    if (!element || !area) return
+    const measure = () => {
+      const top =
+        element.getBoundingClientRect().top - area.getBoundingClientRect().top + area.scrollTop
+      const free = area.clientHeight - top - ROOM_BELOW_CHART
+      // In a tall pane the chart keeps a pleasant shape: at most about half the
+      // preview's height, and not taller than 0.6 × its width.
+      const cap = Math.min(Math.max(CHART_HEIGHT, area.clientHeight / 2), element.clientWidth * 0.6)
+      setHeight(Math.max(MIN_CHART_HEIGHT, Math.round(Math.min(free, cap))))
+    }
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(measure)
+    observer.observe(area)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [ref])
+  return height
+}
+
 /** Width used until the container is measured (and where measuring is a no-op). */
 export const FALLBACK_WIDTH = 640
 /** Space around the plot area; the wider right margin holds the zoom buttons. */
@@ -87,9 +130,6 @@ export function ChartTooltip({
   const hidden = shown.length - listed.length
   return (
     <div className="rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground text-xs shadow-md">
-      <p data-testid="analysis-chart-tooltip-label" className="mb-1 font-medium">
-        {xText}
-      </p>
       {listed.map((entry) => (
         <p
           key={entry.name}
@@ -99,6 +139,9 @@ export function ChartTooltip({
           {`${entry.name}: ${formatChartNumber(entry.value ?? 0)}`}
         </p>
       ))}
+      <p data-testid="analysis-chart-tooltip-label" className="mt-0.5 text-muted-foreground">
+        {xText}
+      </p>
       {hidden > 0 ? (
         <p data-testid="analysis-chart-tooltip-more" className="mt-1 text-muted-foreground">
           {moreText(hidden)}
@@ -131,6 +174,7 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
     [points, view, zoom.zoomed],
   )
   const chartWidth = width || FALLBACK_WIDTH
+  const chartHeight = useChartHeight(ref)
   const mouse = zoomMouseHandlers(zoom, (state) =>
     xAtPixel(
       state.chartX ?? 0,
@@ -138,6 +182,9 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
       chartWidth - PLOT_MARGIN.right,
       view,
     ),
+  )
+  const wheelRef = useWheelZoom(zoom, (px) =>
+    xAtPixel(px, PLOT_MARGIN.left + Y_AXIS_WIDTH, chartWidth - PLOT_MARGIN.right, view),
   )
 
   if (points.length === 0) {
@@ -154,74 +201,79 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
   return (
     <div data-testid="analysis-preview-chart" className="flex flex-col gap-2">
       <div ref={ref} className="relative w-full select-none">
-        <LineChart
-          width={chartWidth}
-          height={CHART_HEIGHT}
-          data={shown}
-          margin={PLOT_MARGIN}
-          {...mouse}
-        >
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis
-            dataKey="x"
-            type="number"
-            domain={[view.min, view.max]}
-            allowDataOverflow
-            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-            tickFormatter={formatChartNumber}
-            label={{
-              value: preview.xLabel,
-              position: "insideBottom",
-              offset: -4,
-              style: { fontSize: 11, fill: "var(--muted-foreground)" },
-            }}
-          />
-          <YAxis
-            width={Y_AXIS_WIDTH}
-            {...(zoom.zoomed ? ZOOMED_Y_DOMAIN : {})}
-            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-            tickFormatter={formatChartNumber}
-          />
-          <Tooltip
-            content={({ active, label, payload }) =>
-              active && payload && payload.length > 0 ? (
-                <ChartTooltip
-                  xText={`${preview.xLabel} ${formatChartNumber(Number(label))}`}
-                  entries={payload.map((entry) => ({
-                    name: String(entry.name),
-                    value: typeof entry.value === "number" ? entry.value : null,
-                    color: String(entry.color),
-                  }))}
-                  moreText={(count) => t("+{count} more").replace("{count}", String(count))}
-                />
-              ) : null
-            }
-          />
-          {preview.series.map((series, i) => (
-            <Line
-              key={series.label}
-              type="monotone"
-              dataKey={series.label}
-              stroke={paletteColor(palette, i, preview.series.length)}
-              strokeWidth={1.5}
-              dot={false}
-              isAnimationActive={false}
-              connectNulls
+        <div ref={wheelRef}>
+          <LineChart
+            width={chartWidth}
+            height={chartHeight}
+            data={shown}
+            margin={PLOT_MARGIN}
+            {...mouse}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis
+              dataKey="x"
+              type="number"
+              domain={[view.min, view.max]}
+              allowDataOverflow
+              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+              tickFormatter={formatChartNumber}
+              label={{
+                value: preview.xLabel,
+                position: "insideBottom",
+                offset: -4,
+                style: { fontSize: 11, fill: "var(--muted-foreground)" },
+              }}
             />
-          ))}
-          {zoom.selection ? (
-            <ReferenceArea
-              x1={zoom.selection.min}
-              x2={zoom.selection.max}
-              fill={SELECTION_FILL}
-              fillOpacity={0.15}
+            <YAxis
+              width={Y_AXIS_WIDTH}
+              {...(zoom.zoomed ? ZOOMED_Y_DOMAIN : {})}
+              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+              tickFormatter={formatChartNumber}
             />
-          ) : null}
-        </LineChart>
+            <Tooltip
+              content={({ active, label, payload }) =>
+                active && payload && payload.length > 0 ? (
+                  <ChartTooltip
+                    xText={`${preview.xLabel}: ${formatChartNumber(Number(label))}`}
+                    entries={payload.map((entry) => ({
+                      name: String(entry.name),
+                      value: typeof entry.value === "number" ? entry.value : null,
+                      color: String(entry.color),
+                    }))}
+                    moreText={(count) => t("+{count} more").replace("{count}", String(count))}
+                  />
+                ) : null
+              }
+            />
+            {preview.series.map((series, i) => (
+              <Line
+                key={series.label}
+                type="monotone"
+                dataKey={series.label}
+                stroke={paletteColor(palette, i, preview.series.length)}
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls
+              />
+            ))}
+            {zoom.selection ? (
+              <ReferenceArea
+                x1={zoom.selection.min}
+                x2={zoom.selection.max}
+                fill={SELECTION_FILL}
+                fillOpacity={0.15}
+              />
+            ) : null}
+          </LineChart>
+        </div>
         <ZoomControls zoom={zoom} />
       </div>
       {preview.series.length <= MAX_LEGEND_SERIES ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-1" data-testid="analysis-chart-legend">
+        <div
+          className="flex flex-wrap justify-end gap-x-4 gap-y-1"
+          data-testid="analysis-chart-legend"
+        >
           {preview.series.map((series, i) => (
             <span key={series.label} className="flex items-center gap-1.5 text-xs">
               <span
@@ -233,11 +285,6 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
             </span>
           ))}
         </div>
-      ) : null}
-      {preview.truncated ? (
-        <p className="text-amber-500 text-xs">
-          {t("Chart downsampled — the file has more points than are plotted.")}
-        </p>
       ) : null}
     </div>
   )

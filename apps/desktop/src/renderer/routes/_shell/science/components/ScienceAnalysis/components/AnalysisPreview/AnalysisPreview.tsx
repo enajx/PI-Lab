@@ -25,6 +25,18 @@ const PdfViewer = lazy(() =>
   })),
 )
 
+/** Per file: whether Load was pressed and the chosen dataset, for this app session (`sessionStorage`). */
+const PREVIEW_CHOICES = {
+  key: (relPath: string): string => `pi-lab.analysis.previewChoice.${relPath}`,
+  get(relPath: string): { load: boolean; dataset: string | null } | undefined {
+    const raw = window.sessionStorage.getItem(this.key(relPath))
+    return raw === null ? undefined : (JSON.parse(raw) as { load: boolean; dataset: string | null })
+  },
+  set(relPath: string, choice: { load: boolean; dataset: string | null }): void {
+    window.sessionStorage.setItem(this.key(relPath), JSON.stringify(choice))
+  },
+}
+
 /**
  * Preview pane for a single selected data file (P8c). Fetches
  * `science.analysis.preview` and dispatches on the returned payload's `type`:
@@ -66,12 +78,21 @@ export function AnalysisPreview({
   const pdf = kind === "pdf"
   const media = kind === "video" || kind === "animation"
   const [pdfStatus, setPdfStatus] = useState("")
-  // The Load click and the chosen HDF5 dataset belong to the file they were made on.
-  const [choice, setChoice] = useState<{ relPath: string; load: boolean; dataset: string | null }>({
-    relPath,
-    load: false,
-    dataset: null,
-  })
+  // The Load click and the chosen dataset (HDF5, SQLite table, .npz array) belong to the
+  // file they were made on, and are kept per file while the app runs.
+  const [choice, setChoiceState] = useState<{
+    relPath: string
+    load: boolean
+    dataset: string | null
+  }>(() => ({ relPath, load: false, dataset: null, ...PREVIEW_CHOICES.get(relPath) }))
+  const setChoice = (next: { relPath: string; load: boolean; dataset: string | null }): void => {
+    PREVIEW_CHOICES.set(next.relPath, { load: next.load, dataset: next.dataset })
+    setChoiceState(next)
+  }
+  // Another file shows with the choices last made on it.
+  if (choice.relPath !== relPath) {
+    setChoiceState({ relPath, load: false, dataset: null, ...PREVIEW_CHOICES.get(relPath) })
+  }
   const load = choice.relPath === relPath && choice.load
   const dataset = choice.relPath === relPath ? choice.dataset : null
   const preview = useQuery({
@@ -106,11 +127,12 @@ export function AnalysisPreview({
       >
         <span
           data-testid="analysis-preview-path"
-          className="min-w-0 flex-1 truncate font-mono text-foreground text-xs"
+          className="min-w-0 max-w-[33%] truncate font-mono text-foreground/50 text-xs"
           title={relPath}
         >
           {relPath}
         </span>
+        <span className="flex-1" />
         {pdf && pdfStatus !== "" ? (
           <span
             data-testid="analysis-pdf-status"
@@ -682,7 +704,13 @@ function PreviewBody({
       return (
         <div data-testid="analysis-preview-datasets" className="flex flex-col gap-3">
           <label className="flex items-center gap-2 text-xs">
-            <span className="shrink-0 text-muted-foreground">{t("Dataset")}</span>
+            <span className="shrink-0 text-muted-foreground">
+              {/\.(db|sqlite3?)$/i.test(relPath)
+                ? t("Table")
+                : /\.npz$/i.test(relPath)
+                  ? t("Array")
+                  : t("Dataset")}
+            </span>
             <select
               data-testid="analysis-preview-dataset"
               value={preview.selected}
@@ -697,8 +725,8 @@ function PreviewBody({
             </select>
           </label>
           {preview.truncated ? (
-            <p className="text-amber-500 text-xs">
-              {`${t("Showing the first")} ${preview.datasets.length} ${t("datasets")}`}
+            <p className="text-right text-muted-foreground text-xs">
+              {t("First {count} datasets").replace("{count}", String(preview.datasets.length))}
             </p>
           ) : null}
           <PreviewBody
@@ -845,9 +873,7 @@ function Row({ label, value }: { label: string; value: string }) {
 function TruncatedNote() {
   const t = useTranslate()
   return (
-    <p className="mt-2 text-amber-500 text-xs">
-      {t("Preview truncated — file is larger than shown.")}
-    </p>
+    <p className="mt-2 text-right text-muted-foreground text-xs">{t("Start of the file only")}</p>
   )
 }
 

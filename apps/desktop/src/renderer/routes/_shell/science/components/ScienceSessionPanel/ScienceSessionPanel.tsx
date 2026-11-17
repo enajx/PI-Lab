@@ -14,6 +14,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
+import { EditorSettingsMenu } from "../../../../../Editor/components/EditorSettingsMenu"
 import type { OpenBuffer } from "../../../../../Editor/hooks/useEditorBuffers"
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { useTranslate } from "../../../../../i18n/language"
@@ -125,8 +126,9 @@ function panelTabKey(view: SessionPanelView): string {
 }
 
 /**
- * The right panel state of Analysis or Tasks (see {@link SciencePanelState}). It
- * starts open while `useResearchDiaryOpen` is on (the default), else collapsed; the
+ * The right panel state of Analysis or Tasks (see {@link SciencePanelState}). In
+ * Analysis it starts collapsed. In Tasks it starts open while `useResearchDiaryOpen`
+ * is on (the default), else collapsed; the
  * top bar diary button turns that value off when it hides the panel and on when it
  * opens it. The panel opens on `defaultTab` the first time (Sessions in Analysis, the
  * Diary in Tasks), then on the view's last tab, kept for the app session (sessionStorage).
@@ -136,7 +138,8 @@ function panelTabKey(view: SessionPanelView): string {
  */
 export function useSciencePanel(view: SessionPanelView, defaultTab: string): SciencePanelState {
   const [startOpen, setStartOpen] = useResearchDiaryOpen()
-  const [collapsed, setCollapsed] = useState(!startOpen)
+  // Analysis opens with the panel collapsed, so the data gets the room.
+  const [collapsed, setCollapsed] = useState(view === "analysis" || !startOpen)
   const [toggles, setToggles] = useSciencePanelTabToggles(view)
   const shown = useCallback(
     (id: string) => tabShownByDefault(view, id) !== toggles.includes(id),
@@ -421,6 +424,17 @@ export function ScienceSessionPanel({
   onSessionOpened,
 }: ScienceSessionPanelProps) {
   const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const editorSettingsQuery = useQuery(trpc.settings.get.queryOptions())
+  const editorSettings: EditorSettings = editorSettingsQuery.data?.editor ?? DEFAULT_EDITOR_SETTINGS
+  const updateEditorSettings = useMutation(
+    trpc.settings.updateEditor.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
+      },
+    }),
+  )
   const { collapsed, setCollapsed, setDocumentsTab } = panel
   const showSessions = useCallback(() => {
     setCollapsed(false)
@@ -469,6 +483,16 @@ export function ScienceSessionPanel({
           onCollapse={() => setCollapsed(true)}
           onOpenFile={(relPath) => setFileRequest({ projectId: project.id, fileRelPath: relPath })}
           tabVisibility={panel.tabVisibility}
+          // In Analysis the header's settings are the session editor settings, and the
+          // Sessions card has no toolbar row (the preview header has its pane buttons).
+          settingsMenu={
+            view === "analysis" ? (
+              <EditorSettingsMenu
+                settings={editorSettings}
+                onChange={(patch) => updateEditorSettings.mutate(patch)}
+              />
+            ) : null
+          }
           leadingTab={{
             id: SESSIONS_TAB_ID,
             label: t("Sessions"),
@@ -708,6 +732,7 @@ function SessionsBody({
         onFilesPanelOpenChange={setFilesPanelOpen}
         hidden={hidden}
         frameless
+        hideToolbar={view === "analysis"}
       />
     </div>
   )
