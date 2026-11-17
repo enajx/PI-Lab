@@ -50,6 +50,7 @@
     "vitest": "^4.0.0"
   },
   "overrides": {
-    "dockview-core": "8.5.1"
+    "dockview-core": "8.5.1",
+    "js-yaml": "4.3.2"
   }
 }
