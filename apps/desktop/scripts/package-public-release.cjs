@@ -4,6 +4,7 @@ const {
   copyFileSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -21,7 +22,30 @@ const {
 const PUBLIC_RELEASE_PUBLISH_MODE = "never"
 
 const RELEASE_ROOT = join(__dirname, "..", "release")
-const MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "packages", "local-db", "drizzle")
+const REPO_ROOT = join(__dirname, "..", "..", "..")
+const MIGRATIONS_DIR = join(REPO_ROOT, "packages", "local-db", "drizzle")
+const LATEST_DMG_URL = "https://github.com/enajx/PI-Lab/releases/latest/download/PI-Lab-arm64.dmg"
+
+/**
+ * GitHub's latest-release link skips pre-releases, so while every release was a Beta the
+ * README download links pointed at the releases page. A Stable release makes the direct
+ * link work, so it refuses to build until every README uses it.
+ */
+function assertReadmeDownloadLinks(repoRoot) {
+  const translations = join(repoRoot, "docs", "readme-int")
+  const files = [
+    join(repoRoot, "README.md"),
+    ...readdirSync(translations)
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => join(translations, name)),
+  ]
+  const stale = files.filter((file) => !readFileSync(file, "utf8").includes(LATEST_DMG_URL))
+  if (stale.length > 0) {
+    throw new Error(
+      `Before the first Stable release, point the "Download for macOS" link to ${LATEST_DMG_URL} in:\n${stale.join("\n")}`,
+    )
+  }
+}
 
 /** A public build never replaces an installed app or a previous release artifact. */
 function publicReleaseDestination(root, channel, version) {
@@ -65,6 +89,7 @@ function fanOutUpdateMetadata(root, channel) {
 function packagePublicRelease(channel, version) {
   if (process.platform !== "darwin") throw new Error("Public releases currently support macOS only")
   const release = publicReleaseDefinition(channel, version)
+  if (release.channel === "stable") assertReadmeDownloadLinks(REPO_ROOT)
   const testBuild = process.env.PI_LAB_UPDATE_TEST_BUILD === "1"
   if (testBuild) publicUpdateUrl(process.env.PI_LAB_UPDATE_URL, true)
   assertPublicReleaseCredentials(process.env, testBuild)
@@ -116,6 +141,7 @@ if (require.main === module) {
 
 module.exports = {
   PUBLIC_RELEASE_PUBLISH_MODE,
+  assertReadmeDownloadLinks,
   fanOutUpdateMetadata,
   packagePublicRelease,
   publicReleaseDestination,

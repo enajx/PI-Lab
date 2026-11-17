@@ -1,11 +1,12 @@
 const assert = require("node:assert/strict")
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
 const { test } = require("node:test")
 const { tmpdir } = require("node:os")
 const { join } = require("node:path")
 const { readMigrationFiles } = require("drizzle-orm/migrator")
 const { parseUpdateInfo } = require("electron-updater/out/providers/Provider")
 const {
+  assertReadmeDownloadLinks,
   fanOutUpdateMetadata,
   publicReleaseDestination,
   writeCompatibilityMetadata,
@@ -18,6 +19,28 @@ test("public build destinations are isolated by channel and version", () => {
     publicReleaseDestination(root, "beta", "1.1.0-beta.1"),
     join(root, "beta", "1.1.0-beta.1"),
   )
+})
+
+test("a Stable release needs every README to link the latest DMG directly", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-lab-readme-links-"))
+  const direct = "https://github.com/enajx/PI-Lab/releases/latest/download/PI-Lab-arm64.dmg"
+  try {
+    mkdirSync(join(root, "docs", "readme-int"), { recursive: true })
+    writeFileSync(join(root, "README.md"), `<a href="${direct}">Download for macOS</a>`)
+    writeFileSync(
+      join(root, "docs", "readme-int", "README.es.md"),
+      '<a href="https://github.com/enajx/PI-Lab/releases">Descargar para macOS</a>',
+    )
+    assert.throws(() => assertReadmeDownloadLinks(root), /README\.es\.md/)
+    assert.throws(() => assertReadmeDownloadLinks(root), /latest\/download\/PI-Lab-arm64\.dmg/)
+    writeFileSync(
+      join(root, "docs", "readme-int", "README.es.md"),
+      `<a href="${direct}">Descargar para macOS</a>`,
+    )
+    assertReadmeDownloadLinks(root)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("a single generated mac feed serves each less stable update track", () => {
