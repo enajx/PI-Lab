@@ -171,7 +171,7 @@ describe("pandas pickles", () => {
     const path = join(FIXTURES, "p3a-names.pkl")
     const preview = await previewDataFile(path, "p3a-names.pkl", NO_LOAD)
     if (preview.type !== "table") throw new Error(`expected a table, got ${preview.type}`)
-    expect(preview.headers).toEqual(["", "names"])
+    expect(preview.headers).toEqual(["index", "names"])
     expect(preview.rows).toEqual([
       ["0", "a"],
       ["1", "None"],
@@ -188,7 +188,7 @@ describe("pandas pickles", () => {
     const path = join(FIXTURES, `${tag}-frame.pkl`)
     const preview = await previewDataFile(path, `${tag}-frame.pkl`, NO_LOAD)
     if (preview.type !== "table") throw new Error(`expected a table, got ${preview.type}`)
-    expect(preview.headers).toEqual(["", "step", "loss", "name", "when"])
+    expect(preview.headers).toEqual(["index", "step", "loss", "name", "when"])
     expect(preview.rows).toEqual([
       ["0", "0", "0.5", "a", "2024-01-01"],
       ["1", "1", "0.4", "b", "2024-01-02"],

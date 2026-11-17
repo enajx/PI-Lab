@@ -9,13 +9,15 @@ import {
 import {
   type DataFilePreview,
   formatCell,
+  MAX_FRAME_ROWS,
   MAX_TABLE_ROWS,
   type MetadataPreview,
 } from "./previewShapes"
+import { type Frame, frameFromValues, tableFromFrame } from "./tables"
 
 /**
  * Parquet previews with hyparquet (pure JavaScript). Only the footer and the
- * pages holding the first {@link MAX_TABLE_ROWS} rows are read; the table
+ * pages holding the first {@link MAX_FRAME_ROWS} rows are read; the table
  * shows every top-level column and the file's total row count. SNAPPY is
  * built into hyparquet; GZIP, BROTLI and ZSTD use Node's zlib. Other codecs
  * (LZ4, LZO) end in a note naming the codec.
@@ -43,41 +45,63 @@ export async function previewParquet(
   load: boolean,
   meta: (note?: string) => MetadataPreview,
 ): Promise<DataFilePreview> {
+  const read = await readParquetFrame(abs, load)
+  if (read.kind === "note") return meta(read.note)
+  if (read.kind === "large")
+    return { type: "large", kind: "parquet", size, huge: false, partial: null }
+  return tableFromFrame(read.frame)
+}
+
+/**
+ * Read the first {@link MAX_FRAME_ROWS} rows of a Parquet file into a frame. A
+ * file hyparquet cannot read, or an unsupported codec, is a note; a first row
+ * group over {@link MAX_PARQUET_ROW_GROUP_BYTES} is "large" unless `load`.
+ */
+export async function readParquetFrame(
+  abs: string,
+  load: boolean,
+): Promise<{ kind: "frame"; frame: Frame } | { kind: "note"; note: string } | { kind: "large" }> {
   const file = await asyncBufferFromFile(abs)
   let metadata: Awaited<ReturnType<typeof parquetMetadataAsync>>
   try {
     metadata = await parquetMetadataAsync(file)
   } catch (error: unknown) {
     // hyparquet throws a plain Error for a file that is not Parquet.
-    return meta(`Could not read the Parquet file: ${errorText(error)}`)
+    return { kind: "note", note: `Could not read the Parquet file: ${errorText(error)}` }
   }
   const codecs = new Set(
     metadata.row_groups.flatMap((group) => group.columns.map((c) => c.meta_data?.codec ?? "")),
   )
   const unsupported = [...codecs].filter((codec) => UNSUPPORTED_CODECS.has(codec))
   if (unsupported.length > 0) {
-    return meta(`Parquet compression ${unsupported.join(", ")} is not supported yet`)
+    return {
+      kind: "note",
+      note: `Parquet compression ${unsupported.join(", ")} is not supported yet`,
+    }
   }
   const firstGroup = Number(metadata.row_groups[0]?.total_compressed_size ?? 0n)
-  if (!load && firstGroup > MAX_PARQUET_ROW_GROUP_BYTES)
-    return { type: "large", kind: "parquet", size }
+  if (!load && firstGroup > MAX_PARQUET_ROW_GROUP_BYTES) return { kind: "large" }
   const headers = parquetSchema(metadata).children.map((child) => child.element.name)
   const totalRows = Number(metadata.num_rows)
   const rows = await parquetReadObjects({
     file,
     metadata,
     rowStart: 0,
-    rowEnd: Math.min(totalRows, MAX_TABLE_ROWS),
+    rowEnd: Math.min(totalRows, MAX_FRAME_ROWS),
     compressors: COMPRESSORS,
     useOffsetIndex: true,
   })
-  return {
-    type: "table",
+  const frame = frameFromValues({
     headers,
-    rows: rows.map((row) => headers.map((header) => cellText(row[header]))),
+    columns: headers.map((header) => rows.map((row) => row[header] ?? null)),
+    head: rows
+      .slice(0, MAX_TABLE_ROWS)
+      .map((row) => headers.map((header) => cellText(row[header]))),
     totalRows,
-    truncated: totalRows > MAX_TABLE_ROWS,
-  }
+    indexColumn: null,
+    text: cellText,
+  })
+  return { kind: "frame", frame }
 }
 
 function errorText(error: unknown): string {

@@ -10,28 +10,32 @@ import {
 import { parseIpynb } from "@pi-lab/shared/analysis/ipynb"
 import { walkWorkspace } from "@pi-lab/workspace-fs"
 import { TRPCError } from "@trpc/server"
-import { previewHdf5 } from "./hdf5"
-import { previewParquet } from "./parquet"
+import { previewHdf5, readHdf5Frame } from "./hdf5"
+import { previewParquet, readParquetFrame } from "./parquet"
 import {
   type ArrayPreview,
   type ChartPreview,
+  type ChartSpec,
   type DataFilePreview,
-  detectScalarChart,
   formatCell,
+  HUGE_FILE_BYTES,
   LARGE_FILE_BYTES,
   MAX_ARRAY_COLS,
   MAX_ARRAY_ROWS,
   MAX_CHART_POINTS,
+  MAX_FRAME_BYTES,
+  MAX_FRAME_ROWS,
   MAX_IMAGE_BYTES,
   MAX_NOTEBOOK_BYTES,
-  MAX_PICKLE_BYTES,
   MAX_TABLE_ROWS,
   MAX_TEXT_BYTES,
   type MetadataPreview,
+  type PlotPreview,
   type TextPreview,
 } from "./previewShapes"
-import { previewPickle } from "./pythonPreview"
+import { pickleFrame, previewPickle } from "./pythonPreview"
 import type { ExperimentsStructure } from "./structure"
+import { buildPlot, type Frame, readDelimitedFrame, tableFromFrame } from "./tables"
 
 /** Filesystem discovery and preview for Analysis, independent of the tRPC router. */
 
@@ -414,13 +418,23 @@ export async function previewDataFile(
     note,
   })
 
+  if (!options.load && info.isFile() && info.size > HUGE_FILE_BYTES) {
+    return {
+      type: "large",
+      kind,
+      size: info.size,
+      huge: true,
+      partial: await hugeFilePartial(abs, kind, meta),
+    }
+  }
+
   const ext = extname(relPath).toLowerCase()
   const reader = READER_BY_EXT[ext]
   if (reader) {
     const limit = LARGE_FILE_BYTES[reader]
     if (!options.load && limit !== null && info.size > limit)
-      return { type: "large", kind, size: info.size }
-    if (reader === "pickle") return previewPickleFile(abs, relPath, info.size, meta)
+      return { type: "large", kind, size: info.size, huge: false, partial: null }
+    if (reader === "pickle") return previewPickleFile(abs, relPath, meta)
     if (reader === "hdf5") return previewHdf5(abs, options.dataset, meta)
     return previewParquet(abs, info.size, options.load, meta)
   }
@@ -436,7 +450,7 @@ export async function previewDataFile(
       return { type: "notebook", ...parseIpynb(await readFile(abs, "utf8")) }
     case "csv":
     case "tsv":
-      return previewTable(abs, kind === "tsv" ? "\t" : ",", meta)
+      return previewTable(abs, kind === "tsv" ? "\t" : ",", MAX_FRAME_BYTES, meta)
     case "json":
       return previewJson(abs, meta)
     case "image":
@@ -452,6 +466,83 @@ export async function previewDataFile(
       // metadata-only. PDFs render in the renderer's PDF.js viewer (`analysis.pdf`).
       return meta()
   }
+}
+
+/**
+ * The part of a file over {@link HUGE_FILE_BYTES} that is safe to show
+ * before the user loads it: a CSV/TSV's first rows or a text file's head.
+ * Other formats show nothing until loaded.
+ */
+async function hugeFilePartial(
+  abs: string,
+  kind: DataFileKind,
+  meta: (note?: string) => MetadataPreview,
+): Promise<DataFilePreview | null> {
+  if (kind === "csv" || kind === "tsv") {
+    return previewTable(abs, kind === "tsv" ? "\t" : ",", MAX_TEXT_BYTES, meta)
+  }
+  if (kind === "markdown" || kind === "markup" || kind === "text") return previewText(abs)
+  return null
+}
+
+/** What a chart request asks for besides the file. */
+export interface ChartOptions {
+  /** The HDF5 dataset holding the table, or null for other formats. */
+  dataset: string | null
+  spec: ChartSpec
+}
+
+/**
+ * Plot a table file (CSV/TSV, Parquet, a pickled DataFrame or list of dicts,
+ * an HDF5 compound dataset) with the chart builder's settings. The file's
+ * first {@link MAX_FRAME_ROWS} rows are read once and kept for the next
+ * request on the same unchanged file, so changing settings is quick.
+ */
+export async function chartDataFile(
+  abs: string,
+  relPath: string,
+  options: ChartOptions,
+): Promise<PlotPreview> {
+  const info = await stat(abs).catch(() => {
+    throw new TRPCError({ code: "NOT_FOUND", message: `No file ${relPath}` })
+  })
+  const key = [abs, options.dataset ?? "", info.size, info.mtimeMs].join("\0")
+  if (frameCache?.key !== key) {
+    frameCache = null
+    frameCache = { key, frame: await readTableFrame(abs, relPath, options.dataset) }
+  }
+  return buildPlot(frameCache.frame, options.spec)
+}
+
+/** The last table read by {@link chartDataFile}, keyed by path, dataset, size and time. */
+let frameCache: { key: string; frame: Frame } | null = null
+
+/** Read a table file into a frame; a file that holds no table is a BAD_REQUEST. */
+async function readTableFrame(
+  abs: string,
+  relPath: string,
+  dataset: string | null,
+): Promise<Frame> {
+  const notTable = (why: string) =>
+    new TRPCError({ code: "BAD_REQUEST", message: `${relPath}: ${why}` })
+  const reader = READER_BY_EXT[extname(relPath).toLowerCase()]
+  if (reader === "pickle") return pickleFrame(await readFile(abs))
+  if (reader === "hdf5") {
+    if (dataset === null) throw notTable("choose a dataset")
+    return readHdf5Frame(abs, dataset)
+  }
+  if (reader === "parquet") {
+    const read = await readParquetFrame(abs, true)
+    if (read.kind !== "frame") throw notTable(read.kind === "note" ? read.note : "not read")
+    return read.frame
+  }
+  const kind = classifyDataFile(relPath)
+  if (kind === "csv" || kind === "tsv") {
+    const frame = await readDelimitedFrame(abs, kind === "tsv" ? "\t" : ",", MAX_FRAME_BYTES)
+    if (!frame) throw notTable("the file is empty")
+    return frame
+  }
+  throw notTable("not a table")
 }
 
 /** What a preview request asks for besides the file. */
@@ -472,16 +563,12 @@ const READER_BY_EXT: Readonly<Record<string, keyof typeof LARGE_FILE_BYTES>> = {
   ".pq": "parquet",
 }
 
-/** Read a whole `.pkl` (up to {@link MAX_PICKLE_BYTES}) with the safe unpickler. */
+/** Read a whole `.pkl` with the safe unpickler. */
 async function previewPickleFile(
   abs: string,
   relPath: string,
-  size: number,
   meta: (note?: string) => MetadataPreview,
 ): Promise<DataFilePreview> {
-  if (size > MAX_PICKLE_BYTES) {
-    return meta(`Stores Python objects; too large to read (${formatMegabytes(size)})`)
-  }
   return previewPickle(await readFile(abs), baseNameWithoutExt(relPath), meta)
 }
 
@@ -531,39 +618,16 @@ async function previewImage(
   return { type: "image", dataUrl: `data:${mime};base64,${buf.toString("base64")}` }
 }
 
+/** A CSV/TSV as a table (see `tables.ts`); `maxBytes` bounds the read. */
 async function previewTable(
   abs: string,
   delimiter: string,
+  maxBytes: number,
   meta: (note?: string) => MetadataPreview,
 ): Promise<DataFilePreview> {
-  const { text, truncated: bytesTruncated } = await readBoundedText(abs)
-  const lines = splitLines(text)
-  if (lines.length === 0) return meta("Empty file")
-
-  const headers = parseDelimited(lines[0] ?? "", delimiter)
-  const bodyLines = lines.slice(1)
-  const allRows = bodyLines.map((line) => parseDelimited(line, delimiter))
-
-  // A numeric, metric-log-shaped table (monotonic x column + ≥1 numeric series)
-  // renders as a line chart instead of a grid. We only attempt this when the
-  // whole file was read, so the monotonicity check sees every row.
-  if (!bytesTruncated) {
-    const chart = detectScalarChart(headers, allRows)
-    if (chart) return chart
-  }
-
-  // Otherwise a sampled table: first MAX_TABLE_ROWS rows; totalRows is exact
-  // when we read the whole file, else an estimate flagged via `truncated`.
-  const sampled = allRows.slice(0, MAX_TABLE_ROWS)
-  const truncated = bytesTruncated || bodyLines.length > MAX_TABLE_ROWS
-
-  return {
-    type: "table",
-    headers,
-    rows: sampled,
-    totalRows: bodyLines.length,
-    truncated,
-  }
+  const frame = await readDelimitedFrame(abs, delimiter, maxBytes)
+  if (!frame) return meta("Empty file")
+  return tableFromFrame(frame)
 }
 
 // ── NumPy (.npy) decoding ──────────────────────────────────────────────────────
@@ -678,9 +742,8 @@ const MAX_NPY_HEADER_BYTES = 1024 * 1024
  * becomes a {@link ChartPreview} (value vs. row index, strided to
  * {@link MAX_CHART_POINTS}); a 2-D one a bounded {@link ArrayPreview} grid.
  * Only the header and the shown cells are read from disk, so the file size
- * does not matter. An object array (`|O`) holds a pickle, read whole (up to
- * {@link MAX_PICKLE_BYTES}, and above the pickle size limit only with `load`)
- * by the safe unpickler. Anything malformed or
+ * does not matter. An object array (`|O`) holds a pickle, read whole (above
+ * the pickle size limit only with `load`) by the safe unpickler. Anything malformed or
  * unsupported degrades to a metadata card with a note (no throw).
  */
 async function previewNpy(
@@ -697,9 +760,8 @@ async function previewNpy(
     if (!header) return meta("Could not decode .npy array")
     if (/^[|<>=]O\d*$/.test(header.descr)) {
       const limit = LARGE_FILE_BYTES.pickle
-      if (!load && limit !== null && size > limit) return { type: "large", kind: "npy", size }
-      if (size > MAX_PICKLE_BYTES) {
-        return meta(`Stores Python objects; too large to read (${formatMegabytes(size)})`)
+      if (!load && limit !== null && size > limit) {
+        return { type: "large", kind: "npy", size, huge: false, partial: null }
       }
       const payload = await readAt(file, header.dataOffset, size - header.dataOffset)
       return previewPickle(payload, baseNameWithoutExt(relPath), meta)
@@ -863,46 +925,4 @@ function baseNameWithoutExt(relPath: string): string {
   const base = relPath.slice(relPath.lastIndexOf("/") + 1)
   const dot = base.lastIndexOf(".")
   return dot > 0 ? base.slice(0, dot) : base
-}
-
-/** Split into lines on `\n`/`\r\n`, dropping a single trailing empty line. */
-function splitLines(text: string): string[] {
-  const lines = text.split(/\r?\n/)
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
-  return lines
-}
-
-/**
- * Parse one delimited line into fields with minimal RFC-4180 quoting support: a
- * field may be wrapped in double quotes to contain the delimiter or quotes
- * (escaped as `""`). Good enough for a *preview* — not a full CSV engine.
- */
-function parseDelimited(line: string, delimiter: string): string[] {
-  const fields: string[] = []
-  let field = ""
-  let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (inQuotes) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') {
-          field += '"'
-          i++
-        } else {
-          inQuotes = false
-        }
-      } else {
-        field += ch
-      }
-    } else if (ch === '"') {
-      inQuotes = true
-    } else if (ch === delimiter) {
-      fields.push(field)
-      field = ""
-    } else {
-      field += ch
-    }
-  }
-  fields.push(field)
-  return fields
 }

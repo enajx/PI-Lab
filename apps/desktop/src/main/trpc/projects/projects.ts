@@ -935,8 +935,8 @@ export const projectsRouter = router({
    */
   setMetadata: publicProcedure.input(setMetadataInput).mutation(({ ctx, input }): Project => {
     // The linked paper folder, the paper auto-detect choice, the paper-only
-    // mark, the stage, the results folder and the analysis format are not part
-    // of the card dialog; keep them.
+    // mark, the stage, the results folder, the analysis format and the chart
+    // settings are not part of the card dialog; keep them.
     const stored = ctx.db
       .select({ metadata: projects.metadata })
       .from(projects)
@@ -949,6 +949,7 @@ export const projectsRouter = router({
     if (stored?.paperAutoDetect !== undefined) kept.paperAutoDetect = stored.paperAutoDetect
     if (stored?.paperOnly !== undefined) kept.paperOnly = stored.paperOnly
     if (stored?.analysisFormat !== undefined) kept.analysisFormat = stored.analysisFormat
+    if (stored?.chartSettings !== undefined) kept.chartSettings = stored.chartSettings
     const metadata: ProjectMetadata | null =
       Object.keys(kept).length === 0 ? input.metadata : { ...input.metadata, ...kept }
     const row = ctx.db

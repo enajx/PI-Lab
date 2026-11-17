@@ -353,6 +353,24 @@ export interface ProjectMetadata {
    * Absent: the `analysisFormat` editor setting is used.
    */
   analysisFormat?: AnalysisFormat
+  /**
+   * Analysis chart builder choices per table file name (e.g. `options.csv`):
+   * every file with that name in the project opens with them.
+   */
+  chartSettings?: Record<string, ChartSettings>
+}
+
+/** How Analysis shows one table file name: as a table or a chart, and the chart's settings. */
+export interface ChartSettings {
+  view: "table" | "chart"
+  spec: {
+    x: string
+    y: string[]
+    splitBy: string | null
+    chartType: "line" | "scatter" | "bar"
+    aggregate: "none" | "mean" | "median" | "sum" | "count"
+    band: "none" | "minmax" | "std" | "ci95"
+  }
 }
 
 /** A locally-known v2 Team. */

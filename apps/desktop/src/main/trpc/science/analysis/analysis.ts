@@ -1,6 +1,7 @@
 import { mkdir, realpath, stat, writeFile } from "node:fs/promises"
-import { dirname, isAbsolute, relative, sep } from "node:path"
+import { basename, dirname, isAbsolute, relative, sep } from "node:path"
 import {
+  type ChartSettings,
   type PiLabDatabase,
   type Project,
   type ProjectMetadata,
@@ -21,6 +22,7 @@ import {
   type DataFilePreview,
   discoverDataFiles,
   isMarimoNotebookFile,
+  type PlotPreview,
 } from "./discover"
 import type { AnalysisInteractiveResult } from "./interactive"
 import { analysisMedia } from "./mediaGrants"
@@ -111,6 +113,31 @@ const dataPreviewInput = previewInput.extend({
   /** The HDF5 dataset to preview, or null for the first one. */
   dataset: z.string().min(1).nullable(),
 })
+
+const chartSpecInput = z.object({
+  x: z.string().min(1),
+  y: z.array(z.string().min(1)).min(1),
+  splitBy: z.string().min(1).nullable(),
+  chartType: z.enum(["line", "scatter", "bar"]),
+  aggregate: z.enum(["none", "mean", "median", "sum", "count"]),
+  band: z.enum(["none", "minmax", "std", "ci95"]),
+})
+
+const chartInput = previewInput.extend({
+  /** The HDF5 dataset holding the table, or null for other formats. */
+  dataset: z.string().min(1).nullable(),
+  spec: chartSpecInput,
+})
+
+const setChartSettingsInput = previewInput.extend({
+  /** The settings for this file's name, or null to forget them. */
+  settings: z.object({ view: z.enum(["table", "chart"]), spec: chartSpecInput }).nullable(),
+})
+
+/** The name chart settings are kept under: the file name, e.g. `options.csv`. */
+function chartSettingsKey(relPath: string): string {
+  return basename(relPath.replaceAll("\\", "/"))
+}
 
 const interactiveInput = previewInput.extend({
   ownerId: z.string().min(1),
@@ -422,6 +449,52 @@ export const analysisRouter = router({
         load: input.load,
         dataset: input.dataset,
       })
+    }),
+
+  /**
+   * Plot a table file (CSV/TSV, Parquet, pickled DataFrame, HDF5 compound
+   * dataset) with the chart builder's settings, from its first rows (at most
+   * `MAX_FRAME_ROWS`). The path is jailed to the project.
+   */
+  chart: publicProcedure.input(chartInput).query(async ({ ctx, input }): Promise<PlotPreview> => {
+    const repoPath = requireRepoPath(ctx.db, input.projectId)
+    const absPath = resolveInsideDir(repoPath, input.relPath)
+    return ctx.analysisPreview.chart({
+      absPath,
+      relPath: input.relPath,
+      dataset: input.dataset,
+      spec: input.spec,
+    })
+  }),
+
+  /** The saved chart settings for this file's name in the project, or null. */
+  chartSettings: publicProcedure
+    .input(previewInput)
+    .query(({ ctx, input }): ChartSettings | null => {
+      const project = requireProject(ctx.db, input.projectId)
+      return project.metadata?.chartSettings?.[chartSettingsKey(input.relPath)] ?? null
+    }),
+
+  /**
+   * Save (or with `settings: null` forget) the chart settings for every file
+   * with this file's name in the project, in `metadata.chartSettings`.
+   */
+  setChartSettings: publicProcedure
+    .input(setChartSettingsInput)
+    .mutation(({ ctx, input }): void => {
+      const project = requireProject(ctx.db, input.projectId)
+      const key = chartSettingsKey(input.relPath)
+      const { chartSettings: old, ...rest } = project.metadata ?? {}
+      const chartSettings = { ...old }
+      if (input.settings === null) delete chartSettings[key]
+      else chartSettings[key] = input.settings
+      const metadata: ProjectMetadata =
+        Object.keys(chartSettings).length === 0 ? rest : { ...rest, chartSettings }
+      ctx.db
+        .update(projects)
+        .set({ metadata, updatedAt: Date.now() })
+        .where(eq(projects.id, input.projectId))
+        .run()
     }),
 
   /**

@@ -7,18 +7,99 @@ import type { ParsedNotebook } from "@pi-lab/shared/analysis/ipynb"
  * readers (pickle, HDF5, Parquet).
  */
 
-/** Rows of a CSV/TSV sampled into a header + body. */
+/**
+ * A table (CSV/TSV, Parquet, a pickled DataFrame or list of dicts, an HDF5
+ * compound dataset): its first rows, what each column holds, and whether it
+ * opens as a table or a chart (see `tables.ts`).
+ */
 export interface TablePreview {
   type: "table"
-  /** Column headers (first row of the file). */
+  /** Column headers. */
   headers: string[]
   /** Up to {@link MAX_TABLE_ROWS} body rows, each aligned to `headers`. */
   rows: string[][]
-  /** Total data rows in the file (header excluded), exact when not truncated. */
+  /** Data rows read (header excluded); the file's total unless `partial`. */
   totalRows: number
   /** True iff more than {@link MAX_TABLE_ROWS} rows exist. */
   truncated: boolean
+  /** True when only the first part of the file was read, so `totalRows` is a lower bound. */
+  partial: boolean
+  /** What each column holds, aligned to `headers`. */
+  columns: ColumnInfo[]
+  /** "chart" for a metric log (a unique, increasing step column), else "table". */
+  defaultView: "table" | "chart"
+  /** The chart shown when the user switches to Chart; null when no column can be plotted. */
+  defaultSpec: ChartSpec | null
 }
+
+/**
+ * What a table column holds. `step`: numbers that increase row by row (a
+ * metric log's x axis). `factor`: a design or grouping column (text with few
+ * values, True/False, or integers with few values or many repeats).
+ * `measure`: other numbers. `text`: text with many values (ids, prompts).
+ * `index`: a pickled DataFrame's unnamed row index.
+ */
+export type ColumnRole = "step" | "factor" | "measure" | "text" | "index"
+
+export interface ColumnInfo {
+  name: string
+  role: ColumnRole
+  /** How the values are read: True/False count as 0/1 in charts; text only as x or split. */
+  kind: "number" | "bool" | "text"
+}
+
+export type ChartType = "line" | "scatter" | "bar"
+/** How rows with the same x value are combined; "none" plots every row. */
+export type ChartAggregate = "none" | "mean" | "median" | "sum" | "count"
+/** The spread drawn around a mean or median: min to max, ±1 std, or the 95% CI of the mean. */
+export type ChartBand = "none" | "minmax" | "std" | "ci95"
+
+/** How the chart builder plots a table (the user's "Chart settings"). */
+export interface ChartSpec {
+  x: string
+  y: string[]
+  /** Draw one series per value of this column, or null for one series per y column. */
+  splitBy: string | null
+  chartType: ChartType
+  aggregate: ChartAggregate
+  band: ChartBand
+}
+
+/** One series of a {@link PlotPreview}, with its own x values. */
+export interface PlotSeries {
+  label: string
+  x: number[]
+  /** Aligned 1:1 with `x`; `null` = a gap. */
+  y: Array<number | null>
+  /** The band's lower and upper edges, aligned with `x`, or null without a band. */
+  lo: number[] | null
+  hi: number[] | null
+}
+
+/** A table plotted with a {@link ChartSpec} (`science.analysis.chart`). */
+export interface PlotPreview {
+  type: "plot"
+  chartType: ChartType
+  xLabel: string
+  /** For a text x column: the category names, and each x value is an index into them. */
+  xCategories: string[] | null
+  series: PlotSeries[]
+  /** Rows the chart was built from. */
+  rowsUsed: number
+  /** True when the file has more rows than {@link MAX_FRAME_ROWS}, so the chart covers only part of it. */
+  partial: boolean
+  /** True when a series had more than {@link MAX_PLOT_POINTS} points and was strided. */
+  downsampled: boolean
+  /** Things the user should know, e.g. split values that were left out. */
+  notes: string[]
+}
+
+/** Most rows read from a table for its column summary and charts. */
+export const MAX_FRAME_ROWS = 100_000
+/** Most bytes of a CSV/TSV read for its column summary and charts. */
+export const MAX_FRAME_BYTES = 64 * 1024 * 1024
+/** Most points drawn per series of a {@link PlotPreview}. */
+export const MAX_PLOT_POINTS = 2000
 
 /** A pretty-printed JSON document. */
 export interface JsonPreview {
@@ -136,14 +217,22 @@ export interface DatasetsPreview {
 }
 
 /**
- * A file above its format's size limit ({@link LARGE_FILE_BYTES}): it is not
- * read until the user asks (the preview is requested again with `load`).
+ * A file above its format's size limit ({@link LARGE_FILE_BYTES}) or above
+ * {@link HUGE_FILE_BYTES}: it is not read until the user asks (the preview is
+ * requested again with `load`).
  */
 export interface LargeFilePreview {
   type: "large"
   kind: DataFileKind
   size: number
+  /** True above {@link HUGE_FILE_BYTES}: loading may be slow or fail. */
+  huge: boolean
+  /** What could be read safely without loading (a CSV's first rows, a text head), or null. */
+  partial: DataFilePreview | null
 }
+
+/** Above this size every file asks before it is read, and shows only a safe part. */
+export const HUGE_FILE_BYTES = 1024 * 1024 * 1024
 
 /** Max body rows returned for a CSV/TSV preview. */
 export const MAX_TABLE_ROWS = 50
@@ -159,8 +248,6 @@ export const MAX_ARRAY_ROWS = 200
 export const MAX_ARRAY_COLS = 32
 /** Max bytes of a `.ipynb` read for its preview (over this → metadata fallback). */
 export const MAX_NOTEBOOK_BYTES = 16 * 1024 * 1024
-/** Max bytes of a pickle (a `.pkl` or an object `.npy`), which is read whole. */
-export const MAX_PICKLE_BYTES = 256 * 1024 * 1024
 
 /**
  * Per reader, the size above which Analysis asks before reading the file
@@ -175,109 +262,7 @@ export const LARGE_FILE_BYTES: Readonly<Record<"pickle" | "hdf5" | "parquet", nu
   parquet: null,
 }
 
-// ── Scalar-curve detection (CSV/TSV → line chart) ──────────────────────────────
-
-/**
- * Fraction of a numeric column's non-empty cells that must parse as finite
- * numbers for the column to count as "numeric". Tolerates the odd `NaN`/blank.
- */
-const NUMERIC_COLUMN_THRESHOLD = 0.8
-/**
- * Fraction of a candidate x column's steps that must be non-decreasing for it to
- * read as a monotonic index/step axis (≈ allows a couple of out-of-order rows).
- */
-const MONOTONIC_THRESHOLD = 0.95
-
-/** Missing cells remain missing; a literal zero remains a measurement. */
-export function numericCell(cell: string | undefined): number | null {
-  if (cell === undefined || cell.trim() === "") return null
-  const value = Number(cell)
-  return Number.isFinite(value) ? value : null
-}
-
-/** Whether at least {@link NUMERIC_COLUMN_THRESHOLD} of column `col` is numeric. */
-function isNumericColumn(rows: string[][], col: number): boolean {
-  let numeric = 0
-  let nonEmpty = 0
-  for (const row of rows) {
-    const cell = row[col]
-    if (cell === undefined || cell.trim() === "") continue
-    nonEmpty++
-    if (numericCell(cell) !== null) numeric++
-  }
-  return nonEmpty > 0 && numeric / nonEmpty >= NUMERIC_COLUMN_THRESHOLD
-}
-
-/** Whether column `col` is monotonically non-decreasing (skipping non-numbers). */
-function isMonotonicColumn(rows: string[][], col: number): boolean {
-  let prev = Number.NEGATIVE_INFINITY
-  let seen = 0
-  let ordered = 0
-  for (const row of rows) {
-    const value = numericCell(row[col])
-    if (value === null) continue
-    seen++
-    if (value >= prev) ordered++
-    prev = value
-  }
-  return seen > 1 && ordered / seen >= MONOTONIC_THRESHOLD
-}
-
-/**
- * Decide whether a parsed CSV/TSV looks like a scalar metric log — a monotonic
- * first numeric column (the step/index axis) followed by ≥1 further numeric
- * column (the plotted series) — and if so build a {@link ChartPreview}. Pure;
- * returns `null` (→ fall back to a table) when the heuristic rejects.
- */
-export function detectScalarChart(headers: string[], rows: string[][]): ChartPreview | null {
-  if (headers.length < 2 || rows.length < 2) return null
-
-  const numericCols: number[] = []
-  for (let col = 0; col < headers.length; col++) {
-    if (isNumericColumn(rows, col)) numericCols.push(col)
-  }
-  if (numericCols.length < 2) return null
-
-  const xCol = numericCols[0] ?? 0
-  if (!isMonotonicColumn(rows, xCol)) return null
-  const seriesCols = numericCols.slice(1)
-
-  return buildChart({
-    rows,
-    xCol,
-    xLabel: headers[xCol] ?? "step",
-    seriesCols,
-    seriesLabels: seriesCols.map((col) => headers[col] ?? `col${col}`),
-  })
-}
-
-/**
- * Assemble a {@link ChartPreview} from string rows: read the x column and each
- * series column as numbers, drop rows whose x is not finite, and downsample to
- * {@link MAX_CHART_POINTS} by striding so a long log still charts cheaply.
- */
-function buildChart(args: {
-  rows: string[][]
-  xCol: number
-  xLabel: string
-  seriesCols: number[]
-  seriesLabels: string[]
-}): ChartPreview {
-  const { rows, xCol, xLabel, seriesCols, seriesLabels } = args
-
-  const xAll: number[] = []
-  const seriesAll: Array<Array<number | null>> = seriesCols.map(() => [])
-  for (const row of rows) {
-    const x = numericCell(row[xCol])
-    if (x === null) continue
-    xAll.push(x)
-    seriesCols.forEach((col, s) => {
-      seriesAll[s]?.push(numericCell(row[col]))
-    })
-  }
-
-  return downsampleChart(xLabel, xAll, seriesLabels, seriesAll)
-}
+// ── Chart helpers ────────────────────────────────────────────────────────────
 
 /** Stride a chart's x + series down to at most {@link MAX_CHART_POINTS} points. */
 export function downsampleChart(

@@ -1245,7 +1245,7 @@ describe("science.analysis.preview", () => {
     expect(preview.kind).toBe("parquet")
   })
 
-  test("numeric metric CSV → a line chart (monotonic step + series)", async () => {
+  test("numeric metric CSV opens as a chart of step against its measures", async () => {
     await writeRepoFile("metrics.csv", "step,loss,reward\n0,1.0,0.1\n1,0.6,0.4\n2,0.3,0.7\n")
     const project = await h.caller.projects.open({ path: h.repoDir })
     const preview = await h.caller.science.analysis.preview({
@@ -1254,13 +1254,76 @@ describe("science.analysis.preview", () => {
       load: false,
       dataset: null,
     })
-    expect(preview.type).toBe("chart")
-    if (preview.type !== "chart") throw new Error("expected chart")
-    expect(preview.xLabel).toBe("step")
-    expect(preview.x).toEqual([0, 1, 2])
-    expect(preview.series.map((s) => s.label)).toEqual(["loss", "reward"])
-    expect(preview.series[0]?.values).toEqual([1.0, 0.6, 0.3])
-    expect(preview.truncated).toBe(false)
+    if (preview.type !== "table") throw new Error(`expected table, got ${preview.type}`)
+    expect(preview.defaultView).toBe("chart")
+    const spec = preview.defaultSpec
+    if (!spec) throw new Error("expected a default chart")
+    expect(spec).toMatchObject({ x: "step", y: ["loss", "reward"], aggregate: "none" })
+    const plot = await h.caller.science.analysis.chart({
+      projectId: project.id,
+      relPath: "metrics.csv",
+      dataset: null,
+      spec,
+    })
+    expect(plot.series.map((s) => s.label)).toEqual(["loss", "reward"])
+    expect(plot.series[0]?.x).toEqual([0, 1, 2])
+    expect(plot.series[0]?.y).toEqual([1.0, 0.6, 0.3])
+  })
+
+  test("a long-format CSV opens as a table; chart settings are kept per file name", async () => {
+    const body = "question,repetition,probability\n1,0,0.2\n1,1,0.4\n2,0,0.6\n2,1,0.8\n"
+    await writeRepoFile("results/a/options.csv", body)
+    await writeRepoFile("results/b/options.csv", body)
+    const project = await h.caller.projects.open({ path: h.repoDir })
+    const preview = await h.caller.science.analysis.preview({
+      projectId: project.id,
+      relPath: "results/a/options.csv",
+      load: false,
+      dataset: null,
+    })
+    if (preview.type !== "table") throw new Error(`expected table, got ${preview.type}`)
+    expect(preview.defaultView).toBe("table")
+    expect(
+      await h.caller.science.analysis.chartSettings({
+        projectId: project.id,
+        relPath: "results/b/options.csv",
+      }),
+    ).toBeNull()
+    const settings = {
+      view: "chart" as const,
+      spec: {
+        x: "question",
+        y: ["probability"],
+        splitBy: null,
+        chartType: "bar" as const,
+        aggregate: "mean" as const,
+        band: "std" as const,
+      },
+    }
+    await h.caller.science.analysis.setChartSettings({
+      projectId: project.id,
+      relPath: "results/a/options.csv",
+      settings,
+    })
+    // Kept when the project card's metadata is edited.
+    await h.caller.projects.setMetadata({ id: project.id, metadata: { venue: "NeurIPS" } })
+    expect(
+      await h.caller.science.analysis.chartSettings({
+        projectId: project.id,
+        relPath: "results/b/options.csv",
+      }),
+    ).toEqual(settings)
+    await h.caller.science.analysis.setChartSettings({
+      projectId: project.id,
+      relPath: "results/b/options.csv",
+      settings: null,
+    })
+    expect(
+      await h.caller.science.analysis.chartSettings({
+        projectId: project.id,
+        relPath: "results/a/options.csv",
+      }),
+    ).toBeNull()
   })
 
   test("a non-metric CSV (single numeric column) stays a table", async () => {

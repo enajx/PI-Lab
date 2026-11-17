@@ -1,4 +1,5 @@
 import { open } from "node:fs/promises"
+import { TRPCError } from "@trpc/server"
 import type { Dataset, Group } from "h5wasm"
 import {
   type DataFilePreview,
@@ -9,9 +10,11 @@ import {
   MAX_ARRAY_COLS,
   MAX_ARRAY_ROWS,
   MAX_CHART_POINTS,
+  MAX_FRAME_ROWS,
   MAX_TABLE_ROWS,
   type MetadataPreview,
 } from "./previewShapes"
+import { type Frame, frameFromValues, tableFromFrame } from "./tables"
 
 /**
  * HDF5 (`.h5`, `.hdf5`) previews with h5wasm (the HDF5 C library compiled to
@@ -149,6 +152,52 @@ function safePreviewDataset(dataset: Dataset, path: string): DatasetsPreview["pr
   }
 }
 
+/**
+ * The first {@link MAX_FRAME_ROWS} rows of a 1-D compound (table) dataset as
+ * a frame, one column per member.
+ */
+function compoundFrame(dataset: Dataset): Frame {
+  const dtype = dataset.dtype
+  const headers = Array.isArray(dtype) ? dtype.map((member) => String(member[0])) : []
+  const count = dataset.shape?.[0] ?? 0
+  const rows = asArray(dataset.slice([[0, Math.min(count, MAX_FRAME_ROWS)]])).map((row) =>
+    Array.isArray(row) ? row : [row],
+  )
+  return frameFromValues({
+    headers,
+    columns: headers.map((_, col) => rows.map((row) => row[col] ?? null)),
+    head: rows.slice(0, MAX_TABLE_ROWS).map((row) => row.map(cellText)),
+    totalRows: count,
+    indexColumn: null,
+    text: cellText,
+  })
+}
+
+/**
+ * Read a 1-D compound dataset of an HDF5 file as a frame. A missing dataset,
+ * or one that is not a table, is a BAD_REQUEST.
+ */
+export async function readHdf5Frame(abs: string, path: string): Promise<Frame> {
+  if (!(await hasHdf5Signature(abs))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Not an HDF5 file" })
+  }
+  const module = await loadH5wasm()
+  const file = new module.File(abs, "r")
+  try {
+    const entity = file.get(path)
+    if (
+      !(entity instanceof module.Dataset) ||
+      entity.metadata.type !== H5T_COMPOUND ||
+      entity.shape?.length !== 1
+    ) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `Dataset ${path} is not a table` })
+    }
+    return compoundFrame(entity)
+  } finally {
+    file.close()
+  }
+}
+
 /** h5wasm `metadata.type` values (HDF5 type classes). */
 const H5T_INTEGER = 0
 const H5T_FLOAT = 1
@@ -172,15 +221,7 @@ function previewDataset(dataset: Dataset, path: string): DatasetsPreview["previe
     const chart = downsampleChart("index", x, [label], [values.map(finiteOrNull)])
     return { ...chart, truncated: stride > 1 }
   }
-  if (shape.length === 1 && type === H5T_COMPOUND) {
-    const dtype = dataset.dtype
-    const headers = Array.isArray(dtype) ? dtype.map((member) => String(member[0])) : []
-    const count = shape[0] ?? 0
-    const rows = asArray(dataset.slice([[0, Math.min(count, MAX_TABLE_ROWS)]])).map((row) =>
-      Array.isArray(row) ? row.map(cellText) : [cellText(row)],
-    )
-    return { type: "table", headers, rows, totalRows: count, truncated: count > MAX_TABLE_ROWS }
-  }
+  if (shape.length === 1 && type === H5T_COMPOUND) return tableFromFrame(compoundFrame(dataset))
   if (shape.length <= 2 && (numeric || type === H5T_STRING)) {
     const [rowCount = 0, colCount = 1] = shape
     const shownRows = Math.min(rowCount, MAX_ARRAY_ROWS)

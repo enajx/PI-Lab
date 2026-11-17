@@ -30,3 +30,41 @@ frame = pd.DataFrame(
 )
 for codec in ("snappy", "gzip", "zstd", "brotli", "none"):
     frame.to_parquet(f"frame-{codec}.parquet", compression=None if codec == "none" else codec)
+
+# A long-format result table: many rows per question (one per option order,
+# repetition and option), like a benchmark's per-option output. Synthetic.
+rows = []
+for question in range(1, 7):
+    for option_order in range(3):
+        for repetition in range(2):
+            for position, option in enumerate("abc"):
+                rows.append(
+                    {
+                        "model": "model-x",
+                        "question": question,
+                        "option_order": option_order,
+                        "repetition": repetition,
+                        "option": option,
+                        "probability": round(0.1 + 0.05 * position + 0.01 * question, 4),
+                        "is_gold": position == question % 3,
+                        "length": 20 + 7 * question + 3 * position + option_order,
+                    }
+                )
+long = pd.DataFrame(rows)
+long.to_parquet("long.parquet")
+long.to_pickle("long-frame.pkl")
+with h5py.File("long.h5", "w") as f:
+    table = np.zeros(
+        len(long),
+        dtype=[
+            ("question", "<i8"),
+            ("option_order", "<i8"),
+            ("repetition", "<i8"),
+            ("probability", "<f8"),
+            ("length", "<i8"),
+        ],
+    )
+    for name in table.dtype.names:
+        table[name] = long[name].to_numpy()
+    f["table"] = table
+long.to_csv("long.csv", index=False)
