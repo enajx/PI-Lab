@@ -153,14 +153,14 @@ function dictListFrame(items: PyValue[]): Frame {
   const first = items[0]
   const keys = first instanceof PyDict ? first.entries.map(([key]) => key) : []
   const kept = items.slice(0, MAX_FRAME_ROWS)
-  const valueOf = (item: PyValue, col: number): PyValue =>
+  const cellOf = (item: PyValue, col: number): PyValue =>
     item instanceof PyDict ? (item.entries[col]?.[1] ?? null) : null
   return frameFromValues({
     headers: keys.map(cellText),
-    columns: keys.map((_, col) => kept.map((item) => valueOf(item, col))),
+    columns: keys.map((_, col) => kept.map((item) => cellOf(item, col))),
     head: kept
       .slice(0, MAX_TABLE_ROWS)
-      .map((item) => keys.map((_, col) => cellText(valueOf(item, col)))),
+      .map((item) => keys.map((_, col) => cellText(cellOf(item, col)))),
     totalRows: items.length,
     indexColumn: null,
     text: (value) => cellText(value as PyValue),
