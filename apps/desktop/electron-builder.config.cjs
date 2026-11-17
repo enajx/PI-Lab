@@ -90,7 +90,7 @@ const APP_FILES = [
 const config = {
   appId,
   productName,
-  ...(publicRelease ? { artifactName: "PI-Lab-${version}-${arch}.${ext}" } : {}),
+  ...(publicRelease ? { artifactName: "PI-Lab-${arch}.${ext}" } : {}),
   extraMetadata: {
     piLabChannel: channel,
     ...(channel === "alpha"

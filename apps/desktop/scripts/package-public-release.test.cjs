@@ -1,11 +1,12 @@
 const assert = require("node:assert/strict")
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
 const { test } = require("node:test")
 const { tmpdir } = require("node:os")
 const { join } = require("node:path")
 const { readMigrationFiles } = require("drizzle-orm/migrator")
 const { parseUpdateInfo } = require("electron-updater/out/providers/Provider")
 const {
+  assertReadmeDownloadLinks,
   fanOutUpdateMetadata,
   publicReleaseDestination,
   writeCompatibilityMetadata,
@@ -18,6 +19,28 @@ test("public build destinations are isolated by channel and version", () => {
     publicReleaseDestination(root, "beta", "1.1.0-beta.1"),
     join(root, "beta", "1.1.0-beta.1"),
   )
+})
+
+test("a Stable release needs every README to link the latest DMG directly", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-lab-readme-links-"))
+  const direct = "https://github.com/enajx/PI-Lab/releases/latest/download/PI-Lab-arm64.dmg"
+  try {
+    mkdirSync(join(root, "docs", "readme-int"), { recursive: true })
+    writeFileSync(join(root, "README.md"), `<a href="${direct}">Download for macOS</a>`)
+    writeFileSync(
+      join(root, "docs", "readme-int", "README.es.md"),
+      '<a href="https://github.com/enajx/PI-Lab/releases">Descargar para macOS</a>',
+    )
+    assert.throws(() => assertReadmeDownloadLinks(root), /README\.es\.md/)
+    assert.throws(() => assertReadmeDownloadLinks(root), /latest\/download\/PI-Lab-arm64\.dmg/)
+    writeFileSync(
+      join(root, "docs", "readme-int", "README.es.md"),
+      `<a href="${direct}">Descargar para macOS</a>`,
+    )
+    assertReadmeDownloadLinks(root)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("a single generated mac feed serves each less stable update track", () => {
@@ -104,7 +127,7 @@ test("the real builder writes GitHub update metadata with publishing disabled", 
     getResource: async () => null,
   }
   try {
-    const zip = join(root, "PI-Lab-0.1.0-beta.1-arm64.zip")
+    const zip = join(root, "PI-Lab-arm64.zip")
     writeFileSync(zip, "fixture archive bytes")
     await artifactCreated({
       file: zip,
@@ -117,13 +140,13 @@ test("the real builder writes GitHub update metadata with publishing disabled", 
     assert.equal(manager.isPublish, false)
     const feed = readFileSync(join(root, "beta-mac.yml"), "utf8")
     assert.match(feed, /version: 0.1.0-beta.1/)
-    assert.match(feed, /PI-Lab-0.1.0-beta.1-arm64.zip/)
+    assert.match(feed, /PI-Lab-arm64.zip/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test("GitHub release discovery retains PI Lab compatibility and resolves versioned ZIPs", async () => {
+test("GitHub release discovery retains PI Lab compatibility and resolves fixed-name ZIPs", async () => {
   const { GitHubProvider } = require("electron-updater/out/providers/GitHubProvider")
   const compatibility = { formatVersion: 1, migrations: [{ hash: "test", createdAt: 1 }] }
   const requests = []
@@ -134,7 +157,7 @@ test("GitHub release discovery retains PI Lab compatibility and resolves version
         return '<feed><entry><title>Beta 2</title><link href="https://github.com/enajx/PI-Lab/releases/tag/v0.1.0-beta.2"/><content>Changes</content></entry></feed>'
       }
       assert.equal(options.path, "/enajx/PI-Lab/releases/download/v0.1.0-beta.2/beta-mac.yml")
-      return `version: 0.1.0-beta.2\nfiles:\n  - url: PI-Lab-0.1.0-beta.2-arm64.zip\n    sha512: fixture\npiLabCompatibility: ${JSON.stringify(compatibility)}\n`
+      return `version: 0.1.0-beta.2\nfiles:\n  - url: PI-Lab-arm64.zip\n    sha512: fixture\npiLabCompatibility: ${JSON.stringify(compatibility)}\n`
     },
   }
   const provider = new GitHubProvider(
@@ -151,7 +174,7 @@ test("GitHub release discovery retains PI Lab compatibility and resolves version
   assert.deepEqual(release.piLabCompatibility, compatibility)
   assert.equal(
     provider.resolveFiles(release)[0].url.href,
-    "https://github.com/enajx/PI-Lab/releases/download/v0.1.0-beta.2/PI-Lab-0.1.0-beta.2-arm64.zip",
+    "https://github.com/enajx/PI-Lab/releases/download/v0.1.0-beta.2/PI-Lab-arm64.zip",
   )
   assert.equal(requests.length, 2)
 })

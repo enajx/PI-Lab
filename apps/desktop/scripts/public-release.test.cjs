@@ -156,7 +156,7 @@ test("public builder config generates mac update metadata and keeps local builds
       assert.equal(config.appId, "com.pi-lab.desktop")
       assert.equal(config.productName, "PI Lab")
       // biome-ignore lint/suspicious/noTemplateCurlyInString: electron-builder expands these placeholders.
-      assert.equal(config.artifactName, "PI-Lab-${version}-${arch}.${ext}")
+      assert.equal(config.artifactName, "PI-Lab-${arch}.${ext}")
       assert.equal(config.extraMetadata.piLabChannel, "stable")
       assert.equal(config.extraMetadata.piLabPublicRelease, true)
       assert.equal(config.extraMetadata.piLabReleaseChannel, channel)

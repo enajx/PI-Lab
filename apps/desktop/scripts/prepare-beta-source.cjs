@@ -67,9 +67,11 @@ function selectPreviousBeta(version, releases) {
   if (!previous) return { tag: "-", zip: "", digest: "" }
   if (compareBetaVersions(version, previous.tag_name.slice(1)) <= 0)
     throw new Error("Choose a version newer than the previous published Beta")
-  const name = `PI-Lab-${previous.tag_name.slice(1)}-arm64.zip`
-  const zip = previous.assets?.find((asset) => asset.name === name)
+  // Betas up to 0.1.5-beta put the version in the file name; later ones use a fixed name.
+  const names = ["PI-Lab-arm64.zip", `PI-Lab-${previous.tag_name.slice(1)}-arm64.zip`]
+  const zip = previous.assets?.find((asset) => names.includes(asset.name))
   if (!zip) throw new Error("The previous Beta has no matching ARM64 ZIP")
+  const name = zip.name
   if (zip.digest != null && !/^sha256:[a-f0-9]{64}$/.test(zip.digest))
     throw new Error("The previous Beta ZIP has an invalid GitHub digest")
   return { tag: previous.tag_name, zip: name, digest: zip.digest ?? "" }

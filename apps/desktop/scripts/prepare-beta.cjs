@@ -95,9 +95,9 @@ function digestFile(filename, algorithm) {
 }
 
 /** Release uploads deliberately exclude the app directory and DMG blockmap. */
-function assetNames(version, arch) {
+function assetNames(arch) {
   if (!["arm64", "x64"].includes(arch)) throw new Error("Candidate architecture is invalid")
-  const stem = `PI-Lab-${version}-${arch}`
+  const stem = `PI-Lab-${arch}`
   return [`${stem}.dmg`, `${stem}.zip`, `${stem}.zip.blockmap`, "beta-mac.yml"]
 }
 
@@ -118,7 +118,7 @@ function verifyFeed(artifactDir, version, arch) {
   const feed = parseUpdateInfo(readMetadata(artifactDir, "beta-mac.yml"), "beta-mac.yml", {})
   if (feed.version !== version)
     throw new Error("Updater feed version does not match the Beta version")
-  const archives = assetNames(version, arch).slice(0, 2)
+  const archives = assetNames(arch).slice(0, 2)
   const zip = archives.find((name) => name.endsWith(".zip"))
   if (!Array.isArray(feed.files) || !feed.files.some(({ url }) => url === zip))
     throw new Error("Updater feed must reference the candidate ZIP")
@@ -151,13 +151,13 @@ function createBetaManifest(options) {
   const previousTag = options.previousTag === "-" ? null : options.previousTag
   validateIdentity(version, commit, previousTag, repo)
   const candidates = ["arm64", "x64"].filter((arch) =>
-    readdirSync(artifactDir).includes(`PI-Lab-${version}-${arch}.zip`),
+    readdirSync(artifactDir).includes(`PI-Lab-${arch}.zip`),
   )
   if (candidates.length !== 1)
     throw new Error("Candidate must contain exactly one architecture ZIP")
   const arch = candidates[0]
   verifyFeed(artifactDir, version, arch)
-  const assets = assetNames(version, arch).map((name) => ({
+  const assets = assetNames(arch).map((name) => ({
     name,
     size: regularFile(join(artifactDir, name), MAX_ASSET_BYTES).size,
     sha256: digestFile(join(artifactDir, name), "sha256"),
@@ -192,7 +192,7 @@ function validateBetaManifest(artifactDir) {
   validateIdentity(version, commit, previousTag, repo)
   if (manifest.schemaVersion !== 1 || manifest.tag !== `v${version}`)
     throw new Error("Prepared Beta manifest identity is invalid")
-  const expected = assetNames(version, arch)
+  const expected = assetNames(arch)
   if (
     !Array.isArray(assets) ||
     assets.length !== expected.length ||
