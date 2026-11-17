@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { isGitRepo } from "../git"
 import { nativeText } from "../i18n/nativeLanguage"
+import { apiKeyLaunchEnvironment } from "../setup/apiKeyEnvironment"
 import { acquireAgentLaunchSlot } from "../trpc/agentLaunchGuard"
 import type { AppContext } from "../trpc/context"
 import { startAgentSession } from "../trpc/sessions/sessions"
@@ -141,6 +142,13 @@ async function dispatchNonInteractiveAutomation(
       )
     }
 
+    const keyEnvironment = apiKeyLaunchEnvironment(
+      ctx.db,
+      ctx.credentialCipher,
+      agent,
+      getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id]?.authMethod,
+    )
+
     const gitAvailable = await isGitRepo(project.repoPath)
     const releaseAgentSlot = acquireAgentLaunchSlot({
       projectId: project.id,
@@ -164,7 +172,7 @@ async function dispatchNonInteractiveAutomation(
         command,
         args,
         cwd: project.repoPath,
-        env: { ...launchEnvironment, ...agent.env },
+        env: { ...launchEnvironment, ...agent.env, ...keyEnvironment },
       })
       lifecycle.started()
       endActivity = ctx.caffeine.beginMeaningfulActivity(`workflow:${run.id}`)

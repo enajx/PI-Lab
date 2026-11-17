@@ -20,6 +20,7 @@ import type { LiveAgentStatus } from "../../../shared/agentStatus"
 import type { ProjectAgentRow } from "../../../shared/projectAgents"
 import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { isGitRepo } from "../../git"
+import { apiKeyLaunchEnvironment } from "../../setup/apiKeyEnvironment"
 import { withAgentLaunchGuard } from "../agentLaunchGuard"
 import type { AppContext } from "../context"
 import { effectiveAnalysisFormat } from "../science/analysis/format"
@@ -233,6 +234,12 @@ export async function startAgentSession(
       message: `${agent.label} is not available at ${candidate || "(no executable configured)"}. Configure its executable path in Settings → Agents & worktrees.`,
     })
   }
+  const keyEnvironment = apiKeyLaunchEnvironment(
+    ctx.db,
+    ctx.credentialCipher,
+    agent,
+    agentSettings.launchDefaults[agent.id]?.authMethod,
+  )
 
   return withAgentLaunchGuard({
     projectId: project.id,
@@ -270,6 +277,7 @@ export async function startAgentSession(
       const extraDirs = await paperExtraDirs(project, input.origin, dir)
       const [, ...args] = buildLaunchArgv(agent, {
         ...agentSettings.launchDefaults[agent.id],
+        workingDir: dir,
         extraDirs,
         args: promptArgs,
       })
@@ -285,7 +293,7 @@ export async function startAgentSession(
         command,
         args,
         cwd: dir,
-        env: { ...launchEnvironment, ...agent.env },
+        env: { ...launchEnvironment, ...agent.env, ...keyEnvironment },
         cols: input.cols ?? 80,
         rows: input.rows ?? 24,
       })

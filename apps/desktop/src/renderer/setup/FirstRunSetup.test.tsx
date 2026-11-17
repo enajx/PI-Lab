@@ -158,7 +158,8 @@ describe("FirstRunSetup", () => {
       "setup.zotero": () => new Promise((resolve) => (resolveZotero = resolve)),
     })
 
-    expect((await screen.findAllByText("Checking…")).length).toBe(4)
+    // Three agent cards (Claude Code, Codex, Gemini) + GitHub + Zotero.
+    expect((await screen.findAllByText("Checking…")).length).toBe(5)
     expect(screen.queryByText("Not detected")).toBeNull()
     expect(screen.queryByText("Detected")).toBeNull()
     expect(screen.queryByText("Not found")).toBeNull()
@@ -201,6 +202,7 @@ describe("FirstRunSetup", () => {
     expect(await screen.findByText("Detected")).toBeTruthy()
     checking = true
     fireEvent.click(screen.getByRole("button", { name: "Recheck" }))
+    // The two fixture agent cards + GitHub + Zotero.
     expect((await screen.findAllByText("Checking…")).length).toBe(4)
     for (const release of releases) release()
     await waitFor(() => expect(screen.queryByText("Checking…")).toBeNull())
@@ -232,16 +234,19 @@ describe("FirstRunSetup", () => {
 
   test("reveals an API field only after explicit choice and never retains its value in the renderer", async () => {
     const saved: unknown[] = []
+    const agentPatches: unknown[] = []
     renderSetup({
       "setup.saveApiKey": (input) => {
         saved.push(input)
         return { configured: true }
       },
+      "settings.updateAgents": (input) => {
+        agentPatches.push(input)
+        return {}
+      },
     })
 
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Use API instead" }))[0] as HTMLElement,
-    )
+    fireEvent.click(await screen.findByTestId("setup-auth-claude-code-api-key"))
     const input = screen.getByLabelText("Claude Code API key")
     expect(input.getAttribute("type")).toBe("password")
     fireEvent.change(input, { target: { value: "sk-local-secret" } })
@@ -250,6 +255,18 @@ describe("FirstRunSetup", () => {
       expect(saved).toEqual([{ agentId: "claude-code", apiKey: "sk-local-secret" }]),
     )
     await waitFor(() => expect(screen.queryByLabelText("Claude Code API key")).toBeNull())
+    // Saving the key makes Claude Code launch with it.
+    await waitFor(() =>
+      expect(agentPatches).toEqual([
+        { launchDefaults: { "claude-code": { authMethod: "api-key" } } },
+      ]),
+    )
+  })
+
+  test("Add another agent says more agents are coming soon", async () => {
+    renderSetup({})
+    fireEvent.click(await screen.findByTestId("setup-add-agent"))
+    expect(screen.getByText(/Coming soon/)).toBeTruthy()
   })
 
   test("lets several detected subscriptions stay without a default", async () => {

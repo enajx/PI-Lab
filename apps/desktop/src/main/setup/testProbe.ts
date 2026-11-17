@@ -22,6 +22,14 @@ export const testSetupProbe: SetupProbe = async ({ command }) => {
       timedOut: false,
     }
   }
+  if (command.includes("agy")) {
+    return {
+      code: 0,
+      stdout: "Fetching available models...\ntest-model\tTest Model\n",
+      stderr: "",
+      timedOut: false,
+    }
+  }
   return {
     code: 0,
     stdout: JSON.stringify({

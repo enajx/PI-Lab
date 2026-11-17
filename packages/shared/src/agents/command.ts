@@ -4,7 +4,11 @@ import type { TerminalAgent } from "./catalog"
 export const AGENT_EFFORT_LEVELS: Readonly<Record<string, readonly string[]>> = {
   codex: ["low", "medium", "high", "xhigh", "max", "ultra"],
   "claude-code": ["low", "medium", "high", "xhigh", "max", "ultracode"],
+  gemini: ["low", "medium", "high", "xhigh", "max"],
 }
+
+/** How a launched agent signs in: the CLI's own login, or the API key saved in PI Lab. */
+export type AgentAuthMethod = "subscription" | "api-key"
 
 export interface LaunchOptions {
   /** Extra arguments appended after the agent's default args. */
@@ -13,6 +17,10 @@ export interface LaunchOptions {
   effort?: string
   /** Folders outside the working directory the agent may also use (needs `addDirArg`). */
   extraDirs?: string[]
+  /** "api-key" makes the agent use the saved key; the key itself goes in the environment. */
+  authMethod?: AgentAuthMethod
+  /** Folder the agent runs in; agy is told to trust it so it does not stop on a trust prompt. */
+  workingDir?: string
 }
 
 /**
@@ -29,10 +37,13 @@ export function buildLaunchArgv(agent: TerminalAgent, options: LaunchOptions = {
   const defaults = launchDefaultsArgv(agent, options)
   const addDirArg = agent.addDirArg
   const extraDirs = addDirArg ? (options.extraDirs ?? []).flatMap((dir) => [addDirArg, dir]) : []
-  const args = options.args ?? []
+  const callerArgs = options.args ?? []
+  const args =
+    agent.promptArg && callerArgs.length > 0 ? [agent.promptArg, ...callerArgs] : callerArgs
   // Claude's --add-dir takes several folders, so "--" ends the options before
-  // the prompt; both Claude and Codex accept "--" there.
-  const separator = extraDirs.length > 0 && args.length > 0 ? ["--"] : []
+  // the prompt; both Claude and Codex accept "--" there. A prompt behind its own
+  // flag (`promptArg`) needs no separator.
+  const separator = extraDirs.length > 0 && args.length > 0 && !agent.promptArg ? ["--"] : []
   return [
     agent.command,
     ...(agent.defaultArgs ?? []),
@@ -46,7 +57,7 @@ export function buildLaunchArgv(agent: TerminalAgent, options: LaunchOptions = {
 /** The provider's model and effort flags, shared by interactive and one-shot launches. */
 function launchDefaultsArgv(agent: TerminalAgent, options: LaunchOptions): string[] {
   const defaults: string[] = []
-  if (agent.id === "codex" || agent.id === "claude-code") {
+  if (agent.id === "codex" || agent.id === "claude-code" || agent.id === "gemini") {
     if (options.model) defaults.push("--model", options.model)
     if (options.effort) {
       defaults.push(
@@ -55,6 +66,21 @@ function launchDefaultsArgv(agent: TerminalAgent, options: LaunchOptions): strin
           : ["--effort", options.effort]),
       )
     }
+  }
+  if (agent.id === "gemini") {
+    // Session-only agy settings (`--settings`), so the user's settings.json is
+    // never changed: trust the working folders (agy otherwise stops on a "trust
+    // this folder" prompt that --dangerously-skip-permissions does not skip), and
+    // with an API key use the "gemini" provider, the only one that reads GEMINI_API_KEY.
+    const trusted = [
+      ...(options.workingDir ? [options.workingDir] : []),
+      ...(options.extraDirs ?? []),
+    ]
+    const settings = {
+      ...(trusted.length > 0 ? { trustedWorkspaces: trusted } : {}),
+      ...(options.authMethod === "api-key" ? { modelProvider: "gemini" } : {}),
+    }
+    if (Object.keys(settings).length > 0) defaults.push("--settings", JSON.stringify(settings))
   }
   return defaults
 }

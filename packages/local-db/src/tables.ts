@@ -210,7 +210,11 @@ export type ProjectConfigStorage = "app" | "project" | "both"
 /** App-wide agent launch and per-project config persistence preferences. */
 export interface AgentSettings {
   defaultAgentId: string | null
-  launchDefaults: Record<string, { model?: string; effort?: string }>
+  /** Per agent: model, effort, and whether launches use the saved API key or the CLI login. */
+  launchDefaults: Record<
+    string,
+    { model?: string; effort?: string; authMethod?: "subscription" | "api-key" }
+  >
   projectConfigStorage: ProjectConfigStorage
   /** Explicit executable paths keyed by catalog agent id. */
   executableOverrides: Record<string, string>

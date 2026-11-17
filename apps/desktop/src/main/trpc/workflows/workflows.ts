@@ -26,6 +26,7 @@ import type {
 import { computeGitStateHash, isGitRepo } from "../../git"
 import { conflictKinds, isMerging } from "../../git/remote"
 import { requireSyncEnabled } from "../../paper/overleaf"
+import { apiKeyLaunchEnvironment } from "../../setup/apiKeyEnvironment"
 import type { AppContext } from "../context"
 import { resolveInsideDir } from "../files/files"
 import { publicProcedure, router } from "../trpc"
@@ -416,6 +417,12 @@ async function executeWorkflow(
   startStream(stream, `${command} ${shownArgs}`)
 
   const launchEnvironment = await ctx.getAgentLaunchEnvironment()
+  const keyEnvironment = apiKeyLaunchEnvironment(
+    ctx.db,
+    ctx.credentialCipher,
+    agent,
+    getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id]?.authMethod,
+  )
   const started = await ctx.runNonInteractiveProcess({
     metadata: {
       kind: "project-workflow",
@@ -428,7 +435,7 @@ async function executeWorkflow(
     command,
     args,
     cwd: target.cwd,
-    env: { ...launchEnvironment, ...agent.env },
+    env: { ...launchEnvironment, ...agent.env, ...keyEnvironment },
     timeoutMs: WORKFLOW_TIMEOUT_MS,
     onOutput: (chunk, streamName) => {
       // Claude stdout is JSON lines → parse into readable steps; its stderr and

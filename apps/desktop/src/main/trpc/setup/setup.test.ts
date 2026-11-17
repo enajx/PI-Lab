@@ -86,7 +86,7 @@ describe("setup router", () => {
       connectivity: "available",
     })
     expect(environment.zotero).toBe("running")
-    expect(environment.apiConfigured).toEqual({ "claude-code": false, codex: false })
+    expect(environment.apiConfigured).toEqual({ "claude-code": false, codex: false, gemini: false })
     expect(JSON.stringify(environment)).not.toContain("must-not-cross")
   })
 

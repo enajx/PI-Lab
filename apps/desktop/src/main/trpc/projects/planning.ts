@@ -27,6 +27,7 @@ import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { agentLaunchLifecycle } from "../../agents/launchLifecycle"
 import type { NonInteractiveProcessResult } from "../../automations/nonInteractiveRunner"
+import { apiKeyLaunchEnvironment } from "../../setup/apiKeyEnvironment"
 import type { AppContext } from "../context"
 import { resolveWritableTemplateDir, seedWritableTemplate } from "../template"
 import { publicProcedure } from "../trpc"
@@ -329,16 +330,34 @@ export const planningProcedures = {
             ...getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
             args: [prompt],
           })
-    const [catalogCommand, ...args] = argv
+    const [catalogCommand, ...builtArgs] = argv
     const command = await ctx.resolveAgentExecutable(configured || catalogCommand || "")
     if (!command)
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: `${agent.label} is not available`,
       })
-    const env = { ...(await ctx.getAgentLaunchEnvironment()), ...agent.env }
+    const env = {
+      ...(await ctx.getAgentLaunchEnvironment()),
+      ...agent.env,
+      ...apiKeyLaunchEnvironment(
+        ctx.db,
+        ctx.credentialCipher,
+        agent,
+        getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id]?.authMethod,
+      ),
+    }
     const draftId = randomUUID()
     const stageDir = await makeStage(project, draftId, proposedAgents, originalResearch)
+    // Interactive runs are rebuilt now that the folder they run in is known.
+    const args =
+      input.mode === "one-shot"
+        ? builtArgs
+        : buildLaunchArgv(agent, {
+            ...getAgentSettingsOrDefaults(ctx.db).launchDefaults[agent.id],
+            args: [prompt],
+            workingDir: stageDir,
+          }).slice(1)
     const draft: PlanDraft = {
       projectId: project.id,
       stageDir,
