@@ -63,6 +63,20 @@ test("chooses the highest published Beta with its matching ARM ZIP and requires 
   assert.deepEqual(selectPreviousBeta("0.1.0-beta.1", []), { tag: "-", zip: "", digest: "" })
 })
 
+test("finds the fixed-name ARM ZIP that newer Betas publish", () => {
+  const release = {
+    tag_name: "v0.1.6-beta",
+    draft: false,
+    prerelease: true,
+    assets: [{ name: "PI-Lab-arm64.zip", digest: `sha256:${"b".repeat(64)}` }],
+  }
+  assert.deepEqual(selectPreviousBeta("0.1.7-beta", [[release]]), {
+    tag: "v0.1.6-beta",
+    zip: "PI-Lab-arm64.zip",
+    digest: `sha256:${"b".repeat(64)}`,
+  })
+})
+
 test("a plain -beta version is newer than the old -beta.N releases of an earlier version", () => {
   const release = (version) => ({
     tag_name: `v${version}`,

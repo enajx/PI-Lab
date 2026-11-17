@@ -22,7 +22,7 @@ const REPO = "enajx/PI-Lab"
 /** Files are real; the tiny archives stand in for separately tested signed packages. */
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "pi-lab-prepare-beta-"))
-  const stem = `PI-Lab-${VERSION}-arm64`
+  const stem = `PI-Lab-arm64`
   const zip = Buffer.from("verified ZIP fixture")
   const dmg = Buffer.from("verified DMG fixture")
   writeFileSync(join(directory, `${stem}.zip`), zip)
@@ -52,12 +52,7 @@ test("a real candidate produces exactly four checked release assets and pinned s
     assert.equal(manifest.previousTag, "v0.1.0-beta.3")
     assert.deepEqual(
       manifest.assets.map(({ name }) => name).sort(),
-      [
-        `PI-Lab-${VERSION}-arm64.dmg`,
-        `PI-Lab-${VERSION}-arm64.zip`,
-        `PI-Lab-${VERSION}-arm64.zip.blockmap`,
-        "beta-mac.yml",
-      ].sort(),
+      [`PI-Lab-arm64.dmg`, `PI-Lab-arm64.zip`, `PI-Lab-arm64.zip.blockmap`, "beta-mac.yml"].sort(),
     )
     assert.match(
       readFileSync(join(input.artifactDir, "release-notes.md"), "utf8"),
@@ -89,7 +84,7 @@ test("feed version and SHA-512 must match the candidate before a manifest is wri
     writeFileSync(feed, original.replace(VERSION, "0.1.0-beta.2"))
     assert.throws(() => createBetaManifest(input), /version/i)
     writeFileSync(feed, original)
-    writeFileSync(join(input.artifactDir, `PI-Lab-${VERSION}-arm64.zip`), "changed ZIP")
+    writeFileSync(join(input.artifactDir, `PI-Lab-arm64.zip`), "changed ZIP")
     assert.throws(() => createBetaManifest(input), /SHA-512|size/i)
   } finally {
     rmSync(input.artifactDir, { recursive: true })
@@ -110,7 +105,7 @@ test("changed assets, notes, unsafe manifest paths and symbolic links cannot be 
     writeFileSync(join(input.artifactDir, "release-notes.md"), "changed notes")
     assert.throws(() => validateBetaManifest(input.artifactDir), /notes|checksum/i)
     createBetaManifest(input)
-    const zip = join(input.artifactDir, `PI-Lab-${VERSION}-arm64.zip`)
+    const zip = join(input.artifactDir, `PI-Lab-arm64.zip`)
     rmSync(zip)
     symlinkSync("beta-mac.yml", zip)
     assert.throws(() => validateBetaManifest(input.artifactDir), /symbolic|regular/i)
@@ -123,7 +118,7 @@ test("an archive changed after preparation fails checksum validation", () => {
   const input = fixture()
   try {
     createBetaManifest(input)
-    writeFileSync(join(input.artifactDir, `PI-Lab-${VERSION}-arm64.zip`), "modified ZIP fixture")
+    writeFileSync(join(input.artifactDir, `PI-Lab-arm64.zip`), "modified ZIP fixture")
     assert.throws(() => validateBetaManifest(input.artifactDir), /checksum|size/i)
   } finally {
     rmSync(input.artifactDir, { recursive: true })

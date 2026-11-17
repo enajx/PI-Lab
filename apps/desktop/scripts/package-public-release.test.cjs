@@ -104,7 +104,7 @@ test("the real builder writes GitHub update metadata with publishing disabled", 
     getResource: async () => null,
   }
   try {
-    const zip = join(root, "PI-Lab-0.1.0-beta.1-arm64.zip")
+    const zip = join(root, "PI-Lab-arm64.zip")
     writeFileSync(zip, "fixture archive bytes")
     await artifactCreated({
       file: zip,
@@ -117,13 +117,13 @@ test("the real builder writes GitHub update metadata with publishing disabled", 
     assert.equal(manager.isPublish, false)
     const feed = readFileSync(join(root, "beta-mac.yml"), "utf8")
     assert.match(feed, /version: 0.1.0-beta.1/)
-    assert.match(feed, /PI-Lab-0.1.0-beta.1-arm64.zip/)
+    assert.match(feed, /PI-Lab-arm64.zip/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test("GitHub release discovery retains PI Lab compatibility and resolves versioned ZIPs", async () => {
+test("GitHub release discovery retains PI Lab compatibility and resolves fixed-name ZIPs", async () => {
   const { GitHubProvider } = require("electron-updater/out/providers/GitHubProvider")
   const compatibility = { formatVersion: 1, migrations: [{ hash: "test", createdAt: 1 }] }
   const requests = []
@@ -134,7 +134,7 @@ test("GitHub release discovery retains PI Lab compatibility and resolves version
         return '<feed><entry><title>Beta 2</title><link href="https://github.com/enajx/PI-Lab/releases/tag/v0.1.0-beta.2"/><content>Changes</content></entry></feed>'
       }
       assert.equal(options.path, "/enajx/PI-Lab/releases/download/v0.1.0-beta.2/beta-mac.yml")
-      return `version: 0.1.0-beta.2\nfiles:\n  - url: PI-Lab-0.1.0-beta.2-arm64.zip\n    sha512: fixture\npiLabCompatibility: ${JSON.stringify(compatibility)}\n`
+      return `version: 0.1.0-beta.2\nfiles:\n  - url: PI-Lab-arm64.zip\n    sha512: fixture\npiLabCompatibility: ${JSON.stringify(compatibility)}\n`
     },
   }
   const provider = new GitHubProvider(
@@ -151,7 +151,7 @@ test("GitHub release discovery retains PI Lab compatibility and resolves version
   assert.deepEqual(release.piLabCompatibility, compatibility)
   assert.equal(
     provider.resolveFiles(release)[0].url.href,
-    "https://github.com/enajx/PI-Lab/releases/download/v0.1.0-beta.2/PI-Lab-0.1.0-beta.2-arm64.zip",
+    "https://github.com/enajx/PI-Lab/releases/download/v0.1.0-beta.2/PI-Lab-arm64.zip",
   )
   assert.equal(requests.length, 2)
 })
