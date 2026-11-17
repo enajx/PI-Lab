@@ -202,6 +202,8 @@ const setTableSettingsInput = previewInput.extend({
         decimals: z.number().int().min(0).max(12).nullable(),
         scientific: z.boolean(),
       }),
+      /** A palette id, or null for the default color map from Settings. */
+      chartColors: z.string().min(1).nullable(),
     })
     .nullable(),
 })

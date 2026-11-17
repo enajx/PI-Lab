@@ -1306,6 +1306,7 @@ describe("science.analysis.preview", () => {
         sort: [{ column: "probability", descending: true }],
       },
       display: { hidden: ["repetition"], order: [], decimals: 2, scientific: false },
+      chartColors: "viridis",
     }
     await h.caller.science.analysis.setTableSettings({
       projectId: project.id,

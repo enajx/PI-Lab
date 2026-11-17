@@ -1285,5 +1285,12 @@
   "This video cannot be played here (format or codec not supported).": "此视频无法在此播放(不支持的格式或编解码器)。",
   "Notebook output": "笔记本输出",
   "Output not shown": "未显示输出",
-  "Updating…": "正在更新…"
+  "Updating…": "正在更新…",
+  "Colors": "颜色",
+  "Default (from Settings)": "默认(来自设置)",
+  "Back to 100%": "恢复到 100%",
+  "Shrink the table so all its columns fit the panel width; click again to go back to 100%": "缩小表格,使所有列适应面板宽度;再次点击可恢复到 100%",
+  "Open an agent, a terminal, or a document in a new pane.": "在新窗格中打开代理、终端或文档。",
+  "Chart colors": "图表颜色",
+  "The color map of Analysis charts. A table's Chart settings can choose another for that file name.": "Analysis 图表的色图。表格的图表设置可以为该文件名选择其他色图。"
 }

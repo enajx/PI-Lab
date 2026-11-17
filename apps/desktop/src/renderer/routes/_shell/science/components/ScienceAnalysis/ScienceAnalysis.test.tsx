@@ -888,9 +888,7 @@ describe("ScienceAnalysis", () => {
       "results/group_b/early-run/curve.pdf",
       "results/summary.json",
     ])
-    expect(rows[0]?.textContent).toContain(
-      "results/group_b/early-run/animations/growth.gif",
-    )
+    expect(rows[0]?.textContent).toContain("results/group_b/early-run/animations/growth.gif")
     expect(window.localStorage.getItem("pi-lab.analysis.flatList")).toBe("true")
 
     // Chips still apply.
@@ -905,10 +903,13 @@ describe("ScienceAnalysis", () => {
       "projects.list": () => [project({ id: "p1", name: "alpha" })],
       "science.analysis.listFiles": () =>
         listing([{ relPath: "d.csv", name: "d.csv", kind: "csv" }]),
-      ...tableStubs(["name", "value"], [
+      ...tableStubs(
+        ["name", "value"],
+        [
           ["alpha", "1"],
           ["beta", "2"],
-        ]),
+        ],
+      ),
     })
 
     await waitFor(() => {

@@ -1285,5 +1285,12 @@
   "This video cannot be played here (format or codec not supported).": "이 동영상은 여기서 재생할 수 없습니다(지원되지 않는 형식 또는 코덱).",
   "Notebook output": "노트북 출력",
   "Output not shown": "출력이 표시되지 않음",
-  "Updating…": "업데이트 중…"
+  "Updating…": "업데이트 중…",
+  "Colors": "색상",
+  "Default (from Settings)": "기본값(설정에서)",
+  "Back to 100%": "100%로 되돌리기",
+  "Shrink the table so all its columns fit the panel width; click again to go back to 100%": "모든 열이 패널 너비에 들어가도록 표를 줄입니다. 다시 클릭하면 100%로 돌아갑니다",
+  "Open an agent, a terminal, or a document in a new pane.": "에이전트, 터미널 또는 문서를 새 창에서 엽니다.",
+  "Chart colors": "차트 색상",
+  "The color map of Analysis charts. A table's Chart settings can choose another for that file name.": "Analysis 차트의 색상 맵입니다. 표의 차트 설정에서 해당 파일 이름에 다른 색상 맵을 선택할 수 있습니다."
 }

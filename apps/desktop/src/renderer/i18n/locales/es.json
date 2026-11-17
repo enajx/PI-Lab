@@ -1285,5 +1285,12 @@
   "This video cannot be played here (format or codec not supported).": "Este vídeo no se puede reproducir aquí (formato o códec no compatible).",
   "Notebook output": "Salida del cuaderno",
   "Output not shown": "Salida no mostrada",
-  "Updating…": "Actualizando…"
+  "Updating…": "Actualizando…",
+  "Colors": "Colores",
+  "Default (from Settings)": "Predeterminado (de Configuración)",
+  "Back to 100%": "Volver al 100 %",
+  "Shrink the table so all its columns fit the panel width; click again to go back to 100%": "Reducir la tabla para que todas sus columnas quepan en el ancho del panel; haga clic de nuevo para volver al 100 %",
+  "Open an agent, a terminal, or a document in a new pane.": "Abrir un agente, una terminal o un documento en un panel nuevo.",
+  "Chart colors": "Colores del gráfico",
+  "The color map of Analysis charts. A table's Chart settings can choose another for that file name.": "El mapa de colores de los gráficos de Analysis. La configuración del gráfico de una tabla puede elegir otro para ese nombre de archivo."
 }

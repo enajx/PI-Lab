@@ -61,6 +61,8 @@ export type ScienceSessionRequest =
   | { projectId: string; pane: Omit<SessionPane, "id"> }
   | { projectId: string; notebookRelPath: string }
   | { projectId: string; fileRelPath: string }
+  /** Open a new pane: the agent chooser, the remembered agent, a terminal or a new Markdown file. */
+  | { projectId: string; create: "agentChooser" | "agent" | "terminal" | "markdown" }
 
 /**
  * Turn an agent to focus into a session request for the panel, once per session:
@@ -649,14 +651,30 @@ function SessionsBody({
   const attachSession = controller.attachSession
   const openNotebook = controller.openNotebook
   const openFile = controller.openFile
+  const { openAgentChooser, openAgent, openTerminal, openNewMarkdown } = controller
   useEffect(() => {
     if (!openSession) return
     if ("pane" in openSession) attachSession(openSession.pane)
     else if ("notebookRelPath" in openSession) openNotebook(openSession.notebookRelPath)
-    else openFile(openSession.fileRelPath)
+    else if ("fileRelPath" in openSession) openFile(openSession.fileRelPath)
+    else if (openSession.create === "agentChooser") openAgentChooser()
+    else if (openSession.create === "agent") openAgent()
+    else if (openSession.create === "terminal") openTerminal()
+    else openNewMarkdown()
     onShowSessions()
     onSessionOpened()
-  }, [attachSession, onShowSessions, onSessionOpened, openFile, openNotebook, openSession])
+  }, [
+    attachSession,
+    onShowSessions,
+    onSessionOpened,
+    openFile,
+    openNotebook,
+    openSession,
+    openAgentChooser,
+    openAgent,
+    openTerminal,
+    openNewMarkdown,
+  ])
 
   // While hidden the central panel's shortcuts are off, so ⌘T is handled here.
   const openNewSession = useOpenNewSession(controller)

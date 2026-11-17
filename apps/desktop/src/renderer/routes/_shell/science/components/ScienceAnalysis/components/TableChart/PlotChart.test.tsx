@@ -38,7 +38,7 @@ describe("PlotChart zoom", () => {
   afterEach(() => cleanup())
 
   test("a line chart zooms its x axis with +, - and a drag", () => {
-    const { container } = render(<PlotChart plot={plotWith("line", 201)} />)
+    const { container } = render(<PlotChart plot={plotWith("line", 201)} palette="default" />)
     expect(Math.max(...xTicks(container))).toBe(200)
     fireEvent.click(screen.getByTestId("analysis-chart-zoom-in"))
     expect(Math.min(...xTicks(container))).toBeGreaterThanOrEqual(50)
@@ -57,7 +57,7 @@ describe("PlotChart zoom", () => {
   })
 
   test("a bar chart keeps the bars whose x is in the zoomed range", () => {
-    const { container } = render(<PlotChart plot={plotWith("bar", 9)} />)
+    const { container } = render(<PlotChart plot={plotWith("bar", 9)} palette="default" />)
     expect(xTicks(container)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8])
     fireEvent.click(screen.getByTestId("analysis-chart-zoom-in"))
     expect(xTicks(container)).toEqual([2, 3, 4, 5, 6])
@@ -66,7 +66,7 @@ describe("PlotChart zoom", () => {
   })
 
   test("dragging over bars keeps the bars from the first to the last one dragged over", () => {
-    const { container } = render(<PlotChart plot={plotWith("bar", 9)} />)
+    const { container } = render(<PlotChart plot={plotWith("bar", 9)} palette="default" />)
     const plot = container.querySelector(".recharts-wrapper")
     if (!plot) throw new Error("Expected the chart to render")
     // Nine bars share 60..612 px, about 61 px each: 152 px is bar 1, 336 px is bar 4.

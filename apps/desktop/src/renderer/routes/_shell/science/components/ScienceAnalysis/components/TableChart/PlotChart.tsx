@@ -26,7 +26,6 @@ import { formatChartNumber } from "../MetricChart/formatChartNumber"
 import {
   CHART_HEIGHT,
   ChartTooltip,
-  colorFor,
   FALLBACK_WIDTH,
   MAX_LEGEND_SERIES,
   PLOT_MARGIN,
@@ -35,6 +34,7 @@ import {
   Y_AXIS_WIDTH,
   ZOOMED_Y_DOMAIN,
 } from "../MetricChart/MetricChart"
+import { paletteColor } from "../MetricChart/palettes"
 import { ZoomControls } from "../MetricChart/ZoomControls"
 
 /**
@@ -50,7 +50,8 @@ import { ZoomControls } from "../MetricChart/ZoomControls"
 
 const AXIS_TICK = { fontSize: 11, fill: "var(--muted-foreground)" }
 
-export function PlotChart({ plot }: { plot: PlotPreview }) {
+export function PlotChart({ plot, palette }: { plot: PlotPreview; palette: string }) {
+  const colorFor = (index: number): string => paletteColor(palette, index, plot.series.length)
   const t = useTranslate()
   const { ref, width } = useMeasuredWidth()
   const categories = plot.xCategories
@@ -70,9 +71,19 @@ export function PlotChart({ plot }: { plot: PlotPreview }) {
       ) : (
         <div ref={ref} className="relative w-full select-none">
           {plot.chartType === "bar" ? (
-            <BarPlot plot={plot} width={width || FALLBACK_WIDTH} xText={xText} />
+            <BarPlot
+              plot={plot}
+              width={width || FALLBACK_WIDTH}
+              xText={xText}
+              colorFor={colorFor}
+            />
           ) : (
-            <PointPlot plot={plot} width={width || FALLBACK_WIDTH} xText={xText} />
+            <PointPlot
+              plot={plot}
+              width={width || FALLBACK_WIDTH}
+              xText={xText}
+              colorFor={colorFor}
+            />
           )}
         </div>
       )}
@@ -147,10 +158,13 @@ function PlotTooltip({
 /** Lines or points, with a shaded band when the series has one. */
 function PointPlot({
   plot,
+  colorFor,
   width,
   xText,
 }: {
   plot: PlotPreview
+  /** The color of series `index`. */
+  colorFor: (index: number) => string
   width: number
   xText: (value: number) => string
 }) {
@@ -273,10 +287,13 @@ function PointPlot({
 /** Bars, one row per x value, with error bars for the spread. */
 function BarPlot({
   plot,
+  colorFor,
   width,
   xText,
 }: {
   plot: PlotPreview
+  /** The color of series `index`. */
+  colorFor: (index: number) => string
   width: number
   xText: (value: number) => string
 }) {

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { CartesianGrid, Line, LineChart, ReferenceArea, Tooltip, XAxis, YAxis } from "recharts"
 import type { ChartPreview } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { useAnalysisChartColors } from "../../../../../../../preferences/preferences"
 import { inRange, rangeOf, useChartZoom, xAtPixel, zoomMouseHandlers } from "./chartZoom"
 import { formatChartNumber } from "./formatChartNumber"
+import { paletteColor } from "./palettes"
 import { ZoomControls } from "./ZoomControls"
 
 /**
@@ -35,22 +37,6 @@ export const SELECTION_FILL = "var(--muted-foreground)"
  * keeps recharts' default, which starts at 0.
  */
 export const ZOOMED_Y_DOMAIN = { domain: ["auto", "auto"] as [string, string] }
-
-/** Per-series stroke palette in OKLCH so it reads on both light and dark themes. */
-const SERIES_COLORS = [
-  "oklch(0.65 0.18 250)",
-  "oklch(0.65 0.18 30)",
-  "oklch(0.65 0.18 140)",
-  "oklch(0.65 0.18 300)",
-  "oklch(0.65 0.18 60)",
-  "oklch(0.65 0.18 180)",
-  "oklch(0.65 0.18 0)",
-  "oklch(0.65 0.18 210)",
-] as const
-
-export function colorFor(index: number): string {
-  return SERIES_COLORS[index % SERIES_COLORS.length] ?? SERIES_COLORS[0]
-}
 
 /** Track an element's content width, updating on resize where supported. */
 export function useMeasuredWidth(): { ref: React.RefObject<HTMLDivElement | null>; width: number } {
@@ -123,6 +109,7 @@ export function ChartTooltip({
 }
 
 export function MetricChart({ preview }: { preview: ChartPreview }) {
+  const [palette] = useAnalysisChartColors()
   const t = useTranslate()
   const { ref, width } = useMeasuredWidth()
 
@@ -215,7 +202,7 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
               key={series.label}
               type="monotone"
               dataKey={series.label}
-              stroke={colorFor(i)}
+              stroke={paletteColor(palette, i, preview.series.length)}
               strokeWidth={1.5}
               dot={false}
               isAnimationActive={false}
@@ -240,7 +227,7 @@ export function MetricChart({ preview }: { preview: ChartPreview }) {
               <span
                 aria-hidden
                 className="size-2.5 shrink-0 rounded-sm"
-                style={{ backgroundColor: colorFor(i) }}
+                style={{ backgroundColor: paletteColor(palette, i, preview.series.length) }}
               />
               <span className="text-muted-foreground">{series.label}</span>
             </span>

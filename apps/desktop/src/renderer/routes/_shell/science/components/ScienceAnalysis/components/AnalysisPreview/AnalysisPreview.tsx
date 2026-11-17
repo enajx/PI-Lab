@@ -2,6 +2,7 @@ import { DATA_FILE_KIND_LABELS, type DataFileKind } from "@pi-lab/shared/analysi
 import type { NotebookCell, NotebookOutput } from "@pi-lab/shared/analysis/ipynb"
 import { splitFrontMatter } from "@pi-lab/shared/markdown/front-matter"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import { Bot, FileText, Plus, TerminalSquare } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react"
 import type { DataFilePreview } from "../../../../../../../../main/trpc/science/analysis"
 import {
@@ -44,6 +45,7 @@ export function AnalysisPreview({
   relPath,
   kind,
   onOpenNotebook,
+  onNewPane,
   headerEnd,
 }: {
   projectId: string
@@ -53,6 +55,8 @@ export function AnalysisPreview({
   kind: DataFileKind
   /** Open this Jupyter or marimo notebook in a notebook tab on its own server. */
   onOpenNotebook: (relPath: string) => void
+  /** Open a new pane in the Sessions panel (the + menu, agent, terminal and document buttons). */
+  onNewPane: (create: NewPaneKind) => void
   /** Shown at the right end of the header row (the collapsed right panel's expand button). */
   headerEnd: ReactNode
 }) {
@@ -142,6 +146,7 @@ export function AnalysisPreview({
             onRendered={(result) => setRendered({ relPath, result, at: Date.now() })}
           />
         ) : null}
+        <NewPaneButtons onNewPane={onNewPane} />
         {headerEnd ? <div className="-my-1 -me-2 flex shrink-0">{headerEnd}</div> : null}
       </div>
       <div
@@ -855,4 +860,108 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** What a new-pane button opens in the Sessions panel. */
+export type NewPaneKind = "agentChooser" | "agent" | "terminal" | "markdown"
+
+/**
+ * The project view's pane buttons (+ menu, new agent, new terminal, new
+ * document), here opening their pane in the Sessions panel on the right.
+ */
+function NewPaneButtons({ onNewPane }: { onNewPane: (create: NewPaneKind) => void }) {
+  const t = useTranslate()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menu = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointer = (event: PointerEvent) => {
+      if (menu.current && !menu.current.contains(event.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointer)
+    return () => document.removeEventListener("pointerdown", onPointer)
+  }, [menuOpen])
+  const iconButton =
+    "flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+  const menuItem = (create: NewPaneKind, label: string, icon: ReactNode) => (
+    <button
+      type="button"
+      role="menuitem"
+      data-testid={`analysis-add-${create}`}
+      onClick={() => {
+        setMenuOpen(false)
+        onNewPane(create)
+      }}
+      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
+    >
+      {icon}
+      {label}
+    </button>
+  )
+  return (
+    <div className="-my-1 flex shrink-0 items-center gap-0.5">
+      <div ref={menu} className="relative">
+        <button
+          type="button"
+          data-testid="analysis-add-menu"
+          title={t("Add pane")}
+          aria-label={t("Add pane")}
+          data-feature-help={t("Open an agent, a terminal, or a document in a new pane.")}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+          className={iconButton}
+        >
+          <Plus className="size-4" aria-hidden />
+        </button>
+        {menuOpen ? (
+          <div
+            role="menu"
+            className="absolute top-8 end-0 z-30 w-36 rounded-md border border-border bg-popover p-1 shadow-lg"
+          >
+            {menuItem("agentChooser", t("Agent CLI"), <Bot className="size-3.5" aria-hidden />)}
+            {menuItem(
+              "terminal",
+              t("Terminal"),
+              <TerminalSquare className="size-3.5" aria-hidden />,
+            )}
+            {menuItem("markdown", t("Document"), <FileText className="size-3.5" aria-hidden />)}
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        data-testid="analysis-new-agent"
+        title={t("New agent")}
+        aria-label={t("New agent")}
+        data-feature-help={t("Start the remembered coding agent in this project workspace")}
+        onClick={() => onNewPane("agent")}
+        className={iconButton}
+      >
+        <Bot className="size-4" aria-hidden />
+      </button>
+      <button
+        type="button"
+        data-testid="analysis-new-terminal"
+        title={t("New terminal")}
+        aria-label={t("New terminal")}
+        data-feature-help={t("Open an interactive shell in this project workspace")}
+        onClick={() => onNewPane("terminal")}
+        className={iconButton}
+      >
+        <TerminalSquare className="size-4" aria-hidden />
+      </button>
+      <button
+        type="button"
+        data-testid="analysis-new-markdown"
+        title={t("New markdown")}
+        aria-label={t("New markdown")}
+        data-feature-help={t("Create an untitled Markdown file in the built-in editor")}
+        onClick={() => onNewPane("markdown")}
+        className={iconButton}
+      >
+        <FileText className="size-4" aria-hidden />
+      </button>
+    </div>
+  )
 }

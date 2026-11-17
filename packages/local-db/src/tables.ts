@@ -396,6 +396,11 @@ export interface TableSettings {
     /** Show numbers in scientific notation (e.g. 1.23e-4). */
     scientific: boolean
   }
+  /**
+   * The chart's color map (a palette id), or null for the default set in
+   * Settings. Absent in settings saved before color maps existed.
+   */
+  chartColors?: string | null
 }
 
 type TableAggFunction =

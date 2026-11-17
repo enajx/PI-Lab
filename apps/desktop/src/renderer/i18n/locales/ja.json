@@ -1285,5 +1285,12 @@
   "This video cannot be played here (format or codec not supported).": "この動画はここで再生できません(形式またはコーデックが未対応です)。",
   "Notebook output": "ノートブックの出力",
   "Output not shown": "出力は表示されません",
-  "Updating…": "更新中…"
+  "Updating…": "更新中…",
+  "Colors": "色",
+  "Default (from Settings)": "既定(設定から)",
+  "Back to 100%": "100% に戻す",
+  "Shrink the table so all its columns fit the panel width; click again to go back to 100%": "すべての列がパネルの幅に収まるように表を縮小します。もう一度クリックすると 100% に戻ります",
+  "Open an agent, a terminal, or a document in a new pane.": "エージェント、ターミナル、またはドキュメントを新しいペインで開きます。",
+  "Chart colors": "グラフの色",
+  "The color map of Analysis charts. A table's Chart settings can choose another for that file name.": "Analysis のグラフのカラーマップです。表のグラフ設定で、そのファイル名に別のものを選べます。"
 }

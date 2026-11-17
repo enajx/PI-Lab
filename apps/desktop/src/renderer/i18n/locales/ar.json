@@ -1285,5 +1285,12 @@
   "This video cannot be played here (format or codec not supported).": "لا يمكن تشغيل هذا الفيديو هنا (التنسيق أو الترميز غير مدعوم).",
   "Notebook output": "مخرجات الدفتر",
   "Output not shown": "المخرجات غير معروضة",
-  "Updating…": "جارٍ التحديث…"
+  "Updating…": "جارٍ التحديث…",
+  "Colors": "الألوان",
+  "Default (from Settings)": "الافتراضي (من الإعدادات)",
+  "Back to 100%": "العودة إلى 100%",
+  "Shrink the table so all its columns fit the panel width; click again to go back to 100%": "تصغير الجدول لتتسع كل أعمدته لعرض اللوحة؛ انقر مرة أخرى للعودة إلى 100%",
+  "Open an agent, a terminal, or a document in a new pane.": "فتح وكيل أو طرفية أو مستند في لوحة جديدة.",
+  "Chart colors": "ألوان المخطط",
+  "The color map of Analysis charts. A table's Chart settings can choose another for that file name.": "خريطة ألوان مخططات Analysis. يمكن لإعدادات مخطط الجدول اختيار خريطة أخرى لاسم الملف هذا."
 }

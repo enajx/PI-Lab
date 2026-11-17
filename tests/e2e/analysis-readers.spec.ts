@@ -257,6 +257,8 @@ test("a long-format table opens as a table; the chart builder plots it and the c
   )
   await window.getByTestId("analysis-chart-band").selectOption("minmax")
   await expect(plot.locator(".recharts-area")).toHaveCount(3)
+  // Another color map for this file name: the first bar series takes tab10's first color.
+  await window.getByTestId("analysis-chart-colors").selectOption("tab10")
   await window.getByTestId("analysis-chart-type").selectOption("bar")
   await expect(plot.locator(".recharts-bar-rectangle").first()).toBeVisible()
   // Error bars are drawn (zero length here: the fixture's values do not vary within a group).
@@ -278,6 +280,9 @@ test("a long-format table opens as a table; the chart builder plots it and the c
   ).toBeVisible({
     timeout: 30_000,
   })
+  await expect(
+    window.getByTestId("analysis-plot").locator(".recharts-bar-rectangle path").first(),
+  ).toHaveAttribute("fill", "#1f77b4")
 
   // Reset to default stays in Chart view with the automatic settings.
   await window.getByTestId("analysis-chart-settings").click()
@@ -404,8 +409,25 @@ test("the table scrolls to its last row, and text size and Fit are kept after a 
   const zoom = await window.getByTestId("analysis-table-zoom").textContent()
   const fits = await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
   expect(fits).toBe(true)
+  // A second click goes back to 100%, a third fits again.
+  await window.getByTestId("analysis-table-zoom-fit").click()
+  await expect(window.getByTestId("analysis-table-zoom")).toHaveText("100%")
+  await window.getByTestId("analysis-table-zoom-fit").click()
+  await expect(window.getByTestId("analysis-table-zoom")).toHaveText(zoom ?? "")
   await closeApp()
   window = await openAnalysis()
   await selectFile(window, "many.csv")
   await expect(window.getByTestId("analysis-table-zoom")).toHaveText(zoom ?? "")
+})
+
+test("the preview header's terminal and document buttons open them in the Sessions panel", async () => {
+  test.setTimeout(120_000)
+  const window = await openAnalysis()
+  await selectFile(window, "options.csv")
+  const panel = window.getByTestId("science-sessions")
+  await window.getByTestId("analysis-new-terminal").click()
+  await expect(panel.getByTestId("terminal").first()).toBeVisible({ timeout: 30_000 })
+  await window.getByTestId("analysis-add-menu").click()
+  await window.getByTestId("analysis-add-markdown").click()
+  await expect(panel.getByText("untitled.md").first()).toBeVisible({ timeout: 30_000 })
 })

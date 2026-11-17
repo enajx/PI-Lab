@@ -1,5 +1,5 @@
 import { useQueries } from "@tanstack/react-query"
-import { ArrowDown, ArrowUp, Maximize2, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowDown, ArrowUp, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import type { TableOps, TablePage } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
@@ -68,6 +68,8 @@ export function DataTable({
   const trpc = useTRPC()
   const scroller = useRef<HTMLDivElement>(null)
   const [zoom, setZoomState] = useState(readZoom)
+  /** The zoom Fit last set, so a second click can go back to 100%. */
+  const fitZoom = useRef<number | null>(null)
   const [view, setView] = useState({ top: 0, height: 480 })
   const setZoom = (next: number): void => {
     const value = clampZoom(next)
@@ -125,11 +127,20 @@ export function DataTable({
     else if (!key.descending) onSort([{ column: name, descending: true }])
     else onSort([])
   }
+  // Fit, then a second click goes back to 100%.
+  const fitted = fitZoom.current !== null && Math.abs(zoom - fitZoom.current) < 0.005
   const fit = (): void => {
+    if (fitted) {
+      fitZoom.current = null
+      setZoom(1)
+      return
+    }
     const element = scroller.current
     const table = element?.querySelector("table")
     if (!element || !table || table.scrollWidth === 0) return
-    setZoom((zoom * element.clientWidth) / table.scrollWidth)
+    const next = clampZoom((zoom * element.clientWidth) / table.scrollWidth)
+    fitZoom.current = next
+    setZoom(next)
   }
 
   const rows: number[] = []
@@ -137,131 +148,142 @@ export function DataTable({
 
   return (
     <div className="flex min-h-0 flex-col gap-2">
-      <div className="flex items-center justify-end gap-1">
-        <ZoomButton
-          testId="analysis-table-zoom-out"
-          label={t("Smaller text")}
-          help={t("Make the table text smaller, so more columns fit")}
-          disabled={zoom <= MIN_ZOOM}
-          onClick={() => setZoom(zoom - ZOOM_STEP)}
+      <div className="flex min-h-0 gap-1.5">
+        <div
+          ref={scroller}
+          data-testid="analysis-table-scroll"
+          onScroll={(event) =>
+            setView({
+              top: event.currentTarget.scrollTop,
+              height: event.currentTarget.clientHeight,
+            })
+          }
+          aria-busy={updating}
+          className={`max-h-[70vh] min-h-24 min-w-0 flex-1 overflow-auto rounded-md border border-border ${
+            updating ? "opacity-50" : ""
+          }`}
         >
-          <ZoomOut className="size-3.5" aria-hidden />
-        </ZoomButton>
-        <span
-          data-testid="analysis-table-zoom"
-          className="w-9 text-center text-muted-foreground text-xs"
-        >
-          {`${Math.round(zoom * 100)}%`}
-        </span>
-        <ZoomButton
-          testId="analysis-table-zoom-in"
-          label={t("Larger text")}
-          help={t("Make the table text larger")}
-          disabled={zoom >= MAX_ZOOM}
-          onClick={() => setZoom(zoom + ZOOM_STEP)}
-        >
-          <ZoomIn className="size-3.5" aria-hidden />
-        </ZoomButton>
-        <ZoomButton
-          testId="analysis-table-zoom-fit"
-          label={t("Fit to width")}
-          help={t("Shrink the table so all its columns fit the panel width")}
-          disabled={false}
-          onClick={fit}
-        >
-          <Maximize2 className="size-3.5" aria-hidden />
-        </ZoomButton>
-      </div>
-      <div
-        ref={scroller}
-        data-testid="analysis-table-scroll"
-        onScroll={(event) =>
-          setView({ top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight })
-        }
-        aria-busy={updating}
-        className={`max-h-[70vh] min-h-24 overflow-auto rounded-md border border-border ${
-          updating ? "opacity-50" : ""
-        }`}
-      >
-        <table
-          data-testid="analysis-preview-table"
-          className="border-collapse"
-          style={{ fontSize: FONT_SIZE * zoom }}
-        >
-          <thead className="sticky top-0 z-10 bg-muted">
-            <tr className="border-border border-b">
-              {shown.map((col) => {
-                const name = firstPage.headers[col] ?? ""
-                const key = sortOf(name)
-                return (
-                  <th
-                    key={name}
-                    className="whitespace-nowrap text-left font-medium"
-                    style={{ height: rowHeight, paddingInline: cellPadding }}
-                  >
-                    <button
-                      type="button"
-                      data-testid="analysis-table-header"
-                      title={t("Sort by this column")}
-                      onClick={() => clickHeader(name)}
-                      className="flex items-center gap-1 hover:text-foreground"
+          <table
+            data-testid="analysis-preview-table"
+            className="border-collapse"
+            style={{ fontSize: FONT_SIZE * zoom }}
+          >
+            <thead className="sticky top-0 z-10 bg-muted">
+              <tr className="border-border border-b">
+                {shown.map((col) => {
+                  const name = firstPage.headers[col] ?? ""
+                  const key = sortOf(name)
+                  return (
+                    <th
+                      key={name}
+                      className="whitespace-nowrap text-left font-medium"
+                      style={{ height: rowHeight, paddingInline: cellPadding }}
                     >
-                      {name}
-                      {key ? (
-                        key.descending ? (
-                          <ArrowDown className="size-3" aria-label={t("descending")} />
-                        ) : (
-                          <ArrowUp className="size-3" aria-label={t("ascending")} />
-                        )
-                      ) : null}
-                    </button>
-                  </th>
+                      <button
+                        type="button"
+                        data-testid="analysis-table-header"
+                        title={t("Sort by this column")}
+                        onClick={() => clickHeader(name)}
+                        className="flex items-center gap-1 hover:text-foreground"
+                      >
+                        {name}
+                        {key ? (
+                          key.descending ? (
+                            <ArrowDown className="size-3" aria-label={t("descending")} />
+                          ) : (
+                            <ArrowUp className="size-3" aria-label={t("ascending")} />
+                          )
+                        ) : null}
+                      </button>
+                    </th>
+                  )
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {first > 0 ? (
+                <tr aria-hidden style={{ height: first * rowHeight }}>
+                  <td colSpan={shown.length} />
+                </tr>
+              ) : null}
+              {rows.map((index) => {
+                const row = rowAt(index)
+                return (
+                  <tr
+                    key={index}
+                    data-testid="analysis-table-row"
+                    data-row={index}
+                    className="border-border border-b last:border-b-0"
+                    style={{ height: rowHeight }}
+                  >
+                    {shown.map((col) => {
+                      const cell = row?.[col] ?? ""
+                      const text = numeric[col] ? formatNumber(cell, format) : cell
+                      return (
+                        <td
+                          key={col}
+                          title={cell.length > 60 ? cell : undefined}
+                          style={{ paddingInline: cellPadding }}
+                          className={`max-w-[28em] select-text cursor-text truncate whitespace-nowrap font-mono ${
+                            numeric[col] ? "text-right" : ""
+                          } ${row ? "" : "text-muted-foreground"}`}
+                        >
+                          {row ? text : "…"}
+                        </td>
+                      )
+                    })}
+                  </tr>
                 )
               })}
-            </tr>
-          </thead>
-          <tbody>
-            {first > 0 ? (
-              <tr aria-hidden style={{ height: first * rowHeight }}>
-                <td colSpan={shown.length} />
-              </tr>
-            ) : null}
-            {rows.map((index) => {
-              const row = rowAt(index)
-              return (
-                <tr
-                  key={index}
-                  data-testid="analysis-table-row"
-                  data-row={index}
-                  className="border-border border-b last:border-b-0"
-                  style={{ height: rowHeight }}
-                >
-                  {shown.map((col) => {
-                    const cell = row?.[col] ?? ""
-                    const text = numeric[col] ? formatNumber(cell, format) : cell
-                    return (
-                      <td
-                        key={col}
-                        title={cell.length > 60 ? cell : undefined}
-                        style={{ paddingInline: cellPadding }}
-                        className={`max-w-[28em] select-text cursor-text truncate whitespace-nowrap font-mono ${
-                          numeric[col] ? "text-right" : ""
-                        } ${row ? "" : "text-muted-foreground"}`}
-                      >
-                        {row ? text : "…"}
-                      </td>
-                    )
-                  })}
+              {last < total ? (
+                <tr aria-hidden style={{ height: (total - last) * rowHeight }}>
+                  <td colSpan={shown.length} />
                 </tr>
-              )
-            })}
-            {last < total ? (
-              <tr aria-hidden style={{ height: (total - last) * rowHeight }}>
-                <td colSpan={shown.length} />
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          <ZoomButton
+            testId="analysis-table-zoom-in"
+            label={t("Larger text")}
+            help={t("Make the table text larger")}
+            disabled={zoom >= MAX_ZOOM}
+            onClick={() => setZoom(zoom + ZOOM_STEP)}
+          >
+            <ZoomIn className="size-3.5" aria-hidden />
+          </ZoomButton>
+          <ZoomButton
+            testId="analysis-table-zoom-out"
+            label={t("Smaller text")}
+            help={t("Make the table text smaller, so more columns fit")}
+            disabled={zoom <= MIN_ZOOM}
+            onClick={() => setZoom(zoom - ZOOM_STEP)}
+          >
+            <ZoomOut className="size-3.5" aria-hidden />
+          </ZoomButton>
+          <ZoomButton
+            testId="analysis-table-zoom-fit"
+            label={fitted ? t("Back to 100%") : t("Fit to width")}
+            help={t(
+              "Shrink the table so all its columns fit the panel width; click again to go back to 100%",
+            )}
+            disabled={false}
+            onClick={fit}
+          >
+            {fitted ? (
+              <Minimize2 className="size-3.5" aria-hidden />
+            ) : (
+              <Maximize2 className="size-3.5" aria-hidden />
+            )}
+          </ZoomButton>
+          <span
+            data-testid="analysis-table-zoom"
+            className="text-center text-[10px] text-muted-foreground"
+          >
+            {`${Math.round(zoom * 100)}%`}
+          </span>
+        </div>
       </div>
       {pageError ? (
         <p className="select-text cursor-text text-destructive text-xs">{pageError.message}</p>

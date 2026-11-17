@@ -84,7 +84,7 @@ export function TableSettings({
         "Show, hide and reorder columns, sort rows, filter rows, and set how numbers are shown",
       )}
       testId="analysis-table-settings"
-      iconOnly={false}
+      iconOnly={true}
       active={active}
     >
       {() => (

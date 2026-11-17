@@ -1,4 +1,4 @@
-import { Settings2 } from "lucide-react"
+import { Settings } from "lucide-react"
 import type {
   ChartAggregate,
   ChartBand,
@@ -7,6 +7,7 @@ import type {
   ColumnInfo,
 } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { PALETTES } from "../MetricChart/palettes"
 import { CONTROL_CLASS, Field, SettingsPopover } from "./SettingsPopover"
 
 /**
@@ -43,11 +44,16 @@ export function useColumnLabel(): (column: ColumnInfo) => string {
 export function ChartSettings({
   spec,
   columns,
+  colors,
+  onColors,
   onChange,
   onReset,
 }: {
   spec: ChartSpec
   columns: ColumnInfo[]
+  /** This file name's color map, or null for the default from Settings. */
+  colors: string | null
+  onColors: (colors: string | null) => void
   onChange: (spec: ChartSpec) => void
   onReset: () => void
 }) {
@@ -60,13 +66,13 @@ export function ChartSettings({
   const bandAllowed = spec.aggregate === "mean" || spec.aggregate === "median"
   return (
     <SettingsPopover
-      icon={<Settings2 className="size-3.5" aria-hidden />}
+      icon={<Settings className="size-3.5" aria-hidden />}
       label={t("Chart settings")}
       help={t(
         "Choose the x and y columns, a column to split lines by, the chart type, how rows with the same x are combined, and the spread band",
       )}
       testId="analysis-chart-settings"
-      iconOnly={false}
+      iconOnly={true}
       active={false}
     >
       {(close) => (
@@ -192,6 +198,21 @@ export function ChartSettings({
               {BANDS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {t(option.label)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t("Colors")}>
+            <select
+              data-testid="analysis-chart-colors"
+              value={colors ?? ""}
+              onChange={(event) => onColors(event.target.value === "" ? null : event.target.value)}
+              className={`w-full ${CONTROL_CLASS}`}
+            >
+              <option value="">{t("Default (from Settings)")}</option>
+              {PALETTES.map((palette) => (
+                <option key={palette.id} value={palette.id}>
+                  {palette.label}
                 </option>
               ))}
             </select>

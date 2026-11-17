@@ -880,6 +880,9 @@ export function ScienceAnalysis({
                     onOpenNotebook={(notebookRelPath) =>
                       setSessionRequest({ projectId: selectedProjectId, notebookRelPath })
                     }
+                    onNewPane={(create) =>
+                      setSessionRequest({ projectId: selectedProjectId, create })
+                    }
                     headerEnd={null}
                   />
                 ) : resultsMissing && allFiles.length === 0 && !listing.isError ? (

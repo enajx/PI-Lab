@@ -10,6 +10,7 @@ import type {
   TablePreview,
 } from "../../../../../../../../main/trpc/science/analysis"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { useAnalysisChartColors } from "../../../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { AggregateSettings } from "./AggregateSettings"
 import { ChartSettings } from "./ChartSettings"
@@ -33,6 +34,8 @@ interface Settings {
   spec: ChartSpec | null
   ops: TableOps
   display: TableDisplay
+  /** The chart's color map for this file name, or null for the default from Settings. */
+  chartColors: string | null
 }
 
 const NO_OPS: TableOps = { filters: [], aggregation: null, sort: [] }
@@ -154,6 +157,7 @@ export function TableChart({
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const summary = useOpsSummary()
+  const [defaultPalette] = useAnalysisChartColors()
   const savedQuery = useQuery(
     trpc.science.analysis.tableSettings.queryOptions({ projectId, relPath }),
   )
@@ -175,12 +179,14 @@ export function TableChart({
     local?.key === shownKey
       ? local.settings
       : savedFits
-        ? saved
+        ? // Settings saved before color maps existed have no `chartColors`.
+          { ...saved, chartColors: saved.chartColors ?? null }
         : {
             view: preview.defaultView,
             spec: preview.defaultSpec,
             ops: NO_OPS,
             display: PLAIN_DISPLAY,
+            chartColors: null,
           }
   const mismatch = saved !== null && !savedFits && local?.key !== shownKey
 
@@ -282,6 +288,14 @@ export function TableChart({
           aggregation={settings.ops.aggregation}
           onChange={(aggregation) => changeOps({ ...settings.ops, aggregation })}
         />
+        <ExportButton
+          projectId={projectId}
+          projectPath={projectPath}
+          relPath={relPath}
+          dataset={dataset}
+          ops={settings.ops}
+          columns={shownNames.length > 0 ? shownNames : null}
+        />
         <TableSettings
           sourceColumns={preview.columns}
           resultColumns={resultColumns}
@@ -294,18 +308,12 @@ export function TableChart({
           <ChartSettings
             spec={spec}
             columns={resultColumns}
+            colors={settings.chartColors}
+            onColors={(chartColors) => change({ ...settings, chartColors })}
             onChange={(next) => change({ ...settings, spec: next })}
             onReset={resetChart}
           />
         ) : null}
-        <ExportButton
-          projectId={projectId}
-          projectPath={projectPath}
-          relPath={relPath}
-          dataset={dataset}
-          ops={settings.ops}
-          columns={shownNames.length > 0 ? shownNames : null}
-        />
       </div>
       {opsText !== "" ? (
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -355,6 +363,7 @@ export function TableChart({
           dataset={dataset}
           ops={settings.ops}
           spec={spec}
+          palette={settings.chartColors ?? defaultPalette}
         />
       ) : (
         <DataTable
@@ -379,12 +388,15 @@ function ChartView({
   dataset,
   ops,
   spec,
+  palette,
 }: {
   projectId: string
   relPath: string
   dataset: string | null
   ops: TableOps
   spec: ChartSpec
+  /** The color map's palette id. */
+  palette: string
 }) {
   const t = useTranslate()
   const trpc = useTRPC()
@@ -404,7 +416,7 @@ function ChartView({
     )
   }
   if (!plot.data) return <p className="text-muted-foreground text-sm">{t("Drawing chart…")}</p>
-  return <PlotChart plot={plot.data} />
+  return <PlotChart plot={plot.data} palette={palette} />
 }
 
 /** Export CSV: a save dialog in the file's folder, then the shown result is written there. */

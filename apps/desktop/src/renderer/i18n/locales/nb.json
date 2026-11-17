@@ -1285,5 +1285,12 @@
   "This video cannot be played here (format or codec not supported).": "Denne videoen kan ikke spilles av her (formatet eller kodeken støttes ikke).",
   "Notebook output": "Notatbokutdata",
   "Output not shown": "Utdata vises ikke",
-  "Updating…": "Oppdaterer …"
+  "Updating…": "Oppdaterer …",
+  "Colors": "Farger",
+  "Default (from Settings)": "Standard (fra Innstillinger)",
+  "Back to 100%": "Tilbake til 100 %",
+  "Shrink the table so all its columns fit the panel width; click again to go back to 100%": "Krymp tabellen slik at alle kolonnene får plass i panelbredden; klikk igjen for å gå tilbake til 100 %",
+  "Open an agent, a terminal, or a document in a new pane.": "Åpne en agent, en terminal eller et dokument i et nytt panel.",
+  "Chart colors": "Diagramfarger",
+  "The color map of Analysis charts. A table's Chart settings can choose another for that file name.": "Fargekartet for Analysis-diagrammer. Diagraminnstillingene til en tabell kan velge et annet for det filnavnet."
 }
