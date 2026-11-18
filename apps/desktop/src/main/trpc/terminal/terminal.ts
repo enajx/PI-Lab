@@ -120,9 +120,13 @@ const ackInput = z.object({
  * count raw bytes since spawn.
  * - start: first event. `replay` continues from the requested offset; for a
  *   `snapshot`, reset the emulator to `cols`x`rows`, write `screen` (which holds
- *   exactly the bytes before `offset`), then the bytes. A later `start` comes
- *   after a skip (always a snapshot) or after the server attached to the
- *   daemon again.
+ *   exactly the bytes before `offset`), then the bytes. A `refresh` applies
+ *   only to an emulator at `base` (its resume point; otherwise ask for a
+ *   snapshot): resize to `cols`x`rows` if it differs, write `screen` without a
+ *   reset (it keeps the emulator's history), then the bytes. After any start
+ *   the emulator is at (`generation`, `offset` + bytes, `revision`). A later
+ *   `start` comes after a skip (a refresh or a snapshot) or after the server
+ *   attached to the daemon again.
  * - data: the bytes starting at `offset`.
  * - resize: the PTY size changed after every byte before `offset`; the screen
  *   is now at `revision`.
@@ -152,6 +156,18 @@ export type TerminalOutput =
       screen: string
       base64: string
     }
+  | {
+      type: "start"
+      generation: string
+      revision: number
+      cols: number
+      rows: number
+      mode: "refresh"
+      base: ResumePoint
+      offset: number
+      screen: string
+      base64: string
+    }
   | { type: "data"; offset: number; base64: string }
   | { type: "resize"; offset: number; revision: number; cols: number; rows: number }
   | { type: "exit"; exitCode: number | null; signal: number | null }
@@ -176,10 +192,11 @@ interface SessionAttachmentHandle {
   detach: () => void
   /**
    * Ask the daemon for the session's latest screen on the same shared
-   * connection (other observers are not affected). `onStart` runs at the
-   * reply boundary: every event after it follows the snapshot.
+   * connection (other observers are not affected), for a client at `from`:
+   * the daemon answers with a small replay, a refresh or a snapshot. `onStart`
+   * runs at the reply boundary: every event after it follows that start.
    */
-  snapshot: (onStart: (result: AttachResult) => void) => Promise<void>
+  snapshot: (from: ResumePoint | null, onStart: (result: AttachResult) => void) => Promise<void>
 }
 
 /**
@@ -302,10 +319,10 @@ function attachSession(
       cancelled = true
       cleanup()
     },
-    snapshot: async (onStart) => {
+    snapshot: async (from, onStart) => {
       const client = current
       if (client === null) throw new Error("not attached to the daemon")
-      await client.attach(sessionId, null, (result) => {
+      await client.attach(sessionId, from, (result) => {
         if (!cancelled) onStart(result)
       })
     },
@@ -389,7 +406,7 @@ export const terminalRouter = router({
       const decoder = new TextDecoder()
       const attachment = attachSession(ctx, input.sessionId, null, {
         onStart: ({ start }) => {
-          const screen = start.mode === "snapshot" ? start.screen : ""
+          const screen = start.mode === "replay" ? "" : start.screen
           const chunk = screen + decoder.decode(start.bytes, { stream: true })
           if (chunk.length > 0) emit.next({ type: "data", chunk })
         },
@@ -474,7 +491,9 @@ export const terminalRouter = router({
         send(
           start.mode === "snapshot"
             ? { ...common, mode: "snapshot", screen: start.screen }
-            : { ...common, mode: "replay" },
+            : start.mode === "refresh"
+              ? { ...common, mode: "refresh", base: start.base, screen: start.screen }
+              : { ...common, mode: "replay" },
         )
       } else if (item.kind === "data") {
         offset = item.offset + item.bytes.length
@@ -508,9 +527,9 @@ export const terminalRouter = router({
       holdSkip: input.holdSkip,
       typedAt: () => lastTypedAt.get(input.sessionId) ?? null,
       deliver,
-      requestSnapshot: () => {
+      requestSnapshot: (from) => {
         attachment
-          .snapshot((result) => stream.snapshotReady(result))
+          .snapshot(from, (result) => stream.snapshotReady(result))
           .catch((error: unknown) => {
             // The daemon connection closed, or the session went away: start over from the client's point.
             const message = error instanceof Error ? error.message : String(error)

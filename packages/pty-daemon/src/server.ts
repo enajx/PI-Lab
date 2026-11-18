@@ -347,7 +347,15 @@ export class DaemonServer {
       start:
         start.mode === "replay"
           ? { mode: "replay", offset: start.offset, base64 }
-          : { mode: "snapshot", offset: start.offset, screen: start.screen, base64 },
+          : start.mode === "snapshot"
+            ? { mode: "snapshot", offset: start.offset, screen: start.screen, base64 }
+            : {
+                mode: "refresh",
+                base: start.base,
+                offset: start.offset,
+                screen: start.screen,
+                base64,
+              },
     })
     connection.attach(session)
   }

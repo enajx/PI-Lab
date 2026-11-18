@@ -2,7 +2,7 @@
 // unsolicited events have none.
 
 /** Bump when a backward-incompatible change is made to the frame shapes. */
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 
 export interface SessionInfo {
   /** Daemon-assigned opaque identifier, stable for the session's lifetime. */
@@ -180,11 +180,16 @@ export interface SpawnReply {
  * - snapshot: a screen that contains exactly the bytes before `offset`, to be
  *   written into a reset terminal of the reply's size, then the bytes from
  *   `offset` to the current offset.
+ * - refresh: only for a client at `base` (its resume point): resize to the
+ *   reply's size if it differs, write `screen` (it resets the modes and
+ *   replaces the visible rows, keeping the client's history), then the bytes
+ *   from `offset` to the current offset.
  * Live `data` events continue from the current offset with no gap or overlap.
  */
 export type AttachStartFrame =
   | { mode: "replay"; offset: number; base64: string }
   | { mode: "snapshot"; offset: number; screen: string; base64: string }
+  | { mode: "refresh"; base: ResumePoint; offset: number; screen: string; base64: string }
 
 export interface AttachReply {
   kind: "attach-ok"

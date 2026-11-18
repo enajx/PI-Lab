@@ -18,7 +18,11 @@ import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest"
 import { WebSocket } from "ws"
 import type { TerminalSupervisor } from "../main/terminal/supervisor"
 import type { ServerRouter } from "../main/trpc/serverRouter"
-import { OUTPUT_QUEUE_LIMIT_BYTES, TYPING_HOLDS_SIZE_MS } from "../main/trpc/terminal/terminal"
+import {
+  OUTPUT_QUEUE_LIMIT_BYTES,
+  type TerminalOutput,
+  TYPING_HOLDS_SIZE_MS,
+} from "../main/trpc/terminal/terminal"
 import {
   type DropPolicy,
   type ResumePoint,
@@ -325,6 +329,10 @@ class Viewer {
   readonly receivedIds: string[] = []
   /** Server errors that ended the stream. */
   readonly errors: string[] = []
+  /** Each start received: its mode and its size (screen plus base64 bytes). */
+  readonly startSizes: { mode: string; bytes: number }[] = []
+  /** Test hook: change an event before the stream sees it. */
+  tamper: ((data: TerminalOutput) => TerminalOutput) | null = null
   #held: (() => void)[] | null = null
   exited = false
 
@@ -337,7 +345,13 @@ class Viewer {
         onData: (event) => {
           this.receivedIds.push(event.id)
           this.received.push({ at: performance.now(), type: event.data.type })
-          handlers.onData(event)
+          const data = event.data
+          if (data.type === "start")
+            this.startSizes.push({
+              mode: data.mode,
+              bytes: (data.mode === "replay" ? 0 : data.screen.length) + data.base64.length,
+            })
+          handlers.onData({ ...event, data: this.tamper ? this.tamper(data) : data })
         },
       })
     }
@@ -461,7 +475,10 @@ for (const dropPolicy of ["keep", "discard"] as const) {
 
     await expectSameEnd(reference, viewer)
     // Every byte applied exactly once: a gap or overlap would have forced a snapshot.
-    expect(viewer.stream.starts).toEqual(["snapshot", "replay"])
+    // A full-screen app gets a refresh when the replay is longer than it.
+    expect(viewer.stream.starts[0]).toBe("snapshot")
+    expect(["replay", "refresh"]).toContain(viewer.stream.starts[1])
+    expect(viewer.stream.starts).toHaveLength(2)
     expect(consoleError).not.toHaveBeenCalled()
     consoleError.mockRestore()
     await control.trpc.terminal.kill.mutate({ sessionId })
@@ -842,9 +859,62 @@ test("a skip delivers the latest screen and scrollback, with no gap or duplicate
   await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
 }, 60_000)
 
-test("a hidden terminal gets no output, and resumes correctly when shown (replay, or a snapshot past the daemon's tail)", async () => {
+test("a skip in a full-screen app sends a screen refresh, not the full snapshot", async () => {
   const control = await newClient()
-  const slowFlood = await spawnFlood(control, "lines", 64 * KiB)
+  const flood = await spawnFlood(control, "fullscreen", 4096 * KiB)
+  const viewer = new Viewer(await newClient(), flood.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "start")
+  const consoleError = vi.spyOn(console, "error")
+  viewer.hold()
+  await control.trpc.terminal.write.mutate({ sessionId: flood.sessionId, data: "g" })
+  const streamId = viewer.streamIds[0] as string
+  await waitFor(async () => (await streamStats(streamId)).skips >= 1, 15_000, "a skip")
+  viewer.release()
+  await waitFor(() => viewer.stream.starts.length >= 2, 10_000, "the skip's start")
+  expect(viewer.stream.starts.slice(0, 2)).toEqual(["snapshot", "refresh"])
+  expect(viewer.startSizes[1]?.bytes).toBeLessThan(16 * KiB)
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  await control.trpc.terminal.write.mutate({ sessionId: flood.sessionId, data: "q" })
+  await expectSameBuffer(viewer, flood.sessionId)
+  expect(viewer.subscribeInputs.length).toBe(1)
+  expect(consoleError).not.toHaveBeenCalled()
+  consoleError.mockRestore()
+  await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
+}, 60_000)
+
+test("a refresh made for another screen (wrong base) is refused: the client asks for a snapshot and ends with the right screen", async () => {
+  const control = await newClient()
+  const sessionId = await spawnProgram(control, "tui")
+  const viewerClient = await newClient()
+  const viewer = new Viewer(viewerClient, sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the program to start")
+  await control.trpc.terminal.write.mutate({ sessionId, data: "g" })
+  await waitFor(() => (viewer.stream.consumed()?.offset ?? 0) > 2_000, 10_000, "output")
+  // The next refresh claims a base one byte before the client's point.
+  viewer.tamper = (data) =>
+    data.type === "start" && data.mode === "refresh"
+      ? { ...data, base: { ...data.base, offset: data.base.offset - 1 } }
+      : data
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+  viewer.stream.setVisible(false)
+  // Enough output while hidden that the daemon sends a refresh, not a small replay.
+  await new Promise((resolve) => setTimeout(resolve, 1_000))
+  viewer.stream.setVisible(true)
+  await waitFor(() => viewer.stream.starts.length === 3, 10_000, "the snapshot after the refusal")
+  expect(viewer.stream.starts).toEqual(["snapshot", "refresh", "snapshot"])
+  expect(viewer.subscribeInputs.at(-1)).toBeNull()
+  expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("does not fit the screen"))
+  consoleError.mockRestore()
+  viewer.tamper = null
+  const reference = new Viewer(await newClient(), sessionId, "keep")
+  await control.trpc.terminal.write.mutate({ sessionId, data: "q" })
+  await expectSameEnd(reference, viewer)
+  await control.trpc.terminal.kill.mutate({ sessionId })
+}, 30_000)
+
+test("a hidden terminal gets no output, and resumes correctly when shown (a small replay, else a snapshot for log lines)", async () => {
+  const control = await newClient()
+  const slowFlood = await spawnFlood(control, "lines", 8 * KiB)
   const viewer = new Viewer(await newClient(), slowFlood.sessionId, "keep")
   await waitFor(() => viewer.screen().includes("R"), 15_000, "start")
 
@@ -862,7 +932,7 @@ test("a hidden terminal gets no output, and resumes correctly when shown (replay
   await new Promise((resolve) => setTimeout(resolve, 1_000))
   expect(viewer.received.length).toBe(receivedWhileShown)
   viewer.stream.setVisible(true)
-  // About 64 KiB while hidden: still in the daemon's 256 KiB tail, so a replay.
+  // About 8 KiB while hidden: a replay of at most 16 KiB.
   await waitFor(() => viewer.stream.starts.length === 2, 5_000, "the start after showing")
   expect(viewer.stream.starts).toEqual(["snapshot", "replay"])
   await control.trpc.terminal.write.mutate({ sessionId: slowFlood.sessionId, data: "q" })
@@ -874,6 +944,7 @@ test("a hidden terminal gets no output, and resumes correctly when shown (replay
   bigViewer.stream.setVisible(false)
   await control.trpc.terminal.write.mutate({ sessionId: bigFlood.sessionId, data: "g" })
   await waitFor(() => bigFlood.produced() > 1024 * KiB, 10_000, "1 MiB while hidden")
+  // Log lines scrolled into history meanwhile, so no refresh: a snapshot.
   bigViewer.stream.setVisible(true)
   await waitFor(() => bigViewer.stream.starts.length === 2, 5_000, "the start after showing")
   expect(bigViewer.stream.starts).toEqual(["snapshot", "snapshot"])

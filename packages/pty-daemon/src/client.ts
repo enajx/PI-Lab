@@ -56,6 +56,7 @@ export interface SpawnParams {
 export type AttachStart =
   | { mode: "replay"; offset: number; bytes: Buffer }
   | { mode: "snapshot"; offset: number; screen: string; bytes: Buffer }
+  | { mode: "refresh"; base: ResumePoint; offset: number; screen: string; bytes: Buffer }
 
 export interface AttachResult {
   session: SessionInfo
@@ -70,9 +71,20 @@ export interface AttachResult {
 
 function decodeStart(start: AttachStartFrame): AttachStart {
   const bytes = Buffer.from(start.base64, "base64")
-  return start.mode === "replay"
-    ? { mode: "replay", offset: start.offset, bytes }
-    : { mode: "snapshot", offset: start.offset, screen: start.screen, bytes }
+  switch (start.mode) {
+    case "replay":
+      return { mode: "replay", offset: start.offset, bytes }
+    case "snapshot":
+      return { mode: "snapshot", offset: start.offset, screen: start.screen, bytes }
+    case "refresh":
+      return {
+        mode: "refresh",
+        base: start.base,
+        offset: start.offset,
+        screen: start.screen,
+        bytes,
+      }
+  }
 }
 
 function attachResult(reply: AttachReply): AttachResult {

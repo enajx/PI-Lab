@@ -88,6 +88,11 @@ export interface TerminalStreamOptions {
   onError: (message: string) => void
 }
 
+/** Whether two resume points name the same screen state. */
+function samePoint(a: ResumePoint, b: ResumePoint): boolean {
+  return a.generation === b.generation && a.offset === b.offset && a.revision === b.revision
+}
+
 /** Decode base64 to bytes without Node's Buffer (browsers and React Native have atob). */
 function decodeBase64(base64: string): Uint8Array {
   const text = atob(base64)
@@ -112,7 +117,7 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
 export const RESUBSCRIBE_RETRY_MS = 250
 
 /** How a stream starts (counted for tests and logs). */
-export type StartMode = "replay" | "snapshot"
+export type StartMode = "replay" | "snapshot" | "refresh"
 
 /** A random id per subscription (no `crypto.randomUUID` in React Native's Hermes). */
 function newStreamId(): string {
@@ -283,6 +288,18 @@ export class TerminalStream {
           // The reset is the first byte of the write, so no frame shows an empty screen.
           this.#resize(event.cols, event.rows)
           emulator.write(FULL_RESET + event.screen, () => {})
+        } else if (event.mode === "refresh") {
+          // A refresh keeps this emulator's history, so it fits only the screen it was made for.
+          if (this.#consumed === null || !samePoint(event.base, this.#consumed)) {
+            const at = this.#consumed
+            this.#mismatch(
+              `refresh for ${event.base.generation}:${event.base.offset}:${event.base.revision} does not fit the screen at ${at === null ? "none" : `${at.generation}:${at.offset}:${at.revision}`}`,
+            )
+            return
+          }
+          this.#resize(event.cols, event.rows)
+          // As bytes: they also end a UTF-8 character the emulator stopped inside.
+          emulator.write(new TextEncoder().encode(event.screen), () => {})
         } else if (
           this.#consumed === null ||
           event.generation !== this.#consumed.generation ||

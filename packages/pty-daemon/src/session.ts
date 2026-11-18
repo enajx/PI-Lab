@@ -12,6 +12,9 @@ import { ScreenState } from "./screen"
 /** How many raw PTY bytes to retain per session for replay on (re)attach. */
 const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
 
+/** A replay at most this long is sent without comparing it with a screen refresh. */
+export const SMALL_REPLAY_BYTES = 16 * 1024
+
 export interface SpawnOptions {
   command: string
   args?: string[]
@@ -34,6 +37,7 @@ export interface SessionListener {
 export type SessionStart =
   | { mode: "replay"; offset: number; bytes: Buffer }
   | { mode: "snapshot"; offset: number; screen: string; bytes: Buffer }
+  | { mode: "refresh"; base: ResumePoint; offset: number; screen: string; bytes: Buffer }
 
 interface ExitState {
   exitCode: number | null
@@ -140,20 +144,36 @@ class Session {
   }
 
   /**
-   * Replay from `resume` when it is in this generation, still retained, and at
-   * the current revision (no resize since); otherwise a snapshot.
+   * How a client at `resume` starts, smallest first:
+   * 1. replay, when the point is in this generation, at the current revision
+   *    (no resize since), still retained, and the replay is at most
+   *    {@link SMALL_REPLAY_BYTES} or the size of a refresh;
+   * 2. refresh (the current screen over the client's own history), when the
+   *    generation matches, at most one resize happened since the client's
+   *    revision, the normal buffer's history did not change after the
+   *    client's offset (so the client's history is already right), and its
+   *    first visible row does not continue a history line;
+   * 3. otherwise a snapshot.
    */
   startFrom(resume: ResumePoint | null): SessionStart {
-    if (
-      resume !== null &&
-      resume.generation === this.generation &&
-      resume.revision === this.revision &&
-      resume.offset >= this.revisionOffset
-    ) {
-      const bytes = this.tail.from(resume.offset)
-      if (bytes !== null) return { mode: "replay", offset: resume.offset, bytes }
-    }
-    return { mode: "snapshot", ...this.screen.snapshot() }
+    if (resume === null || resume.generation !== this.generation || resume.offset > this.tail.end)
+      return { mode: "snapshot", ...this.screen.snapshot() }
+    const replay =
+      resume.revision === this.revision && resume.offset >= this.revisionOffset
+        ? this.tail.from(resume.offset)
+        : null
+    if (replay !== null && replay.length <= SMALL_REPLAY_BYTES)
+      return { mode: "replay", offset: resume.offset, bytes: replay }
+    const refreshable =
+      resume.revision <= this.revision &&
+      this.revision - resume.revision <= 1 &&
+      resume.offset >= this.screen.historyStableFrom &&
+      !this.screen.firstRowContinuesHistory()
+    if (!refreshable) return { mode: "snapshot", ...this.screen.snapshot() }
+    const refresh = this.screen.refresh()
+    if (replay !== null && replay.length <= refresh.screen.length + refresh.bytes.length)
+      return { mode: "replay", offset: resume.offset, bytes: replay }
+    return { mode: "refresh", base: resume, ...refresh }
   }
 
   get screenRevision(): number {
@@ -189,6 +209,8 @@ class Session {
     this.revision += 1
     this.revisionOffset = this.tail.end
     this.screen.resize(cols, rows)
+    // A client that applied less output resizes a different screen, so its history may differ.
+    this.screen.historyStableFrom = Math.max(this.screen.historyStableFrom, this.tail.end)
     for (const listener of this.listeners)
       listener.onResize(cols, rows, this.revision, this.revisionOffset)
   }
