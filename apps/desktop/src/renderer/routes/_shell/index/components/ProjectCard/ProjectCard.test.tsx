@@ -51,6 +51,16 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
 /** A "no runs yet" workflow status — both controls render idle. */
 const IDLE_STATUS = { summary: null, fetchExperiments: null }
 
+/** Settings with every card button shown (the user turned Auto-research on). */
+const ALL_CARD_BUTTONS = {
+  "settings.get": () => ({
+    editor: {
+      autoResearchSkill: "auto-research",
+      projectCardButtons: ["tasks", "analysis", "latex", "auto-research"],
+    },
+  }),
+}
+
 function renderCard(p: Project, handlers: FakeHandlers = {}) {
   return renderCardIn(p, handlers, (card) => card)
 }
@@ -69,6 +79,8 @@ function renderCardIn(p: Project, handlers: FakeHandlers, wrap: (card: ReactNode
     "sessions.projectAgents": () => [],
     "workflows.onOutput": () => ({ kind: "start", command: "agent" }),
     "projects.thumbnail": () => ({ dataUrl: thumbnail, tooLarge: false }),
+    // An install that never changed the card buttons setting.
+    "settings.get": () => ({ editor: {} }),
     ...handlers,
   })
 
@@ -389,7 +401,7 @@ describe("ProjectCard metadata", () => {
   })
 
   test("the action buttons render, are compact (icon-only), and share one row", async () => {
-    renderCard(project({ id: "pbtn", name: "Kappa", metadata: null }))
+    renderCard(project({ id: "pbtn", name: "Kappa", metadata: null }), ALL_CARD_BUTTONS)
 
     const auto = await screen.findByTestId("project-card-auto-research")
     const analysis = screen.getByTestId("project-card-analysis")
@@ -432,6 +444,7 @@ describe("ProjectCard metadata", () => {
     renderCard(
       project({ id: "plain-folder", name: "Plain", metadata: null, defaultBranch: null }),
       {
+        ...ALL_CARD_BUTTONS,
         "projects.capabilities": () => ({ git: false }),
       },
     )
@@ -471,6 +484,7 @@ describe("ProjectCard metadata", () => {
   test("Auto-research opens the project immediately, without awaiting a launch RPC", async () => {
     const calls: unknown[] = []
     renderCard(project({ id: "p5", name: "Epsilon", metadata: null }), {
+      ...ALL_CARD_BUTTONS,
       "sessions.startAutoResearch": (input) => {
         calls.push(input)
         return new Promise(() => {})
@@ -812,4 +826,59 @@ test("a paper-only project's card offers only the paper and opens in LaTeX Edito
   expect(screen.queryByTestId("project-card-status-button")).toBeNull()
   fireEvent.click(screen.getByTestId("project-card-body"))
   expect((await screen.findByTestId("on-latex-route")).textContent).toBe("solo")
+})
+
+describe("ProjectCard buttons setting", () => {
+  test("by default Auto-research is not a button but stays in the card menu", async () => {
+    renderCard(project({ id: "default-buttons", name: "Default", metadata: null }), {
+      "settings.get": () => ({ editor: { autoResearchSkill: "auto-research" } }),
+    })
+    expect(await screen.findByTestId("project-card-tasks")).toBeTruthy()
+    expect(screen.getByTestId("project-card-analysis")).toBeTruthy()
+    expect(screen.getByTestId("project-card-latex")).toBeTruthy()
+    expect(screen.queryByTestId("project-card-auto-research")).toBeNull()
+
+    fireEvent.contextMenu(screen.getByTestId("project-card-body"))
+    const menu = screen.getByTestId("project-card-menu")
+    // Shown buttons are not repeated in the menu.
+    expect(within(menu).queryByTestId("project-card-menu-tasks")).toBeNull()
+    expect(within(menu).queryByTestId("project-card-menu-analysis")).toBeNull()
+    expect(within(menu).queryByTestId("project-card-menu-latex")).toBeNull()
+    const item = within(menu).getByTestId("project-card-menu-auto-research")
+    expect(item.textContent).toContain("Auto-research")
+    fireEvent.click(item)
+
+    const marker = await screen.findByTestId("on-project-route")
+    expect(marker.getAttribute("data-project-id")).toBe("default-buttons")
+    expect(readPendingLaunch("default-buttons")).toEqual({ kind: "auto-research" })
+  })
+
+  test("a hidden Tasks button appears in the card menu instead and opens Tasks", async () => {
+    renderCard(project({ id: "no-tasks", name: "No tasks", metadata: null }), {
+      "settings.get": () => ({
+        editor: { projectCardButtons: ["analysis", "latex", "auto-research"] },
+      }),
+    })
+    expect(await screen.findByTestId("project-card-auto-research")).toBeTruthy()
+    expect(screen.queryByTestId("project-card-tasks")).toBeNull()
+
+    fireEvent.contextMenu(screen.getByTestId("project-card-body"))
+    const menu = screen.getByTestId("project-card-menu")
+    expect(within(menu).queryByTestId("project-card-menu-auto-research")).toBeNull()
+    const item = within(menu).getByTestId("project-card-menu-tasks")
+    expect(item.textContent).toContain("Tasks")
+    fireEvent.click(item)
+    expect((await screen.findByTestId("on-tasks-route")).textContent).toBe("no-tasks")
+  })
+
+  test("the Auto-research menu item is disabled with the Git reason when Git is missing", async () => {
+    renderCard(project({ id: "no-git-menu", name: "Plain", metadata: null, defaultBranch: null }), {
+      "projects.capabilities": () => ({ git: false }),
+    })
+    await screen.findByTestId("project-card-tasks")
+    fireEvent.contextMenu(screen.getByTestId("project-card-body"))
+    const item = await screen.findByTestId("project-card-menu-auto-research")
+    await waitFor(() => expect((item as HTMLButtonElement).disabled).toBe(true))
+    expect(item.getAttribute("title")).toContain("Initialize Git")
+  })
 })

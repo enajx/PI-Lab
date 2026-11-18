@@ -1316,5 +1316,10 @@
   "Start of the file only": "仅文件开头",
   "First {rows} × {columns}": "前 {rows} × {columns}",
   "{count} paths could not be read": "{count} 个路径无法读取",
-  "More files than listed": "文件多于列出的"
+  "More files than listed": "文件多于列出的",
+  "Dashboard": "总览",
+  "Choose the buttons shown on the Projects Dashboard cards.": "选择项目总览卡片上显示的按钮。",
+  "Project card buttons": "项目卡片按钮",
+  "Choose the buttons shown on every project card in the Projects Dashboard. A hidden button's action stays in the card's right-click menu.": "选择项目总览中每张项目卡片上显示的按钮。隐藏按钮的操作仍保留在卡片的右键菜单中。",
+  "Could not save the card buttons:": "无法保存卡片按钮："
 }

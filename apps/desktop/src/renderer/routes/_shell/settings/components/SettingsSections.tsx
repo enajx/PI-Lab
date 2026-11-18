@@ -10,6 +10,7 @@ import {
   type AnalysisFormat,
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
+  type ProjectCardButton,
   type PythonRunDestination,
 } from "@pi-lab/local-db/editor-settings"
 import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
@@ -75,6 +76,7 @@ import {
   useShortcutBindings,
 } from "../../../../shortcuts/shortcuts"
 import { useTRPC } from "../../../../trpc/react"
+import { useProjectCardButtons } from "../../../../trpc/useProjectCardButtons"
 import { requestUpdateCheck } from "../../../../updates/UpdateFeedback"
 import { ProjectSetupWizard } from "../../components/ProjectSetupWizard"
 import { ExperimentsStructureSelect } from "../../science/components/ScienceAnalysis/components/ExperimentsStructure"
@@ -1562,6 +1564,47 @@ export function SectionsSection() {
         onChange={() => undefined}
         disabled
       />
+    </SettingsSection>
+  )
+}
+
+/** The Settings > Dashboard rows, in card order. */
+const PROJECT_CARD_BUTTON_ROWS: { id: ProjectCardButton; label: string }[] = [
+  { id: "tasks", label: "Tasks" },
+  { id: "analysis", label: "Analysis" },
+  { id: "latex", label: "LaTeX Editor" },
+  { id: "auto-research", label: "Auto-research" },
+]
+
+/**
+ * Dashboard — which action buttons every Projects Dashboard card shows. A
+ * hidden button's action moves to the card's right-click menu. The switches
+ * never add a button a card would not offer (for example Analysis while the
+ * Analysis section is hidden).
+ */
+export function DashboardSection() {
+  const t = useTranslate()
+  const [shown, setShown, error] = useProjectCardButtons()
+  return (
+    <SettingsSection
+      testId="settings-section-dashboard"
+      title="Project card buttons"
+      description="Choose the buttons shown on every project card in the Projects Dashboard. A hidden button's action stays in the card's right-click menu."
+    >
+      {PROJECT_CARD_BUTTON_ROWS.map((row) => (
+        <ToggleField
+          key={row.id}
+          testId={`settings-card-button-${row.id}`}
+          label={row.label}
+          checked={shown.has(row.id)}
+          onChange={(next) => setShown(row.id, next)}
+        />
+      ))}
+      {error ? (
+        <p role="alert" className="px-4 py-3 text-destructive text-xs">
+          {t("Could not save the card buttons:")} {error}
+        </p>
+      ) : null}
     </SettingsSection>
   )
 }

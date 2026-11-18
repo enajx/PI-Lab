@@ -1316,5 +1316,10 @@
   "Start of the file only": "ファイルの先頭のみ",
   "First {rows} × {columns}": "最初の {rows} × {columns}",
   "{count} paths could not be read": "{count} 個のパスを読み取れませんでした",
-  "More files than listed": "一覧より多くのファイルがあります"
+  "More files than listed": "一覧より多くのファイルがあります",
+  "Dashboard": "ダッシュボード",
+  "Choose the buttons shown on the Projects Dashboard cards.": "プロジェクト一覧のカードに表示するボタンを選びます。",
+  "Project card buttons": "プロジェクトカードのボタン",
+  "Choose the buttons shown on every project card in the Projects Dashboard. A hidden button's action stays in the card's right-click menu.": "プロジェクト一覧のすべてのプロジェクトカードに表示するボタンを選びます。非表示にしたボタンの操作はカードの右クリックメニューに残ります。",
+  "Could not save the card buttons:": "カードのボタンを保存できませんでした:"
 }

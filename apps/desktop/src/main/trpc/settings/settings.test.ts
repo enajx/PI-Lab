@@ -223,6 +223,19 @@ describe("settings.updateEditor", () => {
     expect(after.editor).toEqual(result)
   })
 
+  it("saves the project card buttons only once changed and rejects unknown buttons", async () => {
+    // Never changed: nothing stored, so the renderer derives the current default.
+    expect((await harness.caller.settings.get()).editor.projectCardButtons).toBeUndefined()
+    await harness.caller.settings.updateEditor({ projectCardButtons: ["latex", "auto-research"] })
+    expect((await harness.caller.settings.get()).editor.projectCardButtons).toEqual([
+      "latex",
+      "auto-research",
+    ])
+    await expect(
+      harness.caller.settings.updateEditor({ projectCardButtons: ["summary" as "latex"] }),
+    ).rejects.toThrow()
+  })
+
   it("merges successive patches without clobbering untouched fields", async () => {
     await harness.caller.settings.updateEditor({ autosave: true })
     const merged = await harness.caller.settings.updateEditor({ formatOnSave: true })

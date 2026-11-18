@@ -1316,5 +1316,10 @@
   "Start of the file only": "بداية الملف فقط",
   "First {rows} × {columns}": "أول {rows} × {columns}",
   "{count} paths could not be read": "تعذرت قراءة {count} مسار",
-  "More files than listed": "ملفات أكثر مما هو مدرج"
+  "More files than listed": "ملفات أكثر مما هو مدرج",
+  "Dashboard": "لوحة المعلومات",
+  "Choose the buttons shown on the Projects Dashboard cards.": "اختر الأزرار التي تظهر على بطاقات لوحة المشاريع.",
+  "Project card buttons": "أزرار بطاقة المشروع",
+  "Choose the buttons shown on every project card in the Projects Dashboard. A hidden button's action stays in the card's right-click menu.": "اختر الأزرار التي تظهر على كل بطاقة مشروع في لوحة المشاريع. يبقى إجراء الزر المخفي في قائمة النقر بزر الماوس الأيمن على البطاقة.",
+  "Could not save the card buttons:": "تعذّر حفظ أزرار البطاقة:"
 }

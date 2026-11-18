@@ -39,6 +39,30 @@ describe("SettingsView", () => {
     expect(header?.className).toContain("pl-24")
   })
 
+  test("the Dashboard navigation entry opens the project card buttons list", async () => {
+    const client = createFakeTrpcClient({
+      "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),
+      "settings.get": () => ({ editor: {} }),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rootRoute = createRootRoute({ component: SettingsView })
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+
+    render(
+      <AppProviders client={client} queryClient={queryClient}>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router type plumbing. */}
+        <RouterProvider router={router as any} />
+      </AppProviders>,
+    )
+
+    fireEvent.click(await screen.findByTestId("settings-nav-dashboard"))
+    expect(await screen.findByTestId("settings-section-dashboard")).toBeTruthy()
+    expect(screen.getByTestId("settings-card-button-auto-research")).toBeTruthy()
+  })
+
   test("opens the Editor typography location from a deep link", async () => {
     const client = createFakeTrpcClient({
       "caffeine.status": () => ({ mode: "off", scope: "system-only", held: false }),

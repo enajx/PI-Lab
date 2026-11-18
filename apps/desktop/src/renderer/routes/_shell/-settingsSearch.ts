@@ -14,6 +14,7 @@ const SETTINGS_SECTION_IDS = [
   "caffeine",
   "project-template",
   "library",
+  "dashboard",
   "project-view",
   "sections",
   "experiments",

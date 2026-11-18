@@ -58,7 +58,10 @@ test("Git capability probes are cached on a quick Dashboard return and refresh a
         ).length
 
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-    await expect(window.getByTestId("project-card-auto-research")).toBeDisabled()
+    // Auto-research is a card menu item by default; it is disabled until Git exists.
+    await window.getByTestId("project-card-body").click({ button: "right" })
+    await expect(window.getByTestId("project-card-menu-auto-research")).toBeDisabled()
+    await window.keyboard.press("Escape")
     await expect.poll(probeCount).toBeGreaterThan(0)
 
     await window.getByTestId("project-item").click()

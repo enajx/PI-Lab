@@ -1316,5 +1316,10 @@
   "Start of the file only": "Bare starten av filen",
   "First {rows} × {columns}": "De første {rows} × {columns}",
   "{count} paths could not be read": "{count} stier kunne ikke leses",
-  "More files than listed": "Flere filer enn listet"
+  "More files than listed": "Flere filer enn listet",
+  "Dashboard": "Oversikt",
+  "Choose the buttons shown on the Projects Dashboard cards.": "Velg knappene som vises på kortene i prosjektoversikten.",
+  "Project card buttons": "Knapper på prosjektkort",
+  "Choose the buttons shown on every project card in the Projects Dashboard. A hidden button's action stays in the card's right-click menu.": "Velg knappene som vises på hvert prosjektkort i prosjektoversikten. Handlingen til en skjult knapp ligger fortsatt i kortets høyreklikkmeny.",
+  "Could not save the card buttons:": "Kunne ikke lagre kortknappene:"
 }

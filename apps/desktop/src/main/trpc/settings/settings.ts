@@ -17,7 +17,7 @@ import {
   type Settings,
   settings,
 } from "@pi-lab/local-db"
-import { ANALYSIS_FORMATS } from "@pi-lab/local-db/editor-settings"
+import { ANALYSIS_FORMATS, PROJECT_CARD_BUTTONS } from "@pi-lab/local-db/editor-settings"
 import { AGENT_EFFORT_LEVELS } from "@pi-lab/shared"
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
@@ -108,6 +108,11 @@ const editorPatch = z.object({
     .trim()
     .regex(/^(|[A-Za-z0-9_-][A-Za-z0-9._-]*)$/)
     .max(128)
+    .optional(),
+  /** Shown Projects Dashboard card buttons, in card order. */
+  projectCardButtons: z
+    .array(z.enum(PROJECT_CARD_BUTTONS))
+    .max(PROJECT_CARD_BUTTONS.length)
     .optional(),
 })
 

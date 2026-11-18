@@ -1316,5 +1316,10 @@
   "Start of the file only": "Solo el inicio del archivo",
   "First {rows} × {columns}": "Primeras {rows} × {columns}",
   "{count} paths could not be read": "No se pudieron leer {count} rutas",
-  "More files than listed": "Hay más archivos que los listados"
+  "More files than listed": "Hay más archivos que los listados",
+  "Dashboard": "Panel",
+  "Choose the buttons shown on the Projects Dashboard cards.": "Elige los botones que se muestran en las tarjetas del panel de proyectos.",
+  "Project card buttons": "Botones de la tarjeta de proyecto",
+  "Choose the buttons shown on every project card in the Projects Dashboard. A hidden button's action stays in the card's right-click menu.": "Elige los botones que se muestran en cada tarjeta de proyecto del panel de proyectos. La acción de un botón oculto sigue en el menú contextual de la tarjeta.",
+  "Could not save the card buttons:": "No se pudieron guardar los botones de la tarjeta:"
 }
