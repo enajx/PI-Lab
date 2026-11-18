@@ -372,6 +372,39 @@ describe("adopting a daemon by protocol", () => {
     }
   })
 
+  test("an adopted old daemon that ignores shutdown is stopped by pid and replaced", async () => {
+    // Stands in for a version 1 daemon from an earlier build: answers list without a
+    // protocol field and ignores shutdown, so only its pid can stop it.
+    const entry = await buildDaemonEntry()
+    const oldEntry = join(socketDir, "old app", "pty-daemon", "index.js")
+    await mkdir(join(socketDir, "old app", "pty-daemon"), { recursive: true })
+    await writeFile(
+      oldEntry,
+      `require('node:net').createServer((s) => s.on('data', (d) => { for (const line of d.toString().split('\\n').filter(Boolean)) { const f = JSON.parse(line); if (f.kind === 'list') s.write(JSON.stringify({ kind: 'list-ok', cid: f.cid, sessions: [] }) + '\\n') } })).listen(process.argv[2])`,
+    )
+    const old = spawn(process.execPath, [oldEntry, socketPath], { stdio: "ignore" })
+    const exited = new Promise((resolve) => old.once("exit", resolve))
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const deadline = Date.now() + 5_000
+      while (!(await isDaemonListening(socketPath))) {
+        if (Date.now() > deadline) throw new Error("fake daemon did not listen")
+        await new Promise((done) => setTimeout(done, 20))
+      }
+      supervisor = new TerminalSupervisor({ socketPath, daemonEntry: entry, spawnTimeoutMs: 1_000 })
+      const client = await supervisor.ensureClient()
+      await exited
+      expect(old.signalCode).toBe("SIGTERM")
+      expect(await client.protocolVersion()).toBe(PROTOCOL_VERSION)
+      expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).toContain(`pid ${old.pid}`)
+      await supervisor.shutdownDaemon(2_000, vi.fn())
+    } finally {
+      warn.mockRestore()
+      old.kill("SIGKILL")
+      await rm(join(entry, ".."), { recursive: true, force: true })
+    }
+  })
+
   test("an adopted current daemon is kept", async () => {
     server = new DaemonServer({ socketPath })
     await server.listen()

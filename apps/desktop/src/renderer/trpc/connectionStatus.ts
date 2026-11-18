@@ -19,6 +19,8 @@ export const DISCONNECTED_AFTER_MS = 10_000
 export class ConnectionStatus {
   readonly #downSince = new Map<string, number | null>()
   readonly #listeners = new Set<() => void>()
+  readonly #reopenListeners = new Set<(name: string) => void>()
+  readonly #opened = new Set<string>()
   #timer: ReturnType<typeof setTimeout> | null = null
   #state: ConnectionState = "connected"
 
@@ -29,8 +31,12 @@ export class ConnectionStatus {
   }
 
   socketOpened(name: string): void {
+    const wasDown = this.#downSince.get(name) != null
+    const openedBefore = this.#opened.has(name)
+    this.#opened.add(name)
     this.#downSince.set(name, null)
     this.#update()
+    if (wasDown && openedBefore) for (const listener of this.#reopenListeners) listener(name)
   }
 
   socketClosed(name: string): void {
@@ -45,6 +51,16 @@ export class ConnectionStatus {
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
+  }
+
+  /**
+   * Call `listener` with the socket's name each time a socket opens again after
+   * it closed. The server may have restarted, and calls that were in flight when
+   * the socket closed failed, so readers refetch here.
+   */
+  onReopened(listener: (name: string) => void): () => void {
+    this.#reopenListeners.add(listener)
+    return () => this.#reopenListeners.delete(listener)
   }
 
   #update(): void {

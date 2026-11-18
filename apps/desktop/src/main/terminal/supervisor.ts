@@ -139,6 +139,23 @@ function findDaemonPids(socketPath: string): Promise<{ pids: number[] } | { erro
   })
 }
 
+/**
+ * Stop the daemon serving `socketPath` by pid: `knownPid` when the app knows it, else
+ * the pids found by command line (an adopted daemon from an earlier build that ignores
+ * `shutdown`). Each gets SIGTERM, then SIGKILL after one second. Returns the stopped
+ * pids, or why none could be stopped.
+ */
+async function stopDaemonByPid(
+  socketPath: string,
+  knownPid: number | null,
+): Promise<{ pids: number[] } | { error: string }> {
+  const found = knownPid === null ? await findDaemonPids(socketPath) : { pids: [knownPid] }
+  if ("error" in found) return { error: `listing processes failed (${found.error})` }
+  if (found.pids.length === 0) return { error: `no pty-daemon process owns ${socketPath}` }
+  await Promise.all(found.pids.map((target) => terminateProcess(target, 1_000)))
+  return found
+}
+
 /** SIGTERM, then SIGKILL if the process is still alive after `graceMs`. */
 async function terminateProcess(pid: number, graceMs: number): Promise<void> {
   signalProcess(pid, "SIGTERM")
@@ -295,7 +312,10 @@ export class TerminalSupervisor {
     return client
   }
 
-  /** Ask an older daemon to exit, wait until its socket stops listening, then spawn a current one. */
+  /**
+   * Ask an older daemon to exit (or, when it ignores the request, stop it by pid), wait
+   * until its socket stops listening, then spawn a current one.
+   */
   private async replaceDaemon(old: DaemonClient): Promise<void> {
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(
@@ -306,8 +326,20 @@ export class TerminalSupervisor {
         this.spawnTimeoutMs,
       ).unref(),
     )
-    await Promise.race([old.shutdown(), timeout])
+    const confirmed = await Promise.race([old.shutdown().then(() => true), timeout]).catch(
+      (error: unknown) => {
+        console.warn(`[pi-lab] ${errorText(error)}; stopping it by pid`)
+        return false
+      },
+    )
     old.close()
+    if (!confirmed) {
+      const stopped = await stopDaemonByPid(this.socketPath, null)
+      if ("error" in stopped) {
+        throw new Error(`could not stop the old pty-daemon on ${this.socketPath}: ${stopped.error}`)
+      }
+      console.warn(`[pi-lab] stopped old pty-daemon pid ${stopped.pids.join(", ")}`)
+    }
     const deadline = Date.now() + this.spawnTimeoutMs
     while (await isDaemonListening(this.socketPath)) {
       if (Date.now() > deadline) {
@@ -451,19 +483,15 @@ export class TerminalSupervisor {
       .catch(async (error: unknown) => {
         const reason = `[pi-lab] pty-daemon did not confirm shutdown (${errorText(error)})`
         // An adopted daemon from an earlier build ignores `shutdown` and its pid is unknown:
-        // find it by its command line, which names our entry and this socket.
-        const found = pid === null ? await findDaemonPids(this.socketPath) : { pids: [pid] }
-        if ("error" in found) {
-          warn(`${reason}; listing processes failed (${found.error}), so it may still be running`)
-          return
-        }
-        if (found.pids.length === 0) {
-          warn(`${reason}; no pty-daemon process owns ${this.socketPath}, so nothing was stopped`)
-          return
-        }
-        warn(`${reason}; stopping pid ${found.pids.join(", ")} with SIGTERM, then SIGKILL`)
-        await Promise.all(found.pids.map((target) => terminateProcess(target, 1_000))).catch(
-          (error: unknown) => warn(`[pi-lab] could not stop pty-daemon: ${errorText(error)}`),
+        // stopDaemonByPid finds it by its command line, which names our entry and this socket.
+        await stopDaemonByPid(this.socketPath, pid).then(
+          (stopped) =>
+            warn(
+              "error" in stopped
+                ? `${reason}; ${stopped.error}, so it may still be running`
+                : `${reason}; stopped pid ${stopped.pids.join(", ")} with SIGTERM, then SIGKILL`,
+            ),
+          (error: unknown) => warn(`${reason}; could not stop pty-daemon: ${errorText(error)}`),
         )
       })
       .finally(() => clearTimeout(timer))
