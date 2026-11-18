@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, type IncomingMessage, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
@@ -254,6 +254,7 @@ test.each([
     serverEntry: fakeServerEntry(),
     launchdLabel: null,
     log: () => undefined,
+    noProgressMs: 30_000,
   })
   cleanups.push(() => {
     if (endpoint.pid) process.kill(endpoint.pid, "SIGKILL")
@@ -316,3 +317,100 @@ test("forwarded requests reuse one identity check until server.json changes or a
   await endpoints.get()
   expect(server.identityChecks()).toBe(3)
 })
+
+/**
+ * A stand-in server bundle (no PI Lab code) that writes its start steps to
+ * `server-start.json` like the real server, runs `body`, and then serves like
+ * {@link fakeServerEntry} when `body` calls `listenNow()`.
+ */
+function steppingServerEntry(name: string, body: string): string {
+  const dir = join(dataDir, name, "out", "main")
+  mkdirSync(dir, { recursive: true })
+  const entry = join(dir, "server.js")
+  writeFileSync(
+    entry,
+    `const { createServer } = require("node:http")
+const { createHmac, randomBytes } = require("node:crypto")
+const { readFileSync, writeFileSync } = require("node:fs")
+const { join } = require("node:path")
+const dataDir = process.env.PI_LAB_DATA_DIR
+const token = readFileSync(join(dataDir, "server-token"), "utf8").trim()
+const step = (name) =>
+  writeFileSync(join(dataDir, "server-start.json"), JSON.stringify({ pid: process.pid, step: name, at: Date.now() }))
+const listenNow = () => {
+  const server = createServer((request, response) => {
+    const url = new URL(request.url, "http://127.0.0.1")
+    if (url.pathname === "/identity") {
+      const nonce = url.searchParams.get("nonce")
+      response.end(JSON.stringify({ proof: createHmac("sha256", token).update("pi-lab-identity:" + nonce).digest("hex") }))
+      return
+    }
+    if (url.pathname === "/health" && request.headers["x-pi-lab-token"] === token) return void response.end("ok")
+    response.writeHead(401).end()
+  })
+  server.listen(0, "127.0.0.1", () => {
+    const discovery = { port: server.address().port, pid: process.pid, build: process.env.PI_LAB_BUILD, serverId: randomBytes(8).toString("hex") }
+    writeFileSync(join(dataDir, "server.json"), JSON.stringify(discovery))
+  })
+}
+${body}
+`,
+  )
+  return entry
+}
+
+/** Start the stand-in `entry` through ensureServer with a short no-progress limit. */
+function ensureStandIn(entry: string, noProgressMs: number) {
+  ensureLocalToken(dataDir)
+  const result = ensureServer({
+    config: { ...serverLaunchConfig(launchInput()), dataDir },
+    serverEntry: entry,
+    launchdLabel: null,
+    log: () => undefined,
+    noProgressMs,
+  })
+  result.then(
+    (endpoint) => cleanups.push(() => void process.kill(endpoint.pid, "SIGKILL")),
+    () => undefined,
+  )
+  return result
+}
+
+test("a server that starts slowly but keeps reporting steps is waited for", async () => {
+  // Steps every 300 ms, listening after 3 s: longer than the 1 s no-progress limit.
+  const entry = steppingServerEntry(
+    "slow",
+    `let n = 0
+const timer = setInterval(() => step("step-" + n++), 300)
+setTimeout(() => { clearInterval(timer); step("listening"); listenNow() }, 3_000)`,
+  )
+  const endpoint = await ensureStandIn(entry, 1_000)
+  expect(endpoint.build).toBe("build-new")
+}, 15_000)
+
+test("a server that exits while starting fails at once with its log tail", async () => {
+  const entry = steppingServerEntry(
+    "crash",
+    `step("migrating")
+console.error("stand-in crash: disk on fire")
+process.exit(1)`,
+  )
+  const started = Date.now()
+  await expect(ensureStandIn(entry, 60_000)).rejects.toThrow(
+    /exited while starting[\s\S]*stand-in crash: disk on fire/,
+  )
+  expect(Date.now() - started).toBeLessThan(5_000)
+}, 15_000)
+
+test("a server that stays alive with no progress fails after the no-progress limit", async () => {
+  const entry = steppingServerEntry("stuck", `step("migrating")\nsetInterval(() => {}, 1_000)`)
+  const started = Date.now()
+  await expect(ensureStandIn(entry, 1_500)).rejects.toThrow(
+    /no progress for 1\.5 s[\s\S]*migrating/,
+  )
+  expect(Date.now() - started).toBeLessThan(8_000)
+  const stuck = JSON.parse(readFileSync(join(dataDir, "server-start.json"), "utf8")) as {
+    pid: number
+  }
+  process.kill(stuck.pid, "SIGKILL")
+}, 15_000)

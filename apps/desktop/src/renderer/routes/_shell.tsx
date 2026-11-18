@@ -187,6 +187,7 @@ function ShellLayout() {
               {showStatusBar && !isSetup && !redirectToSetup ? <StatusBar /> : null}
             </div>
           )}
+          {settings.data === undefined && settings.isPending ? <ServerStartingNotice /> : null}
           {paletteOpen ? (
             <Suspense fallback={null}>
               <CommandPalette onClose={() => setPaletteOpen(false)} />
@@ -196,6 +197,32 @@ function ShellLayout() {
         </NewFileControllerProvider>
       </AddProjectControllerProvider>
     </ProjectActivityProvider>
+  )
+}
+
+/** How long the first settings load may take before the window says the server is starting. */
+const SERVER_STARTING_NOTICE_MS = 3_000
+
+/**
+ * Shown while the first settings load waits for the PI Lab server, once that
+ * takes longer than {@link SERVER_STARTING_NOTICE_MS} (a slow server start).
+ */
+function ServerStartingNotice() {
+  const t = useTranslate()
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(true), SERVER_STARTING_NOTICE_MS)
+    return () => clearTimeout(timer)
+  }, [])
+  if (!visible) return null
+  return (
+    <p
+      role="status"
+      data-testid="server-starting"
+      className="pointer-events-none fixed inset-x-0 bottom-8 text-center text-muted-foreground text-sm"
+    >
+      {t("Starting the PI Lab server…")}
+    </p>
   )
 }
 

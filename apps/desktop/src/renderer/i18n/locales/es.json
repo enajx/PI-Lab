@@ -1321,5 +1321,6 @@
   "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "Las claves de API guardadas se protegen con un archivo que solo tú puedes leer. Con el Llavero activado, el Llavero de macOS guarda la clave que las protege.",
   "Could not change key protection": "No se pudo cambiar la protección de claves",
   "Recent notifications": "Notificaciones recientes",
-  "No notifications yet": "Aún no hay notificaciones"
+  "No notifications yet": "Aún no hay notificaciones",
+  "Starting the PI Lab server…": "Iniciando el servidor de PI Lab…"
 }

@@ -1,7 +1,9 @@
-import { readdir, readFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises"
+import { createRequire } from "node:module"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { expect, test } from "./fixtures/playwright"
+import { _electron as electron, expect, test } from "./fixtures/playwright"
 
 const RENDERER_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -122,4 +124,37 @@ test("Dashboard startup excludes deferred modules and keeps usable hidden debug 
       totalChunks: scripts.size,
     }),
   )
+})
+
+const DESKTOP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../apps/desktop")
+
+/**
+ * Real built app in test mode; the server waits 6 s after its first start step
+ * (PI_LAB_TEST_SERVER_START_DELAY_MS), as a slow start on a loaded machine.
+ */
+test("a slow server start shows a starting message, then the app", async () => {
+  test.setTimeout(90_000)
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-slow-server-"))
+  const app = await electron.launch({
+    executablePath: createRequire(join(DESKTOP_DIR, "package.json"))("electron") as string,
+    args: [join(DESKTOP_DIR, "out", "main", "index.js")],
+    env: {
+      ...process.env,
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      PI_LAB_TEST_SERVER_START_DELAY_MS: "6000",
+    },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId("server-starting")).toHaveText("Starting the PI Lab server…", {
+      timeout: 10_000,
+    })
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 60_000 })
+    await expect(window.getByTestId("server-starting")).toBeHidden()
+  } finally {
+    await app.close()
+    await rm(dataDir, { recursive: true, force: true })
+  }
 })

@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process"
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
@@ -14,6 +14,7 @@ import {
   serverAnswers,
 } from "../../server/access"
 import { type ServerConfig, serverConfigEnv } from "../../server/config"
+import { readStartProgress, SERVER_START_FILE } from "../../server/startProgress"
 import type { PiLabChannel } from "../identity/channel"
 
 /** Where the desktop app finds its server and how it authenticates. */
@@ -64,6 +65,13 @@ export interface LauncherOptions {
   /** launchd label for packaged builds; null starts a detached child process instead. */
   launchdLabel: string | null
   log: (message: string) => void
+  /**
+   * How long a starting server may go without a new start step before the
+   * start fails ({@link SERVER_START_NO_PROGRESS_MS} in the app). There is no
+   * total limit: a slow start on a loaded machine is waited for while the
+   * process lives and its steps advance.
+   */
+  noProgressMs: number
 }
 
 /** A fatal start error the server wrote before exiting (see server/index.ts). */
@@ -74,7 +82,7 @@ export interface ServerStartError {
 
 export const SERVER_ERROR_FILE = "server-error.json"
 export const SERVER_LOG_FILE = "server.log"
-const START_TIMEOUT_MS = 30_000
+export const SERVER_START_NO_PROGRESS_MS = 120_000
 
 /** Identity of a server bundle: changes whenever the built server code changes. */
 export function serverBuildId(serverEntry: string): string {
@@ -245,7 +253,7 @@ function startWithLaunchd(options: LauncherOptions): void {
 }
 
 /** Source and test runs: a detached child that outlives this app. */
-function startDetached(options: LauncherOptions): void {
+function startDetached(options: LauncherOptions): ChildProcess {
   const log = openSync(join(options.config.dataDir, SERVER_LOG_FILE), "a")
   // The data folder on the command line names the process (`ps`, E2E cleanup,
   // isPiLabServerProcess); the server reads its configuration from the environment.
@@ -255,6 +263,7 @@ function startDetached(options: LauncherOptions): void {
     env: { ...process.env, ...serverConfigEnv(options.config), ELECTRON_RUN_AS_NODE: "1" },
   })
   child.unref()
+  return child
 }
 
 /** The last lines of the server log, for an error message. */
@@ -292,9 +301,11 @@ export async function ensureServer(options: LauncherOptions): Promise<ServerEndp
     await waitForExit(current.pid)
   }
   writeFileSync(join(dataDir, SERVER_ERROR_FILE), "", { flag: "w" })
+  writeFileSync(join(dataDir, SERVER_START_FILE), "", { flag: "w" })
+  let child: ChildProcess | null = null
   if (options.launchdLabel) startWithLaunchd(options)
-  else startDetached(options)
-  return waitForServer(options, current?.pid ?? old)
+  else child = startDetached(options)
+  return waitForServer(options, current?.pid ?? old, child)
 }
 
 /**
@@ -318,24 +329,56 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Wait until a server other than `oldPid` with our build answers. */
+/** The fatal error the starting server wrote, or null. */
+function reportedStartError(dataDir: string): ServerStartError | null {
+  const error = readFileSync(join(dataDir, SERVER_ERROR_FILE), "utf8").trim()
+  return error ? (JSON.parse(error) as ServerStartError) : null
+}
+
+/**
+ * Wait until a server other than `oldPid` with our build answers. Fails when
+ * the server reports a start error, when its process exits (the detached
+ * `child`, or the pid in its last start step under launchd), or when no new
+ * start step comes for `options.noProgressMs`.
+ */
 async function waitForServer(
   options: LauncherOptions,
   oldPid: number | null,
+  child: ChildProcess | null,
 ): Promise<ServerEndpoint> {
   const dataDir = options.config.dataDir
-  const deadline = Date.now() + START_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    const error = readFileSync(join(dataDir, SERVER_ERROR_FILE), "utf8").trim()
-    if (error) throw new ServerStartFailure(JSON.parse(error) as ServerStartError)
+  let lastStep = ""
+  let lastProgressAt = Date.now()
+  while (true) {
+    const error = reportedStartError(dataDir)
+    if (error) throw new ServerStartFailure(error)
     const server = await runningServer(dataDir)
     if (server && server.pid !== oldPid && server.build === options.config.build) return server
+    const progress = readStartProgress(dataDir)
+    const step = progress ? `${progress.pid}:${progress.step}:${progress.at}` : ""
+    if (step !== lastStep) {
+      lastStep = step
+      lastProgressAt = Date.now()
+      if (progress) options.log(`[pi-lab] server ${progress.pid} start step: ${progress.step}`)
+    }
+    const childExited = child !== null && (child.exitCode !== null || child.signalCode !== null)
+    if (childExited || (progress !== null && !processAlive(progress.pid))) {
+      // It may have written its error just before exiting.
+      const last = reportedStartError(dataDir)
+      if (last) throw new ServerStartFailure(last)
+      throw new ServerStartFailure({
+        kind: "other",
+        message: `The PI Lab server exited while starting.\n${serverLogTail(dataDir)}`,
+      })
+    }
+    if (Date.now() - lastProgressAt > options.noProgressMs) {
+      throw new ServerStartFailure({
+        kind: "other",
+        message: `The PI Lab server made no progress for ${options.noProgressMs / 1000} s while starting (last step: ${progress?.step ?? "none"}).\n${serverLogTail(dataDir)}`,
+      })
+    }
     await delay(100)
   }
-  throw new ServerStartFailure({
-    kind: "other",
-    message: `The PI Lab server did not start within ${START_TIMEOUT_MS / 1000} s.\n${serverLogTail(dataDir)}`,
-  })
 }
 
 /** The server could not start; carries what it reported. */

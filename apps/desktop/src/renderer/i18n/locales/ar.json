@@ -1321,5 +1321,6 @@
   "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "تُحمى مفاتيح API المحفوظة بملف لا يقرأه غيرك. عند تشغيل سلسلة المفاتيح، تحتفظ سلسلة مفاتيح macOS بالمفتاح الذي يحميها.",
   "Could not change key protection": "تعذر تغيير حماية المفاتيح",
   "Recent notifications": "الإشعارات الأخيرة",
-  "No notifications yet": "لا توجد إشعارات بعد"
+  "No notifications yet": "لا توجد إشعارات بعد",
+  "Starting the PI Lab server…": "جارٍ تشغيل خادم PI Lab…"
 }
