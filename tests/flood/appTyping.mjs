@@ -111,6 +111,7 @@ function installPageRecorder() {
     predictions: [],
     rowsCounts: {},
     observer: null,
+    shown: new Map(),
   }
   const rowsText = () => terminal()?.querySelector(".xterm-rows")?.textContent ?? ""
   const count = (text, ch) => text.split(ch).length - 1
@@ -131,11 +132,20 @@ function installPageRecorder() {
       }
       state.rowsCounts[ch] = current
     }
+    // A drawing ends when its element leaves the page or shows other text.
+    for (const [element, entry] of state.shown) {
+      if (!element.isConnected || element.textContent !== entry.chars) {
+        entry.until = now
+        state.shown.delete(element)
+      }
+    }
     for (const element of terminal()?.querySelectorAll(".pi-lab-prediction") ?? []) {
       const ch = element.textContent ?? ""
       if (element.dataset.seen === ch) continue
       element.dataset.seen = ch
-      state.predictions.push({ at: now, chars: ch, cursorRow: null })
+      const entry = { at: now, chars: ch, until: null }
+      state.predictions.push(entry)
+      state.shown.set(element, entry)
       const key = state.keys.find((entry) => entry.key === ch && entry.predictedAt === null)
       if (key) key.predictedAt = now
     }
@@ -144,6 +154,7 @@ function installPageRecorder() {
     start() {
       state.keys = []
       state.predictions = []
+      state.shown = new Map()
       state.rowsCounts = {}
       for (const ch of "abcdefghijklmnopqrstuvwxyz0123456789") state.rowsCounts[ch] = count(rowsText(), ch)
       state.observer?.disconnect()
@@ -168,6 +179,9 @@ function installPageRecorder() {
     },
     stop() {
       check()
+      const now = performance.now()
+      for (const entry of state.shown.values()) entry.until = now
+      state.shown.clear()
       state.observer?.disconnect()
       state.observer = null
       window.removeEventListener("keydown", state.onKey, true)
@@ -411,8 +425,9 @@ async function hiddenTask(page, dataDir, trials) {
     const drawn = recorded.predictions.filter((entry) => entry.chars === "z")
     if (drawn.length > 0) {
       leaks += 1
-      const z = recorded.keys.find((key) => key.key === "z")
-      leakMs.push(Math.max(...drawn.map((entry) => entry.at)) - (z?.predictedAt ?? drawn[0].at))
+      const from = Math.min(...drawn.map((entry) => entry.at))
+      const until = Math.max(...drawn.map((entry) => entry.until))
+      leakMs.push(until - from)
     }
   }
   await page.keyboard.press("Control+c")
@@ -423,7 +438,11 @@ async function hiddenTask(page, dataDir, trials) {
       hiddenKeys,
       hiddenKeysDrawn: leaks,
       rate: hiddenKeys === 0 ? null : round((leaks / hiddenKeys) * 100),
-      drawnForMs: { p50: round(percentile(leakMs, 50)), max: round(leakMs.length ? Math.max(...leakMs) : null) },
+      drawnForMs: {
+        p50: round(percentile(leakMs, 50)),
+        p95: round(percentile(leakMs, 95)),
+        max: round(leakMs.length ? Math.max(...leakMs) : null),
+      },
     },
   }
 }
