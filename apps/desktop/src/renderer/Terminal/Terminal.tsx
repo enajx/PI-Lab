@@ -397,14 +397,14 @@ export function Terminal({
           redraw()
           requestAnimationFrame(fitView)
         },
-        onStart: (echo) => {
+        onStart: (input) => {
           // A replay, refresh or snapshot (also a flow-control skip) clears every prediction.
           engine.reset()
-          engine.setEcho(echo)
+          engine.setInput(input)
           redraw()
         },
-        onEcho: (echo) => {
-          engine.setEcho(echo)
+        onEcho: (input) => {
+          engine.setInput(input)
           redraw()
         },
         onEchoAck: (ack) => {
@@ -412,7 +412,7 @@ export function Terminal({
           const sentAt = keySentAt.get(ack.seq)
           if (sentAt !== undefined) engine.roundTrip(performance.now() - sentAt - ECHO_ACK_DELAY_MS)
           for (const seq of keySentAt.keys()) if (seq <= ack.seq) keySentAt.delete(seq)
-          engine.setEcho(ack.echo)
+          engine.setInput(ack.input)
           engine.ack(ack.seq, overlay.screen())
           redraw()
         },

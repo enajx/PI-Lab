@@ -5,10 +5,10 @@
  */
 declare const termios: {
   /**
-   * Return whether the ECHO bit is set in the termios `c_lflag` of `fd`
-   * (for example a PTY master fd). Throws a TypeError when `fd` is not a
-   * number, and an Error with the system message when `tcgetattr` fails.
+   * The ECHO and ICANON bits of the termios `c_lflag` of `fd` (for example a
+   * PTY master fd), from one `tcgetattr` call. Throws a TypeError when `fd` is
+   * not a number, and an Error with the system message when `tcgetattr` fails.
    */
-  echoEnabled(fd: number): boolean
+  localFlags(fd: number): { echo: boolean; icanon: boolean }
 }
 export = termios

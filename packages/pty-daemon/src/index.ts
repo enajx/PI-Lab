@@ -25,6 +25,7 @@ export {
   type EchoEvent,
   type ErrorReply,
   type ExitEvent,
+  type InputFlags,
   type KeyInput,
   type KeyStatus,
   type KillRequest,

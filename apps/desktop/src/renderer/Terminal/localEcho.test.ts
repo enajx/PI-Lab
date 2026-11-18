@@ -126,17 +126,28 @@ describe("local echo prediction (Mosh engine port)", () => {
     expect(views.join("")).toBe("")
   })
 
-  test("while ECHO is off nothing is predicted, and pending predictions are removed", () => {
+  test("at a hidden prompt (ECHO off, ICANON on) nothing is predicted, and pending predictions are removed", () => {
     const { engine, grid } = setup(100)
     engine.key("a", 1, grid)
     grid.print("a")
     engine.ack(1, grid)
     engine.key("b", 2, grid)
     expect(shown(engine, grid)).toBe("b")
-    engine.setEcho(false)
+    engine.setInput({ echo: false, icanon: true })
     expect(shown(engine, grid)).toBe("")
     engine.key("c", 3, grid)
     expect(shown(engine, grid)).toBe("")
+  })
+
+  test("a shell's line editor (ECHO and ICANON off) still gets predictions, behind the epoch rule", () => {
+    const { engine, grid } = setup(100)
+    engine.setInput({ echo: false, icanon: false })
+    engine.key("a", 1, grid)
+    expect(shown(engine, grid)).toBe("")
+    grid.print("a")
+    engine.ack(1, grid)
+    engine.key("b", 2, grid)
+    expect(shown(engine, grid)).toBe("b")
   })
 
   test("a rejected prediction (the program echoes uppercase) is removed at the ack", () => {

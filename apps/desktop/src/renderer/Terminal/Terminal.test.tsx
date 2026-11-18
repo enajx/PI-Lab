@@ -301,6 +301,7 @@ describe("Terminal macOS custom key integration", () => {
       id: "g1:5:0",
       data: {
         type: "start",
+        input: { echo: true, icanon: true },
         mode: "snapshot",
         generation: "g1",
         revision: 0,
@@ -360,6 +361,7 @@ describe("Terminal macOS custom key integration", () => {
       id: "g1:5:0",
       data: {
         type: "start",
+        input: { echo: true, icanon: true },
         mode: "snapshot",
         generation: "g1",
         revision: 0,

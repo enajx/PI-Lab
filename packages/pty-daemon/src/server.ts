@@ -120,8 +120,8 @@ class Connection {
         }),
       onResize: (cols, rows, revision, offset) =>
         this.send({ kind: "resize", sessionId, generation, offset, revision, cols, rows }),
-      onEcho: (echo, offset) => this.send({ kind: "echo", sessionId, generation, offset, echo }),
-      onEchoAck: (key, offset, echo) =>
+      onEcho: (input, offset) => this.send({ kind: "echo", sessionId, generation, offset, input }),
+      onEchoAck: (key, offset, input) =>
         this.send({
           kind: "echo-ack",
           sessionId,
@@ -129,7 +129,7 @@ class Connection {
           clientId: key.clientId,
           seq: key.seq,
           offset,
-          echo,
+          input,
         }),
       onExit: (exitCode, signal) =>
         this.send({ kind: "exit", sessionId: session.id, exitCode, signal }),
@@ -353,7 +353,7 @@ export class DaemonServer {
       session: info,
       generation: session.generation,
       revision: session.screenRevision,
-      echo: session.echo,
+      input: session.echo,
       cols: info.cols,
       rows: info.rows,
       start:

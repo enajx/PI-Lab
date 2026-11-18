@@ -19,6 +19,12 @@ import type { TerminalOutput } from "../../main/trpc/terminal/terminal"
  * scrolled up, the stream asks the server to hold skips.
  */
 
+/** The PTY's ECHO and ICANON termios bits (see `InputFlags` in @pi-lab/pty-daemon). */
+export interface InputFlags {
+  echo: boolean
+  icanon: boolean
+}
+
 /** Where the emulator's state stands; see `terminal.output`. */
 export interface ResumePoint {
   generation: string
@@ -85,13 +91,13 @@ export interface TerminalStreamOptions {
   onSize: (cols: number, rows: number) => void
   onExit: (exitCode: number | null) => void
   /**
-   * Applied in stream order: a start (with its ECHO flag) once its screen is
-   * written, and each ECHO flag change once the bytes before it are applied.
+   * Applied in stream order: a start (with its ECHO and ICANON flags) once its
+   * screen is written, and each change of them once the bytes before it are applied.
    */
-  onStart: (echo: boolean) => void
-  onEcho: (echo: boolean) => void
+  onStart: (input: InputFlags) => void
+  onEcho: (input: InputFlags) => void
   /** An echo ack, once the bytes before its offset are applied. */
-  onEchoAck: (ack: { clientId: string; seq: number; echo: boolean }) => void
+  onEchoAck: (ack: { clientId: string; seq: number; input: InputFlags }) => void
   /** A server error ended the stream (not a connection drop, which resumes). */
   onError: (message: string) => void
 }
@@ -317,7 +323,7 @@ export class TerminalStream {
           return
         }
         const end = { generation: event.generation, offset: 0, revision: event.revision }
-        this.#options.onStart(event.echo)
+        this.#options.onStart(event.input)
         this.#write(decodeBase64(event.base64), event.offset, end)
         return
       }
@@ -345,12 +351,12 @@ export class TerminalStream {
         return
       }
       case "echoAck":
-        this.#options.onEchoAck({ clientId: event.clientId, seq: event.seq, echo: event.echo })
+        this.#options.onEchoAck({ clientId: event.clientId, seq: event.seq, input: event.input })
         this.#eventsSinceAck += 1
         this.#pump()
         return
       case "echo":
-        this.#options.onEcho(event.echo)
+        this.#options.onEcho(event.input)
         this.#eventsSinceAck += 1
         this.#pump()
         return

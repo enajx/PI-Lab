@@ -1,4 +1,4 @@
-// Read the ECHO bit of a terminal's termios flags (macOS and Linux only).
+// Read the ECHO and ICANON bits of a terminal's termios flags (macOS and Linux only).
 // Plain N-API with a fixed NAPI_VERSION, so one binary loads under both Node
 // and Electron without a rebuild.
 #define NAPI_VERSION 8
@@ -17,21 +17,22 @@
     }                                                            \
   } while (0)
 
-// echoEnabled(fd: number): boolean
-// Return (c_lflag & ECHO) != 0 for fd. Throw a TypeError on a bad argument
-// and an Error with the strerror text when tcgetattr fails.
-static napi_value EchoEnabled(napi_env env, napi_callback_info info) {
+// localFlags(fd: number): { echo: boolean, icanon: boolean }
+// The ECHO and ICANON bits of c_lflag for fd, from one tcgetattr call. Throw a
+// TypeError on a bad argument and an Error with the strerror text when
+// tcgetattr fails.
+static napi_value LocalFlags(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value argv[1];
   CHECK(env, napi_get_cb_info(env, info, &argc, argv, NULL, NULL));
   if (argc < 1) {
-    napi_throw_type_error(env, NULL, "echoEnabled(fd): fd is required");
+    napi_throw_type_error(env, NULL, "localFlags(fd): fd is required");
     return NULL;
   }
   napi_valuetype type;
   CHECK(env, napi_typeof(env, argv[0], &type));
   if (type != napi_number) {
-    napi_throw_type_error(env, NULL, "echoEnabled(fd): fd must be a number");
+    napi_throw_type_error(env, NULL, "localFlags(fd): fd must be a number");
     return NULL;
   }
   int32_t fd;
@@ -43,14 +44,20 @@ static napi_value EchoEnabled(napi_env env, napi_callback_info info) {
     return NULL;
   }
   napi_value result;
-  CHECK(env, napi_get_boolean(env, (t.c_lflag & ECHO) != 0, &result));
+  napi_value echo;
+  napi_value icanon;
+  CHECK(env, napi_create_object(env, &result));
+  CHECK(env, napi_get_boolean(env, (t.c_lflag & ECHO) != 0, &echo));
+  CHECK(env, napi_get_boolean(env, (t.c_lflag & ICANON) != 0, &icanon));
+  CHECK(env, napi_set_named_property(env, result, "echo", echo));
+  CHECK(env, napi_set_named_property(env, result, "icanon", icanon));
   return result;
 }
 
 static napi_value Init(napi_env env, napi_value exports) {
   napi_value fn;
-  CHECK(env, napi_create_function(env, "echoEnabled", NAPI_AUTO_LENGTH, EchoEnabled, NULL, &fn));
-  CHECK(env, napi_set_named_property(env, exports, "echoEnabled", fn));
+  CHECK(env, napi_create_function(env, "localFlags", NAPI_AUTO_LENGTH, LocalFlags, NULL, &fn));
+  CHECK(env, napi_set_named_property(env, exports, "localFlags", fn));
   return exports;
 }
 

@@ -116,6 +116,16 @@ export interface DetachRequest {
   sessionId: string
 }
 
+/**
+ * The PTY's ECHO and ICANON termios bits. ECHO off with ICANON on is a hidden
+ * prompt (read -s, getpass, sudo); a shell's line editor and full-screen apps
+ * turn both off and echo keys themselves.
+ */
+export interface InputFlags {
+  echo: boolean
+  icanon: boolean
+}
+
 /** A key a user typed: who typed it and its number in that client's sequence. */
 export interface KeyInput {
   clientId: string
@@ -230,8 +240,8 @@ export interface AttachReply {
   generation: string
   /** Screen revision after the start is applied. */
   revision: number
-  /** The PTY's ECHO flag after the start (see {@link EchoEvent}). */
-  echo: boolean
+  /** The PTY's ECHO and ICANON flags after the start (see {@link EchoEvent}). */
+  input: InputFlags
   /** Current PTY size. */
   cols: number
   rows: number
@@ -343,16 +353,17 @@ export interface ResizeEvent {
 }
 
 /**
- * The PTY's ECHO flag changed (a program turned echo off for hidden input, or
- * back on). It applies at `offset`: off before the output read with it, on
- * after it. The daemon reads the flag on every output chunk and every write.
+ * The PTY's ECHO or ICANON flag changed. It applies at `offset`: a change to
+ * hidden input (ECHO off, ICANON on) before the output read with it, any
+ * other change after it. The daemon reads the flags on every output chunk
+ * and every write.
  */
 export interface EchoEvent {
   kind: "echo"
   sessionId: string
   generation: string
   offset: number
-  echo: boolean
+  input: InputFlags
 }
 
 /**
@@ -368,7 +379,7 @@ export interface EchoAckEvent {
   clientId: string
   seq: number
   offset: number
-  echo: boolean
+  input: InputFlags
 }
 
 /** How long after a typed key its echo ack is sent (Mosh's ECHO_TIMEOUT). */
@@ -634,9 +645,7 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
         ? (value as unknown as EchoAckEvent)
         : null
     case "echo":
-      return typeof value.sessionId === "string" &&
-        isCount(value.offset) &&
-        typeof value.echo === "boolean"
+      return typeof value.sessionId === "string" && isCount(value.offset) && isRecord(value.input)
         ? (value as unknown as EchoEvent)
         : null
     case "exit":

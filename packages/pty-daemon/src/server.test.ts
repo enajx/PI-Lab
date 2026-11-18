@@ -511,7 +511,7 @@ test("killing an agent PTY also stops its subprocess group", async () => {
   }
 })
 
-describe.skipIf(process.platform === "win32")("ECHO flag", () => {
+describe.skipIf(process.platform === "win32")("ECHO and ICANON flags", () => {
   /** Attach and record data and echo events in order, with the output text so far. */
   async function watch(
     client: DaemonClient,
@@ -527,7 +527,8 @@ describe.skipIf(process.platform === "win32")("ECHO flag", () => {
       events.push(`data@${event.offset}`)
     })
     client.on("echo", (event) => {
-      if (event.sessionId === sessionId) events.push(`echo ${event.echo}@${event.offset}`)
+      if (event.sessionId === sessionId)
+        events.push(`echo ${event.input.echo} icanon ${event.input.icanon}@${event.offset}`)
     })
     const result = await client.attach(sessionId, null)
     if (end === 0) end = result.start.offset + result.start.bytes.length
@@ -550,7 +551,7 @@ describe.skipIf(process.platform === "win32")("ECHO flag", () => {
     })
     const seen = await watch(client, session.id)
     await waitFor(() => seen.text().includes("Password:"), 10_000)
-    const prompt = seen.events.findIndex((event) => event.startsWith("echo false"))
+    const prompt = seen.events.findIndex((event) => event.startsWith("echo false icanon true"))
     expect(prompt).toBeGreaterThanOrEqual(0)
     // The off event comes right before the chunk that holds the prompt, at its start.
     const offAt = Number(seen.events[prompt]?.split("@")[1])
@@ -575,7 +576,7 @@ describe.skipIf(process.platform === "win32")("ECHO flag", () => {
       ],
     })
     const seen = await watch(client, session.id)
-    expect(seen.result.echo).toBe(true)
+    expect(seen.result.input).toEqual({ echo: true, icanon: true })
     await waitFor(() => seen.text().includes("ready"), 10_000)
     // Give bash time to enter `read -s` (it changes termios without output).
     await new Promise((resolve) => setTimeout(resolve, 1500))
@@ -584,9 +585,39 @@ describe.skipIf(process.platform === "win32")("ECHO flag", () => {
     const off = seen.events.find((event) => event.startsWith("echo false")) as string
     expect(Number(off.split("@")[1])).toBe(seen.end())
     // A new attach starts with the flag off.
-    expect((await (await newClient()).attach(session.id, null)).echo).toBe(false)
+    expect((await (await newClient()).attach(session.id, null)).input).toEqual({
+      echo: false,
+      icanon: true,
+    })
     await client.write(session.id, "\r")
     await waitFor(() => seen.events.some((event) => event.startsWith("echo true")), 10_000)
     expect(seen.text()).not.toContain("z")
+  })
+
+  test("a shell's line editor turns ECHO and ICANON off (not hidden input): the change is sent after the output read with it", async () => {
+    const client = await newClient()
+    const session = await client.spawn({
+      command: "/bin/bash",
+      args: ["--noprofile", "--norc", "-i"],
+      env: { PS1: "PROMPT$ " },
+    })
+    const seen = await watch(client, session.id)
+    await waitFor(() => seen.text().includes("PROMPT$ "), 10_000)
+    await client.write(session.id, "x")
+    await waitFor(
+      async () =>
+        JSON.stringify((await (await newClient()).attach(session.id, null)).input) ===
+        JSON.stringify({ echo: false, icanon: false }),
+      5_000,
+    )
+    const change = seen.events.find((event) => event.startsWith("echo false icanon false"))
+    if (change !== undefined) {
+      // Never placed before a chunk: it follows the output it was read with.
+      const at = seen.events.indexOf(change)
+      const offset = Number(change.split("@")[1])
+      const previous = seen.events.slice(0, at).filter((event) => event.startsWith("data@"))
+      expect(previous.length).toBeGreaterThan(0)
+      expect(Number(previous.at(-1)?.split("@")[1])).toBeLessThan(offset)
+    }
   })
 })

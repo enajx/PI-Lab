@@ -5,6 +5,7 @@ import type {
   EchoAckEvent,
   EchoEvent,
   ExitEvent,
+  InputFlags,
   ResizeEvent,
   ResumePoint,
 } from "@pi-lab/pty-daemon"
@@ -166,8 +167,9 @@ const ackInput = z.object({
  * - data: the bytes starting at `offset`.
  * - resize: the PTY size changed after every byte before `offset`; the screen
  *   is now at `revision`.
- * - echo: the PTY's ECHO flag changed at `offset` (every start also carries
- *   the flag); local echo predicts nothing while it is off.
+ * - echo: the PTY's ECHO or ICANON flag changed at `offset` (every start
+ *   also carries both); local echo predicts nothing while ECHO is off and
+ *   ICANON on (a hidden prompt).
  * - echoAck: client `clientId`'s key `seq` was written about 50 ms before the
  *   bytes at `offset`; its echo, if any, is before `offset`.
  * - exit: the program ended; the stream completes.
@@ -184,7 +186,7 @@ export type TerminalOutput =
       mode: "replay"
       offset: number
       base64: string
-      echo: boolean
+      input: InputFlags
     }
   | {
       type: "start"
@@ -196,7 +198,7 @@ export type TerminalOutput =
       offset: number
       screen: string
       base64: string
-      echo: boolean
+      input: InputFlags
     }
   | {
       type: "start"
@@ -209,10 +211,10 @@ export type TerminalOutput =
       offset: number
       screen: string
       base64: string
-      echo: boolean
+      input: InputFlags
     }
-  | { type: "echo"; offset: number; echo: boolean }
-  | { type: "echoAck"; clientId: string; seq: number; offset: number; echo: boolean }
+  | { type: "echo"; offset: number; input: InputFlags }
+  | { type: "echoAck"; clientId: string; seq: number; offset: number; input: InputFlags }
   | { type: "data"; offset: number; base64: string }
   | { type: "resize"; offset: number; revision: number; cols: number; rows: number }
   | { type: "exit"; exitCode: number | null; signal: number | null }
@@ -581,7 +583,7 @@ export const terminalRouter = router({
           rows: result.rows,
           offset: start.offset,
           base64: start.bytes.toString("base64"),
-          echo: result.echo,
+          input: result.input,
         }
         send(
           start.mode === "snapshot"
@@ -594,14 +596,14 @@ export const terminalRouter = router({
         offset = item.offset + item.bytes.length
         send({ type: "data", offset: item.offset, base64: item.bytes.toString("base64") })
       } else if (item.kind === "echo") {
-        send({ type: "echo", offset: item.offset, echo: item.echo })
+        send({ type: "echo", offset: item.offset, input: item.input })
       } else if (item.kind === "echo-ack") {
         send({
           type: "echoAck",
           clientId: item.clientId,
           seq: item.seq,
           offset: item.offset,
-          echo: item.echo,
+          input: item.input,
         })
       } else if (item.kind === "resize") {
         revision = item.revision

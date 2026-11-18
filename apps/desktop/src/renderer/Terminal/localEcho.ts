@@ -20,8 +20,10 @@
  * - Display: in `adaptive`, shown when the smoothed round trip is over 30 ms
  *   (off again at or below 20 ms, once nothing is shown), underlined over
  *   80 ms (off at or below 50 ms). `always` shows them at any round trip;
- *   `off` predicts nothing. Never in the alternate screen, never while the
- *   PTY's ECHO flag is off.
+ *   `off` predicts nothing. Never in the alternate screen, never at a hidden
+ *   prompt (the PTY's ECHO flag off while ICANON is on; user decision
+ *   2026-11-18: a shell's line editor and raw-mode programs, which turn both
+ *   off, do get predictions).
  *
  * Not taken from Mosh: the glitch trigger (showing predictions when one stays
  * pending for 250 ms even at a low round trip), copying the colours of nearby
@@ -228,10 +230,16 @@ export class PredictionEngine {
       this.#srttMs === null ? sample : this.#srttMs + (sample - this.#srttMs) * SRTT_GAIN
   }
 
-  /** The PTY's ECHO flag. While it is off nothing is predicted. */
-  setEcho(on: boolean): void {
-    this.#echoOff = !on
-    if (!on) this.reset()
+  /**
+   * The PTY's ECHO and ICANON flags. ECHO off with ICANON on is a hidden
+   * prompt (read -s, getpass, sudo): then nothing is predicted. A shell's line
+   * editor and raw-mode programs turn both off and echo keys themselves; they
+   * get predictions, protected by the epochs.
+   */
+  setInput(flags: { echo: boolean; icanon: boolean }): void {
+    const hidden = !flags.echo && flags.icanon
+    this.#echoOff = hidden
+    if (hidden) this.reset()
   }
 
   /** While the connection is down, shown predictions are underlined (as in Mosh). */

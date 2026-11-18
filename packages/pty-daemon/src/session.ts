@@ -9,6 +9,7 @@ import { type IPty, spawn } from "node-pty"
 import { ByteTail } from "./byteTail"
 import {
   ECHO_ACK_DELAY_MS,
+  type InputFlags,
   type KeyInput,
   type KeyStatus,
   type ResumePoint,
@@ -23,7 +24,7 @@ const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
  * Reads the ECHO bit of a PTY's termios (`tcgetattr` on the master fd, under
  * 1 µs). Windows has no termios, so there the flag is taken as always on.
  */
-const termios: { echoEnabled(fd: number): boolean } | null =
+const termios: { localFlags(fd: number): InputFlags } | null =
   process.platform === "win32" ? null : createRequire(import.meta.url)("@pi-lab/pty-termios")
 
 /** Typists remembered per session (oldest forgotten first). */
@@ -40,6 +41,19 @@ interface Typist {
   lastAckOffset: number | null
   /** A resent key was dropped; later resends are dropped too, until a first send. */
   dropping: boolean
+}
+
+function sameFlags(a: InputFlags, b: InputFlags): boolean {
+  return a.echo === b.echo && a.icanon === b.icanon
+}
+
+/**
+ * ECHO off in canonical mode: a hidden prompt (read -s, getpass, sudo). With
+ * ICANON off too the program reads keys raw and echoes them itself (a shell's
+ * line editor, a full-screen app).
+ */
+function hiddenInput(flags: InputFlags): boolean {
+  return !flags.echo && flags.icanon
 }
 
 /** A replay at most this long is sent without comparing it with a screen refresh. */
@@ -61,9 +75,9 @@ export interface SessionListener {
   /** The PTY was resized after every byte before `offset`. */
   onResize(cols: number, rows: number, revision: number, offset: number): void
   /** The PTY's ECHO flag changed; it applies at `offset`. */
-  onEcho(echo: boolean, offset: number): void
+  onEcho(flags: InputFlags, offset: number): void
   /** A typed key's echo ack, {@link ECHO_ACK_DELAY_MS} after it was written. */
-  onEchoAck(key: KeyInput, offset: number, echo: boolean): void
+  onEchoAck(key: KeyInput, offset: number, flags: InputFlags): void
   onExit(exitCode: number | null, signal: number | null): void
 }
 
@@ -104,7 +118,7 @@ class Session {
   private exitState: ExitState | null = null
   private readonly listeners = new Set<SessionListener>()
   /** The PTY's ECHO flag as last read. */
-  private echoFlag = true
+  private echoFlag: InputFlags = { echo: true, icanon: true }
   /** Set once reading the flag failed (logged); the flag then stays as it was. */
   private echoUnreadable = false
   private readonly typists = new Map<string, Typist>()
@@ -150,13 +164,16 @@ class Session {
       if (this.disposed) return
       const offset = this.tail.end
       // Echo turned off before this output was read (a password prompt): off from its start.
-      const echo = this.readEcho()
-      if (!echo && this.echoFlag) this.setEcho(false, offset)
+      // Hidden input began before this output was read (a password prompt): from its start.
+      const flags = this.readEcho()
+      const changed = !sameFlags(flags, this.echoFlag)
+      if (changed && hiddenInput(flags)) this.setEcho(flags, offset)
       this.tail.append(bytes)
       this.screen.feed(bytes)
       for (const listener of this.listeners) listener.onData(bytes, offset)
       // Turned on again: on only after this output.
-      if (echo && !this.echoFlag) this.setEcho(true, this.tail.end)
+      // Any other change applies only after this output.
+      if (changed && !hiddenInput(flags)) this.setEcho(flags, this.tail.end)
     })
 
     this.pty.onExit(({ exitCode, signal }) => {
@@ -225,8 +242,8 @@ class Session {
     return this.revision
   }
 
-  /** The PTY's ECHO flag as last sent to listeners. */
-  get echo(): boolean {
+  /** The PTY's ECHO and ICANON flags as last sent to listeners. */
+  get echo(): InputFlags {
     return this.echoFlag
   }
 
@@ -234,25 +251,25 @@ class Session {
    * Read the ECHO flag from the PTY master. A failed read (the PTY is closing)
    * is logged once; the last value is kept.
    */
-  private readEcho(): boolean {
+  private readEcho(): InputFlags {
     if (termios === null || this.echoUnreadable || this.disposed || !this.alive)
       return this.echoFlag
     const fd = (this.pty as IPty & { fd?: number }).fd
     if (typeof fd !== "number") throw new Error("node-pty did not expose the PTY master fd")
     try {
-      return termios.echoEnabled(fd)
+      return termios.localFlags(fd)
     } catch (error) {
       this.echoUnreadable = true
       console.warn(
-        `[pty-daemon] session ${this.id}: cannot read the ECHO flag (${error instanceof Error ? error.message : String(error)}); keeping ${this.echoFlag ? "on" : "off"}`,
+        `[pty-daemon] session ${this.id}: cannot read the ECHO and ICANON flags (${error instanceof Error ? error.message : String(error)}); keeping ${JSON.stringify(this.echoFlag)}`,
       )
       return this.echoFlag
     }
   }
 
-  private setEcho(echo: boolean, offset: number): void {
-    this.echoFlag = echo
-    for (const listener of this.listeners) listener.onEcho(echo, offset)
+  private setEcho(flags: InputFlags, offset: number): void {
+    this.echoFlag = flags
+    for (const listener of this.listeners) listener.onEcho(flags, offset)
   }
 
   /**
@@ -325,14 +342,14 @@ class Session {
   write(data: string, key: KeyInput | null): void {
     if (!this.alive) return
     // A program may turn echo off without printing anything (read -s).
-    const echo = this.readEcho()
-    if (echo !== this.echoFlag) this.setEcho(echo, this.tail.end)
+    const flags = this.readEcho()
+    if (!sameFlags(flags, this.echoFlag)) this.setEcho(flags, this.tail.end)
     this.pty.write(data)
     if (key === null) return
     setTimeout(() => {
       if (this.disposed) return
       const now = this.readEcho()
-      if (now !== this.echoFlag) this.setEcho(now, this.tail.end)
+      if (!sameFlags(now, this.echoFlag)) this.setEcho(now, this.tail.end)
       const typist = this.typists.get(key.clientId)
       if (typist !== undefined && typist.lastSeq === key.seq) typist.lastAckOffset = this.tail.end
       for (const listener of this.listeners) listener.onEchoAck(key, this.tail.end, this.echoFlag)
@@ -386,7 +403,7 @@ export interface SessionHandle {
   readonly id: string
   readonly generation: string
   readonly screenRevision: number
-  readonly echo: boolean
+  readonly echo: InputFlags
   info(): SessionInfo
   startFrom(resume: ResumePoint | null): SessionStart
   subscribe(listener: SessionListener): () => void

@@ -63,14 +63,14 @@ function checkNodePty(fromPaths) {
 /** @param {string} file Load the termios addon binary and check its export. */
 function checkTermiosBinary(file) {
   const termios = require(file) // throws on a load failure
-  if (typeof termios.echoEnabled !== "function") throw new Error(`${file} has no echoEnabled()`)
+  if (typeof termios.localFlags !== "function") throw new Error(`${file} has no localFlags()`)
 }
 
 /** @param {string[]} fromPaths Load @pi-lab/pty-termios through its package. */
 function checkPtyTermios(fromPaths) {
   const termios = require(require.resolve("@pi-lab/pty-termios", { paths: fromPaths }))
-  if (typeof termios.echoEnabled !== "function") {
-    throw new Error("@pi-lab/pty-termios has no echoEnabled()")
+  if (typeof termios.localFlags !== "function") {
+    throw new Error("@pi-lab/pty-termios has no localFlags()")
   }
   checkTermiosBinary(
     join(

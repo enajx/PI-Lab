@@ -16,6 +16,7 @@ import {
   type ExitEvent,
   encodeFrame,
   FrameDecoder,
+  type InputFlags,
   type KeyInput,
   type KeyStatus,
   type ProcessExitEvent,
@@ -67,8 +68,8 @@ export interface AttachResult {
   generation: string
   /** Screen revision after the start is applied. */
   revision: number
-  /** The PTY's ECHO flag after the start. */
-  echo: boolean
+  /** The PTY's ECHO and ICANON flags after the start. */
+  input: InputFlags
   /** Current PTY size; a snapshot is written into a reset terminal of this size. */
   cols: number
   rows: number
@@ -98,7 +99,7 @@ function attachResult(reply: AttachReply): AttachResult {
     session: reply.session,
     generation: reply.generation,
     revision: reply.revision,
-    echo: reply.echo,
+    input: reply.input,
     cols: reply.cols,
     rows: reply.rows,
     start: decodeStart(reply.start),
