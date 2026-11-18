@@ -383,6 +383,8 @@ async function hiddenTask(page, dataDir, trials) {
   ]) {
     await page.keyboard.press("Control+u")
     await run(page, command, prompt)
+    // Predictions of the command line just typed (a shell gets them) end at its acks.
+    await waitFor(async () => (await page.evaluate(() => window.__typing.drawn())).length === 0, 10_000, "no predictions drawn")
     await page.evaluate(() => window.__typing.start())
     for (const ch of "hunter2x") {
       await page.keyboard.press(ch)
@@ -399,6 +401,7 @@ async function hiddenTask(page, dataDir, trials) {
       typedCharactersOnScreen: [..."hunter2x"].filter((ch) => rows.split(prompt).at(-1)?.includes("hunter2x")).length,
     })
   }
+  if (trials === 0) return { prompts }
   // The race: ECHO turns off at a random time while a key is in flight.
   const script = join(dataDir, "race.py")
   await writeFile(script, RACE_PROGRAM)
@@ -457,6 +460,64 @@ process.stdin.on("data", (data) => {
 })
 `
 
+/** The daemon's current screen for the app's terminal, as text rows, from a fresh snapshot. */
+async function daemonScreen(page, dataDir) {
+  const { createTRPCClient } = await import("desktop:@trpc/client")
+  const { WebSocket } = await import("desktop:ws")
+  const { Terminal: HeadlessTerminal } = (await import("desktop:@xterm/headless")).default
+  const { createServerSockets } = await import(join(DESKTOP_DIR, "src/renderer/trpc/serverLinks.ts"))
+  const { TerminalStream } = await import(join(DESKTOP_DIR, "src/renderer/Terminal/terminalStream.ts"))
+  const { ConnectionStatus } = await import(join(DESKTOP_DIR, "src/renderer/trpc/connectionStatus.ts"))
+  const { port } = JSON.parse(readFileSync(join(dataDir, "server.json"), "utf8"))
+  const token = readFileSync(join(dataDir, "server-token"), "utf8").trim()
+  const sessionId = await page.getByTestId("terminal").first().getAttribute("data-session-id")
+  const sockets = createServerSockets({
+    url: async () => `ws://127.0.0.1:${port}/trpc?token=${encodeURIComponent(token)}`,
+    WebSocket,
+    status: new ConnectionStatus(),
+  })
+  const trpc = createTRPCClient({ links: [sockets.link] })
+  // The snapshot resizes it to the PTY's size.
+  const terminal = new HeadlessTerminal({ cols: 80, rows: 24, allowProposedApi: true })
+  let started = false
+  const stream = new TerminalStream({
+    subscribe: (input, handlers) => trpc.terminal.output.subscribe(input, handlers),
+    ack: (input) => trpc.terminal.ack.mutate(input),
+    sessionId,
+    emulator: {
+      write: (data, applied) => terminal.write(data, () => {
+        started = true
+        applied()
+      }),
+      resize: (c, r) => terminal.resize(c, r),
+    },
+    dropPolicy: "keep",
+    onSize: () => {},
+    onStart: () => {},
+    onEcho: () => {},
+    onEchoAck: () => {},
+    onExit: () => {},
+    onError: (message) => fail(`snapshot stream: ${message}`),
+  })
+  stream.open()
+  await waitFor(() => started && stream.queued() === 0, 10_000, "the snapshot")
+  await sleep(300)
+  const buffer = terminal.buffer.active
+  const lines = []
+  for (let row = 0; row < terminal.rows; row++) lines.push(buffer.getLine(buffer.baseY + row)?.translateToString(true) ?? "")
+  stream.close()
+  await sockets.close()
+  terminal.dispose()
+  return lines
+}
+
+/** The app's xterm rows as text. */
+async function appScreen(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid="terminal"] .xterm-rows > div'), (row) => row.textContent.replace(/\s+$/u, "")),
+  )
+}
+
 async function rejectTask(page, dataDir, roundTripMs) {
   const results = []
   const script = join(dataDir, "upper.cjs")
@@ -471,6 +532,9 @@ async function rejectTask(page, dataDir, roundTripMs) {
   await sleep(2_000)
   let recorded = await page.evaluate(() => window.__typing.stop())
   let rows = await page.evaluate(() => window.__typing.rows())
+  const app = await appScreen(page)
+  const daemon = await daemonScreen(page, dataDir)
+  const normalize = (lines) => lines.map((line) => line.replace(/\s+$/u, "").replace(/\u00a0/gu, " "))
   const drawnLetters = recorded.predictions.filter((entry) => /[a-h]/.test(entry.chars))
   const lastLetterKey = recorded.keys.filter((key) => /[a-h]/.test(key.key)).at(-1)
   results.push({
@@ -479,7 +543,14 @@ async function rejectTask(page, dataDir, roundTripMs) {
     predictionsLeftAfter2s: (await page.evaluate(() => window.__typing.drawn())).length,
     lowercaseOnScreen: /UPPER>[^\n]*[a-h]/.test(rows),
     lastPredictionAfterLastKeyMs: drawnLetters.length && lastLetterKey ? round(drawnLetters.at(-1).at - lastLetterKey.at) : null,
+    // How long each wrong (lowercase) prediction stayed drawn.
+    wrongPredictionDrawnMs: {
+      p50: round(percentile(drawnLetters.map((entry) => entry.until - entry.at), 50)),
+      max: round(drawnLetters.length ? Math.max(...drawnLetters.map((entry) => entry.until - entry.at)) : null),
+    },
     ackWindowMs: roundTripMs === null ? null : roundTripMs + 50,
+    screenEqualsDaemon: JSON.stringify(normalize(app)) === JSON.stringify(normalize(daemon)),
+    screenDiff: JSON.stringify(normalize(app)) === JSON.stringify(normalize(daemon)) ? null : { app: normalize(app), daemon: normalize(daemon) },
   })
   await page.keyboard.press("Control+c")
   await sleep(500)
