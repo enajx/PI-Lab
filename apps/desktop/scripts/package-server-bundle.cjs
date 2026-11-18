@@ -8,7 +8,9 @@
  * only (Linux comes in step 3).
  *
  * Layout inside the archive (`pi-lab-server-<version>-darwin-<arch>/`):
+ *   bundle.json         {version, build, platform, arch}, read by install.sh
  *   bin/pi-lab-server   launcher: `serve` and `enroll --name <client name>`
+ *   bin/install.sh      the installer (scripts/server-install/install.sh), used for updates
  *   node/bin/node       official Node binary, same version as Electron's Node
  *   app/out/main/       server.js, enroll.js, the preview worker, their chunks, drizzle/
  *   app/out/pty-daemon/ the PTY daemon
@@ -41,6 +43,7 @@ const DESKTOP_DIR = join(__dirname, "..")
 const OUT_DIR = join(DESKTOP_DIR, "out")
 const RELEASE_DIR = join(DESKTOP_DIR, "release", "server")
 const CACHE_DIR = join(RELEASE_DIR, "cache")
+const INSTALLER = join(__dirname, "server-install", "install.sh")
 
 /** Electron 42's Node. Keep equal to `process.versions.node` under ELECTRON_RUN_AS_NODE. */
 const NODE_VERSION = "24.19.0"
@@ -269,6 +272,12 @@ root=$(cd "$(dirname "$0")/.." && pwd -P)
 node="$root/node/bin/node"
 app="$root/app"
 export PI_LAB_DATA_DIR="\${PI_LAB_DATA_DIR:-$HOME/.pi-lab}"
+# The server updates itself only when it runs from an install.sh layout.
+export PI_LAB_SERVER_ROOT="$root"
+case "$root" in
+  */versions/*) export PI_LAB_SERVER_PREFIX="\${root%/versions/*}" ;;
+  *) unset PI_LAB_SERVER_PREFIX ;;
+esac
 command="\${1:-}"
 [ $# -gt 0 ] && shift
 case "$command" in
@@ -357,12 +366,20 @@ function main() {
   const build = sha256(join(OUT_DIR, "main", "server.js")).slice(0, 16)
   mkdirSync(join(root, "bin"))
   writeFileSync(join(root, "bin", "pi-lab-server"), launcherScript(build, version), { mode: 0o755 })
+  copyFileSync(INSTALLER, join(root, "bin", "install.sh"))
+  chmodSync(join(root, "bin", "install.sh"), 0o755)
+  writeFileSync(
+    join(root, "bundle.json"),
+    `${JSON.stringify({ version, build, platform: "darwin", arch }, null, 2)}\n`,
+  )
 
   const tarball = join(RELEASE_DIR, `${name}.tar.gz`)
   execFileSync("/usr/bin/tar", ["-czf", tarball, "-C", stage, name], {
     env: { ...process.env, COPYFILE_DISABLE: "1" },
   })
   writeFileSync(`${tarball}.sha256`, `${sha256(tarball)}  ${name}.tar.gz\n`)
+  // Published next to the bundles, for the one-line install command.
+  copyFileSync(INSTALLER, join(RELEASE_DIR, "install.sh"))
   const unpackedMb = (folderSize(root) / 1024 / 1024).toFixed(1)
   const packedMb = (statSync(tarball).size / 1024 / 1024).toFixed(1)
   rmSync(stage, { recursive: true, force: true })
