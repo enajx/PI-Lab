@@ -268,7 +268,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
     )
   })
 
-  test("Quit with a busy terminal leaves everything running; Quit and stop server and agents asks, Cancel keeps it, Stop ends it", async () => {
+  test("Quit dialog Cancel keeps everything; Stop Server and Agents asks, Cancel keeps it, Stop ends it", async () => {
     test.setTimeout(120_000)
     let fixture: Fixture | null = null
     let closed = false
@@ -278,19 +278,22 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
       app.once("close", () => {
         closed = true
       })
-      const requestQuit = () =>
-        app.evaluate(({ Menu }) => {
-          const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
-          if (!item) throw new Error("Missing Quit menu item")
+      const clickMenu = (id: string) =>
+        app.evaluate(({ Menu }, menuId) => {
+          const item = Menu.getApplicationMenu()?.getMenuItemById(menuId)
+          if (!item) throw new Error(`Missing menu item ${menuId}`)
           setImmediate(() => item.click())
-        })
+        }, id)
 
-      await requestQuit()
+      await clickMenu("user-quit")
       const first = await waitForDialog(pid, "Quit")
-      expect([...first.buttons].sort()).toEqual(
-        ["Cancel", "Move to background", "Quit", "Quit and stop server and agents"].sort(),
-      )
-      await click(pid, "Quit and stop server and agents")
+      expect([...first.buttons].sort()).toEqual(["Cancel", "Move to background", "Quit"].sort())
+      await click(pid, "Cancel")
+      await waitForDialogGone(pid, "Move to background")
+      expect(closed).toBe(false)
+      expect(await fixture.foreground()).toBe("sleep")
+
+      await clickMenu("stop-server")
       const busy = await waitForDialog(pid, "Stop server and agents")
       expect(busy.texts).toContain("1 terminal is still running a command.")
       expect(busy.texts.join("\n")).toContain("repo: sleep")
@@ -305,9 +308,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
       expect(daemonPid).toBeGreaterThan(0)
       const serverPid = readServerDiscovery(fixture.dataDir)?.pid ?? 0
       const exited = app.waitForEvent("close")
-      await requestQuit()
-      await waitForDialog(pid, "Quit and stop server and agents")
-      await click(pid, "Quit and stop server and agents")
+      await clickMenu("stop-server")
       await waitForDialog(pid, "Stop server and agents")
       await click(pid, "Stop server and agents")
       await exited
@@ -320,7 +321,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
     }
   })
 
-  test("Quit with a busy terminal asks nothing about work and leaves the server and terminal running", async () => {
+  test("Quit with a busy terminal asks only the Quit dialog and leaves the server and terminal running", async () => {
     test.setTimeout(120_000)
     let fixture: Fixture | null = null
     let closed = false

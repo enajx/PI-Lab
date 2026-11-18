@@ -8,7 +8,7 @@ import type { Dialog, MessageBoxOptions, MessageBoxSyncOptions } from "electron"
  * that assigns its own `dialog.showMessageBox` later still replaces this one.
  *
  * A dialog without a matching answer gets a default: the first button whose
- * label starts with "Quit" (quit and stop confirmations, so app cleanup never
+ * label starts with "Quit" (Quit dialogs and logout warnings (a stop confirmation, whose first button is not a Quit, falls back to Cancel), so app cleanup never
  * waits), otherwise `cancelId`, otherwise the last button. Every dialog is
  * recorded and printed to stdout as {@link TEST_DIALOG_LOG_PREFIX} + JSON, which
  * the e2e fixture attaches to the test report.

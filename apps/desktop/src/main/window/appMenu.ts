@@ -12,12 +12,18 @@ interface ReadyUpdateMenuItem {
 
 let readyUpdate: ReadyUpdateMenuItem | null = null
 let userQuitAction: () => void = () => app.quit()
+let stopServerAction: () => void = () => undefined
 // Cmd+W never hides the app; until main installs the close-tab action it does nothing.
 let closeTabAction: () => void = () => {}
 
 /** Keep explicit quit behavior when the native menu is rebuilt for updates or language. */
 export function setUserQuitAction(action: () => void): void {
   userQuitAction = action
+}
+
+/** "Stop Server and Agents…" in the app menu (see window/userQuit.ts). */
+export function setStopServerAction(action: () => void): void {
+  stopServerAction = action
 }
 
 /** Route Cmd+W to the active tab of the focused panel; it never hides or closes the app. */
@@ -47,6 +53,11 @@ export function installAppMenu(): void {
     label: stable ? nativeText("Quit PI Lab") : `Quit ${appName}`,
     accelerator: "CommandOrControl+Q",
     click: () => userQuitAction(),
+  }
+  const stopServerItem: MenuItemConstructorOptions = {
+    id: "stop-server",
+    label: "Stop Server and Agents…",
+    click: () => stopServerAction(),
   }
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
@@ -92,6 +103,7 @@ export function installAppMenu(): void {
               item("hideOthers", "Hide Others"),
               item("unhide", "Show All"),
               { type: "separator" },
+              stopServerItem,
               quitItem,
             ],
           } satisfies MenuItemConstructorOptions,
@@ -99,7 +111,7 @@ export function installAppMenu(): void {
       : [
           {
             label: nativeText("File"),
-            submenu: [quitItem],
+            submenu: [stopServerItem, quitItem],
           } satisfies MenuItemConstructorOptions,
         ]),
     {

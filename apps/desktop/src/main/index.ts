@@ -69,15 +69,22 @@ import { resolveDaemonEntry, resolveDaemonSocketPath } from "./terminal/socketPa
 import { registerAnalysisReportScheme } from "./trpc/science/analysis/reportScheme"
 import { checkForUpdates, updateSnapshot } from "./updates/feedback"
 import { publicReleaseFromPackage } from "./updates/release"
-import { installAppMenu, setCloseTabAction, setUserQuitAction } from "./window/appMenu"
+import {
+  installAppMenu,
+  setCloseTabAction,
+  setStopServerAction,
+  setUserQuitAction,
+} from "./window/appMenu"
 import { installCloseTabAction } from "./window/closeTabAction"
 import { createMainWindow, loadWindowPage } from "./window/mainWindow"
 import { installShutdownGuard } from "./window/shutdownGuard"
 import {
+  createStopServerAction,
   createUserQuitAction,
   hasRunningWork,
   logoutWorkDialog,
   QUIT_DIALOG_BUTTONS,
+  QUIT_DIALOG_CANCEL,
   quitChoiceFromButton,
   stopWorkDialog,
 } from "./window/userQuit"
@@ -305,6 +312,7 @@ async function ensureTray(): Promise<void> {
       newProject: () => openFull("/?newProject=1"),
       restartToUpdate: () => restartToUpdate?.(),
       quit: () => void requestUserQuit(),
+      stopServer: () => void requestStopServer(),
     },
     // The tray reads this when it opens and every second while open: ask the server for
     // fresh data (it arrives through subscribeTray) and show the last data meanwhile.
@@ -453,16 +461,33 @@ const requestUserQuit = createUserQuitAction({
       title: `Quit ${app.getName()}?`,
       message: `Quit ${app.getName()}?`,
       detail:
-        "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps this window's menu-bar icon.",
+        "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon.",
       buttons: [...QUIT_DIALOG_BUTTONS],
       checkboxLabel: "Remember option",
       checkboxChecked: false,
-      defaultId: 0,
-      cancelId: 0,
+      defaultId: QUIT_DIALOG_CANCEL,
+      cancelId: QUIT_DIALOG_CANCEL,
       noLink: true,
     })
     return { choice: quitChoiceFromButton(result.response), remember: result.checkboxChecked }
   },
+  remember: (choice) => {
+    if (!fullRuntime) throw new Error("Cannot remember the quit choice before PI Lab has started")
+    void fullRuntime.rememberQuitChoice(choice).catch((error: unknown) => {
+      console.error("[pi-lab] could not save the quit choice:", error)
+    })
+  },
+  quit: () => shutdownGuard.requestExplicitQuit(),
+  background: () => {
+    if (process.platform === "darwin") app.hide()
+    else userWindow?.hide()
+  },
+  error: (error) =>
+    dialog.showErrorBox("Could not quit PI Lab", `The app remains open. ${String(error)}`),
+})
+
+const requestStopServer = createStopServerAction({
+  pending: () => shutdownGuard.isQuitPending(),
   work: async () => {
     await fullBootScheduler.startNow()
     if (!fullRuntime) throw new Error("PI Lab has not started")
@@ -479,25 +504,19 @@ const requestUserQuit = createUserQuitAction({
     })
     return result.response === 0 ? "stop" : "cancel"
   },
-  remember: (choice) => {
-    if (!fullRuntime) throw new Error("Cannot remember the quit choice before PI Lab has started")
-    void fullRuntime.rememberQuitChoice(choice).catch((error: unknown) => {
-      console.error("[pi-lab] could not save the quit choice:", error)
-    })
-  },
   stopServer: async () => {
     await fullBootScheduler.startNow()
     if (!fullRuntime) throw new Error("PI Lab has not started")
     await fullRuntime.stopServerAndAgents()
   },
   quit: () => shutdownGuard.requestExplicitQuit(),
-  background: () => {
-    if (process.platform === "darwin") app.hide()
-    else userWindow?.hide()
-  },
   error: (error) =>
-    dialog.showErrorBox("Could not quit PI Lab", `The app remains open. ${String(error)}`),
+    dialog.showErrorBox(
+      "Could not stop the PI Lab server",
+      `The app remains open. ${String(error)}`,
+    ),
 })
+setStopServerAction(() => void requestStopServer())
 setUserQuitAction(() => void requestUserQuit())
 
 // Cmd+W closes the active tab of the focused panel in the user window. It never

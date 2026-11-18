@@ -17,8 +17,19 @@ import { processAlive, readServerDiscovery } from "./fixtures/serverClient"
 import { stopServerIn } from "./fixtures/stopServer"
 
 /** The Quit dialog's buttons, in order (see QUIT_DIALOG_BUTTONS). */
-const QUIT_BUTTONS = ["Cancel", "Move to background", "Quit", "Quit and stop server and agents"]
-const STOP = 3
+const QUIT_BUTTONS = ["Move to background", "Quit", "Cancel"]
+const BACKGROUND = 0
+const QUIT = 1
+const CANCEL = 2
+
+/** Click the app menu's "Stop Server and Agents…" item, the way the user does. */
+async function clickStopServer(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ Menu }) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById("stop-server")
+    if (!item) throw new Error("Missing Stop Server and Agents menu item")
+    setImmediate(() => item.click())
+  })
+}
 
 const execFileAsync = promisify(execFile)
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
@@ -86,7 +97,10 @@ test("Quit leaves the server, daemon and a busy terminal running without asking 
     await expect.poll(() => existsSync(socketPath)).toBe(true)
     await client.connect()
     await expect
-      .poll(async () => (await client.list()).filter((session) => session.alive).length)
+      .poll(async () => (await client.list()).filter((session) => session.alive).length, {
+        // The shell starts through the server and its PTY daemon.
+        timeout: 30_000,
+      })
       .toBe(1)
     const shell = (await client.list()).find((session) => session.alive)
     if (!shell?.pid) throw new Error("Terminal shell not running")
@@ -104,8 +118,8 @@ test("Quit leaves the server, daemon and a busy terminal running without asking 
       state.quitPrompts = []
       dialog.showMessageBox = async (options) => {
         state.quitPrompts.push(JSON.stringify(options))
-        // The Quit button first; any later dialog gets 1 (Cancel on a confirmation).
-        return { response: state.quitPrompts.length === 1 ? 2 : 1, checkboxChecked: false }
+        // The Quit button first; any later dialog gets Cancel.
+        return { response: state.quitPrompts.length === 1 ? 1 : 2, checkboxChecked: false }
       }
     })
     const closed = new Promise((resolve) => app?.once("close", resolve))
@@ -134,7 +148,7 @@ test("Quit leaves the server, daemon and a busy terminal running without asking 
 })
 
 /** Native dialog choices are injected; the app, server, daemon, and terminal shell are real. */
-test("Quit and stop server and agents names a busy terminal, Cancel keeps it, and with idle shells it stops the server and daemon", async () => {
+test("Stop Server and Agents names a busy terminal, Cancel keeps it, and with idle shells it stops the server and daemon", async () => {
   test.skip(process.platform === "win32", "Fixture uses POSIX shell and process listing")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-quit-shell-"))
@@ -172,7 +186,10 @@ test("Quit and stop server and agents names a busy terminal, Cancel keeps it, an
     await expect.poll(() => existsSync(socketPath)).toBe(true)
     await client.connect()
     await expect
-      .poll(async () => (await client.list()).filter((session) => session.alive).length)
+      .poll(async () => (await client.list()).filter((session) => session.alive).length, {
+        // The shell starts through the server and its PTY daemon.
+        timeout: 30_000,
+      })
       .toBe(1)
     let shell = (await client.list()).find((session) => session.alive)
     if (!shell?.pid) throw new Error("Terminal shell not running")
@@ -191,8 +208,8 @@ test("Quit and stop server and agents names a busy terminal, Cancel keeps it, an
       state.quitPrompts = []
       dialog.showMessageBox = async (options) => {
         state.quitPrompts.push(JSON.stringify(options))
-        // An unexpected extra dialog gets 1: Cancel on the stop confirmation.
-        return { response: state.quitChoices.shift() ?? 1, checkboxChecked: false }
+        // An unexpected extra dialog gets 2: Cancel on the Quit dialog (1 on the stop one).
+        return { response: state.quitChoices.shift() ?? 2, checkboxChecked: false }
       }
     })
     const requestQuit = async (choice: number[]): Promise<void> => {
@@ -204,14 +221,26 @@ test("Quit and stop server and agents names a busy terminal, Cancel keeps it, an
         setImmediate(() => item.click())
       }, choice)
     }
+    const requestStop = async (choice: number[]): Promise<void> => {
+      if (!app) throw new Error("App already quit")
+      await app.evaluate((_, response) => {
+        ;(globalThis as unknown as { quitChoices: number[] }).quitChoices = response
+      }, choice)
+      await clickStopServer(app)
+    }
     const prompts = async () =>
       (await app?.evaluate(
         () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts,
       )) ?? []
-    // Quit and stop server and agents, then Cancel on the confirmation.
-    await requestQuit([STOP, 1])
-    await expect.poll(async () => (await prompts()).length).toBe(2)
+    // Cancel on the Quit dialog keeps everything.
+    await requestQuit([CANCEL])
+    await expect.poll(async () => (await prompts()).length).toBe(1)
     expect(JSON.parse((await prompts())[0] ?? "{}").buttons).toEqual(QUIT_BUTTONS)
+    expect(await foreground()).toBe("sleep")
+    expect(processAlive(serverPid)).toBe(true)
+    // Stop Server and Agents names the busy terminal; Cancel on the confirmation keeps it.
+    await requestStop([1])
+    await expect.poll(async () => (await prompts()).length).toBe(2)
     const busy = JSON.parse((await prompts())[1] ?? "{}")
     expect(busy.message).toBe("1 terminal is still running a command.")
     expect(busy.detail).toContain("repo: sleep")
@@ -226,7 +255,7 @@ test("Quit and stop server and agents names a busy terminal, Cancel keeps it, an
     expect(daemonPid).toBeGreaterThan(0)
     const closed = new Promise((resolve) => app?.once("close", resolve))
     // A confirmation would get Cancel and the app would not close.
-    await requestQuit([STOP])
+    await requestStop([])
     await closed
     await expect.poll(() => processAlive(serverPid)).toBe(false)
     await expect.poll(() => daemonPidFor(socketPath)).toBeUndefined()
@@ -247,7 +276,7 @@ test("Quit and stop server and agents names a busy terminal, Cancel keeps it, an
 })
 
 /** The app is real; the adopted daemon is a stand-in for one from an earlier build. */
-test("Quit and stop server and agents stops an adopted daemon from an earlier build that ignores shutdown", async () => {
+test("Stop Server and Agents stops an adopted daemon from an earlier build that ignores shutdown", async () => {
   test.skip(process.platform === "win32", "Fixture uses a Unix socket and process listing")
   test.setTimeout(60_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-old-daemon-"))
@@ -296,14 +325,11 @@ net.createServer((socket) => {
     const window = await app.firstWindow()
     await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
     await app.evaluate(({ dialog }) => {
-      dialog.showMessageBox = async () => ({ response: 3, checkboxChecked: false })
+      // No work runs, so no dialog is expected; a stray one gets Cancel.
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
     })
     const closed = new Promise((resolve) => app?.once("close", resolve))
-    await app.evaluate(({ Menu }) => {
-      const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
-      if (!item) throw new Error("Missing Quit menu item")
-      setImmediate(() => item.click())
-    })
+    await clickStopServer(app)
     await closed
     await oldExited
     expect(old.signalCode).toBe("SIGTERM")
@@ -320,7 +346,7 @@ net.createServer((socket) => {
 })
 
 /** Native dialog choices are injected; the app, window close, daemon and shell are real. */
-test("closing the window with Keep running after window closes off runs the Quit flow; its stop choice stops the server", async () => {
+test("closing the window with Keep running after window closes off runs the Quit flow; Cancel keeps the window and Quit keeps the server, daemon and shell", async () => {
   test.skip(process.platform !== "darwin", "Background choice uses macOS app hiding")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-close-quit-"))
@@ -362,7 +388,10 @@ test("closing the window with Keep running after window closes off runs the Quit
     await expect.poll(() => existsSync(socketPath)).toBe(true)
     await client.connect()
     await expect
-      .poll(async () => (await client.list()).filter((session) => session.alive).length)
+      .poll(async () => (await client.list()).filter((session) => session.alive).length, {
+        // The shell starts through the server and its PTY daemon.
+        timeout: 30_000,
+      })
       .toBe(1)
     const shell = (await client.list()).find((session) => session.alive)
     if (!shell?.pid) throw new Error("Terminal shell not running")
@@ -372,7 +401,7 @@ test("closing the window with Keep running after window closes off runs the Quit
       state.quitPrompts = []
       dialog.showMessageBox = async (options) => {
         state.quitPrompts.push(JSON.stringify(options))
-        return { response: state.quitChoices.shift() ?? 0, checkboxChecked: false }
+        return { response: state.quitChoices.shift() ?? 2, checkboxChecked: false }
       }
     })
     const closeWindow = async (choice: number[]): Promise<void> => {
@@ -389,7 +418,7 @@ test("closing the window with Keep running after window closes off runs the Quit
         () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts,
       )) ?? []
     // Cancel keeps the window open and the shell running.
-    await closeWindow([0])
+    await closeWindow([CANCEL])
     await expect.poll(async () => (await prompts()).length).toBe(1)
     expect(JSON.parse((await prompts())[0] ?? "{}").buttons).toEqual(QUIT_BUTTONS)
     expect(
@@ -398,17 +427,17 @@ test("closing the window with Keep running after window closes off runs the Quit
       ),
     ).toEqual([true])
     expect(alive(shell.pid)).toBe(true)
-    // Quit and stop with only an idle shell ends the shell, the daemon, the server and the app.
+    // Quit closes the app; the shell, the daemon and the server keep running.
     const daemonPid = await daemonPidFor(socketPath)
     expect(daemonPid).toBeGreaterThan(0)
     const serverPid = readServerDiscovery(dataDir)?.pid ?? 0
     expect(processAlive(serverPid)).toBe(true)
     const closed = new Promise((resolve) => app?.once("close", resolve))
-    await closeWindow([STOP])
+    await closeWindow([QUIT])
     await closed
-    await expect.poll(() => processAlive(serverPid)).toBe(false)
-    await expect.poll(() => daemonPidFor(socketPath)).toBeUndefined()
-    expect(alive(shell.pid)).toBe(false)
+    expect(processAlive(serverPid)).toBe(true)
+    expect(await daemonPidFor(socketPath)).toBe(daemonPid)
+    expect(alive(shell.pid)).toBe(true)
   } finally {
     if (app) {
       const closed = (app as ElectronApplication).waitForEvent("close")
@@ -424,7 +453,7 @@ test("closing the window with Keep running after window closes off runs the Quit
 })
 
 /** Native dialog choices are injected; the app and managed agent process are real. */
-test("Quit and stop server and agents confirms running work; Cancel, Move to background and Quit preserve it, and the confirmed stop ends it", async () => {
+test("Stop Server and Agents confirms running work; Cancel on the Quit dialog and Move to background preserve it, and the confirmed stop ends it", async () => {
   test.skip(process.platform !== "darwin", "Cmd+Q background assertions use macOS app visibility")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-quit-"))
@@ -500,9 +529,16 @@ test("Quit and stop server and agents confirms running work; Cancel, Move to bac
       state.quitPrompts = []
       dialog.showMessageBox = async (options) => {
         state.quitPrompts.push(JSON.stringify(options))
-        return { response: state.quitChoices.shift() ?? 0, checkboxChecked: false }
+        return { response: state.quitChoices.shift() ?? 2, checkboxChecked: false }
       }
     })
+    const requestStop = async (choice: number[]): Promise<void> => {
+      if (!app) throw new Error("App already quit")
+      await app.evaluate((_, response) => {
+        ;(globalThis as unknown as { quitChoices: number[] }).quitChoices = response
+      }, choice)
+      await clickStopServer(app)
+    }
     const requestQuit = async (choice: number[]): Promise<void> => {
       if (!app) throw new Error("App already quit")
       const found = await app.evaluate(({ Menu }, response) => {
@@ -514,7 +550,7 @@ test("Quit and stop server and agents confirms running work; Cancel, Move to bac
       }, choice)
       expect(found).toBe("CommandOrControl+Q")
     }
-    await requestQuit([0])
+    await requestQuit([CANCEL])
     await expect
       .poll(async () =>
         app?.evaluate(
@@ -524,30 +560,30 @@ test("Quit and stop server and agents confirms running work; Cancel, Move to bac
       .toBe(1)
     expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
     expect((await client.listProcesses()).filter((job) => job.alive)).toHaveLength(1)
-    await requestQuit([1])
+    await requestQuit([BACKGROUND])
     await expect.poll(() => app?.evaluate(({ app }) => app.isHidden())).toBe(true)
     expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
     expect((await client.listProcesses()).filter((job) => job.alive)).toHaveLength(1)
     await app.evaluate(({ app }) => app.show())
     await expect.poll(() => app?.evaluate(({ app }) => app.isHidden())).toBe(false)
-    // Quit and stop server and agents, then Cancel on the confirmation.
-    await requestQuit([STOP, 1])
+    // Stop Server and Agents, then Cancel on the confirmation.
+    await requestStop([1])
     await expect
       .poll(async () =>
         app?.evaluate(
           () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts.length,
         ),
       )
-      .toBe(4)
+      .toBe(3)
     expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
     expect((await client.listProcesses()).filter((job) => job.alive)).toHaveLength(1)
     expect(await app.evaluate(({ app }) => app.isHidden())).toBe(false)
     const prompts = await app.evaluate(
       () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts,
     )
-    expect(prompts).toHaveLength(4)
+    expect(prompts).toHaveLength(3)
     expect(JSON.parse(prompts[0] ?? "{}").buttons).toEqual(QUIT_BUTTONS)
-    const confirmation = JSON.parse(prompts[3] ?? "{}")
+    const confirmation = JSON.parse(prompts[2] ?? "{}")
     expect(confirmation.message).toBe("2 agents are still running.")
     expect(confirmation.detail).toContain(": cat")
     expect(confirmation.buttons).toEqual(["Stop server and agents", "Cancel"])
@@ -557,7 +593,7 @@ test("Quit and stop server and agents confirms running work; Cancel, Move to bac
     expect(daemonPid).toBeGreaterThan(0)
     // Confirming the stop ends the agent, the terminal, the daemon and the server.
     const closed = app.waitForEvent("close")
-    await requestQuit([STOP, 0])
+    await requestStop([0])
     await closed
     app = null
     await expect.poll(() => processAlive(serverPid)).toBe(false)
@@ -618,7 +654,7 @@ test("idle explicit Quit always asks, Background preserves a draft, and draft ca
       }, choice)
     }
     const count = () => app?.evaluate(() => (globalThis as unknown as { prompts: number }).prompts)
-    await request(0)
+    await request(CANCEL)
     await expect.poll(count).toBe(1)
     expect(
       await app.evaluate(() => (globalThis as unknown as { buttons: string[] }).buttons),
@@ -630,7 +666,7 @@ test("idle explicit Quit always asks, Background preserves a draft, and draft ca
     const editor = window.getByTestId("quick-editor-full-app").locator(".cm-content")
     await editor.fill("keep_this_draft = True\n")
     await window.getByTestId("nav-dashboard").click()
-    await request(1)
+    await request(BACKGROUND)
     await expect.poll(() => app?.evaluate(({ app }) => app.isHidden())).toBe(true)
     // Back to the Untitled draft.
     await window.keyboard.press("ControlOrMeta+p")
@@ -638,13 +674,13 @@ test("idle explicit Quit always asks, Background preserves a draft, and draft ca
     await window.locator('[data-command-id="nav-editor"]').click()
     await expect(editor).toContainText("keep_this_draft = True")
     await window.getByTestId("nav-dashboard").click()
-    await request(2)
+    await request(QUIT)
     const recovery = window.getByRole("dialog", { name: "Unsaved changes" })
     await expect(recovery).toBeVisible()
-    await request(2)
+    await request(QUIT)
     expect(await count()).toBe(3)
     await recovery.getByRole("button", { name: "Cancel", exact: true }).click()
-    await request(2)
+    await request(QUIT)
     await expect.poll(count).toBe(4)
     await expect(recovery).toBeVisible()
     const closed = app.waitForEvent("close")

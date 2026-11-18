@@ -72,7 +72,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-  // The fixture terminal runs a Node process, so quitting asks; choose Quit and stop.
+  // The fixture terminal runs a Node process, so quitting asks; choose Quit.
   await app
     ?.evaluate(({ dialog }) => {
       dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
