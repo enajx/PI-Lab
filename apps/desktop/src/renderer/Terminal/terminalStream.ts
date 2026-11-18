@@ -84,6 +84,14 @@ export interface TerminalStreamOptions {
   /** The emulator changed size (a snapshot or a PTY resize). */
   onSize: (cols: number, rows: number) => void
   onExit: (exitCode: number | null) => void
+  /**
+   * Applied in stream order: a start (with its ECHO flag) once its screen is
+   * written, and each ECHO flag change once the bytes before it are applied.
+   */
+  onStart: (echo: boolean) => void
+  onEcho: (echo: boolean) => void
+  /** An echo ack, once the bytes before its offset are applied. */
+  onEchoAck: (ack: { clientId: string; seq: number; echo: boolean }) => void
   /** A server error ended the stream (not a connection drop, which resumes). */
   onError: (message: string) => void
 }
@@ -309,6 +317,7 @@ export class TerminalStream {
           return
         }
         const end = { generation: event.generation, offset: 0, revision: event.revision }
+        this.#options.onStart(event.echo)
         this.#write(decodeBase64(event.base64), event.offset, end)
         return
       }
@@ -335,6 +344,16 @@ export class TerminalStream {
         this.#pump()
         return
       }
+      case "echoAck":
+        this.#options.onEchoAck({ clientId: event.clientId, seq: event.seq, echo: event.echo })
+        this.#eventsSinceAck += 1
+        this.#pump()
+        return
+      case "echo":
+        this.#options.onEcho(event.echo)
+        this.#eventsSinceAck += 1
+        this.#pump()
+        return
       case "exit":
         // The program ended: nothing more to resume.
         this.#closed = true

@@ -116,12 +116,20 @@ export interface DetachRequest {
   sessionId: string
 }
 
+/** A key a user typed: who typed it and its number in that client's sequence. */
+export interface KeyInput {
+  clientId: string
+  seq: number
+}
+
 export interface WriteRequest {
   kind: "write"
   cid: string
   sessionId: string
   /** Bytes to feed to the PTY's stdin, as a UTF-8 string. */
   data: string
+  /** Set for typed keys: the daemon sends an {@link EchoAckEvent} for each one. */
+  key?: KeyInput
 }
 
 export interface ResizeRequest {
@@ -198,6 +206,8 @@ export interface AttachReply {
   generation: string
   /** Screen revision after the start is applied. */
   revision: number
+  /** The PTY's ECHO flag after the start (see {@link EchoEvent}). */
+  echo: boolean
   /** Current PTY size. */
   cols: number
   rows: number
@@ -306,6 +316,38 @@ export interface ResizeEvent {
   rows: number
 }
 
+/**
+ * The PTY's ECHO flag changed (a program turned echo off for hidden input, or
+ * back on). It applies at `offset`: off before the output read with it, on
+ * after it. The daemon reads the flag on every output chunk and every write.
+ */
+export interface EchoEvent {
+  kind: "echo"
+  sessionId: string
+  generation: string
+  offset: number
+  echo: boolean
+}
+
+/**
+ * Sent {@link ECHO_ACK_DELAY_MS} after a typed key was written, with the
+ * offset at that moment, so the program's echo of the key comes before it.
+ * Local echo checks its predictions for keys up to `seq` once the bytes
+ * before `offset` are applied.
+ */
+export interface EchoAckEvent {
+  kind: "echo-ack"
+  sessionId: string
+  generation: string
+  clientId: string
+  seq: number
+  offset: number
+  echo: boolean
+}
+
+/** How long after a typed key its echo ack is sent (Mosh's ECHO_TIMEOUT). */
+export const ECHO_ACK_DELAY_MS = 50
+
 export interface ExitEvent {
   kind: "exit"
   sessionId: string
@@ -322,7 +364,14 @@ export interface ClosingEvent {
   reason: string
 }
 
-export type DaemonEvent = DataFrame | ResizeEvent | ExitEvent | ProcessEvent | ClosingEvent
+export type DaemonEvent =
+  | DataFrame
+  | ResizeEvent
+  | EchoEvent
+  | EchoAckEvent
+  | ExitEvent
+  | ProcessEvent
+  | ClosingEvent
 
 /** Every frame the daemon can emit. */
 export type DaemonFrame = DaemonReply | DaemonEvent
@@ -459,9 +508,20 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
     case "detach":
       if (typeof value.sessionId !== "string") return null
       return { kind: "detach", cid, sessionId: value.sessionId }
-    case "write":
+    case "write": {
       if (typeof value.sessionId !== "string" || typeof value.data !== "string") return null
-      return { kind: "write", cid, sessionId: value.sessionId, data: value.data }
+      const key = value.key
+      if (key === undefined)
+        return { kind: "write", cid, sessionId: value.sessionId, data: value.data }
+      if (!isRecord(key) || typeof key.clientId !== "string" || !isCount(key.seq)) return null
+      return {
+        kind: "write",
+        cid,
+        sessionId: value.sessionId,
+        data: value.data,
+        key: { clientId: key.clientId, seq: key.seq },
+      }
+    }
     case "resize":
       if (typeof value.sessionId !== "string") return null
       if (typeof value.cols !== "number" || typeof value.rows !== "number") return null
@@ -519,6 +579,19 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
     case "resize":
       return typeof value.sessionId === "string" && isCount(value.offset)
         ? (value as unknown as ResizeEvent)
+        : null
+    case "echo-ack":
+      return typeof value.sessionId === "string" &&
+        typeof value.clientId === "string" &&
+        isCount(value.seq) &&
+        isCount(value.offset)
+        ? (value as unknown as EchoAckEvent)
+        : null
+    case "echo":
+      return typeof value.sessionId === "string" &&
+        isCount(value.offset) &&
+        typeof value.echo === "boolean"
+        ? (value as unknown as EchoEvent)
         : null
     case "exit":
       return typeof value.sessionId === "string" ? (value as unknown as ExitEvent) : null

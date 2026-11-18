@@ -10,10 +10,13 @@ import {
   type DaemonFrame,
   type DaemonReply,
   type DataEvent,
+  type EchoAckEvent,
+  type EchoEvent,
   type ErrorReply,
   type ExitEvent,
   encodeFrame,
   FrameDecoder,
+  type KeyInput,
   type ProcessExitEvent,
   type ProcessOutputEvent,
   type ProcessParams,
@@ -63,6 +66,8 @@ export interface AttachResult {
   generation: string
   /** Screen revision after the start is applied. */
   revision: number
+  /** The PTY's ECHO flag after the start. */
+  echo: boolean
   /** Current PTY size; a snapshot is written into a reset terminal of this size. */
   cols: number
   rows: number
@@ -92,6 +97,7 @@ function attachResult(reply: AttachReply): AttachResult {
     session: reply.session,
     generation: reply.generation,
     revision: reply.revision,
+    echo: reply.echo,
     cols: reply.cols,
     rows: reply.rows,
     start: decodeStart(reply.start),
@@ -104,6 +110,8 @@ export interface DaemonClientEvents {
   "process-exit": (event: ProcessExitEvent) => void
   data: (event: DataEvent) => void
   resize: (event: ResizeEvent) => void
+  echo: (event: EchoEvent) => void
+  "echo-ack": (event: EchoAckEvent) => void
   exit: (event: ExitEvent) => void
   /** Emitted when the underlying socket closes, with the daemon's reason when it gave one. */
   close: (reason: string | null) => void
@@ -195,8 +203,8 @@ export class DaemonClient extends EventEmitter {
       this.emit(`session:${frame.sessionId}`, frame)
       return
     }
-    if (frame.kind === "resize") {
-      this.emit("resize", frame)
+    if (frame.kind === "resize" || frame.kind === "echo" || frame.kind === "echo-ack") {
+      this.emit(frame.kind, frame)
       return
     }
     if (frame.kind === "closing") {
@@ -341,6 +349,17 @@ export class DaemonClient extends EventEmitter {
       cid,
       sessionId,
       data,
+    }))
+  }
+
+  /** Write a key the user typed; the daemon sends an echo ack for it. */
+  async writeKey(sessionId: string, data: string, key: KeyInput): Promise<void> {
+    await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({
+      kind: "write",
+      cid,
+      sessionId,
+      data,
+      key,
     }))
   }
 

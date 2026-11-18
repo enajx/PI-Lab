@@ -2,9 +2,10 @@
 // @ts-check
 /**
  * Validate actual native loading under the consuming Node or Electron runtime.
- * Default mode opens an in-memory SQLite database and loads the PTY addons from
- * the checkout. --app loads the target binaries from app.asar.unpacked using the
- * packages' current layouts. Packaged SQLite and terminal smoke tests also prove
+ * Default mode opens an in-memory SQLite database and loads the PTY addons
+ * (node-pty and, outside Windows, @pi-lab/pty-termios) from the checkout. --app
+ * loads the target binaries from app.asar.unpacked using the packages' current
+ * layouts. Packaged SQLite and terminal smoke tests also prove
  * the full JS resolver and daemon path in the real app.
  */
 
@@ -59,12 +60,38 @@ function checkNodePty(fromPaths) {
   checkPtyBinaries(resolve(ptyPath, "../.."))
 }
 
+/** @param {string} file Load the termios addon binary and check its export. */
+function checkTermiosBinary(file) {
+  const termios = require(file) // throws on a load failure
+  if (typeof termios.echoEnabled !== "function") throw new Error(`${file} has no echoEnabled()`)
+}
+
+/** @param {string[]} fromPaths Load @pi-lab/pty-termios through its package. */
+function checkPtyTermios(fromPaths) {
+  const termios = require(require.resolve("@pi-lab/pty-termios", { paths: fromPaths }))
+  if (typeof termios.echoEnabled !== "function") {
+    throw new Error("@pi-lab/pty-termios has no echoEnabled()")
+  }
+  checkTermiosBinary(
+    join(
+      resolve(require.resolve("@pi-lab/pty-termios/package.json", { paths: fromPaths }), ".."),
+      "build",
+      "Release",
+      "pty_termios.node",
+    ),
+  )
+}
+
 /** @param {string} label @param {string[]} fromPaths Validate checkout dependencies. */
 function run(label, fromPaths) {
+  /** @type {[string, () => void][]} */
   const checks = [
     ["better-sqlite3", () => checkBetterSqlite3(fromPaths)],
     ["node-pty", () => checkNodePty(fromPaths)],
   ]
+  // Windows has no termios, so the addon is not built there.
+  if (process.platform !== "win32")
+    checks.push(["@pi-lab/pty-termios", () => checkPtyTermios(fromPaths)])
   for (const [name, fn] of checks) {
     process.stdout.write(`  • ${name} ... `)
     fn()
@@ -147,6 +174,12 @@ function runPackaged(appPath) {
     process.stdout.write("  • node-pty (.node + spawn-helper) ... ")
     checkPtyBinaries(join(nm, "node-pty"))
     process.stdout.write("ok\n")
+
+    if (process.platform !== "win32") {
+      process.stdout.write("  • @pi-lab/pty-termios (.node) ... ")
+      checkTermiosBinary(join(nm, "@pi-lab", "pty-termios", "build", "Release", "pty_termios.node"))
+      process.stdout.write("ok\n")
+    }
   }
   console.log(`validate:native — packaged OK (runtime: ${RUNTIME}, module ABI ${ABI})`)
 }

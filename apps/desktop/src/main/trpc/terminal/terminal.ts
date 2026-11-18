@@ -2,6 +2,8 @@ import type {
   AttachResult,
   DaemonClient,
   DataEvent,
+  EchoAckEvent,
+  EchoEvent,
   ExitEvent,
   ResizeEvent,
   ResumePoint,
@@ -38,6 +40,12 @@ const writeInput = z.object({
   data: z.string(),
   /** The typing client's id; absent when the server itself writes (agent launch). */
   clientId: z.string().min(1).optional(),
+  /**
+   * The key's number in this client's sequence (with `clientId`): the daemon
+   * then sends an echo ack for it in the output stream (local echo). Absent
+   * from released clients.
+   */
+  seq: z.number().int().nonnegative().optional(),
 })
 
 const resizeInput = z.object({
@@ -130,6 +138,10 @@ const ackInput = z.object({
  * - data: the bytes starting at `offset`.
  * - resize: the PTY size changed after every byte before `offset`; the screen
  *   is now at `revision`.
+ * - echo: the PTY's ECHO flag changed at `offset` (every start also carries
+ *   the flag); local echo predicts nothing while it is off.
+ * - echoAck: client `clientId`'s key `seq` was written about 50 ms before the
+ *   bytes at `offset`; its echo, if any, is before `offset`.
  * - exit: the program ended; the stream completes.
  * - behind: this connection fell behind; the stream completes and the client
  *   subscribes again from its consumed offset.
@@ -144,6 +156,7 @@ export type TerminalOutput =
       mode: "replay"
       offset: number
       base64: string
+      echo: boolean
     }
   | {
       type: "start"
@@ -155,6 +168,7 @@ export type TerminalOutput =
       offset: number
       screen: string
       base64: string
+      echo: boolean
     }
   | {
       type: "start"
@@ -167,7 +181,10 @@ export type TerminalOutput =
       offset: number
       screen: string
       base64: string
+      echo: boolean
     }
+  | { type: "echo"; offset: number; echo: boolean }
+  | { type: "echoAck"; clientId: string; seq: number; offset: number; echo: boolean }
   | { type: "data"; offset: number; base64: string }
   | { type: "resize"; offset: number; revision: number; cols: number; rows: number }
   | { type: "exit"; exitCode: number | null; signal: number | null }
@@ -178,7 +195,7 @@ function resumeId(generation: string, offset: number, revision: number): string 
   return `${generation}:${offset}:${revision}`
 }
 
-type SessionEvent = DataEvent | ResizeEvent | ExitEvent
+type SessionEvent = DataEvent | ResizeEvent | EchoEvent | EchoAckEvent | ExitEvent
 
 interface SessionAttachment {
   /** Runs at the attach reply boundary, before any later event. */
@@ -239,12 +256,14 @@ function attachSession(
       }
       handlers.onEvent(event)
     }
-    const onResize = (event: ResizeEvent) => {
+    const onResize = (event: ResizeEvent | EchoEvent | EchoAckEvent) => {
       if (event.sessionId === sessionId) onEvent(event)
     }
     const eventName = `session:${sessionId}`
     client.on(eventName, onEvent)
     client.on("resize", onResize)
+    client.on("echo", onResize)
+    client.on("echo-ack", onResize)
     let observers = sessionObservers.get(client)
     if (!observers) {
       observers = new Map<string, Set<() => void>>()
@@ -264,6 +283,8 @@ function attachSession(
       if (current === client) current = null
       client.off(eventName, onEvent)
       client.off("resize", onResize)
+      client.off("echo", onResize)
+      client.off("echo-ack", onResize)
       cleanup = () => {}
       if (!cancelled) run(point, true)
     }
@@ -273,6 +294,8 @@ function attachSession(
     cleanup = () => {
       client.off(eventName, onEvent)
       client.off("resize", onResize)
+      client.off("echo", onResize)
+      client.off("echo-ack", onResize)
       listeners.delete(onClose)
       if (listeners.size === 0) {
         watchedObservers.delete(sessionId)
@@ -354,7 +377,12 @@ export const terminalRouter = router({
       typingMap(client).set(input.sessionId, { clientId: input.clientId, at: Date.now() })
       lastTypedAt.set(input.sessionId, Date.now())
     }
-    await client.write(input.sessionId, input.data)
+    if (input.clientId !== undefined && input.seq !== undefined)
+      await client.writeKey(input.sessionId, input.data, {
+        clientId: input.clientId,
+        seq: input.seq,
+      })
+    else await client.write(input.sessionId, input.data)
     ctx.caffeine.markTerminalActivity()
     return { ok: true as const }
   }),
@@ -487,6 +515,7 @@ export const terminalRouter = router({
           rows: result.rows,
           offset: start.offset,
           base64: start.bytes.toString("base64"),
+          echo: result.echo,
         }
         send(
           start.mode === "snapshot"
@@ -498,6 +527,16 @@ export const terminalRouter = router({
       } else if (item.kind === "data") {
         offset = item.offset + item.bytes.length
         send({ type: "data", offset: item.offset, base64: item.bytes.toString("base64") })
+      } else if (item.kind === "echo") {
+        send({ type: "echo", offset: item.offset, echo: item.echo })
+      } else if (item.kind === "echo-ack") {
+        send({
+          type: "echoAck",
+          clientId: item.clientId,
+          seq: item.seq,
+          offset: item.offset,
+          echo: item.echo,
+        })
       } else if (item.kind === "resize") {
         revision = item.revision
         send({

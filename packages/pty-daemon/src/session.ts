@@ -4,13 +4,21 @@
 
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
+import { createRequire } from "node:module"
 import { type IPty, spawn } from "node-pty"
 import { ByteTail } from "./byteTail"
-import type { ResumePoint, SessionInfo } from "./protocol"
+import { ECHO_ACK_DELAY_MS, type KeyInput, type ResumePoint, type SessionInfo } from "./protocol"
 import { ScreenState } from "./screen"
 
 /** How many raw PTY bytes to retain per session for replay on (re)attach. */
 const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
+
+/**
+ * Reads the ECHO bit of a PTY's termios (`tcgetattr` on the master fd, under
+ * 1 µs). Windows has no termios, so there the flag is taken as always on.
+ */
+const termios: { echoEnabled(fd: number): boolean } | null =
+  process.platform === "win32" ? null : createRequire(import.meta.url)("@pi-lab/pty-termios")
 
 /** A replay at most this long is sent without comparing it with a screen refresh. */
 export const SMALL_REPLAY_BYTES = 16 * 1024
@@ -30,6 +38,10 @@ export interface SessionListener {
   onData(bytes: Buffer, offset: number): void
   /** The PTY was resized after every byte before `offset`. */
   onResize(cols: number, rows: number, revision: number, offset: number): void
+  /** The PTY's ECHO flag changed; it applies at `offset`. */
+  onEcho(echo: boolean, offset: number): void
+  /** A typed key's echo ack, {@link ECHO_ACK_DELAY_MS} after it was written. */
+  onEchoAck(key: KeyInput, offset: number, echo: boolean): void
   onExit(exitCode: number | null, signal: number | null): void
 }
 
@@ -69,6 +81,10 @@ class Session {
   private rows: number
   private exitState: ExitState | null = null
   private readonly listeners = new Set<SessionListener>()
+  /** The PTY's ECHO flag as last read. */
+  private echoFlag = true
+  /** Set once reading the flag failed (logged); the flag then stays as it was. */
+  private echoUnreadable = false
 
   constructor(
     options: SpawnOptions,
@@ -102,6 +118,7 @@ class Session {
 
     this.processGroupId = this.pty.pid
     if (process.platform !== "win32") setUtf8LineEditing(this.pty)
+    this.echoFlag = this.readEcho()
 
     this.pty.onData((data) => {
       // With `encoding: null` node-pty delivers Buffers despite its string typing.
@@ -109,9 +126,14 @@ class Session {
       // Output that a killed PTY flushes after teardown has nowhere to go.
       if (this.disposed) return
       const offset = this.tail.end
+      // Echo turned off before this output was read (a password prompt): off from its start.
+      const echo = this.readEcho()
+      if (!echo && this.echoFlag) this.setEcho(false, offset)
       this.tail.append(bytes)
       this.screen.feed(bytes)
       for (const listener of this.listeners) listener.onData(bytes, offset)
+      // Turned on again: on only after this output.
+      if (echo && !this.echoFlag) this.setEcho(true, this.tail.end)
     })
 
     this.pty.onExit(({ exitCode, signal }) => {
@@ -180,6 +202,36 @@ class Session {
     return this.revision
   }
 
+  /** The PTY's ECHO flag as last sent to listeners. */
+  get echo(): boolean {
+    return this.echoFlag
+  }
+
+  /**
+   * Read the ECHO flag from the PTY master. A failed read (the PTY is closing)
+   * is logged once; the last value is kept.
+   */
+  private readEcho(): boolean {
+    if (termios === null || this.echoUnreadable || this.disposed || !this.alive)
+      return this.echoFlag
+    const fd = (this.pty as IPty & { fd?: number }).fd
+    if (typeof fd !== "number") throw new Error("node-pty did not expose the PTY master fd")
+    try {
+      return termios.echoEnabled(fd)
+    } catch (error) {
+      this.echoUnreadable = true
+      console.warn(
+        `[pty-daemon] session ${this.id}: cannot read the ECHO flag (${error instanceof Error ? error.message : String(error)}); keeping ${this.echoFlag ? "on" : "off"}`,
+      )
+      return this.echoFlag
+    }
+  }
+
+  private setEcho(echo: boolean, offset: number): void {
+    this.echoFlag = echo
+    for (const listener of this.listeners) listener.onEcho(echo, offset)
+  }
+
   /**
    * Register a listener. If the session has
    * already exited, the caller is notified synchronously so a late attach still
@@ -196,8 +248,20 @@ class Session {
     }
   }
 
-  write(data: string): void {
-    if (this.alive) this.pty.write(data)
+  /** Write to the PTY; a typed key (`key` set) gets an echo ack. */
+  write(data: string, key: KeyInput | null): void {
+    if (!this.alive) return
+    // A program may turn echo off without printing anything (read -s).
+    const echo = this.readEcho()
+    if (echo !== this.echoFlag) this.setEcho(echo, this.tail.end)
+    this.pty.write(data)
+    if (key === null) return
+    setTimeout(() => {
+      if (this.disposed) return
+      const now = this.readEcho()
+      if (now !== this.echoFlag) this.setEcho(now, this.tail.end)
+      for (const listener of this.listeners) listener.onEchoAck(key, this.tail.end, this.echoFlag)
+    }, ECHO_ACK_DELAY_MS).unref()
   }
 
   resize(cols: number, rows: number): void {
@@ -247,10 +311,11 @@ export interface SessionHandle {
   readonly id: string
   readonly generation: string
   readonly screenRevision: number
+  readonly echo: boolean
   info(): SessionInfo
   startFrom(resume: ResumePoint | null): SessionStart
   subscribe(listener: SessionListener): () => void
-  write(data: string): void
+  write(data: string, key: KeyInput | null): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
 }
@@ -283,6 +348,8 @@ export class SessionStore {
     session.subscribe({
       onData: () => {},
       onResize: () => {},
+      onEcho: () => {},
+      onEchoAck: () => {},
       onExit: () => {
         setTimeout(() => {
           if (this.sessions.get(session.id) === session) {

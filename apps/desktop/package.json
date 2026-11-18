@@ -44,6 +44,7 @@
     "@pi-lab/local-db": "workspace:*",
     "@pi-lab/port-scanner": "workspace:*",
     "@pi-lab/pty-daemon": "workspace:*",
+    "@pi-lab/pty-termios": "workspace:*",
     "@pi-lab/shared": "workspace:*",
     "@pi-lab/ui": "workspace:*",
     "@pi-lab/workspace-fs": "workspace:*",

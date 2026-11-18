@@ -1,6 +1,8 @@
 import type {
   AttachResult,
   DataEvent,
+  EchoAckEvent,
+  EchoEvent,
   ExitEvent,
   ResizeEvent,
   ResumePoint,
@@ -41,7 +43,13 @@ export const DRAIN_SAMPLE_MS = 250
 export const TYPING_PRIORITY_MS = 3_000
 
 /** What a stream sends: a start (replay or snapshot) or a daemon event, in daemon order. */
-export type FlowItem = { kind: "start"; result: AttachResult } | DataEvent | ResizeEvent | ExitEvent
+export type FlowItem =
+  | { kind: "start"; result: AttachResult }
+  | DataEvent
+  | ResizeEvent
+  | EchoEvent
+  | EchoAckEvent
+  | ExitEvent
 
 /** Bytes an item counts against the window, the cap and the backlog. */
 function costOf(item: FlowItem): number {

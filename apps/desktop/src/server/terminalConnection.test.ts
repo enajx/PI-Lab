@@ -300,7 +300,7 @@ function percentile(values: number[], p: number): number {
 /** Spawn tests/flood/floodProgram.cjs; `produced()` reads the PTY bytes it has written. */
 async function spawnFlood(
   client: Client,
-  mode: "lines" | "echo",
+  mode: "lines" | "fullscreen" | "echo",
   bytesPerSecond: number,
 ): Promise<{ sessionId: string; produced: () => number }> {
   const counterFile = join(dataDir, `flood-${Math.random().toString(36).slice(2)}.count`)
@@ -370,6 +370,9 @@ class Viewer {
       emulator,
       dropPolicy,
       onSize: () => {},
+      onStart: () => {},
+      onEcho: () => {},
+      onEchoAck: () => {},
       onExit: () => {
         this.exited = true
       },

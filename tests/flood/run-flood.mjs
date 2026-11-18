@@ -366,6 +366,9 @@ class Viewer {
       },
       dropPolicy,
       onSize: () => {},
+      onStart: () => {},
+      onEcho: () => {},
+      onEchoAck: () => {},
       onExit: () => {},
       onError: (message) => this.errors.push(message),
     })
