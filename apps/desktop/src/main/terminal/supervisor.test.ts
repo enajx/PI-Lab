@@ -346,6 +346,7 @@ describe("adopting a daemon by protocol", () => {
       "--format=esm",
       "--external=node-pty",
       "--external=@xterm/headless",
+      "--external=@pi-lab/pty-termios",
       `--outfile=${entry}`,
     ])
     await writeFile(join(dir, "package.json"), '{"type":"module"}')
@@ -363,7 +364,9 @@ describe("adopting a daemon by protocol", () => {
       expect(await client.protocolVersion()).toBe(PROTOCOL_VERSION)
       const session = await client.spawn({ command: "/bin/cat", args: [] })
       expect(session.id).toBeTruthy()
-      expect(warn.mock.calls[0]?.[0]).toMatch(/protocol 1.*protocol 2|protocol 1.*2/s)
+      expect(warn.mock.calls[0]?.[0]).toMatch(
+        new RegExp(`protocol 1.*protocol ${PROTOCOL_VERSION}`, "s"),
+      )
       await supervisor.shutdownDaemon(2_000, vi.fn())
     } finally {
       warn.mockRestore()

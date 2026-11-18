@@ -30,6 +30,7 @@ test("a production daemon survives disposal, is adopted, and reaps its PTY on sh
   const bundle = join(directory, "bundle")
   const socketPath = join(directory, "daemon.sock")
   const nativePty = createRequire(import.meta.url).resolve("node-pty")
+  const termios = createRequire(import.meta.url).resolve("@pi-lab/pty-termios")
   // Compile the production entry using the same ESM/Node target as the desktop build.
   await build({
     configFile: false,
@@ -39,8 +40,12 @@ test("a production daemon survives disposal, is adopted, and reaps its PTY on sh
       ssr: resolve(__dirname, "daemonEntry.ts"),
       target: "node20",
       rollupOptions: {
-        external: ["node-pty"],
-        output: { format: "es", entryFileNames: "index.js", paths: { "node-pty": nativePty } },
+        external: ["node-pty", "@pi-lab/pty-termios"],
+        output: {
+          format: "es",
+          entryFileNames: "index.js",
+          paths: { "node-pty": nativePty, "@pi-lab/pty-termios": termios },
+        },
       },
     },
   })

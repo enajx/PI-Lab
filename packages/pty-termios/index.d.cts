@@ -1,7 +1,7 @@
 /**
  * Read terminal flags of a PTY through termios (macOS and Linux only).
- * Windows has no termios: the addon is not built there, so do not require
- * this package on win32.
+ * Windows has no termios: the addon is not built there and the package
+ * exports null.
  */
 declare const termios: {
   /**
@@ -10,5 +10,5 @@ declare const termios: {
    * not a number, and an Error with the system message when `tcgetattr` fails.
    */
   localFlags(fd: number): { echo: boolean; icanon: boolean }
-}
+} | null
 export = termios

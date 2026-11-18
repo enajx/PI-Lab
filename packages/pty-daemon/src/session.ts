@@ -4,7 +4,7 @@
 
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { createRequire } from "node:module"
+import termiosAddon from "@pi-lab/pty-termios"
 import { type IPty, spawn } from "node-pty"
 import { ByteTail } from "./byteTail"
 import {
@@ -24,8 +24,7 @@ const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
  * Reads the ECHO bit of a PTY's termios (`tcgetattr` on the master fd, under
  * 1 µs). Windows has no termios, so there the flag is taken as always on.
  */
-const termios: { localFlags(fd: number): InputFlags } | null =
-  process.platform === "win32" ? null : createRequire(import.meta.url)("@pi-lab/pty-termios")
+const termios: { localFlags(fd: number): InputFlags } | null = termiosAddon
 
 /** Typists remembered per session (oldest forgotten first). */
 const TYPIST_LIMIT = 64
