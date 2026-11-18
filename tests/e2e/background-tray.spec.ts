@@ -92,7 +92,7 @@ test("closing the last window quits when background mode is off", async () => {
     await expect(toggle).toHaveAttribute("aria-checked", "false")
     // With the setting off, closing the window runs the Quit flow; choose Quit.
     await app.evaluate(({ dialog }) => {
-      dialog.showMessageBox = async () => ({ response: 2, checkboxChecked: false })
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
     })
     const closed = app.waitForEvent("close")
     await window.evaluate(() => window.close())
@@ -119,7 +119,7 @@ test("closing the last window quits when background mode is off", async () => {
     const full = await reopened
     await expect(full.getByTestId("app-ready")).toBeVisible()
     await app.evaluate(({ dialog }) => {
-      dialog.showMessageBox = async () => ({ response: 2, checkboxChecked: false })
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
     })
     const closedAfterLogin = app.waitForEvent("close")
     await full.evaluate(() => window.close())

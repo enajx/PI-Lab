@@ -12,14 +12,19 @@ test("right-click menu offers app actions and starts New Project", () => {
     openApp: vi.fn(async () => undefined),
     newProject: vi.fn(async () => undefined),
     quit: vi.fn(),
+    stopServer: vi.fn(),
     restartToUpdate: vi.fn(),
   }
   const items = trayMenuTemplate(actions, null, vi.fn())
   expect(items.filter((item) => item.label).map((item) => item.label)).toEqual([
     "Open PI Lab",
     "New Project",
+    "Stop Server and Agents…",
     "Quit PI Lab",
   ])
+  click(items, "Stop Server and Agents…")
+  expect(actions.stopServer).toHaveBeenCalledOnce()
+  expect(actions.quit).not.toHaveBeenCalled()
   click(items, "New Project")
   expect(actions.newProject).toHaveBeenCalledOnce()
   expect(actions.openApp).not.toHaveBeenCalled()
@@ -33,6 +38,7 @@ test("ready updates appear in the menu and action failures are reported", async 
       throw new Error("Project chooser failed")
     }),
     quit: vi.fn(),
+    stopServer: vi.fn(),
     restartToUpdate: vi.fn(),
   }
   const items = trayMenuTemplate(actions, "0.1.2", onError)
@@ -47,6 +53,7 @@ test("the always-visible icon cannot be hidden from its menu", () => {
     openApp: vi.fn(async () => undefined),
     newProject: vi.fn(async () => undefined),
     quit: vi.fn(),
+    stopServer: vi.fn(),
     restartToUpdate: vi.fn(),
   }
   const items = trayMenuTemplate(actions, null, vi.fn())

@@ -62,13 +62,13 @@ test.beforeEach(async () => {
   await launchApp()
 })
 
-/** Quit-policy behavior is tested separately; accept stopping fixture agents on cleanup. */
+/** Quit-policy behavior is tested separately; accept the logout-style Quit on cleanup. */
 async function closeApp(): Promise<void> {
   await app.evaluate(({ dialog }) => {
     const showMessageBox = dialog.showMessageBox.bind(dialog)
     dialog.showMessageBox = async (...args: Parameters<typeof dialog.showMessageBox>) => {
       const options = args.length === 1 ? args[0] : args[1]
-      const response = options?.buttons?.indexOf("Quit and stop agents") ?? -1
+      const response = options?.buttons?.indexOf("Quit") ?? -1
       if (response >= 0) return { response, checkboxChecked: false }
       return showMessageBox(...args)
     }

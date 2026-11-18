@@ -68,16 +68,16 @@ test("unset quit and stop confirmations default to the button that completes qui
   const choose = await dialogs.showMessageBox({
     title: "Quit PI Lab?",
     message: "Quit PI Lab?",
-    buttons: ["Cancel", "Move to background", "Quit"],
-    cancelId: 0,
+    buttons: ["Move to background", "Quit", "Cancel"],
+    cancelId: 2,
   })
   const confirm = await dialogs.showMessageBox({
     title: "Work is still running",
     message: "1 agent is still running.",
-    buttons: ["Quit and stop agents", "Cancel"],
+    buttons: ["Quit", "Cancel"],
     cancelId: 1,
   })
-  expect([choose.response, confirm.response]).toEqual([2, 0])
+  expect([choose.response, confirm.response]).toEqual([1, 0])
   expect(responder.records().map((record) => record.answeredBy)).toEqual(["default", "default"])
 })
 

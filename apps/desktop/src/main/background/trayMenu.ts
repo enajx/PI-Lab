@@ -5,6 +5,7 @@ export interface TrayMenuActions {
   newProject(): Promise<void>
   restartToUpdate(): void
   quit(): void
+  stopServer(): void
 }
 
 /** Build the native right-click actions without changing the left-click monitor. */
@@ -26,6 +27,7 @@ export function trayMenuTemplate(
         ]
       : []),
     { type: "separator" },
+    { label: "Stop Server and Agents…", click: actions.stopServer },
     { label: "Quit PI Lab", click: actions.quit },
   ]
 }

@@ -128,7 +128,7 @@ test("Restart to Update keeps the same agent terminal and a shell across a real 
     })
     await client.kill(shell.id, "SIGKILL")
   } finally {
-    // A quit the app did not start asks while the agent runs; choose Quit and stop.
+    // A quit the app did not start asks while the agent runs; choose Quit.
     await app
       ?.evaluate(({ dialog }) => {
         dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })

@@ -13,8 +13,8 @@ export function hasRunningWork(work: QuitWork): boolean {
   return work.agents > 0 || work.terminals.length > 0 || work.notebooks > 0
 }
 
-/** First Quit dialog: Quit leaves the server and all work running; "stop" ends them too. */
-type QuitChoice = "quit" | "stop" | "background" | "cancel"
+/** Quit dialog choice. Quit leaves the server and all work running. */
+type QuitChoice = "quit" | "background" | "cancel"
 
 /**
  * The Quit dialog choice saved with "Remember option", or "ask" (the
@@ -25,16 +25,10 @@ export type RememberedQuitChoice = "ask" | "background"
 interface UserQuitDependencies {
   pending(): boolean
   remembered(): RememberedQuitChoice
-  /** The first Quit dialog: the chosen button and whether "Remember option" is ticked. */
+  /** The Quit dialog: the chosen button and whether "Remember option" is ticked. */
   choose(): Promise<{ choice: QuitChoice; remember: boolean }>
-  /** Work the stop choice would end (agents, busy terminals, notebooks). */
-  work(): Promise<QuitWork>
-  /** Second dialog before stopping running work. */
-  confirmStop(work: QuitWork): Promise<"stop" | "cancel">
-  /** Save a ticked Move to background so later quits skip the dialogs. */
+  /** Save a ticked Move to background so later quits skip the dialog. */
   remember(choice: "background"): void
-  /** Stop every agent, terminal and notebook, then the server. */
-  stopServer(): Promise<void>
   quit(): void
   background(): void
   error(error: unknown): void
@@ -42,37 +36,29 @@ interface UserQuitDependencies {
 
 /**
  * Explicit user Quit. The PI Lab server keeps projects, agents and routines
- * running after the app quits; the dialog offers to stop them as well, with
- * a second confirmation when work is running.
+ * running after the app quits; stopping them is the separate
+ * {@link createStopServerAction} (app menu and tray).
  *
  * A remembered "background" skips the dialog and moves PI Lab to the
  * background. Only Move to background can be remembered: a ticked box is
- * saved only when the user picks Move to background; the other choices never
- * save.
+ * saved only when the user picks Move to background.
  */
 export function createUserQuitAction(dependencies: UserQuitDependencies): () => Promise<void> {
   let choosing = false
 
-  async function decide(): Promise<"quit" | "stop" | "background" | "cancel"> {
+  async function decide(): Promise<QuitChoice> {
     const remembered = dependencies.remembered()
     if (remembered !== "ask") return remembered
     const { choice, remember } = await dependencies.choose()
     if (choice === "background" && remember) dependencies.remember("background")
-    if (choice !== "stop") return choice
-    const work = await dependencies.work()
-    if (!hasRunningWork(work)) return "stop"
-    return (await dependencies.confirmStop(work)) === "stop" ? "stop" : "cancel"
+    return choice
   }
 
   return async () => {
     if (choosing || dependencies.pending()) return
     choosing = true
     await decide()
-      .then(async (choice) => {
-        if (choice === "stop") {
-          await dependencies.stopServer()
-          dependencies.quit()
-        }
+      .then((choice) => {
         if (choice === "quit") dependencies.quit()
         if (choice === "background") dependencies.background()
       })
@@ -83,16 +69,49 @@ export function createUserQuitAction(dependencies: UserQuitDependencies): () => 
   }
 }
 
-/** The first Quit dialog's buttons, in the order {@link quitChoiceFromButton} reads them. */
-export const QUIT_DIALOG_BUTTONS = [
-  "Cancel",
-  "Move to background",
-  "Quit",
-  "Quit and stop server and agents",
-] as const
+/** The Quit dialog's buttons, in the order {@link quitChoiceFromButton} reads them. */
+export const QUIT_DIALOG_BUTTONS = ["Move to background", "Quit", "Cancel"] as const
+
+/** Index of Cancel in {@link QUIT_DIALOG_BUTTONS} (the dialog's default and Esc choice). */
+export const QUIT_DIALOG_CANCEL = 2
 
 export function quitChoiceFromButton(index: number): QuitChoice {
-  return index === 3 ? "stop" : index === 2 ? "quit" : index === 1 ? "background" : "cancel"
+  return index === 0 ? "background" : index === 1 ? "quit" : "cancel"
+}
+
+interface StopServerDependencies {
+  pending(): boolean
+  /** Work stopping would end (agents, busy terminals, notebooks). */
+  work(): Promise<QuitWork>
+  /** Confirmation shown only while work runs. */
+  confirmStop(work: QuitWork): Promise<"stop" | "cancel">
+  /** Stop every agent, terminal and notebook, the PTY daemon and the server. */
+  stopServer(): Promise<void>
+  quit(): void
+  error(error: unknown): void
+}
+
+/**
+ * "Stop Server and Agents…" (app menu and tray): ends all PI Lab work on this
+ * machine, then quits the app, which cannot work without its server. Asks
+ * first while work runs.
+ */
+export function createStopServerAction(dependencies: StopServerDependencies): () => Promise<void> {
+  let running = false
+  return async () => {
+    if (running || dependencies.pending()) return
+    running = true
+    try {
+      const work = await dependencies.work()
+      if (hasRunningWork(work) && (await dependencies.confirmStop(work)) !== "stop") return
+      await dependencies.stopServer()
+      dependencies.quit()
+    } catch (error) {
+      dependencies.error(error)
+    } finally {
+      running = false
+    }
+  }
 }
 
 /** "Quitting also stops …" followed by one "• project: command" line per busy terminal. */
@@ -139,7 +158,7 @@ export function stopWorkDialog(work: QuitWork): {
   return {
     message: workMessage(work),
     detail: paragraphs([
-      "Stopping the server ends this work. Quit without stopping leaves it running on the PI Lab server.",
+      "Stopping the server ends this work and quits PI Lab.",
       terminalList(work),
       notebookLine(work),
     ]),
