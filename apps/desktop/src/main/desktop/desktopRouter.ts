@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { clipboard, shell } from "electron"
 import { z } from "zod"
 import { electronMicrophone } from "../dictation/electronMicrophone"
+import type { MachineConnections } from "../machines/machineConnections"
 import type { NotificationBrokers } from "../notifications"
 import type { ServerClient } from "../server/client"
 import type { AppContext } from "../trpc/context"
@@ -15,6 +16,8 @@ export interface DesktopRouterDependencies {
   server: () => Promise<ServerClient>
   /** The renderer's server WebSocket address (with token), once the server runs. */
   rendererEndpoint: () => Promise<{ url: string }>
+  /** Remote machines this app connects to. */
+  machines: () => MachineConnections
 }
 
 /**
@@ -41,6 +44,22 @@ export function createDesktopRouter(deps: DesktopRouterDependencies) {
     desktop: router({
       /** Where the renderer's server WebSocket connects; waits while the server starts. */
       serverEndpoint: publicProcedure.query(() => deps.rendererEndpoint()),
+      machines: router({
+        /** Stored machines with their connection state (no tokens). */
+        list: publicProcedure.query(() => deps.machines().list()),
+        /** Enroll this app on `sshHost` over ssh, store the token, connect. */
+        add: publicProcedure
+          .input(z.object({ sshHost: z.string().trim().min(1), name: z.string().trim().min(1) }))
+          .mutation(({ input }) => deps.machines().add(input)),
+        /** Revoke this app's device on the machine when reachable, then forget it. */
+        remove: publicProcedure
+          .input(z.object({ machineId: z.string().min(1) }))
+          .mutation(({ input }) => deps.machines().remove(input.machineId)),
+        /** The machine's server WebSocket address (with token); asked on every connection attempt. */
+        endpoint: publicProcedure
+          .input(z.object({ machineId: z.string().min(1) }))
+          .query(({ input }) => deps.machines().endpoint(input.machineId)),
+      }),
     }),
     system: systemRouter,
     notifications: notificationsRouter,

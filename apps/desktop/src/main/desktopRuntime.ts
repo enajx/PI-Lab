@@ -1,3 +1,4 @@
+import { hostname } from "node:os"
 import { join } from "node:path"
 import { resolveDataDir } from "@pi-lab/local-db/paths"
 import {
@@ -18,6 +19,12 @@ import type { QuickEditTarget } from "../shared/quickEdit"
 import { createDesktopRouter, desktopContext } from "./desktop/desktopRouter"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelIdentity, type PiLabChannel } from "./identity/channel"
+import {
+  DEFAULT_REMOTE_DATA_DIR,
+  DEFAULT_REMOTE_ENROLL_COMMAND,
+  MachineConnections,
+  type RemoteAccess,
+} from "./machines/machineConnections"
 import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
 import { stopNotebooksWithWindow } from "./notebooks/notebookServers"
 import {
@@ -41,6 +48,7 @@ import {
   serverBuildId,
   serverLaunchConfig,
 } from "./server/launcher"
+import { SSH_PATH } from "./server/tunnel"
 import { MEDIA_SCHEME, REPORT_SCHEME } from "./trpc/science/analysis/mediaGrants"
 import { publicReleaseFromPackage } from "./updates/release"
 import type { QuitWork, RememberedQuitChoice } from "./window/userQuit"
@@ -87,6 +95,7 @@ export class DesktopRuntime {
   private readonly trayListeners = new Set<(snapshot: BackgroundTraySnapshot) => void>()
   private readonly unsubscribers: Array<() => void> = []
   private connecting: Promise<void> | null = null
+  private machineConnections: MachineConnections | null = null
 
   constructor(private readonly host: DesktopRuntimeHost) {
     this.ready = new Promise((resolve, reject) => {
@@ -105,6 +114,12 @@ export class DesktopRuntime {
   /** The server client once connected; rejects if the server could not start. */
   server(): Promise<ServerClient> {
     return this.ready
+  }
+
+  /** Remote machines (see machines/machineConnections.ts); created in start(). */
+  machines(): MachineConnections {
+    if (!this.machineConnections) throw new Error("Machines are not loaded yet")
+    return this.machineConnections
   }
 
   /** The renderer's server address and token (asked over IPC by the preload). */
@@ -151,6 +166,7 @@ export class DesktopRuntime {
       router: createDesktopRouter({
         server: () => this.server(),
         rendererEndpoint: () => this.rendererEndpoint(),
+        machines: () => this.machines(),
       }),
       windows: [window],
       createContext: async () => desktopContext(this.brokers),
@@ -167,6 +183,17 @@ export class DesktopRuntime {
       }
     })
     this.installSchemeForwarding()
+    this.machineConnections = new MachineConnections({
+      profileDir: app.getPath("userData"),
+      access: remoteAccess(),
+      deviceName: `PI Lab on ${hostname()}`,
+      localMachineId: async () => (await (await this.server()).server.hello.query()).machineId,
+      log: (message) => console.log(message),
+    })
+    if (isTestMode) {
+      ;(globalThis as { piLabTestMachines?: MachineConnections }).piLabTestMachines =
+        this.machineConnections
+    }
     installNotebookFrameHeaders(
       (port) => port >= NOTEBOOK_PORTS.start && port <= NOTEBOOK_PORTS.end,
       isAppPageUrl,
@@ -176,6 +203,7 @@ export class DesktopRuntime {
     try {
       this.connecting = this.connect()
       await this.connecting
+      this.machineConnections.start()
     } catch (error) {
       this.rejectReady(error)
       throw error
@@ -426,6 +454,7 @@ export class DesktopRuntime {
    */
   async dispose(): Promise<void> {
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe()
+    await this.machineConnections?.close()
     if (isTestMode && process.env.PI_LAB_TEST_RETAIN_SERVER !== "1") await this.stopTestServer()
     const connection = this.serverClient
     connection?.close()
@@ -459,6 +488,23 @@ export class DesktopRuntime {
       console.warn(`[pi-lab] test server ${pid} did not stop; killing it`)
       process.kill(pid, "SIGKILL")
     }
+  }
+}
+
+/**
+ * How remote machines are reached: the user's ssh and the defaults, or in
+ * test mode a test sshd (`PI_LAB_TEST_SSH_ARGS`, a JSON array), a temp remote
+ * data folder and a remote enroll command.
+ */
+function remoteAccess(): RemoteAccess {
+  const env = isTestMode ? process.env : {}
+  return {
+    sshPath: SSH_PATH,
+    extraSshArgs: env.PI_LAB_TEST_SSH_ARGS
+      ? (JSON.parse(env.PI_LAB_TEST_SSH_ARGS) as string[])
+      : [],
+    dataDir: env.PI_LAB_TEST_REMOTE_DATA_DIR ?? DEFAULT_REMOTE_DATA_DIR,
+    enrollCommand: env.PI_LAB_TEST_REMOTE_ENROLL ?? DEFAULT_REMOTE_ENROLL_COMMAND,
   }
 }
 

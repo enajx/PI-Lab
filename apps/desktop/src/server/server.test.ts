@@ -23,6 +23,7 @@ import {
   ensureLocalToken,
   ensureMachineId,
   MACHINE_ID_FILE,
+  proveDeviceIdentity,
   proveServerIdentity,
   TOKEN_FILE,
   TOKEN_HEADER,
@@ -388,6 +389,8 @@ test("a broken devices.json entry or a failing token check never crashes the ser
         throw new Error("token check failed")
       },
       track: () => () => {},
+      proofKey: () => null,
+      revoke: () => {},
     },
     localToken: token,
     testRoutes: false,
@@ -532,6 +535,37 @@ test("GET /identity proves the server holds the token without sending it, new fo
   // No nonce, or one that is not hex, gets no proof.
   expect((await fetch(`http://127.0.0.1:${server.port}/identity`)).status).toBe(400)
   expect((await fetch(`http://127.0.0.1:${server.port}/identity?nonce=zz`)).status).toBe(400)
+})
+
+test("GET /identity with a device id proves the server knows that device's token; revoked or unknown devices get no proof", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Remote laptop" })
+  expect(await proveDeviceIdentity(server.port, created.device.id, created.token)).toBe(true)
+  // Another token for the same id, or an unknown id, is not accepted.
+  expect(await proveDeviceIdentity(server.port, created.device.id, "y".repeat(43))).toBe(false)
+  expect(await proveDeviceIdentity(server.port, "no-such-device", created.token)).toBe(false)
+  await local.client.server.devices.revoke.mutate({ id: created.device.id })
+  expect(await proveDeviceIdentity(server.port, created.device.id, created.token)).toBe(false)
+  local.close()
+})
+
+test("POST /device/revoke revokes the device whose token it carries; the local token is refused", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Leaving laptop" })
+  const revokeSelf = (presented: string) =>
+    fetch(`http://127.0.0.1:${server.port}/device/revoke`, {
+      method: "POST",
+      headers: { [TOKEN_HEADER]: presented },
+    })
+  expect((await revokeSelf(created.token)).status).toBe(204)
+  expect(await upgradeStatus(created.token)).toBe(401)
+  const listed = (await local.client.server.devices.list.query()).find(
+    (device) => device.id === created.device.id,
+  )
+  expect(listed?.revokedAt).toEqual(expect.any(Number))
+  expect((await revokeSelf(token)).status).toBe(403)
+  expect(await upgradeStatus(token)).toBe(101)
+  local.close()
 })
 
 /** Real server and WebSocket; the updater's network engine is a recording stand-in (injected). */
