@@ -63,7 +63,7 @@ export interface OutputAck {
 export type AckOutput = (input: OutputAck) => Promise<unknown>
 
 /** Ack after this many bytes applied since the last ack (or when the queue is empty). */
-export const ACK_EVERY_BYTES = 16 * 1024
+export const ACK_EVERY_BYTES = 32 * 1024
 
 /** Full reset (RIS): part of a snapshot's write, so no frame shows an empty screen. */
 const FULL_RESET = "\x1bc"
