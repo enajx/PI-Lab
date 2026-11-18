@@ -1371,5 +1371,13 @@
   "Revoked": "مُلغى",
   "Added": "أُضيف",
   "Revoke": "إلغاء",
-  "Connect to the PI Lab server on another computer over SSH.": "اتصل بخادم PI Lab على حاسوب آخر عبر SSH."
+  "Connect to the PI Lab server on another computer over SSH.": "اتصل بخادم PI Lab على حاسوب آخر عبر SSH.",
+  "Download…": "تنزيل…",
+  "Upload…": "رفع…",
+  "Downloaded to ": "تم التنزيل إلى ",
+  "Uploaded files: ": "الملفات المرفوعة: ",
+  "Skipped: ": "تم التخطي: ",
+  "Uploading…": "جارٍ الرفع…",
+  "Downloading…": "جارٍ التنزيل…",
+  "Upload files from this Mac into ": "رفع ملفات من جهاز Mac هذا إلى "
 }

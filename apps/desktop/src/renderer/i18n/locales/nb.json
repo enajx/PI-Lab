@@ -1371,5 +1371,13 @@
   "Revoked": "Trukket tilbake",
   "Added": "Lagt til",
   "Revoke": "Trekk tilbake",
-  "Connect to the PI Lab server on another computer over SSH.": "Koble til PI Lab-serveren på en annen datamaskin over SSH."
+  "Connect to the PI Lab server on another computer over SSH.": "Koble til PI Lab-serveren på en annen datamaskin over SSH.",
+  "Download…": "Last ned…",
+  "Upload…": "Last opp…",
+  "Downloaded to ": "Lastet ned til ",
+  "Uploaded files: ": "Opplastede filer: ",
+  "Skipped: ": "Hoppet over: ",
+  "Uploading…": "Laster opp…",
+  "Downloading…": "Laster ned…",
+  "Upload files from this Mac into ": "Last opp filer fra denne Mac-en til "
 }

@@ -1371,5 +1371,13 @@
   "Revoked": "취소됨",
   "Added": "추가됨",
   "Revoke": "취소",
-  "Connect to the PI Lab server on another computer over SSH.": "SSH로 다른 컴퓨터의 PI Lab 서버에 연결합니다."
+  "Connect to the PI Lab server on another computer over SSH.": "SSH로 다른 컴퓨터의 PI Lab 서버에 연결합니다.",
+  "Download…": "다운로드…",
+  "Upload…": "업로드…",
+  "Downloaded to ": "다운로드 위치: ",
+  "Uploaded files: ": "업로드한 파일: ",
+  "Skipped: ": "건너뜀: ",
+  "Uploading…": "업로드 중…",
+  "Downloading…": "다운로드 중…",
+  "Upload files from this Mac into ": "이 Mac의 파일을 다음 위치에 업로드: "
 }

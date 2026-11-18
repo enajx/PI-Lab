@@ -1371,5 +1371,13 @@
   "Revoked": "取り消し済み",
   "Added": "追加日",
   "Revoke": "取り消す",
-  "Connect to the PI Lab server on another computer over SSH.": "SSH で別のコンピューターの PI Lab サーバーに接続します。"
+  "Connect to the PI Lab server on another computer over SSH.": "SSH で別のコンピューターの PI Lab サーバーに接続します。",
+  "Download…": "ダウンロード…",
+  "Upload…": "アップロード…",
+  "Downloaded to ": "ダウンロード先: ",
+  "Uploaded files: ": "アップロードしたファイル: ",
+  "Skipped: ": "スキップ: ",
+  "Uploading…": "アップロード中…",
+  "Downloading…": "ダウンロード中…",
+  "Upload files from this Mac into ": "この Mac からファイルをアップロード: "
 }

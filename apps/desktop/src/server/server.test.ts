@@ -611,3 +611,117 @@ test("public updates start with the server's data format and channel, and follow
   updates.stop()
   close()
 })
+
+/** A git repo opened as a project on this server; returns its main workspace id and folder. */
+async function projectWithFiles(): Promise<{ workspaceId: string; dir: string }> {
+  const { execFileSync } = await import("node:child_process")
+  const { mkdirSync, realpathSync, writeFileSync } = await import("node:fs")
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-lab-transfer-repo-")))
+  execFileSync("git", ["init", "-q", "-b", "main", dir])
+  writeFileSync(join(dir, "notes.txt"), "old notes\n")
+  mkdirSync(join(dir, "data", "deep"), { recursive: true })
+  writeFileSync(join(dir, "data", "a.csv"), "x,y\n1,2\n")
+  writeFileSync(join(dir, "data", "deep", "b.txt"), "ünïcode\n")
+  const { client, close } = connect(token)
+  const project = await client.projects.open.mutate({ path: dir })
+  const workspace = await client.workspaces.ensureMain.mutate({ projectId: project.id })
+  close()
+  return { workspaceId: workspace.id, dir }
+}
+
+function transferUrl(kind: "download" | "upload", query: Record<string, string>): string {
+  return `http://127.0.0.1:${server.port}/files/${kind}?${new URLSearchParams(query)}`
+}
+
+test("GET /files/download streams a file, and a folder as a tar archive; paths outside the project are refused", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { workspaceId } = await projectWithFiles()
+  const headers = { [TOKEN_HEADER]: token }
+  const file = await fetch(transferUrl("download", { workspaceId, relPath: "notes.txt" }), {
+    headers,
+  })
+  expect(file.status).toBe(200)
+  expect(file.headers.get("x-pi-lab-entry")).toBe("file")
+  expect(await file.text()).toBe("old notes\n")
+
+  const folder = await fetch(transferUrl("download", { workspaceId, relPath: "data" }), {
+    headers,
+  })
+  expect(folder.status).toBe(200)
+  expect(folder.headers.get("x-pi-lab-entry")).toBe("dir")
+  const out = mkdtempSync(join(tmpdir(), "pi-lab-transfer-out-"))
+  execFileSync("tar", ["-xf", "-", "-C", out], {
+    input: Buffer.from(await folder.arrayBuffer()),
+  })
+  expect(readFileSync(join(out, "a.csv"), "utf8")).toBe("x,y\n1,2\n")
+  expect(readFileSync(join(out, "deep", "b.txt"), "utf8")).toBe("ünïcode\n")
+  rmSync(out, { recursive: true, force: true })
+
+  const outside = await fetch(transferUrl("download", { workspaceId, relPath: "../x" }), {
+    headers,
+  })
+  expect(outside.status).toBe(403)
+  const missing = await fetch(transferUrl("download", { workspaceId, relPath: "none.txt" }), {
+    headers,
+  })
+  expect(missing.status).toBe(404)
+  expect((await fetch(transferUrl("download", { workspaceId, relPath: "notes.txt" }))).status).toBe(
+    401,
+  )
+})
+
+test("PUT /files/upload writes a file (folders made as needed), refuses to replace one unless asked", async () => {
+  const { workspaceId, dir } = await projectWithFiles()
+  const put = (relPath: string, body: string, replace: "0" | "1") =>
+    fetch(transferUrl("upload", { workspaceId, relPath, replace }), {
+      method: "PUT",
+      headers: { [TOKEN_HEADER]: token },
+      body,
+    })
+  expect((await put("new/sub/fresh.txt", "fresh\n", "0")).status).toBe(204)
+  expect(readFileSync(join(dir, "new", "sub", "fresh.txt"), "utf8")).toBe("fresh\n")
+  expect((await put("notes.txt", "new notes\n", "0")).status).toBe(409)
+  expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("old notes\n")
+  expect((await put("notes.txt", "new notes\n", "1")).status).toBe(204)
+  expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("new notes\n")
+  expect((await put("../escape.txt", "x", "1")).status).toBe(403)
+})
+
+test("an interrupted upload leaves the old file intact; calls stay responsive during large transfers", async () => {
+  const { request } = await import("node:http")
+  const { readdirSync, writeFileSync } = await import("node:fs")
+  const { workspaceId, dir } = await projectWithFiles()
+  writeFileSync(join(dir, "big.bin"), Buffer.alloc(64 * 1024 * 1024, 7))
+  const { client, close } = connect(token)
+
+  // A large download whose reader stops reading: the server waits on the socket.
+  const download = await fetch(transferUrl("download", { workspaceId, relPath: "big.bin" }), {
+    headers: { [TOKEN_HEADER]: token },
+  })
+  expect(download.status).toBe(200)
+
+  // An upload that sends part of a file, then stops.
+  const upload = request(
+    transferUrl("upload", { workspaceId, relPath: "notes.txt", replace: "1" }),
+    {
+      method: "PUT",
+      headers: { [TOKEN_HEADER]: token },
+    },
+  )
+  upload.on("error", () => undefined)
+  upload.write(Buffer.alloc(8 * 1024 * 1024, 1))
+
+  // Editing a routine and answering an agent go over the same server: an ordinary call answers fast.
+  const started = Date.now()
+  await client.projects.list.query()
+  await client.settings.get.query()
+  expect(Date.now() - started).toBeLessThan(1_000)
+
+  upload.destroy()
+  await download.body?.cancel()
+  await vi.waitFor(() =>
+    expect(readdirSync(dir).filter((name) => name.includes(".pi-lab-upload-"))).toEqual([]),
+  )
+  expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("old notes\n")
+  close()
+})

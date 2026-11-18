@@ -14,6 +14,7 @@ import {
   TOKEN_HEADER,
 } from "./access"
 import { type DeviceAccess, LOCAL_DEVICE_ID } from "./devices"
+import { DOWNLOAD_PATH, handleDownload, handleUpload, UPLOAD_PATH } from "./transfers"
 
 export { TOKEN_HEADER }
 
@@ -104,7 +105,8 @@ async function sendResponse(response: Response, out: ServerResponse): Promise<vo
 
 /**
  * `GET /scheme/<scheme>/<host>/<path>` serves what Electron's protocol handler
- * forwards. Everything needs the device token, except `GET /identity`, which
+ * forwards; `GET /files/download` and `PUT /files/upload` move project files
+ * for clients on other machines (transfers.ts). Everything needs the device token, except `GET /identity`, which
  * answers the HMAC of the client's nonce with the token, so a client can check
  * the port before it sends the token.
  */
@@ -163,6 +165,14 @@ async function handleHttp(
     out
       .writeHead(200, { "content-type": "application/json" })
       .end(JSON.stringify(connectionStats()))
+    return
+  }
+  if (request.method === "GET" && path === DOWNLOAD_PATH) {
+    await handleDownload(options.createContext(), requested, out)
+    return
+  }
+  if (request.method === "PUT" && path === UPLOAD_PATH) {
+    await handleUpload(options.createContext(), requested, request, out)
     return
   }
   if (!path.startsWith(SCHEME_PATH_PREFIX)) {

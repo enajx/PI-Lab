@@ -126,6 +126,16 @@ export class MachineConnections {
    * Throws while the machine cannot be reached, so the socket retries.
    */
   async endpoint(machineId: string): Promise<{ url: string }> {
+    const { port, token } = await this.httpEndpoint(machineId)
+    return { url: `ws://127.0.0.1:${port}/trpc?token=${encodeURIComponent(token)}` }
+  }
+
+  /**
+   * The tunnel's local port and this app's token for a machine, with the
+   * same checks as {@link endpoint}: for plain HTTP to its server (report and
+   * media streams, Download and Upload).
+   */
+  async httpEndpoint(machineId: string): Promise<{ port: number; token: string }> {
     const live = this.#get(machineId)
     if (live.stopped) throw new Error(`${live.stored.name} is stopped`)
     if (live.attempt) await live.attempt
@@ -145,7 +155,7 @@ export class MachineConnections {
     }
     const port = live.tunnel?.localPort
     if (port === undefined) throw new Error(live.error ?? `${live.stored.name} is offline`)
-    return { url: `ws://127.0.0.1:${port}/trpc?token=${encodeURIComponent(token)}` }
+    return { port, token }
   }
 
   /**

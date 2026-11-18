@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { createMachineSockets, createTrpcClientOver, type PiLabTrpcClient } from "../trpc/client"
+import { createMachineSockets, createMachineTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { ConnectionStatus } from "../trpc/connectionStatus"
 
 /**
@@ -34,7 +34,7 @@ export function machineRuntime(machineId: string): MachineRuntime {
   const runtime: MachineRuntime = {
     machineId,
     status,
-    client: createTrpcClientOver(sockets),
+    client: createMachineTrpcClient(sockets),
     queryClient,
     close: async () => {
       stopReopen()

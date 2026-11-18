@@ -1371,5 +1371,13 @@
   "Revoked": "已撤销",
   "Added": "添加于",
   "Revoke": "撤销",
-  "Connect to the PI Lab server on another computer over SSH.": "通过 SSH 连接另一台电脑上的 PI Lab 服务器。"
+  "Connect to the PI Lab server on another computer over SSH.": "通过 SSH 连接另一台电脑上的 PI Lab 服务器。",
+  "Download…": "下载…",
+  "Upload…": "上传…",
+  "Downloaded to ": "已下载到 ",
+  "Uploaded files: ": "已上传文件：",
+  "Skipped: ": "已跳过：",
+  "Uploading…": "正在上传…",
+  "Downloading…": "正在下载…",
+  "Upload files from this Mac into ": "从这台 Mac 上传文件到 "
 }

@@ -32,6 +32,7 @@ import type { EditorBuffersApi } from "../../../../../Editor/hooks/useEditorBuff
 import { isPythonPath } from "../../../../../Editor/utils/pythonDiagnostics"
 import { rejectedReadMessage } from "../../../../../Editor/utils/rejectedRead"
 import { useTranslate } from "../../../../../i18n/language"
+import { useMachineScope } from "../../../../../machines/machines"
 import {
   FILES_PANEL_MAX_WIDTH,
   FILES_PANEL_MIN_WIDTH,
@@ -174,6 +175,7 @@ export function CentralPanel({
   hideToolbar,
 }: CentralPanelProps) {
   const t = useTranslate()
+  const onAnotherMachine = useMachineScope() !== null
   const { editor, sessions, active } = controller
   const [quickOpen, setQuickOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -916,13 +918,15 @@ export function CentralPanel({
           className="shrink-0 border-border border-b px-4 py-2 text-sm"
         >
           <p>{rejectedReadMessage(editor.rejectedRead)}</p>
-          <button
-            type="button"
-            className="underline"
-            onClick={() => void editor.revealRejectedRead()}
-          >
-            {t("Reveal in Finder")}
-          </button>
+          {onAnotherMachine ? null : (
+            <button
+              type="button"
+              className="underline"
+              onClick={() => void editor.revealRejectedRead()}
+            >
+              {t("Reveal in Finder")}
+            </button>
+          )}
         </div>
       ) : null}
 

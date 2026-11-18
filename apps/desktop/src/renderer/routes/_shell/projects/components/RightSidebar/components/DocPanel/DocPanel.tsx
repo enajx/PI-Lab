@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import { rejectedReadMessage } from "../../../../../../../Editor/utils/rejectedRead"
 import { translateKnownError } from "../../../../../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
+import { useMachineScope } from "../../../../../../../machines/machines"
 import { useTRPC } from "../../../../../../../trpc/react"
 import { Markdown } from "../Markdown"
 
@@ -33,6 +34,7 @@ export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const reveal = useMutation(trpc.files.reveal.mutationOptions())
+  const onAnotherMachine = useMachineScope() !== null
   const docQuery = useQuery(
     trpc.files.read.queryOptions(
       { workspaceId, relPath },
@@ -59,13 +61,15 @@ export function DocPanel({ workspaceId, relPath, testId, emptyTitle, emptyHint }
         ) : docQuery.data?.status === "oversized" || docQuery.data?.status === "binary" ? (
           <div data-testid={`${testId}-rejected`} className="text-sm">
             <p>{rejectedReadMessage({ ...docQuery.data, relPath })}</p>
-            <button
-              type="button"
-              className="underline"
-              onClick={() => reveal.mutate({ workspaceId, relPath })}
-            >
-              {t("Reveal in Finder")}
-            </button>
+            {onAnotherMachine ? null : (
+              <button
+                type="button"
+                className="underline"
+                onClick={() => reveal.mutate({ workspaceId, relPath })}
+              >
+                {t("Reveal in Finder")}
+              </button>
+            )}
             {reveal.error ? (
               <p role="alert">{translateKnownError(language, reveal.error.message)}</p>
             ) : null}

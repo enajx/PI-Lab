@@ -12,6 +12,7 @@ import {
   RenderedDocument,
 } from "../../../../../../../components/DocumentRender/DocumentRender"
 import { useInterfaceLanguage, useTranslate } from "../../../../../../../i18n/language"
+import { useMachinePageUrl } from "../../../../../../../machines/useMachinePageUrl"
 import { useTRPC, useTRPCClient } from "../../../../../../../trpc/react"
 import { Markdown } from "../../../../../projects/components/RightSidebar/components/Markdown"
 import { ArrayGrid } from "../ArrayGrid"
@@ -278,8 +279,12 @@ function MediaPreview({
 }) {
   const t = useTranslate()
   const client = useTRPCClient()
-  const [url, setUrl] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [serverUrl, setUrl] = useState<string | null>(null)
+  const [mediaError, setError] = useState<string | null>(null)
+  // A grant of another machine's server names that machine (shared/machineUrls.ts).
+  const page = useMachinePageUrl(serverUrl)
+  const url = page.url
+  const error = mediaError ?? page.error
   useEffect(() => {
     let live = true
     let granted: string | null = null
@@ -389,7 +394,10 @@ export function InteractivePreview({
   const trpc = useTRPC()
   const ownerId = useRef(`analysis-${crypto.randomUUID()}`)
   const [status, setStatus] = useState<InteractiveStatus>("starting")
-  const [url, setUrl] = useState<string | null>(null)
+  const [serverUrl, setUrl] = useState<string | null>(null)
+  // A report or marimo page of another machine's server goes through that machine.
+  const page = useMachinePageUrl(serverUrl)
+  const url = page.url
   const [runtime, setRuntime] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -509,6 +517,11 @@ export function InteractivePreview({
             {t("Stop")}
           </button>
         </div>
+      ) : null}
+      {page.error ? (
+        <p role="alert" className="shrink-0 px-3 py-1.5 text-destructive text-xs">
+          {page.error}
+        </p>
       ) : null}
       {url ? (
         <iframe
