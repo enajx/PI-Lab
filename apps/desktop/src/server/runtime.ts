@@ -204,6 +204,12 @@ export class ServerRuntime {
     await this.ensureAgentRecovery().catch((error) => {
       console.warn(`[pi-lab server] activity reconciliation skipped: ${String(error)}`)
     })
+    // Connect to a running PTY daemon now: one from an earlier build is replaced on
+    // first contact, which takes seconds, and must not fall in the bounded wait of
+    // the user's first Quit or Stop Server and Agents.
+    void this.terminalSupervisor.listSessionsIfRunning().catch((error: unknown) => {
+      console.warn(`[pi-lab server] pty-daemon check at start failed: ${String(error)}`)
+    })
     void seedWritableTemplate().catch((error) => {
       console.warn("[pi-lab server] template seed skipped:", error)
     })

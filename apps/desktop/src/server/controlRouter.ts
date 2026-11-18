@@ -25,6 +25,7 @@ import {
   deviceSchema,
   legacyCredentialMoveSchema,
   legacyCredentialSchema,
+  notebookCountSchema,
   notificationEventSchema,
   notificationStreamMessageSchema,
   okSchema,
@@ -159,6 +160,10 @@ export const serverControlRouter = router({
   quitWork: publicProcedure
     .output(quitWorkSchema)
     .query(({ ctx }): Promise<QuitWork> => control(ctx).runtime.quitWork()),
+  /** Open notebook tabs whose servers run; cheap, for the Quit dialog. */
+  notebookCount: publicProcedure
+    .output(notebookCountSchema)
+    .query(({ ctx }): number => control(ctx).runtime.notebookServers.runningCount()),
 
   traySnapshot: publicProcedure
     .output(backgroundTraySnapshotSchema)

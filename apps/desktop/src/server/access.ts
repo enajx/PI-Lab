@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto"
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -13,15 +13,24 @@ export const DISCOVERY_FILE = "server.json"
 /** Header carrying the device token on plain HTTP requests. */
 export const TOKEN_HEADER = "x-pi-lab-token"
 
-/** Unauthenticated path that answers only the server's random id. */
+/**
+ * Unauthenticated path where the server proves it holds the token:
+ * `GET /identity?nonce=<hex>` answers `{ proof }` (see {@link identityProof}).
+ */
 export const IDENTITY_PATH = "/identity"
+
+/** A nonce the server accepts: 32 to 128 lowercase hex characters. */
+export const IDENTITY_NONCE = /^[0-9a-f]{32,128}$/
 
 /** What the server writes to `server.json` once it listens. */
 export interface ServerDiscovery {
   port: number
   pid: number
   build: string
-  /** Random id, new on every server start; `GET /identity` answers it. */
+  /**
+   * Random id, new on every server start. Clients use it to notice a
+   * restarted server; the identity proof is the HMAC, not this id.
+   */
   serverId: string
 }
 
@@ -83,20 +92,29 @@ export function newServerId(): string {
   return randomBytes(16).toString("base64url")
 }
 
+/** The proof for one nonce: hex `HMAC-SHA256(token, "pi-lab-identity:" + nonce)`. */
+export function identityProof(token: string, nonce: string): string {
+  return createHmac("sha256", token).update(`pi-lab-identity:${nonce}`).digest("hex")
+}
+
 /**
- * True when the process listening on `port` answers `GET /identity` with
- * `serverId` (from the owner-only `server.json`). Clients call this before
- * they send the token, so a stale port taken by another process never gets it.
- * Redirects are refused.
+ * True when the process listening on `port` proves it holds `token`: it is
+ * sent a new random nonce and must answer its HMAC. Clients call this before
+ * they send the token, so a process that took a stale port (and replays an
+ * earlier answer) never gets it. Redirects are refused.
  */
-export async function isServerIdentity(port: number, serverId: string): Promise<boolean> {
-  const response = await fetch(`http://127.0.0.1:${port}${IDENTITY_PATH}`, {
+export async function proveServerIdentity(port: number, token: string): Promise<boolean> {
+  const nonce = randomBytes(16).toString("hex")
+  const response = await fetch(`http://127.0.0.1:${port}${IDENTITY_PATH}?nonce=${nonce}`, {
     redirect: "error",
     signal: AbortSignal.timeout(2_000),
   }).catch(() => null)
   if (!response?.ok) return false
-  const body = (await response.json().catch(() => null)) as { serverId?: unknown } | null
-  return body?.serverId === serverId
+  const body = (await response.json().catch(() => null)) as { proof?: unknown } | null
+  if (typeof body?.proof !== "string") return false
+  const expected = Buffer.from(identityProof(token, nonce))
+  const presented = Buffer.from(body.proof)
+  return expected.length === presented.length && timingSafeEqual(expected, presented)
 }
 
 /**
@@ -104,7 +122,7 @@ export async function isServerIdentity(port: number, serverId: string): Promise<
  * and accepts `token`. The token is sent only after the identity check.
  */
 export async function serverAnswers(discovery: ServerDiscovery, token: string): Promise<boolean> {
-  if (!(await isServerIdentity(discovery.port, discovery.serverId))) return false
+  if (!(await proveServerIdentity(discovery.port, token))) return false
   const response = await fetch(`http://127.0.0.1:${discovery.port}/health`, {
     headers: { [TOKEN_HEADER]: token },
     redirect: "error",

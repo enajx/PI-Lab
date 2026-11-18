@@ -276,7 +276,7 @@ test("Stop Server and Agents names a busy terminal, Cancel keeps it, and with id
 })
 
 /** The app is real; the adopted daemon is a stand-in for one from an earlier build. */
-test("Stop Server and Agents stops an adopted daemon from an earlier build that ignores shutdown", async () => {
+test("an adopted daemon from an earlier build that ignores shutdown is replaced at server start, and Stop Server and Agents then quits", async () => {
   test.skip(process.platform === "win32", "Fixture uses a Unix socket and process listing")
   test.setTimeout(60_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-old-daemon-"))
@@ -328,11 +328,14 @@ net.createServer((socket) => {
       // No work runs, so no dialog is expected; a stray one gets Cancel.
       dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
     })
+    // The server replaces the old daemon at start (it ignores shutdown, so it is
+    // stopped by pid), before the user's Stop Server and its bounded wait.
+    await oldExited
+    expect(old.signalCode).toBe("SIGTERM")
     const closed = new Promise((resolve) => app?.once("close", resolve))
     await clickStopServer(app)
     await closed
-    await oldExited
-    expect(old.signalCode).toBe("SIGTERM")
+    await expect.poll(() => daemonPidFor(socketPath)).toBeUndefined()
   } finally {
     if (app) {
       const closed = (app as ElectronApplication).waitForEvent("close")
@@ -763,6 +766,137 @@ test("Stop Server and Agents asks about unsaved drafts first: Cancel stops nothi
     expect(await readFile(join(repo, "draft.txt"), "utf8")).toContain("SAVED-BEFORE-STOP")
     await expect.poll(() => processAlive(server.pid), { timeout: 15_000 }).toBe(false)
   } finally {
+    if (app) {
+      const closed = (app as ElectronApplication).waitForEvent("close")
+      ;(app as ElectronApplication).process().kill("SIGKILL")
+      await closed
+    }
+    await stopServerIn(dataDir)
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})
+
+/** Native dialogs are injected; the app and server are real. The server is paused with SIGSTOP. */
+test("with the server not answering, Quit still opens its dialog and Stop Server says the server is not reachable", async () => {
+  test.skip(process.platform === "win32", "Pauses the server with SIGSTOP")
+  test.setTimeout(90_000)
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-quit-unreachable-"))
+  const socketPath = join(dataDir, "daemon.sock")
+  let app: ElectronApplication | null = null
+  let serverPid = 0
+  try {
+    app = await electron.launch({
+      executablePath: packagedBinary ?? electronPath,
+      args: launchArgs,
+      env: {
+        ...process.env,
+        PI_LAB_TEST_MODE: "1",
+        PI_LAB_TEST_FIRST_RUN: "1",
+        PI_LAB_TEST_RETAIN_SERVER: "1",
+        PI_LAB_DATA_DIR: dataDir,
+        PI_LAB_SOCKET_PATH: socketPath,
+      },
+    })
+    app.on("close", () => {
+      app = null
+    })
+    const window = await app.firstWindow()
+    await window.getByRole("button", { name: "Skip setup" }).first().click()
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    serverPid = readServerDiscovery(dataDir)?.pid ?? 0
+    expect(processAlive(serverPid)).toBe(true)
+    await app.evaluate(({ dialog }) => {
+      const state = globalThis as unknown as { shown: { kind: string; text: string }[] }
+      state.shown = []
+      dialog.showMessageBox = async (options) => {
+        state.shown.push({ kind: "message", text: `${options.title}\n${options.detail ?? ""}` })
+        return { response: 2, checkboxChecked: false }
+      }
+      dialog.showErrorBox = (title, content) => {
+        state.shown.push({ kind: "error", text: `${title}\n${content}` })
+      }
+    })
+    const shown = () =>
+      (app as ElectronApplication).evaluate(
+        () => (globalThis as unknown as { shown: { kind: string; text: string }[] }).shown,
+      )
+    process.kill(serverPid, "SIGSTOP")
+
+    const quitAsked = Date.now()
+    await app.evaluate(({ Menu }) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
+      if (!item) throw new Error("Missing Quit menu item")
+      setImmediate(() => item.click())
+    })
+    await expect.poll(async () => (await shown()).length, { timeout: 5_000 }).toBe(1)
+    expect(Date.now() - quitAsked).toBeLessThan(4_000)
+    const [quitDialog] = await shown()
+    expect(quitDialog?.kind).toBe("message")
+    expect(quitDialog?.text).toMatch(/^Quit /)
+    expect(quitDialog?.text).not.toMatch(/notebook/)
+
+    await clickStopServer(app)
+    await expect.poll(async () => (await shown()).length, { timeout: 8_000 }).toBe(2)
+    const stopError = (await shown())[1]
+    expect(stopError?.kind).toBe("error")
+    expect(stopError?.text).toMatch(/not reachable\. It may already be stopped/)
+    // The app stays open, and Quit can be asked again.
+    expect(app).not.toBeNull()
+    await app.evaluate(({ Menu }) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
+      if (!item) throw new Error("Missing Quit menu item")
+      setImmediate(() => item.click())
+    })
+    await expect.poll(async () => (await shown()).length, { timeout: 5_000 }).toBe(3)
+  } finally {
+    if (serverPid && processAlive(serverPid)) process.kill(serverPid, "SIGCONT")
+    if (app) {
+      const closed = (app as ElectronApplication).waitForEvent("close")
+      ;(app as ElectronApplication).process().kill("SIGKILL")
+      await closed
+    }
+    await stopServerIn(dataDir)
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})
+
+/** The app and server are real; the server is paused with SIGSTOP. */
+test("a logout-style quit with the server not answering still quits the app", async () => {
+  test.skip(process.platform === "win32", "Pauses the server with SIGSTOP")
+  test.setTimeout(60_000)
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-logout-unreachable-"))
+  let app: ElectronApplication | null = null
+  let serverPid = 0
+  try {
+    app = await electron.launch({
+      executablePath: packagedBinary ?? electronPath,
+      args: launchArgs,
+      env: {
+        ...process.env,
+        PI_LAB_TEST_MODE: "1",
+        PI_LAB_TEST_FIRST_RUN: "1",
+        PI_LAB_TEST_RETAIN_SERVER: "1",
+        PI_LAB_DATA_DIR: dataDir,
+        PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      },
+    })
+    const window = await app.firstWindow()
+    await window.getByRole("button", { name: "Skip setup" }).first().click()
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    serverPid = readServerDiscovery(dataDir)?.pid ?? 0
+    expect(processAlive(serverPid)).toBe(true)
+    process.kill(serverPid, "SIGSTOP")
+    // macOS logout, restart and shutdown reach the app as this same app.quit().
+    const closed = app.waitForEvent("close")
+    const asked = Date.now()
+    await app.evaluate(({ app }) => {
+      setImmediate(() => app.quit())
+    })
+    await closed
+    app = null
+    expect(Date.now() - asked).toBeLessThan(20_000)
+  } finally {
+    if (serverPid && processAlive(serverPid)) process.kill(serverPid, "SIGCONT")
     if (app) {
       const closed = (app as ElectronApplication).waitForEvent("close")
       ;(app as ElectronApplication).process().kill("SIGKILL")

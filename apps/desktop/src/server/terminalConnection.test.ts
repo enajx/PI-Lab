@@ -78,7 +78,7 @@ beforeAll(async () => {
   server = await listen({
     port: 0,
     access: runtime.devices,
-    serverId: "test-server-id",
+    localToken: ensureLocalToken(dataDir),
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => undefined },

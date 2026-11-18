@@ -88,6 +88,7 @@ import {
   QUIT_DIALOG_CANCEL,
   quitChoiceFromButton,
   quitDialogDetail,
+  quitDialogNotebooks,
   stopWorkDialog,
 } from "./window/userQuit"
 
@@ -411,6 +412,9 @@ if (ownsInstance) {
 // In test mode there is no auto-update or telemetry to disable yet; the seam is
 // reserved here so future wiring stays gated behind one flag.
 
+/** How long a logout or shutdown waits for the server to report running work. */
+const LOGOUT_WORK_TIMEOUT_MS = 3_000
+
 const shutdownGuard = installShutdownGuard({
   app,
   ipcMain,
@@ -418,23 +422,30 @@ const shutdownGuard = installShutdownGuard({
   // A quit PI Lab did not start (macOS logout, restart, shutdown) also ends the
   // user's launchd server and its agents, so ask first while work is running.
   prepareQuit: async (mode) => {
-    if (mode !== "confirm-end" || !fullRuntime) return true
-    try {
-      const work = await fullRuntime.quitWork()
-      if (!hasRunningWork(work)) return true
-      const result = await dialog.showMessageBox({
-        type: "warning",
-        title: "Work is still running",
-        ...logoutWorkDialog(work),
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-      })
-      return result.response === 0
-    } catch (error) {
+    const runtime = fullRuntime
+    if (mode !== "confirm-end" || !runtime) return true
+    // Bounded: a server that does not answer must never hold a logout or shutdown.
+    const work = await Promise.race([
+      runtime.quitWork(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), LOGOUT_WORK_TIMEOUT_MS)),
+    ]).catch((error: unknown) => {
       console.error("[pi-lab] running work could not be checked:", error)
+      return null
+    })
+    if (work === null) {
+      console.warn("[pi-lab] running work could not be checked in time; quitting without asking")
       return true
     }
+    if (!hasRunningWork(work)) return true
+    const result = await dialog.showMessageBox({
+      type: "warning",
+      title: "Work is still running",
+      ...logoutWorkDialog(work),
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0
   },
   // With "Keep running after window closes" off, closing the window is a Quit:
   // run the Cmd+Q flow; Cancel leaves the window open. Before full boot the
@@ -458,13 +469,18 @@ const requestUserQuit = createUserQuitAction({
   pending: () => shutdownGuard.isQuitPending(),
   remembered: () => (fullRuntime ? fullRuntime.quitChoice() : "ask"),
   choose: async () => {
-    // Before the server is connected no notebook can be open.
-    const work = fullRuntime && fullBootComplete ? await fullRuntime.quitWork() : null
+    // Before the server is connected no notebook can be open. The count is
+    // bounded so Cmd+Q never waits on a server that does not answer.
+    const runtime = fullRuntime
+    const notebooks =
+      runtime && fullBootComplete
+        ? await quitDialogNotebooks(() => runtime.notebookCount(), 1_500, console.warn)
+        : 0
     const result = await dialog.showMessageBox({
       type: "question",
       title: `Quit ${app.getName()}?`,
       message: `Quit ${app.getName()}?`,
-      detail: quitDialogDetail(work?.notebooks ?? 0),
+      detail: quitDialogDetail(notebooks),
       buttons: [...QUIT_DIALOG_BUTTONS],
       checkboxLabel: "Remember option",
       checkboxChecked: false,
@@ -496,6 +512,7 @@ const requestStopServer = createStopServerAction({
     if (!fullRuntime) throw new Error("PI Lab has not started")
     return fullRuntime.quitWork()
   },
+  workTimeoutMs: 3_000,
   confirmStop: async (work) => {
     const result = await dialog.showMessageBox({
       type: "warning",
@@ -519,7 +536,8 @@ const requestStopServer = createStopServerAction({
 })
 /** Stopping the server failed: the app stays open. */
 function reportStopFailure(error: unknown): void {
-  dialog.showErrorBox("Could not stop the PI Lab server", `The app remains open. ${String(error)}`)
+  const reason = error instanceof Error ? error.message : String(error)
+  dialog.showErrorBox("Could not stop the PI Lab server", `The app remains open. ${reason}`)
 }
 
 setStopServerAction(() => void requestStopServer())

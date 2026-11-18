@@ -1,10 +1,18 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveDataDir } from "@pi-lab/local-db/paths"
-import { isServerIdentity, readDiscovery, readLocalToken, serverAnswers } from "../../server/access"
+import {
+  DISCOVERY_FILE,
+  proveServerIdentity,
+  readDiscovery,
+  readLocalToken,
+  type ServerDiscovery,
+  serverAnswers,
+} from "../../server/access"
 import { type ServerConfig, serverConfigEnv } from "../../server/config"
 import type { PiLabChannel } from "../identity/channel"
 
@@ -84,7 +92,7 @@ function processAlive(pid: number): boolean {
 
 /**
  * The running server for this data folder, if it answers. The token is sent
- * only after the process on the port proved it is this server (identity check).
+ * only after the process on the port proved it holds the token (identity check).
  */
 export async function runningServer(dataDir: string): Promise<ServerEndpoint | null> {
   const discovery = readDiscovery(dataDir)
@@ -94,25 +102,71 @@ export async function runningServer(dataDir: string): Promise<ServerEndpoint | n
   return { ...discovery, token }
 }
 
-/**
- * Where this data folder's server listens now, checked before any client
- * sends it the token. Read on every connection attempt: a restarted server has
- * a new port and id. Throws when the port does not answer with the id in
- * `server.json`.
- */
-export async function verifiedEndpoint(dataDir: string, token: string): Promise<ServerEndpoint> {
-  const discovery = readDiscovery(dataDir)
+/** Check that the process on `discovery.port` proves it holds `token`. */
+async function verified(discovery: ServerDiscovery | null, token: string): Promise<ServerEndpoint> {
   if (!discovery?.serverId) throw new Error("The PI Lab server is not running")
-  if (!(await isServerIdentity(discovery.port, discovery.serverId))) {
+  if (!(await proveServerIdentity(discovery.port, token))) {
     throw new Error(`The process on port ${discovery.port} is not this PI Lab server`)
   }
   return { ...discovery, token }
 }
 
-/** True when `pid` runs a PI Lab server bundle (`…/out/main/server.js`). */
-export function isPiLabServerProcess(pid: number): boolean {
+/**
+ * Where this data folder's server listens now, checked before any client
+ * sends it the token. Throws when the process on the port in `server.json`
+ * does not prove it holds the token.
+ */
+export async function verifiedEndpoint(dataDir: string, token: string): Promise<ServerEndpoint> {
+  return verified(readDiscovery(dataDir), token)
+}
+
+/** A verified server endpoint kept between requests (see {@link createEndpointCache}). */
+export interface EndpointCache {
+  /** The verified endpoint; checked again only when needed. */
+  get: () => Promise<ServerEndpoint>
+  /** Forget the verified endpoint after a failed request or a closed connection. */
+  invalidate: () => void
+}
+
+/**
+ * Keep the verified endpoint so forwarded requests do not repeat the identity
+ * check. `server.json` is read (async) on each `get`; the check runs again
+ * only when its port or serverId changes (a restarted server), after
+ * `invalidate`, or after a failed check.
+ */
+export function createEndpointCache(dataDir: string, token: string): EndpointCache {
+  let cached: { key: string; endpoint: Promise<ServerEndpoint> } | null = null
+  const path = join(dataDir, DISCOVERY_FILE)
+  return {
+    get: async () => {
+      const text = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null
+        throw error
+      })
+      const discovery = text === null ? null : (JSON.parse(text) as ServerDiscovery)
+      const key = `${discovery?.port}:${discovery?.serverId}`
+      if (cached?.key === key) return cached.endpoint
+      const entry = { key, endpoint: verified(discovery, token) }
+      cached = entry
+      entry.endpoint.catch(() => {
+        if (cached === entry) cached = null
+      })
+      return entry.endpoint
+    },
+    invalidate: () => {
+      cached = null
+    },
+  }
+}
+
+/**
+ * True when `pid` runs a PI Lab server bundle for `dataDir`: its command line
+ * ends with `…/out/main/server.js <dataDir>` (both start modes pass the data
+ * folder as the argument).
+ */
+export function isPiLabServerProcess(pid: number, dataDir: string): boolean {
   const result = spawnSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" })
-  return result.status === 0 && result.stdout.includes("/out/main/server.js")
+  return result.status === 0 && result.stdout.trim().endsWith(`/out/main/server.js ${dataDir}`)
 }
 
 /** The launchd agent definition: the app binary in Node mode running server.js. */
@@ -138,6 +192,7 @@ export function launchdPlist(options: LauncherOptions): string {
   <array>
     <string>${escapeXml(process.execPath)}</string>
     <string>${escapeXml(options.serverEntry)}</string>
+    <string>${escapeXml(options.config.dataDir)}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -192,7 +247,8 @@ function startWithLaunchd(options: LauncherOptions): void {
 /** Source and test runs: a detached child that outlives this app. */
 function startDetached(options: LauncherOptions): void {
   const log = openSync(join(options.config.dataDir, SERVER_LOG_FILE), "a")
-  // The data folder on the command line only names the process (for E2E cleanup and `ps`).
+  // The data folder on the command line names the process (`ps`, E2E cleanup,
+  // isPiLabServerProcess); the server reads its configuration from the environment.
   const child = spawn(process.execPath, [options.serverEntry, options.config.dataDir], {
     detached: true,
     stdio: ["ignore", log, log],
@@ -223,6 +279,12 @@ export async function ensureServer(options: LauncherOptions): Promise<ServerEndp
   mkdirSync(dataDir, { recursive: true })
   const current = await runningServer(dataDir)
   if (current && current.build === options.config.build) return current
+  const old = current ? null : unprovenServerPid(dataDir)
+  if (old !== null) {
+    options.log(`[pi-lab] stopping server ${old}: it does not prove its identity (older build)`)
+    stopByPid(old)
+    await waitForExit(old)
+  }
   if (current) {
     // A clean exit is not restarted by launchd, so the new definition starts next.
     options.log(`[pi-lab] restarting server ${current.pid}: build ${current.build} differs`)
@@ -232,7 +294,18 @@ export async function ensureServer(options: LauncherOptions): Promise<ServerEndp
   writeFileSync(join(dataDir, SERVER_ERROR_FILE), "", { flag: "w" })
   if (options.launchdLabel) startWithLaunchd(options)
   else startDetached(options)
-  return waitForServer(options, current?.pid ?? null)
+  return waitForServer(options, current?.pid ?? old)
+}
+
+/**
+ * The pid in `server.json` when it is a live server process of this data
+ * folder that did not pass {@link runningServer}: a server from an older
+ * build (no serverId, or the identity check before the HMAC proof), or null.
+ */
+function unprovenServerPid(dataDir: string): number | null {
+  const discovery = readDiscovery(dataDir)
+  if (!discovery || !processAlive(discovery.pid)) return null
+  return isPiLabServerProcess(discovery.pid, dataDir) ? discovery.pid : null
 }
 
 async function waitForExit(pid: number): Promise<void> {
@@ -283,7 +356,7 @@ export function stopServerSync(dataDir: string, launchdLabel: string | null): vo
   if (launchdLabel) launchctl(["bootout", `gui/${userInfo().uid}/${launchdLabel}`])
   if (!discovery || !processAlive(discovery.pid)) return
   // A crash can leave a pid that now belongs to another process.
-  if (!isPiLabServerProcess(discovery.pid)) {
+  if (!isPiLabServerProcess(discovery.pid, dataDir)) {
     console.warn(`[pi-lab] pid ${discovery.pid} in server.json is not a PI Lab server; not stopped`)
     return
   }

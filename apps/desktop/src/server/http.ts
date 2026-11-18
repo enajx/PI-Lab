@@ -5,7 +5,7 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws"
 import { WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
 import { serverRouter } from "../main/trpc/serverRouter"
-import { IDENTITY_PATH, TOKEN_HEADER } from "./access"
+import { IDENTITY_NONCE, IDENTITY_PATH, identityProof, TOKEN_HEADER } from "./access"
 import type { DeviceAccess } from "./devices"
 
 export { TOKEN_HEADER }
@@ -17,8 +17,11 @@ export interface ListenOptions {
   port: number
   /** Device tokens: who may connect, and how to close a revoked device's sockets. */
   access: DeviceAccess
-  /** Random id of this start, answered without the token at `GET /identity`. */
-  serverId: string
+  /**
+   * The local device token ("This Mac"). `GET /identity` proves the server
+   * holds it; only the desktop app on this machine uses that check.
+   */
+  localToken: string
   createContext: () => AppContext
   /** Serve one custom-scheme request (`pi-lab-report://…`, `pi-lab-media://…`). */
   handleScheme: (scheme: string, request: Request) => Promise<Response>
@@ -70,7 +73,8 @@ async function sendResponse(response: Response, out: ServerResponse): Promise<vo
 /**
  * `GET /scheme/<scheme>/<host>/<path>` serves what Electron's protocol handler
  * forwards. Everything needs the device token, except `GET /identity`, which
- * answers only the server id so clients can check the port before sending it.
+ * answers the HMAC of the client's nonce with the token, so a client can check
+ * the port before it sends the token.
  */
 async function handleHttp(
   options: ListenOptions,
@@ -78,11 +82,17 @@ async function handleHttp(
   request: IncomingMessage,
   out: ServerResponse,
 ): Promise<void> {
-  const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname
+  const requested = new URL(request.url ?? "/", "http://127.0.0.1")
+  const path = requested.pathname
   if (request.method === "GET" && path === IDENTITY_PATH) {
+    const nonce = requested.searchParams.get("nonce") ?? ""
+    if (!IDENTITY_NONCE.test(nonce)) {
+      out.writeHead(400).end()
+      return
+    }
     out
       .writeHead(200, { "content-type": "application/json" })
-      .end(JSON.stringify({ serverId: options.serverId }))
+      .end(JSON.stringify({ proof: identityProof(options.localToken, nonce) }))
     return
   }
   if (!options.access.authenticate(request.headers[TOKEN_HEADER]?.toString() ?? null)) {

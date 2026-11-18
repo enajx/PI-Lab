@@ -136,6 +136,8 @@ export const quitWorkSchema = z.strictObject({
   notebooks: z.number().int(),
 })
 
+export const notebookCountSchema = z.number().int()
+
 export const backgroundTraySnapshotSchema = z.strictObject({
   projects: z.array(
     z.strictObject({
