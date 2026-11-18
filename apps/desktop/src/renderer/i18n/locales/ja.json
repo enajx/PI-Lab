@@ -1326,5 +1326,6 @@
   "Reconnecting": "再接続中",
   "Disconnected": "切断",
   "Server connection": "サーバー接続",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "このウィンドウと PI Lab サーバーの接続です。切断されると自動で再接続します。"
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "このウィンドウと PI Lab サーバーの接続です。切断されると自動で再接続します。",
+  "Starting the PI Lab server…": "PI Lab サーバーを起動しています…"
 }

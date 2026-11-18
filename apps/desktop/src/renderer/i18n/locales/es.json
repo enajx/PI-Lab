@@ -1326,5 +1326,6 @@
   "Reconnecting": "Reconectando",
   "Disconnected": "Desconectado",
   "Server connection": "Conexión con el servidor",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "La conexión entre esta ventana y el servidor de PI Lab. Tras una caída se vuelve a conectar sola."
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "La conexión entre esta ventana y el servidor de PI Lab. Tras una caída se vuelve a conectar sola.",
+  "Starting the PI Lab server…": "Iniciando el servidor de PI Lab…"
 }

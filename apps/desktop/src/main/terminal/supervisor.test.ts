@@ -416,3 +416,21 @@ describe("adopting a daemon by protocol", () => {
     expect(await isDaemonListening(socketPath)).toBe(true)
   })
 })
+
+describe("slow daemon start", () => {
+  test("a daemon child that is alive but slow to listen is waited for past 5 s", async () => {
+    // Listens after 6 s, as on a fully loaded machine.
+    const entry = join(socketDir, "slow-start-daemon.js")
+    await writeFile(
+      entry,
+      // Answers the protocol check like a current daemon once it listens.
+      `setTimeout(() => require('node:net').createServer((s) => { let b = ''; s.on('data', (d) => { b += d; let i; while ((i = b.indexOf('\\n')) >= 0) { const m = JSON.parse(b.slice(0, i)); b = b.slice(i + 1); if (m.kind === 'list') s.write(JSON.stringify({ kind: 'list-ok', cid: m.cid, sessions: [], protocol: ${PROTOCOL_VERSION} }) + '\\n') } }) }).listen(process.argv[2]), 6_000)`,
+    )
+    supervisor = new TerminalSupervisor({
+      socketPath,
+      daemonEntry: entry,
+      reapDaemonOnDispose: true,
+    })
+    await expect(supervisor.ensureClient()).resolves.toBeTruthy()
+  }, 20_000)
+})

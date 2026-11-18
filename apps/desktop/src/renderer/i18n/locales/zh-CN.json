@@ -1326,5 +1326,6 @@
   "Reconnecting": "正在重新连接",
   "Disconnected": "已断开",
   "Server connection": "服务器连接",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "此窗口与 PI Lab 服务器之间的连接。断开后会自动重新连接。"
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "此窗口与 PI Lab 服务器之间的连接。断开后会自动重新连接。",
+  "Starting the PI Lab server…": "正在启动 PI Lab 服务器…"
 }

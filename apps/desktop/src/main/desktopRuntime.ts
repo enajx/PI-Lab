@@ -35,6 +35,7 @@ import {
   type EndpointCache,
   ensureServer,
   isPiLabServerProcess,
+  SERVER_START_NO_PROGRESS_MS,
   type ServerEndpoint,
   ServerStartFailure,
   serverBuildId,
@@ -194,6 +195,7 @@ export class DesktopRuntime {
           ? `${channelIdentity(this.host.channel).autostartName}.server`
           : null,
       log: (message) => console.log(message),
+      noProgressMs: SERVER_START_NO_PROGRESS_MS,
     })
     console.log(`[pi-lab] connected to server pid ${this.endpoint.pid} port ${this.endpoint.port}`)
     this.endpoints = createEndpointCache(resolveDataDir(), this.endpoint.token)

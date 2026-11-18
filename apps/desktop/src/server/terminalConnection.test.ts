@@ -82,7 +82,7 @@ beforeAll(async () => {
     version: "0.0.0-test",
     port: 0,
   })
-  await runtime.start()
+  await runtime.start(() => undefined)
   server = await listen({
     port: 0,
     access: runtime.devices,

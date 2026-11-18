@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { MigrationFailure } from "@pi-lab/local-db"
+import { isTestMode } from "../main/runtime/env"
 import {
   analysisMedia,
   MEDIA_SCHEME,
@@ -17,6 +18,7 @@ import {
 import { readServerConfig } from "./config"
 import { listen } from "./http"
 import { ServerRuntime } from "./runtime"
+import { writeStartStep } from "./startProgress"
 
 /**
  * PI Lab server entry. Started by launchd (packaged app) or by the desktop app
@@ -28,6 +30,12 @@ async function main(): Promise<void> {
   mkdirSync(config.dataDir, { recursive: true })
   // Shared modules read the data folder from the environment.
   process.env.PI_LAB_DATA_DIR = config.dataDir
+  writeStartStep(config.dataDir, "starting")
+  // E2E only: a slow start, as on a fully loaded machine.
+  const testStartDelayMs = Number(process.env.PI_LAB_TEST_SERVER_START_DELAY_MS ?? "0")
+  if (isTestMode && testStartDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, testStartDelayMs))
+  }
 
   const token = ensureLocalToken(config.dataDir)
   // A server.json left by a crash can name a pid that now belongs to another
@@ -39,7 +47,7 @@ async function main(): Promise<void> {
   }
 
   const runtime = new ServerRuntime(config)
-  await runtime.start()
+  await runtime.start((step) => writeStartStep(config.dataDir, step))
 
   let stopping = false
   const stop = (code: number): void => {
@@ -71,6 +79,7 @@ async function main(): Promise<void> {
     },
     testRoutes: process.env.PI_LAB_TEST_MODE === "1",
   })
+  writeStartStep(config.dataDir, "listening")
   writeDiscovery(config.dataDir, {
     port: server.port,
     pid: process.pid,

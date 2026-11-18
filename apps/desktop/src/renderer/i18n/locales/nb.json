@@ -1326,5 +1326,6 @@
   "Reconnecting": "Kobler til på nytt",
   "Disconnected": "Frakoblet",
   "Server connection": "Servertilkobling",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "Tilkoblingen mellom dette vinduet og PI Lab-serveren. Etter et brudd kobler den seg til igjen av seg selv."
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "Tilkoblingen mellom dette vinduet og PI Lab-serveren. Etter et brudd kobler den seg til igjen av seg selv.",
+  "Starting the PI Lab server…": "Starter PI Lab-serveren…"
 }

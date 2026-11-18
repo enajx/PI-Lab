@@ -84,6 +84,7 @@ import {
   macKeychain,
   type SecretStore,
 } from "./secrets"
+import type { ServerStartStep } from "./startProgress"
 import { trashPath } from "./trash"
 
 /** Microphone access belongs to the client device; the server never asks for it. */
@@ -161,8 +162,12 @@ export class ServerRuntime {
     })
   }
 
-  /** Open the database, reconcile agents with the PTY daemon, start routines. */
-  async start(): Promise<void> {
+  /**
+   * Open the database, reconcile agents with the PTY daemon, start routines.
+   * `onStep` is called as each start step begins (see startProgress.ts).
+   */
+  async start(onStep: (step: ServerStartStep) => void): Promise<void> {
+    onStep("migrating")
     const dbStatus = initDatabase()
     loadNativeLanguage(this.config.profileDir)
     console.log(
@@ -201,6 +206,7 @@ export class ServerRuntime {
     void this.dictation.start().catch((error) => {
       console.warn(`[pi-lab server] dictation cleanup failed: ${String(error)}`)
     })
+    onStep("reconciling")
     await this.ensureAgentRecovery().catch((error) => {
       console.warn(`[pi-lab server] activity reconciliation skipped: ${String(error)}`)
     })

@@ -1326,5 +1326,6 @@
   "Reconnecting": "جارٍ إعادة الاتصال",
   "Disconnected": "غير متصل",
   "Server connection": "الاتصال بالخادم",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "الاتصال بين هذه النافذة وخادم PI Lab. بعد انقطاعه يعيد الاتصال تلقائيًا."
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "الاتصال بين هذه النافذة وخادم PI Lab. بعد انقطاعه يعيد الاتصال تلقائيًا.",
+  "Starting the PI Lab server…": "جارٍ تشغيل خادم PI Lab…"
 }
