@@ -22,9 +22,18 @@ import { LatexText } from "../../../../components/LatexText"
 import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import {
+  effectiveFilter,
+  filterShows,
+  MachineBadge,
+  MachineFilter,
+} from "../../../../machines/MachineControls"
+import { useMachines, useRemoteProjects } from "../../../../machines/machines"
+import { RemoteProjectRows } from "../../../../machines/RemoteProjects"
+import {
   dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  useMachineFilter,
   useNavOrder,
   useRestoreProjectTabs,
   useShowHiddenProjects,
@@ -363,6 +372,13 @@ export function Sidebar() {
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const projectActivityStates = useProjectActivityStates()
+  // Remote machines: their projects follow this Mac's, each with a machine badge.
+  const machines = useMachines(false) ?? []
+  const remote = useRemoteProjects(machines)
+  const [machineFilterValue, setMachineFilter] = useMachineFilter()
+  const machineFilter = effectiveFilter(machineFilterValue, machines)
+  const localBadge = machines.length > 0 ? t("This Mac") : null
+  const routeParams = useParams({ strict: false }) as { machineId?: string; projectId?: string }
   const projects = projectsQuery.data ?? []
   const hiddenCount =
     projectsQuery.data === undefined
@@ -429,7 +445,9 @@ export function Sidebar() {
 
   // `projects.list` returns the saved project order, the one the Dashboard cards use too.
   const reorderProjects = useProjectReorder((message) => setActionError(message))
-  const orderedProjects = projects.filter((project) => showHidden || !project.archivedAt)
+  const orderedProjects = filterShows(machineFilter, null)
+    ? projects.filter((project) => showHidden || !project.archivedAt)
+    : []
   const projectRowProps = useDragReorder(
     orderedProjects.map((project) => project.id),
     reorderProjects,
@@ -491,7 +509,16 @@ export function Sidebar() {
               {t("Projects")}
             </Link>
           )}
-          {orderedProjects.length === 0 ? (
+          {machines.length > 0 && !collapsed ? (
+            <MachineFilter
+              machines={machines}
+              value={machineFilter}
+              onChange={setMachineFilter}
+              testId="sidebar-machine-filter"
+              className="mx-1 mb-1"
+            />
+          ) : null}
+          {orderedProjects.length === 0 && remote.every((entry) => entry.projects.length === 0) ? (
             collapsed ? null : (
               <p
                 data-testid="projects-empty"
@@ -505,6 +532,7 @@ export function Sidebar() {
               <ProjectItem
                 key={project.id}
                 project={project}
+                machineName={localBadge}
                 collapsed={collapsed}
                 workspaceState={readProjectWorkspaceState(project.id, restoreProjectTabs)}
                 agentStatus={projectAgentStatus(projectActivityStates.get(project.id) ?? "idle")}
@@ -522,6 +550,21 @@ export function Sidebar() {
               />
             ))
           )}
+          {remote
+            .filter((entry) => filterShows(machineFilter, entry.machine.machineId))
+            .map((entry) => (
+              <RemoteProjectRows
+                key={entry.machine.machineId}
+                machine={entry.machine}
+                projects={entry.projects}
+                collapsed={collapsed}
+                activeProjectId={
+                  routeParams.machineId === entry.machine.machineId
+                    ? (routeParams.projectId ?? null)
+                    : null
+                }
+              />
+            ))}
           <ProjectVisibilityToggle
             hiddenCount={hiddenCount ?? 0}
             showHidden={showHidden}
@@ -1121,6 +1164,7 @@ function SettingsNav({ collapsed }: { collapsed: boolean }) {
  */
 function ProjectItem({
   project,
+  machineName,
   collapsed,
   workspaceState,
   agentStatus,
@@ -1128,6 +1172,8 @@ function ProjectItem({
   onContextMenu,
 }: {
   project: ProjectSummary
+  /** The machine badge ("This Mac"), shown once a remote machine is added; null shows none. */
+  machineName: string | null
   collapsed: boolean
   workspaceState: ProjectWorkspaceState | undefined
   agentStatus: ProjectAgentStatus
@@ -1136,8 +1182,8 @@ function ProjectItem({
 }) {
   const t = useTranslate()
   const toDisplayPath = useDisplayPath()
-  const params = useParams({ strict: false }) as { projectId?: string }
-  const isActive = params.projectId === project.id
+  const params = useParams({ strict: false }) as { machineId?: string; projectId?: string }
+  const isActive = params.machineId === undefined && params.projectId === project.id
   const navigate = useNavigate()
   const [sessionsExpanded, setSessionsExpanded] = useState(true)
   const agentSessions = workspaceState?.sessions.filter((session) => session.kind === "agent") ?? []
@@ -1246,6 +1292,7 @@ function ProjectItem({
         >
           {project.name}
         </Link>
+        {machineName === null ? null : <MachineBadge name={machineName} className="" />}
         {hasUnsavedEdits ? <UnsavedProjectMarker /> : null}
         <ProjectAgentStatusRing status={agentStatus} />
       </div>

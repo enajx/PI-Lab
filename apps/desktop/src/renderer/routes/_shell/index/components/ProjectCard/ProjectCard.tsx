@@ -21,6 +21,7 @@ import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
 import { useSkillLink } from "../../../../../components/ProjectWorkflow"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
+import { MachineBadge } from "../../../../../machines/MachineControls"
 import {
   useDigitalRainDensity,
   useDigitalRainSpeed,
@@ -83,9 +84,11 @@ const CARD_ACTION_CLASS =
 
 interface ProjectCardProps {
   project: ProjectSummary
+  /** The machine badge ("This Mac"), shown once a remote machine is added; null shows none. */
+  machineName: string | null
 }
 
-export function ProjectCard({ project }: ProjectCardProps) {
+export function ProjectCard({ project, machineName }: ProjectCardProps) {
   const t = useTranslate()
   const trpc = useTRPC()
   const navigate = useNavigate()
@@ -483,6 +486,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           >
             {project.name}
           </span>
+          {machineName === null ? null : <MachineBadge name={machineName} className="" />}
           <span
             data-testid="project-card-status"
             data-state={state}

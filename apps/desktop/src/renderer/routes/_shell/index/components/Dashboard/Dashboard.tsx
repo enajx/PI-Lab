@@ -21,7 +21,18 @@ import { useNavigate } from "@tanstack/react-router"
 import { type ComponentProps, useCallback, useEffect, useRef, useState } from "react"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
 import { useTranslate } from "../../../../../i18n/language"
-import { useShowHiddenProjects, useSidebarCollapsed } from "../../../../../preferences/preferences"
+import {
+  effectiveFilter,
+  filterShows,
+  MachineFilter,
+} from "../../../../../machines/MachineControls"
+import { useMachines, useRemoteProjects } from "../../../../../machines/machines"
+import { RemoteProjectCards } from "../../../../../machines/RemoteProjects"
+import {
+  useMachineFilter,
+  useShowHiddenProjects,
+  useSidebarCollapsed,
+} from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { useAddProjectController } from "../../../components/AddProjectController"
 import { AddProjectMenu } from "../../../components/AddProjectMenu"
@@ -46,7 +57,13 @@ const SLIDE_TRANSITION = { duration: 160, easing: "cubic-bezier(0.2, 0, 0, 1)" }
  * One project card that can be dragged (by its thumbnail or body) or moved with the
  * keyboard (focus it, Space, arrow keys, Space) to a new place in the grid.
  */
-function SortableProjectCard({ project }: { project: DashboardProject }) {
+function SortableProjectCard({
+  project,
+  machineName,
+}: {
+  project: DashboardProject
+  machineName: string | null
+}) {
   const {
     attributes,
     listeners,
@@ -74,7 +91,7 @@ function SortableProjectCard({ project }: { project: DashboardProject }) {
       )}
       style={{ transform: CSS.Translate.toString(transform), transition }}
     >
-      <ProjectCard project={project} />
+      <ProjectCard project={project} machineName={machineName} />
     </ResizableCardGridItem>
   )
 }
@@ -98,6 +115,13 @@ export function Dashboard() {
   const queryClient = useQueryClient()
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
   const [collapsed] = useSidebarCollapsed()
+  // Remote machines: their projects follow this Mac's, each with a machine badge.
+  const machines = useMachines(false) ?? []
+  const remote = useRemoteProjects(machines)
+  const [machineFilterValue, setMachineFilter] = useMachineFilter()
+  const machineFilter = effectiveFilter(machineFilterValue, machines)
+  const showLocal = filterShows(machineFilter, null)
+  const localBadge = machines.length > 0 ? t("This Mac") : null
 
   const projects = projectsQuery.data ?? []
   const hiddenCount =
@@ -105,7 +129,11 @@ export function Dashboard() {
       ? null
       : projects.filter((project) => Boolean(project.archivedAt)).length
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
-  const visibleProjects = showHidden ? projects : projects.filter((project) => !project.archivedAt)
+  const visibleProjects = !showLocal
+    ? []
+    : showHidden
+      ? projects
+      : projects.filter((project) => !project.archivedAt)
   const [reorderError, setReorderError] = useState<string | null>(null)
   const reorderProjects = useProjectReorder(setReorderError)
   const sensors = useSensors(
@@ -154,6 +182,15 @@ export function Dashboard() {
       >
         <h1 className="text-foreground text-sm tracking-tight">{t("Projects Dashboard")}</h1>
         <div className={cn("flex shrink-0 items-center gap-3", titleBarControlClass(collapsed))}>
+          {machines.length > 0 ? (
+            <MachineFilter
+              machines={machines}
+              value={machineFilter}
+              onChange={setMachineFilter}
+              testId="dashboard-machine-filter"
+              className=""
+            />
+          ) : null}
           <ProjectVisibilityToggle
             hiddenCount={hiddenCount ?? 0}
             showHidden={showHidden}
@@ -167,7 +204,7 @@ export function Dashboard() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-12 pb-6">
         {/* With no projects the New project card alone is shown, with no text above it. */}
-        {projects.length > 0 && visibleProjects.length === 0 ? (
+        {showLocal && projects.length > 0 && visibleProjects.length === 0 ? (
           <p
             data-testid="dashboard-empty"
             className="text-muted-foreground text-sm leading-relaxed"
@@ -195,10 +232,19 @@ export function Dashboard() {
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={visibleIds} strategy={rectSortingStrategy}>
               {visibleProjects.map((project) => (
-                <SortableProjectCard key={project.id} project={project} />
+                <SortableProjectCard key={project.id} project={project} machineName={localBadge} />
               ))}
             </SortableContext>
           </DndContext>
+          {remote
+            .filter((entry) => filterShows(machineFilter, entry.machine.machineId))
+            .map((entry) => (
+              <RemoteProjectCards
+                key={entry.machine.machineId}
+                machine={entry.machine}
+                projects={entry.projects}
+              />
+            ))}
           <AddProjectMenu variant="dashboard-card" onAdded={() => void invalidateProjects()} />
         </CardGrid>
       </div>

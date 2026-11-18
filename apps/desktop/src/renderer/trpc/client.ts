@@ -4,7 +4,7 @@ import { ipcLink } from "trpc-electron/renderer"
 import type { DesktopRouter } from "../../main/desktop/desktopRouter"
 import type { AppRouter } from "../../main/trpc/appRouter"
 import { isDesktopPath } from "../../shared/desktopPaths"
-import { connectionStatus } from "./connectionStatus"
+import { type ConnectionStatus, connectionStatus } from "./connectionStatus"
 import { createServerSockets, type ServerSockets } from "./serverLinks"
 
 let lastRequestId = 0
@@ -40,10 +40,31 @@ export function createIpcClient<TRouter extends AnyRouter>() {
  */
 let desktopClient: ReturnType<typeof createIpcClient<DesktopRouter>> | null = null
 
+/** The Electron-only router over IPC (server endpoints, remote machines). */
+export function desktopIpc(): ReturnType<typeof createIpcClient<DesktopRouter>> {
+  desktopClient ??= createIpcClient<DesktopRouter>()
+  return desktopClient
+}
+
 /** The server's WebSocket URL now, asked again on every connection attempt. */
 export async function serverSocketUrl(): Promise<string> {
-  desktopClient ??= createIpcClient<DesktopRouter>()
-  return (await desktopClient.desktop.serverEndpoint.query()).url
+  return (await desktopIpc().desktop.serverEndpoint.query()).url
+}
+
+/**
+ * The sockets to a remote machine's server (see main/machines). Its URL goes
+ * through the machine's SSH tunnel and is asked again on every connection
+ * attempt; it fails while the machine cannot be reached, so the socket retries.
+ */
+export function createMachineSockets(
+  machineId: string,
+  status: ConnectionStatus,
+): ServerSockets<AppRouter> {
+  return createServerSockets<AppRouter>({
+    url: async () => (await desktopIpc().desktop.machines.endpoint.query({ machineId })).url,
+    WebSocket: globalThis.WebSocket,
+    status,
+  })
 }
 
 /**
@@ -70,13 +91,18 @@ function sharedServerSockets(): ServerSockets<AppRouter> {
  * Components can inject fake clients.
  */
 export function createPiLabTrpcClient() {
+  return createTrpcClientOver(sharedServerSockets())
+}
+
+/** A client like {@link createPiLabTrpcClient} whose server calls go over `sockets` (a remote machine's). */
+export function createTrpcClientOver(sockets: ServerSockets<AppRouter>) {
   return createTRPCClient<AppRouter>({
     links: [
       uniqueRequestIds<AppRouter>(),
       splitLink({
         condition: (op) => isDesktopPath(op.path),
         true: ipcLink(),
-        false: sharedServerSockets().link,
+        false: sockets.link,
       }),
     ],
   })

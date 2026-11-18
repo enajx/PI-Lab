@@ -87,10 +87,15 @@ export class ConnectionStatus {
 /** The status of this document's server sockets (see `client.ts`). */
 export const connectionStatus = new ConnectionStatus()
 
-/** React view of {@link connectionStatus}. */
+/** React view of {@link connectionStatus} (the local server). */
 export function useConnectionState(): ConnectionState {
+  return useStatusState(connectionStatus)
+}
+
+/** React view of one server's socket status (the local one or a remote machine's). */
+export function useStatusState(status: ConnectionStatus): ConnectionState {
   return useSyncExternalStore(
-    (listener) => connectionStatus.subscribe(listener),
-    () => connectionStatus.state(),
+    (listener) => status.subscribe(listener),
+    () => status.state(),
   )
 }

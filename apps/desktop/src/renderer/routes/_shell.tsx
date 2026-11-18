@@ -4,6 +4,7 @@ import { FolderGit2 } from "lucide-react"
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { DictationController } from "../dictation/DictationController"
 import { useTranslate } from "../i18n/language"
+import { isProjectPath } from "../machines/projectRoute"
 import { NotificationBridge } from "../notifications/NotificationBridge"
 import {
   editorVimChoicePending,
@@ -136,7 +137,7 @@ function ShellLayout() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!eventMatchesShortcut(event, "quick-open")) return
       const path = pathRef.current
-      if (path.startsWith("/projects/") || path.startsWith("/science/")) return
+      if (isProjectPath(path) || path.startsWith("/science/")) return
       event.preventDefault()
       setFindProjectsOpen(true)
     }

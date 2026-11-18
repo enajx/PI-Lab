@@ -191,3 +191,109 @@ test("tokens: adding a machine enrolls a device; removing it revokes the token o
   expect(await storedMachines()).toEqual([])
   expect(await remoteUpgradeStatus(stored.token)).toBe(401)
 })
+
+/** Add a machine through the main-process entry the desktop.machines IPC calls use (test seam). */
+async function addMachineInMain(sshHost: string, name: string): Promise<{ machineId: string }> {
+  if (!app) throw new Error("not started")
+  return app.evaluate(
+    async (_electron, input) => {
+      const machines = (
+        globalThis as {
+          piLabTestMachines?: { add: (i: unknown) => Promise<{ machineId: string }> }
+        }
+      ).piLabTestMachines
+      if (!machines) throw new Error("no machines seam")
+      return machines.add(input)
+    },
+    { sshHost, name },
+  )
+}
+
+/** Close the machine's SSH tunnel and refuse its endpoint (an unreachable machine), or undo that. */
+async function setMachineStopped(machineId: string, stopped: boolean): Promise<void> {
+  if (!app) throw new Error("not started")
+  await app.evaluate(
+    async (_electron, input) => {
+      const machines = (
+        globalThis as {
+          piLabTestMachines?: {
+            stopForTest: (id: string) => Promise<void>
+            startForTest: (id: string) => void
+          }
+        }
+      ).piLabTestMachines
+      if (!machines) throw new Error("no machines seam")
+      if (input.stopped) await machines.stopForTest(input.machineId)
+      else machines.startForTest(input.machineId)
+    },
+    { machineId, stopped },
+  )
+}
+
+test("two servers: remote projects show with a badge, run a terminal there, grey out while disconnected", async () => {
+  test.setTimeout(180_000)
+  const localRepo = join(rootDir, "local-repo")
+  const remoteRepo = join(rootDir, "remote-repo")
+  await gitRepo(localRepo, "local.md")
+  await gitRepo(remoteRepo, "remote.md")
+  const remote = connectServer(remoteData)
+  await remote.client.projects.open.mutate({ path: remoteRepo })
+  remote.close()
+
+  let page = await launch({ PI_LAB_TEST_OPEN_PROJECT: localRepo })
+  if (!sshd || !app) throw new Error("not started")
+  // Before any machine: no badges, no filter (as today).
+  await expect(page.getByTestId("project-card")).toHaveCount(1)
+  await expect(page.getByTestId("machine-badge")).toHaveCount(0)
+  await expect(page.getByTestId("dashboard-machine-filter")).toHaveCount(0)
+
+  const { machineId } = await addMachineInMain(sshd.host, "Lab server")
+  await page.reload()
+  page = await app.firstWindow()
+  await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+
+  const remoteCard = page.getByTestId("remote-project-card")
+  await expect(remoteCard).toHaveCount(1, { timeout: 30_000 })
+  await expect(remoteCard).toContainText("remote-repo")
+  await expect(remoteCard.getByTestId("machine-badge")).toHaveText("Lab server")
+  await expect(page.getByTestId("project-card").getByTestId("machine-badge")).toHaveText("This Mac")
+  await expect(page.getByTestId("remote-project-item")).toContainText("remote-repo")
+
+  // The filter by machine.
+  const filter = page.getByTestId("dashboard-machine-filter")
+  await filter.selectOption(machineId)
+  await expect(page.getByTestId("project-card")).toHaveCount(0)
+  await expect(remoteCard).toHaveCount(1)
+  await filter.selectOption("local")
+  await expect(page.getByTestId("project-card")).toHaveCount(1)
+  await expect(remoteCard).toHaveCount(0)
+  await filter.selectOption("")
+
+  // Open the remote project and run a terminal on that machine's server.
+  await remoteCard.click()
+  await expect(page).toHaveURL(new RegExp(`#/m/${machineId}/projects/`))
+  await page.getByTestId("central-add-menu").click()
+  await page.getByTestId("central-add-terminal").click()
+  const terminal = page.locator('[data-testid="terminal"]:visible')
+  await expect(terminal).toBeVisible({ timeout: 30_000 })
+  await terminal.locator(".xterm-helper-textarea").focus()
+  await page.keyboard.insertText('printf \'IN-%s\\n\' "$(basename "$PWD")"\r')
+  await expect(terminal).toContainText("IN-remote-repo", { timeout: 30_000 })
+  // The terminal session lives in the remote server's daemon.
+  const check = connectServer(remoteData)
+  const sessions = await check.client.terminal.list.query()
+  check.close()
+  expect(sessions.length).toBeGreaterThan(0)
+
+  // Disconnect the machine: its projects stay, greyed, with their last data.
+  await page.keyboard.press("Escape")
+  await page.getByTestId("nav-project-dashboard").first().click()
+  await setMachineStopped(machineId, true)
+  await expect(remoteCard).toHaveAttribute("data-offline", "true", { timeout: 30_000 })
+  await expect(remoteCard).toContainText("remote-repo")
+  await expect(page.getByTestId("remote-project-item")).toHaveAttribute("data-offline", "true")
+
+  // Reconnect: the machine's sockets open again on their own.
+  await setMachineStopped(machineId, false)
+  await expect(remoteCard).toHaveAttribute("data-offline", "false", { timeout: 30_000 })
+})

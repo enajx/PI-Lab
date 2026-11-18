@@ -76,7 +76,7 @@ function renderCardIn(p: Project, handlers: FakeHandlers, wrap: (card: ReactNode
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => wrap(<ProjectCard project={summary} />),
+    component: () => wrap(<ProjectCard project={summary} machineName={null} />),
   })
   const projectRoute = createRoute({
     getParentRoute: () => rootRoute,

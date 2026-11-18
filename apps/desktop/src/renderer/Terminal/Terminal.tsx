@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css"
 import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { registerDictationTarget } from "../dictation/targets"
 import { useTranslate } from "../i18n/language"
+import { useMachineScope } from "../machines/machines"
 import { readComposeChoice, useLocalEcho, writeComposeChoice } from "../preferences/preferences"
 import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { connectionStatus } from "../trpc/connectionStatus"
@@ -168,8 +169,10 @@ export function Terminal({
   // Effect deps are intentionally empty: a terminal pane binds to one session for
   // its lifetime. Options are captured in a ref so changing a prop never
   // re-spawns/re-attaches (and never tears down a live agent session) mid-flight.
-  const optionsRef = useRef({ client, inputKind, sessionId, cwd, command, args })
-  optionsRef.current = { client, inputKind, sessionId, cwd, command, args }
+  // A terminal of a remote machine's project uses that machine's client and sockets.
+  const machine = useMachineScope()
+  const optionsRef = useRef({ client, inputKind, sessionId, cwd, command, args, machine })
+  optionsRef.current = { client, inputKind, sessionId, cwd, command, args, machine }
 
   // Track the app's resolved mode and CSS-token palette so the terminal follows
   // Appearance changes without re-attaching the session.
@@ -196,8 +199,10 @@ export function Terminal({
       cwd,
       command,
       args,
+      machine: scope,
     } = optionsRef.current
-    const trpc = injected ?? createPiLabTrpcClient()
+    const trpc = injected ?? scope?.client ?? createPiLabTrpcClient()
+    const status = scope?.status ?? connectionStatus
 
     // No convertEol: the daemon's emulator applies the same raw bytes, so snapshots match.
     const xterm = new XTerm({
@@ -219,13 +224,13 @@ export function Terminal({
     const redraw = (): void => overlay.draw()
     const writeParsed = xterm.onWriteParsed(redraw)
     const updateDisconnected = (): void => {
-      const state = connectionStatus.state()
+      const state = status.state()
       engine.setDisconnected(state !== "connected")
       // Past the short-drop window: keys still waiting are not sent.
       if (state === "disconnected") keySender?.discardWaiting()
       redraw()
     }
-    const unsubscribeStatus = connectionStatus.subscribe(updateDisconnected)
+    const unsubscribeStatus = status.subscribe(updateDisconnected)
     const fitAddon = new FitAddon()
     xterm.loadAddon(fitAddon)
     xterm.open(container)
@@ -437,7 +442,7 @@ export function Terminal({
           const point = consumedBy.consumed()
           return point === null ? null : { generation: point.generation, offset: point.offset }
         },
-        connection: () => connectionStatus.state(),
+        connection: () => status.state(),
         nextSeq: () => nextKeySeq++,
         onLost: () =>
           showNotice("input", "Some input typed during the disconnect was not sent", null),
