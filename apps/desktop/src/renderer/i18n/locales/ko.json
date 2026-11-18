@@ -1316,5 +1316,10 @@
   "Start of the file only": "파일 앞부분만",
   "First {rows} × {columns}": "처음 {rows} × {columns}",
   "{count} paths could not be read": "{count}개 경로를 읽을 수 없습니다",
-  "More files than listed": "목록보다 파일이 더 있습니다"
+  "More files than listed": "목록보다 파일이 더 있습니다",
+  "Dashboard": "대시보드",
+  "Choose the buttons shown on the Projects Dashboard cards.": "프로젝트 대시보드 카드에 표시할 버튼을 선택합니다.",
+  "Project card buttons": "프로젝트 카드 버튼",
+  "Choose the buttons shown on every project card in the Projects Dashboard. A hidden button's action stays in the card's right-click menu.": "프로젝트 대시보드의 모든 프로젝트 카드에 표시할 버튼을 선택합니다. 숨긴 버튼의 동작은 카드의 오른쪽 클릭 메뉴에 남습니다.",
+  "Could not save the card buttons:": "카드 버튼을 저장할 수 없습니다:"
 }

@@ -7,6 +7,7 @@ import {
   AgentsSection,
   AppearanceSection,
   CaffeineSection,
+  DashboardSection,
   EditorSection,
   GeneralSection,
   NotificationsSection,
@@ -42,6 +43,33 @@ beforeEach(() => {
 })
 
 describe("Settings sections", () => {
+  test("Dashboard shows the default card buttons and saves a changed list", async () => {
+    const saved: unknown[] = []
+    renderSection(<DashboardSection />, {
+      // An install that never changed the setting.
+      "settings.get": () => ({ editor: {} }),
+      "settings.updateEditor": (input) => {
+        saved.push(input)
+        return input
+      },
+    })
+    const tasks = await screen.findByTestId("settings-card-button-tasks")
+    const analysis = screen.getByTestId("settings-card-button-analysis")
+    const latex = screen.getByTestId("settings-card-button-latex")
+    const auto = screen.getByTestId("settings-card-button-auto-research")
+    expect(screen.getByText("Project card buttons")).toBeTruthy()
+    expect(tasks.getAttribute("aria-checked")).toBe("true")
+    expect(analysis.getAttribute("aria-checked")).toBe("true")
+    expect(latex.getAttribute("aria-checked")).toBe("true")
+    expect(auto.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(auto)
+    await waitFor(() =>
+      expect(saved).toContainEqual({
+        projectCardButtons: ["tasks", "analysis", "latex", "auto-research"],
+      }),
+    )
+  })
+
   test("changes interface language and switches document direction for Arabic", () => {
     renderSection(<GeneralSection />)
     const language = screen.getByTestId<HTMLSelectElement>("settings-interface-language")

@@ -17,6 +17,7 @@ import {
   AgentsSection,
   AppearanceSection,
   CaffeineSection,
+  DashboardSection,
   EditorSection,
   ExperimentalSection,
   ExperimentsSection,
@@ -115,6 +116,12 @@ const SECTIONS = [
     label: "Library",
     description: "Connect Zotero or a local PDF folder as the research library.",
     render: () => <LibrarySection />,
+  },
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    description: "Choose the buttons shown on the Projects Dashboard cards.",
+    render: () => <DashboardSection />,
   },
   {
     id: "project-view",

@@ -5,6 +5,10 @@
  */
 import type { ImportedEditorTheme } from "./editorThemeImport"
 
+export * from "./projectCardButtons"
+
+import type { ProjectCardButton } from "./projectCardButtons"
+
 export type {
   ImportedEditorTheme,
   ImportedEditorThemeColors,
@@ -105,6 +109,12 @@ export interface EditorSettings {
   planResearchSkill: string
   /** Folder name of the skill Auto-research starts an agent with; empty until the user links one. */
   autoResearchSkill: string
+  /**
+   * Shown Projects Dashboard card buttons (Settings > Dashboard), saved in full
+   * once the user changes them. Absent means never changed, so the current
+   * default (`DEFAULT_PROJECT_CARD_BUTTONS`) applies, also to existing installs.
+   */
+  projectCardButtons?: ProjectCardButton[]
 }
 
 /** Spec defaults for {@link EditorSettings}. */

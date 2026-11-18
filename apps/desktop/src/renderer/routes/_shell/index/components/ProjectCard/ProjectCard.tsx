@@ -1,4 +1,5 @@
 import type { ProjectDetails, ProjectMetadata } from "@pi-lab/local-db"
+import type { ProjectCardButton } from "@pi-lab/local-db/editor-settings"
 import { cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -27,6 +28,7 @@ import {
   useShowAnalysisSection,
 } from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
+import { useProjectCardButtons } from "../../../../../trpc/useProjectCardButtons"
 import { type ProjectSummary, useProjectThumbnail } from "../../../../../trpc/useProjectThumbnail"
 import { useProjectActivityState } from "../../../-ProjectActivity"
 import { setPendingLaunch } from "../../../projects/-pendingLaunch"
@@ -95,6 +97,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const [choosingArtwork, setChoosingArtwork] = useState(false)
   const [editing, setEditing] = useState(false)
   const [showAnalysis] = useShowAnalysisSection()
+  const [shownButtons] = useProjectCardButtons()
   const [digitalRainDensity] = useDigitalRainDensity()
   const [digitalRainSpeed] = useDigitalRainSpeed()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -178,6 +181,33 @@ export function ProjectCard({ project }: ProjectCardProps) {
     setPendingLaunch(project.id, { kind: "auto-research" })
     openProject()
   }
+
+  const openTasks = () => void navigate({ to: "/science/tasks", search: { projectId: project.id } })
+  const openAnalysis = () =>
+    void navigate({ to: "/science/analysis", search: { projectId: project.id } })
+  const openLatex = () => void navigate({ to: "/science/latex", search: { projectId: project.id } })
+
+  // Which card actions this card offers at all; Settings > Dashboard only chooses
+  // whether an offered action is a button or a menu item.
+  const offered: Record<ProjectCardButton, boolean> = {
+    tasks: !paperOnly,
+    analysis: showAnalysis && !paperOnly,
+    latex: true,
+    "auto-research": !paperOnly,
+  }
+  const isButton = (id: ProjectCardButton) => offered[id] && shownButtons.has(id)
+  const menuActions: ProjectCardMenuAction[] = [
+    { id: "tasks" as const, label: t("Tasks"), icon: ListTodo, onSelect: openTasks },
+    { id: "analysis" as const, label: t("Analysis"), icon: ChartArea, onSelect: openAnalysis },
+    { id: "latex" as const, label: t("LaTeX Editor"), icon: ScrollText, onSelect: openLatex },
+    {
+      id: "auto-research" as const,
+      label: t("Auto-research"),
+      icon: Telescope,
+      onSelect: onAutoResearch,
+      disabledReason: gitAvailable ? null : gitDisabledReason,
+    },
+  ].filter((action) => offered[action.id] && !shownButtons.has(action.id))
 
   const applyThumbnailFile = async (file: File | undefined) => {
     if (!file?.type.startsWith("image/")) return
@@ -512,7 +542,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
             gitDisabledReason={gitDisabledReason}
           />
         )}
-        {paperOnly ? null : (
+        {isButton("tasks") ? (
           <button
             type="button"
             data-testid="project-card-tasks"
@@ -521,14 +551,12 @@ export function ProjectCard({ project }: ProjectCardProps) {
             data-feature-label={t("Tasks")}
             data-feature-help={t("Open this project's tasks")}
             className={CARD_ACTION_CLASS}
-            onClick={() =>
-              void navigate({ to: "/science/tasks", search: { projectId: project.id } })
-            }
+            onClick={openTasks}
           >
             <ListTodo className="size-4 shrink-0" aria-hidden />
           </button>
-        )}
-        {showAnalysis && !paperOnly ? (
+        ) : null}
+        {isButton("analysis") ? (
           <button
             type="button"
             data-testid="project-card-analysis"
@@ -537,26 +565,26 @@ export function ProjectCard({ project }: ProjectCardProps) {
             data-feature-label={t("Analysis")}
             data-feature-help={t("Open this project's analysis files")}
             className={CARD_ACTION_CLASS}
-            onClick={() =>
-              void navigate({ to: "/science/analysis", search: { projectId: project.id } })
-            }
+            onClick={openAnalysis}
           >
             <ChartArea className="size-4 shrink-0" aria-hidden />
           </button>
         ) : null}
-        <button
-          type="button"
-          data-testid="project-card-latex"
-          aria-label={`${t("LaTeX Editor")} ${project.name}`}
-          title={t("LaTeX Editor")}
-          data-feature-label={t("LaTeX Editor")}
-          data-feature-help={t("Open this project's paper in the LaTeX Editor")}
-          className={CARD_ACTION_CLASS}
-          onClick={() => void navigate({ to: "/science/latex", search: { projectId: project.id } })}
-        >
-          <ScrollText className="size-4 shrink-0" aria-hidden />
-        </button>
-        {paperOnly ? null : (
+        {isButton("latex") ? (
+          <button
+            type="button"
+            data-testid="project-card-latex"
+            aria-label={`${t("LaTeX Editor")} ${project.name}`}
+            title={t("LaTeX Editor")}
+            data-feature-label={t("LaTeX Editor")}
+            data-feature-help={t("Open this project's paper in the LaTeX Editor")}
+            className={CARD_ACTION_CLASS}
+            onClick={openLatex}
+          >
+            <ScrollText className="size-4 shrink-0" aria-hidden />
+          </button>
+        ) : null}
+        {isButton("auto-research") ? (
           <button
             type="button"
             data-testid="project-card-auto-research"
@@ -576,7 +604,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           >
             <Telescope className="size-4 shrink-0" aria-hidden />
           </button>
-        )}
+        ) : null}
       </div>
 
       <ProjectStageRow
@@ -589,6 +617,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
       <ProjectCardMenu
         menu={menu}
         onClose={() => setMenu(null)}
+        actions={menuActions}
         onSetThumbnail={openArtworkChooser}
         onEditProject={openEditDialog}
         hidden={Boolean(project.archivedAt)}
@@ -681,9 +710,20 @@ function ProjectCardMetadata({ metadata }: { metadata: ProjectMetadata }) {
  * or a fresh seeded gradient. Closes on outside mousedown or Escape
  * (mirrors the sidebar's project context menu).
  */
+/** A card action shown in the menu because Settings > Dashboard hides its button. */
+interface ProjectCardMenuAction {
+  id: ProjectCardButton
+  label: string
+  icon: typeof ListTodo
+  onSelect: () => void
+  /** Why the action cannot run now (shown as its tooltip), or null when it can. */
+  disabledReason?: string | null
+}
+
 function ProjectCardMenu({
   menu,
   onClose,
+  actions,
   onSetThumbnail,
   onEditProject,
   hidden,
@@ -691,6 +731,7 @@ function ProjectCardMenu({
 }: {
   menu: { x: number; y: number } | null
   onClose: () => void
+  actions: ProjectCardMenuAction[]
   onSetThumbnail: () => void
   onEditProject: () => void
   hidden: boolean
@@ -710,6 +751,24 @@ function ProjectCardMenu({
       className="fixed z-50 w-56 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
       style={{ left: menu.x, top: menu.y }}
     >
+      {actions.map(({ id, label, icon: Icon, onSelect, disabledReason }) => (
+        <button
+          key={id}
+          type="button"
+          role="menuitem"
+          data-testid={`project-card-menu-${id}`}
+          disabled={Boolean(disabledReason)}
+          title={disabledReason ?? undefined}
+          onClick={() => {
+            onClose()
+            onSelect()
+          }}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Icon className="size-4 shrink-0" aria-hidden />
+          <span className="min-w-0 truncate">{label}</span>
+        </button>
+      ))}
       <button
         type="button"
         role="menuitem"
