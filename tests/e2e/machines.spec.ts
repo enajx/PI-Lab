@@ -6,6 +6,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { type SshTestServer, startSshTestServer } from "../support/sshTestServer"
+import { openAnalysisExperiment } from "./fixtures/analysis"
 import { headlessServerEnv, startHeadlessServer } from "./fixtures/headlessServer"
 import {
   type ElectronApplication,
@@ -305,7 +306,7 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   await filter.selectOption("")
 
   // Open the remote project and run a terminal on that machine's server.
-  await remoteCard.click()
+  await remoteCard.getByTestId("remote-project-open").click()
   await expect(page).toHaveURL(new RegExp(`#/m/${machineId}/projects/`))
   await page.getByTestId("central-add-menu").click()
   await page.getByTestId("central-add-terminal").click()
@@ -356,7 +357,7 @@ test("remote files: browse, search, edit, Download and Upload on another machine
   if (!sshd || !app) throw new Error("not started")
   await addMachine(page, sshd.host, "Lab server")
   await page.getByTestId("settings-back").click()
-  await page.getByTestId("remote-project-card").click()
+  await page.getByTestId("remote-project-open").click()
   await expect(page.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
 
   // Search: quick open lists the remote project's files.
@@ -445,7 +446,7 @@ test("a notebook of a project on another machine shows in its tab through a forw
   if (!sshd) throw new Error("not started")
   await addMachine(page, sshd.host, "Lab server")
   await page.getByTestId("settings-back").click()
-  await page.getByTestId("remote-project-card").click()
+  await page.getByTestId("remote-project-open").click()
   await expect(page.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await page.getByTestId("panel-tab-files").click()
   await page.getByTestId("file-tree-file").filter({ hasText: "analysis.ipynb" }).click()
@@ -460,4 +461,54 @@ test("a notebook of a project on another machine shows in its tab through a forw
   await expect(page.getByTestId("notebook-open-browser")).toHaveCount(0)
   // The stand-in page asks before unloading; PI Lab ignores that at quit, so leave the dialog alone.
   page.on("dialog", () => undefined)
+})
+
+test("Tasks, Analysis and LaTeX follow a project on another machine; its HTML report streams from there", async () => {
+  test.setTimeout(180_000)
+  const localRepo = join(rootDir, "local-repo")
+  const remoteRepo = join(rootDir, "remote-repo")
+  await gitRepo(localRepo, "local.md")
+  await gitRepo(remoteRepo, "remote.md")
+  await writeFile(join(remoteRepo, "TODO.md"), "# TODO\n\n- [ ] Remote only task\n")
+  await mkdir(join(remoteRepo, "results", "run"), { recursive: true })
+  await writeFile(
+    join(remoteRepo, "results", "run", "report.html"),
+    '<!doctype html><p id="ready">Remote report</p>',
+  )
+  const remote = connectServer(remoteData)
+  await remote.client.projects.open.mutate({ path: remoteRepo })
+  remote.close()
+
+  const page = await launch({ PI_LAB_TEST_OPEN_PROJECT: localRepo })
+  if (!sshd) throw new Error("not started")
+  await addMachine(page, sshd.host, "Lab server")
+  const machineId = (await storedMachines())[0]?.machineId ?? ""
+  await page.getByTestId("settings-back").click()
+  const card = page.getByTestId("remote-project-card")
+  await expect(card).toHaveCount(1, { timeout: 30_000 })
+
+  // Tasks: the remote project's TODO.md.
+  await card.getByTestId("remote-project-tasks").click()
+  await expect(page).toHaveURL(new RegExp(`machineId=${machineId}`))
+  await expect(page.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText("Remote only task")).toBeVisible({ timeout: 30_000 })
+
+  // Analysis: the remote project's files; its HTML report streams through the machine.
+  await page.getByTestId("nav-project-dashboard").first().click()
+  await card.getByTestId("remote-project-analysis").click()
+  await openAnalysisExperiment(page, "run")
+  await page
+    .locator('[data-testid="analysis-file"][data-rel-path="results/run/report.html"]')
+    .click()
+  await expect(
+    page.frameLocator('[data-testid="analysis-preview-html"]').locator("#ready"),
+  ).toHaveText("Remote report", { timeout: 30_000 })
+  const src = (await page.getByTestId("analysis-preview-html").getAttribute("src")) ?? ""
+  expect(new URL(src).host.endsWith(`.${machineId}`)).toBe(true)
+
+  // LaTeX Editor: shows the remote project.
+  await page.getByTestId("nav-project-dashboard").first().click()
+  await card.getByTestId("remote-project-latex").click()
+  await expect(page.getByTestId("science-latex")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId("latex-project-select")).toHaveText("remote-repo")
 })
