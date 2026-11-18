@@ -1316,5 +1316,10 @@
   "Start of the file only": "Solo el inicio del archivo",
   "First {rows} × {columns}": "Primeras {rows} × {columns}",
   "{count} paths could not be read": "No se pudieron leer {count} rutas",
-  "More files than listed": "Hay más archivos que los listados"
+  "More files than listed": "Hay más archivos que los listados",
+  "Protect saved keys with Keychain": "Proteger las claves guardadas con Llavero",
+  "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "Las claves de API guardadas se protegen con un archivo que solo tú puedes leer. Con el Llavero activado, el Llavero de macOS guarda la clave que las protege.",
+  "Could not change key protection": "No se pudo cambiar la protección de claves",
+  "Recent notifications": "Notificaciones recientes",
+  "No notifications yet": "Aún no hay notificaciones"
 }

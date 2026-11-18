@@ -1,4 +1,5 @@
 import { createTRPCClient, createWSClient, splitLink, type TRPCLink, wsLink } from "@trpc/client"
+import type { AnyRouter } from "@trpc/server"
 import superjson from "superjson"
 import { ipcLink } from "trpc-electron/renderer"
 import type { DesktopRouter } from "../../main/desktop/desktopRouter"
@@ -8,7 +9,7 @@ import { isDesktopPath } from "../../shared/desktopPaths"
 let lastIpcRequestId = 0
 
 /** Give every IPC operation in this document a distinct ID. */
-function uniqueIpcIds<TRouter extends AppRouter | DesktopRouter>(): TRPCLink<TRouter> {
+function uniqueIpcIds<TRouter extends AnyRouter>(): TRPCLink<TRouter> {
   return () =>
     ({ op, next }) => {
       if (lastIpcRequestId === Number.MAX_SAFE_INTEGER)
@@ -18,16 +19,26 @@ function uniqueIpcIds<TRouter extends AppRouter | DesktopRouter>(): TRPCLink<TRo
     }
 }
 
+/**
+ * A client over Electron IPC only. Clients in one document share the request-ID
+ * sequence, and the preload bridge scopes those IDs to the document.
+ */
+export function createIpcClient<TRouter extends AnyRouter>() {
+  return createTRPCClient<TRouter>({
+    links: [uniqueIpcIds<TRouter>(), ipcLink({ transformer: superjson })],
+  })
+}
+
 /** The Electron-only router, used here only to ask where the server listens. */
-const desktop = createTRPCClient<DesktopRouter>({
-  links: [uniqueIpcIds<DesktopRouter>(), ipcLink({ transformer: superjson })],
-})
+function desktopClient() {
+  return createIpcClient<DesktopRouter>()
+}
 
 /** One WebSocket to the PI Lab server per document, shared by every client. */
 let serverSocket: ReturnType<typeof createWSClient> | null = null
 function sharedServerSocket(): ReturnType<typeof createWSClient> {
   serverSocket ??= createWSClient({
-    url: async () => (await desktop.desktop.serverEndpoint.query()).url,
+    url: async () => (await desktopClient().desktop.serverEndpoint.query()).url,
   })
   return serverSocket
 }

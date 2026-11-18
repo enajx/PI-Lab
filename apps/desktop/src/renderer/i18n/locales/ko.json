@@ -1316,5 +1316,10 @@
   "Start of the file only": "파일 앞부분만",
   "First {rows} × {columns}": "처음 {rows} × {columns}",
   "{count} paths could not be read": "{count}개 경로를 읽을 수 없습니다",
-  "More files than listed": "목록보다 파일이 더 있습니다"
+  "More files than listed": "목록보다 파일이 더 있습니다",
+  "Protect saved keys with Keychain": "저장된 키를 키체인으로 보호",
+  "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "저장된 API 키는 본인만 읽을 수 있는 파일로 보호됩니다. 키체인을 켜면 macOS 키체인이 이를 보호하는 키를 보관합니다.",
+  "Could not change key protection": "키 보호를 변경하지 못했습니다",
+  "Recent notifications": "최근 알림",
+  "No notifications yet": "아직 알림이 없습니다"
 }

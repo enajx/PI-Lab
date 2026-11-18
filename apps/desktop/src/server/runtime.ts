@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join, relative, sep } from "node:path"
 import {
@@ -74,7 +74,7 @@ import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { caffeinateAdapter } from "./caffeinate"
 import type { ServerConfig } from "./config"
 import { NotificationFeed } from "./notificationFeed"
-import { createSecretStore, macKeychain, type SecretStore } from "./secrets"
+import { createSecretStore, type KeychainPort, macKeychain, type SecretStore } from "./secrets"
 import { trashPath } from "./trash"
 
 /** Microphone access belongs to the client device; the server never asks for it. */
@@ -143,7 +143,10 @@ export class ServerRuntime {
       () => getSettingsOrDefaults(getDb()).notifications,
       isTestMode && process.env.PI_LAB_TEST_NOTIFICATIONS !== "1",
     )
-    this.secrets = createSecretStore({ dataDir: config.dataDir, keychain: macKeychain })
+    this.secrets = createSecretStore({
+      dataDir: config.dataDir,
+      keychain: isTestMode ? testKeychain(config.dataDir) : macKeychain,
+    })
   }
 
   /** Open the database, reconcile agents with the PTY daemon, start routines. */
@@ -533,6 +536,28 @@ export class ServerRuntime {
       notificationService: this.notifications,
       caffeine: this.caffeineController,
     }
+  }
+}
+
+/**
+ * Test runs never touch the login keychain: a stand-in kept in a JSON file in
+ * the test data folder, so "Protect with Keychain" can be switched in E2E runs.
+ */
+function testKeychain(dataDir: string): KeychainPort {
+  const path = join(dataDir, "test-keychain.json")
+  const read = (): Record<string, string> =>
+    existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, string>) : {}
+  return {
+    read: (service, account) => read()[`${service}/${account}`] ?? null,
+    write: (service, account, secret) =>
+      writeFileSync(path, JSON.stringify({ ...read(), [`${service}/${account}`]: secret }), {
+        mode: 0o600,
+      }),
+    remove: (service, account) => {
+      const items = read()
+      delete items[`${service}/${account}`]
+      writeFileSync(path, JSON.stringify(items), { mode: 0o600 })
+    },
   }
 }
 

@@ -1316,5 +1316,10 @@
   "Start of the file only": "ファイルの先頭のみ",
   "First {rows} × {columns}": "最初の {rows} × {columns}",
   "{count} paths could not be read": "{count} 個のパスを読み取れませんでした",
-  "More files than listed": "一覧より多くのファイルがあります"
+  "More files than listed": "一覧より多くのファイルがあります",
+  "Protect saved keys with Keychain": "Keychainで保存したキーを保護",
+  "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "保存したAPIキーは、自分だけが読めるファイルで保護されます。Keychainをオンにすると、macOSのKeychainが保護用のキーを保持します。",
+  "Could not change key protection": "キー保護を変更できませんでした",
+  "Recent notifications": "最近の通知",
+  "No notifications yet": "通知はまだありません"
 }

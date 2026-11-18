@@ -13,6 +13,8 @@ import {
   expect,
   test,
 } from "./fixtures/playwright"
+import { processAlive, readServerDiscovery } from "./fixtures/serverClient"
+import { stopServerIn } from "./fixtures/stopServer"
 
 const execFileAsync = promisify(execFile)
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop")
@@ -39,7 +41,7 @@ function alive(pid: number): boolean {
 }
 
 /** Native dialog choices are injected; the app and managed agent process are real. */
-test("a quit PI Lab did not start (like macOS logout) asks while an agent runs; Cancel keeps it, Quit ends everything", async () => {
+test("a quit PI Lab did not start (like macOS logout) just quits the app; the server keeps the agent and terminal running", async () => {
   test.skip(process.platform === "win32", "Fixture uses POSIX shell and process listing")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-quit-"))
@@ -69,6 +71,7 @@ test("a quit PI Lab did not start (like macOS logout) asks while an agent runs; 
         ...process.env,
         PI_LAB_TEST_MODE: "1",
         PI_LAB_TEST_FIRST_RUN: "1",
+        PI_LAB_TEST_RETAIN_SERVER: "1",
         PI_LAB_TEST_RETAIN_DAEMON: "1",
         PI_LAB_DATA_DIR: dataDir,
         PI_LAB_SOCKET_PATH: socketPath,
@@ -91,44 +94,24 @@ test("a quit PI Lab did not start (like macOS logout) asks while an agent runs; 
     if (!agent) throw new Error("Managed agent not running")
     const shell = await client.spawn({ command: "/bin/cat", args: [] })
     await app.evaluate(({ dialog }) => {
-      const state = globalThis as unknown as { quitChoice: number; quitPrompts: string[] }
-      state.quitChoice = 0
-      state.quitPrompts = []
-      dialog.showMessageBox = async (options) => {
-        state.quitPrompts.push(JSON.stringify(options))
-        return { response: state.quitChoice, checkboxChecked: false }
-      }
+      // Any dialog would keep the app open (button 0 is Cancel or Stop), so a closed app means none.
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
     })
-    const requestQuit = async (choice: number): Promise<void> => {
-      if (!app) throw new Error("App already quit")
-      await app.evaluate(({ app }, response) => {
-        ;(globalThis as unknown as { quitChoice: number }).quitChoice = response
-        setImmediate(() => app.quit())
-      }, choice)
-    }
+    const serverPid = readServerDiscovery(dataDir)?.pid ?? 0
+    expect(processAlive(serverPid)).toBe(true)
     // macOS logout, restart and shutdown reach the app as this same app.quit().
-    await requestQuit(1)
-    await expect
-      .poll(async () =>
-        app?.evaluate(
-          () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts.length,
-        ),
-      )
-      .toBe(1)
-    expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
-    const prompts = await app.evaluate(
-      () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts,
-    )
-    const prompt = JSON.parse(prompts[0] ?? "{}")
-    expect(prompt.message).toBe("1 agent is still running.")
-    expect(prompt.detail).toContain(": cat")
-    expect(prompt.buttons).toEqual(["Quit and stop agents", "Cancel"])
-    const daemon = await daemonPid(socketPath)
-    expect(daemon).toBeGreaterThan(0)
     const closed = app.waitForEvent("close")
-    await requestQuit(0)
+    await app.evaluate(({ app }) => {
+      setImmediate(() => app.quit())
+    })
     await closed
     app = null
+    // No dialog was shown (the spy would have answered), and the work runs on.
+    expect(processAlive(serverPid)).toBe(true)
+    expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
+    expect(alive(shell.pid as number)).toBe(true)
+    // Stopping the server stops the agent, the terminal and the daemon.
+    await stopServerIn(dataDir)
     await expect.poll(() => daemonPid(socketPath)).toBeUndefined()
     expect(alive(agent.pid as number)).toBe(false)
     expect(alive(shell.pid as number)).toBe(false)
@@ -139,6 +122,7 @@ test("a quit PI Lab did not start (like macOS logout) asks while an agent runs; 
       await closed
     }
     client.close()
+    await stopServerIn(dataDir)
     const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="])
     const daemon = stdout
       .split("\n")
@@ -149,7 +133,7 @@ test("a quit PI Lab did not start (like macOS logout) asks while an agent runs; 
 })
 
 /** A local executable fixture crosses the real workflow IPC and daemon process boundaries. */
-test("background summary survives Restart to Update, restores its result, and a later quit stops it", async () => {
+test("background summary survives Restart to Update, restores its result, and a later quit leaves it running until the server is stopped", async () => {
   test.skip(process.platform === "win32", "Fixture executable is a POSIX shell script")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-background-agent-"))
@@ -166,6 +150,7 @@ test("background summary survives Restart to Update, restores its result, and a 
       env: {
         ...process.env,
         PI_LAB_TEST_MODE: "1",
+        PI_LAB_TEST_RETAIN_SERVER: "1",
         PI_LAB_TEST_RETAIN_DAEMON: "1",
         PI_LAB_DATA_DIR: dataDir,
         PI_LAB_SOCKET_PATH: socketPath,
@@ -225,8 +210,12 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
     app = null
     expect((await client.listProcesses()).find((job) => job.id === original.id)?.alive).toBe(true)
     await writeFile(release, "finish")
+    // The server finishes the routine with no client connected, then drops the finished job.
     await expect
-      .poll(async () => (await client.listProcesses()).find((job) => job.id === original.id)?.alive)
+      .poll(
+        async () =>
+          (await client.listProcesses()).find((job) => job.id === original.id)?.alive ?? false,
+      )
       .toBe(false)
     app = await launch()
     window = await app.firstWindow()
@@ -243,15 +232,15 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
     await expect
       .poll(async () => (await client.listProcesses()).filter((job) => job.alive).length)
       .toBe(1)
-    await app.evaluate(({ dialog }) => {
-      dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
-    })
     const stopped = app.waitForEvent("close")
     await app.evaluate(({ app }) => {
       setImmediate(() => app.quit())
     })
     await stopped
     app = null
+    // A plain quit leaves the routine running on the server.
+    expect((await client.listProcesses()).filter((job) => job.alive)).toHaveLength(1)
+    await stopServerIn(dataDir)
     await expect.poll(() => daemonPid(socketPath)).toBeUndefined()
   } finally {
     if (app) {
@@ -260,6 +249,7 @@ printf '{"type":"result","result":"BACKGROUND-RECOVERED","is_error":false}\\n'
       await closed
     }
     client.close()
+    await stopServerIn(dataDir)
     const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="])
     const daemon = stdout
       .split("\n")
