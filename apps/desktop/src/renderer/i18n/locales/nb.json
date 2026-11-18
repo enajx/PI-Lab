@@ -1377,5 +1377,16 @@
   "Ask me": "Spør meg",
   "Never": "Aldri",
   "Update machines automatically": "Oppdater maskiner automatisk",
-  "Update": "Oppdater"
+  "Update": "Oppdater",
+  "Machine": "Maskin",
+  "The machine the new project is created on.": "Maskinen det nye prosjektet opprettes på.",
+  "Folder on that machine": "Mappe på den maskinen",
+  "Parent folder on that machine": "Overordnet mappe på den maskinen",
+  "Clone": "Klon",
+  "Local server": "Lokal server",
+  "This Mac's own PI Lab server. Always keeps it running after you quit; Only while PI Lab is open stops it when you quit; Off uses only the added machines. Off, and back from Off, apply the next time PI Lab starts.": "Denne Macens egen PI Lab-server. Alltid holder den i gang etter at du avslutter; Bare mens PI Lab er åpen stopper den når du avslutter; Av bruker bare de tilføyde maskinene. Av, og tilbake fra Av, gjelder neste gang PI Lab starter.",
+  "Only while PI Lab is open": "Bare mens PI Lab er åpen",
+  "Off (client only)": "Av (bare klient)",
+  "Default machine": "Standardmaskin",
+  "Where New project creates a project unless you choose another machine.": "Hvor Nytt prosjekt oppretter et prosjekt hvis du ikke velger en annen maskin."
 }

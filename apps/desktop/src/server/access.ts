@@ -66,6 +66,11 @@ export function ensureMachineId(dataDir: string): string {
   return id
 }
 
+/** This data folder's machine id, or null when no server ever started here. */
+export function readMachineId(dataDir: string): string | null {
+  return existsSync(join(dataDir, MACHINE_ID_FILE)) ? ensureMachineId(dataDir) : null
+}
+
 /** Read the local device token, creating it on first start. */
 export function ensureLocalToken(dataDir: string): string {
   const path = join(dataDir, TOKEN_FILE)

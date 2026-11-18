@@ -7,6 +7,7 @@ import { readRemoteDiscovery, SshTunnel, type TunnelState } from "../server/tunn
 import type { ServerRouter } from "../trpc/serverRouter"
 import {
   type BehindPolicy,
+  type LocalServerMode,
   readMachineFile,
   type StoredMachine,
   writeMachineFile,
@@ -65,6 +66,12 @@ export interface MachineSummary {
   updating: boolean
   /** Why the last update over SSH failed, or null. */
   updateError: string | null
+}
+
+/** This device's machine settings (see {@link LocalServerMode}). */
+export interface DeviceMachineSettings {
+  localServer: LocalServerMode
+  defaultMachine: string | null
 }
 
 const REVOKE_TIMEOUT_MS = 5_000
@@ -127,8 +134,8 @@ export interface MachineConnectionsOptions {
   access: RemoteAccess
   /** This app's device name on remote servers. */
   deviceName: string
-  /** The local server's machine id, so the local server is not added as a machine. */
-  localMachineId: () => Promise<string>
+  /** The local server's machine id (null: none ever ran), so the local server is not added as a machine. */
+  localMachineId: () => Promise<string | null>
   /** The server bundle this app carries ("Add machine" installs it); null when it has none. */
   bundle: () => ServerBundleFiles | null
   log: (message: string) => void
@@ -138,11 +145,15 @@ export class MachineConnections {
   readonly #options: MachineConnectionsOptions
   readonly #machines = new Map<string, LiveMachine>()
   #behindPolicy: BehindPolicy
+  #localServer: LocalServerMode
+  #defaultMachine: string | null
 
   constructor(options: MachineConnectionsOptions) {
     this.#options = options
     const file = readMachineFile(options.profileDir)
     this.#behindPolicy = file.behindPolicy
+    this.#localServer = file.localServer
+    this.#defaultMachine = file.defaultMachine
     for (const stored of file.machines) {
       this.#machines.set(stored.machineId, this.#live(stored))
     }
@@ -155,6 +166,34 @@ export class MachineConnections {
 
   setBehindPolicy(policy: BehindPolicy): void {
     this.#behindPolicy = policy
+    this.#save()
+  }
+
+  /** This device's "Local server" setting and default machine (null: this Mac), as saved. */
+  deviceSettings(): DeviceMachineSettings {
+    return { localServer: this.#localServer, defaultMachine: this.#defaultMachine }
+  }
+
+  /** Save "Local server". Off needs a default machine other than this Mac. */
+  setLocalServer(mode: LocalServerMode): void {
+    if (mode === "off" && this.#defaultMachine === null) {
+      throw new Error(
+        "Choose another default machine than This Mac before turning the local server off",
+      )
+    }
+    this.#localServer = mode
+    this.#save()
+  }
+
+  /** Save the default machine (null: this Mac, refused while the local server is off). */
+  setDefaultMachine(machineId: string | null): void {
+    if (machineId === null && this.#localServer === "off") {
+      throw new Error("This Mac cannot be the default machine while its local server is off")
+    }
+    if (machineId !== null && !this.#machines.has(machineId)) {
+      throw new Error(`Machine ${machineId} is not added`)
+    }
+    this.#defaultMachine = machineId
     this.#save()
   }
 
@@ -235,6 +274,8 @@ export class MachineConnections {
     writeMachineFile(this.#options.profileDir, {
       machines: [...this.#machines.values()].map((live) => live.stored),
       behindPolicy: this.#behindPolicy,
+      localServer: this.#localServer,
+      defaultMachine: this.#defaultMachine,
     })
   }
 
@@ -360,6 +401,11 @@ export class MachineConnections {
       revoked = response?.status === 204
     }
     this.#machines.delete(machineId)
+    // The default moves to this Mac, or while the local server is off to another machine.
+    if (this.#defaultMachine === machineId) {
+      this.#defaultMachine =
+        this.#localServer === "off" ? (this.#machines.keys().next().value ?? null) : null
+    }
     this.#save()
     live.stopped = true
     await tunnel?.close()

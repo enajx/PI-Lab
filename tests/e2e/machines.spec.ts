@@ -1,4 +1,4 @@
-import { type ChildProcess, execFile } from "node:child_process"
+import { type ChildProcess, execFile, spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
@@ -158,12 +158,16 @@ interface StoredMachine {
   name: string
 }
 
+interface MachineFile {
+  machines: StoredMachine[]
+  behindPolicy: string
+  localServer: string
+  defaultMachine: string | null
+}
+
 /** What `machines.json` in the app profile holds. */
-async function machineFile(): Promise<{ machines: StoredMachine[]; behindPolicy: string }> {
-  return JSON.parse(await readFile(join(localData, "machines.json"), "utf8")) as {
-    machines: StoredMachine[]
-    behindPolicy: string
-  }
+async function machineFile(): Promise<MachineFile> {
+  return JSON.parse(await readFile(join(localData, "machines.json"), "utf8")) as MachineFile
 }
 
 async function storedMachines(): Promise<StoredMachine[]> {
@@ -179,7 +183,9 @@ async function openMachinesSettings(page: Page): Promise<void> {
 
 /** Add a machine with the Settings > Machines form and wait until it is connected. */
 async function addMachine(page: Page, sshHost: string, name: string): Promise<void> {
-  await openMachinesSettings(page)
+  if (!(await page.getByTestId("settings-section-machines").isVisible())) {
+    await openMachinesSettings(page)
+  }
   await page.getByTestId("settings-add-machine-host").fill(sshHost)
   await page.getByTestId("settings-add-machine-name").fill(name)
   await page.getByTestId("settings-add-machine-submit").click()
@@ -355,4 +361,84 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   // Reconnect: the machine's sockets open again on their own.
   await setMachineStopped(machineId, false)
   await expect(remoteCard).toHaveAttribute("data-offline", "false", { timeout: 30_000 })
+})
+
+/** True when a server process for the local data folder runs (its `server.json` pid is alive). */
+async function localServerRunning(): Promise<boolean> {
+  const discovery = await readFile(join(localData, "server.json"), "utf8").catch(() => null)
+  if (discovery === null) return false
+  const { pid } = JSON.parse(discovery) as { pid: number }
+  return spawnSync("kill", ["-0", String(pid)]).status === 0
+}
+
+test("local server and default machine: New project is preset to the default machine and creates the project there; with the local server off the app starts without it", async () => {
+  test.setTimeout(240_000)
+  const remoteRepo = join(rootDir, "remote-new")
+  await gitRepo(remoteRepo, "new.md")
+  let page = await launch({})
+  if (!sshd) throw new Error("not started")
+  await openMachinesSettings(page)
+  const localServer = page.getByTestId("settings-local-server")
+  await expect(localServer).toHaveValue("always")
+  await expect(localServer.locator("option")).toHaveText([
+    "Always",
+    "Only while PI Lab is open",
+    "Off (client only)",
+  ])
+  // Before any machine: no default machine choice.
+  await expect(page.getByTestId("settings-default-machine")).toHaveCount(0)
+
+  await addMachine(page, sshd.host, "Lab server")
+  const machineId = (await storedMachines())[0]?.machineId ?? ""
+  const defaultMachine = page.getByTestId("settings-default-machine")
+  await expect(defaultMachine).toHaveValue("local")
+  // Off needs another default machine first.
+  await localServer.selectOption("off")
+  await expect(page.getByTestId("settings-local-server-error")).toContainText(
+    "Choose another default machine",
+  )
+  await expect(localServer).toHaveValue("always")
+  await defaultMachine.selectOption(machineId)
+  await expect.poll(async () => (await machineFile()).defaultMachine).toBe(machineId)
+  await localServer.selectOption("while-open")
+  await expect.poll(async () => (await machineFile()).localServer).toBe("while-open")
+
+  // New project is preset to the default machine; a path field replaces the folder dialog.
+  await page.getByTestId("settings-back").click()
+  await page.getByTestId("dashboard-add-project").click()
+  await expect(page.getByTestId("add-project-machine")).toHaveValue(machineId)
+  await page.getByTestId("add-project-folder").click()
+  await page.getByTestId("add-project-remote-path").fill(remoteRepo)
+  await page.getByTestId("add-project-remote-path-submit").click()
+  const remoteCard = page.getByTestId("remote-project-card")
+  await expect(remoteCard.filter({ hasText: "remote-new" })).toHaveCount(1, { timeout: 30_000 })
+  const remote = connectServer(remoteData)
+  const remoteProjects = await remote.client.projects.list.query()
+  remote.close()
+  expect(remoteProjects.map((project) => project.repoPath)).toContain(remoteRepo)
+
+  // Off: the default cannot be this Mac.
+  await openMachinesSettings(page)
+  await localServer.selectOption("off")
+  await expect.poll(async () => (await machineFile()).localServer).toBe("off")
+  await expect(defaultMachine.locator("option")).toHaveText(["Lab server"])
+  await app?.close()
+  app = null
+  expect(await localServerRunning()).toBe(false)
+
+  // The next start has no local server and still lists the machine's projects.
+  page = await launch({})
+  await expect(
+    page.getByTestId("remote-project-card").filter({ hasText: "remote-new" }),
+  ).toHaveAttribute("data-offline", "false", { timeout: 30_000 })
+  await expect(page.getByTestId("project-card")).toHaveCount(0)
+  await expect(page.getByTestId("app-error")).toHaveCount(0)
+  expect(await localServerRunning()).toBe(false)
+  await page.getByTestId("dashboard-add-project").click()
+  await expect(page.getByTestId("add-project-machine").locator("option")).toHaveText(["Lab server"])
+  await page.keyboard.press("Escape")
+  await expect(page.getByTestId("default-agent-error")).toHaveCount(0)
+  await openMachinesSettings(page)
+  await expect(page.getByTestId("settings-local-server")).toHaveValue("off")
+  await expect(page.getByTestId("settings-section-devices")).toHaveCount(0)
 })

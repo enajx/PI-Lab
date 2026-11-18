@@ -2,6 +2,7 @@ import { cn } from "@pi-lab/ui"
 import { Server } from "lucide-react"
 import { useTranslate } from "../i18n/language"
 import type { ConnectionState } from "../trpc/connectionStatus"
+import { localServerOff } from "./localServer"
 import type { MachineSummary } from "./machines"
 
 /** The dot colours of the status bar's connection item. */
@@ -67,7 +68,7 @@ export function MachineFilter({
       )}
     >
       <option value="">{t("All machines")}</option>
-      <option value="local">{t("This Mac")}</option>
+      {localServerOff() ? null : <option value="local">{t("This Mac")}</option>}
       {machines.map((machine) => (
         <option key={machine.machineId} value={machine.machineId}>
           {machine.name}

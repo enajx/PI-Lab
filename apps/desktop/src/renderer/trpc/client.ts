@@ -4,6 +4,7 @@ import { ipcLink } from "trpc-electron/renderer"
 import type { DesktopRouter } from "../../main/desktop/desktopRouter"
 import type { AppRouter } from "../../main/trpc/appRouter"
 import { isDesktopPath } from "../../shared/desktopPaths"
+import { localServerOff, localServerOffLink } from "../machines/localServer"
 import { type ConnectionStatus, connectionStatus } from "./connectionStatus"
 import { createServerSockets, type ServerSockets } from "./serverLinks"
 
@@ -91,18 +92,24 @@ function sharedServerSockets(): ServerSockets<AppRouter> {
  * Components can inject fake clients.
  */
 export function createPiLabTrpcClient() {
+  // "Local server: Off": no local sockets; local calls fail at once with the reason.
+  if (localServerOff()) return createTrpcClientWith(localServerOffLink<AppRouter>())
   return createTrpcClientOver(sharedServerSockets())
 }
 
 /** A client like {@link createPiLabTrpcClient} whose server calls go over `sockets` (a remote machine's). */
 export function createTrpcClientOver(sockets: ServerSockets<AppRouter>) {
+  return createTrpcClientWith(sockets.link)
+}
+
+function createTrpcClientWith(serverLink: TRPCLink<AppRouter>) {
   return createTRPCClient<AppRouter>({
     links: [
       uniqueRequestIds<AppRouter>(),
       splitLink({
         condition: (op) => isDesktopPath(op.path),
         true: ipcLink(),
-        false: sockets.link,
+        false: serverLink,
       }),
     ],
   })

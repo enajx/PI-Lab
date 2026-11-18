@@ -1,13 +1,13 @@
 import { QueryClientProvider, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createContext, type ReactNode, useContext, useEffect } from "react"
-import type { MachineSummary } from "../../main/machines/machineConnections"
+import type { DeviceMachineSettings, MachineSummary } from "../../main/machines/machineConnections"
 import { desktopIpc } from "../trpc/client"
 import { type ConnectionState, useStatusState } from "../trpc/connectionStatus"
 import { TRPCProvider } from "../trpc/react"
 import type { ProjectListItem } from "../trpc/types"
 import { closeRemovedMachines, type MachineRuntime, machineRuntime } from "./machineRuntime"
 
-export type { MachineSummary }
+export type { DeviceMachineSettings, MachineSummary }
 
 const MachineContext = createContext<MachineRuntime | null>(null)
 
@@ -44,6 +44,38 @@ export function useMachineScope(): MachineRuntime | null {
 }
 
 export const MACHINES_QUERY_KEY = ["desktop", "machines", "list"] as const
+
+/**
+ * Whether machine UI (badges, the machine filter, the Machines group, the New
+ * project machine picker, the default machine) shows: only once a machine is
+ * added, so a single computer looks as before. The one place this rule lives.
+ */
+export function showMachineUi(machines: MachineSummary[]): boolean {
+  return machines.length > 0
+}
+
+export const DEVICE_SETTINGS_QUERY_KEY = ["desktop", "machines", "deviceSettings"] as const
+
+/** Where the device settings come from: Electron main over IPC; renderer unit tests replace it. */
+let readDeviceSettings: () => Promise<DeviceMachineSettings> = () =>
+  desktopIpc().desktop.machines.deviceSettings.query()
+
+/** Renderer unit tests (no Electron preload) read the device settings from here instead. */
+export function setDeviceSettingsSourceForTests(
+  source: () => Promise<DeviceMachineSettings>,
+): void {
+  readDeviceSettings = source
+}
+
+/** This device's "Local server" setting and default machine (null: this Mac), from Electron main. */
+export function useDeviceMachineSettings(): DeviceMachineSettings | null {
+  const query = useQuery({
+    queryKey: DEVICE_SETTINGS_QUERY_KEY,
+    queryFn: () => readDeviceSettings(),
+  })
+  if (query.isError) throw query.error
+  return query.data ?? null
+}
 
 /** Where the machines list comes from: Electron main over IPC; renderer unit tests replace it. */
 let listMachines: () => Promise<MachineSummary[]> = () => desktopIpc().desktop.machines.list.query()

@@ -3,7 +3,7 @@ import { clipboard, shell } from "electron"
 import { z } from "zod"
 import { electronMicrophone } from "../dictation/electronMicrophone"
 import type { MachineConnections } from "../machines/machineConnections"
-import { behindPolicySchema } from "../machines/machineStore"
+import { behindPolicySchema, localServerModeSchema } from "../machines/machineStore"
 import type { NotificationBrokers } from "../notifications"
 import type { ServerClient } from "../server/client"
 import type { AppContext } from "../trpc/context"
@@ -69,6 +69,14 @@ export function createDesktopRouter(deps: DesktopRouterDependencies) {
         setBehindPolicy: publicProcedure
           .input(z.object({ policy: behindPolicySchema }))
           .mutation(({ input }) => deps.machines().setBehindPolicy(input.policy)),
+        /** "Local server" and the default machine of this device. */
+        deviceSettings: publicProcedure.query(() => deps.machines().deviceSettings()),
+        setLocalServer: publicProcedure
+          .input(z.object({ mode: localServerModeSchema }))
+          .mutation(({ input }) => deps.machines().setLocalServer(input.mode)),
+        setDefaultMachine: publicProcedure
+          .input(z.object({ machineId: z.string().min(1).nullable() }))
+          .mutation(({ input }) => deps.machines().setDefaultMachine(input.machineId)),
       }),
     }),
     system: systemRouter,

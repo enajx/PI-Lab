@@ -22,6 +22,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { LatexText } from "../../../../components/LatexText"
 import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
+import { localServerOff } from "../../../../machines/localServer"
 import {
   CONNECTION_DOTS,
   CONNECTION_LABELS,
@@ -32,6 +33,7 @@ import {
 } from "../../../../machines/MachineControls"
 import {
   type MachineSummary,
+  showMachineUi,
   useMachineState,
   useMachines,
   useRemoteProjects,
@@ -378,18 +380,21 @@ export function Sidebar() {
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  // "Local server: Off": no local projects (none are asked for).
+  const localOff = localServerOff()
+  const projectsQuery = useQuery({ ...trpc.projects.list.queryOptions(), enabled: !localOff })
+  const localProjects = localOff ? [] : projectsQuery.data
   const projectActivityStates = useProjectActivityStates()
   // Remote machines: their projects follow this Mac's, each with a machine badge.
   const machines = useMachines(false) ?? []
   const remote = useRemoteProjects(machines)
   const [machineFilterValue, setMachineFilter] = useMachineFilter()
   const machineFilter = effectiveFilter(machineFilterValue, machines)
-  const localBadge = machines.length > 0 ? t("This Mac") : null
+  const localBadge = showMachineUi(machines) ? t("This Mac") : null
   const routeParams = useParams({ strict: false }) as { machineId?: string; projectId?: string }
-  const projects = projectsQuery.data ?? []
+  const projects = localProjects ?? []
   const hiddenCount =
-    projectsQuery.data === undefined
+    localProjects === undefined
       ? null
       : projects.filter((project) => Boolean(project.archivedAt)).length
   const [collapsed, setCollapsed] = useSidebarCollapsed()
@@ -517,7 +522,7 @@ export function Sidebar() {
               {t("Projects")}
             </Link>
           )}
-          {machines.length > 0 && !collapsed ? (
+          {showMachineUi(machines) && !collapsed ? (
             <MachineFilter
               machines={machines}
               value={machineFilter}
@@ -1200,7 +1205,7 @@ function MachineNavRow({ machine, collapsed }: { machine: MachineSummary; collap
 function MachinesNav({ machines, collapsed }: { machines: MachineSummary[]; collapsed: boolean }) {
   const t = useTranslate()
   const { location } = useRouterState()
-  if (machines.length === 0) return null
+  if (!showMachineUi(machines)) return null
   return (
     <nav
       aria-label={t("Machines")}

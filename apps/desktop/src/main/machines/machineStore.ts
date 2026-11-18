@@ -33,34 +33,61 @@ export type StoredMachine = z.infer<typeof storedMachineSchema>
 export const behindPolicySchema = z.enum(["auto", "ask", "never"])
 export type BehindPolicy = z.infer<typeof behindPolicySchema>
 
+/**
+ * "Local server": this device's own PI Lab server. always: it keeps running
+ * after the app quits (launchd); while-open: it stops when the app quits; off:
+ * no local server, the app is a client of its added machines only.
+ */
+export const localServerModeSchema = z.enum(["always", "while-open", "off"])
+export type LocalServerMode = z.infer<typeof localServerModeSchema>
+
 /** What `machines.json` holds. */
 export interface MachineFile {
   machines: StoredMachine[]
   behindPolicy: BehindPolicy
+  localServer: LocalServerMode
+  /** The machine New project is preset to: a stored machine id, or null for this Mac. */
+  defaultMachine: string | null
 }
 
+/** Files written before a setting existed read with its default. */
 const machineFileSchema = z.object({
   machines: z.array(storedMachineSchema),
-  behindPolicy: behindPolicySchema,
+  behindPolicy: behindPolicySchema.default("auto"),
+  localServer: localServerModeSchema.default("always"),
+  defaultMachine: z.string().min(1).nullable().default(null),
 })
 
 /**
- * The stored machines and the behind policy; none and "auto" when the file
- * does not exist. An older file holding only the machines array reads with
- * "auto". Throws on a file others can read or a broken file.
+ * The stored machines and this device's machine settings; the defaults
+ * (none, "auto", "always", this Mac) when the file does not exist. An older
+ * file holding only the machines array reads with the defaults. Throws on a
+ * file others can read or a broken file.
  */
 export function readMachineFile(profileDir: string): MachineFile {
   const path = join(profileDir, MACHINES_FILE)
-  if (!existsSync(path)) return { machines: [], behindPolicy: "auto" }
+  const parsed: unknown = existsSync(path) ? readOwnerOnlyJson(path) : { machines: [] }
+  return machineFileSchema.parse(Array.isArray(parsed) ? { machines: parsed } : parsed)
+}
+
+function readOwnerOnlyJson(path: string): unknown {
   assertOwnerOnly(path)
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
-  if (Array.isArray(parsed)) {
-    return { machines: z.array(storedMachineSchema).parse(parsed), behindPolicy: "auto" }
-  }
-  return machineFileSchema.parse(parsed)
+  return JSON.parse(readFileSync(path, "utf8"))
 }
 
 /** Replace `machines.json` (owner-only, temp file and rename). */
 export function writeMachineFile(profileDir: string, file: MachineFile): void {
   writeOwnerOnly(join(profileDir, MACHINES_FILE), `${JSON.stringify(file, null, 2)}\n`)
+}
+
+let modeAtStart: LocalServerMode | null = null
+
+/**
+ * "Local server" as saved when this app started, read once: whether this
+ * session has a local server and how it runs. A change in Settings applies to
+ * the start at the next app start (the Quit behaviour reads the saved value).
+ */
+export function localServerAtStart(profileDir: string): LocalServerMode {
+  modeAtStart ??= readMachineFile(profileDir).localServer
+  return modeAtStart
 }

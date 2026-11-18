@@ -26,6 +26,7 @@ import {
   isCloseTabResponse,
 } from "../shared/closeTab"
 import { INTERFACE_LANGUAGE_CHANNEL, isInterfaceLanguage } from "../shared/interfaceLanguage"
+import { LOCAL_SERVER_OFF_CHANNEL } from "../shared/localServer"
 import {
   QUICK_EDIT_CLOSE_CHANNEL,
   QUICK_EDIT_CURRENT_CHANNEL,
@@ -195,6 +196,7 @@ if (process.isMainFrame) {
     quickEdit,
     backgroundTray,
     appIcon,
+    localServerOff: ipcRenderer.sendSync(LOCAL_SERVER_OFF_CHANNEL) === true,
     setInterfaceLanguage(language: string): void {
       if (isInterfaceLanguage(language)) ipcRenderer.send(INTERFACE_LANGUAGE_CHANNEL, language)
     },

@@ -31,6 +31,7 @@ import type { ComponentType } from "react"
 import { openDictationHistory } from "../dictation/historyPicker"
 import { useTranslate } from "../i18n/language"
 import { ISSUE_ACTION_LABELS, useOpenIssueForm } from "../issueReport/issueForms"
+import { projectRoute } from "../machines/projectRoute"
 import {
   useExperimentalV2,
   useShowCodeChanges,
@@ -102,7 +103,7 @@ const NAV_TARGETS = [
 /** Build the palette's controller-backed New/Add Project command. */
 export function createAddProjectCommand(
   openAddProject: (request: AddProjectRequest) => void,
-  navigateToProject: (projectId: string) => void,
+  navigateToProject: (projectId: string, machineId: string | null) => void,
 ): PaletteCommand {
   return {
     id: "add-project",
@@ -111,7 +112,7 @@ export function createAddProjectCommand(
     icon: FolderPlus,
     run: () =>
       openAddProject({
-        onAdded: (project) => navigateToProject(project.id),
+        onAdded: (project, machineId) => navigateToProject(project.id, machineId),
       }),
   }
 }
@@ -311,9 +312,11 @@ export function usePaletteCommands(): PaletteCommand[] {
     run: () => void navigate({ to: "/projects/$projectId", params: { projectId: project.id } }),
   }))
 
-  const addProjectCommand = createAddProjectCommand(openAddProject, (projectId) => {
-    void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
-    void navigate({ to: "/projects/$projectId", params: { projectId } })
+  const addProjectCommand = createAddProjectCommand(openAddProject, (projectId, machineId) => {
+    if (machineId === null) {
+      void queryClient.invalidateQueries({ queryKey: trpc.projects.list.queryKey() })
+    }
+    void navigate(projectRoute(machineId, projectId))
   })
   const activeProjectId = location.pathname.match(/^\/projects\/([^/]+)/)?.[1]
   const newFileCommand = createNewFileCommand(

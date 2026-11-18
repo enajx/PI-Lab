@@ -1,7 +1,7 @@
 import { cleanup } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach } from "vitest"
 import { loadMessages } from "../i18n/messages"
-import { setMachinesSourceForTests } from "../machines/machines"
+import { setDeviceSettingsSourceForTests, setMachinesSourceForTests } from "../machines/machines"
 
 // Component fixtures choose languages synchronously; cold-loading races have their own tests.
 beforeAll(async () => {
@@ -74,3 +74,4 @@ afterEach(() => {
 
 // No Electron main in unit tests: no remote machines unless a test sets them.
 setMachinesSourceForTests(async () => [])
+setDeviceSettingsSourceForTests(async () => ({ localServer: "always", defaultMachine: null }))

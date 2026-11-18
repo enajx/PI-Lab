@@ -1,9 +1,8 @@
-import type { Project } from "@pi-lab/local-db"
 import { createContext, type ReactNode, useContext, useState } from "react"
-import { AddProjectMenu } from "./AddProjectMenu"
+import { AddProjectMenu, type OnAdded } from "./AddProjectMenu"
 
 export interface AddProjectRequest {
-  onAdded: (project: Project) => void
+  onAdded: OnAdded
 }
 
 interface AddProjectController {
@@ -29,7 +28,7 @@ export function AddProjectControllerProvider({ children }: { children: ReactNode
         onOpenChange={(open) => {
           if (!open) setRequest(null)
         }}
-        onAdded={(project) => request?.onAdded(project)}
+        onAdded={(project, machineId) => request?.onAdded(project, machineId)}
       />
     </AddProjectControllerContext.Provider>
   )

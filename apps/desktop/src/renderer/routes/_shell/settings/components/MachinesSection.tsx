@@ -1,14 +1,19 @@
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import type { LocalServerMode } from "../../../../../main/machines/machineStore"
 import { SERVER_UPDATE_CAPABILITY } from "../../../../../shared/clientApi"
 import { useTranslate } from "../../../../i18n/language"
+import { localServerOff } from "../../../../machines/localServer"
 import { CONNECTION_DOTS, CONNECTION_LABELS } from "../../../../machines/MachineControls"
 import {
+  DEVICE_SETTINGS_QUERY_KEY,
   forgetCachedProjects,
   MACHINES_QUERY_KEY,
   MachineScope,
   type MachineSummary,
+  showMachineUi,
+  useDeviceMachineSettings,
   useMachineState,
   useMachines,
 } from "../../../../machines/machines"
@@ -66,11 +71,80 @@ export function MachinesSection() {
             {notice}
           </p>
         ) : null}
+        <LocalServerFields machines={machines ?? []} />
         <BehindPolicyField />
         <AddMachineForm />
       </SettingsSection>
-      <ThisMacDevices />
+      {localServerOff() ? null : <ThisMacDevices />}
     </div>
+  )
+}
+
+/**
+ * "Local server" (this Mac's own server) and, once a machine is added, the
+ * default machine New project is preset to. With the local server off the
+ * default cannot be this Mac (Electron main refuses it).
+ */
+function LocalServerFields({ machines }: { machines: MachineSummary[] }) {
+  const queryClient = useQueryClient()
+  const settings = useDeviceMachineSettings()
+  const onSettled = () =>
+    void queryClient.invalidateQueries({ queryKey: DEVICE_SETTINGS_QUERY_KEY })
+  const saveMode = useMutation({
+    mutationFn: (mode: LocalServerMode) =>
+      desktopIpc().desktop.machines.setLocalServer.mutate({ mode }),
+    onSettled,
+  })
+  const saveDefault = useMutation({
+    mutationFn: (machineId: string | null) =>
+      desktopIpc().desktop.machines.setDefaultMachine.mutate({ machineId }),
+    onSettled,
+  })
+  if (settings === null) return null
+  return (
+    <>
+      <SelectField
+        testId="settings-local-server"
+        label="Local server"
+        description="This Mac's own PI Lab server. Always keeps it running after you quit; Only while PI Lab is open stops it when you quit; Off uses only the added machines. Off, and back from Off, apply the next time PI Lab starts."
+        value={settings.localServer}
+        options={[
+          { value: "always", label: "Always" },
+          { value: "while-open", label: "Only while PI Lab is open" },
+          { value: "off", label: "Off (client only)" },
+        ]}
+        onChange={(next) => {
+          if (next === "always" || next === "while-open" || next === "off") saveMode.mutate(next)
+        }}
+      />
+      {saveMode.error ? (
+        <p
+          role="alert"
+          data-testid="settings-local-server-error"
+          className="px-4 py-3 text-destructive text-xs"
+        >
+          {saveMode.error.message}
+        </p>
+      ) : null}
+      {showMachineUi(machines) ? (
+        <SelectField
+          testId="settings-default-machine"
+          label="Default machine"
+          description="Where New project creates a project unless you choose another machine."
+          value={settings.defaultMachine ?? "local"}
+          options={[
+            ...(settings.localServer === "off" ? [] : [{ value: "local", label: "This Mac" }]),
+            ...machines.map((machine) => ({ value: machine.machineId, label: machine.name })),
+          ]}
+          onChange={(next) => saveDefault.mutate(next === "local" ? null : next)}
+        />
+      ) : null}
+      {saveDefault.error ? (
+        <p role="alert" className="px-4 py-3 text-destructive text-xs">
+          {saveDefault.error.message}
+        </p>
+      ) : null}
+    </>
   )
 }
 
@@ -188,6 +262,7 @@ function MachineHeader({
       onRemoved(result.revoked)
       forgetCachedProjects(machine.machineId)
       void queryClient.invalidateQueries({ queryKey: MACHINES_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: DEVICE_SETTINGS_QUERY_KEY })
     },
   })
   return (

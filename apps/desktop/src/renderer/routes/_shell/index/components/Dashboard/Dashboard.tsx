@@ -21,12 +21,14 @@ import { useNavigate } from "@tanstack/react-router"
 import { type ComponentProps, useCallback, useEffect, useRef, useState } from "react"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
 import { useTranslate } from "../../../../../i18n/language"
+import { localServerOff } from "../../../../../machines/localServer"
 import {
   effectiveFilter,
   filterShows,
   MachineFilter,
 } from "../../../../../machines/MachineControls"
-import { useMachines, useRemoteProjects } from "../../../../../machines/machines"
+import { showMachineUi, useMachines, useRemoteProjects } from "../../../../../machines/machines"
+import { projectRoute } from "../../../../../machines/projectRoute"
 import { RemoteProjectCards } from "../../../../../machines/RemoteProjects"
 import {
   useMachineFilter,
@@ -113,7 +115,10 @@ export function Dashboard() {
   const { openAddProject } = useAddProjectController()
   const trayRequestHandled = useRef(false)
   const queryClient = useQueryClient()
-  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  // "Local server: Off": no local projects (none are asked for).
+  const localOff = localServerOff()
+  const projectsQuery = useQuery({ ...trpc.projects.list.queryOptions(), enabled: !localOff })
+  const localProjects = localOff ? [] : projectsQuery.data
   const [collapsed] = useSidebarCollapsed()
   // Remote machines: their projects follow this Mac's, each with a machine badge.
   const machines = useMachines(false) ?? []
@@ -121,11 +126,11 @@ export function Dashboard() {
   const [machineFilterValue, setMachineFilter] = useMachineFilter()
   const machineFilter = effectiveFilter(machineFilterValue, machines)
   const showLocal = filterShows(machineFilter, null)
-  const localBadge = machines.length > 0 ? t("This Mac") : null
+  const localBadge = showMachineUi(machines) ? t("This Mac") : null
 
-  const projects = projectsQuery.data ?? []
+  const projects = localProjects ?? []
   const hiddenCount =
-    projectsQuery.data === undefined
+    localProjects === undefined
       ? null
       : projects.filter((project) => Boolean(project.archivedAt)).length
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
@@ -163,9 +168,9 @@ export function Dashboard() {
     if (!search || !new URLSearchParams(search).has("newProject")) return
     trayRequestHandled.current = true
     openAddProject({
-      onAdded: (project) => {
-        void invalidateProjects()
-        void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+      onAdded: (project, machineId) => {
+        if (machineId === null) void invalidateProjects()
+        void navigate(projectRoute(machineId, project.id))
       },
     })
     const cleanHash = window.location.hash.split("?", 1)[0]
@@ -182,7 +187,7 @@ export function Dashboard() {
       >
         <h1 className="text-foreground text-sm tracking-tight">{t("Projects Dashboard")}</h1>
         <div className={cn("flex shrink-0 items-center gap-3", titleBarControlClass(collapsed))}>
-          {machines.length > 0 ? (
+          {showMachineUi(machines) ? (
             <MachineFilter
               machines={machines}
               value={machineFilter}
@@ -224,7 +229,7 @@ export function Dashboard() {
         <CardGrid
           surface="dashboard"
           cardIds={
-            projectsQuery.data === undefined ? null : visibleProjects.map((project) => project.id)
+            localProjects === undefined ? null : visibleProjects.map((project) => project.id)
           }
           testId="dashboard-grid"
           className="gap-6"
@@ -245,7 +250,12 @@ export function Dashboard() {
                 projects={entry.projects}
               />
             ))}
-          <AddProjectMenu variant="dashboard-card" onAdded={() => void invalidateProjects()} />
+          <AddProjectMenu
+            variant="dashboard-card"
+            onAdded={(_project, machineId) => {
+              if (machineId === null) void invalidateProjects()
+            }}
+          />
         </CardGrid>
       </div>
     </div>

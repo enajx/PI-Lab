@@ -1377,5 +1377,16 @@
   "Ask me": "물어보기",
   "Never": "안 함",
   "Update machines automatically": "머신을 자동으로 업데이트",
-  "Update": "업데이트"
+  "Update": "업데이트",
+  "Machine": "머신",
+  "The machine the new project is created on.": "새 프로젝트를 만들 머신입니다.",
+  "Folder on that machine": "그 머신의 폴더",
+  "Parent folder on that machine": "그 머신의 상위 폴더",
+  "Clone": "복제",
+  "Local server": "로컬 서버",
+  "This Mac's own PI Lab server. Always keeps it running after you quit; Only while PI Lab is open stops it when you quit; Off uses only the added machines. Off, and back from Off, apply the next time PI Lab starts.": "이 Mac의 PI Lab 서버입니다. 항상: 종료한 뒤에도 계속 실행합니다. PI Lab이 열려 있는 동안만: 종료할 때 멈춥니다. 끔: 추가한 머신만 사용합니다. 끔으로 바꾸거나 끔에서 되돌리면 다음에 PI Lab을 시작할 때 적용됩니다.",
+  "Only while PI Lab is open": "PI Lab이 열려 있는 동안만",
+  "Off (client only)": "끔 (클라이언트 전용)",
+  "Default machine": "기본 머신",
+  "Where New project creates a project unless you choose another machine.": "다른 머신을 고르지 않으면 새 프로젝트가 만들어지는 곳입니다."
 }

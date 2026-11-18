@@ -10,6 +10,7 @@ import { CONNECTION_DOTS, CONNECTION_LABELS } from "../../../../machines/Machine
 import {
   MachineScope,
   type MachineSummary,
+  showMachineUi,
   useMachineState,
   useMachines,
 } from "../../../../machines/machines"
@@ -341,7 +342,7 @@ function HostsItem() {
       >
         <Server className="size-3 shrink-0" aria-hidden />
         {`${list.length} ${list.length === 1 ? t("host") : t("hosts")}`}
-        {machines.length > 0 ? (
+        {showMachineUi(machines) ? (
           <span className="ms-1 inline-flex items-center gap-1">
             {`· ${machines.length} ${machines.length === 1 ? t("machine") : t("machines")}`}
             {machines.map((machine) => (
@@ -357,7 +358,7 @@ function HostsItem() {
           data-testid="status-bar-hosts-popover"
           className="absolute right-0 bottom-7 z-50 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
         >
-          {machines.length > 0 ? (
+          {showMachineUi(machines) ? (
             <>
               <h2 className="font-semibold text-sm">{t("Machines")}</h2>
               <ul className="mt-2 mb-3 space-y-1.5">

@@ -906,3 +906,71 @@ test("a logout-style quit with the server not answering still quits the app", as
     await rm(dataDir, { recursive: true, force: true })
   }
 })
+
+/** Native dialog choices are injected; the app and server are real. */
+test("with Local server set to Only while PI Lab is open, Quit says so and stops the server", async () => {
+  test.setTimeout(90_000)
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-quit-while-open-"))
+  let app: ElectronApplication | null = null
+  try {
+    // The app profile is the data folder in test mode.
+    await writeFile(
+      join(dataDir, "machines.json"),
+      JSON.stringify({ machines: [], behindPolicy: "auto", localServer: "while-open" }),
+      { mode: 0o600 },
+    )
+    app = await electron.launch({
+      executablePath: packagedBinary ?? electronPath,
+      args: launchArgs,
+      env: {
+        ...process.env,
+        PI_LAB_TEST_MODE: "1",
+        PI_LAB_TEST_HIDE_WINDOWS: "1",
+        // Without the setting, this server would outlive the app.
+        PI_LAB_TEST_RETAIN_SERVER: "1",
+        PI_LAB_DATA_DIR: dataDir,
+        PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      },
+    })
+    app.on("close", () => {
+      app = null
+    })
+    const window = await app.firstWindow()
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    const serverPid = readServerDiscovery(dataDir)?.pid ?? 0
+    expect(processAlive(serverPid)).toBe(true)
+    // The first Quit is cancelled so its text can be read; the second one quits.
+    await app.evaluate(({ dialog }) => {
+      const state = globalThis as unknown as { quitPrompts: string[] }
+      state.quitPrompts = []
+      dialog.showMessageBox = async (options) => {
+        state.quitPrompts.push(String(options.detail))
+        return { response: state.quitPrompts.length === 1 ? 2 : 1, checkboxChecked: false }
+      }
+    })
+    const clickQuit = () =>
+      app?.evaluate(({ Menu }) => {
+        const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
+        if (!item) throw new Error("Missing Quit menu item")
+        setImmediate(() => item.click())
+      })
+    await clickQuit()
+    await expect
+      .poll(async () =>
+        app?.evaluate(() => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts[0]),
+      )
+      .toContain("This Mac's PI Lab server, its agents and routines stop when you quit")
+    const closed = new Promise((resolve) => app?.once("close", resolve))
+    await clickQuit()
+    await closed
+    await expect.poll(() => processAlive(serverPid), { timeout: 15_000 }).toBe(false)
+  } finally {
+    if (app) {
+      const closed = (app as ElectronApplication).waitForEvent("close")
+      ;(app as ElectronApplication).process().kill("SIGKILL")
+      await closed
+    }
+    await stopServerIn(dataDir)
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})

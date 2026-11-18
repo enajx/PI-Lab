@@ -1377,5 +1377,16 @@
   "Ask me": "询问我",
   "Never": "从不",
   "Update machines automatically": "自动更新机器",
-  "Update": "更新"
+  "Update": "更新",
+  "Machine": "机器",
+  "The machine the new project is created on.": "新项目创建所在的机器。",
+  "Folder on that machine": "该机器上的文件夹",
+  "Parent folder on that machine": "该机器上的父文件夹",
+  "Clone": "克隆",
+  "Local server": "本地服务器",
+  "This Mac's own PI Lab server. Always keeps it running after you quit; Only while PI Lab is open stops it when you quit; Off uses only the added machines. Off, and back from Off, apply the next time PI Lab starts.": "这台 Mac 自己的 PI Lab 服务器。“始终”在你退出后仍保持运行；“仅在 PI Lab 打开时”在你退出时停止它；“关闭”只使用已添加的机器。切换到“关闭”或从“关闭”切回，会在 PI Lab 下次启动时生效。",
+  "Only while PI Lab is open": "仅在 PI Lab 打开时",
+  "Off (client only)": "关闭（仅客户端）",
+  "Default machine": "默认机器",
+  "Where New project creates a project unless you choose another machine.": "除非你选择其他机器，新建项目会在这里创建项目。"
 }

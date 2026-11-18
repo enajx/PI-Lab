@@ -46,10 +46,10 @@ describe("Add Project palette command", () => {
 
     command.run?.()
     expect(requests).toHaveLength(1)
-    requests[0]?.onAdded(project)
+    requests[0]?.onAdded(project, null)
 
     expect(navigateToProject).toHaveBeenCalledOnce()
-    expect(navigateToProject).toHaveBeenCalledWith("project-added")
+    expect(navigateToProject).toHaveBeenCalledWith("project-added", null)
   })
 })
 

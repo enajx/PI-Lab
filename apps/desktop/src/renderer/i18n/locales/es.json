@@ -1377,5 +1377,16 @@
   "Ask me": "Preguntarme",
   "Never": "Nunca",
   "Update machines automatically": "Actualizar las máquinas automáticamente",
-  "Update": "Actualizar"
+  "Update": "Actualizar",
+  "Machine": "Máquina",
+  "The machine the new project is created on.": "La máquina en la que se crea el proyecto nuevo.",
+  "Folder on that machine": "Carpeta en esa máquina",
+  "Parent folder on that machine": "Carpeta superior en esa máquina",
+  "Clone": "Clonar",
+  "Local server": "Servidor local",
+  "This Mac's own PI Lab server. Always keeps it running after you quit; Only while PI Lab is open stops it when you quit; Off uses only the added machines. Off, and back from Off, apply the next time PI Lab starts.": "El servidor de PI Lab propio de este Mac. Siempre lo mantiene en marcha después de salir; Solo mientras PI Lab está abierto lo detiene al salir; Desactivado usa solo las máquinas añadidas. Desactivado, y volver de Desactivado, se aplican la próxima vez que PI Lab se inicie.",
+  "Only while PI Lab is open": "Solo mientras PI Lab está abierto",
+  "Off (client only)": "Desactivado (solo cliente)",
+  "Default machine": "Máquina predeterminada",
+  "Where New project creates a project unless you choose another machine.": "Dónde crea Nuevo proyecto un proyecto si no eliges otra máquina."
 }

@@ -246,11 +246,17 @@ test("the stop dialog names agents, busy terminals and notebooks", () => {
 test("the Quit dialog names open notebooks so the user can cancel and save them", () => {
   const plain =
     "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon."
-  expect(quitDialogDetail(0)).toBe(plain)
-  expect(quitDialogDetail(2)).toBe(
+  expect(quitDialogDetail(0, false)).toBe(plain)
+  expect(quitDialogDetail(2, false)).toBe(
     `${plain}\n\n2 notebooks are open. Their servers stop when PI Lab quits; save them first.`,
   )
-  expect(quitDialogDetail(1)).toBe(
+  expect(quitDialogDetail(1, false)).toBe(
     `${plain}\n\n1 notebook is open. Its server stops when PI Lab quits; save it first.`,
+  )
+})
+
+test("with Local server set to Only while PI Lab is open, the Quit dialog says the server and agents stop", () => {
+  expect(quitDialogDetail(0, true)).toBe(
+    "This Mac's PI Lab server, its agents and routines stop when you quit (Settings > Machines > Local server). Move to background keeps them running with the menu-bar icon.",
   )
 })

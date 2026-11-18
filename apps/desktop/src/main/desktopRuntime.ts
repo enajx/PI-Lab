@@ -12,7 +12,7 @@ import {
   session,
 } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
-import { readDiscovery, TOKEN_HEADER } from "../server/access"
+import { readDiscovery, readMachineId, TOKEN_HEADER } from "../server/access"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
 import type { QuickEditTarget } from "../shared/quickEdit"
@@ -27,6 +27,7 @@ import {
   MachineConnections,
   type RemoteAccess,
 } from "./machines/machineConnections"
+import { localServerAtStart } from "./machines/machineStore"
 import { findServerBundle, type ServerBundleFiles } from "./machines/serverBundle"
 import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
 import { stopNotebooksWithWindow } from "./notebooks/notebookServers"
@@ -45,6 +46,7 @@ import {
   type EndpointCache,
   ensureServer,
   isPiLabServerProcess,
+  removeLaunchdAgent,
   SERVER_START_NO_PROGRESS_MS,
   type ServerEndpoint,
   ServerStartFailure,
@@ -69,6 +71,10 @@ interface AppSettings {
   quitChoice: RememberedQuitChoice
   editorVim: boolean
 }
+
+/** Why calls to the local server fail in a session started with "Local server: Off". */
+const LOCAL_SERVER_OFF_MESSAGE =
+  "This Mac's PI Lab server is off (Settings > Machines > Local server)."
 
 /** Notebook servers use this port range (see the server's NotebookServers). */
 const NOTEBOOK_PORTS = { start: 42_700, end: 42_799 }
@@ -186,11 +192,17 @@ export class DesktopRuntime {
       }
     })
     this.installSchemeForwarding()
+    const profileDir = app.getPath("userData")
+    const mode = localServerAtStart(profileDir)
     this.machineConnections = new MachineConnections({
-      profileDir: app.getPath("userData"),
+      profileDir,
       access: remoteAccess(),
       deviceName: `PI Lab on ${hostname()}`,
-      localMachineId: async () => (await (await this.server()).server.hello.query()).machineId,
+      // With the local server off, the id it had (so it is still not added as a machine).
+      localMachineId: async () =>
+        mode === "off"
+          ? readMachineId(resolveDataDir())
+          : (await (await this.server()).server.hello.query()).machineId,
       bundle: carriedServerBundle,
       log: (message) => console.log(message),
     })
@@ -204,8 +216,20 @@ export class DesktopRuntime {
     )
     const window = this.host.initialWindow()
     if (window) this.boot(window)
+    // Only "Always" keeps the launchd agent: it would start the server at login.
+    const launchdLabel =
+      app.isPackaged && !isTestMode && process.platform === "darwin"
+        ? `${channelIdentity(this.host.channel).autostartName}.server`
+        : null
+    if (launchdLabel !== null && mode !== "always") removeLaunchdAgent(launchdLabel)
+    if (mode === "off") {
+      console.log("[pi-lab] local server is off; connecting to the added machines only")
+      this.rejectReady(new Error(LOCAL_SERVER_OFF_MESSAGE))
+      this.machineConnections.start()
+      return
+    }
     try {
-      this.connecting = this.connect()
+      this.connecting = this.connect(mode === "always" ? launchdLabel : null)
       await this.connecting
       this.machineConnections.start()
     } catch (error) {
@@ -214,7 +238,8 @@ export class DesktopRuntime {
     }
   }
 
-  private async connect(): Promise<void> {
+  /** launchdLabel: null starts the server as a detached child, which stops with the app's Quit. */
+  private async connect(launchdLabel: string | null): Promise<void> {
     const serverEntry = join(__dirname, "server.js")
     this.endpoint = await ensureServer({
       config: serverLaunchConfig({
@@ -228,10 +253,7 @@ export class DesktopRuntime {
         profileDir: app.getPath("userData"),
       }),
       serverEntry,
-      launchdLabel:
-        app.isPackaged && !isTestMode && process.platform === "darwin"
-          ? `${channelIdentity(this.host.channel).autostartName}.server`
-          : null,
+      launchdLabel,
       log: (message) => console.log(message),
       noProgressMs: SERVER_START_NO_PROGRESS_MS,
     })
@@ -390,6 +412,8 @@ export class DesktopRuntime {
    * runs recorded since the last activity change only show after this read.
    */
   async refreshTray(): Promise<BackgroundTraySnapshot> {
+    // No local server: the tray shows no projects.
+    if (localServerAtStart(app.getPath("userData")) === "off") return this.tray
     const snapshot = await (await this.server()).server.traySnapshot.query()
     this.tray = snapshot
     for (const listener of this.trayListeners) listener(snapshot)
@@ -434,6 +458,16 @@ export class DesktopRuntime {
   async stopServerAndAgents(): Promise<void> {
     const client = await this.server()
     await client.server.stop.mutate({ stopAgents: true })
+  }
+
+  /**
+   * True when Quit should also stop this Mac's server and agents: the app
+   * started a local server and "Local server" is now Only while PI Lab is
+   * open or Off.
+   */
+  stopsServerOnQuit(): boolean {
+    if (this.serverClient === null || this.machineConnections === null) return false
+    return this.machineConnections.deviceSettings().localServer !== "always"
   }
 
   async quickPythonOptions(path: string) {
