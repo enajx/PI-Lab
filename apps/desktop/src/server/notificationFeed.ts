@@ -87,6 +87,11 @@ export class NotificationFeed implements NotificationSink {
     return "delivered"
   }
 
+  /** A request while it is still pending, or null. */
+  pending(id: string): NotificationEvent | null {
+    return this.#pending.get(id) ?? null
+  }
+
   /**
    * Take a pending request for answering: it stops being pending and clears
    * on every client. Null when it is no longer pending (already answered,

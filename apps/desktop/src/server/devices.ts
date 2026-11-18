@@ -59,20 +59,24 @@ export class DeviceRegistry implements DeviceAccess {
   readonly #tokenPath: string
   readonly #localToken: string
   readonly #connections = new Map<string, Set<() => void>>()
+  /** The devices file, read once here; written on every create and revoke. */
+  #devices: StoredDevice[]
 
   constructor(dataDir: string) {
     this.#path = join(dataDir, DEVICES_FILE)
     this.#tokenPath = join(dataDir, TOKEN_FILE)
     this.#localToken = ensureLocalToken(dataDir)
+    this.#devices = this.#read()
   }
 
   authenticate(token: string | null): string | null {
     if (!token) return null
     if (tokenMatches(this.#localToken, token)) return LOCAL_DEVICE_ID
     const presented = Buffer.from(hashToken(token), "hex")
-    const device = this.#read().find((entry) =>
-      timingSafeEqual(Buffer.from(entry.tokenHash, "hex"), presented),
-    )
+    const device = this.#devices.find((entry) => {
+      const stored = Buffer.from(entry.tokenHash, "hex")
+      return stored.length === presented.length && timingSafeEqual(stored, presented)
+    })
     return device && device.revokedAt === null ? device.id : null
   }
 
@@ -99,7 +103,7 @@ export class DeviceRegistry implements DeviceAccess {
     }
     return [
       local,
-      ...this.#read().map((device) => ({
+      ...this.#devices.map((device) => ({
         id: device.id,
         name: device.name,
         createdAt: device.createdAt,
@@ -119,7 +123,7 @@ export class DeviceRegistry implements DeviceAccess {
       revokedAt: null,
       tokenHash: hashToken(token),
     }
-    this.#write([...this.#read(), stored])
+    this.#write([...this.#devices, stored])
     return {
       device: {
         id: stored.id,
@@ -135,12 +139,14 @@ export class DeviceRegistry implements DeviceAccess {
   /** Revoke a device's token and close its open connections. */
   revoke(id: string): void {
     if (id === LOCAL_DEVICE_ID) throw new Error("The local device cannot be revoked")
-    const devices = this.#read()
-    const device = devices.find((entry) => entry.id === id)
+    const device = this.#devices.find((entry) => entry.id === id)
     if (!device) throw new Error(`No device ${id}`)
     if (device.revokedAt === null) {
-      device.revokedAt = Date.now()
-      this.#write(devices)
+      this.#write(
+        this.#devices.map((entry) =>
+          entry.id === id ? { ...entry, revokedAt: Date.now() } : entry,
+        ),
+      )
     }
     for (const close of this.#connections.get(id) ?? []) close()
     this.#connections.delete(id)
@@ -152,7 +158,9 @@ export class DeviceRegistry implements DeviceAccess {
     return JSON.parse(readFileSync(this.#path, "utf8")) as StoredDevice[]
   }
 
+  /** Write the file first, so the list in memory never holds what the file does not. */
   #write(devices: StoredDevice[]): void {
     writeOwnerOnly(this.#path, `${JSON.stringify(devices, null, 2)}\n`)
+    this.#devices = devices
   }
 }

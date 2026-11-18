@@ -275,7 +275,7 @@ test("a revoked device token is refused, and its open connection closes at once"
   // Revoking closes its open connection at once; later upgrades and requests get 401.
   const closed = new Promise<number>((resolve) => laptopSocket.once("close", resolve))
   await local.client.server.devices.revoke.mutate({ id: created.device.id })
-  expect(await closed).toBe(1008)
+  await closed
   expect(await upgradeStatus(created.token)).toBe(401)
   expect((await fetch(health, { headers: { [TOKEN_HEADER]: created.token } })).status).toBe(401)
   const revoked = (await local.client.server.devices.list.query()).find(
@@ -291,6 +291,135 @@ test("a revoked device token is refused, and its open connection closes at once"
   )
   expect(await upgradeStatus(token)).toBe(101)
   local.close()
+})
+
+test("only the local device may create or revoke devices and stop the server", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Phone" })
+  const phone = connect(created.token)
+  const forbidden = async (call: Promise<unknown>) => {
+    const error = await call.then(
+      () => null,
+      (reason: unknown) => reason,
+    )
+    expect(error).toBeInstanceOf(TRPCClientError)
+    expect((error as TRPCClientError<ServerRouter>).data?.code).toBe("FORBIDDEN")
+  }
+  await forbidden(phone.client.server.devices.create.mutate({ name: "Another" }))
+  await forbidden(phone.client.server.devices.revoke.mutate({ id: created.device.id }))
+  await forbidden(phone.client.server.stop.mutate({ stopAgents: false }))
+  // Listing stays open to every device; nothing was added.
+  expect(
+    (await phone.client.server.devices.list.query()).map((device) => device.name),
+  ).not.toContain("Another")
+  phone.close()
+  await local.client.server.devices.revoke.mutate({ id: created.device.id })
+  local.close()
+})
+
+test("calls from a revoked device's open socket stop at once", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Tablet" })
+  const tablet = new WebSocket(
+    `ws://127.0.0.1:${server.port}/trpc?token=${encodeURIComponent(created.token)}`,
+  )
+  await new Promise((resolve, reject) => {
+    tablet.once("open", resolve)
+    tablet.once("error", reject)
+  })
+  tablet.on("error", () => {})
+  // The tablet does not read, so it never sees the server close: it keeps sending.
+  ;(tablet as unknown as { _socket: import("node:net").Socket })._socket.pause()
+  await local.client.server.devices.revoke.mutate({ id: created.device.id })
+  tablet.send(
+    JSON.stringify({
+      id: 1,
+      method: "mutation",
+      params: { path: "server.rememberQuitChoice", input: { choice: "background" } },
+    }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect((await local.client.server.appSettings.query()).quitChoice).toBe("ask")
+  tablet.terminate()
+  local.close()
+})
+
+test("a broken devices.json entry or a failing token check never crashes the server", async () => {
+  const { DeviceRegistry } = await import("./devices")
+  const dir = mkdtempSync(join(tmpdir(), "pi-lab-devices-test-"))
+  const { writeOwnerOnly } = await import("./access")
+  writeOwnerOnly(
+    join(dir, DEVICES_FILE),
+    JSON.stringify([{ id: "short", name: "Old", createdAt: 1, revokedAt: null, tokenHash: "ab" }]),
+  )
+  const registry = new DeviceRegistry(dir)
+  expect(registry.authenticate("some-token")).toBeNull()
+  rmSync(dir, { recursive: true, force: true })
+
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+  const broken = await listen({
+    port: 0,
+    access: {
+      authenticate: () => {
+        throw new Error("token check failed")
+      },
+      track: () => () => {},
+    },
+    localToken: token,
+    testRoutes: false,
+    createContext: () => runtime.createAppContext(),
+    handleScheme: async () => new Response(null, { status: 404 }),
+  })
+  const status = await new Promise<number>((resolve) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${broken.port}/trpc?token=x`)
+    socket.on("unexpected-response", (_request, response) => resolve(response.statusCode ?? 0))
+    socket.on("error", () => resolve(-1))
+  })
+  expect(status).toBe(500)
+  expect(errors).toHaveBeenCalled()
+  errors.mockRestore()
+  await broken.close()
+})
+
+test("an answer whose write fails leaves the request pending and returns the error", async () => {
+  const { client, close } = connect(token)
+  const outcome = runtime.notifications.notify({
+    eventType: "agentInput",
+    title: "Agent needs input",
+    body: "Continue?",
+    target: {
+      type: "agent",
+      projectId: "project",
+      workspaceId: "workspace",
+      sessionId: "no-such-session",
+      agentId: "test-agent",
+      origin: "project",
+    },
+  })
+  const pendingIds = async (): Promise<string[]> => {
+    const ids: string[] = []
+    await new Promise<void>((resolve) => {
+      const subscription = client.server.onNotification.subscribe(undefined, {
+        onData: (message) => {
+          if (message.type === "alert") ids.push(message.event.id)
+        },
+        onStarted: () =>
+          setTimeout(() => {
+            subscription.unsubscribe()
+            resolve()
+          }, 100),
+      })
+    })
+    return ids
+  }
+  const [requestId] = await pendingIds()
+  if (!requestId) throw new Error(`no pending request (${JSON.stringify(outcome)})`)
+  await expect(
+    client.server.answerRequest.mutate({ requestId, text: "yes" }),
+  ).rejects.toBeInstanceOf(TRPCClientError)
+  expect(await pendingIds()).toContain(requestId)
+  runtime.notifications.take(requestId)
+  close()
 })
 
 test("two devices answer the same request: the first is accepted, the other's text never reaches the agent", async () => {

@@ -207,6 +207,7 @@ export class DaemonClient extends EventEmitter {
     }
     if (frame.kind === "resize" || frame.kind === "echo" || frame.kind === "echo-ack") {
       this.emit(frame.kind, frame)
+      this.emit(`session:${frame.sessionId}`, frame)
       return
     }
     if (frame.kind === "closing") {

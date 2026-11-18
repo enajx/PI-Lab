@@ -304,7 +304,11 @@ export class TerminalSupervisor {
             this.spawnTimeoutMs,
           ).unref(),
         ),
-      ])
+      ]).then(undefined, (error: unknown) => {
+        // Close this connection, so each failed attempt leaves no socket open.
+        client.close()
+        throw error
+      })
       if (running !== PROTOCOL_VERSION) {
         console.warn(
           `[pi-lab] the running pty-daemon speaks protocol ${running}, this app speaks protocol ${PROTOCOL_VERSION}: stopping it and starting a new one, its terminals end`,

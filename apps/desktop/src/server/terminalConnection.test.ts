@@ -1286,3 +1286,86 @@ test("input after a drop: keys typed while the connection is down are dropped wh
   await link.close()
   await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
 }, 60_000)
+
+test("12 terminals on one daemon connection: no listener warning, and each viewer gets only its own resize", async () => {
+  const warnings: Error[] = []
+  const onWarning = (warning: Error) => warnings.push(warning)
+  process.on("warning", onWarning)
+  const control = await newClient()
+  const viewerClient = await newClient()
+  const sessions: string[] = []
+  const viewers: Viewer[] = []
+  for (let index = 0; index < 12; index++) {
+    const sessionId = await spawnProgram(control, "stream")
+    sessions.push(sessionId)
+    viewers.push(new Viewer(viewerClient, sessionId, "keep"))
+  }
+  await waitFor(
+    () => viewers.every((viewer) => viewer.stream.consumed() !== null),
+    15_000,
+    "every viewer to start",
+  )
+  for (const [index, sessionId] of sessions.entries()) {
+    await control.trpc.terminal.resize.mutate({
+      sessionId,
+      cols: 60 + index,
+      rows: ROWS,
+      clientId: "control",
+    })
+  }
+  await waitFor(
+    () => viewers.every((viewer, index) => viewer.terminal.cols === 60 + index),
+    15_000,
+    "each viewer to take its own session's size",
+  )
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  expect(viewers.map((viewer) => viewer.terminal.cols)).toEqual(
+    sessions.map((_, index) => 60 + index),
+  )
+  process.off("warning", onWarning)
+  expect(warnings.filter((warning) => warning.name === "MaxListenersExceededWarning")).toEqual([])
+  for (const sessionId of sessions) await control.trpc.terminal.kill.mutate({ sessionId })
+}, 60_000)
+
+test("opening the first terminal does not show Reconnecting, and keys go out as first sends", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "plain")
+  const typist = await newClient()
+  const firstSends: boolean[] = []
+  // The terminal socket is created here, lazily, for the first terminal.
+  const viewer = new Viewer(typist, logger.sessionId, "keep")
+  const sender = new KeySender({
+    write: async (data, key, signal) => {
+      firstSends.push(key.firstSend)
+      const reply = await typist.trpc.terminal.write.mutate(
+        { sessionId: logger.sessionId, data, clientId: "first-terminal", key },
+        { signal },
+      )
+      return reply.status
+    },
+    consumed: () => {
+      const point = viewer.stream.consumed()
+      return point === null ? null : { generation: point.generation, offset: point.offset }
+    },
+    connection: () => typist.status.state(),
+    nextSeq: (() => {
+      let seq = 0
+      return () => seq++
+    })(),
+    onLost: () => {
+      throw new Error("a key was lost")
+    },
+    onError: (error) => {
+      throw error
+    },
+    onDelivered: () => {},
+  })
+  sender.send("a")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the viewer")
+  sender.send("b")
+  await waitFor(() => sender.waiting() === 0, 15_000, "the replies")
+  expect(firstSends).toEqual([true, true])
+  expect(typist.states).not.toContain("reconnecting")
+  await waitFor(() => logger.input() === "ab", 5_000, "the keys")
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 30_000)

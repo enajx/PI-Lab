@@ -289,14 +289,8 @@ function attachSession(
       }
       handlers.onEvent(event)
     }
-    const onResize = (event: ResizeEvent | EchoEvent | EchoAckEvent) => {
-      if (event.sessionId === sessionId) onEvent(event)
-    }
     const eventName = `session:${sessionId}`
     client.on(eventName, onEvent)
-    client.on("resize", onResize)
-    client.on("echo", onResize)
-    client.on("echo-ack", onResize)
     let observers = sessionObservers.get(client)
     if (!observers) {
       observers = new Map<string, Set<() => void>>()
@@ -315,9 +309,6 @@ function attachSession(
       closed = true
       if (current === client) current = null
       client.off(eventName, onEvent)
-      client.off("resize", onResize)
-      client.off("echo", onResize)
-      client.off("echo-ack", onResize)
       cleanup = () => {}
       if (!cancelled) run(point, true)
     }
@@ -326,9 +317,6 @@ function attachSession(
     const watchedObservers = observers
     cleanup = () => {
       client.off(eventName, onEvent)
-      client.off("resize", onResize)
-      client.off("echo", onResize)
-      client.off("echo-ack", onResize)
       listeners.delete(onClose)
       if (listeners.size === 0) {
         watchedObservers.delete(sessionId)

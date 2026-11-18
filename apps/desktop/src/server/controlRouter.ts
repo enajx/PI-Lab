@@ -72,6 +72,19 @@ function control(ctx: AppContext): ServerControlPort {
   return ctx.server
 }
 
+/** Device management and stopping the server are for the local device ("This Mac") only. */
+function localDeviceOnly(ctx: AppContext): void {
+  if (ctx.connection?.deviceId !== LOCAL_DEVICE_ID) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Only the local device can manage devices and stop the server",
+    })
+  }
+}
+
+/** Requests whose answer is being written now; a second answer meanwhile gets `already-answered`. */
+const answering = new Set<string>()
+
 /** Settings Electron main keeps a copy of. */
 export interface AppSettings {
   keepRunningAfterClose: boolean
@@ -128,12 +141,16 @@ export const serverControlRouter = router({
     create: publicProcedure
       .input(z.object({ name: z.string().trim().min(1) }))
       .output(createdDeviceSchema)
-      .mutation(({ ctx, input }) => control(ctx).runtime.devices.create(input.name)),
+      .mutation(({ ctx, input }) => {
+        localDeviceOnly(ctx)
+        return control(ctx).runtime.devices.create(input.name)
+      }),
     /** Revoke a device: its open connections close and its token is refused from now on. */
     revoke: publicProcedure
       .input(z.object({ id: z.string().min(1) }))
       .output(okSchema)
       .mutation(({ ctx, input }): { ok: true } => {
+        localDeviceOnly(ctx)
         const { devices } = control(ctx).runtime
         if (input.id === LOCAL_DEVICE_ID) {
           throw new TRPCError({ code: "FORBIDDEN", message: "The local device cannot be revoked" })
@@ -151,6 +168,7 @@ export const serverControlRouter = router({
     .input(z.object({ stopAgents: z.boolean() }))
     .output(okSchema)
     .mutation(async ({ ctx, input }): Promise<{ ok: true }> => {
+      localDeviceOnly(ctx)
       const port = control(ctx)
       if (input.stopAgents) await port.runtime.stopAllWork()
       port.exit()
@@ -242,16 +260,19 @@ export const serverControlRouter = router({
   }),
   /**
    * Answer a pending request from any device. The first answer is typed into
-   * the agent's terminal (text and Enter) and the request clears everywhere;
-   * any later answer gets `already-answered` and writes nothing.
+   * the agent's terminal (text and Enter, in bracketed paste when the program
+   * turned it on) and the request clears everywhere once the write succeeded;
+   * any other answer gets `already-answered` and writes nothing. A failed
+   * write leaves the request pending and returns the error.
    */
   answerRequest: publicProcedure
     .input(z.object({ requestId: z.string().min(1), text: z.string() }))
     .output(answerRequestResultSchema)
     .mutation(async ({ ctx, input }): Promise<{ status: "accepted" | "already-answered" }> => {
-      // Taken synchronously, before any await, so two answers can never both get it.
-      const event = control(ctx).runtime.notifications.take(input.requestId)
-      if (!event) return { status: "already-answered" }
+      const { notifications } = control(ctx).runtime
+      // Checked and claimed synchronously, before any await, so two answers can never both write.
+      const event = notifications.pending(input.requestId)
+      if (!event || answering.has(input.requestId)) return { status: "already-answered" }
       const target = event.request.target
       if (target.type !== "agent") {
         throw new TRPCError({
@@ -259,8 +280,14 @@ export const serverControlRouter = router({
           message: `Request ${input.requestId} is not an agent request`,
         })
       }
-      const daemon = await ctx.getDaemonClient()
-      await daemon.write(target.sessionId, `${input.text}\r`)
+      answering.add(input.requestId)
+      const written = (async () => {
+        const daemon = await ctx.getDaemonClient()
+        ctx.activityMonitor.userInput(target.sessionId, `${input.text}\r`)
+        await daemon.writeMessage(target.sessionId, input.text)
+      })()
+      await written.finally(() => answering.delete(input.requestId))
+      notifications.take(input.requestId)
       return { status: "accepted" }
     }),
   notificationHistory: publicProcedure

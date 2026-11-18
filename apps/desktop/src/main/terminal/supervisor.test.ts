@@ -221,6 +221,26 @@ describe("explicit Quit", () => {
     }
   })
 
+  test("a daemon that never answers list leaves no open sockets after repeated connect attempts", async () => {
+    // Accepts connections and reads requests, never answers.
+    const silent = createServer((socket) => socket.resume())
+    await new Promise<void>((resolve) => silent.listen(socketPath, resolve))
+    try {
+      supervisor = new TerminalSupervisor({ socketPath, spawnTimeoutMs: 100 })
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await expect(supervisor.ensureClient()).rejects.toThrow(/did not answer/)
+      }
+      await vi.waitFor(async () => {
+        const open = await new Promise<number>((resolve, reject) =>
+          silent.getConnections((error, count) => (error ? reject(error) : resolve(count))),
+        )
+        expect(open).toBe(0)
+      })
+    } finally {
+      await new Promise((resolve) => silent.close(resolve))
+    }
+  })
+
   test("shutdownDaemon stops a daemon it is still starting", async () => {
     // A daemon that starts listening only after Quit has begun.
     const entry = join(socketDir, "slow-daemon.js")

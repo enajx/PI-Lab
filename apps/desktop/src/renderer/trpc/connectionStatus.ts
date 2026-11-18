@@ -13,8 +13,10 @@ export const DISCONNECTED_AFTER_MS = 10_000
  * The state of this client's server sockets (calls and terminal output),
  * driven by the WebSocket clients' open and close events. The worst socket
  * wins: any socket down means Reconnecting, and Disconnected once one has been
- * down for {@link DISCONNECTED_AFTER_MS}. A socket that never opened counts as
- * down since it was created.
+ * down for {@link DISCONNECTED_AFTER_MS}. A socket that is still making its
+ * first connection does not count as down (the terminal socket is created
+ * lazily, when the first terminal opens); a socket counts as down once it
+ * closes, whether it was open or its first connection failed.
  */
 export class ConnectionStatus {
   readonly #downSince = new Map<string, number | null>()
@@ -24,9 +26,9 @@ export class ConnectionStatus {
   #timer: ReturnType<typeof setTimeout> | null = null
   #state: ConnectionState = "connected"
 
-  /** A socket was created and is connecting. */
+  /** A socket was created and is making its first connection. */
   socketCreated(name: string): void {
-    this.#downSince.set(name, Date.now())
+    this.#downSince.set(name, null)
     this.#update()
   }
 

@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
-import { pipeline, Readable } from "node:stream"
+import { type Duplex, pipeline, Readable } from "node:stream"
 import { applyWSSHandler } from "@trpc/server/adapters/ws"
 import { type WebSocket, WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
@@ -193,15 +193,20 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
     }
     return entry
   }
+  /** The device of each open socket, set at upgrade. */
+  const devices = new WeakMap<WebSocket, string>()
   const handler = applyWSSHandler({
     wss,
     router: serverRouter,
     createContext: ({ res }) => {
+      const deviceId = devices.get(res)
+      if (!deviceId) throw new Error("WebSocket without an authenticated device")
       const outputFlow = new ConnectionFlow()
       const entry = statsFor(res, outputFlow)
       return {
         ...options.createContext(),
         connection: {
+          deviceId,
           queuedBytes: () => {
             const queued = res.bufferedAmount
             if (entry) entry.peakQueuedBytes = Math.max(entry.peakQueuedBytes, queued)
@@ -232,7 +237,7 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
       },
     )
   })
-  http.on("upgrade", (request, socket, head) => {
+  const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname
     const deviceId = path === "/trpc" ? options.access.authenticate(queryToken(request)) : null
     if (!deviceId) {
@@ -241,11 +246,29 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
       return
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
-      // A revoked device loses its open sockets at once (1008: policy violation).
-      const forget = options.access.track(deviceId, () => ws.close(1008, "Device token revoked"))
+      devices.set(ws, deviceId)
+      // A revoked device loses its open sockets at once: the close frame
+      // (1008: policy violation), then the socket ends, so no later message
+      // from it is read.
+      const forget = options.access.track(deviceId, () => {
+        ws.close(1008, "Device token revoked")
+        ws.terminate()
+      })
       ws.once("close", forget)
       wss.emit("connection", ws, request)
     })
+  }
+  http.on("upgrade", (request, socket, head) => {
+    // An unexpected error here would otherwise end the server process.
+    Promise.resolve()
+      .then(() => upgrade(request, socket, head))
+      .catch((error: unknown) => {
+        console.error("[pi-lab server] WebSocket upgrade failed:", error)
+        if (!socket.destroyed) {
+          socket.write("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n")
+          socket.destroy()
+        }
+      })
   })
   return new Promise((resolve, reject) => {
     http.once("error", reject)

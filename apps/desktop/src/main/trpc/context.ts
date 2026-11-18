@@ -100,6 +100,8 @@ export interface AppContext {
 
 /** One client's WebSocket, as the routers see it. */
 export interface ClientConnection {
+  /** The device whose token opened this WebSocket (see server/devices.ts). */
+  deviceId: string
   /** Bytes queued to send to this client and not yet written to the network. */
   queuedBytes: () => number
   /** The server stopped terminal output to this client because its queue was over the limit. */

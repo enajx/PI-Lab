@@ -2,7 +2,6 @@
 // client connection: sessions keep running while no one is attached, and a
 // reconnecting client resumes from its offset or starts from a screen snapshot.
 
-import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import termiosAddon from "@pi-lab/pty-termios"
 import { type IPty, spawn } from "node-pty"
@@ -22,9 +21,13 @@ const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
 
 /**
  * Reads the ECHO bit of a PTY's termios (`tcgetattr` on the master fd, under
- * 1 µs). Windows has no termios, so there the flag is taken as always on.
+ * 1 µs) and turns on IUTF8. Windows has no termios, so there the flag is
+ * taken as always on.
  */
-const termios: { localFlags(fd: number): InputFlags } | null = termiosAddon
+const termios = termiosAddon
+
+/** What a failed flag read is taken as: a hidden prompt, so no client predicts. */
+const UNREADABLE_FLAGS: InputFlags = { echo: false, icanon: true }
 
 /** Typists remembered per session (oldest forgotten first). */
 const TYPIST_LIMIT = 64
@@ -118,8 +121,8 @@ class Session {
   private readonly listeners = new Set<SessionListener>()
   /** The PTY's ECHO flag as last read. */
   private echoFlag: InputFlags = { echo: true, icanon: true }
-  /** Set once reading the flag failed (logged); the flag then stays as it was. */
-  private echoUnreadable = false
+  /** Set once a failed flag read was logged, so it is logged once per session. */
+  private echoErrorLogged = false
   private readonly typists = new Map<string, Typist>()
 
   constructor(
@@ -153,7 +156,16 @@ class Session {
     })
 
     this.processGroupId = this.pty.pid
-    if (process.platform !== "win32") setUtf8LineEditing(this.pty)
+    if (termios !== null) {
+      // node-pty sets IUTF8 only for `encoding: "utf8"`. Raw-byte output leaves
+      // it off, so a program reading cooked-mode lines would erase one byte of
+      // a non-ASCII character.
+      const failed = termios.setUtf8(this.masterFd())
+      if (failed !== null) {
+        this.pty.kill("SIGKILL")
+        throw new Error(`cannot turn on UTF-8 line editing (IUTF8) for the new PTY: ${failed}`)
+      }
+    }
     this.echoFlag = this.readEcho()
 
     this.pty.onData((data) => {
@@ -246,24 +258,29 @@ class Session {
     return this.echoFlag
   }
 
-  /**
-   * Read the ECHO flag from the PTY master. A failed read (the PTY is closing)
-   * is logged once; the last value is kept.
-   */
-  private readEcho(): InputFlags {
-    if (termios === null || this.echoUnreadable || this.disposed || !this.alive)
-      return this.echoFlag
+  /** The PTY master fd, which node-pty keeps in `fd` (not in its public type). */
+  private masterFd(): number {
     const fd = (this.pty as IPty & { fd?: number }).fd
     if (typeof fd !== "number") throw new Error("node-pty did not expose the PTY master fd")
-    try {
-      return termios.localFlags(fd)
-    } catch (error) {
-      this.echoUnreadable = true
+    return fd
+  }
+
+  /**
+   * Read the ECHO and ICANON flags from the PTY master. A failed read (the
+   * PTY is closing) counts as a hidden prompt for that read, so no client
+   * predicts; the first failure is logged.
+   */
+  private readEcho(): InputFlags {
+    if (termios === null || this.disposed || !this.alive) return this.echoFlag
+    const flags = termios.localFlags(this.masterFd())
+    if (!("error" in flags)) return flags
+    if (!this.echoErrorLogged) {
+      this.echoErrorLogged = true
       console.warn(
-        `[pty-daemon] session ${this.id}: cannot read the ECHO and ICANON flags (${error instanceof Error ? error.message : String(error)}); keeping ${JSON.stringify(this.echoFlag)}`,
+        `[pty-daemon] session ${this.id}: cannot read the ECHO and ICANON flags (${flags.error}); taken as a hidden prompt (no predictions)`,
       )
-      return this.echoFlag
     }
+    return UNREADABLE_FLAGS
   }
 
   private setEcho(flags: InputFlags, offset: number): void {
@@ -472,17 +489,4 @@ export class SessionStore {
     }
     this.sessions.clear()
   }
-}
-
-/**
- * node-pty sets the IUTF8 terminal flag only for `encoding: "utf8"`. Raw-byte
- * output (`encoding: null`) leaves it off, so a program reading cooked-mode
- * lines would erase one byte of a non-ASCII character. Turn it on with `stty`
- * on the PTY's own device right after spawn.
- */
-function setUtf8LineEditing(pty: IPty): void {
-  const device = (pty as IPty & { ptsName?: string }).ptsName
-  if (!device) throw new Error("node-pty did not report the PTY device name")
-  const flag = process.platform === "darwin" ? "-f" : "-F"
-  execFileSync("/bin/stty", [flag, device, "iutf8"], { stdio: "ignore" })
 }
