@@ -856,3 +856,50 @@ test("with the server not answering, Quit still opens its dialog and Stop Server
     await rm(dataDir, { recursive: true, force: true })
   }
 })
+
+/** The app and server are real; the server is paused with SIGSTOP. */
+test("a logout-style quit with the server not answering still quits the app", async () => {
+  test.skip(process.platform === "win32", "Pauses the server with SIGSTOP")
+  test.setTimeout(60_000)
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-logout-unreachable-"))
+  let app: ElectronApplication | null = null
+  let serverPid = 0
+  try {
+    app = await electron.launch({
+      executablePath: packagedBinary ?? electronPath,
+      args: launchArgs,
+      env: {
+        ...process.env,
+        PI_LAB_TEST_MODE: "1",
+        PI_LAB_TEST_FIRST_RUN: "1",
+        PI_LAB_TEST_RETAIN_SERVER: "1",
+        PI_LAB_DATA_DIR: dataDir,
+        PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      },
+    })
+    const window = await app.firstWindow()
+    await window.getByRole("button", { name: "Skip setup" }).first().click()
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    serverPid = readServerDiscovery(dataDir)?.pid ?? 0
+    expect(processAlive(serverPid)).toBe(true)
+    process.kill(serverPid, "SIGSTOP")
+    // macOS logout, restart and shutdown reach the app as this same app.quit().
+    const closed = app.waitForEvent("close")
+    const asked = Date.now()
+    await app.evaluate(({ app }) => {
+      setImmediate(() => app.quit())
+    })
+    await closed
+    app = null
+    expect(Date.now() - asked).toBeLessThan(20_000)
+  } finally {
+    if (serverPid && processAlive(serverPid)) process.kill(serverPid, "SIGCONT")
+    if (app) {
+      const closed = (app as ElectronApplication).waitForEvent("close")
+      ;(app as ElectronApplication).process().kill("SIGKILL")
+      await closed
+    }
+    await stopServerIn(dataDir)
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})
