@@ -1388,5 +1388,13 @@
   "Only while PI Lab is open": "仅在 PI Lab 打开时",
   "Off (client only)": "关闭（仅客户端）",
   "Default machine": "默认机器",
-  "Where New project creates a project unless you choose another machine.": "除非你选择其他机器，新建项目会在这里创建项目。"
+  "Where New project creates a project unless you choose another machine.": "除非你选择其他机器，新建项目会在这里创建项目。",
+  "Download…": "下载…",
+  "Upload…": "上传…",
+  "Downloaded to ": "已下载到 ",
+  "Uploaded files: ": "已上传文件：",
+  "Skipped: ": "已跳过：",
+  "Uploading…": "正在上传…",
+  "Downloading…": "正在下载…",
+  "Upload files from this Mac into ": "从这台 Mac 上传文件到 "
 }

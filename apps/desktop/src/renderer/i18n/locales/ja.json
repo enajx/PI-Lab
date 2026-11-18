@@ -1388,5 +1388,13 @@
   "Only while PI Lab is open": "PI Lab を開いている間のみ",
   "Off (client only)": "オフ（クライアントのみ）",
   "Default machine": "デフォルトのマシン",
-  "Where New project creates a project unless you choose another machine.": "別のマシンを選ばない場合に、新規プロジェクトがプロジェクトを作成する場所。"
+  "Where New project creates a project unless you choose another machine.": "別のマシンを選ばない場合に、新規プロジェクトがプロジェクトを作成する場所。",
+  "Download…": "ダウンロード…",
+  "Upload…": "アップロード…",
+  "Downloaded to ": "ダウンロード先: ",
+  "Uploaded files: ": "アップロードしたファイル: ",
+  "Skipped: ": "スキップ: ",
+  "Uploading…": "アップロード中…",
+  "Downloading…": "ダウンロード中…",
+  "Upload files from this Mac into ": "この Mac からファイルをアップロード: "
 }

@@ -15,6 +15,7 @@ import { createIPCHandler } from "trpc-electron/main"
 import { readDiscovery, readMachineId, TOKEN_HEADER } from "../server/access"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
+import { splitGrantHost } from "../shared/machineUrls"
 import type { QuickEditTarget } from "../shared/quickEdit"
 import { createDesktopRouter, desktopContext } from "./desktop/desktopRouter"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
@@ -28,6 +29,7 @@ import {
   type RemoteAccess,
 } from "./machines/machineConnections"
 import { localServerAtStart } from "./machines/machineStore"
+import { PortForwards } from "./machines/portForwards"
 import { findServerBundle, type ServerBundleFiles } from "./machines/serverBundle"
 import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
 import { stopNotebooksWithWindow } from "./notebooks/notebookServers"
@@ -105,6 +107,8 @@ export class DesktopRuntime {
   private readonly unsubscribers: Array<() => void> = []
   private connecting: Promise<void> | null = null
   private machineConnections: MachineConnections | null = null
+  /** Forwards to notebook servers on remote machines (created with the machines). */
+  private portForwards: PortForwards | null = null
 
   constructor(private readonly host: DesktopRuntimeHost) {
     this.ready = new Promise((resolve, reject) => {
@@ -129,6 +133,12 @@ export class DesktopRuntime {
   machines(): MachineConnections {
     if (!this.machineConnections) throw new Error("Machines are not loaded yet")
     return this.machineConnections
+  }
+
+  /** Local forwards to ports on remote machines; created in start(). */
+  forwards(): PortForwards {
+    if (!this.portForwards) throw new Error("Machines are not loaded yet")
+    return this.portForwards
   }
 
   /** The renderer's server address and token (asked over IPC by the preload). */
@@ -176,6 +186,7 @@ export class DesktopRuntime {
         server: () => this.server(),
         rendererEndpoint: () => this.rendererEndpoint(),
         machines: () => this.machines(),
+        forwards: () => this.forwards(),
       }),
       windows: [window],
       createContext: async () => desktopContext(this.brokers),
@@ -210,8 +221,21 @@ export class DesktopRuntime {
       ;(globalThis as { piLabTestMachines?: MachineConnections }).piLabTestMachines =
         this.machineConnections
     }
+    const machines = this.machineConnections
+    const forwards = new PortForwards(
+      remoteAccess(),
+      (machineId) => {
+        const machine = machines.list().find((entry) => entry.machineId === machineId)
+        if (!machine) throw new Error(`No machine ${machineId}`)
+        return machine.sshHost
+      },
+      (message) => console.log(message),
+    )
+    this.portForwards = forwards
+    // Notebook servers on another machine show here through a forwarded local port.
     installNotebookFrameHeaders(
-      (port) => port >= NOTEBOOK_PORTS.start && port <= NOTEBOOK_PORTS.end,
+      (port) =>
+        (port >= NOTEBOOK_PORTS.start && port <= NOTEBOOK_PORTS.end) || forwards.isForwarded(port),
       isAppPageUrl,
     )
     const window = this.host.initialWindow()
@@ -370,20 +394,26 @@ export class DesktopRuntime {
   /**
    * Analysis reports and media stream from the server through the same token.
    * A request that cannot reach the server checks the endpoint again and is
-   * sent once more (the server may have restarted on another port).
+   * sent once more (the server may have restarted on another port). A host
+   * `<token>.<machineId>` is a grant of that machine's server, reached through
+   * its tunnel (shared/machineUrls.ts).
    */
   private installSchemeForwarding(): void {
     for (const scheme of [REPORT_SCHEME, MEDIA_SCHEME]) {
       session.defaultSession.protocol.handle(scheme, async (request) => {
         await this.ready
         const url = new URL(request.url)
+        const { token: grant, machineId } = splitGrantHost(url.host)
         const headers: Record<string, string> = {}
         const range = request.headers.get("range")
         if (range) headers.range = range
         const forward = async () => {
-          const endpoint = await this.currentEndpoint()
+          const endpoint =
+            machineId === null
+              ? await this.currentEndpoint()
+              : await this.machines().httpEndpoint(machineId)
           return net.fetch(
-            `http://127.0.0.1:${endpoint.port}/scheme/${scheme}/${url.host}${url.pathname}`,
+            `http://127.0.0.1:${endpoint.port}/scheme/${scheme}/${grant}${url.pathname}`,
             { headers: { ...headers, [TOKEN_HEADER]: endpoint.token }, redirect: "error" },
           )
         }
@@ -493,6 +523,7 @@ export class DesktopRuntime {
   async dispose(): Promise<void> {
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe()
     await this.machineConnections?.close()
+    await this.portForwards?.close()
     if (isTestMode && process.env.PI_LAB_TEST_RETAIN_SERVER !== "1") await this.stopTestServer()
     const connection = this.serverClient
     connection?.close()

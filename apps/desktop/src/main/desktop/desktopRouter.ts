@@ -1,9 +1,13 @@
+import { basename, join } from "node:path"
 import { TRPCError } from "@trpc/server"
-import { clipboard, shell } from "electron"
+import { app, BrowserWindow, clipboard, dialog, shell } from "electron"
 import { z } from "zod"
 import { electronMicrophone } from "../dictation/electronMicrophone"
+import { nativeText } from "../i18n/nativeLanguage"
 import type { MachineConnections } from "../machines/machineConnections"
 import { behindPolicySchema, localServerModeSchema } from "../machines/machineStore"
+import type { PortForwards } from "../machines/portForwards"
+import { downloadEntry, uploadEntries } from "../machines/transfers"
 import type { NotificationBrokers } from "../notifications"
 import type { ServerClient } from "../server/client"
 import type { AppContext } from "../trpc/context"
@@ -19,6 +23,8 @@ export interface DesktopRouterDependencies {
   rendererEndpoint: () => Promise<{ url: string }>
   /** Remote machines this app connects to. */
   machines: () => MachineConnections
+  /** Local forwards to notebook servers on remote machines. */
+  forwards: () => PortForwards
 }
 
 /**
@@ -77,6 +83,86 @@ export function createDesktopRouter(deps: DesktopRouterDependencies) {
         setDefaultMachine: publicProcedure
           .input(z.object({ machineId: z.string().min(1).nullable() }))
           .mutation(({ input }) => deps.machines().setDefaultMachine(input.machineId)),
+        /**
+         * The local port that reaches `port` on the machine's 127.0.0.1 (a
+         * notebook or marimo server its PI Lab server started), for a frame here.
+         */
+        forwardPort: publicProcedure
+          .input(
+            z.object({ machineId: z.string().min(1), port: z.number().int().min(1).max(65_535) }),
+          )
+          .mutation(
+            async ({ input }): Promise<{ localPort: number }> => ({
+              localPort: await deps.forwards().localPort(input.machineId, input.port),
+            }),
+          ),
+        /**
+         * Download a file or folder of a project on the machine: a save dialog
+         * picks where on this Mac. `savedTo` is null when the user cancels.
+         */
+        download: publicProcedure
+          .input(z.object({ machineId: z.string().min(1) }).merge(workspaceEntry))
+          .mutation(async ({ input }): Promise<{ savedTo: string | null }> => {
+            const options = {
+              defaultPath: join(app.getPath("downloads"), basename(input.relPath)),
+              properties: ["createDirectory" as const],
+            }
+            const parent = dialogParent()
+            const chosen = parent
+              ? await dialog.showSaveDialog(parent, options)
+              : await dialog.showSaveDialog(options)
+            if (chosen.canceled || !chosen.filePath) return { savedTo: null }
+            const endpoint = await deps.machines().httpEndpoint(input.machineId)
+            await downloadEntry(endpoint, input, chosen.filePath)
+            return { savedTo: chosen.filePath }
+          }),
+        /**
+         * Upload files and folders from this Mac into a folder ("" is the root)
+         * of a project on the machine: `paths` (dragged in), or null to pick them
+         * in an open dialog. Each file that exists there asks Replace or Skip.
+         */
+        upload: publicProcedure
+          .input(
+            z.object({
+              machineId: z.string().min(1),
+              workspaceId: z.string().min(1),
+              folderRelPath: z.string(),
+              paths: z.array(z.string().min(1)).nullable(),
+            }),
+          )
+          .mutation(async ({ input }): Promise<{ uploaded: string[]; skipped: string[] }> => {
+            const parent = dialogParent()
+            let paths = input.paths
+            if (paths === null) {
+              const options = {
+                properties: [
+                  "openFile" as const,
+                  "openDirectory" as const,
+                  "multiSelections" as const,
+                ],
+              }
+              const chosen = parent
+                ? await dialog.showOpenDialog(parent, options)
+                : await dialog.showOpenDialog(options)
+              if (chosen.canceled) return { uploaded: [], skipped: [] }
+              paths = chosen.filePaths
+            }
+            const endpoint = await deps.machines().httpEndpoint(input.machineId)
+            return uploadEntries(endpoint, input, paths, async (relPath) => {
+              const options = {
+                type: "question" as const,
+                buttons: [nativeText("Replace"), nativeText("Skip")],
+                defaultId: 1,
+                cancelId: 1,
+                message: nativeText("This file already exists on the other machine. Replace it?"),
+                detail: relPath,
+              }
+              const answer = parent
+                ? await dialog.showMessageBox(parent, options)
+                : await dialog.showMessageBox(options)
+              return answer.response === 0
+            })
+          }),
       }),
     }),
     system: systemRouter,
@@ -146,6 +232,11 @@ async function openTarget(target: OpenTargetResult) {
   const error = await shell.openPath(target.path)
   if (error) return { ok: false as const, reason: "error" as const, message: error }
   return { ok: true as const }
+}
+
+/** The window native dialogs attach to. */
+function dialogParent(): BrowserWindow | undefined {
+  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
 }
 
 export type DesktopRouter = ReturnType<typeof createDesktopRouter>

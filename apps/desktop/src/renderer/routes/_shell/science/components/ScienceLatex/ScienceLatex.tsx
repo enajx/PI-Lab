@@ -7,6 +7,8 @@ import { EdgeResizeHandle } from "../../../../../components/EdgeResizeHandle"
 import { headerIconButtonClass } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../../i18n/language"
+import { useMachineScope } from "../../../../../machines/machines"
+import { projectRoute } from "../../../../../machines/projectRoute"
 import {
   RESEARCH_DIARY_MAX_WIDTH,
   RESEARCH_DIARY_MIN_WIDTH,
@@ -73,16 +75,23 @@ export function ScienceLatex({
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
   const [savedProjectId, setSavedProjectId] = useCurrentProject()
   const navigate = useNavigate()
+  // A project of another machine: the address keeps its machine.
+  const machineId = useMachineScope()?.machineId ?? null
+  const machineSearch = machineId ? { machineId } : {}
   // The picker always wins over a project in the address: it makes the
   // choice current and replaces the address (dropping any agent to focus).
   // New paper… in the picker goes in the address, so opening any project afterwards clears it.
   const chooseProject = (projectId: string): void => {
     if (projectId === NEW_PAPER) {
-      void navigate({ to: "/science/latex", search: { newPaper: true }, replace: true })
+      void navigate({
+        to: "/science/latex",
+        search: { ...machineSearch, newPaper: true },
+        replace: true,
+      })
       return
     }
     setSavedProjectId(projectId)
-    void navigate({ to: "/science/latex", search: { projectId }, replace: true })
+    void navigate({ to: "/science/latex", search: { ...machineSearch, projectId }, replace: true })
   }
 
   // A project chosen from a dashboard card wins and becomes the current one.
@@ -266,7 +275,7 @@ export function ScienceLatex({
               width={diaryRow.width}
               onOpenFile={(relPath) => {
                 setPendingOpenFile(selected.id, relPath)
-                void navigate({ to: "/projects/$projectId", params: { projectId: selected.id } })
+                void navigate(projectRoute(machineId, selected.id))
               }}
             />
           )}

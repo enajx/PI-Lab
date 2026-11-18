@@ -1,5 +1,6 @@
-import { createTRPCClient, splitLink, type TRPCLink } from "@trpc/client"
+import { createTRPCClient, splitLink, TRPCClientError, type TRPCLink } from "@trpc/client"
 import type { AnyRouter } from "@trpc/server"
+import { observable } from "@trpc/server/observable"
 import { ipcLink } from "trpc-electron/renderer"
 import type { DesktopRouter } from "../../main/desktop/desktopRouter"
 import type { AppRouter } from "../../main/trpc/appRouter"
@@ -97,7 +98,49 @@ export function createPiLabTrpcClient() {
   return createTrpcClientOver(sharedServerSockets())
 }
 
-/** A client like {@link createPiLabTrpcClient} whose server calls go over `sockets` (a remote machine's). */
+/**
+ * Electron-side calls that act on this Mac's server and Finder (see
+ * shared/desktopPaths.ts). For a project on another machine they would ask
+ * the wrong server, so a machine's client refuses them with a clear error
+ * (the views hide these actions there).
+ */
+const THIS_MAC_FILE_PATHS = [
+  "files.reveal",
+  "files.copyPath",
+  "documents.openInBrowser",
+  "notebooks.openInBrowser",
+]
+
+function refuseThisMacFilePaths(): TRPCLink<AppRouter> {
+  return () =>
+    ({ op, next }) => {
+      if (!THIS_MAC_FILE_PATHS.includes(op.path)) return next(op)
+      return observable((observer) => {
+        observer.error(
+          TRPCClientError.from(
+            new Error(`${op.path} is not available for a project on another machine`),
+          ),
+        )
+      })
+    }
+}
+
+/** The tRPC client of a remote machine: its server calls go over that machine's `sockets`. */
+export function createMachineTrpcClient(sockets: ServerSockets<AppRouter>) {
+  return createTRPCClient<AppRouter>({
+    links: [
+      uniqueRequestIds<AppRouter>(),
+      refuseThisMacFilePaths(),
+      splitLink({
+        condition: (op) => isDesktopPath(op.path),
+        true: ipcLink(),
+        false: sockets.link,
+      }),
+    ],
+  })
+}
+
+/** A client like {@link createPiLabTrpcClient} whose server calls go over `sockets`. */
 export function createTrpcClientOver(sockets: ServerSockets<AppRouter>) {
   return createTrpcClientWith(sockets.link)
 }

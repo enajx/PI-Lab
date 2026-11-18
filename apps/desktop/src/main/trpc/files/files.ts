@@ -120,7 +120,7 @@ export interface FileSearchResult {
 }
 
 /** Fetch a workspace row or throw a clean NOT_FOUND. */
-function requireWorkspace(db: PiLabDatabase, workspaceId: string): Workspace {
+export function requireWorkspace(db: PiLabDatabase, workspaceId: string): Workspace {
   const row = db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).get()
   if (!row) {
     throw new TRPCError({ code: "NOT_FOUND", message: `No workspace ${workspaceId}` })
@@ -500,8 +500,11 @@ function nodeErrorCode(error: unknown): string | undefined {
   return typeof code === "string" ? code : undefined
 }
 
-/** Resolve a workspace entry for Reveal in Finder; refuses paths outside the workspace. */
-async function revealTarget(ctx: AppContext, input: z.infer<typeof readInput>): Promise<string> {
+/** Resolve an existing workspace entry (Reveal in Finder, Download); refuses paths outside the workspace. */
+export async function revealTarget(
+  ctx: AppContext,
+  input: z.infer<typeof readInput>,
+): Promise<string> {
   const workspace = requireWorkspace(ctx.db, input.workspaceId)
   const base = await realpath(workspaceWorkingDir(ctx.db, workspace))
   const target = await realpath(resolveInsideDir(base, input.relPath))

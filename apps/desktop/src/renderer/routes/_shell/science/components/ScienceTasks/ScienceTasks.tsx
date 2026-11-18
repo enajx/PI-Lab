@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { HeaderShortcuts } from "../../../../../components/HeaderShortcuts/HeaderShortcuts"
 import { ProjectMarkdownChoice } from "../../../../../components/ProjectMarkdownChoice"
 import { useTranslate } from "../../../../../i18n/language"
+import { useMachineScope } from "../../../../../machines/machines"
+import { projectRoute } from "../../../../../machines/projectRoute"
 import {
   readDefaultAgentId,
   useSciencePanelWidth,
@@ -53,12 +55,15 @@ export function ScienceTasks({
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [savedProjectId, setSavedProjectId] = useTasksProject()
+  // A project of another machine: the address keeps its machine.
+  const machineId = useMachineScope()?.machineId ?? null
+  const machineSearch = machineId ? { machineId } : {}
   // The picker makes the choice current and replaces the address ("" = All projects).
   const chooseProject = (projectId: string): void => {
     setSavedProjectId(projectId)
     void navigate({
       to: "/science/tasks",
-      search: projectId ? { projectId } : {},
+      search: projectId ? { ...machineSearch, projectId } : machineSearch,
       replace: true,
     })
   }
@@ -219,7 +224,7 @@ export function ScienceTasks({
       wsKind: result.kind,
       launch: { type: "agent", agentId, workspaceMode: "main" },
     })
-    await navigate({ to: "/projects/$projectId", params: { projectId: task.projectId } })
+    await navigate(projectRoute(machineId, task.projectId))
   }
 
   return (

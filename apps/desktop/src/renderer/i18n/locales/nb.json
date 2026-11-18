@@ -1388,5 +1388,13 @@
   "Only while PI Lab is open": "Bare mens PI Lab er åpen",
   "Off (client only)": "Av (bare klient)",
   "Default machine": "Standardmaskin",
-  "Where New project creates a project unless you choose another machine.": "Hvor Nytt prosjekt oppretter et prosjekt hvis du ikke velger en annen maskin."
+  "Where New project creates a project unless you choose another machine.": "Hvor Nytt prosjekt oppretter et prosjekt hvis du ikke velger en annen maskin.",
+  "Download…": "Last ned…",
+  "Upload…": "Last opp…",
+  "Downloaded to ": "Lastet ned til ",
+  "Uploaded files: ": "Opplastede filer: ",
+  "Skipped: ": "Hoppet over: ",
+  "Uploading…": "Laster opp…",
+  "Downloading…": "Laster ned…",
+  "Upload files from this Mac into ": "Last opp filer fra denne Mac-en til "
 }

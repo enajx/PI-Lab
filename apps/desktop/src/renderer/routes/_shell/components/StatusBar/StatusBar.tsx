@@ -1,6 +1,6 @@
 import { cn } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
-import { useParams } from "@tanstack/react-router"
+import { useParams, useSearch } from "@tanstack/react-router"
 import { Bot, Coffee, FileText, FolderGit2, GitBranch, Server } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
 import { useCaffeine } from "../../../../caffeine"
@@ -70,15 +70,17 @@ function Item({
 export function StatusBar() {
   const t = useTranslate()
   const projectId = useViewProject()
-  // A remote machine's project view: its project and branch come from that machine.
+  // A remote machine's project view (route param) or Tasks, Analysis or LaTeX
+  // view (search value): its project and branch come from that machine.
   const params = useParams({ strict: false }) as { machineId?: string }
+  const search = useSearch({ strict: false }) as { machineId?: string }
   return (
     <footer
       data-testid="window-status-bar"
       className="flex h-6 shrink-0 select-none items-center gap-4 bg-sidebar px-3 text-[11px] text-muted-foreground"
     >
       {projectId ? (
-        <MachineScope machineId={params.machineId ?? null}>
+        <MachineScope machineId={params.machineId ?? search.machineId ?? null}>
           <ProjectItems projectId={projectId} />
         </MachineScope>
       ) : null}

@@ -10,6 +10,8 @@ import {
   type TreeMenuState,
 } from "../../../../../../../Editor/components/FileTree/FileTreeManage"
 import { useTranslate } from "../../../../../../../i18n/language"
+import { useMachineScope } from "../../../../../../../machines/machines"
+import { useCopyPath } from "../../../../../../../machines/useCopyPath"
 import { useTRPC } from "../../../../../../../trpc/react"
 
 /**
@@ -47,7 +49,8 @@ export function AnalysisFileMenu({
     void queryClient.invalidateQueries({ queryKey: trpc.science.analysis.listFiles.queryKey() })
   const report = (cause: { message: string }) => setError(cause.message)
   const reveal = useMutation(trpc.files.reveal.mutationOptions({ onError: report }))
-  const copyPath = useMutation(trpc.files.copyPath.mutationOptions({ onError: report }))
+  const copyPath = useCopyPath(report)
+  const onAnotherMachine = useMachineScope() !== null
   const duplicate = useMutation(
     trpc.files.duplicate.mutationOptions({ onError: report, onSuccess: relist }),
   )
@@ -93,8 +96,10 @@ export function AnalysisFileMenu({
           // Folders are not listed in Analysis menus, so there is nothing to create in.
           onNewFile: () => undefined,
           onNewFolder: () => undefined,
-          onReveal: (entry) =>
-            withWorkspace((id) => reveal.mutate({ workspaceId: id, relPath: entry.relPath })),
+          onReveal: onAnotherMachine
+            ? undefined
+            : (entry) =>
+                withWorkspace((id) => reveal.mutate({ workspaceId: id, relPath: entry.relPath })),
           onCopyPath: (entry, form) =>
             withWorkspace((id) =>
               copyPath.mutate({ workspaceId: id, relPath: entry.relPath, form }),

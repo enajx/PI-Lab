@@ -1388,5 +1388,13 @@
   "Only while PI Lab is open": "PI Lab이 열려 있는 동안만",
   "Off (client only)": "끔 (클라이언트 전용)",
   "Default machine": "기본 머신",
-  "Where New project creates a project unless you choose another machine.": "다른 머신을 고르지 않으면 새 프로젝트가 만들어지는 곳입니다."
+  "Where New project creates a project unless you choose another machine.": "다른 머신을 고르지 않으면 새 프로젝트가 만들어지는 곳입니다.",
+  "Download…": "다운로드…",
+  "Upload…": "업로드…",
+  "Downloaded to ": "다운로드 위치: ",
+  "Uploaded files: ": "업로드한 파일: ",
+  "Skipped: ": "건너뜀: ",
+  "Uploading…": "업로드 중…",
+  "Downloading…": "다운로드 중…",
+  "Upload files from this Mac into ": "이 Mac의 파일을 다음 위치에 업로드: "
 }

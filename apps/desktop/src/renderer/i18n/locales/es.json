@@ -1388,5 +1388,13 @@
   "Only while PI Lab is open": "Solo mientras PI Lab está abierto",
   "Off (client only)": "Desactivado (solo cliente)",
   "Default machine": "Máquina predeterminada",
-  "Where New project creates a project unless you choose another machine.": "Dónde crea Nuevo proyecto un proyecto si no eliges otra máquina."
+  "Where New project creates a project unless you choose another machine.": "Dónde crea Nuevo proyecto un proyecto si no eliges otra máquina.",
+  "Download…": "Descargar…",
+  "Upload…": "Subir…",
+  "Downloaded to ": "Descargado en ",
+  "Uploaded files: ": "Archivos subidos: ",
+  "Skipped: ": "Omitidos: ",
+  "Uploading…": "Subiendo…",
+  "Downloading…": "Descargando…",
+  "Upload files from this Mac into ": "Subir archivos desde este Mac a "
 }

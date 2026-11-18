@@ -1,11 +1,12 @@
 import { type ChildProcess, execFile, spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { type SshTestServer, startSshTestServer } from "../support/sshTestServer"
+import { openAnalysisExperiment } from "./fixtures/analysis"
 import { headlessServerEnv, startHeadlessServer } from "./fixtures/headlessServer"
 import {
   type ElectronApplication,
@@ -68,11 +69,22 @@ test.beforeEach(async () => {
   remoteData = join(rootDir, "remote")
   await mkdir(localData)
   await mkdir(remoteData)
-  const env = headlessServerEnv({
-    dataDir: remoteData,
-    resourcesDir: join(DESKTOP_DIR, "resources"),
-    serverEntry: SERVER_ENTRY,
-  })
+  // A stand-in uvx on the remote server's PATH starts the stand-in notebook server.
+  const binDir = join(rootDir, "bin")
+  await mkdir(binDir)
+  await writeFile(
+    join(binDir, "uvx"),
+    `#!/bin/sh\nexec "${process.execPath}" "${join(HERE, "fixtures", "notebook-server.cjs")}" "$@"\n`,
+  )
+  await chmod(join(binDir, "uvx"), 0o755)
+  const env = {
+    ...headlessServerEnv({
+      dataDir: remoteData,
+      resourcesDir: join(DESKTOP_DIR, "resources"),
+      serverEntry: SERVER_ENTRY,
+    }),
+    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+  }
   remoteServer = await startHeadlessServer(
     process.execPath,
     [SERVER_ENTRY, remoteData],
@@ -331,7 +343,7 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   await filter.selectOption("")
 
   // Open the remote project and run a terminal on that machine's server.
-  await remoteCard.click()
+  await remoteCard.getByTestId("remote-project-open").click()
   await expect(page).toHaveURL(new RegExp(`#/m/${machineId}/projects/`))
   await page.getByTestId("central-add-menu").click()
   await page.getByTestId("central-add-terminal").click()
@@ -361,6 +373,181 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   // Reconnect: the machine's sockets open again on their own.
   await setMachineStopped(machineId, false)
   await expect(remoteCard).toHaveAttribute("data-offline", "false", { timeout: 30_000 })
+})
+
+test("remote files: browse, search, edit, Download and Upload on another machine; no Finder actions", async () => {
+  test.setTimeout(240_000)
+  const remoteRepo = join(rootDir, "remote-repo")
+  await gitRepo(remoteRepo, "remote.md")
+  await mkdir(join(remoteRepo, "data", "deep"), { recursive: true })
+  await writeFile(join(remoteRepo, "data", "a.csv"), "x,y\n1,2\n")
+  await writeFile(join(remoteRepo, "data", "deep", "b-target.txt"), "deep\n")
+  const remote = connectServer(remoteData)
+  await remote.client.projects.open.mutate({ path: remoteRepo })
+  remote.close()
+  const downloads = join(rootDir, "downloads")
+  await mkdir(downloads)
+  const localFile = join(rootDir, "upload.txt")
+  await writeFile(localFile, "from this Mac\n")
+
+  const page = await launch({})
+  if (!sshd || !app) throw new Error("not started")
+  await addMachine(page, sshd.host, "Lab server")
+  await page.getByTestId("settings-back").click()
+  await page.getByTestId("remote-project-open").click()
+  await expect(page.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+
+  // Search: quick open lists the remote project's files.
+  await page.getByTestId("launcher-file").click()
+  await page.getByTestId("quick-open-input").fill("b-target")
+  await expect(page.getByTestId("quick-open-result")).toHaveCount(1, { timeout: 30_000 })
+  await page.keyboard.press("Escape")
+
+  // Browse and edit: open a remote file, change it, save; the file on the machine changes.
+  await page.getByTestId("panel-tab-files").click()
+  const row = page.getByTestId("file-tree-file").filter({ hasText: "remote.md" })
+  await row.click()
+  const content = page.getByTestId("editor-buffer").locator(".cm-content")
+  await expect(content).toContainText("# fixture", { timeout: 30_000 })
+  await content.click()
+  await page.keyboard.press("ControlOrMeta+End")
+  await page.keyboard.insertText("edited on the Mac\n")
+  await page.keyboard.press("ControlOrMeta+s")
+  await expect
+    .poll(() => readFile(join(remoteRepo, "remote.md"), "utf8"), { timeout: 30_000 })
+    .toContain("edited on the Mac")
+
+  // No Finder action for a file on another machine; Download saves it on this Mac.
+  await row.click({ button: "right" })
+  const menu = page.getByTestId("file-tree-context-menu")
+  await expect(menu.getByTestId("file-tree-download")).toHaveText("Download…")
+  await expect(menu.getByTestId("file-tree-reveal")).toHaveCount(0)
+  await expect(menu.getByTestId("file-tree-copy-path")).toBeVisible()
+  const saveTo = async (path: string) =>
+    app?.evaluate(({ dialog }, chosen) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: chosen })
+    }, path)
+  await saveTo(join(downloads, "remote.md"))
+  await menu.getByTestId("file-tree-download").click()
+  await expect(page.getByTestId("file-tree-transfer")).toContainText(join(downloads, "remote.md"))
+  expect(await readFile(join(downloads, "remote.md"), "utf8")).toContain("edited on the Mac")
+
+  // A folder downloads with everything in it.
+  const folder = page.getByTestId("file-tree-dir").filter({ hasText: "data" })
+  await folder.click({ button: "right" })
+  await expect(menu.getByTestId("file-tree-reveal")).toHaveCount(0)
+  await saveTo(join(downloads, "data"))
+  await menu.getByTestId("file-tree-download").click()
+  await expect(page.getByTestId("file-tree-transfer")).toContainText(join(downloads, "data"))
+  expect(await readFile(join(downloads, "data", "a.csv"), "utf8")).toBe("x,y\n1,2\n")
+  expect(await readFile(join(downloads, "data", "deep", "b-target.txt"), "utf8")).toBe("deep\n")
+
+  // Upload from the folder menu; the tree shows the new file.
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
+  }, localFile)
+  await folder.click({ button: "right" })
+  await menu.getByTestId("file-tree-upload").click()
+  await expect
+    .poll(() => readFile(join(remoteRepo, "data", "upload.txt"), "utf8").catch(() => ""), {
+      timeout: 30_000,
+    })
+    .toBe("from this Mac\n")
+  await expect(page.getByTestId("file-tree-file").filter({ hasText: "upload.txt" })).toBeVisible()
+
+  // Uploading over an existing file asks first; Replace writes the new content.
+  await writeFile(localFile, "second version\n")
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
+  })
+  await folder.click({ button: "right" })
+  await menu.getByTestId("file-tree-upload").click()
+  await expect
+    .poll(() => readFile(join(remoteRepo, "data", "upload.txt"), "utf8"), { timeout: 30_000 })
+    .toBe("second version\n")
+})
+
+test("a notebook of a project on another machine shows in its tab through a forwarded port (stand-in uvx)", async () => {
+  test.setTimeout(180_000)
+  const remoteRepo = join(rootDir, "remote-repo")
+  await gitRepo(remoteRepo, "remote.md")
+  await writeFile(
+    join(remoteRepo, "analysis.ipynb"),
+    JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells: [] }),
+  )
+  const remote = connectServer(remoteData)
+  await remote.client.projects.open.mutate({ path: remoteRepo })
+  remote.close()
+
+  const page = await launch({})
+  if (!sshd) throw new Error("not started")
+  await addMachine(page, sshd.host, "Lab server")
+  await page.getByTestId("settings-back").click()
+  await page.getByTestId("remote-project-open").click()
+  await expect(page.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  await page.getByTestId("panel-tab-files").click()
+  await page.getByTestId("file-tree-file").filter({ hasText: "analysis.ipynb" }).click()
+  await page.getByTestId("editor-open-notebook").click()
+  const frame = page.getByTestId("notebook-frame")
+  await expect(
+    page.frameLocator('[data-testid="notebook-frame"]').locator("#notebook-stand-in"),
+  ).toBeVisible({ timeout: 60_000 })
+  // The frame loads from a local port forwarded over ssh, not the machine's notebook port.
+  const port = Number(new URL((await frame.getAttribute("src")) ?? "").port)
+  expect(port < 42_700 || port > 42_799).toBe(true)
+  await expect(page.getByTestId("notebook-open-browser")).toHaveCount(0)
+  // The stand-in page asks before unloading; PI Lab ignores that at quit, so leave the dialog alone.
+  page.on("dialog", () => undefined)
+})
+
+test("Tasks, Analysis and LaTeX follow a project on another machine; its HTML report streams from there", async () => {
+  test.setTimeout(180_000)
+  const localRepo = join(rootDir, "local-repo")
+  const remoteRepo = join(rootDir, "remote-repo")
+  await gitRepo(localRepo, "local.md")
+  await gitRepo(remoteRepo, "remote.md")
+  await writeFile(join(remoteRepo, "TODO.md"), "# TODO\n\n- [ ] Remote only task\n")
+  await mkdir(join(remoteRepo, "results", "run"), { recursive: true })
+  await writeFile(
+    join(remoteRepo, "results", "run", "report.html"),
+    '<!doctype html><p id="ready">Remote report</p>',
+  )
+  const remote = connectServer(remoteData)
+  await remote.client.projects.open.mutate({ path: remoteRepo })
+  remote.close()
+
+  const page = await launch({ PI_LAB_TEST_OPEN_PROJECT: localRepo })
+  if (!sshd) throw new Error("not started")
+  await addMachine(page, sshd.host, "Lab server")
+  const machineId = (await storedMachines())[0]?.machineId ?? ""
+  await page.getByTestId("settings-back").click()
+  const card = page.getByTestId("remote-project-card")
+  await expect(card).toHaveCount(1, { timeout: 30_000 })
+
+  // Tasks: the remote project's TODO.md.
+  await card.getByTestId("remote-project-tasks").click()
+  await expect(page).toHaveURL(new RegExp(`machineId=${machineId}`))
+  await expect(page.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText("Remote only task")).toBeVisible({ timeout: 30_000 })
+
+  // Analysis: the remote project's files; its HTML report streams through the machine.
+  await page.getByTestId("nav-project-dashboard").first().click()
+  await card.getByTestId("remote-project-analysis").click()
+  await openAnalysisExperiment(page, "run")
+  await page
+    .locator('[data-testid="analysis-file"][data-rel-path="results/run/report.html"]')
+    .click()
+  await expect(
+    page.frameLocator('[data-testid="analysis-preview-html"]').locator("#ready"),
+  ).toHaveText("Remote report", { timeout: 30_000 })
+  const src = (await page.getByTestId("analysis-preview-html").getAttribute("src")) ?? ""
+  expect(new URL(src).host.endsWith(`.${machineId}`)).toBe(true)
+
+  // LaTeX Editor: shows the remote project.
+  await page.getByTestId("nav-project-dashboard").first().click()
+  await card.getByTestId("remote-project-latex").click()
+  await expect(page.getByTestId("science-latex")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId("latex-project-select")).toHaveText("remote-repo")
 })
 
 /** True when a server process for the local data folder runs (its `server.json` pid is alive). */
