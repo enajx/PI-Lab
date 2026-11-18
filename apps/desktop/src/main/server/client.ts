@@ -1,5 +1,4 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client"
-import superjson from "superjson"
 import { WebSocket } from "ws"
 import type { ServerRouter } from "../trpc/serverRouter"
 import type { ServerEndpoint } from "./launcher"
@@ -21,7 +20,7 @@ export function createServerClient(endpoint: () => ServerEndpoint) {
     WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
   })
   const client = createTRPCClient<ServerRouter>({
-    links: [wsLink({ client: socket, transformer: superjson })],
+    links: [wsLink({ client: socket })],
   })
   return { client, close: () => socket.close() }
 }

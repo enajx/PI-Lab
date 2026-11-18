@@ -10,7 +10,13 @@ import {
   runMigrations,
   workspaces,
 } from "@pi-lab/local-db"
-import type { AttachResult, DataEvent, ExitEvent, SessionInfo } from "@pi-lab/pty-daemon"
+import type {
+  AttachResult,
+  DataEvent,
+  ExitEvent,
+  ResumePoint,
+  SessionInfo,
+} from "@pi-lab/pty-daemon"
 import { eq } from "drizzle-orm"
 import { describe, expect, onTestFinished, test } from "vitest"
 import { EventBroker } from "../notifications/broker"
@@ -85,11 +91,16 @@ class FakeDaemon implements ActivityDaemonClient {
 
   async attach(
     sessionId: string,
+    _resume: ResumePoint | null,
     onReplay?: (result: AttachResult) => void,
   ): Promise<AttachResult> {
-    const result = {
+    const result: AttachResult = {
       session: this.session(sessionId),
-      scrollback: this.scrollback,
+      generation: "test-generation",
+      revision: 0,
+      cols: 80,
+      rows: 24,
+      start: { mode: "snapshot", offset: 0, screen: this.scrollback, bytes: Buffer.alloc(0) },
     }
     onReplay?.(result)
     this.afterReplay?.(sessionId)
@@ -113,7 +124,13 @@ class FakeDaemon implements ActivityDaemonClient {
 
   emitSessionScreen(sessionId: string, screen: string): void {
     for (const listener of this.dataListeners) {
-      listener({ kind: "data", sessionId, chunk: screen })
+      listener({
+        kind: "data",
+        sessionId,
+        generation: "test-generation",
+        offset: 0,
+        bytes: Buffer.from(screen),
+      })
     }
   }
 

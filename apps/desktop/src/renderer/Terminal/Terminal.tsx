@@ -5,6 +5,13 @@ import { type CSSProperties, useEffect, useRef } from "react"
 import { registerDictationTarget } from "../dictation/targets"
 import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
+import { TerminalStream } from "./terminalStream"
+
+/**
+ * This document's id toward the server's terminals: the server lets the client
+ * that typed last keep its PTY size for a few seconds (`terminal.resize`).
+ */
+const CLIENT_ID = crypto.randomUUID()
 
 /**
  * Live terminal pane wired end-to-end to the `terminal` tRPC
@@ -20,6 +27,15 @@ import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMappin
  *     subscribes — it never spawns. The subscription replays scrollback as a
  *     leading chunk, so an attaching pane sees prior output. This is how the
  *     session/workspace view renders a running agent.
+ *
+ * Output arrives through `terminal.output` with resume (see terminalStream.ts):
+ * after a dropped connection the pane subscribes again from the bytes its
+ * emulator applied, so the screen continues without a gap or a duplicate.
+ *
+ * Size: the emulator always has the PTY's size. Focusing the pane asks the
+ * server for this pane's size; the server refuses while another client typed
+ * in the last few seconds, and then the pane shows the PTY with a margin (or
+ * scaled down when the PTY is larger than the pane).
  *
  * Lifecycle ownership is deliberate: on unmount we unsubscribe and **detach**
  * (the subscription's teardown calls the daemon's `detach`) — we never `kill`.
@@ -92,8 +108,8 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     } = optionsRef.current
     const trpc = injected ?? createPiLabTrpcClient()
 
+    // No convertEol: the daemon's emulator applies the same raw bytes, so snapshots match.
     const xterm = new XTerm({
-      convertEol: true,
       cursorBlink: true,
       fontFamily:
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
@@ -110,7 +126,10 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     // into a disposed terminal.
     let cancelled = false
     let sessionId: string | null = null
-    let unsubscribe: (() => void) | null = null
+    let stream: TerminalStream | null = null
+    let focusTarget: HTMLTextAreaElement | null = null
+    /** The PTY size as the stream last reported it; null until the first start. */
+    let ptySize: { cols: number; rows: number } | null = null
     let inputDisposable: { dispose: () => void } | null = null
     let resizeObserver: ResizeObserver | null = null
     let unregisterDictation: (() => void) | null = null
@@ -125,7 +144,7 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     /** Forward one input chunk exactly once, whether xterm generated or custom-mapped. */
     const forwardInput = (data: string): void => {
       if (cancelled || !sessionId) return
-      void trpc.terminal.write.mutate({ sessionId, data }).then(
+      void trpc.terminal.write.mutate({ sessionId, data, clientId: CLIENT_ID }).then(
         () => failedTransports.delete("write"),
         (error: unknown) => reportTransportFailure("write", error),
       )
@@ -176,44 +195,68 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       return false
     })
 
-    /** Fit to the container, then push the new grid size to the PTY. */
-    const syncSize = () => {
-      if (cancelled || !sessionId) return
-      try {
-        fitAddon.fit()
-      } catch {
-        // The container can be momentarily zero-sized during layout; ignore and
-        // let the next ResizeObserver tick re-fit.
-        return
-      }
-      void trpc.terminal.resize.mutate({ sessionId, cols: xterm.cols, rows: xterm.rows }).then(
-        () => failedTransports.delete("resize"),
-        (error: unknown) => reportTransportFailure("resize", error),
+    /** Show the PTY-sized emulator inside the pane: a margin, or scaled down when it is larger. */
+    const fitView = (): void => {
+      const element = xterm.element
+      const screen = element?.querySelector<HTMLElement>(".xterm-screen")
+      if (!element || !screen || screen.offsetWidth === 0 || screen.offsetHeight === 0) return
+      const scale = Math.min(
+        1,
+        container.clientWidth / screen.offsetWidth,
+        container.clientHeight / screen.offsetHeight,
       )
+      element.style.transformOrigin = "0 0"
+      element.style.transform = scale < 1 ? `scale(${scale})` : ""
+    }
+
+    /** Ask the server to give the PTY this pane's size (it refuses while another client types). */
+    const takeSize = () => {
+      if (cancelled || !sessionId) return
+      const proposed = fitAddon.proposeDimensions()
+      // The container can be momentarily zero-sized during layout; the next resize tick retries.
+      if (!proposed || !(proposed.cols > 0) || !(proposed.rows > 0)) return
+      if (ptySize && proposed.cols === ptySize.cols && proposed.rows === ptySize.rows) return
+      void trpc.terminal.resize
+        .mutate({ sessionId, cols: proposed.cols, rows: proposed.rows, clientId: CLIENT_ID })
+        .then(
+          () => failedTransports.delete("resize"),
+          (error: unknown) => reportTransportFailure("resize", error),
+        )
+    }
+
+    const onPaneResize = () => {
+      fitView()
+      if (document.activeElement === focusTarget) takeSize()
     }
 
     /** Wire the streaming subscription + stdin forwarding for a session id. */
     const bind = (id: string) => {
       sessionId = id
 
-      // Stream daemon output into xterm. `onData` yields our `TerminalEvent`
-      // discriminated union: incremental `data` chunks (including replayed
-      // scrollback as a single leading chunk) then a terminal `exit`.
-      const subscription = trpc.terminal.onData.subscribe(
-        { sessionId: id },
-        {
-          onData: (event) => {
-            if (cancelled) return
-            if (event.type === "data") xterm.write(event.chunk)
-            else xterm.write(`\r\n[pi-lab] session exited (code ${event.exitCode ?? "?"})\r\n`)
-          },
-          onError: (error) => {
-            if (cancelled) return
-            xterm.write(`\r\n[pi-lab] terminal connection failed: ${error.message}\r\n`)
-          },
+      // Stream daemon output into xterm, resuming after dropped connections.
+      stream = new TerminalStream({
+        subscribe: (input, handlers) => trpc.terminal.output.subscribe(input, handlers),
+        sessionId: id,
+        emulator: {
+          write: (data, applied) => xterm.write(data, applied),
+          reset: () => xterm.reset(),
+          resize: (cols, rows) => xterm.resize(cols, rows),
         },
-      )
-      unsubscribe = () => subscription.unsubscribe()
+        dropPolicy: "keep",
+        onSize: (cols, rows) => {
+          ptySize = { cols, rows }
+          requestAnimationFrame(fitView)
+        },
+        onExit: (exitCode) => {
+          if (cancelled) return
+          xterm.write(`\r\n[pi-lab] session exited (code ${exitCode ?? "?"})\r\n`)
+        },
+        onError: (message) => {
+          if (cancelled) return
+          xterm.write(`\r\n[pi-lab] terminal connection failed: ${message}\r\n`)
+        },
+      })
+      stream.open()
 
       // Forward keystrokes (and pasted text) to the PTY's stdin.
       inputDisposable = xterm.onData(forwardInput)
@@ -226,11 +269,13 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
         focus: () => xterm.focus(),
       })
 
-      // Keep the PTY grid matched to the viewport.
-      resizeObserver = new ResizeObserver(() => syncSize())
+      // Focusing the pane takes the PTY size; resizing the focused pane keeps it.
+      focusTarget = xterm.textarea ?? null
+      focusTarget?.addEventListener("focus", takeSize)
+      resizeObserver = new ResizeObserver(onPaneResize)
       resizeObserver.observe(container)
-      syncSize()
       xterm.focus()
+      takeSize()
     }
 
     void (async () => {
@@ -274,11 +319,12 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       container.removeEventListener("dragover", onDragOver)
       container.removeEventListener("drop", onDrop)
       resizeObserver?.disconnect()
+      focusTarget?.removeEventListener("focus", takeSize)
       inputDisposable?.dispose()
       unregisterDictation?.()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
       // session (it is NOT killed), so the PTY persists across reload.
-      unsubscribe?.()
+      stream?.close()
       xterm.dispose()
       xtermRef.current = null
     }

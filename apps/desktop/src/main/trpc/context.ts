@@ -89,6 +89,18 @@ export interface AppContext {
   thumbnailImageProcessor: ThumbnailImageProcessor
   /** Server process services; absent in router tests that do not need them. */
   server?: ServerControlPort
+  /**
+   * The client connection this call came over: present for WebSocket clients,
+   * absent for in-process callers. Terminal output stops when its send queue
+   * passes a limit (see `terminal.output`).
+   */
+  connection?: ClientConnection
+}
+
+/** One client's WebSocket, as the routers see it. */
+export interface ClientConnection {
+  /** Bytes queued to send to this client and not yet written to the network. */
+  queuedBytes: () => number
 }
 
 /**

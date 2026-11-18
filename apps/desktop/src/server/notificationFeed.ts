@@ -88,6 +88,19 @@ export class NotificationFeed implements NotificationSink {
   }
 
   /**
+   * Take a pending request for answering: it stops being pending and clears
+   * on every client. Null when it is no longer pending (already answered,
+   * withdrawn or its agent exited), so only the first answer gets it.
+   */
+  take(id: string): NotificationEvent | null {
+    const event = this.#pending.get(id)
+    if (!event) return null
+    this.#pending.delete(id)
+    this.#publish({ type: "cleared", id })
+    return event
+  }
+
+  /**
    * Stream for one client: first every pending request (so a client that was
    * off is alerted to them), then live messages. Info events missed while
    * the client was off are not re-sent; they are in {@link history}.

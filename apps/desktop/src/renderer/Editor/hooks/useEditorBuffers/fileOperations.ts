@@ -26,7 +26,23 @@ export function withFileOperation<T>(
   return result
 }
 
-/** Wait for already-started editor operations before a normal shutdown decision. */
-export async function drainFileOperations(): Promise<void> {
-  while (pending.size > 0) await Promise.all([...pending.values()])
+/**
+ * Wait for already-started editor operations before a shutdown decision, for
+ * at most `timeoutMs`. A save the server cannot answer (it is down; tRPC holds
+ * the call until it reconnects) must not hold the decision forever: its
+ * buffer is still dirty, so the caller treats it as unsaved.
+ */
+export async function drainFileOperations(timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (pending.size > 0) {
+    const left = deadline - Date.now()
+    if (left <= 0) return
+    await Promise.race([
+      Promise.all([...pending.values()]),
+      new Promise((resolve) => setTimeout(resolve, left)),
+    ])
+  }
 }
+
+/** How long a quit decision waits for in-flight saves (see {@link drainFileOperations}). */
+export const SHUTDOWN_DRAIN_MS = 3_000

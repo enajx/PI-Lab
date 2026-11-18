@@ -56,7 +56,7 @@ async function main(): Promise<void> {
 
   const server = await listen({
     port: config.port,
-    token,
+    access: runtime.devices,
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => setImmediate(() => stop(0)) },
@@ -66,6 +66,7 @@ async function main(): Promise<void> {
       if (scheme === MEDIA_SCHEME) return analysisMedia.handle(request)
       return Promise.resolve(new Response(null, { status: 404 }))
     },
+    testRoutes: process.env.PI_LAB_TEST_MODE === "1",
   })
   writeDiscovery(config.dataDir, { port: server.port, pid: process.pid, build: config.build })
   console.log(`[pi-lab server] listening on 127.0.0.1:${server.port} (pid ${process.pid})`)

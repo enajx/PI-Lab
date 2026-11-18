@@ -1,17 +1,23 @@
 import { initTRPC } from "@trpc/server"
-import superjson from "superjson"
 import type { AppContext } from "./context"
 
 /**
- * tRPC primitives for the main process. There is exactly one renderer↔main
- * contract — no inter-process HTTP hop — so a single root
- * builder is all we need. `superjson` is the wire transformer and MUST match
- * the renderer's `ipcLink` transformer or payloads silently corrupt.
+ * Whether error replies carry the server's stack trace: only in test mode
+ * (`PI_LAB_TEST_MODE=1`) or development (`NODE_ENV=development`).
+ */
+export function showErrorStacks(env: Record<string, string | undefined>): boolean {
+  return env.PI_LAB_TEST_MODE === "1" || env.NODE_ENV === "development"
+}
+
+/**
+ * tRPC primitives shared by the server router and the Electron desktop router.
+ * No transformer: the client API is plain JSON (see shared/clientApi.ts), so
+ * any client can call it without SuperJSON.
  *
  * The router is typed over {@link AppContext} so feature routers (terminal) can
  * reach the PTY daemon; context-free routers (health) ignore it.
  */
-const t = initTRPC.context<AppContext>().create({ transformer: superjson })
+const t = initTRPC.context<AppContext>().create({ isDev: showErrorStacks(process.env) })
 
 export const router = t.router
 export const publicProcedure = t.procedure.use(async ({ ctx, path, type, next }) => {

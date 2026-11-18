@@ -106,7 +106,7 @@ describe("Project header", () => {
     fireEvent.click(button)
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true))
     fireEvent.click(button)
-    expect(calls).toEqual([{ projectId: "p1" }])
+    expect(calls).toEqual([{ projectId: "p1", launchId: expect.any(String) }])
     rejectLaunch(new Error("Launch unavailable"))
     expect((await screen.findByTestId("project-launch-error")).textContent).toContain(
       "Launch unavailable",
@@ -578,7 +578,14 @@ describe("Project header shortcuts menu", () => {
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
     fireEvent.click(button)
     await waitFor(() =>
-      expect(calls).toEqual([{ projectId: "p1", skillSlug: "review-notes", origin: "project" }]),
+      expect(calls).toEqual([
+        {
+          projectId: "p1",
+          skillSlug: "review-notes",
+          origin: "project",
+          launchId: expect.any(String),
+        },
+      ]),
     )
     const tab = await waitFor(() => {
       const found = screen
@@ -733,7 +740,9 @@ describe("Card-triggered launch on the project view", () => {
 
     // The view — not the card — ran the launch, and its session attached as the
     // active, selectable agent tab (a pane the user can click into).
-    await waitFor(() => expect(calls).toEqual([{ projectId: "launch-auto" }]))
+    await waitFor(() =>
+      expect(calls).toEqual([{ projectId: "launch-auto", launchId: expect.any(String) }]),
+    )
     const tabSelect = await screen.findByRole("button", { name: "Auto-research" })
     const tab = tabSelect.closest("[data-testid='central-tab']")
     expect(tab?.getAttribute("data-tab-kind")).toBe("agent")

@@ -47,8 +47,8 @@ describe("production package contents through electron-builder", () => {
     for (const file of [
       "@trpc/server/dist/index.cjs",
       "@xterm/headless/lib-headless/xterm-headless.js",
-      "superjson/dist/index.js",
-      "copy-anything/dist/index.js",
+      "js-yaml/index.js",
+      "argparse/argparse.js",
       "zod/index.cjs",
       "drizzle-orm/better-sqlite3/index.cjs",
       "trpc-electron/dist/main.cjs",
@@ -205,14 +205,14 @@ test("runtime audit rejects an excluded transitive dependency", () => {
   const fixture = mkdtempSync(join(tmpdir(), "pi-lab-runtime-import-"))
   for (const name of ["main", "preload", "pty-daemon"]) {
     mkdirSync(join(fixture, name))
-    writeFileSync(join(fixture, name, "index.js"), name === "main" ? 'require("superjson")' : "")
+    writeFileSync(join(fixture, name, "index.js"), name === "main" ? 'require("js-yaml")' : "")
   }
   const missingTransitive = {
     ...config,
-    files: [...(config.files ?? []), "!**/node_modules/is-what/**"],
+    files: [...(config.files ?? []), "!**/node_modules/argparse/**"],
   }
   expect(() => validatePackageDependencies(fixture, missingTransitive)).toThrow(
-    "runtime dependency excluded from package: is-what",
+    "runtime dependency excluded from package: argparse",
   )
   rmSync(fixture, { recursive: true, force: true })
 })

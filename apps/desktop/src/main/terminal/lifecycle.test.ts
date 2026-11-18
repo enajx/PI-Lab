@@ -64,10 +64,10 @@ test("a production daemon survives disposal, is adopted, and reaps its PTY on sh
     await adopted.write(session.id, "AFTER-ADOPTION\n")
     let output = ""
     adopted.on("data", (event) => {
-      if (event.sessionId === session.id) output += event.chunk
+      if (event.sessionId === session.id) output += event.bytes.toString()
     })
-    await adopted.attach(session.id, ({ scrollback }) => {
-      output += scrollback
+    await adopted.attach(session.id, null, ({ start }) => {
+      output += (start.mode === "snapshot" ? start.screen : "") + start.bytes.toString()
     })
     await waitFor(() => output.includes("AFTER-ADOPTION"))
     second.dispose()

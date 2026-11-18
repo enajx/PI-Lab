@@ -8,7 +8,7 @@ import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { DaemonClient } from "./client"
+import { type AttachResult, DaemonClient } from "./client"
 import { DaemonServer } from "./server"
 
 const NODE = process.execPath
@@ -92,22 +92,28 @@ async function waitFor(
   throw new Error("waitFor timed out")
 }
 
+/** The text an attach start shows: the snapshot screen (if any) and the bytes after it. */
+function startText(result: AttachResult): string {
+  const { start } = result
+  return (start.mode === "snapshot" ? start.screen : "") + start.bytes.toString()
+}
+
 /** Collect a session's data chunks and exit, draining via the async iterator. */
 async function drain(
   client: DaemonClient,
   sessionId: string,
 ): Promise<{ output: string; exitCode: number | null; signal: number | null }> {
-  let output = ""
+  const chunks: Buffer[] = []
   let exitCode: number | null = null
   let signal: number | null = null
   for await (const event of client.events(sessionId)) {
-    if (event.kind === "data") output += event.chunk
+    if (event.kind === "data") chunks.push(event.bytes)
     else {
       exitCode = event.exitCode
       signal = event.signal
     }
   }
-  return { output, exitCode, signal }
+  return { output: Buffer.concat(chunks).toString(), exitCode, signal }
 }
 
 describe("spawn + stream + exit", () => {
@@ -160,7 +166,7 @@ describe("spawn + stream + exit", () => {
       await client.write(session.id, "start\n")
       await waitFor(() => connectionSubscriptions().length === 1)
       expect((await client.list()).find(({ id }) => id === session.id)?.alive).toBe(true)
-      expect((await client.attach(session.id)).scrollback.length).toBeGreaterThan(0)
+      expect(startText(await client.attach(session.id, null)).length).toBeGreaterThan(0)
     } finally {
       slow.destroy()
       await client.kill(session.id)
@@ -204,9 +210,9 @@ describe("session reaping", () => {
       await waitFor(() => ids.every((id) => firstExits.has(id)))
 
       for (const [index, id] of ids.entries()) {
-        const attached = await second.attach(id)
+        const attached = await second.attach(id, null)
         expect(attached.session.alive).toBe(false)
-        expect(attached.scrollback).toContain(`FINAL-${cycle}-${index}`)
+        expect(startText(attached)).toContain(`FINAL-${cycle}-${index}`)
         await waitFor(() => secondExits.has(id))
       }
       expect(connectionSubscriptions().map((subscriptions) => subscriptions.size)).toEqual([3, 3])
@@ -233,7 +239,7 @@ describe("session reaping", () => {
         )
         const ids = sessions.map((session) => session.id)
         references.push(...ids.map(weakSession))
-        await Promise.all(ids.map((id) => second.attach(id)))
+        await Promise.all(ids.map((id) => second.attach(id, null)))
 
         await waitFor(() => ids.every((id) => reapedIds.includes(id)), 8_000)
         expect(connectionSubscriptions().map((subscriptions) => subscriptions.size)).toEqual([0, 0])
@@ -255,7 +261,7 @@ describe("interactive write/echo", () => {
 
     let output = ""
     client.on("data", (event) => {
-      if (event.sessionId === session.id) output += event.chunk
+      if (event.sessionId === session.id) output += event.bytes.toString()
     })
 
     await client.write(session.id, "ping\n")
@@ -275,7 +281,7 @@ describe("reattach contract", () => {
 
     let firstOutput = ""
     first.on("data", (event) => {
-      if (event.sessionId === session.id) firstOutput += event.chunk
+      if (event.sessionId === session.id) firstOutput += event.bytes.toString()
     })
     await first.write(session.id, "MARKER-123\n")
     await waitFor(() => firstOutput.includes("MARKER-123"))
@@ -289,14 +295,14 @@ describe("reattach contract", () => {
     const sessions = await second.list()
     expect(sessions.some((s) => s.id === session.id && s.alive)).toBe(true)
 
-    const { session: reattached, scrollback } = await second.attach(session.id)
-    expect(reattached.alive).toBe(true)
-    expect(scrollback).toContain("MARKER-123")
+    const attached = await second.attach(session.id, null)
+    expect(attached.session.alive).toBe(true)
+    expect(startText(attached)).toContain("MARKER-123")
 
     // Live streaming resumes too: input written after reattach is echoed back.
     let liveOutput = ""
     second.on("data", (event) => {
-      if (event.sessionId === session.id) liveOutput += event.chunk
+      if (event.sessionId === session.id) liveOutput += event.bytes.toString()
     })
     await second.write(session.id, "AFTER-REATTACH\n")
     await waitFor(() => liveOutput.includes("AFTER-REATTACH"))
@@ -322,7 +328,7 @@ describe("resize", () => {
 
     let output = ""
     client.on("data", (event) => {
-      if (event.sessionId === session.id) output += event.chunk
+      if (event.sessionId === session.id) output += event.bytes.toString()
     })
 
     await client.resize(session.id, 120, 40)
@@ -428,7 +434,7 @@ test.skipIf(process.platform === "win32")(
     const session = await client.spawn({ command: "/bin/sh", args: ["-i"], cwd: socketDir })
     await client.write(session.id, "printf 'SHELL_READY\\n'\n")
     await waitFor(async () =>
-      (await client.attach(session.id)).scrollback.includes("SHELL_READY\r\n"),
+      startText(await client.attach(session.id, null)).includes("SHELL_READY\r\n"),
     )
     expect(session.pid).toBeGreaterThan(0)
     await client.kill(session.id)
@@ -442,7 +448,7 @@ test.skipIf(process.platform === "win32")(
 describe("error handling", () => {
   test("attaching to an unknown session yields a DaemonError", async () => {
     const client = await newClient()
-    await expect(client.attach("does-not-exist")).rejects.toMatchObject({
+    await expect(client.attach("does-not-exist", null)).rejects.toMatchObject({
       name: "DaemonError",
       code: "unknown-session",
     })
@@ -461,9 +467,9 @@ test("killing an agent PTY also stops its subprocess group", async () => {
   })
   let descendant = 0
   await waitFor(async () => {
-    const snapshot = await client.attach(session.id)
-    descendant = Number(snapshot.scrollback.match(/CHILD:(\d+)/)?.[1] ?? 0)
-    return descendant > 0 && snapshot.scrollback.includes("READY")
+    const text = startText(await client.attach(session.id, null))
+    descendant = Number(text.match(/CHILD:(\d+)/)?.[1] ?? 0)
+    return descendant > 0 && text.includes("READY")
   })
   try {
     process.kill(descendant, 0)

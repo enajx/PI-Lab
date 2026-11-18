@@ -12,6 +12,9 @@ const xtermHarness = vi.hoisted(() => ({
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit(): void {}
+    proposeDimensions(): { cols: number; rows: number } {
+      return { cols: 100, rows: 30 }
+    }
   },
 }))
 
@@ -24,8 +27,16 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon(): void {}
     open(): void {}
     focus(): void {}
-    write(data: string): void {
-      xtermHarness.writes.push(data)
+    textarea = document.createElement("textarea")
+    element = document.createElement("div")
+    write(data: string | Uint8Array, applied?: () => void): void {
+      xtermHarness.writes.push(typeof data === "string" ? data : new TextDecoder().decode(data))
+      applied?.()
+    }
+    reset(): void {}
+    resize(cols: number, rows: number): void {
+      this.cols = cols
+      this.rows = rows
     }
     dispose(): void {}
 
@@ -70,7 +81,7 @@ describe("Terminal macOS custom key integration", () => {
     const write = vi.fn(async () => ({ ok: true as const }))
     const client = {
       terminal: {
-        onData: { subscribe: () => ({ unsubscribe: () => {} }) },
+        output: { subscribe: () => ({ unsubscribe: () => {} }) },
         write: { mutate: write },
         resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
       },
@@ -89,6 +100,7 @@ describe("Terminal macOS custom key integration", () => {
     expect(write).toHaveBeenLastCalledWith({
       sessionId: "agent-session",
       data: "\u001b[13;2u",
+      clientId: expect.any(String),
     })
 
     const plainEnter = macKeyEvent("Enter", {})
@@ -97,7 +109,11 @@ describe("Terminal macOS custom key integration", () => {
     expect(xtermHandled).toBe(true)
     expect(plainEnter.defaultPrevented).toBe(false)
     expect(write).toHaveBeenCalledTimes(2)
-    expect(write).toHaveBeenLastCalledWith({ sessionId: "agent-session", data: "\r" })
+    expect(write).toHaveBeenLastCalledWith({
+      sessionId: "agent-session",
+      data: "\r",
+      clientId: expect.any(String),
+    })
   })
 
   test("shows failed input once until a write succeeds", async () => {
@@ -105,7 +121,7 @@ describe("Terminal macOS custom key integration", () => {
     const write = vi.fn().mockRejectedValue(new Error("daemon offline"))
     const client = {
       terminal: {
-        onData: { subscribe: () => ({ unsubscribe: () => {} }) },
+        output: { subscribe: () => ({ unsubscribe: () => {} }) },
         write: { mutate: write },
         resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
       },
@@ -127,11 +143,16 @@ describe("Terminal macOS custom key integration", () => {
 
   test("shows a subscription failure in the terminal", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock)
-    const errorHandler = { current: null as ((error: Error) => void) | null }
+    const errorHandler = {
+      current: null as ((error: { message: string; data: unknown }) => void) | null,
+    }
     const client = {
       terminal: {
-        onData: {
-          subscribe: (_input: unknown, handlers: { onError: (error: Error) => void }) => {
+        output: {
+          subscribe: (
+            _input: unknown,
+            handlers: { onError: (error: { message: string; data: unknown }) => void },
+          ) => {
             errorHandler.current = handlers.onError
             return { unsubscribe: () => {} }
           },
@@ -143,7 +164,10 @@ describe("Terminal macOS custom key integration", () => {
 
     render(<Terminal client={client} inputKind="terminal" sessionId="agent-session" />)
     await waitFor(() => expect(errorHandler.current).not.toBeNull())
-    errorHandler.current?.(new Error("daemon unavailable"))
+    errorHandler.current?.({
+      message: "daemon unavailable",
+      data: { code: "INTERNAL_SERVER_ERROR" },
+    })
 
     expect(xtermHarness.writes.join("")).toContain("daemon unavailable")
   })
@@ -157,7 +181,7 @@ describe("Terminal macOS custom key integration", () => {
     const write = vi.fn(async () => ({ ok: true as const }))
     const client = {
       terminal: {
-        onData: { subscribe: () => ({ unsubscribe: () => {} }) },
+        output: { subscribe: () => ({ unsubscribe: () => {} }) },
         write: { mutate: write },
         resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
       },
@@ -174,6 +198,65 @@ describe("Terminal macOS custom key integration", () => {
     expect(write).toHaveBeenCalledExactlyOnceWith({
       sessionId: "folder-session",
       data: "'/tmp/research folder'",
+      clientId: expect.any(String),
     })
+  })
+
+  // Mocked xterm and tRPC client: checks the pane's wiring only. The real
+  // resume runs through the server in server/terminalConnection.test.ts and the
+  // app in tests/e2e/connection-state.spec.ts.
+  test("after a dropped socket the pane subscribes again from what its emulator applied", async () => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock)
+    const inputs: unknown[] = []
+    const handlers: {
+      onData: (event: { id: string; data: unknown }) => void
+      onConnectionStateChange: (state: { state: string; error: unknown }) => void
+    }[] = []
+    const resize = vi.fn(async () => ({ ok: true as const, applied: true }))
+    const client = {
+      terminal: {
+        output: {
+          subscribe: (input: { resume: unknown }, observer: (typeof handlers)[number]) => {
+            inputs.push(input.resume)
+            handlers.push(observer)
+            return { unsubscribe: () => {} }
+          },
+        },
+        write: { mutate: vi.fn(async () => ({ ok: true as const })) },
+        resize: { mutate: resize },
+      },
+    } as unknown as PiLabTrpcClient
+    render(<Terminal client={client} inputKind="terminal" sessionId="resume-session" />)
+    await waitFor(() => expect(handlers).toHaveLength(1))
+    const first = handlers[0]
+    if (!first) throw new Error("no subscription")
+    first.onConnectionStateChange({ state: "pending", error: null })
+    first.onData({
+      id: "g1:5:0",
+      data: {
+        type: "start",
+        mode: "snapshot",
+        generation: "g1",
+        revision: 0,
+        cols: 80,
+        rows: 24,
+        offset: 0,
+        screen: "",
+        base64: btoa("hello"),
+      },
+    })
+    first.onData({ id: "g1:8:0", data: { type: "data", offset: 5, base64: btoa(" ok") } })
+    expect(xtermHarness.writes.join("")).toContain("hello ok")
+    // Focus took the size: the pane asked for its own size.
+    expect(resize).toHaveBeenCalledWith({
+      sessionId: "resume-session",
+      cols: 100,
+      rows: 30,
+      clientId: expect.any(String),
+    })
+
+    first.onConnectionStateChange({ state: "connecting", error: new Error("WebSocket closed") })
+    await waitFor(() => expect(handlers).toHaveLength(2))
+    expect(inputs).toEqual([null, { generation: "g1", offset: 8, revision: 0 }])
   })
 })

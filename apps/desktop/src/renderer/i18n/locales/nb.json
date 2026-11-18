@@ -366,6 +366,7 @@
   "Start agent": "Start agent",
   " changed on disk while you were editing. Autosave is paused.": " ble endret på disken mens du redigerte. Automatisk lagring er satt på pause.",
   "Overwrite disk": "Overskriv filen på disken",
+  "Not saved": "Ikke lagret",
   "Reload from disk": "Last inn fra disken på nytt",
   "Reopen run terminal": "Åpne kjøreterminalen igjen",
   "Collapse run terminal": "Slå sammen kjøreterminalen",
@@ -1321,5 +1322,9 @@
   "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "Lagrede API-nøkler beskyttes av en fil bare du kan lese. Med Nøkkelring på holder macOS Nøkkelring nøkkelen som beskytter dem.",
   "Could not change key protection": "Kunne ikke endre nøkkelbeskyttelsen",
   "Recent notifications": "Nylige varsler",
-  "No notifications yet": "Ingen varsler ennå"
+  "No notifications yet": "Ingen varsler ennå",
+  "Reconnecting": "Kobler til på nytt",
+  "Disconnected": "Frakoblet",
+  "Server connection": "Servertilkobling",
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "Tilkoblingen mellom dette vinduet og PI Lab-serveren. Etter et brudd kobler den seg til igjen av seg selv."
 }

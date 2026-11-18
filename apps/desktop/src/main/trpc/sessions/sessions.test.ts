@@ -137,6 +137,36 @@ function enableWorktreePerAgent(): void {
   h.db.insert(settings).values({ id: 1, worktreePerAgent: true }).run()
 }
 
+describe("sessions.start — launch IDs", () => {
+  test("a retry with the same launch ID after a lost reply starts no second agent", async () => {
+    const input = {
+      origin: "project" as const,
+      projectId,
+      agentId: LONG_FAKE_AGENT.id,
+      launchId: "launch-lost-reply",
+    }
+    // The first reply is lost: the client never sees it and sends the same start again,
+    // once while the first is still running and once after it finished.
+    const [first, during] = await Promise.all([
+      h.caller.sessions.start(input),
+      h.caller.sessions.start(input),
+    ])
+    const after = await h.caller.sessions.start(input)
+    expect(during).toEqual(first)
+    expect(after).toEqual(first)
+    const rows = h.db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.projectId, projectId))
+      .all()
+    expect(rows.map((row) => row.sessionId)).toEqual([first.sessionId])
+
+    // A new launch ID is a new start.
+    const second = await h.caller.sessions.start({ ...input, launchId: "launch-next" })
+    expect(second.sessionId).not.toBe(first.sessionId)
+  })
+})
+
 describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
   test("title bar status lists live sessions with their agent, project, and state", async () => {
     h.activityRegistry.register({

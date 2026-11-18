@@ -15,6 +15,7 @@ import {
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import { fileWriteResultSchema } from "../../../shared/clientApi"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 import { workspaceWorkingDir } from "../workspaces/workspaces"
@@ -48,6 +49,12 @@ const readInput = z.object({
 
 const writeInput = readInput.extend({
   content: z.string(),
+  /**
+   * The version the client opened (from `read`, `stat` or the last save). The
+   * write is refused with a `conflict` when the file on disk differs. `null`
+   * writes without a check: a new file, or the user chose Overwrite.
+   */
+  expected: z.object({ mtimeMs: z.number(), size: z.number() }).nullable(),
 })
 
 /**
@@ -77,6 +84,9 @@ const searchInput = z.object({
   /** Cap on returned hits (the palette only shows a handful). */
   limit: z.number().int().positive().max(200).default(50),
 })
+
+/** What `files.write` returns: saved, or a conflict with the version on disk now. */
+export type FileWriteResult = z.infer<typeof fileWriteResultSchema>
 
 /** Typed bounded editor read, with no content on rejected outcomes. */
 export type FileReadResult = TextSnapshot
@@ -169,27 +179,33 @@ export const filesRouter = router({
 
   /**
    * Write a text file inside the workspace's working dir, creating parent
-   * directories as needed (the built-in editor's save path). Returns the byte
-   * length written so callers can confirm the round-trip.
+   * directories as needed (the built-in editor's save path). With `expected`,
+   * the file is written only if its fingerprint (mtime and size) still matches
+   * the version the client opened; otherwise nothing is written and the result
+   * is a `conflict` carrying the version on disk now, so the client keeps its
+   * text and shows the conflict.
    */
   write: publicProcedure
     .input(writeInput)
-    .mutation(
-      async ({
-        ctx,
-        input,
-      }): Promise<{ bytes: number; baseline: FileStat; matchesWrittenContent: boolean }> => {
-        const workspace = requireWorkspace(ctx.db, input.workspaceId)
-        const dir = workspaceWorkingDir(ctx.db, workspace)
-        const target = resolveInsideDir(dir, input.relPath)
-        await writeTextFile(target, input.content)
-        const verified = await verifyWrittenText(target, input.content)
-        return {
-          bytes: Buffer.byteLength(input.content, "utf8"),
-          ...verified,
-        }
-      },
-    ),
+    .output(fileWriteResultSchema)
+    .mutation(async ({ ctx, input }): Promise<FileWriteResult> => {
+      const workspace = requireWorkspace(ctx.db, input.workspaceId)
+      const dir = workspaceWorkingDir(ctx.db, workspace)
+      const target = resolveInsideDir(dir, input.relPath)
+      if (input.expected) {
+        const actual = await statFile(target)
+        // A missing file has mtime and size 0, so a file opened as missing matches only while it stays missing.
+        if (actual.mtimeMs !== input.expected.mtimeMs || actual.size !== input.expected.size)
+          return { status: "conflict", baseline: actual }
+      }
+      await writeTextFile(target, input.content)
+      const verified = await verifyWrittenText(target, input.content)
+      return {
+        status: "saved",
+        bytes: Buffer.byteLength(input.content, "utf8"),
+        ...verified,
+      }
+    }),
 
   /**
    * Reveal only existing files whose real path stays inside this workspace.

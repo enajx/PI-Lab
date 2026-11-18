@@ -10,11 +10,12 @@ import {
   type DaemonReply,
   encodeFrame,
   FrameDecoder,
+  PROTOCOL_VERSION,
   parseClientRequest,
 } from "./protocol"
 import { type SessionHandle, SessionStore, type SessionStoreOptions } from "./session"
 
-// Larger than the most-escaped scrollback replay, while bounding stalled readers.
+// Bounds stalled readers of live output; attach replies use the replay limit.
 const MAX_PENDING_OUTPUT_BYTES = 4 * 1024 * 1024
 const MAX_PROCESS_REPLAY_BYTES = 16 * 1024 * 1024
 
@@ -60,6 +61,7 @@ class Connection {
     if (this.socket.destroyed) return
     const encoded = encodeFrame(frame)
     const limit =
+      frame.kind === "attach-ok" ||
       frame.kind === "process-attach-ok" ||
       frame.kind === "process-start-ok" ||
       frame.kind === "process-exit"
@@ -76,8 +78,19 @@ class Connection {
   attach(session: SessionHandle): void {
     // Renew an existing attachment so a repeated attach also sees a cached exit.
     this.detach(session.id)
+    const sessionId = session.id
+    const generation = session.generation
     const unsubscribe = session.subscribe({
-      onData: (chunk) => this.send({ kind: "data", sessionId: session.id, chunk }),
+      onData: (bytes, offset) =>
+        this.send({
+          kind: "data",
+          sessionId,
+          generation,
+          offset,
+          base64: bytes.toString("base64"),
+        }),
+      onResize: (cols, rows, revision, offset) =>
+        this.send({ kind: "resize", sessionId, generation, offset, revision, cols, rows }),
       onExit: (exitCode, signal) =>
         this.send({ kind: "exit", sessionId: session.id, exitCode, signal }),
     })
@@ -267,9 +280,14 @@ export class DaemonServer {
       return
     }
     // The spawning connection is attached implicitly so it begins streaming
-    // output without a separate round-trip. Scrollback is empty at spawn time.
+    // output from offset 0 without a separate round-trip.
     connection.attach(session)
-    this.reply(connection, { kind: "spawn-ok", cid: request.cid, session: session.info() })
+    this.reply(connection, {
+      kind: "spawn-ok",
+      cid: request.cid,
+      session: session.info(),
+      generation: session.generation,
+    })
   }
 
   private handleAttach(
@@ -281,11 +299,24 @@ export class DaemonServer {
       this.fail(connection, request.cid, "unknown-session", `no session ${request.sessionId}`)
       return
     }
-    // Snapshot scrollback before subscribing so the replay and the live stream
-    // do not overlap or drop a chunk that arrives between the two steps.
-    const scrollback = session.getScrollback()
+    // The start and the subscription happen in one synchronous step, so live
+    // events continue at the start's end offset with no gap or overlap.
+    const start = session.startFrom(request.resume)
     const info = session.info()
-    this.reply(connection, { kind: "attach-ok", cid: request.cid, session: info, scrollback })
+    const base64 = start.bytes.toString("base64")
+    this.reply(connection, {
+      kind: "attach-ok",
+      cid: request.cid,
+      session: info,
+      generation: session.generation,
+      revision: session.screenRevision,
+      cols: info.cols,
+      rows: info.rows,
+      start:
+        start.mode === "replay"
+          ? { mode: "replay", offset: start.offset, base64 }
+          : { mode: "snapshot", offset: start.offset, screen: start.screen, base64 },
+    })
     connection.attach(session)
   }
 
@@ -346,7 +377,12 @@ export class DaemonServer {
     request: Extract<ClientRequest, { kind: "list" }>,
     connection: Connection,
   ): void {
-    this.reply(connection, { kind: "list-ok", cid: request.cid, sessions: this.store.list() })
+    this.reply(connection, {
+      kind: "list-ok",
+      cid: request.cid,
+      sessions: this.store.list(),
+      protocol: PROTOCOL_VERSION,
+    })
   }
 
   /** Confirm first, then close once the reply is flushed, since closing destroys the socket. */

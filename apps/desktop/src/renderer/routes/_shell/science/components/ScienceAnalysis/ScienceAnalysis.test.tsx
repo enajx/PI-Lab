@@ -217,7 +217,9 @@ describe("ScienceAnalysis", () => {
     expect(button.textContent).toBe("")
     expect(button.getAttribute("data-feature-label")).toBe("Report")
     fireEvent.click(button)
-    await waitFor(() => expect(startReport).toHaveBeenCalledWith({ projectId: "p1" }))
+    await waitFor(() =>
+      expect(startReport).toHaveBeenCalledWith({ projectId: "p1", launchId: expect.any(String) }),
+    )
     expect(screen.queryByTestId("analysis-new-marimo-notebook")).toBeNull()
   })
 

@@ -6,6 +6,7 @@ import { useCaffeine } from "../../../../caffeine"
 import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../i18n/language"
 import { formatBinding, getBinding } from "../../../../shortcuts/shortcuts"
+import { type ConnectionState, useConnectionState } from "../../../../trpc/connectionStatus"
 import { useTRPC } from "../../../../trpc/react"
 import { useAgentStatus } from "../../-ProjectActivity"
 import { readSshConfigPathOverride } from "../../utils/sshConfigPathOverride"
@@ -70,6 +71,7 @@ export function StatusBar() {
       <CaffeineItem />
       <LatexItem />
       <span className="ms-auto" />
+      <ConnectionItem />
       <HostsItem />
       <VersionItem />
       <Item
@@ -222,6 +224,42 @@ function VersionItem() {
       className="shrink-0"
     >
       {`${CHANNEL_NAMES[info.data.channel]} ${info.data.commit ?? info.data.version}`}
+    </Item>
+  )
+}
+
+const CONNECTION_LABELS: Record<ConnectionState, string> = {
+  connected: "Connected",
+  reconnecting: "Reconnecting",
+  disconnected: "Disconnected",
+}
+
+const CONNECTION_DOTS: Record<ConnectionState, string> = {
+  connected: "bg-emerald-500",
+  reconnecting: "bg-amber-500",
+  disconnected: "bg-destructive",
+}
+
+/** The state of this window's sockets to the PI Lab server: a dot and a word. */
+function ConnectionItem() {
+  const t = useTranslate()
+  const state = useConnectionState()
+  return (
+    <Item
+      testId="status-bar-connection"
+      icon={
+        <span
+          className={cn("size-1.5 shrink-0 rounded-full", CONNECTION_DOTS[state])}
+          aria-hidden
+        />
+      }
+      title={t("Server connection")}
+      help={t(
+        "The connection between this window and the PI Lab server. After a drop it reconnects on its own.",
+      )}
+      className={cn("shrink-0", state === "disconnected" ? "text-destructive" : "")}
+    >
+      {t(CONNECTION_LABELS[state])}
     </Item>
   )
 }

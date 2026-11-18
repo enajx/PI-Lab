@@ -125,8 +125,8 @@ export async function insideFile(dir: string, relPath: string): Promise<string> 
 
 /**
  * The bytes of a PDF file, base64-encoded, and the size and time they were read at.
- * Base64 because the IPC transformer (superjson) turns a `Uint8Array` into a plain number
- * array, which takes seconds for a large PDF; a string crosses IPC unchanged.
+ * Base64 because the client API is plain JSON: a `Uint8Array` would become a number array,
+ * which takes seconds for a large PDF; a string crosses unchanged.
  */
 export interface PdfSnapshot {
   base64: string

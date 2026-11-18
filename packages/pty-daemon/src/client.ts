@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
 import { connect, type Socket } from "node:net"
 import {
+  type AttachReply,
+  type AttachStartFrame,
   type ClientRequest,
   type DaemonFrame,
   type DaemonReply,
@@ -19,6 +21,8 @@ import {
   type ProcessSnapshot,
   type ProcessSummary,
   parseDaemonFrame,
+  type ResizeEvent,
+  type ResumePoint,
   type SessionInfo,
 } from "./protocol"
 
@@ -48,9 +52,38 @@ export interface SpawnParams {
   rows?: number
 }
 
+/** How an attach starts; see {@link AttachStartFrame}. Bytes are decoded. */
+export type AttachStart =
+  | { mode: "replay"; offset: number; bytes: Buffer }
+  | { mode: "snapshot"; offset: number; screen: string; bytes: Buffer }
+
 export interface AttachResult {
   session: SessionInfo
-  scrollback: string
+  generation: string
+  /** Screen revision after the start is applied. */
+  revision: number
+  /** Current PTY size; a snapshot is written into a reset terminal of this size. */
+  cols: number
+  rows: number
+  start: AttachStart
+}
+
+function decodeStart(start: AttachStartFrame): AttachStart {
+  const bytes = Buffer.from(start.base64, "base64")
+  return start.mode === "replay"
+    ? { mode: "replay", offset: start.offset, bytes }
+    : { mode: "snapshot", offset: start.offset, screen: start.screen, bytes }
+}
+
+function attachResult(reply: AttachReply): AttachResult {
+  return {
+    session: reply.session,
+    generation: reply.generation,
+    revision: reply.revision,
+    cols: reply.cols,
+    rows: reply.rows,
+    start: decodeStart(reply.start),
+  }
 }
 
 /** Listener signatures for the client's session-scoped events. */
@@ -58,6 +91,7 @@ export interface DaemonClientEvents {
   "process-output": (event: ProcessOutputEvent) => void
   "process-exit": (event: ProcessExitEvent) => void
   data: (event: DataEvent) => void
+  resize: (event: ResizeEvent) => void
   exit: (event: ExitEvent) => void
   /** Emitted when the underlying socket closes. */
   close: () => void
@@ -105,7 +139,24 @@ export class DaemonClient extends EventEmitter {
     for (const value of decoded) {
       const frame = parseDaemonFrame(value)
       if (frame) this.dispatch(frame)
+      else this.rejectUnreadableReply(value)
     }
+  }
+
+  /** A reply this client cannot read (for example from an older daemon) fails its request. */
+  private rejectUnreadableReply(value: unknown): void {
+    if (typeof value !== "object" || value === null) return
+    const cid = (value as { cid?: unknown }).cid
+    if (typeof cid !== "string") return
+    const pending = this.pending.get(cid)
+    if (!pending) return
+    this.pending.delete(cid)
+    pending.reject(
+      new DaemonError(
+        "protocol-mismatch",
+        "the PTY daemon sent a reply in an older protocol; restart the daemon",
+      ),
+    )
   }
 
   private dispatch(frame: DaemonFrame): void {
@@ -113,9 +164,25 @@ export class DaemonClient extends EventEmitter {
       this.emit(frame.kind, frame)
       return
     }
-    if (frame.kind === "data" || frame.kind === "exit") {
+    if (frame.kind === "data") {
+      const event: DataEvent = {
+        kind: "data",
+        sessionId: frame.sessionId,
+        generation: frame.generation,
+        offset: frame.offset,
+        bytes: Buffer.from(frame.base64, "base64"),
+      }
+      this.emit("data", event)
+      this.emit(`session:${frame.sessionId}`, event)
+      return
+    }
+    if (frame.kind === "exit") {
       this.emit(frame.kind, frame)
       this.emit(`session:${frame.sessionId}`, frame)
+      return
+    }
+    if (frame.kind === "resize") {
+      this.emit("resize", frame)
       return
     }
     const pending = this.pending.get(frame.cid)
@@ -210,6 +277,7 @@ export class DaemonClient extends EventEmitter {
     await this.processRequest((cid) => ({ kind: "process-forget", cid, id }), undefined)
   }
 
+  /** Spawn a PTY; this connection is attached to it from offset 0. */
   async spawn(params: SpawnParams): Promise<SessionInfo> {
     const reply = await this.request<Extract<DaemonReply, { kind: "spawn-ok" }>>((cid) => ({
       kind: "spawn",
@@ -224,20 +292,21 @@ export class DaemonClient extends EventEmitter {
     return reply.session
   }
 
-  /** Deliver replay synchronously at the reply boundary, before later frames in the same read. */
+  /**
+   * Attach to a session, resuming from `resume` when the daemon still can
+   * (otherwise, and for `null`, the start is a snapshot). `onStart` runs
+   * synchronously at the reply boundary, before later frames in the same read.
+   */
   async attach(
     sessionId: string,
-    onReplay?: (result: AttachResult) => void,
+    resume: ResumePoint | null,
+    onStart?: (result: AttachResult) => void,
   ): Promise<AttachResult> {
-    const reply = await this.request<Extract<DaemonReply, { kind: "attach-ok" }>>(
-      (cid) => ({
-        kind: "attach",
-        cid,
-        sessionId,
-      }),
-      (frame) => onReplay?.({ session: frame.session, scrollback: frame.scrollback }),
+    const reply = await this.request<AttachReply>(
+      (cid) => ({ kind: "attach", cid, sessionId, resume }),
+      onStart ? (frame) => onStart(attachResult(frame)) : undefined,
     )
-    return { session: reply.session, scrollback: reply.scrollback }
+    return attachResult(reply)
   }
 
   async detach(sessionId: string): Promise<void> {
@@ -277,11 +346,20 @@ export class DaemonClient extends EventEmitter {
   }
 
   async list(): Promise<SessionInfo[]> {
-    const reply = await this.request<Extract<DaemonReply, { kind: "list-ok" }>>((cid) => ({
+    return (await this.listReply()).sessions
+  }
+
+  /** The protocol version the daemon speaks. A version 1 daemon does not report one. */
+  async protocolVersion(): Promise<number> {
+    const reply = await this.listReply()
+    return typeof reply.protocol === "number" ? reply.protocol : 1
+  }
+
+  private listReply(): Promise<Extract<DaemonReply, { kind: "list-ok" }>> {
+    return this.request<Extract<DaemonReply, { kind: "list-ok" }>>((cid) => ({
       kind: "list",
       cid,
     }))
-    return reply.sessions
   }
 
   /**

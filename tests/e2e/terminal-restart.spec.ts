@@ -87,7 +87,7 @@ test("Restart to Update keeps the same agent terminal and a shell across a real 
     const [original] = (await client.list()).filter((session) => session.alive)
     expect(original?.pid).toBeGreaterThan(0)
     if (!original) throw new Error("Agent terminal did not start")
-    await client.attach(original.id)
+    await client.attach(original.id, null)
     let outputEvents = 0
     client.on("data", (event) => {
       if (event.sessionId === original.id) outputEvents += 1

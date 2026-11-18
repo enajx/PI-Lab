@@ -32,8 +32,11 @@ function QuickEditorRoute() {
       workspaceId: workspace.id,
       relPath: destination.relPath,
       content,
+      // A new file chosen in the New file dialog: no opened version to check.
+      expected: null,
     })
-    if (!result.matchesWrittenContent) throw new Error("Saved file differs from editor content")
+    if (result.status !== "saved" || !result.matchesWrittenContent)
+      throw new Error("Saved file differs from editor content")
     setPendingOpenFile(destination.projectId, destination.relPath)
     return `/projects/${encodeURIComponent(destination.projectId)}`
   }

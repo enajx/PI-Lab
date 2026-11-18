@@ -1,7 +1,7 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { connect } from "node:net"
-import { DaemonClient, type SessionInfo } from "@pi-lab/pty-daemon"
+import { DaemonClient, PROTOCOL_VERSION, type SessionInfo } from "@pi-lab/pty-daemon"
 import { resolveDaemonEntry, resolveDaemonSocketPath } from "./socketPath"
 
 export { resolveDaemonEntry }
@@ -259,8 +259,33 @@ export class TerminalSupervisor {
       await this.spawnDaemon()
     }
     if (this.disposed) throw new Error("supervisor disposed")
-    const client = new DaemonClient(this.socketPath)
+    let client = new DaemonClient(this.socketPath)
     await client.connect()
+    if (listening) {
+      // Bounded: a daemon that accepts connections but never answers must fail loudly.
+      const running = await Promise.race([
+        client.protocolVersion(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `pty-daemon on ${this.socketPath} did not answer within ${this.spawnTimeoutMs}ms`,
+                ),
+              ),
+            this.spawnTimeoutMs,
+          ).unref(),
+        ),
+      ])
+      if (running !== PROTOCOL_VERSION) {
+        console.warn(
+          `[pi-lab] the running pty-daemon speaks protocol ${running}, this app speaks protocol ${PROTOCOL_VERSION}: stopping it and starting a new one, its terminals end`,
+        )
+        await this.replaceDaemon(client)
+        client = new DaemonClient(this.socketPath)
+        await client.connect()
+      }
+    }
     if (this.disposed) {
       client.close()
       throw new Error("supervisor disposed")
@@ -268,6 +293,31 @@ export class TerminalSupervisor {
     this.client = client
     client.on("close", () => this.handleClose())
     return client
+  }
+
+  /** Ask an older daemon to exit, wait until its socket stops listening, then spawn a current one. */
+  private async replaceDaemon(old: DaemonClient): Promise<void> {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(`old pty-daemon did not confirm shutdown within ${this.spawnTimeoutMs}ms`),
+          ),
+        this.spawnTimeoutMs,
+      ).unref(),
+    )
+    await Promise.race([old.shutdown(), timeout])
+    old.close()
+    const deadline = Date.now() + this.spawnTimeoutMs
+    while (await isDaemonListening(this.socketPath)) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `old pty-daemon still listening on ${this.socketPath} ${this.spawnTimeoutMs}ms after shutdown`,
+        )
+      }
+      await delay(50)
+    }
+    await this.spawnDaemon()
   }
 
   private async spawnDaemon(): Promise<void> {

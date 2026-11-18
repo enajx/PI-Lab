@@ -366,6 +366,7 @@
   "Start agent": "에이전트 시작",
   " changed on disk while you were editing. Autosave is paused.": " 파일이 편집 중 디스크에서 변경되었습니다. 자동 저장이 일시 중지되었습니다.",
   "Overwrite disk": "디스크 파일 덮어쓰기",
+  "Not saved": "저장되지 않음",
   "Reload from disk": "디스크에서 다시 불러오기",
   "Reopen run terminal": "실행 터미널 다시 열기",
   "Collapse run terminal": "실행 터미널 접기",
@@ -1321,5 +1322,9 @@
   "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "저장된 API 키는 본인만 읽을 수 있는 파일로 보호됩니다. 키체인을 켜면 macOS 키체인이 이를 보호하는 키를 보관합니다.",
   "Could not change key protection": "키 보호를 변경하지 못했습니다",
   "Recent notifications": "최근 알림",
-  "No notifications yet": "아직 알림이 없습니다"
+  "No notifications yet": "아직 알림이 없습니다",
+  "Reconnecting": "다시 연결 중",
+  "Disconnected": "연결 끊김",
+  "Server connection": "서버 연결",
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "이 창과 PI Lab 서버 사이의 연결입니다. 연결이 끊기면 자동으로 다시 연결합니다."
 }

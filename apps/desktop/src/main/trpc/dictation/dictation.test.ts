@@ -206,7 +206,8 @@ test("selects, deletes and changes output action", async () => {
   }
   h = await dictationHarness(
     [english, multi],
-    (async (url: string) => new Response(bodies[url])) as typeof fetch,
+    (async (url: string) =>
+      new Response(bodies[url] ? new Uint8Array(bodies[url]) : null)) as typeof fetch,
     null,
   )
   const caller = h.caller
@@ -348,7 +349,8 @@ test("restarts the engine for a new model and stops it after the idle time", asy
   h = await createHarness([], {
     git: false,
     daemon: "lazy",
-    httpFetch: (async (url: string) => new Response(bodies[url])) as typeof fetch,
+    httpFetch: (async (url: string) =>
+      new Response(bodies[url] ? new Uint8Array(bodies[url]) : null)) as typeof fetch,
     dictationCatalog: [english, multi],
     dictationEngine: engine,
     dictationIdleMs: 300,
@@ -382,7 +384,8 @@ test("deleting the selected model selects the recommended installed model, else 
   }
   h = await dictationHarness(
     [big, small, recommended],
-    (async (url: string) => new Response(bodies[url])) as typeof fetch,
+    (async (url: string) =>
+      new Response(bodies[url] ? new Uint8Array(bodies[url]) : null)) as typeof fetch,
     null,
   )
   const caller = h.caller

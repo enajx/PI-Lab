@@ -1,10 +1,11 @@
-import { createTRPCClient, createWSClient, splitLink, type TRPCLink, wsLink } from "@trpc/client"
+import { createTRPCClient, splitLink, type TRPCLink } from "@trpc/client"
 import type { AnyRouter } from "@trpc/server"
-import superjson from "superjson"
 import { ipcLink } from "trpc-electron/renderer"
 import type { DesktopRouter } from "../../main/desktop/desktopRouter"
 import type { AppRouter } from "../../main/trpc/appRouter"
 import { isDesktopPath } from "../../shared/desktopPaths"
+import { connectionStatus } from "./connectionStatus"
+import { createServerSockets, type ServerSockets } from "./serverLinks"
 
 let lastIpcRequestId = 0
 
@@ -25,7 +26,7 @@ function uniqueIpcIds<TRouter extends AnyRouter>(): TRPCLink<TRouter> {
  */
 export function createIpcClient<TRouter extends AnyRouter>() {
   return createTRPCClient<TRouter>({
-    links: [uniqueIpcIds<TRouter>(), ipcLink({ transformer: superjson })],
+    links: [uniqueIpcIds<TRouter>(), ipcLink()],
   })
 }
 
@@ -34,20 +35,25 @@ function desktopClient() {
   return createIpcClient<DesktopRouter>()
 }
 
-/** One WebSocket to the PI Lab server per document, shared by every client. */
-let serverSocket: ReturnType<typeof createWSClient> | null = null
-function sharedServerSocket(): ReturnType<typeof createWSClient> {
-  serverSocket ??= createWSClient({
+/**
+ * The sockets to the PI Lab server, one pair per document, shared by every
+ * client: calls and status on one, terminal output on the other.
+ */
+let serverSockets: ServerSockets<AppRouter> | null = null
+function sharedServerSockets(): ServerSockets<AppRouter> {
+  serverSockets ??= createServerSockets<AppRouter>({
     url: async () => (await desktopClient().desktop.serverEndpoint.query()).url,
+    WebSocket: globalThis.WebSocket,
+    status: connectionStatus,
   })
-  return serverSocket
+  return serverSockets
 }
 
 /**
  * Typed tRPC client. Calls the desktop app serves itself (native dialogs,
  * this device's notifications, Finder and clipboard; see
  * shared/desktopPaths.ts) go over Electron IPC; every other call goes over a
- * WebSocket to the PI Lab server. SuperJSON must match both routers.
+ * WebSocket to the PI Lab server (terminal output on a second socket). Both carry plain JSON (no transformer).
  * Components can inject fake clients.
  */
 export function createPiLabTrpcClient() {
@@ -55,8 +61,8 @@ export function createPiLabTrpcClient() {
     links: [
       splitLink({
         condition: (op) => isDesktopPath(op.path),
-        true: [uniqueIpcIds<AppRouter>(), ipcLink({ transformer: superjson })],
-        false: wsLink({ client: sharedServerSocket(), transformer: superjson }),
+        true: [uniqueIpcIds<AppRouter>(), ipcLink()],
+        false: sharedServerSockets().link,
       }),
     ],
   })

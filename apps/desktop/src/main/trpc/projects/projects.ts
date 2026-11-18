@@ -17,6 +17,7 @@ import { ANALYSIS_FORMATS } from "@pi-lab/local-db/editor-settings"
 import { TRPCError } from "@trpc/server"
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
+import { projectSchema, projectSummarySchema } from "../../../shared/clientApi"
 import { writeProjectAgentConfig } from "../../agents/projectConfig"
 import {
   currentBranch,
@@ -741,7 +742,7 @@ export const projectsRouter = router({
    * Archived rows remain in this public list so project-aware surfaces and direct routes keep working;
    * Dashboard and sidebar apply their own presentational visibility filter.
    */
-  list: publicProcedure.query(({ ctx }): ProjectSummary[] => {
+  list: publicProcedure.output(z.array(projectSummarySchema)).query(({ ctx }): ProjectSummary[] => {
     const rows = ctx.db
       .select({
         id: projects.id,
@@ -781,13 +782,16 @@ export const projectsRouter = router({
   }),
 
   /** A single project by id, or throws NOT_FOUND. */
-  get: publicProcedure.input(idInput).query(({ ctx, input }): Project => {
-    const row = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
-    if (!row) {
-      throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
-    }
-    return row
-  }),
+  get: publicProcedure
+    .input(idInput)
+    .output(projectSchema)
+    .query(({ ctx, input }): Project => {
+      const row = ctx.db.select().from(projects).where(eq(projects.id, input.id)).get()
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.id}` })
+      }
+      return row
+    }),
 
   /**
    * Delete a project row (cascades to its worktrees/workspaces via the schema's

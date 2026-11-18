@@ -67,7 +67,7 @@ const APP_FILES = [
   // These are the emitted main/daemon externals and their runtime dependency
   // tree. validate:package rejects a new external or transitive dependency
   // missing from this list before electron-builder runs.
-  "!**/node_modules/!(@jsquash|@trpc|@xterm|argparse|better-sqlite3|builder-util-runtime|copy-anything|debug|drizzle-orm|electron-updater|fs-extra|graceful-fs|h5wasm|is-what|jpeg-js|js-yaml|jsonfile|lazy-val|lodash.escaperegexp|lodash.isequal|ms|node-pty|omggif|pngjs|sax|semver|superjson|tiny-typed-emitter|trpc-electron|universalify|wasm-feature-detect|ws|zod)/**",
+  "!**/node_modules/!(@jsquash|@trpc|@xterm|argparse|better-sqlite3|builder-util-runtime|debug|drizzle-orm|electron-updater|fs-extra|graceful-fs|h5wasm|jpeg-js|js-yaml|jsonfile|lazy-val|lodash.escaperegexp|lodash.isequal|ms|node-pty|omggif|pngjs|sax|semver|tiny-typed-emitter|trpc-electron|universalify|wasm-feature-detect|ws|zod)/**",
   "!**/node_modules/@jsquash/!(webp)/**",
   // h5wasm (Analysis HDF5 reader): only its Node build, which embeds the WASM.
   "!**/node_modules/h5wasm/!(dist|package.json|LICENSE.txt)",

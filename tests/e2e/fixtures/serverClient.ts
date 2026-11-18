@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ServerRouter } from "../../../apps/desktop/src/server/router"
 
-// The tRPC client and SuperJSON are dependencies of the desktop app, not the repo root.
+// The tRPC client is a dependency of the desktop app, not the repo root.
 const desktopRequire = createRequire(
   join(
     dirname(fileURLToPath(import.meta.url)),
@@ -19,8 +19,6 @@ const desktopRequire = createRequire(
 const { createTRPCClient, createWSClient, wsLink } = desktopRequire(
   "@trpc/client",
 ) as typeof import("@trpc/client")
-const superjson = (desktopRequire("superjson") as { default: typeof import("superjson").default })
-  .default
 
 /** What the server writes to `server.json` in its data folder. */
 export interface ServerDiscovery {
@@ -60,7 +58,7 @@ export function connectServer(dataDir: string, token?: string) {
     url: `ws://127.0.0.1:${discovery.port}/trpc?token=${encodeURIComponent(deviceToken)}`,
   })
   const client = createTRPCClient<ServerRouter>({
-    links: [wsLink({ client: ws, transformer: superjson })],
+    links: [wsLink({ client: ws })],
   })
   return { client, close: () => ws.close(), discovery }
 }

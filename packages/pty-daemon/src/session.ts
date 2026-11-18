@@ -1,13 +1,15 @@
 // In-memory ownership of live PTY sessions. The store outlives any individual
 // client connection: sessions keep running while no one is attached, and a
-// reconnecting client replays recent scrollback then resumes the live stream.
+// reconnecting client resumes from its offset or starts from a screen snapshot.
 
+import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { type IPty, spawn } from "node-pty"
-import type { SessionInfo } from "./protocol"
-import { Scrollback } from "./scrollback"
+import { ByteTail } from "./byteTail"
+import type { ResumePoint, SessionInfo } from "./protocol"
+import { ScreenState } from "./screen"
 
-/** How much PTY output to retain per session for replay on (re)attach. */
+/** How many raw PTY bytes to retain per session for replay on (re)attach. */
 const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
 
 export interface SpawnOptions {
@@ -21,9 +23,17 @@ export interface SpawnOptions {
 
 /** Listeners notified for the lifetime of a single session. */
 export interface SessionListener {
-  onData(chunk: string): void
+  /** Raw PTY bytes; `offset` is the offset of the first one. */
+  onData(bytes: Buffer, offset: number): void
+  /** The PTY was resized after every byte before `offset`. */
+  onResize(cols: number, rows: number, revision: number, offset: number): void
   onExit(exitCode: number | null, signal: number | null): void
 }
+
+/** How an attach starts, with raw bytes; see `AttachStartFrame` in the protocol. */
+export type SessionStart =
+  | { mode: "replay"; offset: number; bytes: Buffer }
+  | { mode: "snapshot"; offset: number; screen: string; bytes: Buffer }
 
 interface ExitState {
   exitCode: number | null
@@ -31,9 +41,11 @@ interface ExitState {
 }
 
 /**
- * A single PTY plus its replay buffer and subscribers.
+ * A single PTY plus its byte tail, headless emulator and subscribers.
  *
- * Scrollback retains a capped UTF-16 suffix in chunks and joins on attach.
+ * The byte offset counts raw PTY bytes since spawn. The revision changes when
+ * the screen changes without new bytes (a resize); `revisionOffset` is the
+ * offset at which the current revision began.
  */
 class Session {
   readonly id = randomUUID()
@@ -44,19 +56,32 @@ class Session {
 
   private readonly pty: IPty
   private readonly processGroupId: number
-  private readonly scrollback: Scrollback
+  private readonly tail: ByteTail
+  private readonly screen: ScreenState
+  private revision = 0
+  private revisionOffset = 0
+  private disposed = false
   private cols: number
   private rows: number
   private exitState: ExitState | null = null
   private readonly listeners = new Set<SessionListener>()
 
-  constructor(options: SpawnOptions, scrollbackCap: number) {
+  constructor(
+    options: SpawnOptions,
+    scrollbackCap: number,
+    readonly generation: string,
+  ) {
     this.command = options.command
     this.args = options.args ?? []
     this.cwd = options.cwd ?? process.cwd()
     this.cols = options.cols ?? 80
     this.rows = options.rows ?? 24
-    this.scrollback = new Scrollback(scrollbackCap)
+    this.tail = new ByteTail(scrollbackCap)
+    this.screen = new ScreenState(this.cols, this.rows, scrollbackCap, (heldBytes) =>
+      console.warn(
+        `[pty-daemon] session ${this.id}: parser reset after ${heldBytes} bytes inside one sequence`,
+      ),
+    )
 
     const inheritedEnv = { ...process.env }
     delete inheritedEnv.ELECTRON_RUN_AS_NODE
@@ -67,13 +92,22 @@ class Session {
       rows: this.rows,
       cwd: this.cwd,
       env: { ...(inheritedEnv as Record<string, string>), ...options.env },
+      // Raw bytes: offsets, retention and replay count PTY bytes, not decoded text.
+      encoding: null,
     })
 
     this.processGroupId = this.pty.pid
+    if (process.platform !== "win32") setUtf8LineEditing(this.pty)
 
-    this.pty.onData((chunk) => {
-      this.scrollback.append(chunk)
-      for (const listener of this.listeners) listener.onData(chunk)
+    this.pty.onData((data) => {
+      // With `encoding: null` node-pty delivers Buffers despite its string typing.
+      const bytes = data as unknown as Buffer
+      // Output that a killed PTY flushes after teardown has nowhere to go.
+      if (this.disposed) return
+      const offset = this.tail.end
+      this.tail.append(bytes)
+      this.screen.feed(bytes)
+      for (const listener of this.listeners) listener.onData(bytes, offset)
     })
 
     this.pty.onExit(({ exitCode, signal }) => {
@@ -105,12 +139,29 @@ class Session {
     }
   }
 
-  getScrollback(): string {
-    return this.scrollback.text()
+  /**
+   * Replay from `resume` when it is in this generation, still retained, and at
+   * the current revision (no resize since); otherwise a snapshot.
+   */
+  startFrom(resume: ResumePoint | null): SessionStart {
+    if (
+      resume !== null &&
+      resume.generation === this.generation &&
+      resume.revision === this.revision &&
+      resume.offset >= this.revisionOffset
+    ) {
+      const bytes = this.tail.from(resume.offset)
+      if (bytes !== null) return { mode: "replay", offset: resume.offset, bytes }
+    }
+    return { mode: "snapshot", ...this.screen.snapshot() }
+  }
+
+  get screenRevision(): number {
+    return this.revision
   }
 
   /**
-   * Register a listener and return its current scrollback. If the session has
+   * Register a listener. If the session has
    * already exited, the caller is notified synchronously so a late attach still
    * observes the exit. Returns an unsubscribe function.
    */
@@ -130,9 +181,16 @@ class Session {
   }
 
   resize(cols: number, rows: number): void {
+    const changed = cols !== this.cols || rows !== this.rows
     this.cols = cols
     this.rows = rows
     if (this.alive) this.pty.resize(cols, rows)
+    if (!changed) return
+    this.revision += 1
+    this.revisionOffset = this.tail.end
+    this.screen.resize(cols, rows)
+    for (const listener of this.listeners)
+      listener.onResize(cols, rows, this.revision, this.revisionOffset)
   }
 
   kill(signal?: string): void {
@@ -154,17 +212,21 @@ class Session {
     }
   }
 
-  /** Drop all listeners; used during store teardown. */
-  clearListeners(): void {
+  /** Drop all listeners and the emulator; used when the session is reaped. */
+  dispose(): void {
+    this.disposed = true
     this.listeners.clear()
+    this.screen.dispose()
   }
 }
 
 /** A handle the server uses to drive one session without touching internals. */
 export interface SessionHandle {
   readonly id: string
+  readonly generation: string
+  readonly screenRevision: number
   info(): SessionInfo
-  getScrollback(): string
+  startFrom(resume: ResumePoint | null): SessionStart
   subscribe(listener: SessionListener): () => void
   write(data: string): void
   resize(cols: number, rows: number): void
@@ -179,6 +241,8 @@ export interface SessionStoreOptions {
 
 /** Owns every live session and reaps each one shortly after its PTY exits. */
 export class SessionStore {
+  /** New for every daemon process, so a resume point from another daemon never replays. */
+  readonly generation = randomUUID()
   private readonly sessions = new Map<string, Session>()
   private readonly scrollbackBytes: number
   private readonly onSessionReaped?: (sessionId: string) => void
@@ -189,18 +253,19 @@ export class SessionStore {
   }
 
   spawn(options: SpawnOptions): SessionHandle {
-    const session = new Session(options, this.scrollbackBytes)
+    const session = new Session(options, this.scrollbackBytes, this.generation)
     this.sessions.set(session.id, session)
     // Reap from the map once the PTY exits, but only after a short grace period
     // so a client attaching right after exit still finds the session and its
     // final scrollback. Listeners always receive the exit event regardless.
     session.subscribe({
       onData: () => {},
+      onResize: () => {},
       onExit: () => {
         setTimeout(() => {
           if (this.sessions.get(session.id) === session) {
             this.sessions.delete(session.id)
-            session.clearListeners()
+            session.dispose()
             this.onSessionReaped?.(session.id)
           }
         }, 5_000).unref?.()
@@ -221,8 +286,21 @@ export class SessionStore {
   shutdown(): void {
     for (const session of this.sessions.values()) {
       session.kill("SIGKILL")
-      session.clearListeners()
+      session.dispose()
     }
     this.sessions.clear()
   }
+}
+
+/**
+ * node-pty sets the IUTF8 terminal flag only for `encoding: "utf8"`. Raw-byte
+ * output (`encoding: null`) leaves it off, so a program reading cooked-mode
+ * lines would erase one byte of a non-ASCII character. Turn it on with `stty`
+ * on the PTY's own device right after spawn.
+ */
+function setUtf8LineEditing(pty: IPty): void {
+  const device = (pty as IPty & { ptsName?: string }).ptsName
+  if (!device) throw new Error("node-pty did not report the PTY device name")
+  const flag = process.platform === "darwin" ? "-f" : "-F"
+  execFileSync("/bin/stty", [flag, device, "iutf8"], { stdio: "ignore" })
 }

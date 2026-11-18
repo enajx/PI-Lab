@@ -5,7 +5,8 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws"
 import { WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
 import { serverRouter } from "../main/trpc/serverRouter"
-import { TOKEN_HEADER, tokenMatches } from "./access"
+import { TOKEN_HEADER } from "./access"
+import type { DeviceAccess } from "./devices"
 
 export { TOKEN_HEADER }
 
@@ -14,16 +15,29 @@ export const SCHEME_PATH_PREFIX = "/scheme/"
 
 export interface ListenOptions {
   port: number
-  token: string
+  /** Device tokens: who may connect, and how to close a revoked device's sockets. */
+  access: DeviceAccess
   createContext: () => AppContext
   /** Serve one custom-scheme request (`pi-lab-report://…`, `pi-lab-media://…`). */
   handleScheme: (scheme: string, request: Request) => Promise<Response>
+  /** Test mode only: serve `POST /test/drop-connections` (see {@link ListeningServer}). */
+  testRoutes: boolean
 }
 
 export interface ListeningServer {
   port: number
   close: () => Promise<void>
+  /** Close every client WebSocket from the server side, as a killed tunnel would. */
+  dropConnections: () => void
 }
+
+/**
+ * Provisional heartbeat (set after the flood test): the server pings a client
+ * that sent nothing for this long, and closes it when no answer comes in time.
+ * Clients ping on their own schedule too (renderer/trpc/serverLinks.ts).
+ */
+export const SERVER_PING_MS = 5_000
+export const SERVER_PONG_WAIT_MS = 3_000
 
 /** The token a WebSocket upgrade presents in its `?token=` query. */
 function queryToken(request: IncomingMessage): string | null {
@@ -32,7 +46,11 @@ function queryToken(request: IncomingMessage): string | null {
 
 /** Write a fetch Response to a Node response, streaming its body. */
 async function sendResponse(response: Response, out: ServerResponse): Promise<void> {
-  out.writeHead(response.status, Object.fromEntries(response.headers.entries()))
+  const headers: Record<string, string> = {}
+  response.headers.forEach((value, name) => {
+    headers[name] = value
+  })
+  out.writeHead(response.status, headers)
   if (!response.body) {
     out.end()
     return
@@ -53,16 +71,22 @@ async function sendResponse(response: Response, out: ServerResponse): Promise<vo
  */
 async function handleHttp(
   options: ListenOptions,
+  dropConnections: () => void,
   request: IncomingMessage,
   out: ServerResponse,
 ): Promise<void> {
-  if (!tokenMatches(options.token, request.headers[TOKEN_HEADER]?.toString() ?? null)) {
+  if (!options.access.authenticate(request.headers[TOKEN_HEADER]?.toString() ?? null)) {
     out.writeHead(401).end()
     return
   }
   const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname
   if (path === "/health") {
     out.writeHead(200, { "content-type": "text/plain" }).end("ok")
+    return
+  }
+  if (options.testRoutes && request.method === "POST" && path === "/test/drop-connections") {
+    out.writeHead(204).end()
+    dropConnections()
     return
   }
   if (!path.startsWith(SCHEME_PATH_PREFIX)) {
@@ -95,10 +119,17 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
   const handler = applyWSSHandler({
     wss,
     router: serverRouter,
-    createContext: () => options.createContext(),
+    createContext: ({ res }) => ({
+      ...options.createContext(),
+      connection: { queuedBytes: () => res.bufferedAmount },
+    }),
+    keepAlive: { enabled: true, pingMs: SERVER_PING_MS, pongWaitMs: SERVER_PONG_WAIT_MS },
   })
+  const dropConnections = (): void => {
+    for (const client of wss.clients) client.terminate()
+  }
   const http: Server = createServer((request, response) => {
-    handleHttp(options, request, response).catch((error: unknown) => {
+    handleHttp(options, dropConnections, request, response).catch((error: unknown) => {
       console.error("[pi-lab server] HTTP request failed:", error)
       if (!response.headersSent) response.writeHead(500)
       response.end()
@@ -106,12 +137,18 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
   })
   http.on("upgrade", (request, socket, head) => {
     const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname
-    if (path !== "/trpc" || !tokenMatches(options.token, queryToken(request))) {
+    const deviceId = path === "/trpc" ? options.access.authenticate(queryToken(request)) : null
+    if (!deviceId) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n")
       socket.destroy()
       return
     }
-    wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request))
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      // A revoked device loses its open sockets at once (1008: policy violation).
+      const forget = options.access.track(deviceId, () => ws.close(1008, "Device token revoked"))
+      ws.once("close", forget)
+      wss.emit("connection", ws, request)
+    })
   })
   return new Promise((resolve, reject) => {
     http.once("error", reject)
@@ -126,6 +163,7 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
             wss.close()
             http.close(() => done())
           }),
+        dropConnections,
       })
     })
   })

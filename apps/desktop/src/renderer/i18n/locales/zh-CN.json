@@ -366,6 +366,7 @@
   "Start agent": "启动代理",
   " changed on disk while you were editing. Autosave is paused.": "在编辑期间被磁盘上的更改修改。自动保存已暂停。",
   "Overwrite disk": "覆盖磁盘文件",
+  "Not saved": "未保存",
   "Reload from disk": "从磁盘重新加载",
   "Reopen run terminal": "重新打开运行终端",
   "Collapse run terminal": "收起运行终端",
@@ -1321,5 +1322,9 @@
   "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "已保存的 API 密钥由只有你能读取的文件保护。开启钥匙串后，由 macOS 钥匙串保存保护它们的密钥。",
   "Could not change key protection": "无法更改密钥保护方式",
   "Recent notifications": "最近的通知",
-  "No notifications yet": "还没有通知"
+  "No notifications yet": "还没有通知",
+  "Reconnecting": "正在重新连接",
+  "Disconnected": "已断开",
+  "Server connection": "服务器连接",
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "此窗口与 PI Lab 服务器之间的连接。断开后会自动重新连接。"
 }

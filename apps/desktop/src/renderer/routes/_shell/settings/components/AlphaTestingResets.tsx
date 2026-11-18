@@ -2,7 +2,10 @@ import { Button } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { APP_ICON_DEFAULT_SELECTION } from "../../../../../shared/appIcon"
-import { drainFileOperations } from "../../../../Editor/hooks/useEditorBuffers/fileOperations"
+import {
+  drainFileOperations,
+  SHUTDOWN_DRAIN_MS,
+} from "../../../../Editor/hooks/useEditorBuffers/fileOperations"
 import { setInterfaceLanguage } from "../../../../i18n/language"
 import {
   alphaProjectsHaveUnsavedWork,
@@ -53,7 +56,7 @@ export function AlphaTestingResets() {
     setBusy("projects")
     setError(null)
     try {
-      await drainFileOperations()
+      await drainFileOperations(SHUTDOWN_DRAIN_MS)
       const projects = await queryClient.fetchQuery(trpc.projects.list.queryOptions())
       const recovery = workspaceRecovery()
       recovery.flush()

@@ -366,6 +366,7 @@
   "Start agent": "بدء الوكيل",
   " changed on disk while you were editing. Autosave is paused.": " تغير على القرص أثناء التحرير. توقف الحفظ التلقائي مؤقتًا.",
   "Overwrite disk": "الكتابة فوق ملف القرص",
+  "Not saved": "لم يُحفظ",
   "Reload from disk": "إعادة التحميل من القرص",
   "Reopen run terminal": "إعادة فتح طرفية التشغيل",
   "Collapse run terminal": "طي طرفية التشغيل",
@@ -1321,5 +1322,9 @@
   "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "تُحمى مفاتيح API المحفوظة بملف لا يقرأه غيرك. عند تشغيل سلسلة المفاتيح، تحتفظ سلسلة مفاتيح macOS بالمفتاح الذي يحميها.",
   "Could not change key protection": "تعذر تغيير حماية المفاتيح",
   "Recent notifications": "الإشعارات الأخيرة",
-  "No notifications yet": "لا توجد إشعارات بعد"
+  "No notifications yet": "لا توجد إشعارات بعد",
+  "Reconnecting": "جارٍ إعادة الاتصال",
+  "Disconnected": "غير متصل",
+  "Server connection": "الاتصال بالخادم",
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "الاتصال بين هذه النافذة وخادم PI Lab. بعد انقطاعه يعيد الاتصال تلقائيًا."
 }

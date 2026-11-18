@@ -519,7 +519,9 @@ describe("PaperEditor Start draft and Update paper (mocked server)", () => {
     await waitFor(() => expect(skill.hasAttribute("disabled")).toBe(false))
     fireEvent.click(skill)
     await waitFor(() => expect(tabLabels()).toEqual(["main.tex", "Review notes"]))
-    expect(started).toEqual([{ projectId: "p8", skillSlug: "review-notes", origin: "latex" }])
+    expect(started).toEqual([
+      { projectId: "p8", skillSlug: "review-notes", origin: "latex", launchId: expect.any(String) },
+    ])
     cleanup()
     slot.remove()
   })

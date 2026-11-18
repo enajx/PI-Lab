@@ -5,7 +5,13 @@ import {
   automationRuns,
   type PiLabDatabase,
 } from "@pi-lab/local-db"
-import type { AttachResult, DataEvent, ExitEvent, SessionInfo } from "@pi-lab/pty-daemon"
+import type {
+  AttachResult,
+  DataEvent,
+  ExitEvent,
+  ResumePoint,
+  SessionInfo,
+} from "@pi-lab/pty-daemon"
 import { eq, ne } from "drizzle-orm"
 import { nativeNotificationBody, nativeText } from "../i18n/nativeLanguage"
 import type { NotificationSink } from "../notifications"
@@ -26,7 +32,11 @@ import type {
 } from "./types"
 
 export interface ActivityDaemonClient {
-  attach: (sessionId: string, onReplay?: (result: AttachResult) => void) => Promise<AttachResult>
+  attach: (
+    sessionId: string,
+    resume: ResumePoint | null,
+    onStart?: (result: AttachResult) => void,
+  ) => Promise<AttachResult>
   list: () => Promise<SessionInfo[]>
   on: {
     (event: "data", listener: (event: DataEvent) => void): unknown
@@ -78,6 +88,8 @@ interface MonitoredTerminal {
   rows: number
   kind: "agent" | "terminal"
   replayPending: boolean
+  /** Raw PTY bytes can split a UTF-8 character across chunks. */
+  decoder: TextDecoder
 }
 
 interface TerminalCommandRuntime {
@@ -297,7 +309,14 @@ export class ActivityMonitor implements ActivityMonitorPort {
   ): Promise<void> {
     if (this.disposed || this.terminals.has(sessionId)) return
     const terminal = this.options.terminalFactory(cols, rows)
-    const monitored = { terminal, cols, rows, kind, replayPending: true }
+    const monitored = {
+      terminal,
+      cols,
+      rows,
+      kind,
+      replayPending: true,
+      decoder: new TextDecoder(),
+    }
     this.terminals.set(sessionId, monitored)
     const replay = (result: AttachResult) => {
       if (!monitored.replayPending || this.terminals.get(sessionId) !== monitored) return
@@ -311,12 +330,15 @@ export class ActivityMonitor implements ActivityMonitorPort {
         })
         return
       }
-      if (result.scrollback.length > 0) this.render(sessionId, result.scrollback)
+      const { start } = result
+      const screen = start.mode === "snapshot" ? start.screen : ""
+      const text = screen + monitored.decoder.decode(start.bytes, { stream: true })
+      if (text.length > 0) this.render(sessionId, text)
     }
     try {
       const client = providedClient ?? (await this.options.getMonitorClient())
       this.wireClient(client)
-      const result = await client.attach(sessionId, replay)
+      const result = await client.attach(sessionId, null, replay)
       // Keep injected clients that only return a snapshot compatible with the port.
       replay(result)
     } catch (error) {
@@ -336,8 +358,9 @@ export class ActivityMonitor implements ActivityMonitorPort {
     if (this.clients.has(identity)) return
     this.clients.add(identity)
     client.on("data", (event) => {
-      if (!this.terminals.get(event.sessionId)?.replayPending)
-        this.render(event.sessionId, event.chunk)
+      const monitored = this.terminals.get(event.sessionId)
+      if (monitored && !monitored.replayPending)
+        this.render(event.sessionId, monitored.decoder.decode(event.bytes, { stream: true }))
     })
     client.on("exit", (event) => this.handleExit(event))
     client.on("close", () => this.handleClientClose())

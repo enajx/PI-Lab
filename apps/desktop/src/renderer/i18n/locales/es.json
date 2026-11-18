@@ -366,6 +366,7 @@
   "Start agent": "Iniciar agente",
   " changed on disk while you were editing. Autosave is paused.": " cambió en el disco mientras lo editabas. El guardado automático está en pausa.",
   "Overwrite disk": "Sobrescribir disco",
+  "Not saved": "No guardado",
   "Reload from disk": "Recargar desde disco",
   "Reopen run terminal": "Reabrir terminal de ejecución",
   "Collapse run terminal": "Contraer terminal de ejecución",
@@ -1321,5 +1322,9 @@
   "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "Las claves de API guardadas se protegen con un archivo que solo tú puedes leer. Con el Llavero activado, el Llavero de macOS guarda la clave que las protege.",
   "Could not change key protection": "No se pudo cambiar la protección de claves",
   "Recent notifications": "Notificaciones recientes",
-  "No notifications yet": "Aún no hay notificaciones"
+  "No notifications yet": "Aún no hay notificaciones",
+  "Reconnecting": "Reconectando",
+  "Disconnected": "Desconectado",
+  "Server connection": "Conexión con el servidor",
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "La conexión entre esta ventana y el servidor de PI Lab. Tras una caída se vuelve a conectar sola."
 }

@@ -8,7 +8,10 @@ import type { CloseTabBridge } from "../../../../shared/closeTab"
 import type { QuickEditBridge } from "../../../../shared/quickEdit"
 import type { ShutdownBridge, ShutdownRequest } from "../../../../shared/shutdown"
 import type { UpdatesBridge } from "../../../../shared/updates"
-import { drainFileOperations } from "../../../Editor/hooks/useEditorBuffers/fileOperations"
+import {
+  drainFileOperations,
+  SHUTDOWN_DRAIN_MS,
+} from "../../../Editor/hooks/useEditorBuffers/fileOperations"
 import { useTranslate } from "../../../i18n/language"
 import { readRestoreProjectTabs, useRestoreProjectTabs } from "../../../preferences/preferences"
 import {
@@ -77,7 +80,7 @@ export function WorkspaceRecoveryController() {
       pending.current = next
       // Main already canceled the native event. Wait for in-flight writes and
       // formatter reads before deciding whether the current revision is protected.
-      void drainFileOperations().then(() => {
+      void drainFileOperations(SHUTDOWN_DRAIN_MS).then(() => {
         if (pending.current?.requestId !== next.requestId) return
         store.flush()
         const unprotected = store.affected(readRestoreProjectTabs())
@@ -177,7 +180,7 @@ export function WorkspaceRecoveryController() {
         setUntitledLocationRequested(true)
         return
       }
-      await drainFileOperations()
+      await drainFileOperations(SHUTDOWN_DRAIN_MS)
       store.flush()
       const remaining = store.affected(readRestoreProjectTabs())
       if (remaining.length > 0 || readDirtyQuickBuffers().length > 0 || readUntitledDraft()) {
@@ -198,7 +201,7 @@ export function WorkspaceRecoveryController() {
     setBusy(true)
     setError(null)
     try {
-      await drainFileOperations()
+      await drainFileOperations(SHUTDOWN_DRAIN_MS)
       const latest = currentAffected()
       if (!store.discard(latest, closeDiscardedBuffers)) {
         setError(
@@ -207,7 +210,7 @@ export function WorkspaceRecoveryController() {
         setAffected(currentAffected())
         return
       }
-      await drainFileOperations()
+      await drainFileOperations(SHUTDOWN_DRAIN_MS)
       store.flush()
       const remaining = store.affected(readRestoreProjectTabs())
       if (remaining.length > 0) {
@@ -248,6 +251,8 @@ export function WorkspaceRecoveryController() {
                 workspaceId: workspace.id,
                 relPath: destination.relPath,
                 content,
+                // A new file chosen in the New file dialog: no opened version to check.
+                expected: null,
               }),
             (cause: unknown) => {
               setError(`Could not save Untitled: ${String(cause)}`)
@@ -261,8 +266,8 @@ export function WorkspaceRecoveryController() {
               return null
             },
           )
-        saved = result?.matchesWrittenContent === true
-        if (result && !result.matchesWrittenContent)
+        saved = result?.status === "saved" && result.matchesWrittenContent
+        if (result && !saved)
           setError("Saved file differs from Untitled content. PI Lab is still open.")
       }
     } else {

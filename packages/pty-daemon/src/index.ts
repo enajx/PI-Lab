@@ -5,6 +5,7 @@
 
 export {
   type AttachResult,
+  type AttachStart,
   DaemonClient,
   type DaemonClientEvents,
   DaemonError,
@@ -18,6 +19,7 @@ export {
   type DaemonFrame,
   type DaemonReply,
   type DataEvent,
+  type DataFrame,
   type ErrorReply,
   type ExitEvent,
   type KillRequest,
@@ -31,7 +33,9 @@ export {
   type ProcessResult,
   type ProcessSnapshot,
   type ProcessSummary,
+  type ResizeEvent,
   type ResizeRequest,
+  type ResumePoint,
   type SessionInfo,
   type ShutdownReply,
   type ShutdownRequest,
