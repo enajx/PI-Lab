@@ -107,6 +107,11 @@ export interface AttachRequest {
   cid: string
   sessionId: string
   resume: ResumePoint | null
+  /**
+   * A terminal shown again (user decision): replay whenever the tail still
+   * has the bytes, whatever their size, so its scrollback stays exact.
+   */
+  preferReplay?: true
 }
 
 /** Stop receiving events for a session on this connection (the session keeps running). */
@@ -526,8 +531,9 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
     case "attach": {
       if (typeof value.sessionId !== "string") return null
       const resume = value.resume
+      const prefer = value.preferReplay === true ? { preferReplay: true as const } : {}
       if (resume === null || resume === undefined)
-        return { kind: "attach", cid, sessionId: value.sessionId, resume: null }
+        return { kind: "attach", cid, sessionId: value.sessionId, resume: null, ...prefer }
       if (
         !isRecord(resume) ||
         typeof resume.generation !== "string" ||
@@ -540,6 +546,7 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
         cid,
         sessionId: value.sessionId,
         resume: { generation: resume.generation, offset: resume.offset, revision: resume.revision },
+        ...prefer,
       }
     }
     case "detach":

@@ -329,9 +329,16 @@ export class DaemonClient extends EventEmitter {
     sessionId: string,
     resume: ResumePoint | null,
     onStart?: (result: AttachResult) => void,
+    preferReplay?: true,
   ): Promise<AttachResult> {
     const reply = await this.request<AttachReply>(
-      (cid) => ({ kind: "attach", cid, sessionId, resume }),
+      (cid) => ({
+        kind: "attach",
+        cid,
+        sessionId,
+        resume,
+        ...(preferReplay ? { preferReplay } : {}),
+      }),
       onStart ? (frame) => onStart(attachResult(frame)) : undefined,
     )
     return attachResult(reply)

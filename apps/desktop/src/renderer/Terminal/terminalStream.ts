@@ -54,7 +54,13 @@ export interface OutputSubscriptionHandlers {
 
 /** `trpc.terminal.output.subscribe`, from any tRPC client of the server. */
 export type SubscribeOutput = (
-  input: { sessionId: string; resume: ResumePoint | null; streamId: string; holdSkip: boolean },
+  input: {
+    sessionId: string
+    resume: ResumePoint | null
+    streamId: string
+    holdSkip: boolean
+    preferReplay?: true
+  },
   handlers: OutputSubscriptionHandlers,
 ) => { unsubscribe: () => void }
 
@@ -160,6 +166,8 @@ export class TerminalStream {
   #closed = false
   #visible = true
   #holdSkip = false
+  /** The next subscription is for a terminal shown again (replay whenever possible). */
+  #shownAgain = false
   /** The current subscription's stream id; null while none is open. */
   #streamId: string | null = null
   /** Applied since the last ack: bytes, and events of any kind. */
@@ -176,7 +184,7 @@ export class TerminalStream {
 
   /** Subscribe for the first time: a fresh emulator asks for a snapshot. */
   open(): void {
-    this.#subscribe(null)
+    this.#subscribe(null, false)
   }
 
   /** Events received and not yet handed to the emulator. */
@@ -215,6 +223,7 @@ export class TerminalStream {
       return
     }
     this.#resubscribeWhenIdle = true
+    this.#shownAgain = true
     this.#pump()
   }
 
@@ -241,7 +250,7 @@ export class TerminalStream {
     this.#streamId = null
   }
 
-  #subscribe(resume: ResumePoint | null): void {
+  #subscribe(resume: ResumePoint | null, preferReplay: boolean): void {
     if (!this.#visible) return
     const epoch = ++this.#epoch
     let sawOpen = false
@@ -250,7 +259,13 @@ export class TerminalStream {
     this.#bytesSinceAck = 0
     this.#eventsSinceAck = 0
     this.#subscription = this.#options.subscribe(
-      { sessionId: this.#options.sessionId, resume, streamId, holdSkip: this.#holdSkip },
+      {
+        sessionId: this.#options.sessionId,
+        resume,
+        streamId,
+        holdSkip: this.#holdSkip,
+        ...(preferReplay ? { preferReplay: true as const } : {}),
+      },
       {
         onData: ({ data }) => {
           if (epoch !== this.#epoch) return
@@ -290,7 +305,8 @@ export class TerminalStream {
       if (this.#eventsSinceAck > 0) this.#sendAck()
       if (this.#resubscribeWhenIdle) {
         this.#resubscribeWhenIdle = false
-        this.#subscribe(resumePointWhenShown(this.#consumed))
+        this.#subscribe(resumePointWhenShown(this.#consumed), this.#shownAgain)
+        this.#shownAgain = false
       }
       return
     }

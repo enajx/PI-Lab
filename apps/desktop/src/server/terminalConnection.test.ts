@@ -893,7 +893,7 @@ test("a refresh made for another screen (wrong base) is refused: the client asks
   const control = await newClient()
   const sessionId = await spawnProgram(control, "tui")
   const viewerClient = await newClient()
-  const viewer = new Viewer(viewerClient, sessionId, "keep")
+  const viewer = new Viewer(viewerClient, sessionId, "discard")
   await waitFor(() => viewer.screen().includes("R"), 15_000, "the program to start")
   await control.trpc.terminal.write.mutate({ sessionId, data: "g" })
   await waitFor(() => (viewer.stream.consumed()?.offset ?? 0) > 2_000, 10_000, "output")
@@ -903,10 +903,13 @@ test("a refresh made for another screen (wrong base) is refused: the client asks
       ? { ...data, base: { ...data.base, offset: data.base.offset - 1 } }
       : data
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
-  viewer.stream.setVisible(false)
-  // Enough output while hidden that the daemon sends a refresh, not a small replay.
+  // Output queues unapplied, then the socket drops and the queue is discarded:
+  // the resume point is far enough behind that the daemon sends a refresh.
+  viewer.hold()
   await new Promise((resolve) => setTimeout(resolve, 1_000))
-  viewer.stream.setVisible(true)
+  viewerClient.terminalSocket().terminate()
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  viewer.release()
   await waitFor(() => viewer.stream.starts.length === 3, 10_000, "the snapshot after the refusal")
   expect(viewer.stream.starts).toEqual(["snapshot", "refresh", "snapshot"])
   expect(viewer.subscribeInputs.at(-1)).toBeNull()
@@ -919,31 +922,33 @@ test("a refresh made for another screen (wrong base) is refused: the client asks
   await control.trpc.terminal.kill.mutate({ sessionId })
 }, 30_000)
 
-test("a hidden terminal gets no output, and resumes correctly when shown (a small replay, else a snapshot for log lines)", async () => {
+test("a hidden terminal gets no output; shown again it gets an exact replay while the daemon has the bytes (112 KB of log lines), else a snapshot", async () => {
   const control = await newClient()
-  const slowFlood = await spawnFlood(control, "lines", 8 * KiB)
-  const viewer = new Viewer(await newClient(), slowFlood.sessionId, "keep")
+  const sessionId = await spawnProgram(control, "stream")
+  const viewer = new Viewer(await newClient(), sessionId, "keep")
   await waitFor(() => viewer.screen().includes("R"), 15_000, "start")
 
   viewer.stream.setVisible(false)
   await waitFor(
     async () =>
       (await connectionStats()).every((entry) =>
-        entry.output.streams.every((stream) => stream.sessionId !== slowFlood.sessionId),
+        entry.output.streams.every((stream) => stream.sessionId !== sessionId),
       ),
     5_000,
     "the hidden terminal's stream to end on the server",
   )
   const receivedWhileShown = viewer.received.length
-  await control.trpc.terminal.write.mutate({ sessionId: slowFlood.sessionId, data: "g" })
-  await new Promise((resolve) => setTimeout(resolve, 1_000))
+  // About 2,000 log lines (112 KB), all scrolled into history while hidden.
+  await control.trpc.terminal.write.mutate({ sessionId, data: "b" })
+  const fresh = new Viewer(await newClient(), sessionId, "keep")
+  await waitFor(() => fresh.screen().includes("FINAL"), 10_000, "the burst")
   expect(viewer.received.length).toBe(receivedWhileShown)
   viewer.stream.setVisible(true)
-  // About 8 KiB while hidden: a replay of at most 16 KiB.
   await waitFor(() => viewer.stream.starts.length === 2, 5_000, "the start after showing")
   expect(viewer.stream.starts).toEqual(["snapshot", "replay"])
-  await control.trpc.terminal.write.mutate({ sessionId: slowFlood.sessionId, data: "q" })
-  await expectSameBuffer(viewer, slowFlood.sessionId)
+  await expectSameEnd(fresh, viewer)
+  expect(viewer.allLines()).toEqual(fresh.allLines())
+  await control.trpc.terminal.kill.mutate({ sessionId })
 
   const bigFlood = await spawnFlood(control, "lines", 2048 * KiB)
   const bigViewer = new Viewer(await newClient(), bigFlood.sessionId, "keep")
@@ -957,8 +962,7 @@ test("a hidden terminal gets no output, and resumes correctly when shown (a smal
   expect(bigViewer.stream.starts).toEqual(["snapshot", "snapshot"])
   await control.trpc.terminal.write.mutate({ sessionId: bigFlood.sessionId, data: "q" })
   await expectSameBuffer(bigViewer, bigFlood.sessionId)
-  for (const flood of [slowFlood, bigFlood])
-    await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
+  await control.trpc.terminal.kill.mutate({ sessionId: bigFlood.sessionId })
 }, 60_000)
 
 test("while the user has a selection or has scrolled up, a skip is held; it applies once released", async () => {

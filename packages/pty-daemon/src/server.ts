@@ -344,7 +344,7 @@ export class DaemonServer {
     }
     // The start and the subscription happen in one synchronous step, so live
     // events continue at the start's end offset with no gap or overlap.
-    const start = session.startFrom(request.resume)
+    const start = session.startFrom(request.resume, request.preferReplay === true)
     const info = session.info()
     const base64 = start.bytes.toString("base64")
     this.reply(connection, {

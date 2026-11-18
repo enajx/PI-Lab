@@ -216,14 +216,14 @@ class Session {
    *    first visible row does not continue a history line;
    * 3. otherwise a snapshot.
    */
-  startFrom(resume: ResumePoint | null): SessionStart {
+  startFrom(resume: ResumePoint | null, preferReplay: boolean): SessionStart {
     if (resume === null || resume.generation !== this.generation || resume.offset > this.tail.end)
       return { mode: "snapshot", ...this.screen.snapshot() }
     const replay =
       resume.revision === this.revision && resume.offset >= this.revisionOffset
         ? this.tail.from(resume.offset)
         : null
-    if (replay !== null && replay.length <= SMALL_REPLAY_BYTES)
+    if (replay !== null && (preferReplay || replay.length <= SMALL_REPLAY_BYTES))
       return { mode: "replay", offset: resume.offset, bytes: replay }
     const refreshable =
       resume.revision <= this.revision &&
@@ -404,7 +404,7 @@ export interface SessionHandle {
   readonly screenRevision: number
   readonly echo: InputFlags
   info(): SessionInfo
-  startFrom(resume: ResumePoint | null): SessionStart
+  startFrom(resume: ResumePoint | null, preferReplay: boolean): SessionStart
   subscribe(listener: SessionListener): () => void
   write(data: string, key: KeyInput | null): void
   writeKey(data: string, key: KeyInput): KeyStatus

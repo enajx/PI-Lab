@@ -143,6 +143,8 @@ const outputInput = z.object({
   streamId: z.string().min(1).max(100),
   /** The client holds skips while the user has a selection or has scrolled up. */
   holdSkip: z.boolean(),
+  /** A terminal shown again: replay from `resume` whenever the daemon still has the bytes. */
+  preferReplay: z.literal(true).optional(),
 })
 
 const ackInput = z.object({
@@ -261,6 +263,7 @@ function attachSession(
   ctx: AppContext,
   sessionId: string,
   resume: ResumePoint | null,
+  preferReplay: boolean,
   handlers: SessionAttachment,
 ): SessionAttachmentHandle {
   let cancelled = false
@@ -270,7 +273,7 @@ function attachSession(
   /** The resume point after the last start or event forwarded to the handlers. */
   let point: ResumePoint | null = resume
 
-  const attachOnce = async (from: ResumePoint | null): Promise<void> => {
+  const attachOnce = async (from: ResumePoint | null, replay: boolean): Promise<void> => {
     let attaching = true
     let closed = false
     const client = await ctx.getDaemonClient()
@@ -334,16 +337,21 @@ function attachSession(
       cleanup = () => {}
     }
     try {
-      await client.attach(sessionId, from, (result) => {
-        if (cancelled) return
-        point = {
-          generation: result.generation,
-          offset: result.start.offset + result.start.bytes.length,
-          revision: result.revision,
-        }
-        handlers.onStart(result)
-        attaching = false
-      })
+      await client.attach(
+        sessionId,
+        from,
+        (result) => {
+          if (cancelled) return
+          point = {
+            generation: result.generation,
+            offset: result.start.offset + result.start.bytes.length,
+            revision: result.revision,
+          }
+          handlers.onStart(result)
+          attaching = false
+        },
+        replay ? true : undefined,
+      )
     } catch (error) {
       // The connection closed during the attach: onClose attaches again.
       if (closed) return
@@ -352,7 +360,7 @@ function attachSession(
   }
 
   const run = (from: ResumePoint | null, afterClose: boolean): void => {
-    attachOnce(from).catch((error: unknown) => {
+    attachOnce(from, !afterClose && preferReplay).catch((error: unknown) => {
       cleanup()
       if (cancelled) return
       const message = error instanceof Error ? error.message : String(error)
@@ -500,7 +508,7 @@ export const terminalRouter = router({
     observable<TerminalEvent>((emit) => {
       // Raw PTY bytes can split a UTF-8 character across chunks.
       const decoder = new TextDecoder()
-      const attachment = attachSession(ctx, input.sessionId, null, {
+      const attachment = attachSession(ctx, input.sessionId, null, false, {
         onStart: ({ start }) => {
           const screen = start.mode === "replay" ? "" : start.screen
           const chunk = screen + decoder.decode(start.bytes, { stream: true })
@@ -652,22 +660,28 @@ export const terminalRouter = router({
           })
       },
     })
-    const attachment = attachSession(ctx, input.sessionId, input.resume, {
-      onStart: (result) => stream.push({ kind: "start", result }),
-      onEvent: (event) => {
-        if (ended) return
-        if (event.kind === "data") ctx.caffeine.markTerminalActivity()
-        if (event.kind !== "exit" && connection.queuedBytes() > OUTPUT_QUEUE_LIMIT_BYTES) {
-          behind()
-          return
-        }
-        stream.push(event)
+    const attachment = attachSession(
+      ctx,
+      input.sessionId,
+      input.resume,
+      input.preferReplay === true,
+      {
+        onStart: (result) => stream.push({ kind: "start", result }),
+        onEvent: (event) => {
+          if (ended) return
+          if (event.kind === "data") ctx.caffeine.markTerminalActivity()
+          if (event.kind !== "exit" && connection.queuedBytes() > OUTPUT_QUEUE_LIMIT_BYTES) {
+            behind()
+            return
+          }
+          stream.push(event)
+        },
+        onError: (error) => {
+          failure = error
+          end()
+        },
       },
-      onError: (error) => {
-        failure = error
-        end()
-      },
-    })
+    )
     const onAbort = () => wake()
     signal?.addEventListener("abort", onAbort)
     try {
