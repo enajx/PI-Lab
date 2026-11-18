@@ -206,6 +206,8 @@ export function Terminal({
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
       theme: currentTerminalTheme(),
+      // Local echo draws its predictions as decorations, a proposed API in xterm 5.5.
+      allowProposedApi: true,
     })
     xtermRef.current = xterm
     const engine = new PredictionEngine(localEchoRef.current)

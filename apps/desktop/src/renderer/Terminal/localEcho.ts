@@ -293,12 +293,12 @@ export class PredictionEngine {
           continue
         if (cell.unknown) continue
         const actual = screen.cellChars(row.row, cell.col)
-        if (actual === cell.replacement) continue
+        if (actual === cell.replacement || (isBlank(actual) && isBlank(cell.replacement))) continue
         cells.push({
           row: row.row,
           col: cell.col,
           chars: cell.replacement,
-          underline: flag && !(isBlank(cell.replacement) && isBlank(actual)),
+          underline: flag,
         })
       }
     }

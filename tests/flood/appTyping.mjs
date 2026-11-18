@@ -10,7 +10,8 @@
 // Electron main keeps its own direct connection; only the renderer is slowed.
 //
 // Tasks (--task):
-//   latency  type --keys keys at 10 per second into bash; per key, keydown to
+//   latency  type --keys keys at 10 per second into bash (or `cat` with
+//            --target cat); per key, keydown to
 //            the first visible character: a local echo prediction (decoration
 //            text) or xterm's own rows. Reported with --echo adaptive and off.
 //   hidden   prompts that hide input (read -s, Python getpass, a sudo-like
@@ -258,7 +259,10 @@ async function launch({ link, echo }) {
     },
   })
   const page = await app.firstWindow()
-  if (process.env.DEBUG_TYPING) page.on("console", (message) => console.log(`[page] ${message.text()}`))
+  if (process.env.DEBUG_TYPING) {
+    page.on("console", (message) => console.log(`[page] ${message.text()}`))
+    page.on("pageerror", (error) => console.log(`[page error] ${error.stack}`))
+  }
   await page.getByTestId("app-ready").waitFor({ state: "visible", timeout: 90_000 })
   await page.evaluate((mode) => window.localStorage.setItem("pi-lab.terminal.localEcho", mode), echo)
   await page.getByTestId("project-item").click()
@@ -289,7 +293,10 @@ async function run(page, command, ready) {
   await waitFor(async () => (await page.evaluate(() => window.__typing.rows())).includes(ready), 30_000, ready)
 }
 
-async function latencyTask(page, keys) {
+async function latencyTask(page, keys, target) {
+  // cat: a cooked-mode program (the PTY's ECHO flag is on, the tty echoes);
+  // bash: readline at its prompt (ECHO off, bash echoes itself).
+  if (target === "cat") await run(page, "cat", "cat")
   // Warm up: a few keys so the round trip is measured, then clear the line.
   for (const ch of "warmup") {
     await page.keyboard.press(ch)
@@ -483,6 +490,7 @@ async function main() {
       link: { type: "string" },
       echo: { type: "string" },
       keys: { type: "string" },
+      target: { type: "string" },
       trials: { type: "string" },
       out: { type: "string" },
     },
@@ -495,7 +503,10 @@ async function main() {
   const result = { task: values.task, echo, conditions: session.conditions, startedAt: new Date(started).toISOString() }
   let failure = null
   try {
-    if (values.task === "latency") result.latency = await latencyTask(session.page, Number(values.keys ?? "200"))
+    if (values.task === "latency") {
+      result.target = values.target ?? "bash"
+      result.latency = await latencyTask(session.page, Number(values.keys ?? "200"), result.target)
+    }
     else if (values.task === "hidden")
       result.hidden = await hiddenTask(session.page, session.dataDir, Number(values.trials ?? "1000"))
     else if (values.task === "reject")
