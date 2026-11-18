@@ -420,15 +420,18 @@ test("closing the window with Keep running after window closes off runs the Quit
       (await app?.evaluate(
         () => (globalThis as unknown as { quitPrompts: string[] }).quitPrompts,
       )) ?? []
-    // Cancel keeps the window open and the shell running.
+    // Cancel keeps the window as it was (shown, or hidden under
+    // PI_LAB_TEST_HIDE_WINDOWS) and the shell running.
+    const visibility = () =>
+      app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().map((open) => open.isVisible()),
+      )
+    const before = await visibility()
+    expect(before).toHaveLength(1)
     await closeWindow([CANCEL])
     await expect.poll(async () => (await prompts()).length).toBe(1)
     expect(JSON.parse((await prompts())[0] ?? "{}").buttons).toEqual(QUIT_BUTTONS)
-    expect(
-      await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().map((open) => open.isVisible()),
-      ),
-    ).toEqual([true])
+    expect(await visibility()).toEqual(before)
     expect(alive(shell.pid)).toBe(true)
     // Quit closes the app; the shell, the daemon and the server keep running.
     const daemonPid = await daemonPidFor(socketPath)
