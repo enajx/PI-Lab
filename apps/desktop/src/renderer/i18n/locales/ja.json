@@ -1359,7 +1359,7 @@
   "could not be reached, so its token is still valid there. Revoke it in Settings > Machines on that machine.": "に接続できなかったため、そのトークンはまだ有効です。そのマシンの設定 > マシンで取り消してください。",
   "Forget this machine. Its token is revoked on the machine when it can be reached.": "このマシンを削除します。接続できる場合は、そのマシン上でトークンを取り消します。",
   "SSH host": "SSH ホスト",
-  "A host name, user@host, or a Host from ~/.ssh/config. The PI Lab server must run there.": "ホスト名、user@host、または ~/.ssh/config の Host。そこで PI Lab サーバーが動いている必要があります。",
+  "A host name, user@host, or a Host from ~/.ssh/config. If no PI Lab server runs there, PI Lab installs one.": "ホスト名、user@host、または ~/.ssh/config の Host。そこで PI Lab サーバーが動いていない場合は、PI Lab がインストールします。",
   "How this machine is shown in PI Lab.": "PI Lab でのこのマシンの表示名。",
   "lab-server": "lab-server",
   "Lab server": "ラボのサーバー",
@@ -1371,5 +1371,11 @@
   "Revoked": "取り消し済み",
   "Added": "追加日",
   "Revoke": "取り消す",
-  "Connect to the PI Lab server on another computer over SSH.": "SSH で別のコンピューターの PI Lab サーバーに接続します。"
+  "Connect to the PI Lab server on another computer over SSH.": "SSH で別のコンピューターの PI Lab サーバーに接続します。",
+  "When a machine is behind this app": "マシンがこのアプリより古いとき",
+  "Update automatically": "自動的に更新",
+  "Ask me": "確認する",
+  "Never": "しない",
+  "Update machines automatically": "マシンを自動的に更新",
+  "Update": "更新"
 }

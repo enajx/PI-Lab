@@ -61,6 +61,7 @@ beforeAll(async () => {
     build: "test-build",
     version: "0.0.0-test",
     port: 0,
+    install: null,
   })
   await runtime.start(() => undefined)
   token = ensureLocalToken(dataDir)
@@ -104,6 +105,19 @@ test("a client with the local token gets the hello and project data over loopbac
   expect(hello).toMatchObject({ protocol: 1, build: "test-build", version: "0.0.0-test" })
   expect(hello.capabilities).toEqual(["devices", "launch-ids", "answer-request", "machines"])
   expect(await client.projects.list.query()).toEqual([])
+  close()
+})
+
+test("Update machines automatically: on by default, saved by the server; no self-update for an app's server", async () => {
+  const { client, close } = connect(token)
+  expect(await client.server.updates.settings.query()).toEqual({
+    autoUpdate: true,
+    selfUpdate: false,
+  })
+  await client.server.updates.setAutoUpdate.mutate({ autoUpdate: false })
+  expect((await client.server.updates.settings.query()).autoUpdate).toBe(false)
+  await client.server.updates.setAutoUpdate.mutate({ autoUpdate: true })
+  expect((await client.server.hello.query()).capabilities).not.toContain("server-update")
   close()
 })
 

@@ -26,15 +26,41 @@ const storedMachineSchema = z.object({
 
 export type StoredMachine = z.infer<typeof storedMachineSchema>
 
-/** The stored machines; none when the file does not exist. Throws on a file others can read or a broken file. */
-export function readMachines(profileDir: string): StoredMachine[] {
-  const path = join(profileDir, MACHINES_FILE)
-  if (!existsSync(path)) return []
-  assertOwnerOnly(path)
-  return z.array(storedMachineSchema).parse(JSON.parse(readFileSync(path, "utf8")))
+/**
+ * "When a machine is behind this app": auto installs this app's server bundle
+ * over SSH, ask shows an Update button, never does nothing.
+ */
+export const behindPolicySchema = z.enum(["auto", "ask", "never"])
+export type BehindPolicy = z.infer<typeof behindPolicySchema>
+
+/** What `machines.json` holds. */
+export interface MachineFile {
+  machines: StoredMachine[]
+  behindPolicy: BehindPolicy
 }
 
-/** Replace the stored machines (owner-only, temp file and rename). */
-export function writeMachines(profileDir: string, machines: StoredMachine[]): void {
-  writeOwnerOnly(join(profileDir, MACHINES_FILE), `${JSON.stringify(machines, null, 2)}\n`)
+const machineFileSchema = z.object({
+  machines: z.array(storedMachineSchema),
+  behindPolicy: behindPolicySchema,
+})
+
+/**
+ * The stored machines and the behind policy; none and "auto" when the file
+ * does not exist. An older file holding only the machines array reads with
+ * "auto". Throws on a file others can read or a broken file.
+ */
+export function readMachineFile(profileDir: string): MachineFile {
+  const path = join(profileDir, MACHINES_FILE)
+  if (!existsSync(path)) return { machines: [], behindPolicy: "auto" }
+  assertOwnerOnly(path)
+  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
+  if (Array.isArray(parsed)) {
+    return { machines: z.array(storedMachineSchema).parse(parsed), behindPolicy: "auto" }
+  }
+  return machineFileSchema.parse(parsed)
+}
+
+/** Replace `machines.json` (owner-only, temp file and rename). */
+export function writeMachineFile(profileDir: string, file: MachineFile): void {
+  writeOwnerOnly(join(profileDir, MACHINES_FILE), `${JSON.stringify(file, null, 2)}\n`)
 }

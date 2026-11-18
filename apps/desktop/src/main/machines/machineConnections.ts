@@ -1,6 +1,16 @@
+import { createTRPCClient, createWSClient, wsLink } from "@trpc/client"
+import { WebSocket } from "ws"
 import { DEVICE_REVOKE_PATH, proveDeviceIdentity, TOKEN_HEADER } from "../../server/access"
+import { SERVER_UPDATE_CAPABILITY } from "../../shared/clientApi"
+import { compareVersions } from "../../shared/serverVersion"
 import { readRemoteDiscovery, SshTunnel, type TunnelState } from "../server/tunnel"
-import { readMachines, type StoredMachine, writeMachines } from "./machineStore"
+import type { ServerRouter } from "../trpc/serverRouter"
+import {
+  type BehindPolicy,
+  readMachineFile,
+  type StoredMachine,
+  writeMachineFile,
+} from "./machineStore"
 import {
   bundleEnrollCommand,
   installServerBundle,
@@ -47,6 +57,14 @@ export interface MachineSummary {
   state: MachineState
   /** Why the last attempt failed, or null. */
   error: string | null
+  /** The server version from its hello, once connected. */
+  version: string | null
+  /** The machine is older than the server bundle this app carries and can be updated over SSH (not with "Never"). */
+  updateAvailable: boolean
+  /** This app is installing its server bundle there now. */
+  updating: boolean
+  /** Why the last update over SSH failed, or null. */
+  updateError: string | null
 }
 
 const REVOKE_TIMEOUT_MS = 5_000
@@ -62,6 +80,31 @@ interface LiveMachine {
   failedAt: number
   /** Test seam: stopped by {@link MachineConnections.stopForTest}, no new attempt until started. */
   stopped: boolean
+  /** From the server's hello: its version, and whether it sends `server-update` (installed by install.sh). */
+  version: string | null
+  canUpdate: boolean
+  update: Promise<void> | null
+  updateError: string | null
+  /** The bundle version an automatic update was last started for, so it runs once per bundle version. */
+  autoUpdatedTo: string | null
+}
+
+const HELLO_TIMEOUT_MS = 15_000
+
+/** The version and capabilities of the server behind a tunnel, from its hello. */
+async function readHello(
+  port: number,
+  token: string,
+): Promise<{ version: string; capabilities: string[] }> {
+  const socket = createWSClient({
+    url: `ws://127.0.0.1:${port}/trpc?token=${encodeURIComponent(token)}`,
+    WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+  })
+  const client = createTRPCClient<ServerRouter>({ links: [wsLink({ client: socket })] })
+  const hello = await client.server.hello
+    .query(undefined, { signal: AbortSignal.timeout(HELLO_TIMEOUT_MS) })
+    .finally(() => socket.close())
+  return { version: hello.version, capabilities: hello.capabilities }
 }
 
 function parseEnroll(stdout: string): { machineId: string; deviceId: string; token: string } {
@@ -94,12 +137,25 @@ export interface MachineConnectionsOptions {
 export class MachineConnections {
   readonly #options: MachineConnectionsOptions
   readonly #machines = new Map<string, LiveMachine>()
+  #behindPolicy: BehindPolicy
 
   constructor(options: MachineConnectionsOptions) {
     this.#options = options
-    for (const stored of readMachines(options.profileDir)) {
+    const file = readMachineFile(options.profileDir)
+    this.#behindPolicy = file.behindPolicy
+    for (const stored of file.machines) {
       this.#machines.set(stored.machineId, this.#live(stored))
     }
+  }
+
+  /** "When a machine is behind this app" (see {@link BehindPolicy}). */
+  behindPolicy(): BehindPolicy {
+    return this.#behindPolicy
+  }
+
+  setBehindPolicy(policy: BehindPolicy): void {
+    this.#behindPolicy = policy
+    this.#save()
   }
 
   /** Start connecting every stored machine; failures show as offline. */
@@ -115,7 +171,71 @@ export class MachineConnections {
       addedAt: live.stored.addedAt,
       state: live.state,
       error: live.error,
+      version: live.version,
+      updateAvailable: live.update === null && this.#behindPolicy !== "never" && this.#behind(live),
+      updating: live.update !== null,
+      updateError: live.updateError,
     }))
+  }
+
+  /**
+   * Install the server bundle this app carries on a machine that is behind
+   * (install.sh over SSH: only the server restarts, a failed start rolls
+   * back), then connect again. One update at a time per machine.
+   */
+  update(machineId: string): Promise<void> {
+    const live = this.#get(machineId)
+    live.update ??= this.#install(live).finally(() => {
+      live.update = null
+    })
+    return live.update
+  }
+
+  async #install(live: LiveMachine): Promise<void> {
+    const bundle = this.#options.bundle()
+    if (bundle === null) throw new Error("This app has no server bundle to install")
+    if (!this.#behind(live)) throw new Error(`${live.stored.name} is not behind this app`)
+    live.updateError = null
+    this.#options.log(
+      `[pi-lab] updating machine ${live.stored.name} from ${live.version} to ${bundle.version}`,
+    )
+    const installed = await installServerBundle(this.#options.access, live.stored.sshHost, bundle)
+      .then(() => null)
+      .catch((error: Error) => error)
+    // Connect again either way: the new version, or the old one after the rollback.
+    await this.#attempt(live).catch(() => undefined)
+    if (installed !== null) {
+      live.updateError = installed.message
+      this.#options.log(`[pi-lab] machine ${live.stored.name}: ${installed.message}`)
+      throw installed
+    }
+  }
+
+  /** The machine sends `server-update` and is older than the bundle this app carries. */
+  #behind(live: LiveMachine): boolean {
+    const bundle = this.#options.bundle()
+    return (
+      live.canUpdate &&
+      live.version !== null &&
+      bundle !== null &&
+      compareVersions(live.version, bundle.version) < 0
+    )
+  }
+
+  /** With "Update automatically", update a machine that is behind, once per bundle version. */
+  #autoUpdate(live: LiveMachine): void {
+    const bundle = this.#options.bundle()
+    if (this.#behindPolicy !== "auto" || bundle === null || !this.#behind(live)) return
+    if (live.update !== null || live.autoUpdatedTo === bundle.version) return
+    live.autoUpdatedTo = bundle.version
+    void this.update(live.stored.machineId).catch(() => undefined)
+  }
+
+  #save(): void {
+    writeMachineFile(this.#options.profileDir, {
+      machines: [...this.#machines.values()].map((live) => live.stored),
+      behindPolicy: this.#behindPolicy,
+    })
   }
 
   /**
@@ -206,12 +326,9 @@ export class MachineConnections {
       token: enrolled.token,
       addedAt: Date.now(),
     }
-    writeMachines(this.#options.profileDir, [
-      ...[...this.#machines.values()].map((live) => live.stored),
-      stored,
-    ])
     const live = this.#live(stored)
     this.#machines.set(stored.machineId, live)
+    this.#save()
     await this.#attempt(live).catch(() => undefined)
     const summary = this.list().find((entry) => entry.machineId === stored.machineId)
     if (!summary) throw new Error("The added machine is missing")
@@ -243,10 +360,7 @@ export class MachineConnections {
       revoked = response?.status === 204
     }
     this.#machines.delete(machineId)
-    writeMachines(
-      this.#options.profileDir,
-      [...this.#machines.values()].map((entry) => entry.stored),
-    )
+    this.#save()
     live.stopped = true
     await tunnel?.close()
     return { revoked }
@@ -284,6 +398,11 @@ export class MachineConnections {
       attempt: null,
       failedAt: 0,
       stopped: false,
+      version: null,
+      canUpdate: false,
+      update: null,
+      updateError: null,
+      autoUpdatedTo: null,
     }
   }
 
@@ -348,6 +467,10 @@ export class MachineConnections {
         ),
       )
     }
+    const hello = await readHello(tunnel.localPort, token).catch(async (error: Error) => {
+      await tunnel?.close()
+      return failed(new Error(`the PI Lab server on ${sshHost} did not answer: ${error.message}`))
+    })
     if (live.stopped) {
       await tunnel.close()
       return
@@ -355,5 +478,8 @@ export class MachineConnections {
     live.tunnel = tunnel
     live.state = "connected"
     live.error = null
+    live.version = hello.version
+    live.canUpdate = hello.capabilities.includes(SERVER_UPDATE_CAPABILITY)
+    this.#autoUpdate(live)
   }
 }

@@ -1359,7 +1359,7 @@
   "could not be reached, so its token is still valid there. Revoke it in Settings > Machines on that machine.": "no se pudo contactar, así que su token sigue siendo válido allí. Revócalo en Ajustes > Máquinas en esa máquina.",
   "Forget this machine. Its token is revoked on the machine when it can be reached.": "Olvida esta máquina. Su token se revoca en la máquina cuando se puede contactar.",
   "SSH host": "Host SSH",
-  "A host name, user@host, or a Host from ~/.ssh/config. The PI Lab server must run there.": "Un nombre de host, usuario@host o un Host de ~/.ssh/config. El servidor de PI Lab debe ejecutarse allí.",
+  "A host name, user@host, or a Host from ~/.ssh/config. If no PI Lab server runs there, PI Lab installs one.": "Un nombre de host, usuario@host o un Host de ~/.ssh/config. Si allí no se ejecuta ningún servidor de PI Lab, PI Lab instala uno.",
   "How this machine is shown in PI Lab.": "Cómo se muestra esta máquina en PI Lab.",
   "lab-server": "lab-server",
   "Lab server": "Servidor del laboratorio",
@@ -1371,5 +1371,11 @@
   "Revoked": "Revocado",
   "Added": "Añadido",
   "Revoke": "Revocar",
-  "Connect to the PI Lab server on another computer over SSH.": "Conéctate al servidor de PI Lab de otro ordenador por SSH."
+  "Connect to the PI Lab server on another computer over SSH.": "Conéctate al servidor de PI Lab de otro ordenador por SSH.",
+  "When a machine is behind this app": "Cuando una máquina va por detrás de esta app",
+  "Update automatically": "Actualizar automáticamente",
+  "Ask me": "Preguntarme",
+  "Never": "Nunca",
+  "Update machines automatically": "Actualizar las máquinas automáticamente",
+  "Update": "Actualizar"
 }

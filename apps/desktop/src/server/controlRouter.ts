@@ -37,12 +37,15 @@ import {
   quickPythonRunSchema,
   quitWorkSchema,
   SERVER_CAPABILITIES,
+  SERVER_UPDATE_CAPABILITY,
   secretProtectionSchema,
   serverHelloSchema,
+  serverUpdateSettingsSchema,
 } from "../shared/clientApi"
 import { LOCAL_DEVICE_ID } from "./devices"
 import type { NotificationEvent, NotificationStreamMessage } from "./notificationFeed"
 import type { ServerRuntime } from "./runtime"
+import { readUpdateSettings, writeUpdateSettings } from "./selfUpdate"
 
 /** Protocol version of the client API; bumped on breaking changes. */
 export const PROTOCOL_VERSION = 1
@@ -133,7 +136,10 @@ export const serverControlRouter = router({
       build: runtime.config.build,
       version: runtime.config.version,
       pid: process.pid,
-      capabilities: [...SERVER_CAPABILITIES],
+      capabilities: [
+        ...SERVER_CAPABILITIES,
+        ...(runtime.config.install ? [SERVER_UPDATE_CAPABILITY] : []),
+      ],
       machineId: runtime.machineId,
       hostname: hostname(),
       platform: process.platform,
@@ -243,6 +249,24 @@ export const serverControlRouter = router({
     .mutation(({ ctx, input }) => {
       initializePublicUpdateChannel(ctx.db, input)
     }),
+
+  /** "Update machines automatically" for this server (see selfUpdate.ts). */
+  updates: router({
+    settings: publicProcedure.output(serverUpdateSettingsSchema).query(({ ctx }) => {
+      const { runtime } = control(ctx)
+      return {
+        autoUpdate: readUpdateSettings(runtime.config.dataDir).autoUpdate,
+        selfUpdate: runtime.config.install !== null,
+      }
+    }),
+    setAutoUpdate: publicProcedure
+      .input(z.object({ autoUpdate: z.boolean() }))
+      .output(okSchema)
+      .mutation(({ ctx, input }) => {
+        writeUpdateSettings(control(ctx).runtime.config.dataDir, { autoUpdate: input.autoUpdate })
+        return { ok: true as const }
+      }),
+  }),
 
   /** The data format of this server's database, for the desktop updater. */
   updateCompatibility: publicProcedure

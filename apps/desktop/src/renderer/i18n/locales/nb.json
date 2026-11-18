@@ -1359,7 +1359,7 @@
   "could not be reached, so its token is still valid there. Revoke it in Settings > Machines on that machine.": "kunne ikke nås, så tokenet er fortsatt gyldig der. Trekk det tilbake i Innstillinger > Maskiner på den maskinen.",
   "Forget this machine. Its token is revoked on the machine when it can be reached.": "Glem denne maskinen. Tokenet trekkes tilbake på maskinen når den kan nås.",
   "SSH host": "SSH-vert",
-  "A host name, user@host, or a Host from ~/.ssh/config. The PI Lab server must run there.": "Et vertsnavn, bruker@vert eller en Host fra ~/.ssh/config. PI Lab-serveren må kjøre der.",
+  "A host name, user@host, or a Host from ~/.ssh/config. If no PI Lab server runs there, PI Lab installs one.": "Et vertsnavn, bruker@vert eller en Host fra ~/.ssh/config. Hvis ingen PI Lab-server kjører der, installerer PI Lab en.",
   "How this machine is shown in PI Lab.": "Slik vises denne maskinen i PI Lab.",
   "lab-server": "lab-server",
   "Lab server": "Lab-server",
@@ -1371,5 +1371,11 @@
   "Revoked": "Trukket tilbake",
   "Added": "Lagt til",
   "Revoke": "Trekk tilbake",
-  "Connect to the PI Lab server on another computer over SSH.": "Koble til PI Lab-serveren på en annen datamaskin over SSH."
+  "Connect to the PI Lab server on another computer over SSH.": "Koble til PI Lab-serveren på en annen datamaskin over SSH.",
+  "When a machine is behind this app": "Når en maskin er eldre enn denne appen",
+  "Update automatically": "Oppdater automatisk",
+  "Ask me": "Spør meg",
+  "Never": "Aldri",
+  "Update machines automatically": "Oppdater maskiner automatisk",
+  "Update": "Oppdater"
 }

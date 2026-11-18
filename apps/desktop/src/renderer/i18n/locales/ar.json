@@ -1359,7 +1359,7 @@
   "could not be reached, so its token is still valid there. Revoke it in Settings > Machines on that machine.": "تعذّر الوصول إليه، لذلك ما زال رمزه صالحًا هناك. ألغِه من الإعدادات > الأجهزة على ذلك الجهاز.",
   "Forget this machine. Its token is revoked on the machine when it can be reached.": "انسَ هذا الجهاز. يُلغى رمزه على الجهاز عندما يمكن الوصول إليه.",
   "SSH host": "مضيف SSH",
-  "A host name, user@host, or a Host from ~/.ssh/config. The PI Lab server must run there.": "اسم مضيف، أو user@host، أو Host من ~/.ssh/config. يجب أن يعمل خادم PI Lab هناك.",
+  "A host name, user@host, or a Host from ~/.ssh/config. If no PI Lab server runs there, PI Lab installs one.": "اسم مضيف، أو user@host، أو Host من ~/.ssh/config. إذا لم يكن خادم PI Lab يعمل هناك، يثبّت PI Lab خادمًا.",
   "How this machine is shown in PI Lab.": "الاسم الذي يظهر به هذا الجهاز في PI Lab.",
   "lab-server": "lab-server",
   "Lab server": "خادم المختبر",
@@ -1371,5 +1371,11 @@
   "Revoked": "مُلغى",
   "Added": "أُضيف",
   "Revoke": "إلغاء",
-  "Connect to the PI Lab server on another computer over SSH.": "اتصل بخادم PI Lab على حاسوب آخر عبر SSH."
+  "Connect to the PI Lab server on another computer over SSH.": "اتصل بخادم PI Lab على حاسوب آخر عبر SSH.",
+  "When a machine is behind this app": "عندما يكون الجهاز أقدم من هذا التطبيق",
+  "Update automatically": "التحديث تلقائيًا",
+  "Ask me": "اسألني",
+  "Never": "أبدًا",
+  "Update machines automatically": "تحديث الأجهزة تلقائيًا",
+  "Update": "تحديث"
 }

@@ -158,8 +158,16 @@ interface StoredMachine {
   name: string
 }
 
+/** What `machines.json` in the app profile holds. */
+async function machineFile(): Promise<{ machines: StoredMachine[]; behindPolicy: string }> {
+  return JSON.parse(await readFile(join(localData, "machines.json"), "utf8")) as {
+    machines: StoredMachine[]
+    behindPolicy: string
+  }
+}
+
 async function storedMachines(): Promise<StoredMachine[]> {
-  return JSON.parse(await readFile(join(localData, "machines.json"), "utf8")) as StoredMachine[]
+  return (await machineFile()).machines
 }
 
 /** Open Settings > Machines. */
@@ -212,6 +220,29 @@ test("tokens: adding a machine enrolls a device; removing it revokes the token o
   expect(await storedMachines()).toEqual([])
   // The old token is refused on the remote.
   expect(await remoteUpgradeStatus(stored.token)).toBe(401)
+})
+
+test("updates: the behind policy offers its three choices and is kept after a restart", async () => {
+  test.setTimeout(120_000)
+  let page = await launch({})
+  await openMachinesSettings(page)
+  const policy = page.getByTestId("settings-machines-behind-policy")
+  await expect(policy).toHaveValue("auto")
+  await expect(policy.locator("option")).toHaveText(["Update automatically", "Ask me", "Never"])
+  await expect(page.getByTestId("settings-section-machines")).toContainText(
+    "When a machine is behind this app",
+  )
+  await expect(page.getByTestId("settings-add-machine")).toContainText(
+    "If no PI Lab server runs there, PI Lab installs one.",
+  )
+  await policy.selectOption("ask")
+  await expect.poll(async () => (await machineFile()).behindPolicy).toBe("ask")
+  await app?.close()
+  app = null
+
+  page = await launch({})
+  await openMachinesSettings(page)
+  await expect(page.getByTestId("settings-machines-behind-policy")).toHaveValue("ask")
 })
 
 test("this Mac's devices: a device enrolled on the local server is listed and revoked from Settings", async () => {

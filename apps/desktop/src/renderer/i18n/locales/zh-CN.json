@@ -1359,7 +1359,7 @@
   "could not be reached, so its token is still valid there. Revoke it in Settings > Machines on that machine.": "无法连接，所以它的令牌在那里仍然有效。请在那台机器的设置 > 机器中撤销。",
   "Forget this machine. Its token is revoked on the machine when it can be reached.": "移除这台机器。能连接时，会在那台机器上撤销它的令牌。",
   "SSH host": "SSH 主机",
-  "A host name, user@host, or a Host from ~/.ssh/config. The PI Lab server must run there.": "主机名、user@host 或 ~/.ssh/config 中的 Host。那里必须运行 PI Lab 服务器。",
+  "A host name, user@host, or a Host from ~/.ssh/config. If no PI Lab server runs there, PI Lab installs one.": "主机名、user@host 或 ~/.ssh/config 中的 Host。如果那里没有运行 PI Lab 服务器，PI Lab 会安装一个。",
   "How this machine is shown in PI Lab.": "这台机器在 PI Lab 中显示的名称。",
   "lab-server": "lab-server",
   "Lab server": "实验室服务器",
@@ -1371,5 +1371,11 @@
   "Revoked": "已撤销",
   "Added": "添加于",
   "Revoke": "撤销",
-  "Connect to the PI Lab server on another computer over SSH.": "通过 SSH 连接另一台电脑上的 PI Lab 服务器。"
+  "Connect to the PI Lab server on another computer over SSH.": "通过 SSH 连接另一台电脑上的 PI Lab 服务器。",
+  "When a machine is behind this app": "当机器落后于此应用时",
+  "Update automatically": "自动更新",
+  "Ask me": "询问我",
+  "Never": "从不",
+  "Update machines automatically": "自动更新机器",
+  "Update": "更新"
 }

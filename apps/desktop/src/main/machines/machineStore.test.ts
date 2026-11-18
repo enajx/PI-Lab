@@ -2,7 +2,12 @@ import { chmodSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, expect, test } from "vitest"
-import { MACHINES_FILE, readMachines, type StoredMachine, writeMachines } from "./machineStore"
+import {
+  MACHINES_FILE,
+  readMachineFile,
+  type StoredMachine,
+  writeMachineFile,
+} from "./machineStore"
 
 let profileDir: string
 
@@ -23,27 +28,32 @@ const machine: StoredMachine = {
   addedAt: 1_700_000_000_000,
 }
 
-test("no machines.json means no machines", () => {
-  expect(readMachines(profileDir)).toEqual([])
+test("no machines.json means no machines, and machines behind this app are updated automatically", () => {
+  expect(readMachineFile(profileDir)).toEqual({ machines: [], behindPolicy: "auto" })
+})
+
+test("a machines.json from before the behind policy reads with auto", () => {
+  writeFileSync(join(profileDir, MACHINES_FILE), JSON.stringify([machine]), { mode: 0o600 })
+  expect(readMachineFile(profileDir)).toEqual({ machines: [machine], behindPolicy: "auto" })
 })
 
 test("machines are written owner-only and atomically, and read back the same", () => {
-  writeMachines(profileDir, [machine])
+  writeMachineFile(profileDir, { machines: [machine], behindPolicy: "ask" })
   const path = join(profileDir, MACHINES_FILE)
   expect(statSync(path).mode & 0o777).toBe(0o600)
   // No temp file is left next to it.
   expect(readdirSync(profileDir)).toEqual([MACHINES_FILE])
-  expect(readMachines(profileDir)).toEqual([machine])
-  writeMachines(profileDir, [])
-  expect(readMachines(profileDir)).toEqual([])
+  expect(readMachineFile(profileDir)).toEqual({ machines: [machine], behindPolicy: "ask" })
+  writeMachineFile(profileDir, { machines: [], behindPolicy: "never" })
+  expect(readMachineFile(profileDir)).toEqual({ machines: [], behindPolicy: "never" })
 })
 
 test("a machines.json other users can read, or a broken one, is refused", () => {
   const path = join(profileDir, MACHINES_FILE)
   writeFileSync(path, JSON.stringify([machine]), { mode: 0o644 })
   chmodSync(path, 0o644)
-  expect(() => readMachines(profileDir)).toThrow("readable by other users")
+  expect(() => readMachineFile(profileDir)).toThrow("readable by other users")
   chmodSync(path, 0o600)
   writeFileSync(path, JSON.stringify([{ ...machine, token: 5 }]))
-  expect(() => readMachines(profileDir)).toThrow()
+  expect(() => readMachineFile(profileDir)).toThrow()
 })

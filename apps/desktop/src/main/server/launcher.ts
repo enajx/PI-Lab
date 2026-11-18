@@ -54,6 +54,7 @@ export function serverLaunchConfig(input: LaunchInput): ServerConfig {
     build: input.build,
     version: input.version,
     port: 0,
+    install: null,
   }
 }
 

@@ -3,6 +3,7 @@ import { clipboard, shell } from "electron"
 import { z } from "zod"
 import { electronMicrophone } from "../dictation/electronMicrophone"
 import type { MachineConnections } from "../machines/machineConnections"
+import { behindPolicySchema } from "../machines/machineStore"
 import type { NotificationBrokers } from "../notifications"
 import type { ServerClient } from "../server/client"
 import type { AppContext } from "../trpc/context"
@@ -59,6 +60,15 @@ export function createDesktopRouter(deps: DesktopRouterDependencies) {
         endpoint: publicProcedure
           .input(z.object({ machineId: z.string().min(1) }))
           .query(({ input }) => deps.machines().endpoint(input.machineId)),
+        /** Install this app's server bundle on a machine that is behind ("Ask me"'s Update button). */
+        update: publicProcedure
+          .input(z.object({ machineId: z.string().min(1) }))
+          .mutation(({ input }) => deps.machines().update(input.machineId)),
+        /** "When a machine is behind this app". */
+        behindPolicy: publicProcedure.query(() => deps.machines().behindPolicy()),
+        setBehindPolicy: publicProcedure
+          .input(z.object({ policy: behindPolicySchema }))
+          .mutation(({ input }) => deps.machines().setBehindPolicy(input.policy)),
       }),
     }),
     system: systemRouter,

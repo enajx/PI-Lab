@@ -25,6 +25,18 @@ export interface ServerConfig {
   version: string
   /** Fixed port, or 0 to pick a free one. */
   port: number
+  /** Set when the server runs from an install.sh layout (the server bundle); it then updates itself. */
+  install: ServerInstall | null
+}
+
+/** Where install.sh put this server (see apps/desktop/scripts/server-install/install.sh). */
+export interface ServerInstall {
+  /** `--prefix`: holds `versions/`, `current`, `previous`, `failed-versions`. */
+  prefix: string
+  /** This version's folder, `<prefix>/versions/<version>`. */
+  root: string
+  /** The launchd label it runs under, or null when it was started detached (`--no-launchd`). */
+  label: string | null
 }
 
 /** Read a required environment variable or stop with a clear message. */
@@ -53,6 +65,18 @@ export function readServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
     build: required(env, "PI_LAB_BUILD"),
     version: required(env, "PI_LAB_VERSION"),
     port,
+    install: serverInstall(env),
+  }
+}
+
+/** The install.sh layout from the bundle launcher's environment, or null. */
+function serverInstall(env: NodeJS.ProcessEnv): ServerInstall | null {
+  const prefix = env.PI_LAB_SERVER_PREFIX?.trim()
+  if (!prefix) return null
+  return {
+    prefix,
+    root: required(env, "PI_LAB_SERVER_ROOT"),
+    label: env.PI_LAB_SERVER_LABEL?.trim() || null,
   }
 }
 
