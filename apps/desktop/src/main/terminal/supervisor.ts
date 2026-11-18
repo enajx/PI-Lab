@@ -66,6 +66,12 @@ export interface SupervisorOptions {
 }
 
 const DEFAULT_SPAWN_TIMEOUT_MS = 60_000
+/**
+ * How long an old daemon that already answered the protocol check gets to
+ * confirm shutdown before it is stopped by pid. Short, unlike the spawn wait:
+ * a daemon from an earlier build ignores the request.
+ */
+const OLD_DAEMON_SHUTDOWN_MS = 5_000
 const DEFAULT_RECONNECT_BASE_MS = 200
 const DEFAULT_RECONNECT_MAX_MS = 3_000
 
@@ -336,9 +342,9 @@ export class TerminalSupervisor {
       setTimeout(
         () =>
           reject(
-            new Error(`old pty-daemon did not confirm shutdown within ${this.spawnTimeoutMs}ms`),
+            new Error(`old pty-daemon did not confirm shutdown within ${OLD_DAEMON_SHUTDOWN_MS}ms`),
           ),
-        this.spawnTimeoutMs,
+        OLD_DAEMON_SHUTDOWN_MS,
       ).unref(),
     )
     const confirmed = await Promise.race([old.shutdown().then(() => true), timeout]).catch(

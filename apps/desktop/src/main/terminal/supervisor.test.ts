@@ -414,7 +414,8 @@ describe("adopting a daemon by protocol", () => {
         if (Date.now() > deadline) throw new Error("fake daemon did not listen")
         await new Promise((done) => setTimeout(done, 20))
       }
-      supervisor = new TerminalSupervisor({ socketPath, daemonEntry: entry, spawnTimeoutMs: 1_000 })
+      // The default spawn wait (60 s, for a slow start) must not delay the replacement.
+      supervisor = new TerminalSupervisor({ socketPath, daemonEntry: entry })
       const client = await supervisor.ensureClient()
       await exited
       expect(old.signalCode).toBe("SIGTERM")
@@ -426,7 +427,7 @@ describe("adopting a daemon by protocol", () => {
       old.kill("SIGKILL")
       await rm(join(entry, ".."), { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test("an adopted current daemon is kept", async () => {
     server = new DaemonServer({ socketPath })
