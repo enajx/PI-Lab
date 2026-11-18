@@ -19,6 +19,12 @@ import type { TerminalOutput } from "../../main/trpc/terminal/terminal"
  * scrolled up, the stream asks the server to hold skips.
  */
 
+/** The PTY's ECHO and ICANON termios bits (see `InputFlags` in @pi-lab/pty-daemon). */
+export interface InputFlags {
+  echo: boolean
+  icanon: boolean
+}
+
 /** Where the emulator's state stands; see `terminal.output`. */
 export interface ResumePoint {
   generation: string
@@ -48,7 +54,13 @@ export interface OutputSubscriptionHandlers {
 
 /** `trpc.terminal.output.subscribe`, from any tRPC client of the server. */
 export type SubscribeOutput = (
-  input: { sessionId: string; resume: ResumePoint | null; streamId: string; holdSkip: boolean },
+  input: {
+    sessionId: string
+    resume: ResumePoint | null
+    streamId: string
+    holdSkip: boolean
+    preferReplay?: true
+  },
   handlers: OutputSubscriptionHandlers,
 ) => { unsubscribe: () => void }
 
@@ -84,8 +96,21 @@ export interface TerminalStreamOptions {
   /** The emulator changed size (a snapshot or a PTY resize). */
   onSize: (cols: number, rows: number) => void
   onExit: (exitCode: number | null) => void
+  /**
+   * Applied in stream order: a start (with its ECHO and ICANON flags) once its
+   * screen is written, and each change of them once the bytes before it are applied.
+   */
+  onStart: (input: InputFlags) => void
+  onEcho: (input: InputFlags) => void
+  /** An echo ack, once the bytes before its offset are applied. */
+  onEchoAck: (ack: { clientId: string; seq: number; input: InputFlags }) => void
   /** A server error ended the stream (not a connection drop, which resumes). */
   onError: (message: string) => void
+}
+
+/** Whether two resume points name the same screen state. */
+function samePoint(a: ResumePoint, b: ResumePoint): boolean {
+  return a.generation === b.generation && a.offset === b.offset && a.revision === b.revision
 }
 
 /** Decode base64 to bytes without Node's Buffer (browsers and React Native have atob). */
@@ -112,7 +137,7 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
 export const RESUBSCRIBE_RETRY_MS = 250
 
 /** How a stream starts (counted for tests and logs). */
-export type StartMode = "replay" | "snapshot"
+export type StartMode = "replay" | "snapshot" | "refresh"
 
 /** A random id per subscription (no `crypto.randomUUID` in React Native's Hermes). */
 function newStreamId(): string {
@@ -141,6 +166,8 @@ export class TerminalStream {
   #closed = false
   #visible = true
   #holdSkip = false
+  /** The next subscription is for a terminal shown again (replay whenever possible). */
+  #shownAgain = false
   /** The current subscription's stream id; null while none is open. */
   #streamId: string | null = null
   /** Applied since the last ack: bytes, and events of any kind. */
@@ -157,7 +184,7 @@ export class TerminalStream {
 
   /** Subscribe for the first time: a fresh emulator asks for a snapshot. */
   open(): void {
-    this.#subscribe(null)
+    this.#subscribe(null, false)
   }
 
   /** Events received and not yet handed to the emulator. */
@@ -196,6 +223,7 @@ export class TerminalStream {
       return
     }
     this.#resubscribeWhenIdle = true
+    this.#shownAgain = true
     this.#pump()
   }
 
@@ -222,7 +250,7 @@ export class TerminalStream {
     this.#streamId = null
   }
 
-  #subscribe(resume: ResumePoint | null): void {
+  #subscribe(resume: ResumePoint | null, preferReplay: boolean): void {
     if (!this.#visible) return
     const epoch = ++this.#epoch
     let sawOpen = false
@@ -231,7 +259,13 @@ export class TerminalStream {
     this.#bytesSinceAck = 0
     this.#eventsSinceAck = 0
     this.#subscription = this.#options.subscribe(
-      { sessionId: this.#options.sessionId, resume, streamId, holdSkip: this.#holdSkip },
+      {
+        sessionId: this.#options.sessionId,
+        resume,
+        streamId,
+        holdSkip: this.#holdSkip,
+        ...(preferReplay ? { preferReplay: true as const } : {}),
+      },
       {
         onData: ({ data }) => {
           if (epoch !== this.#epoch) return
@@ -271,7 +305,8 @@ export class TerminalStream {
       if (this.#eventsSinceAck > 0) this.#sendAck()
       if (this.#resubscribeWhenIdle) {
         this.#resubscribeWhenIdle = false
-        this.#subscribe(resumePointWhenShown(this.#consumed))
+        this.#subscribe(resumePointWhenShown(this.#consumed), this.#shownAgain)
+        this.#shownAgain = false
       }
       return
     }
@@ -283,6 +318,18 @@ export class TerminalStream {
           // The reset is the first byte of the write, so no frame shows an empty screen.
           this.#resize(event.cols, event.rows)
           emulator.write(FULL_RESET + event.screen, () => {})
+        } else if (event.mode === "refresh") {
+          // A refresh keeps this emulator's history, so it fits only the screen it was made for.
+          if (this.#consumed === null || !samePoint(event.base, this.#consumed)) {
+            const at = this.#consumed
+            this.#mismatch(
+              `refresh for ${event.base.generation}:${event.base.offset}:${event.base.revision} does not fit the screen at ${at === null ? "none" : `${at.generation}:${at.offset}:${at.revision}`}`,
+            )
+            return
+          }
+          this.#resize(event.cols, event.rows)
+          // As bytes: they also end a UTF-8 character the emulator stopped inside.
+          emulator.write(new TextEncoder().encode(event.screen), () => {})
         } else if (
           this.#consumed === null ||
           event.generation !== this.#consumed.generation ||
@@ -292,6 +339,7 @@ export class TerminalStream {
           return
         }
         const end = { generation: event.generation, offset: 0, revision: event.revision }
+        this.#options.onStart(event.input)
         this.#write(decodeBase64(event.base64), event.offset, end)
         return
       }
@@ -318,6 +366,16 @@ export class TerminalStream {
         this.#pump()
         return
       }
+      case "echoAck":
+        this.#options.onEchoAck({ clientId: event.clientId, seq: event.seq, input: event.input })
+        this.#eventsSinceAck += 1
+        this.#pump()
+        return
+      case "echo":
+        this.#options.onEcho(event.input)
+        this.#eventsSinceAck += 1
+        this.#pump()
+        return
       case "exit":
         // The program ended: nothing more to resume.
         this.#closed = true

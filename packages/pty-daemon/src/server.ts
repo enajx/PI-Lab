@@ -120,6 +120,17 @@ class Connection {
         }),
       onResize: (cols, rows, revision, offset) =>
         this.send({ kind: "resize", sessionId, generation, offset, revision, cols, rows }),
+      onEcho: (input, offset) => this.send({ kind: "echo", sessionId, generation, offset, input }),
+      onEchoAck: (key, offset, input) =>
+        this.send({
+          kind: "echo-ack",
+          sessionId,
+          generation,
+          clientId: key.clientId,
+          seq: key.seq,
+          offset,
+          input,
+        }),
       onExit: (exitCode, signal) =>
         this.send({ kind: "exit", sessionId: session.id, exitCode, signal }),
     })
@@ -333,7 +344,7 @@ export class DaemonServer {
     }
     // The start and the subscription happen in one synchronous step, so live
     // events continue at the start's end offset with no gap or overlap.
-    const start = session.startFrom(request.resume)
+    const start = session.startFrom(request.resume, request.preferReplay === true)
     const info = session.info()
     const base64 = start.bytes.toString("base64")
     this.reply(connection, {
@@ -342,12 +353,21 @@ export class DaemonServer {
       session: info,
       generation: session.generation,
       revision: session.screenRevision,
+      input: session.echo,
       cols: info.cols,
       rows: info.rows,
       start:
         start.mode === "replay"
           ? { mode: "replay", offset: start.offset, base64 }
-          : { mode: "snapshot", offset: start.offset, screen: start.screen, base64 },
+          : start.mode === "snapshot"
+            ? { mode: "snapshot", offset: start.offset, screen: start.screen, base64 }
+            : {
+                mode: "refresh",
+                base: start.base,
+                offset: start.offset,
+                screen: start.screen,
+                base64,
+              },
     })
     connection.attach(session)
   }
@@ -369,7 +389,18 @@ export class DaemonServer {
       this.fail(connection, request.cid, "unknown-session", `no session ${request.sessionId}`)
       return
     }
-    session.write(request.data)
+    if (request.key !== undefined) {
+      const status = session.writeKey(request.data, request.key)
+      this.reply(connection, {
+        kind: "write-ok",
+        cid: request.cid,
+        sessionId: request.sessionId,
+        status,
+      })
+      return
+    }
+    if (request.message === true) session.writeMessage(request.data)
+    else session.write(request.data, null)
     this.reply(connection, { kind: "write-ok", cid: request.cid, sessionId: request.sessionId })
   }
 

@@ -6,13 +6,18 @@ const LAUNCH_ATTEMPTS = 3
 /**
  * True when a call failed because the WebSocket closed or errored before its
  * reply arrived. tRPC's WebSocket client then fails the call with the socket's
- * close or error event (not an Error) or its own closed error. A server error
- * always carries a `shape`.
+ * close or error event (not an Error), its own closed error, or (a call sent
+ * while the socket was closing, so never sent) "Active connection is not
+ * open". A server error always carries a `shape`.
  */
-function replyLost(error: unknown): boolean {
+export function replyLost(error: unknown): boolean {
   if (!(error instanceof TRPCClientError) || error.shape !== undefined) return false
   const cause: unknown = error.cause
-  return !(cause instanceof Error) || cause.name === "TRPCWebSocketClosedError"
+  return (
+    !(cause instanceof Error) ||
+    cause.name === "TRPCWebSocketClosedError" ||
+    cause.message === "Active connection is not open"
+  )
 }
 
 /**

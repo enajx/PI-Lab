@@ -1,4 +1,12 @@
-import type { AttachResult, DataEvent, ExitEvent, ResizeEvent } from "@pi-lab/pty-daemon"
+import type {
+  AttachResult,
+  DataEvent,
+  EchoAckEvent,
+  EchoEvent,
+  ExitEvent,
+  ResizeEvent,
+  ResumePoint,
+} from "@pi-lab/pty-daemon"
 
 /**
  * Terminal output flow control for one client WebSocket (md/branch-connection-layer.md,
@@ -35,13 +43,19 @@ export const DRAIN_SAMPLE_MS = 250
 export const TYPING_PRIORITY_MS = 3_000
 
 /** What a stream sends: a start (replay or snapshot) or a daemon event, in daemon order. */
-export type FlowItem = { kind: "start"; result: AttachResult } | DataEvent | ResizeEvent | ExitEvent
+export type FlowItem =
+  | { kind: "start"; result: AttachResult }
+  | DataEvent
+  | ResizeEvent
+  | EchoEvent
+  | EchoAckEvent
+  | ExitEvent
 
 /** Bytes an item counts against the window, the cap and the backlog. */
 function costOf(item: FlowItem): number {
   switch (item.kind) {
     case "start": {
-      const screen = item.result.start.mode === "snapshot" ? item.result.start.screen.length : 0
+      const screen = item.result.start.mode === "replay" ? 0 : item.result.start.screen.length
       return screen + item.result.start.bytes.length + EVENT_COST_BYTES
     }
     case "data":
@@ -62,11 +76,13 @@ export interface OutputStreamOptions {
   /** Send one item to the client now. */
   deliver: (item: FlowItem) => void
   /**
-   * Ask the daemon for the latest screen; answer with
+   * Ask the daemon for the latest screen for a client at `from` (the point
+   * after everything sent; null before the first start): a refresh when the
+   * daemon can make one, else a snapshot. Answer with
    * {@link OutputStream.snapshotReady} at the reply boundary, or
    * {@link OutputStream.snapshotFailed}.
    */
-  requestSnapshot: () => void
+  requestSnapshot: (from: ResumePoint | null) => void
 }
 
 /** Per-stream numbers for the test route. */
@@ -104,6 +120,8 @@ export class OutputStream {
   #inFlight: { end: number; cost: number }[] = []
   /** The consumed offset after the last item sent. */
   #sentEnd = 0
+  /** The client's resume point once it applied everything sent; null before the first start. */
+  #sentPoint: ResumePoint | null = null
   /**
    * live: send the backlog in turns. skipPending: the backlog was dropped;
    * drop new output until the next turn asks for a snapshot. snapshotting: a
@@ -213,7 +231,7 @@ export class OutputStream {
   turn(): number {
     if (this.#state === "skipPending") {
       this.#state = "snapshotting"
-      this.#options.requestSnapshot()
+      this.#options.requestSnapshot(this.#sentPoint)
       return 0
     }
     const item = this.#take()
@@ -221,10 +239,18 @@ export class OutputStream {
     const cost = costOf(item)
     if (item.kind === "start") {
       this.#sentEnd = item.result.start.offset + item.result.start.bytes.length
+      this.#sentPoint = {
+        generation: item.result.generation,
+        offset: this.#sentEnd,
+        revision: item.result.revision,
+      }
     } else if (item.kind === "data") {
       this.#sentEnd = item.offset + item.bytes.length
+      if (this.#sentPoint !== null) this.#sentPoint = { ...this.#sentPoint, offset: this.#sentEnd }
     } else if (item.kind === "resize") {
       this.#sentEnd = item.offset
+      if (this.#sentPoint !== null)
+        this.#sentPoint = { ...this.#sentPoint, offset: item.offset, revision: item.revision }
     }
     this.#inFlight.push({ end: this.#sentEnd, cost })
     this.inFlightBytes += cost

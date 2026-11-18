@@ -171,6 +171,9 @@ async function check(params: CheckParams, say: (line: string) => void): Promise<
     emulator,
     dropPolicy: "discard",
     onSize: () => {},
+    onStart: () => {},
+    onEcho: () => {},
+    onEchoAck: () => {},
     onExit: () => {
       streamError = "the program exited"
     },

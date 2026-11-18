@@ -2,7 +2,10 @@ import type {
   AttachResult,
   DaemonClient,
   DataEvent,
+  EchoAckEvent,
+  EchoEvent,
   ExitEvent,
+  InputFlags,
   ResizeEvent,
   ResumePoint,
 } from "@pi-lab/pty-daemon"
@@ -38,7 +41,41 @@ const writeInput = z.object({
   data: z.string(),
   /** The typing client's id; absent when the server itself writes (agent launch). */
   clientId: z.string().min(1).optional(),
+  /**
+   * A typed key (with `clientId`; absent from released clients and for other
+   * writes): its number in this client's sequence, the client's consumed point
+   * when it was typed, and whether this is its first send on the connection it
+   * was typed on. The daemon writes it at most once (see `KeyInput` in
+   * @pi-lab/pty-daemon) and sends an echo ack for it in the output stream.
+   */
+  key: z
+    .object({
+      seq: z.number().int().nonnegative(),
+      typedAt: z
+        .object({ generation: z.string().min(1), offset: z.number().int().nonnegative() })
+        .nullable(),
+      firstSend: z.boolean(),
+    })
+    .optional(),
 })
+
+const sendMessageInput = z.object({
+  sessionId: z.string(),
+  /** One per message; a resend after a lost reply uses the same ID. */
+  messageId: z.string().min(1).max(200),
+  text: z.string(),
+  clientId: z.string().min(1),
+})
+
+/** How many compose-line message IDs the server keeps; older ones are forgotten first. */
+const MESSAGE_ID_LIMIT = 500
+
+/**
+ * Message ID → the write of that message, for the server's lifetime (in
+ * memory, last {@link MESSAGE_ID_LIMIT}). A failed write is forgotten, so a
+ * resend writes it again.
+ */
+const sentMessages = new Map<string, Promise<void>>()
 
 const resizeInput = z.object({
   sessionId: z.string(),
@@ -106,6 +143,8 @@ const outputInput = z.object({
   streamId: z.string().min(1).max(100),
   /** The client holds skips while the user has a selection or has scrolled up. */
   holdSkip: z.boolean(),
+  /** A terminal shown again: replay from `resume` whenever the daemon still has the bytes. */
+  preferReplay: z.literal(true).optional(),
 })
 
 const ackInput = z.object({
@@ -120,12 +159,21 @@ const ackInput = z.object({
  * count raw bytes since spawn.
  * - start: first event. `replay` continues from the requested offset; for a
  *   `snapshot`, reset the emulator to `cols`x`rows`, write `screen` (which holds
- *   exactly the bytes before `offset`), then the bytes. A later `start` comes
- *   after a skip (always a snapshot) or after the server attached to the
- *   daemon again.
+ *   exactly the bytes before `offset`), then the bytes. A `refresh` applies
+ *   only to an emulator at `base` (its resume point; otherwise ask for a
+ *   snapshot): resize to `cols`x`rows` if it differs, write `screen` without a
+ *   reset (it keeps the emulator's history), then the bytes. After any start
+ *   the emulator is at (`generation`, `offset` + bytes, `revision`). A later
+ *   `start` comes after a skip (a refresh or a snapshot) or after the server
+ *   attached to the daemon again.
  * - data: the bytes starting at `offset`.
  * - resize: the PTY size changed after every byte before `offset`; the screen
  *   is now at `revision`.
+ * - echo: the PTY's ECHO or ICANON flag changed at `offset` (every start
+ *   also carries both); local echo predicts nothing while ECHO is off and
+ *   ICANON on (a hidden prompt).
+ * - echoAck: client `clientId`'s key `seq` was written about 50 ms before the
+ *   bytes at `offset`; its echo, if any, is before `offset`.
  * - exit: the program ended; the stream completes.
  * - behind: this connection fell behind; the stream completes and the client
  *   subscribes again from its consumed offset.
@@ -140,6 +188,7 @@ export type TerminalOutput =
       mode: "replay"
       offset: number
       base64: string
+      input: InputFlags
     }
   | {
       type: "start"
@@ -151,7 +200,23 @@ export type TerminalOutput =
       offset: number
       screen: string
       base64: string
+      input: InputFlags
     }
+  | {
+      type: "start"
+      generation: string
+      revision: number
+      cols: number
+      rows: number
+      mode: "refresh"
+      base: ResumePoint
+      offset: number
+      screen: string
+      base64: string
+      input: InputFlags
+    }
+  | { type: "echo"; offset: number; input: InputFlags }
+  | { type: "echoAck"; clientId: string; seq: number; offset: number; input: InputFlags }
   | { type: "data"; offset: number; base64: string }
   | { type: "resize"; offset: number; revision: number; cols: number; rows: number }
   | { type: "exit"; exitCode: number | null; signal: number | null }
@@ -162,7 +227,7 @@ function resumeId(generation: string, offset: number, revision: number): string 
   return `${generation}:${offset}:${revision}`
 }
 
-type SessionEvent = DataEvent | ResizeEvent | ExitEvent
+type SessionEvent = DataEvent | ResizeEvent | EchoEvent | EchoAckEvent | ExitEvent
 
 interface SessionAttachment {
   /** Runs at the attach reply boundary, before any later event. */
@@ -176,10 +241,11 @@ interface SessionAttachmentHandle {
   detach: () => void
   /**
    * Ask the daemon for the session's latest screen on the same shared
-   * connection (other observers are not affected). `onStart` runs at the
-   * reply boundary: every event after it follows the snapshot.
+   * connection (other observers are not affected), for a client at `from`:
+   * the daemon answers with a small replay, a refresh or a snapshot. `onStart`
+   * runs at the reply boundary: every event after it follows that start.
    */
-  snapshot: (onStart: (result: AttachResult) => void) => Promise<void>
+  snapshot: (from: ResumePoint | null, onStart: (result: AttachResult) => void) => Promise<void>
 }
 
 /**
@@ -197,6 +263,7 @@ function attachSession(
   ctx: AppContext,
   sessionId: string,
   resume: ResumePoint | null,
+  preferReplay: boolean,
   handlers: SessionAttachment,
 ): SessionAttachmentHandle {
   let cancelled = false
@@ -206,7 +273,7 @@ function attachSession(
   /** The resume point after the last start or event forwarded to the handlers. */
   let point: ResumePoint | null = resume
 
-  const attachOnce = async (from: ResumePoint | null): Promise<void> => {
+  const attachOnce = async (from: ResumePoint | null, replay: boolean): Promise<void> => {
     let attaching = true
     let closed = false
     const client = await ctx.getDaemonClient()
@@ -222,12 +289,14 @@ function attachSession(
       }
       handlers.onEvent(event)
     }
-    const onResize = (event: ResizeEvent) => {
+    const onResize = (event: ResizeEvent | EchoEvent | EchoAckEvent) => {
       if (event.sessionId === sessionId) onEvent(event)
     }
     const eventName = `session:${sessionId}`
     client.on(eventName, onEvent)
     client.on("resize", onResize)
+    client.on("echo", onResize)
+    client.on("echo-ack", onResize)
     let observers = sessionObservers.get(client)
     if (!observers) {
       observers = new Map<string, Set<() => void>>()
@@ -247,6 +316,8 @@ function attachSession(
       if (current === client) current = null
       client.off(eventName, onEvent)
       client.off("resize", onResize)
+      client.off("echo", onResize)
+      client.off("echo-ack", onResize)
       cleanup = () => {}
       if (!cancelled) run(point, true)
     }
@@ -256,6 +327,8 @@ function attachSession(
     cleanup = () => {
       client.off(eventName, onEvent)
       client.off("resize", onResize)
+      client.off("echo", onResize)
+      client.off("echo-ack", onResize)
       listeners.delete(onClose)
       if (listeners.size === 0) {
         watchedObservers.delete(sessionId)
@@ -264,16 +337,21 @@ function attachSession(
       cleanup = () => {}
     }
     try {
-      await client.attach(sessionId, from, (result) => {
-        if (cancelled) return
-        point = {
-          generation: result.generation,
-          offset: result.start.offset + result.start.bytes.length,
-          revision: result.revision,
-        }
-        handlers.onStart(result)
-        attaching = false
-      })
+      await client.attach(
+        sessionId,
+        from,
+        (result) => {
+          if (cancelled) return
+          point = {
+            generation: result.generation,
+            offset: result.start.offset + result.start.bytes.length,
+            revision: result.revision,
+          }
+          handlers.onStart(result)
+          attaching = false
+        },
+        replay ? true : undefined,
+      )
     } catch (error) {
       // The connection closed during the attach: onClose attaches again.
       if (closed) return
@@ -282,7 +360,7 @@ function attachSession(
   }
 
   const run = (from: ResumePoint | null, afterClose: boolean): void => {
-    attachOnce(from).catch((error: unknown) => {
+    attachOnce(from, !afterClose && preferReplay).catch((error: unknown) => {
       cleanup()
       if (cancelled) return
       const message = error instanceof Error ? error.message : String(error)
@@ -302,10 +380,10 @@ function attachSession(
       cancelled = true
       cleanup()
     },
-    snapshot: async (onStart) => {
+    snapshot: async (from, onStart) => {
       const client = current
       if (client === null) throw new Error("not attached to the daemon")
-      await client.attach(sessionId, null, (result) => {
+      await client.attach(sessionId, from, (result) => {
         if (!cancelled) onStart(result)
       })
     },
@@ -332,14 +410,57 @@ export const terminalRouter = router({
   /** Feed bytes to a session's stdin. */
   write: publicProcedure.input(writeInput).mutation(async ({ ctx, input }) => {
     const client = await ctx.getDaemonClient()
-    ctx.activityMonitor.userInput(input.sessionId, input.data)
     if (input.clientId !== undefined) {
       typingMap(client).set(input.sessionId, { clientId: input.clientId, at: Date.now() })
       lastTypedAt.set(input.sessionId, Date.now())
     }
+    if (input.clientId !== undefined && input.key !== undefined) {
+      const status = await client.writeKey(input.sessionId, input.data, {
+        clientId: input.clientId,
+        ...input.key,
+      })
+      // A duplicate or dropped key was not written now.
+      if (status === "applied") ctx.activityMonitor.userInput(input.sessionId, input.data)
+      ctx.caffeine.markTerminalActivity()
+      return { ok: true as const, status }
+    }
+    ctx.activityMonitor.userInput(input.sessionId, input.data)
     await client.write(input.sessionId, input.data)
     ctx.caffeine.markTerminalActivity()
-    return { ok: true as const }
+    return { ok: true as const, status: "applied" as const }
+  }),
+
+  /**
+   * Send a compose-line message (the text and Enter; the daemon wraps it in
+   * bracketed paste when the program turned that mode on). Accepted once per
+   * `messageId`: a resend after a lost reply gets `duplicate` and writes nothing.
+   */
+  sendMessage: publicProcedure.input(sendMessageInput).mutation(async ({ ctx, input }) => {
+    const existing = sentMessages.get(input.messageId)
+    if (existing !== undefined) {
+      await existing
+      return { status: "duplicate" as const }
+    }
+    // Registered before any await, so a resend that arrives meanwhile finds it.
+    const written = (async () => {
+      const client = await ctx.getDaemonClient()
+      ctx.activityMonitor.userInput(input.sessionId, `${input.text}\r`)
+      typingMap(client).set(input.sessionId, { clientId: input.clientId, at: Date.now() })
+      lastTypedAt.set(input.sessionId, Date.now())
+      await client.writeMessage(input.sessionId, input.text)
+    })()
+    sentMessages.set(input.messageId, written)
+    written.catch(() => {
+      if (sentMessages.get(input.messageId) === written) sentMessages.delete(input.messageId)
+    })
+    while (sentMessages.size > MESSAGE_ID_LIMIT) {
+      const oldest = sentMessages.keys().next().value
+      if (oldest === undefined) break
+      sentMessages.delete(oldest)
+    }
+    await written
+    ctx.caffeine.markTerminalActivity()
+    return { status: "sent" as const }
   }),
 
   /**
@@ -387,9 +508,9 @@ export const terminalRouter = router({
     observable<TerminalEvent>((emit) => {
       // Raw PTY bytes can split a UTF-8 character across chunks.
       const decoder = new TextDecoder()
-      const attachment = attachSession(ctx, input.sessionId, null, {
+      const attachment = attachSession(ctx, input.sessionId, null, false, {
         onStart: ({ start }) => {
-          const screen = start.mode === "snapshot" ? start.screen : ""
+          const screen = start.mode === "replay" ? "" : start.screen
           const chunk = screen + decoder.decode(start.bytes, { stream: true })
           if (chunk.length > 0) emit.next({ type: "data", chunk })
         },
@@ -470,15 +591,28 @@ export const terminalRouter = router({
           rows: result.rows,
           offset: start.offset,
           base64: start.bytes.toString("base64"),
+          input: result.input,
         }
         send(
           start.mode === "snapshot"
             ? { ...common, mode: "snapshot", screen: start.screen }
-            : { ...common, mode: "replay" },
+            : start.mode === "refresh"
+              ? { ...common, mode: "refresh", base: start.base, screen: start.screen }
+              : { ...common, mode: "replay" },
         )
       } else if (item.kind === "data") {
         offset = item.offset + item.bytes.length
         send({ type: "data", offset: item.offset, base64: item.bytes.toString("base64") })
+      } else if (item.kind === "echo") {
+        send({ type: "echo", offset: item.offset, input: item.input })
+      } else if (item.kind === "echo-ack") {
+        send({
+          type: "echoAck",
+          clientId: item.clientId,
+          seq: item.seq,
+          offset: item.offset,
+          input: item.input,
+        })
       } else if (item.kind === "resize") {
         revision = item.revision
         send({
@@ -508,9 +642,9 @@ export const terminalRouter = router({
       holdSkip: input.holdSkip,
       typedAt: () => lastTypedAt.get(input.sessionId) ?? null,
       deliver,
-      requestSnapshot: () => {
+      requestSnapshot: (from) => {
         attachment
-          .snapshot((result) => stream.snapshotReady(result))
+          .snapshot(from, (result) => stream.snapshotReady(result))
           .catch((error: unknown) => {
             // The daemon connection closed, or the session went away: start over from the client's point.
             const message = error instanceof Error ? error.message : String(error)
@@ -526,22 +660,28 @@ export const terminalRouter = router({
           })
       },
     })
-    const attachment = attachSession(ctx, input.sessionId, input.resume, {
-      onStart: (result) => stream.push({ kind: "start", result }),
-      onEvent: (event) => {
-        if (ended) return
-        if (event.kind === "data") ctx.caffeine.markTerminalActivity()
-        if (event.kind !== "exit" && connection.queuedBytes() > OUTPUT_QUEUE_LIMIT_BYTES) {
-          behind()
-          return
-        }
-        stream.push(event)
+    const attachment = attachSession(
+      ctx,
+      input.sessionId,
+      input.resume,
+      input.preferReplay === true,
+      {
+        onStart: (result) => stream.push({ kind: "start", result }),
+        onEvent: (event) => {
+          if (ended) return
+          if (event.kind === "data") ctx.caffeine.markTerminalActivity()
+          if (event.kind !== "exit" && connection.queuedBytes() > OUTPUT_QUEUE_LIMIT_BYTES) {
+            behind()
+            return
+          }
+          stream.push(event)
+        },
+        onError: (error) => {
+          failure = error
+          end()
+        },
       },
-      onError: (error) => {
-        failure = error
-        end()
-      },
-    })
+    )
     const onAbort = () => wake()
     signal?.addEventListener("abort", onAbort)
     try {

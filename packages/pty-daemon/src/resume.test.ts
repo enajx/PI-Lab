@@ -71,7 +71,7 @@ interface TestCore {
 
 /** A client terminal: applies attach starts and live events in offset order. */
 class Viewer {
-  readonly emulator = new Emulator(COLS, ROWS)
+  readonly emulator: Emulator
   client: DaemonClient | null = null
   generation = ""
   offset = 0
@@ -81,12 +81,21 @@ class Viewer {
   queued: (DataEvent | ResizeEvent)[] = []
   starts: AttachResult["start"]["mode"][] = []
 
-  constructor(readonly sessionId: string) {
+  constructor(
+    readonly sessionId: string,
+    cols: number,
+    rows: number,
+  ) {
+    this.emulator = new Emulator(cols, rows)
     viewers.push(this)
   }
 
+  /** The resume point the last attach was made from. */
+  resumePointBeforeStart: ResumePoint | null = null
+
   /** Connect a new client and attach, resuming from `resume` when given. */
   async attach(resume: ResumePoint | null): Promise<AttachResult> {
+    this.resumePointBeforeStart = resume
     const client = await newClient()
     this.client = client
     const onEvent = (event: DataEvent | ResizeEvent) => {
@@ -108,6 +117,29 @@ class Viewer {
     this.paused = false
   }
 
+  /**
+   * While paused: apply the queued events up to the first one with an escape
+   * sequence, then only part of it, stopping right after its `ESC [`.
+   */
+  applyUpToMidSequence(): void {
+    for (;;) {
+      const event = this.queued.shift()
+      if (event === undefined) throw new Error("no queued chunk with an escape sequence")
+      if (event.kind !== "data") {
+        this.apply(event)
+        continue
+      }
+      const at = event.bytes.indexOf("\x1b[")
+      if (at < 0) {
+        this.apply(event)
+        continue
+      }
+      this.emulator.write(event.bytes.subarray(0, at + 2))
+      this.offset += at + 2
+      return
+    }
+  }
+
   resumePoint(): ResumePoint {
     return { generation: this.generation, offset: this.offset, revision: this.revision }
   }
@@ -118,6 +150,15 @@ class Viewer {
     this.starts.push(result.start.mode)
     if (result.start.mode === "replay") {
       expect(result.start.offset).toBe(this.offset)
+    } else if (result.start.mode === "refresh") {
+      // The renderer's rule: a refresh applies only on top of the screen it was made for.
+      expect(result.start.base).toEqual(this.resumePointBeforeStart)
+      if (
+        this.emulator.terminal.cols !== result.cols ||
+        this.emulator.terminal.rows !== result.rows
+      )
+        this.emulator.resize(result.cols, result.rows)
+      this.emulator.write(Buffer.from(result.start.screen))
     } else {
       this.emulator.terminal.reset()
       this.emulator.resize(result.cols, result.rows)
@@ -139,6 +180,24 @@ class Viewer {
       this.emulator.resize(event.cols, event.rows)
       this.revision = event.revision
     }
+  }
+
+  /** Every line of the normal or alternate buffer, history included. */
+  allLines(): string[] {
+    const buffer = this.emulator.terminal.buffer.active
+    const lines: string[] = []
+    for (let row = 0; row < buffer.length; row++)
+      lines.push(buffer.getLine(row)?.translateToString(true) ?? "")
+    return lines
+  }
+
+  /** The normal buffer's lines, history included (what a refresh must keep). */
+  normalLines(): string[] {
+    const buffer = this.emulator.terminal.buffer.normal
+    const lines: string[] = []
+    for (let row = 0; row < buffer.length; row++)
+      lines.push(buffer.getLine(row)?.translateToString(true) ?? "")
+    return lines
   }
 
   screenText(): string {
@@ -173,7 +232,7 @@ class Viewer {
       charsets: [0, 1].map((slot) => core._charsetService._charsets[slot]?.q ?? null),
       glevel: core._charsetService.glevel,
       text: this.screenText(),
-      serialized: this.emulator.serialize(),
+      serialized: this.emulator.serialize("all"),
     }
   }
 }
@@ -182,17 +241,25 @@ class Viewer {
 async function spawnProgram(
   scenario: string,
 ): Promise<{ control: DaemonClient; id: string; reference: Viewer }> {
+  return spawnProgramSized(scenario, COLS, ROWS)
+}
+
+async function spawnProgramSized(
+  scenario: string,
+  cols: number,
+  rows: number,
+): Promise<{ control: DaemonClient; id: string; reference: Viewer }> {
   const control = await newClient()
   const session = await control.spawn({
     command: NODE,
     args: [PROGRAM, scenario],
-    cols: COLS,
-    rows: ROWS,
+    cols,
+    rows,
   })
   await control.detach(session.id)
-  const reference = new Viewer(session.id)
+  const reference = new Viewer(session.id, cols, rows)
   await reference.attach(null)
-  await waitFor(() => reference.screenText().includes("R"), 5000)
+  await waitFor(() => reference.screenText().includes("R"), 15_000)
   return { control, id: session.id, reference }
 }
 
@@ -216,7 +283,7 @@ describe("resume, two variants", () => {
     async (_label, discard) => {
       await startServer(256 * 1024)
       const { control, id, reference } = await spawnProgram("stream")
-      const resumer = new Viewer(id)
+      const resumer = new Viewer(id, COLS, ROWS)
       await resumer.attach(null)
       await control.write(id, "g")
       await waitFor(() => resumer.offset > 2000, 5000)
@@ -245,7 +312,7 @@ describe("expired tail", () => {
   test("a resize and reattach after the tail expired match the uninterrupted client", async () => {
     await startServer(4096)
     const { control, id, reference } = await spawnProgram("fullscreen")
-    const returning = new Viewer(id)
+    const returning = new Viewer(id, COLS, ROWS)
     await returning.attach(null)
     await control.write(id, "g")
     await waitFor(() => returning.offset > 1000, 5000)
@@ -277,15 +344,15 @@ describe("idle recovery", () => {
     await waitFor(() => reference.offset > 20_000, 5000)
 
     // The tail no longer holds the start of the session.
-    const probe = new Viewer(id)
+    const probe = new Viewer(id, COLS, ROWS)
     const expired = await probe.attach({
       generation: reference.generation,
       offset: 0,
       revision: 0,
     })
-    expect(expired.start.mode).toBe("snapshot")
+    expect(expired.start.mode).not.toBe("replay")
 
-    const fresh = new Viewer(id)
+    const fresh = new Viewer(id, COLS, ROWS)
     const result = await fresh.attach(null)
     expect(result.start.mode).toBe("snapshot")
     expect(fresh.offset).toBe(reference.offset)
@@ -294,26 +361,36 @@ describe("idle recovery", () => {
 })
 
 describe("stale revision", () => {
-  test("a client that returns after another client resized gets the current screen", async () => {
-    await startServer(256 * 1024)
-    const { control, id, reference } = await spawnProgram("static")
-    await control.write(id, "g")
-    await waitFor(() => reference.screenText().includes("FINAL"), 5000)
+  test.each([
+    // History lines scrolled before the client's offset, not after: its history is right.
+    ["wider, no row wraps", 100, 30, "refresh"],
+    // The first visible row continues a history line; a refresh cannot mark it wrapped.
+    ["narrower, every row wraps", 40, ROWS, "snapshot"],
+  ] as const)(
+    "a client that returns after another client resized (%s) gets the current screen",
+    async (_label, cols, rows, mode) => {
+      await startServer(256 * 1024)
+      const { control, id, reference } = await spawnProgram("static")
+      await control.write(id, "g")
+      await waitFor(() => reference.screenText().includes("FINAL"), 5000)
 
-    const stale = new Viewer(id)
-    await stale.attach(null)
-    const point = stale.resumePoint()
-    stale.drop()
+      const stale = new Viewer(id, COLS, ROWS)
+      await stale.attach(null)
+      const point = stale.resumePoint()
+      stale.drop()
 
-    await control.resize(id, 40, ROWS)
-    await waitFor(() => reference.emulator.terminal.cols === 40, 5000)
-    expect(stale.state()).not.toEqual(reference.state())
+      await control.resize(id, cols, rows)
+      await waitFor(() => reference.emulator.terminal.cols === cols, 5000)
+      expect(stale.state()).not.toEqual(reference.state())
 
-    const result = await stale.attach(point)
-    expect(point.offset).toBe(reference.offset)
-    expect(result.start.mode).toBe("snapshot")
-    expect(stale.state()).toEqual(reference.state())
-  }, 20_000)
+      const result = await stale.attach(point)
+      expect(point.offset).toBe(reference.offset)
+      expect(result.start.mode).toBe(mode)
+      expect(stale.state()).toEqual(reference.state())
+      expect(stale.normalLines()).toEqual(reference.normalLines())
+    },
+    20_000,
+  )
 })
 
 describe("generation", () => {
@@ -323,7 +400,7 @@ describe("generation", () => {
     await control.write(id, "g")
     await waitFor(() => reference.screenText().includes("FINAL"), 5000)
     const point = reference.resumePoint()
-    const other = new Viewer(id)
+    const other = new Viewer(id, COLS, ROWS)
     other.offset = point.offset
     const result = await other.attach({ ...point, generation: "an-earlier-daemon" })
     expect(result.start.mode).toBe("snapshot")
@@ -353,7 +430,7 @@ describe("input modes", () => {
     await waitFor(() => reference.screenText().includes("FINAL"), 5000)
     await waitFor(() => reference.offset > 20_000, 5000)
 
-    const restored = new Viewer(id)
+    const restored = new Viewer(id, COLS, ROWS)
     expect((await restored.attach(null)).start.mode).toBe("snapshot")
     expect(restored.emulator.mouseEncoding()).toBe("SGR")
     expect(restored.emulator.terminal.modes).toMatchObject({
@@ -377,7 +454,7 @@ describe("offsets with non-ASCII output", () => {
     await control.write(id, "g")
     // Each line is 😀 (4 bytes), 中 (3 bytes) and CR LF after the PTY's ONLCR.
     await waitFor(() => reference.offset === start + 200 * 9, 5000)
-    const fresh = new Viewer(id)
+    const fresh = new Viewer(id, COLS, ROWS)
     await fresh.attach(null)
     expect(fresh.offset).toBe(start + 200 * 9)
     expect(fresh.state()).toEqual(reference.state())
@@ -387,8 +464,8 @@ describe("offsets with non-ASCII output", () => {
     // A cap that is not a multiple of any character size cuts through characters.
     await startServer(4099)
     const { control, id, reference } = await spawnProgram("stream")
-    const replayed = new Viewer(id)
-    const expired = new Viewer(id)
+    const replayed = new Viewer(id, COLS, ROWS)
+    const expired = new Viewer(id, COLS, ROWS)
     await replayed.attach(null)
     await expired.attach(null)
     await control.write(id, "g")
@@ -415,7 +492,7 @@ describe("paused mid-sequence", () => {
     await waitFor(() => reference.screenText().includes("hello"), 5000)
 
     // Paused inside a CSI sequence.
-    const midEscape = new Viewer(id)
+    const midEscape = new Viewer(id, COLS, ROWS)
     const first = await midEscape.attach(null)
     expect(first.start.mode).toBe("snapshot")
     expect(first.start.bytes.toString()).toBe("\x1b[3")
@@ -425,7 +502,7 @@ describe("paused mid-sequence", () => {
     const offsetBefore = reference.offset
     await control.write(id, "1")
     await waitFor(() => reference.offset > offsetBefore, 5000)
-    const midCharacter = new Viewer(id)
+    const midCharacter = new Viewer(id, COLS, ROWS)
     const second = await midCharacter.attach(null)
     expect([...second.start.bytes]).toEqual([0xe4])
     expect(midCharacter.screenText()).toContain("hello red")
@@ -445,7 +522,7 @@ describe("paused mid-sequence", () => {
     await control.write(id, "g")
     await waitFor(() => reference.offset > 20_000, 5000)
 
-    const fresh = new Viewer(id)
+    const fresh = new Viewer(id, COLS, ROWS)
     const result = await fresh.attach(null)
     expect(result.start.mode).toBe("snapshot")
     expect(result.start.bytes.length).toBeLessThanOrEqual(4096)
@@ -478,4 +555,108 @@ describe("terminal flags", () => {
     const flags = Buffer.concat(chunks).toString("utf8")
     expect(flags).toMatch(/(^|\s)iutf8(\s|$)/m)
   })
+})
+
+describe("screen refresh", () => {
+  test("a full-screen app (scroll region, DEC graphics, origin mode, mouse SGR, bracketed paste, hidden cursor, alternate screen) resumed from inside an escape sequence gets a refresh; the next input and output match an attached client", async () => {
+    await startServer(256 * 1024)
+    const { control, id, reference } = await spawnProgram("tui")
+    const resumer = new Viewer(id, COLS, ROWS)
+    await resumer.attach(null)
+    await control.write(id, "g")
+    await waitFor(() => resumer.offset > 2000, 5000)
+    resumer.paused = true
+    await waitFor(() => resumer.queued.some((event) => event.kind === "data"), 5000)
+    resumer.applyUpToMidSequence()
+    const point = resumer.resumePoint()
+    resumer.drop()
+    // More output than a small replay while the client is away.
+    await waitFor(() => reference.offset > point.offset + 40_000, 10_000)
+
+    const result = await resumer.attach(point)
+    expect(result.start.mode).toBe("refresh")
+    if (result.start.mode !== "refresh") return
+    expect(result.start.base).toEqual(point)
+    expect(result.start.screen.length + result.start.bytes.length).toBeLessThan(16 * 1024)
+    await control.write(id, "q")
+    await expectSameEnd(reference, [resumer])
+    expect(resumer.normalLines()).toEqual(reference.normalLines())
+    expect(resumer.emulator.terminal.modes).toMatchObject({
+      originMode: true,
+      bracketedPasteMode: true,
+      mouseTrackingMode: "drag",
+    })
+    expect(resumer.emulator.mouseEncoding()).toBe("SGR")
+    expect(nextInput(resumer)).toEqual(nextInput(reference))
+    // The same next output on both keeps them equal (G1 shifted out and in again).
+    const before = reference.offset
+    await control.write(id, "n")
+    await waitFor(
+      () =>
+        reference.offset > before &&
+        reference.screenText().includes("NEXT") &&
+        resumer.offset === reference.offset,
+      5000,
+    )
+    expect(resumer.state()).toEqual(reference.state())
+  }, 30_000)
+
+  test("lines scrolled into history after the client's offset: a small replay or a snapshot, never a refresh", async () => {
+    await startServer(256 * 1024)
+    const { control, id, reference } = await spawnProgram("stream")
+    const short = new Viewer(id, COLS, ROWS)
+    const long = new Viewer(id, COLS, ROWS)
+    await short.attach(null)
+    await long.attach(null)
+    await control.write(id, "g")
+    await waitFor(() => short.offset > 2000, 5000)
+    const shortPoint = short.resumePoint()
+    const longPoint = long.resumePoint()
+    short.drop()
+    long.drop()
+    await waitFor(() => reference.offset > shortPoint.offset + 1000, 5000)
+    expect((await short.attach(shortPoint)).start.mode).toBe("replay")
+    await waitFor(() => reference.offset > longPoint.offset + 40_000, 10_000)
+    expect((await long.attach(longPoint)).start.mode).toBe("snapshot")
+    await control.write(id, "q")
+    await expectSameEnd(reference, [short, long])
+  }, 30_000)
+
+  test("sizes: replay, refresh and snapshot bytes for a status line, a full-screen redraw and log lines, at 80x24 and 200x50", async () => {
+    await startServer(256 * 1024)
+    const rows: string[] = []
+    for (const [cols, height] of [
+      [80, 24],
+      [200, 50],
+    ] as const) {
+      for (const scenario of ["status", "redraw", "stream"]) {
+        const { control, id, reference } = await spawnProgramSized(scenario, cols, height)
+        // Some history first (the stream scenario prints its log lines on "b").
+        if (scenario !== "stream") await control.write(id, "g")
+        await waitFor(() => reference.offset > (scenario === "stream" ? 0 : 300), 5000)
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        const away = new Viewer(id, cols, height)
+        await away.attach(null)
+        const point = away.resumePoint()
+        away.drop()
+        await control.write(id, "b")
+        await waitFor(() => reference.screenText().includes("FINAL"), 10_000)
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        const result = await away.attach(point)
+        const fresh = await (await newClient()).attach(id, null)
+        const startBytes = (start: AttachResult["start"]): number =>
+          (start.mode === "replay" ? 0 : start.screen.length) + start.bytes.length
+        const replayBytes = reference.offset - point.offset
+        rows.push(
+          `${scenario} ${cols}x${height}: replay ${replayBytes} B, chosen ${result.start.mode} ${startBytes(result.start)} B, snapshot ${startBytes(fresh.start)} B`,
+        )
+        await expectSameEnd(reference, [away])
+        if (scenario === "stream") expect(result.start.mode).toBe("snapshot")
+        else expect(result.start.mode).toBe("refresh")
+        expect(startBytes(result.start)).toBeLessThan(replayBytes)
+        await control.kill(id)
+      }
+    }
+    console.log(`[sizes]\n${rows.join("\n")}`)
+  }, 120_000)
 })

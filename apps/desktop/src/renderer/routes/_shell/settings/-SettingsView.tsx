@@ -26,6 +26,7 @@ import {
   ProjectViewSection,
   SectionsSection,
   ShortcutsSection,
+  TerminalSection,
 } from "./components/SettingsSections"
 
 /**
@@ -91,6 +92,12 @@ const SECTIONS = [
     label: "Agents & worktrees",
     description: "Choose defaults for launching agents and isolating their Git work.",
     render: () => <AgentsSection />,
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    description: "Choose how typed characters show on slow connections.",
+    render: () => <TerminalSection />,
   },
   {
     id: "notifications",

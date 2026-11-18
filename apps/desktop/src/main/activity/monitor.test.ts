@@ -98,6 +98,7 @@ class FakeDaemon implements ActivityDaemonClient {
       session: this.session(sessionId),
       generation: "test-generation",
       revision: 0,
+      input: { echo: true, icanon: true },
       cols: 80,
       rows: 24,
       start: { mode: "snapshot", offset: 0, screen: this.scrollback, bytes: Buffer.alloc(0) },

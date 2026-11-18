@@ -59,7 +59,20 @@ vi.mock("@xterm/xterm", () => ({
     }
 
     get buffer() {
-      return { active: { viewportY: xtermHarness.viewportY, baseY: xtermHarness.baseY } }
+      return {
+        active: {
+          viewportY: xtermHarness.viewportY,
+          baseY: xtermHarness.baseY,
+          cursorX: 0,
+          cursorY: 0,
+          type: "normal",
+          getLine: () => undefined,
+        },
+      }
+    }
+
+    onWriteParsed(): { dispose: () => void } {
+      return { dispose: () => {} }
     }
 
     onSelectionChange(handler: () => void): { dispose: () => void } {
@@ -125,11 +138,15 @@ describe("Terminal macOS custom key integration", () => {
     expect(customHandled).toBe(false)
     expect(shiftedEnter.defaultPrevented).toBe(true)
     expect(write).toHaveBeenCalledTimes(1)
-    expect(write).toHaveBeenLastCalledWith({
-      sessionId: "agent-session",
-      data: "\u001b[13;2u",
-      clientId: expect.any(String),
-    })
+    expect(write).toHaveBeenLastCalledWith(
+      {
+        sessionId: "agent-session",
+        data: "\u001b[13;2u",
+        clientId: expect.any(String),
+        key: { seq: expect.any(Number), typedAt: null, firstSend: true },
+      },
+      { signal: expect.any(AbortSignal) },
+    )
 
     const plainEnter = macKeyEvent("Enter", {})
     const xtermHandled = xtermHarness.customKeyHandler?.(plainEnter)
@@ -137,14 +154,18 @@ describe("Terminal macOS custom key integration", () => {
     expect(xtermHandled).toBe(true)
     expect(plainEnter.defaultPrevented).toBe(false)
     expect(write).toHaveBeenCalledTimes(2)
-    expect(write).toHaveBeenLastCalledWith({
-      sessionId: "agent-session",
-      data: "\r",
-      clientId: expect.any(String),
-    })
+    expect(write).toHaveBeenLastCalledWith(
+      {
+        sessionId: "agent-session",
+        data: "\r",
+        clientId: expect.any(String),
+        key: { seq: expect.any(Number), typedAt: null, firstSend: true },
+      },
+      { signal: expect.any(AbortSignal) },
+    )
   })
 
-  test("shows failed input once until a write succeeds", async () => {
+  test("shows failed input in the banner, never in xterm, until a write succeeds", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock)
     const write = vi.fn().mockRejectedValue(new Error("daemon offline"))
     const client = {
@@ -154,22 +175,27 @@ describe("Terminal macOS custom key integration", () => {
         resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
       },
     } as unknown as PiLabTrpcClient
-    render(<Terminal client={client} inputKind="terminal" sessionId="input-failure" visible />)
+    const view = render(
+      <Terminal client={client} inputKind="terminal" sessionId="input-failure" visible />,
+    )
     await waitFor(() => expect(xtermHarness.dataHandler).not.toBeNull())
     xtermHarness.dataHandler?.("a")
     xtermHarness.dataHandler?.("b")
-    await waitFor(() => expect(xtermHarness.writes.join("")).toContain("daemon offline"))
-    expect(xtermHarness.writes.join("").match(/daemon offline/g)).toHaveLength(1)
+    await waitFor(() =>
+      expect(view.getByTestId("terminal-notice").textContent).toContain(
+        "Terminal input failed: daemon offline",
+      ),
+    )
+    expect(view.getAllByText(/daemon offline/)).toHaveLength(1)
     write.mockResolvedValueOnce({ ok: true })
     xtermHarness.dataHandler?.("c")
-    await waitFor(() => expect(write).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(view.queryByTestId("terminal-notice")).toBeNull())
     xtermHarness.dataHandler?.("d")
-    await waitFor(() =>
-      expect(xtermHarness.writes.join("").match(/daemon offline/g)).toHaveLength(2),
-    )
+    await waitFor(() => expect(view.getAllByText(/daemon offline/)).toHaveLength(1))
+    expect(xtermHarness.writes.join("")).not.toContain("daemon offline")
   })
 
-  test("shows a subscription failure in the terminal", async () => {
+  test("shows a subscription failure in the banner, not in xterm", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock)
     const errorHandler = {
       current: null as ((error: { message: string; data: unknown }) => void) | null,
@@ -190,14 +216,21 @@ describe("Terminal macOS custom key integration", () => {
       },
     } as unknown as PiLabTrpcClient
 
-    render(<Terminal client={client} inputKind="terminal" sessionId="agent-session" visible />)
+    const view = render(
+      <Terminal client={client} inputKind="terminal" sessionId="agent-session" visible />,
+    )
     await waitFor(() => expect(errorHandler.current).not.toBeNull())
     errorHandler.current?.({
       message: "daemon unavailable",
       data: { code: "INTERNAL_SERVER_ERROR" },
     })
 
-    expect(xtermHarness.writes.join("")).toContain("daemon unavailable")
+    await waitFor(() =>
+      expect(view.getByTestId("terminal-notice").textContent).toContain(
+        "Terminal connection failed: daemon unavailable",
+      ),
+    )
+    expect(xtermHarness.writes.join("")).not.toContain("daemon unavailable")
   })
 
   test("inserts a dropped folder path without submitting it", async () => {
@@ -223,11 +256,15 @@ describe("Terminal macOS custom key integration", () => {
       dataTransfer: { files: [new File([], "research folder")] },
     })
 
-    expect(write).toHaveBeenCalledExactlyOnceWith({
-      sessionId: "folder-session",
-      data: "'/tmp/research folder'",
-      clientId: expect.any(String),
-    })
+    expect(write).toHaveBeenCalledExactlyOnceWith(
+      {
+        sessionId: "folder-session",
+        data: "'/tmp/research folder'",
+        clientId: expect.any(String),
+        key: { seq: expect.any(Number), typedAt: null, firstSend: true },
+      },
+      { signal: expect.any(AbortSignal) },
+    )
   })
 
   // Mocked xterm and tRPC client: checks the pane's wiring only. The real
@@ -264,6 +301,7 @@ describe("Terminal macOS custom key integration", () => {
       id: "g1:5:0",
       data: {
         type: "start",
+        input: { echo: true, icanon: true },
         mode: "snapshot",
         generation: "g1",
         revision: 0,
@@ -323,6 +361,7 @@ describe("Terminal macOS custom key integration", () => {
       id: "g1:5:0",
       data: {
         type: "start",
+        input: { echo: true, icanon: true },
         mode: "snapshot",
         generation: "g1",
         revision: 0,

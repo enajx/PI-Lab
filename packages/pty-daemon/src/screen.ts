@@ -19,6 +19,16 @@ const { Terminal: HeadlessTerminal } = xtermHeadless
 const EMULATOR_SCROLLBACK = 1000
 
 /**
+ * The start of a screen refresh, written into a client's xterm that already
+ * holds the session's history: CAN ends any sequence the client stopped in,
+ * `?47l` switches to the normal buffer, mouse reporting and its encoding go
+ * off, DECSTR resets modes, text style, scroll region, charsets and the saved
+ * cursor without touching history, and `CSI H CSI 2J` clears the visible rows
+ * (xterm.js does not push them into history). The current screen follows.
+ */
+export const REFRESH_PREFIX = "\x18\x1b[?47l\x1b[?1000l\x1b[?1006l\x1b[!p\x1b[H\x1b[2J"
+
+/**
  * xterm 5.5 internals that the public API and SerializeAddon 0.13 do not cover.
  * Checked when each emulator is created so an xterm update fails loudly.
  */
@@ -111,6 +121,10 @@ export class Emulator {
     this.terminal.resize(cols, rows)
   }
 
+  scrollTop(): number {
+    return this.core.buffer.scrollTop
+  }
+
   mouseEncoding(): string {
     return this.core.coreMouseService.activeEncoding
   }
@@ -131,7 +145,8 @@ export class Emulator {
   }
 
   /**
-   * Bytes that rebuild this screen in a reset terminal of the same size.
+   * Bytes that rebuild this screen in a reset terminal of the same size:
+   * `all` includes the scrollback, `screen` only the visible rows (a refresh).
    *
    * SerializeAddon 0.13 writes the normal and alternate buffers, the current
    * text style and the modes in `terminal.modes`. It lacks the scroll region,
@@ -139,13 +154,15 @@ export class Emulator {
    * charsets, and its origin mode output moves the cursor home after it placed
    * it. Those are added here, ending with an absolute cursor position.
    */
-  serialize(): string {
+  serialize(rows: "all" | "screen"): string {
     const terminal = this.terminal
     const buffer = this.core.buffer
-    let text = this.addon.serialize()
+    let text = this.addon.serialize(rows === "screen" ? { scrollback: 0 } : undefined)
     const originMode = terminal.modes.originMode
     const region = buffer.scrollTop !== 0 || buffer.scrollBottom !== terminal.rows - 1
-    const saved = buffer.savedX !== 0 || buffer.savedY !== 0
+    // DECRC clamps the saved row to the screen, so a saved home position is the default.
+    const savedRow = Math.max(buffer.savedY - buffer.ybase, 0)
+    const saved = buffer.savedX !== 0 || savedRow !== 0
     const charsets = this.core._charsetService
     if (isDecGraphics(charsets._charsets[0])) text += "\x1b(0"
     if (isDecGraphics(charsets._charsets[1])) text += "\x1b)0"
@@ -157,7 +174,6 @@ export class Emulator {
     if (buffer.x >= terminal.cols && !originMode && !region && !saved) return text
     if (originMode) text += "\x1b[?6l"
     if (saved) {
-      const savedRow = Math.max(buffer.savedY - buffer.ybase, 0)
       text += `\x1b[${savedRow + 1};${Math.min(buffer.savedX, terminal.cols - 1) + 1}H\x1b7`
     }
     if (region) text += `\x1b[${buffer.scrollTop + 1};${buffer.scrollBottom + 1}r`
@@ -187,6 +203,13 @@ export class ScreenState {
   private readonly tracker = new ParserTracker()
   private held = Buffer.alloc(0)
   private safeOffset = 0
+  /** A line went into (or out of) the normal buffer's history during the current write. */
+  private historyMoved = false
+  /**
+   * The normal buffer's history is the same for every offset from this one on
+   * (chunk granularity): no line scrolled into it and it was not cleared since.
+   */
+  historyStableFrom = 0
 
   /**
    * @param heldLimit most bytes held after the safe offset (the retention limit)
@@ -199,10 +222,25 @@ export class ScreenState {
     private readonly onParserReset: (heldBytes: number) => void,
   ) {
     this.emulator = new Emulator(cols, rows)
+    const terminal = this.emulator.terminal
+    // A scroll with the region at the top of the normal buffer adds a history line.
+    terminal.onScroll(() => {
+      if (terminal.buffer.active.type === "normal" && this.emulator.scrollTop() === 0)
+        this.historyMoved = true
+    })
   }
 
   /** Feed the next output bytes, in order. */
   feed(chunk: Buffer): void {
+    const lengthBefore = this.emulator.terminal.buffer.normal.length
+    this.historyMoved = false
+    this.write(chunk)
+    // Clearing the scrollback (CSI 3 J, RIS) changes the length without a scroll.
+    if (this.historyMoved || this.emulator.terminal.buffer.normal.length !== lengthBefore)
+      this.historyStableFrom = this.safeOffset
+  }
+
+  private write(chunk: Buffer): void {
     const lastSafe = this.tracker.pushAndFindLastSafe(chunk)
     if (lastSafe >= 0) {
       this.emulator.write(this.held)
@@ -228,8 +266,32 @@ export class ScreenState {
     this.emulator.resize(cols, rows)
   }
 
+  /** The program turned on bracketed paste (mode 2004). */
+  bracketedPaste(): boolean {
+    return this.emulator.terminal.modes.bracketedPasteMode
+  }
+
   snapshot(): ScreenSnapshot {
-    return { offset: this.safeOffset, screen: this.emulator.serialize(), bytes: this.held }
+    return { offset: this.safeOffset, screen: this.emulator.serialize("all"), bytes: this.held }
+  }
+
+  /**
+   * The normal buffer's first visible row continues a history line. A refresh
+   * cannot mark it as wrapped (only output that wraps does that), so it would
+   * differ from this screen.
+   */
+  firstRowContinuesHistory(): boolean {
+    const normal = this.emulator.terminal.buffer.normal
+    return normal.baseY > 0 && normal.getLine(normal.baseY)?.isWrapped === true
+  }
+
+  /** The current screen for a client that holds the same history: see {@link REFRESH_PREFIX}. */
+  refresh(): ScreenSnapshot {
+    return {
+      offset: this.safeOffset,
+      screen: REFRESH_PREFIX + this.emulator.serialize("screen"),
+      bytes: this.held,
+    }
   }
 
   dispose(): void {

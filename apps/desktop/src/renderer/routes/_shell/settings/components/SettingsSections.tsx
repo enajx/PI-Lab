@@ -40,6 +40,7 @@ import {
   EDITOR_FONT_DEFAULT_SIZE,
   EDITOR_FONT_MAX_SIZE,
   EDITOR_FONT_MIN_SIZE,
+  type LocalEchoPreference,
   type NewSessionKind,
   useAnalysisChartColors,
   useAnalysisFlatList,
@@ -53,6 +54,7 @@ import {
   useExperimentRunsFile,
   useExperimentRunsSource,
   useFetchExperimentsInstructions,
+  useLocalEcho,
   useNewSessionKind,
   useRestoreProjectTabs,
   useShowAnalysisSection,
@@ -1893,6 +1895,43 @@ export function ShortcutsSection() {
           </option>
           <option value="terminal-agent">{t("Terminal agent")}</option>
           <option value="terminal">{t("Terminal")}</option>
+        </select>
+      </div>
+    </SettingsSection>
+  )
+}
+
+/** Terminal: how local echo shows typed characters before the program echoes them. */
+export function TerminalSection() {
+  const t = useTranslate()
+  const [localEcho, setLocalEcho] = useLocalEcho()
+  return (
+    <SettingsSection
+      testId="settings-section-terminal"
+      title="Terminal"
+      description="Typing in terminals."
+    >
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div className="flex min-w-0 flex-col">
+          <label htmlFor="settings-local-echo" className="text-foreground text-sm">
+            {t("Local echo")}
+          </label>
+          <span className="text-muted-foreground text-xs">
+            {t(
+              "Show typed characters before the program echoes them. Adaptive shows them only when the connection is slow (round trip over 30 ms) and underlines them over 80 ms.",
+            )}
+          </span>
+        </div>
+        <select
+          id="settings-local-echo"
+          data-testid="settings-local-echo"
+          value={localEcho}
+          onChange={(event) => setLocalEcho(event.target.value as LocalEchoPreference)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-foreground text-sm outline-none"
+        >
+          <option value="adaptive">{t("Adaptive")}</option>
+          <option value="always">{t("Always")}</option>
+          <option value="off">{t("Off")}</option>
         </select>
       </div>
     </SettingsSection>

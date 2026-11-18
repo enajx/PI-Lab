@@ -60,6 +60,35 @@ describe("production package contents through electron-builder", () => {
       expect(ships("mac", "arm64", file), file).toBe(true)
   })
 
+  test.each([
+    ["mac", "arm64"],
+    ["linux", "x64"],
+    ["linux", "arm64"],
+  ] as const)("keeps the termios addon and drops its sources on %s/%s", (platform, arch) => {
+    for (const file of [
+      "@pi-lab/pty-termios/package.json",
+      "@pi-lab/pty-termios/index.cjs",
+      "@pi-lab/pty-termios/build/Release/pty_termios.node",
+    ])
+      expect(ships(platform, arch, file), file).toBe(true)
+    for (const file of [
+      "@pi-lab/pty-termios/src/termios.c",
+      "@pi-lab/pty-termios/src/termios.test.ts",
+      "@pi-lab/pty-termios/binding.gyp",
+      "@pi-lab/pty-termios/tsconfig.json",
+      "@pi-lab/pty-termios/node_modules/node-pty/package.json",
+      "@pi-lab/pty-termios/node_modules/node-gyp/package.json",
+      "@pi-lab/pty-termios/build/Makefile",
+      "@pi-lab/pty-termios/build/config.gypi",
+      "@pi-lab/pty-termios/build/Release/obj.target/pty_termios/src/termios.o",
+      "@pi-lab/pty-termios/build/Release/.deps/Release/pty_termios.node.d",
+      "@pi-lab/pty-daemon/package.json",
+      "@pi-lab/pty-daemon/src/session.ts",
+      "@pi-lab/local-db/package.json",
+    ])
+      expect(ships(platform, arch, file), file).toBe(false)
+  })
+
   test("does not ship bundled renderer packages or native build sources", () => {
     for (const file of [
       "@codemirror/view/dist/index.js",
@@ -251,7 +280,7 @@ test("macOS keeps the selected locales", () => {
   expect(config.mac.electronLanguages).toEqual(selected)
 })
 
-test("packaged native validator loads SQLite 13's real prebuild layout", () => {
+test("packaged native validator loads SQLite 13's real prebuild layout and the termios addon", () => {
   const fixture = mkdtempSync(join(tmpdir(), "pi-lab-native-layout-"))
   const modules = join(fixture, "app.asar.unpacked", "node_modules")
   const sqliteRoot = dirname(desktopRequire.resolve("better-sqlite3/package.json"))
@@ -285,6 +314,17 @@ test("packaged native validator loads SQLite 13's real prebuild layout", () => {
   for (const name of names) {
     mkdirSync(dirname(join(ptyDest, name)), { recursive: true })
     copyFileSync(join(ptySource, name), join(ptyDest, name))
+  }
+  if (process.platform !== "win32") {
+    const termiosDest = join(modules, "@pi-lab", "pty-termios", "build", "Release")
+    mkdirSync(termiosDest, { recursive: true })
+    copyFileSync(
+      join(
+        dirname(desktopRequire.resolve("@pi-lab/pty-termios/package.json")),
+        "build/Release/pty_termios.node",
+      ),
+      join(termiosDest, "pty_termios.node"),
+    )
   }
   const result = spawnSync(
     process.execPath,

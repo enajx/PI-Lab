@@ -82,11 +82,12 @@ function copyMigrationsPlugin(): Plugin {
  * it MUST be bundled to a single `out/pty-daemon/index.js` the supervisor can run
  * as a detached child.
  *
- * node-pty (a native `.node` addon) is forced external — bundling it would break
- * at runtime — so the daemon `require`s it from node_modules at launch. It is
- * built with N-API; the supervisor runs the daemon under Electron's bundled
- * Node (`ELECTRON_RUN_AS_NODE=1`). Native-load checks validate the addon under
- * both plain Node (unit tests) and Electron (the app and daemon).
+ * node-pty and @pi-lab/pty-termios (native `.node` addons) are forced external —
+ * bundling them would break at runtime — so the daemon `require`s them from
+ * node_modules at launch. Both are built with N-API; the supervisor runs the
+ * daemon under Electron's bundled Node (`ELECTRON_RUN_AS_NODE=1`). Native-load
+ * checks validate the addons under both plain Node (unit tests) and Electron
+ * (the app and daemon).
  */
 function bundlePtyDaemonPlugin(): Plugin {
   const entry = resolve(__dirname, "src", "main", "terminal", "daemonEntry.ts")
@@ -176,9 +177,9 @@ const WORKSPACE_PACKAGES = [
  */
 const BUNDLED_MAIN_DEPS = ["hyparquet"]
 /** Native `.node` addons that must stay runtime `require`s, never inlined. */
-const NATIVE_DEPS = ["better-sqlite3", "node-pty"]
-/** Native addon the daemon bundle must `require` from disk, never inline. */
-const NATIVE_DEPS_DAEMON = ["node-pty"]
+const NATIVE_DEPS = ["better-sqlite3", "node-pty", "@pi-lab/pty-termios"]
+/** Native addons the daemon bundle must `require` from disk, never inline. */
+const NATIVE_DEPS_DAEMON = ["node-pty", "@pi-lab/pty-termios"]
 
 export default defineConfig({
   main: {

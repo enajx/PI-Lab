@@ -18,7 +18,12 @@ import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest"
 import { WebSocket } from "ws"
 import type { TerminalSupervisor } from "../main/terminal/supervisor"
 import type { ServerRouter } from "../main/trpc/serverRouter"
-import { OUTPUT_QUEUE_LIMIT_BYTES, TYPING_HOLDS_SIZE_MS } from "../main/trpc/terminal/terminal"
+import {
+  OUTPUT_QUEUE_LIMIT_BYTES,
+  type TerminalOutput,
+  TYPING_HOLDS_SIZE_MS,
+} from "../main/trpc/terminal/terminal"
+import { KeySender, type KeyStatus } from "../renderer/Terminal/keyInput"
 import {
   type DropPolicy,
   type ResumePoint,
@@ -27,6 +32,7 @@ import {
   TerminalStream,
 } from "../renderer/Terminal/terminalStream"
 import { type ConnectionState, ConnectionStatus } from "../renderer/trpc/connectionStatus"
+import { startOnce } from "../renderer/trpc/launch"
 import { createServerSockets } from "../renderer/trpc/serverLinks"
 import { ensureLocalToken, TOKEN_HEADER } from "./access"
 import { type ConnectionStats, type ListeningServer, listen } from "./http"
@@ -46,6 +52,8 @@ const PROGRAM = join(
   "testPrograms",
   "screenProgram.cjs",
 )
+/** Logs every stdin chunk to a file (packages/pty-daemon/src/testPrograms/stdinLogger.cjs). */
+const STDIN_LOGGER = join(PROGRAM, "..", "stdinLogger.cjs")
 /** The flood harness's program: steady output at a set rate on "g", FINAL on "q", or a key echo. */
 const FLOOD_PROGRAM = join(__dirname, "..", "..", "..", "..", "tests", "flood", "floodProgram.cjs")
 const COLS = 80
@@ -296,7 +304,7 @@ function percentile(values: number[], p: number): number {
 /** Spawn tests/flood/floodProgram.cjs; `produced()` reads the PTY bytes it has written. */
 async function spawnFlood(
   client: Client,
-  mode: "lines" | "echo",
+  mode: "lines" | "fullscreen" | "echo",
   bytesPerSecond: number,
 ): Promise<{ sessionId: string; produced: () => number }> {
   const counterFile = join(dataDir, `flood-${Math.random().toString(36).slice(2)}.count`)
@@ -325,6 +333,10 @@ class Viewer {
   readonly receivedIds: string[] = []
   /** Server errors that ended the stream. */
   readonly errors: string[] = []
+  /** Each start received: its mode and its size (screen plus base64 bytes). */
+  readonly startSizes: { mode: string; bytes: number }[] = []
+  /** Test hook: change an event before the stream sees it. */
+  tamper: ((data: TerminalOutput) => TerminalOutput) | null = null
   #held: (() => void)[] | null = null
   exited = false
 
@@ -337,7 +349,13 @@ class Viewer {
         onData: (event) => {
           this.receivedIds.push(event.id)
           this.received.push({ at: performance.now(), type: event.data.type })
-          handlers.onData(event)
+          const data = event.data
+          if (data.type === "start")
+            this.startSizes.push({
+              mode: data.mode,
+              bytes: (data.mode === "replay" ? 0 : data.screen.length) + data.base64.length,
+            })
+          handlers.onData({ ...event, data: this.tamper ? this.tamper(data) : data })
         },
       })
     }
@@ -356,6 +374,9 @@ class Viewer {
       emulator,
       dropPolicy,
       onSize: () => {},
+      onStart: () => {},
+      onEcho: () => {},
+      onEchoAck: () => {},
       onExit: () => {
         this.exited = true
       },
@@ -461,7 +482,10 @@ for (const dropPolicy of ["keep", "discard"] as const) {
 
     await expectSameEnd(reference, viewer)
     // Every byte applied exactly once: a gap or overlap would have forced a snapshot.
-    expect(viewer.stream.starts).toEqual(["snapshot", "replay"])
+    // A full-screen app gets a refresh when the replay is longer than it.
+    expect(viewer.stream.starts[0]).toBe("snapshot")
+    expect(["replay", "refresh"]).toContain(viewer.stream.starts[1])
+    expect(viewer.stream.starts).toHaveLength(2)
     expect(consoleError).not.toHaveBeenCalled()
     consoleError.mockRestore()
     await control.trpc.terminal.kill.mutate({ sessionId })
@@ -842,31 +866,89 @@ test("a skip delivers the latest screen and scrollback, with no gap or duplicate
   await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
 }, 60_000)
 
-test("a hidden terminal gets no output, and resumes correctly when shown (replay, or a snapshot past the daemon's tail)", async () => {
+test("a skip in a full-screen app sends a screen refresh, not the full snapshot", async () => {
   const control = await newClient()
-  const slowFlood = await spawnFlood(control, "lines", 64 * KiB)
-  const viewer = new Viewer(await newClient(), slowFlood.sessionId, "keep")
+  const flood = await spawnFlood(control, "fullscreen", 4096 * KiB)
+  const viewer = new Viewer(await newClient(), flood.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "start")
+  const consoleError = vi.spyOn(console, "error")
+  viewer.hold()
+  await control.trpc.terminal.write.mutate({ sessionId: flood.sessionId, data: "g" })
+  const streamId = viewer.streamIds[0] as string
+  await waitFor(async () => (await streamStats(streamId)).skips >= 1, 15_000, "a skip")
+  viewer.release()
+  await waitFor(() => viewer.stream.starts.length >= 2, 10_000, "the skip's start")
+  expect(viewer.stream.starts.slice(0, 2)).toEqual(["snapshot", "refresh"])
+  expect(viewer.startSizes[1]?.bytes).toBeLessThan(16 * KiB)
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  await control.trpc.terminal.write.mutate({ sessionId: flood.sessionId, data: "q" })
+  await expectSameBuffer(viewer, flood.sessionId)
+  expect(viewer.subscribeInputs.length).toBe(1)
+  expect(consoleError).not.toHaveBeenCalled()
+  consoleError.mockRestore()
+  await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
+}, 60_000)
+
+test("a refresh made for another screen (wrong base) is refused: the client asks for a snapshot and ends with the right screen", async () => {
+  const control = await newClient()
+  const sessionId = await spawnProgram(control, "tui")
+  const viewerClient = await newClient()
+  const viewer = new Viewer(viewerClient, sessionId, "discard")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the program to start")
+  await control.trpc.terminal.write.mutate({ sessionId, data: "g" })
+  await waitFor(() => (viewer.stream.consumed()?.offset ?? 0) > 2_000, 10_000, "output")
+  // The next refresh claims a base one byte before the client's point.
+  viewer.tamper = (data) =>
+    data.type === "start" && data.mode === "refresh"
+      ? { ...data, base: { ...data.base, offset: data.base.offset - 1 } }
+      : data
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+  // Output queues unapplied, then the socket drops and the queue is discarded:
+  // the resume point is far enough behind that the daemon sends a refresh.
+  viewer.hold()
+  await new Promise((resolve) => setTimeout(resolve, 1_000))
+  viewerClient.terminalSocket().terminate()
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  viewer.release()
+  await waitFor(() => viewer.stream.starts.length === 3, 10_000, "the snapshot after the refusal")
+  expect(viewer.stream.starts).toEqual(["snapshot", "refresh", "snapshot"])
+  expect(viewer.subscribeInputs.at(-1)).toBeNull()
+  expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("does not fit the screen"))
+  consoleError.mockRestore()
+  viewer.tamper = null
+  const reference = new Viewer(await newClient(), sessionId, "keep")
+  await control.trpc.terminal.write.mutate({ sessionId, data: "q" })
+  await expectSameEnd(reference, viewer)
+  await control.trpc.terminal.kill.mutate({ sessionId })
+}, 30_000)
+
+test("a hidden terminal gets no output; shown again it gets an exact replay while the daemon has the bytes (112 KB of log lines), else a snapshot", async () => {
+  const control = await newClient()
+  const sessionId = await spawnProgram(control, "stream")
+  const viewer = new Viewer(await newClient(), sessionId, "keep")
   await waitFor(() => viewer.screen().includes("R"), 15_000, "start")
 
   viewer.stream.setVisible(false)
   await waitFor(
     async () =>
       (await connectionStats()).every((entry) =>
-        entry.output.streams.every((stream) => stream.sessionId !== slowFlood.sessionId),
+        entry.output.streams.every((stream) => stream.sessionId !== sessionId),
       ),
     5_000,
     "the hidden terminal's stream to end on the server",
   )
   const receivedWhileShown = viewer.received.length
-  await control.trpc.terminal.write.mutate({ sessionId: slowFlood.sessionId, data: "g" })
-  await new Promise((resolve) => setTimeout(resolve, 1_000))
+  // About 2,000 log lines (112 KB), all scrolled into history while hidden.
+  await control.trpc.terminal.write.mutate({ sessionId, data: "b" })
+  const fresh = new Viewer(await newClient(), sessionId, "keep")
+  await waitFor(() => fresh.screen().includes("FINAL"), 10_000, "the burst")
   expect(viewer.received.length).toBe(receivedWhileShown)
   viewer.stream.setVisible(true)
-  // About 64 KiB while hidden: still in the daemon's 256 KiB tail, so a replay.
   await waitFor(() => viewer.stream.starts.length === 2, 5_000, "the start after showing")
   expect(viewer.stream.starts).toEqual(["snapshot", "replay"])
-  await control.trpc.terminal.write.mutate({ sessionId: slowFlood.sessionId, data: "q" })
-  await expectSameBuffer(viewer, slowFlood.sessionId)
+  await expectSameEnd(fresh, viewer)
+  expect(viewer.allLines()).toEqual(fresh.allLines())
+  await control.trpc.terminal.kill.mutate({ sessionId })
 
   const bigFlood = await spawnFlood(control, "lines", 2048 * KiB)
   const bigViewer = new Viewer(await newClient(), bigFlood.sessionId, "keep")
@@ -874,13 +956,13 @@ test("a hidden terminal gets no output, and resumes correctly when shown (replay
   bigViewer.stream.setVisible(false)
   await control.trpc.terminal.write.mutate({ sessionId: bigFlood.sessionId, data: "g" })
   await waitFor(() => bigFlood.produced() > 1024 * KiB, 10_000, "1 MiB while hidden")
+  // Log lines scrolled into history meanwhile, so no refresh: a snapshot.
   bigViewer.stream.setVisible(true)
   await waitFor(() => bigViewer.stream.starts.length === 2, 5_000, "the start after showing")
   expect(bigViewer.stream.starts).toEqual(["snapshot", "snapshot"])
   await control.trpc.terminal.write.mutate({ sessionId: bigFlood.sessionId, data: "q" })
   await expectSameBuffer(bigViewer, bigFlood.sessionId)
-  for (const flood of [slowFlood, bigFlood])
-    await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
+  await control.trpc.terminal.kill.mutate({ sessionId: bigFlood.sessionId })
 }, 60_000)
 
 test("while the user has a selection or has scrolled up, a skip is held; it applies once released", async () => {
@@ -957,3 +1039,250 @@ test("acks for an ended stream are ignored", async () => {
   await expectSameBuffer(live, flood.sessionId)
   await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
 }, 30_000)
+
+/** Spawn the stdin logger; `input()` is everything it read so far, in order. */
+async function spawnLogger(
+  client: Client,
+  mode: "plain" | "paste" | "echo",
+): Promise<{ sessionId: string; viewer: Viewer; input: () => string }> {
+  const logFile = join(dataDir, `stdin-${Math.random().toString(36).slice(2)}.log`)
+  const { sessionId } = await client.trpc.terminal.spawn.mutate({
+    command: NODE,
+    args: [STDIN_LOGGER, logFile, mode],
+    cols: COLS,
+    rows: ROWS,
+  })
+  const viewer = new Viewer(await newClient(), sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the logger to start")
+  const input = (): string =>
+    existsSync(logFile)
+      ? readFileSync(logFile, "utf8")
+          .split("\n")
+          .filter((line) => line.length > 0)
+          .map((line) => JSON.parse(line) as string)
+          .join("")
+      : ""
+  return { sessionId, viewer, input }
+}
+
+test("compose line: a message is written with Enter, in bracketed paste when the program turned it on; a resend with the same ID is a duplicate and writes nothing", async () => {
+  const control = await newClient()
+  const plain = await spawnLogger(control, "plain")
+  const pasted = await spawnLogger(control, "paste")
+  const text = "two\nlines"
+  for (const target of [plain, pasted]) {
+    const first = await control.trpc.terminal.sendMessage.mutate({
+      sessionId: target.sessionId,
+      messageId: `message-${target.sessionId}`,
+      text,
+      clientId: "compose-test",
+    })
+    expect(first).toEqual({ status: "sent" })
+    const again = await control.trpc.terminal.sendMessage.mutate({
+      sessionId: target.sessionId,
+      messageId: `message-${target.sessionId}`,
+      text,
+      clientId: "compose-test",
+    })
+    expect(again).toEqual({ status: "duplicate" })
+  }
+  await waitFor(() => plain.input().length > 0 && pasted.input().length > 0, 5_000, "the messages")
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(plain.input()).toBe("two\nlines\r")
+  expect(pasted.input()).toBe("\x1b[200~two\nlines\x1b[201~\r")
+  for (const target of [plain, pasted])
+    await control.trpc.terminal.kill.mutate({ sessionId: target.sessionId })
+}, 30_000)
+
+test("input after a drop: a compose message whose reply is lost to a dropped connection arrives exactly once", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "plain")
+  const sender = await newClient()
+  const messages = ["first", "second", "third", "fourth", "fifth"]
+  let resends = 0
+  const statuses: string[] = []
+  for (const text of messages) {
+    let attempts = 0
+    const sent = startOnce((messageId) => {
+      attempts += 1
+      return sender.trpc.terminal.sendMessage.mutate({
+        sessionId: logger.sessionId,
+        messageId,
+        text,
+        clientId: "drop-test",
+      })
+    })
+    // Drop every connection while the message is in flight (a killed tunnel).
+    setImmediate(() => server.dropConnections())
+    const result = await sent
+    statuses.push(result.status)
+    resends += attempts - 1
+  }
+  // The drop hit messages in flight: at least one was sent again with its ID.
+  expect(resends).toBeGreaterThan(0)
+  console.log(`[compose drop] resends ${resends}, statuses ${statuses.join(",")}`)
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  expect(logger.input()).toBe(messages.map((text) => `${text}\r`).join(""))
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)
+
+/**
+ * A link that adds `delayMs` each way and can be cut (every connection closed,
+ * new ones refused) and restored, as a tunnel that goes down for a while.
+ */
+class CutLink {
+  readonly #tcp: Server
+  readonly #sockets = new Set<Socket>()
+  #cut = false
+  port = 0
+
+  constructor(readonly delayMs: number) {
+    this.#tcp = createServer((downstream) => {
+      if (this.#cut) {
+        downstream.destroy()
+        return
+      }
+      const upstream = tcpConnect(server.port, "127.0.0.1")
+      for (const socket of [downstream, upstream]) this.#sockets.add(socket)
+      const forward = (to: Socket) => (bytes: Buffer) =>
+        setTimeout(() => {
+          if (!to.destroyed && !this.#cut) to.write(bytes)
+        }, this.delayMs)
+      downstream.on("data", forward(upstream))
+      upstream.on("data", forward(downstream))
+      const end = () => {
+        downstream.destroy()
+        upstream.destroy()
+      }
+      for (const socket of [downstream, upstream]) {
+        socket.on("close", end)
+        socket.on("error", end)
+      }
+    })
+  }
+
+  async open(): Promise<void> {
+    await new Promise<void>((resolve) => this.#tcp.listen(0, "127.0.0.1", resolve))
+    this.port = (this.#tcp.address() as { port: number }).port
+  }
+
+  cut(): void {
+    this.#cut = true
+    for (const socket of this.#sockets) socket.destroy()
+    this.#sockets.clear()
+  }
+
+  restore(): void {
+    this.#cut = false
+  }
+
+  async close(): Promise<void> {
+    this.cut()
+    await new Promise<void>((resolve) => this.#tcp.close(() => resolve()))
+  }
+}
+
+/** The renderer's key sender over a test client, recording every reply and loss. */
+function keySenderFor(
+  client: Client,
+  sessionId: string,
+  viewer: Viewer,
+): { sender: KeySender; statuses: KeyStatus[]; lost: () => number } {
+  const statuses: KeyStatus[] = []
+  let lost = 0
+  let seq = 0
+  const sender = new KeySender({
+    write: async (data, key, signal) => {
+      const reply = await client.trpc.terminal.write.mutate(
+        { sessionId, data, clientId: "drop-keys", key },
+        { signal },
+      )
+      statuses.push(reply.status)
+      return reply.status
+    },
+    consumed: () => {
+      const point = viewer.stream.consumed()
+      return point === null ? null : { generation: point.generation, offset: point.offset }
+    },
+    connection: () => client.status.state(),
+    nextSeq: () => seq++,
+    onLost: () => {
+      lost += 1
+    },
+    onError: (error) => {
+      throw error
+    },
+    onDelivered: () => {},
+  })
+  return { sender, statuses, lost: () => lost }
+}
+
+test("input after a drop: keys whose reply is lost, with no output meanwhile, arrive once", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "plain")
+  const typist = await newClient()
+  const viewer = new Viewer(typist, logger.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the viewer")
+  const keys = keySenderFor(typist, logger.sessionId, viewer)
+  for (const key of "abcdefgh") {
+    keys.sender.send(key)
+    setImmediate(() => server.dropConnections())
+    await waitFor(() => keys.sender.waiting() === 0, 15_000, `the reply for ${key}`)
+  }
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(logger.input()).toBe("abcdefgh")
+  expect(keys.lost()).toBe(0)
+  console.log(`[keys after drop] statuses ${keys.statuses.join(",")}`)
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)
+
+test("input after a drop: a key applied whose reply is lost is resent and gets duplicate; it arrives once", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "plain")
+  const link = new CutLink(50)
+  await link.open()
+  const typist = new Client(() => url.replace(`:${server.port}/`, `:${link.port}/`))
+  await typist.trpc.terminal.list.query()
+  const viewer = new Viewer(typist, logger.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the viewer")
+  const keys = keySenderFor(typist, logger.sessionId, viewer)
+  keys.sender.send("k")
+  // The key reaches the server after 50 ms; its reply would arrive after 100 ms.
+  await waitFor(() => logger.input() === "k", 5_000, "the key at the program")
+  link.cut()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  link.restore()
+  await waitFor(() => keys.sender.waiting() === 0, 15_000, "the resend's reply")
+  expect(keys.statuses).toEqual(["duplicate"])
+  expect(logger.input()).toBe("k")
+  expect(keys.lost()).toBe(0)
+  await link.close()
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)
+
+test("input after a drop: keys typed while the connection is down are dropped when output appeared meanwhile, and reported lost", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "echo")
+  const link = new CutLink(10)
+  await link.open()
+  const typist = new Client(() => url.replace(`:${server.port}/`, `:${link.port}/`))
+  await typist.trpc.terminal.list.query()
+  const viewer = new Viewer(typist, logger.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the viewer")
+  const keys = keySenderFor(typist, logger.sessionId, viewer)
+  link.cut()
+  await waitFor(() => typist.status.state() === "reconnecting", 10_000, "reconnecting")
+  keys.sender.send("x")
+  keys.sender.send("y")
+  // Output appears while the typist is away (another client types; the program echoes).
+  await control.trpc.terminal.write.mutate({ sessionId: logger.sessionId, data: "zz" })
+  await waitFor(() => logger.input() === "zz", 5_000, "the other client's input")
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  link.restore()
+  await waitFor(() => keys.sender.waiting() === 0, 15_000, "the replies")
+  expect(keys.statuses).toEqual(["dropped", "dropped"])
+  expect(keys.lost()).toBe(2)
+  expect(logger.input()).toBe("zz")
+  await link.close()
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)
