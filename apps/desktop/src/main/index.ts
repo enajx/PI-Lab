@@ -295,7 +295,14 @@ async function ensureTray(): Promise<void> {
       restartToUpdate: () => restartToUpdate?.(),
       quit: () => void requestUserQuit(),
     },
-    traySnapshot,
+    // The tray reads this when it opens and every second while open: ask the server for
+    // fresh data (it arrives through subscribeTray) and show the last data meanwhile.
+    () => {
+      void runtime.refreshTray().catch((error: unknown) => {
+        console.warn(`[pi-lab] tray refresh failed: ${String(error)}`)
+      })
+      return traySnapshot()
+    },
   )
   tray = created
   unsubscribeTray = runtime.subscribeTray((snapshot) =>
@@ -618,7 +625,10 @@ async function openFull(route: string | null): Promise<void> {
   showUserWindow(window)
 }
 
-ipcMain.handle(BACKGROUND_TRAY_SNAPSHOT_CHANNEL, () => traySnapshot())
+ipcMain.handle(BACKGROUND_TRAY_SNAPSHOT_CHANNEL, async () => {
+  await fullRuntime?.refreshTray()
+  return traySnapshot()
+})
 ipcMain.handle(BACKGROUND_TRAY_OPEN_DASHBOARD_CHANNEL, () => openFull("/"))
 ipcMain.handle(BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL, async (_event, id: unknown) => {
   if (typeof id !== "string" || !(await fullRuntime?.hasProject(id)))

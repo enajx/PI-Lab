@@ -863,7 +863,14 @@ test("dragging a project card moves it on the Dashboard and in the sidebar, and 
   await expect(
     window.locator('[data-testid="project-card-grid-item"][data-dragging="true"]'),
   ).toHaveCount(1)
-  await window.screenshot({ path: resolve(".cache", "screens", "card-drag.png") })
+  // Capture through Electron: with a Playwright page screenshot taken mid-drag, the drop
+  // landed on the dragged card itself and the order did not change.
+  const dragImage = await app.evaluate(async ({ BrowserWindow }) => {
+    const shown = BrowserWindow.getAllWindows()[0]
+    if (!shown) throw new Error("No window to capture")
+    return (await shown.capturePage()).toPNG().toString("base64")
+  })
+  await writeFile(resolve(".cache", "screens", "card-drag.png"), Buffer.from(dragImage, "base64"))
   await window.mouse.up()
 
   // The drop moved the card and did not open the project.

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { createServer } from "node:net"
 import { basename, dirname, join } from "node:path"
 import { promisify } from "node:util"
+import { testDictationHoldHealthFile, testDictationHoldTranscribeFile } from "../runtime/env"
 
 const execFileAsync = promisify(execFile)
 
@@ -170,6 +171,9 @@ export class WhisperServerEngine implements DictationEngine {
     const running = this.running
     if (!running) throw new Error("The dictation engine is not running")
     await running.ready
+    while (testDictationHoldTranscribeFile && existsSync(testDictationHoldTranscribeFile)) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
     const form = new FormData()
     form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "audio.wav")
     form.append("response_format", "json")
@@ -249,7 +253,9 @@ async function waitForHealth(port: number): Promise<void> {
       (response) => response.ok,
       () => false,
     )
-    if (ok) return
+    const held =
+      testDictationHoldHealthFile !== undefined && existsSync(testDictationHoldHealthFile)
+    if (ok && !held) return
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error("The dictation engine did not finish loading the model in time")

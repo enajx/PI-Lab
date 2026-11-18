@@ -181,6 +181,8 @@ test("⌘T opens a plain terminal when Settings > Shortcuts chooses Terminal", a
   await openProject(window)
 
   await blurFocus(window)
+  // The shortcut listener comes with the central panel, which renders after the project view.
+  await expect(window.getByTestId("launcher-terminal")).toBeVisible()
   await window.keyboard.press("ControlOrMeta+t")
   await expect(window.locator('[data-testid="central-tab"][data-tab-kind="terminal"]')).toHaveCount(
     1,
@@ -247,6 +249,8 @@ test("⌘T in Analysis opens a terminal in the session panel, kept after leaving
   const panel = window.getByTestId("science-sessions")
   // Analysis opens with the panel collapsed.
   await expect(panel).toHaveAttribute("data-collapsed", "true")
+  // The ⌘T listener comes with the panel's hidden central panel, once the project loaded.
+  await expect(panel.getByTestId("central-panel")).toBeAttached({ timeout: 30_000 })
 
   await blurFocus(window)
   await window.keyboard.press("ControlOrMeta+t")

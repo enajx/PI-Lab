@@ -26,14 +26,17 @@ const electronPath = createRequire(join(desktop, "package.json"))("electron") as
 /** The packaged quick-file entry must leave full-app services outside its static load path. */
 test("quick-edit main entry defers full-app dependencies", async () => {
   const entry = await readFile(mainEntry, "utf8")
-  const deferredName = entry.match(/require\("\.\/(fullRuntime-[^"]+\.js)"\)/)?.[1]
+  const deferredName = entry.match(/require\("\.\/(desktopRuntime-[^"]+\.js)"\)/)?.[1]
   expect(deferredName, "full-app chunk must remain loadable").toBeTruthy()
   if (!deferredName) return
-  const deferred = await readFile(join(dirname(mainEntry), deferredName), "utf8")
+  // The deferred desktop client and the separate server process hold the full-app services.
+  const later =
+    (await readFile(join(dirname(mainEntry), deferredName), "utf8")) +
+    (await readFile(join(dirname(mainEntry), "server.js"), "utf8"))
   for (const dependency of ["better-sqlite3", "drizzle-orm", "@trpc/server", "node-pty"]) {
     const reference = `require("${dependency}")`
     expect(entry.includes(reference), `${dependency} must not load before quick edit`).toBe(false)
-    expect(deferred.includes(reference), `${dependency} must remain available later`).toBe(true)
+    expect(later.includes(reference), `${dependency} must remain available later`).toBe(true)
   }
 })
 

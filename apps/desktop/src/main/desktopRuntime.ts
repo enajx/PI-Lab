@@ -18,6 +18,7 @@ import { createDesktopRouter, desktopContext } from "./desktop/desktopRouter"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelIdentity, type PiLabChannel } from "./identity/channel"
 import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
+import { stopNotebooksWithWindow } from "./notebooks/notebookServers"
 import {
   createAppFocusAdapter,
   createNativeNotificationAdapter,
@@ -110,6 +111,10 @@ export class DesktopRuntime {
 
   /** Attach the desktop tRPC handler to a newly created or reopened window. */
   boot(window: BrowserWindow): void {
+    // The notebook tabs live in this window's page; the servers run in the PI Lab server.
+    stopNotebooksWithWindow(window, window.webContents, async () => {
+      await (await this.server()).server.stopNotebooks.mutate()
+    })
     if (this.ipcHandler) {
       this.ipcHandler.attachWindow(window)
       return
@@ -295,6 +300,17 @@ export class DesktopRuntime {
     return this.tray
   }
 
+  /**
+   * Read the tray data again from the server and tell the listeners. Projects opened or
+   * runs recorded since the last activity change only show after this read.
+   */
+  async refreshTray(): Promise<BackgroundTraySnapshot> {
+    const snapshot = await (await this.server()).server.traySnapshot.query()
+    this.tray = snapshot
+    for (const listener of this.trayListeners) listener(snapshot)
+    return snapshot
+  }
+
   subscribeTray(listener: (snapshot: BackgroundTraySnapshot) => void): () => void {
     this.trayListeners.add(listener)
     return () => this.trayListeners.delete(listener)
@@ -359,8 +375,23 @@ export class DesktopRuntime {
         .catch((error: unknown) =>
           console.warn(`[pi-lab] test server stop failed: ${String(error)}`),
         )
+      // The next test launch must not find this server still shutting down.
+      const pid = this.endpoint?.pid
+      const deadline = Date.now() + 5_000
+      while (pid && processAlive(pid) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
     }
     connection?.close()
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
   }
 }
 

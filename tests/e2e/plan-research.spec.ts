@@ -28,6 +28,13 @@ test("Plan research reports a missing skill and runs a user skill after installa
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId("project-item")).toHaveCount(1)
+    // Plan research runs only the skill linked in Settings (empty by default).
+    await window.getByTestId("nav-settings").click()
+    await window.getByTestId("settings-nav-agents").click()
+    await window.getByTestId("settings-plan-research-skill").fill("plan-research")
+    await window.getByTestId("settings-plan-research-skill-save").click()
+    await expect(window.getByTestId("settings-plan-research-skill-save")).toBeDisabled()
+    await window.getByTestId("settings-back").click()
     await window.getByTestId("project-item").click()
     await window.getByTestId("project-view-plan-research").click()
     await expect(window.getByTestId("workflow-result-error")).toContainText(

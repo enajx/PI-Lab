@@ -219,6 +219,11 @@ export const serverControlRouter = router({
       return { moved: changed === 1 }
     }),
 
+  /** Stop every notebook server: the desktop page that showed them reloaded or closed. */
+  stopNotebooks: publicProcedure.mutation(({ ctx }) =>
+    control(ctx).runtime.notebookServers.stopAll(),
+  ),
+
   /** Quick Editor's Python run, through the server's PTY daemon. */
   quickPythonOptions: publicProcedure
     .input(z.object({ path: z.string().min(1) }))
