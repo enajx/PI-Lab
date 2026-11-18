@@ -1345,5 +1345,6 @@
   "Message to the terminal": "Mensaje al terminal",
   "Message (Enter sends, Shift+Enter adds a line)": "Mensaje (Intro envía, Mayús+Intro añade una línea)",
   "Compose line: type a message and send it with Enter": "Línea de redacción: escribe un mensaje y envíalo con Intro",
-  "Compose": "Redactar"
+  "Compose": "Redactar",
+  "Some input typed during the disconnect was not sent": "Parte de lo escrito durante la desconexión no se envió"
 }

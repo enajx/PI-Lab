@@ -23,6 +23,7 @@ import {
   type TerminalOutput,
   TYPING_HOLDS_SIZE_MS,
 } from "../main/trpc/terminal/terminal"
+import { KeySender, type KeyStatus } from "../renderer/Terminal/keyInput"
 import {
   type DropPolicy,
   type ResumePoint,
@@ -1118,5 +1119,166 @@ test("input after a drop: a compose message whose reply is lost to a dropped con
   console.log(`[compose drop] resends ${resends}, statuses ${statuses.join(",")}`)
   await new Promise((resolve) => setTimeout(resolve, 500))
   expect(logger.input()).toBe(messages.map((text) => `${text}\r`).join(""))
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)
+
+/**
+ * A link that adds `delayMs` each way and can be cut (every connection closed,
+ * new ones refused) and restored, as a tunnel that goes down for a while.
+ */
+class CutLink {
+  readonly #tcp: Server
+  readonly #sockets = new Set<Socket>()
+  #cut = false
+  port = 0
+
+  constructor(readonly delayMs: number) {
+    this.#tcp = createServer((downstream) => {
+      if (this.#cut) {
+        downstream.destroy()
+        return
+      }
+      const upstream = tcpConnect(server.port, "127.0.0.1")
+      for (const socket of [downstream, upstream]) this.#sockets.add(socket)
+      const forward = (to: Socket) => (bytes: Buffer) =>
+        setTimeout(() => {
+          if (!to.destroyed && !this.#cut) to.write(bytes)
+        }, this.delayMs)
+      downstream.on("data", forward(upstream))
+      upstream.on("data", forward(downstream))
+      const end = () => {
+        downstream.destroy()
+        upstream.destroy()
+      }
+      for (const socket of [downstream, upstream]) {
+        socket.on("close", end)
+        socket.on("error", end)
+      }
+    })
+  }
+
+  async open(): Promise<void> {
+    await new Promise<void>((resolve) => this.#tcp.listen(0, "127.0.0.1", resolve))
+    this.port = (this.#tcp.address() as { port: number }).port
+  }
+
+  cut(): void {
+    this.#cut = true
+    for (const socket of this.#sockets) socket.destroy()
+    this.#sockets.clear()
+  }
+
+  restore(): void {
+    this.#cut = false
+  }
+
+  async close(): Promise<void> {
+    this.cut()
+    await new Promise<void>((resolve) => this.#tcp.close(() => resolve()))
+  }
+}
+
+/** The renderer's key sender over a test client, recording every reply and loss. */
+function keySenderFor(
+  client: Client,
+  sessionId: string,
+  viewer: Viewer,
+): { sender: KeySender; statuses: KeyStatus[]; lost: () => number } {
+  const statuses: KeyStatus[] = []
+  let lost = 0
+  let seq = 0
+  const sender = new KeySender({
+    write: async (data, key, signal) => {
+      const reply = await client.trpc.terminal.write.mutate(
+        { sessionId, data, clientId: "drop-keys", key },
+        { signal },
+      )
+      statuses.push(reply.status)
+      return reply.status
+    },
+    consumed: () => {
+      const point = viewer.stream.consumed()
+      return point === null ? null : { generation: point.generation, offset: point.offset }
+    },
+    connection: () => client.status.state(),
+    nextSeq: () => seq++,
+    onLost: () => {
+      lost += 1
+    },
+    onError: (error) => {
+      throw error
+    },
+    onDelivered: () => {},
+  })
+  return { sender, statuses, lost: () => lost }
+}
+
+test("input after a drop: keys whose reply is lost, with no output meanwhile, arrive once", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "plain")
+  const typist = await newClient()
+  const viewer = new Viewer(typist, logger.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the viewer")
+  const keys = keySenderFor(typist, logger.sessionId, viewer)
+  for (const key of "abcdefgh") {
+    keys.sender.send(key)
+    setImmediate(() => server.dropConnections())
+    await waitFor(() => keys.sender.waiting() === 0, 15_000, `the reply for ${key}`)
+  }
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(logger.input()).toBe("abcdefgh")
+  expect(keys.lost()).toBe(0)
+  console.log(`[keys after drop] statuses ${keys.statuses.join(",")}`)
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)
+
+test("input after a drop: a key applied whose reply is lost is resent and gets duplicate; it arrives once", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "plain")
+  const link = new CutLink(50)
+  await link.open()
+  const typist = new Client(() => url.replace(`:${server.port}/`, `:${link.port}/`))
+  await typist.trpc.terminal.list.query()
+  const viewer = new Viewer(typist, logger.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the viewer")
+  const keys = keySenderFor(typist, logger.sessionId, viewer)
+  keys.sender.send("k")
+  // The key reaches the server after 50 ms; its reply would arrive after 100 ms.
+  await waitFor(() => logger.input() === "k", 5_000, "the key at the program")
+  link.cut()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  link.restore()
+  await waitFor(() => keys.sender.waiting() === 0, 15_000, "the resend's reply")
+  expect(keys.statuses).toEqual(["duplicate"])
+  expect(logger.input()).toBe("k")
+  expect(keys.lost()).toBe(0)
+  await link.close()
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)
+
+test("input after a drop: keys typed while the connection is down are dropped when output appeared meanwhile, and reported lost", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "echo")
+  const link = new CutLink(10)
+  await link.open()
+  const typist = new Client(() => url.replace(`:${server.port}/`, `:${link.port}/`))
+  await typist.trpc.terminal.list.query()
+  const viewer = new Viewer(typist, logger.sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the viewer")
+  const keys = keySenderFor(typist, logger.sessionId, viewer)
+  link.cut()
+  await waitFor(() => typist.status.state() === "reconnecting", 10_000, "reconnecting")
+  keys.sender.send("x")
+  keys.sender.send("y")
+  // Output appears while the typist is away (another client types; the program echoes).
+  await control.trpc.terminal.write.mutate({ sessionId: logger.sessionId, data: "zz" })
+  await waitFor(() => logger.input() === "zz", 5_000, "the other client's input")
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  link.restore()
+  await waitFor(() => keys.sender.waiting() === 0, 15_000, "the replies")
+  expect(keys.statuses).toEqual(["dropped", "dropped"])
+  expect(keys.lost()).toBe(2)
+  expect(logger.input()).toBe("zz")
+  await link.close()
   await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
 }, 60_000)

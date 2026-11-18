@@ -120,7 +120,25 @@ export interface DetachRequest {
 export interface KeyInput {
   clientId: string
   seq: number
+  /**
+   * The client's consumed point when the key was typed (generation and the
+   * next byte its emulator needed), or null before its first start.
+   */
+  typedAt: { generation: string; offset: number } | null
+  /**
+   * True for the first send on the connection the key was typed on. False for
+   * a resend after a lost reply and for a key typed while disconnected: the
+   * daemon applies those only if no new output appeared since `typedAt`.
+   */
+  firstSend: boolean
 }
+
+/**
+ * What the daemon did with a typed key: written; already written before (a
+ * resend after a lost reply), so not written again; or not written because
+ * output appeared since it was typed (the screen the user saw changed).
+ */
+export type KeyStatus = "applied" | "duplicate" | "dropped"
 
 export interface WriteRequest {
   kind: "write"
@@ -230,6 +248,8 @@ export interface WriteReply {
   kind: "write-ok"
   cid: string
   sessionId: string
+  /** For a typed key (`key` set); absent for other writes. */
+  status?: KeyStatus
 }
 
 export interface ResizeReply {
@@ -521,13 +541,31 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
       const key = value.key
       if (key === undefined)
         return { kind: "write", cid, sessionId: value.sessionId, data: value.data }
-      if (!isRecord(key) || typeof key.clientId !== "string" || !isCount(key.seq)) return null
+      if (
+        !isRecord(key) ||
+        typeof key.clientId !== "string" ||
+        !isCount(key.seq) ||
+        typeof key.firstSend !== "boolean"
+      )
+        return null
+      const raw = key.typedAt
+      let typedAt: { generation: string; offset: number } | null = null
+      if (raw !== null) {
+        if (!isRecord(raw) || typeof raw.generation !== "string" || !isCount(raw.offset))
+          return null
+        typedAt = { generation: raw.generation, offset: raw.offset }
+      }
       return {
         kind: "write",
         cid,
         sessionId: value.sessionId,
         data: value.data,
-        key: { clientId: key.clientId, seq: key.seq },
+        key: {
+          clientId: key.clientId,
+          seq: key.seq,
+          typedAt,
+          firstSend: key.firstSend,
+        },
       }
     }
     case "resize":

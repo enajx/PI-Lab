@@ -17,6 +17,7 @@ import {
   encodeFrame,
   FrameDecoder,
   type KeyInput,
+  type KeyStatus,
   type ProcessExitEvent,
   type ProcessOutputEvent,
   type ProcessParams,
@@ -363,15 +364,21 @@ export class DaemonClient extends EventEmitter {
     }))
   }
 
-  /** Write a key the user typed; the daemon sends an echo ack for it. */
-  async writeKey(sessionId: string, data: string, key: KeyInput): Promise<void> {
-    await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({
+  /**
+   * Write a key the user typed (at most once; see `KeyInput`). The daemon
+   * sends an echo ack for a written key.
+   */
+  async writeKey(sessionId: string, data: string, key: KeyInput): Promise<KeyStatus> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({
       kind: "write",
       cid,
       sessionId,
       data,
       key,
     }))
+    if (reply.status === undefined)
+      throw new Error("the PTY daemon did not say what it did with a key")
+    return reply.status
   }
 
   async resize(sessionId: string, cols: number, rows: number): Promise<void> {

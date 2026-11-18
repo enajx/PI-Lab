@@ -389,8 +389,18 @@ export class DaemonServer {
       this.fail(connection, request.cid, "unknown-session", `no session ${request.sessionId}`)
       return
     }
+    if (request.key !== undefined) {
+      const status = session.writeKey(request.data, request.key)
+      this.reply(connection, {
+        kind: "write-ok",
+        cid: request.cid,
+        sessionId: request.sessionId,
+        status,
+      })
+      return
+    }
     if (request.message === true) session.writeMessage(request.data)
-    else session.write(request.data, request.key ?? null)
+    else session.write(request.data, null)
     this.reply(connection, { kind: "write-ok", cid: request.cid, sessionId: request.sessionId })
   }
 

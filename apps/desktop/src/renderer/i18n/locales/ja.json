@@ -1345,5 +1345,6 @@
   "Message to the terminal": "ターミナルへのメッセージ",
   "Message (Enter sends, Shift+Enter adds a line)": "メッセージ（Enter で送信、Shift+Enter で改行）",
   "Compose line: type a message and send it with Enter": "作成行：メッセージを入力して Enter で送信",
-  "Compose": "作成"
+  "Compose": "作成",
+  "Some input typed during the disconnect was not sent": "切断中に入力した内容の一部は送信されませんでした"
 }

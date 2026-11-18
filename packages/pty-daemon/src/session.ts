@@ -7,7 +7,13 @@ import { randomUUID } from "node:crypto"
 import { createRequire } from "node:module"
 import { type IPty, spawn } from "node-pty"
 import { ByteTail } from "./byteTail"
-import { ECHO_ACK_DELAY_MS, type KeyInput, type ResumePoint, type SessionInfo } from "./protocol"
+import {
+  ECHO_ACK_DELAY_MS,
+  type KeyInput,
+  type KeyStatus,
+  type ResumePoint,
+  type SessionInfo,
+} from "./protocol"
 import { ScreenState } from "./screen"
 
 /** How many raw PTY bytes to retain per session for replay on (re)attach. */
@@ -19,6 +25,22 @@ const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
  */
 const termios: { echoEnabled(fd: number): boolean } | null =
   process.platform === "win32" ? null : createRequire(import.meta.url)("@pi-lab/pty-termios")
+
+/** Typists remembered per session (oldest forgotten first). */
+const TYPIST_LIMIT = 64
+
+/** What the daemon remembers about one client typing into one session. */
+interface Typist {
+  /** The last key written. */
+  lastSeq: number
+  /**
+   * Where the echo ack of the last written key was sent, or null while it is
+   * still pending: output before it may be that key's own echo.
+   */
+  lastAckOffset: number | null
+  /** A resent key was dropped; later resends are dropped too, until a first send. */
+  dropping: boolean
+}
 
 /** A replay at most this long is sent without comparing it with a screen refresh. */
 export const SMALL_REPLAY_BYTES = 16 * 1024
@@ -85,6 +107,7 @@ class Session {
   private echoFlag = true
   /** Set once reading the flag failed (logged); the flag then stays as it was. */
   private echoUnreadable = false
+  private readonly typists = new Map<string, Typist>()
 
   constructor(
     options: SpawnOptions,
@@ -248,6 +271,50 @@ class Session {
     }
   }
 
+  /**
+   * Write a typed key at most once. A duplicate sequence number is not written
+   * again. A first send is written. A resend (after a lost reply, or a key
+   * typed while disconnected) is written only if no output appeared after the
+   * point it was typed at; output before the echo ack of this client's
+   * previous written key does not count (it may be that key's own echo).
+   */
+  writeKey(data: string, key: KeyInput): KeyStatus {
+    const typist = this.typists.get(key.clientId) ?? {
+      lastSeq: -1,
+      lastAckOffset: 0,
+      dropping: false,
+    }
+    if (key.seq <= typist.lastSeq) return "duplicate"
+    if (key.firstSend) typist.dropping = false
+    else {
+      const ownEcho = typist.lastAckOffset ?? this.tail.end
+      const unchanged =
+        key.typedAt !== null &&
+        key.typedAt.generation === this.generation &&
+        this.tail.end <= Math.max(key.typedAt.offset, ownEcho)
+      if (typist.dropping || !unchanged) {
+        typist.dropping = true
+        this.remember(key.clientId, typist)
+        return "dropped"
+      }
+    }
+    typist.lastSeq = key.seq
+    typist.lastAckOffset = null
+    this.remember(key.clientId, typist)
+    this.write(data, key)
+    return "applied"
+  }
+
+  private remember(clientId: string, typist: Typist): void {
+    this.typists.delete(clientId)
+    this.typists.set(clientId, typist)
+    while (this.typists.size > TYPIST_LIMIT) {
+      const oldest = this.typists.keys().next().value
+      if (oldest === undefined) break
+      this.typists.delete(oldest)
+    }
+  }
+
   /** Write a compose-line message and Enter; see `WriteRequest.message`. */
   writeMessage(text: string): void {
     const wrapped = this.screen.bracketedPaste() ? `\x1b[200~${text}\x1b[201~` : text
@@ -266,6 +333,8 @@ class Session {
       if (this.disposed) return
       const now = this.readEcho()
       if (now !== this.echoFlag) this.setEcho(now, this.tail.end)
+      const typist = this.typists.get(key.clientId)
+      if (typist !== undefined && typist.lastSeq === key.seq) typist.lastAckOffset = this.tail.end
       for (const listener of this.listeners) listener.onEchoAck(key, this.tail.end, this.echoFlag)
     }, ECHO_ACK_DELAY_MS).unref()
   }
@@ -322,6 +391,7 @@ export interface SessionHandle {
   startFrom(resume: ResumePoint | null): SessionStart
   subscribe(listener: SessionListener): () => void
   write(data: string, key: KeyInput | null): void
+  writeKey(data: string, key: KeyInput): KeyStatus
   writeMessage(text: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void

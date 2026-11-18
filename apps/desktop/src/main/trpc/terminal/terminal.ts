@@ -41,11 +41,21 @@ const writeInput = z.object({
   /** The typing client's id; absent when the server itself writes (agent launch). */
   clientId: z.string().min(1).optional(),
   /**
-   * The key's number in this client's sequence (with `clientId`): the daemon
-   * then sends an echo ack for it in the output stream (local echo). Absent
-   * from released clients.
+   * A typed key (with `clientId`; absent from released clients and for other
+   * writes): its number in this client's sequence, the client's consumed point
+   * when it was typed, and whether this is its first send on the connection it
+   * was typed on. The daemon writes it at most once (see `KeyInput` in
+   * @pi-lab/pty-daemon) and sends an echo ack for it in the output stream.
    */
-  seq: z.number().int().nonnegative().optional(),
+  key: z
+    .object({
+      seq: z.number().int().nonnegative(),
+      typedAt: z
+        .object({ generation: z.string().min(1), offset: z.number().int().nonnegative() })
+        .nullable(),
+      firstSend: z.boolean(),
+    })
+    .optional(),
 })
 
 const sendMessageInput = z.object({
@@ -390,19 +400,24 @@ export const terminalRouter = router({
   /** Feed bytes to a session's stdin. */
   write: publicProcedure.input(writeInput).mutation(async ({ ctx, input }) => {
     const client = await ctx.getDaemonClient()
-    ctx.activityMonitor.userInput(input.sessionId, input.data)
     if (input.clientId !== undefined) {
       typingMap(client).set(input.sessionId, { clientId: input.clientId, at: Date.now() })
       lastTypedAt.set(input.sessionId, Date.now())
     }
-    if (input.clientId !== undefined && input.seq !== undefined)
-      await client.writeKey(input.sessionId, input.data, {
+    if (input.clientId !== undefined && input.key !== undefined) {
+      const status = await client.writeKey(input.sessionId, input.data, {
         clientId: input.clientId,
-        seq: input.seq,
+        ...input.key,
       })
-    else await client.write(input.sessionId, input.data)
+      // A duplicate or dropped key was not written now.
+      if (status === "applied") ctx.activityMonitor.userInput(input.sessionId, input.data)
+      ctx.caffeine.markTerminalActivity()
+      return { ok: true as const, status }
+    }
+    ctx.activityMonitor.userInput(input.sessionId, input.data)
+    await client.write(input.sessionId, input.data)
     ctx.caffeine.markTerminalActivity()
-    return { ok: true as const }
+    return { ok: true as const, status: "applied" as const }
   }),
 
   /**

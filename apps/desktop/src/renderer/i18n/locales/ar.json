@@ -1345,5 +1345,6 @@
   "Message to the terminal": "رسالة إلى الطرفية",
   "Message (Enter sends, Shift+Enter adds a line)": "رسالة (Enter للإرسال، Shift+Enter لإضافة سطر)",
   "Compose line: type a message and send it with Enter": "سطر الكتابة: اكتب رسالة وأرسلها بالضغط على Enter",
-  "Compose": "كتابة"
+  "Compose": "كتابة",
+  "Some input typed during the disconnect was not sent": "لم يُرسل جزء من الإدخال المكتوب أثناء انقطاع الاتصال"
 }

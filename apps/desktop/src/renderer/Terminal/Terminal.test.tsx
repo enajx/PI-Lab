@@ -138,12 +138,15 @@ describe("Terminal macOS custom key integration", () => {
     expect(customHandled).toBe(false)
     expect(shiftedEnter.defaultPrevented).toBe(true)
     expect(write).toHaveBeenCalledTimes(1)
-    expect(write).toHaveBeenLastCalledWith({
-      sessionId: "agent-session",
-      data: "\u001b[13;2u",
-      clientId: expect.any(String),
-      seq: expect.any(Number),
-    })
+    expect(write).toHaveBeenLastCalledWith(
+      {
+        sessionId: "agent-session",
+        data: "\u001b[13;2u",
+        clientId: expect.any(String),
+        key: { seq: expect.any(Number), typedAt: null, firstSend: true },
+      },
+      { signal: expect.any(AbortSignal) },
+    )
 
     const plainEnter = macKeyEvent("Enter", {})
     const xtermHandled = xtermHarness.customKeyHandler?.(plainEnter)
@@ -151,12 +154,15 @@ describe("Terminal macOS custom key integration", () => {
     expect(xtermHandled).toBe(true)
     expect(plainEnter.defaultPrevented).toBe(false)
     expect(write).toHaveBeenCalledTimes(2)
-    expect(write).toHaveBeenLastCalledWith({
-      sessionId: "agent-session",
-      data: "\r",
-      clientId: expect.any(String),
-      seq: expect.any(Number),
-    })
+    expect(write).toHaveBeenLastCalledWith(
+      {
+        sessionId: "agent-session",
+        data: "\r",
+        clientId: expect.any(String),
+        key: { seq: expect.any(Number), typedAt: null, firstSend: true },
+      },
+      { signal: expect.any(AbortSignal) },
+    )
   })
 
   test("shows failed input in the banner, never in xterm, until a write succeeds", async () => {
@@ -250,12 +256,15 @@ describe("Terminal macOS custom key integration", () => {
       dataTransfer: { files: [new File([], "research folder")] },
     })
 
-    expect(write).toHaveBeenCalledExactlyOnceWith({
-      sessionId: "folder-session",
-      data: "'/tmp/research folder'",
-      clientId: expect.any(String),
-      seq: expect.any(Number),
-    })
+    expect(write).toHaveBeenCalledExactlyOnceWith(
+      {
+        sessionId: "folder-session",
+        data: "'/tmp/research folder'",
+        clientId: expect.any(String),
+        key: { seq: expect.any(Number), typedAt: null, firstSend: true },
+      },
+      { signal: expect.any(AbortSignal) },
+    )
   })
 
   // Mocked xterm and tRPC client: checks the pane's wiring only. The real

@@ -1345,5 +1345,6 @@
   "Message to the terminal": "发送到终端的消息",
   "Message (Enter sends, Shift+Enter adds a line)": "消息（Enter 发送，Shift+Enter 换行）",
   "Compose line: type a message and send it with Enter": "撰写行：输入消息并按 Enter 发送",
-  "Compose": "撰写"
+  "Compose": "撰写",
+  "Some input typed during the disconnect was not sent": "断开连接期间输入的部分内容未发送"
 }

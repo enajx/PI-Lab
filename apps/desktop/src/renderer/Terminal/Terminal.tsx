@@ -9,6 +9,7 @@ import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { connectionStatus } from "../trpc/connectionStatus"
 import { startOnce } from "../trpc/launch"
 import { ComposeLine } from "./ComposeLine"
+import { KeySender } from "./keyInput"
 import { PredictionEngine } from "./localEcho"
 import { LocalEchoOverlay } from "./localEchoOverlay"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
@@ -104,7 +105,7 @@ interface TerminalProps {
  * into xterm: its screen must hold only the daemon's bytes, or resume and
  * snapshots would differ from the daemon's emulator.
  */
-type NoticeKind = "write" | "resize" | "drop" | "exit" | "connection" | "start"
+type NoticeKind = "write" | "resize" | "drop" | "exit" | "connection" | "start" | "input"
 
 /** One banner line: fixed English wording (translated when shown) and an optional detail. */
 interface Notice {
@@ -216,7 +217,10 @@ export function Terminal({
     const redraw = (): void => overlay.draw()
     const writeParsed = xterm.onWriteParsed(redraw)
     const updateDisconnected = (): void => {
-      engine.setDisconnected(connectionStatus.state() !== "connected")
+      const state = connectionStatus.state()
+      engine.setDisconnected(state !== "connected")
+      // Past the short-drop window: keys still waiting are not sent.
+      if (state === "disconnected") keySender?.discardWaiting()
       redraw()
     }
     const unsubscribeStatus = connectionStatus.subscribe(updateDisconnected)
@@ -233,6 +237,8 @@ export function Terminal({
     let focusTarget: HTMLTextAreaElement | null = null
     /** The PTY size as the stream last reported it; null until the first start. */
     let ptySize: { cols: number; rows: number } | null = null
+    /** Sends typed keys at most once, also across a dropped connection (keyInput.ts). */
+    let keySender: KeySender | null = null
     /** Smoothed round trip of the stream's acks (ms), or null before the first. */
     let ackRoundTrip: number | null = null
     let inputDisposable: { dispose: () => void } | null = null
@@ -264,15 +270,12 @@ export function Terminal({
 
     /** Forward one input chunk exactly once, whether xterm generated or custom-mapped. */
     const forwardInput = (data: string): void => {
-      if (cancelled || !sessionId) return
-      const seq = nextKeySeq++
-      keySentAt.set(seq, performance.now())
+      if (cancelled || !sessionId || keySender === null) return
+      const sentAt = performance.now()
+      const seq = keySender.send(data)
+      keySentAt.set(seq, sentAt)
       engine.key(data, seq, overlay.screen())
       redraw()
-      void trpc.terminal.write.mutate({ sessionId, data, clientId: CLIENT_ID, seq }).then(
-        () => clearNotice("write"),
-        (error: unknown) => reportTransportFailure("write", error),
-      )
     }
 
     /** Insert native paths as one shell argument each, leaving submission to the user. */
@@ -419,6 +422,26 @@ export function Terminal({
         },
       })
       streamRef.current = stream
+      const consumedBy = stream
+      keySender = new KeySender({
+        write: async (data, key, signal) =>
+          (
+            await trpc.terminal.write.mutate(
+              { sessionId: id, data, clientId: CLIENT_ID, key },
+              { signal },
+            )
+          ).status,
+        consumed: () => {
+          const point = consumedBy.consumed()
+          return point === null ? null : { generation: point.generation, offset: point.offset }
+        },
+        connection: () => connectionStatus.state(),
+        nextSeq: () => nextKeySeq++,
+        onLost: () =>
+          showNotice("input", "Some input typed during the disconnect was not sent", null),
+        onError: (error) => reportTransportFailure("write", error),
+        onDelivered: () => clearNotice("write"),
+      })
       stream.setVisible(shownRef.current)
       stream.open()
 

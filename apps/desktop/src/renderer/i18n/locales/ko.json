@@ -1345,5 +1345,6 @@
   "Message to the terminal": "터미널로 보낼 메시지",
   "Message (Enter sends, Shift+Enter adds a line)": "메시지(Enter로 보내기, Shift+Enter로 줄 추가)",
   "Compose line: type a message and send it with Enter": "작성 줄: 메시지를 입력하고 Enter로 보냅니다",
-  "Compose": "작성"
+  "Compose": "작성",
+  "Some input typed during the disconnect was not sent": "연결이 끊긴 동안 입력한 일부 내용이 전송되지 않았습니다"
 }

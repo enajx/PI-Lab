@@ -26,6 +26,7 @@ export {
   type ErrorReply,
   type ExitEvent,
   type KeyInput,
+  type KeyStatus,
   type KillRequest,
   type ListReply,
   type ListRequest,

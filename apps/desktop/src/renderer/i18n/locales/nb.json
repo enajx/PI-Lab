@@ -1345,5 +1345,6 @@
   "Message to the terminal": "Melding til terminalen",
   "Message (Enter sends, Shift+Enter adds a line)": "Melding (Enter sender, Shift+Enter legger til en linje)",
   "Compose line: type a message and send it with Enter": "Skrivelinje: skriv en melding og send den med Enter",
-  "Compose": "Skriv"
+  "Compose": "Skriv",
+  "Some input typed during the disconnect was not sent": "Noe av det som ble skrevet mens tilkoblingen var nede, ble ikke sendt"
 }
