@@ -1,6 +1,7 @@
 import type { PiLabDatabase } from "@pi-lab/local-db"
 import type { DaemonClient } from "@pi-lab/pty-daemon"
 import { BUILTIN_AGENTS, type TerminalAgent } from "@pi-lab/shared"
+import type { ServerControlPort } from "../../server/controlRouter"
 import type { ActivityMonitorPort } from "../activity"
 import type { ActivityStatusFeed } from "../activity/statusFeed"
 import {
@@ -19,7 +20,7 @@ import type { DictationService } from "../dictation/service"
 import type { PiLabChannel } from "../identity/channel"
 import { liveSshExec, type SshExec } from "../lib/ssh-config"
 import type { NotebookServerPort } from "../notebooks/notebookServers"
-import type { NotificationBrokers, NotificationService } from "../notifications"
+import type { NotificationBrokers, NotificationSink } from "../notifications"
 import {
   livePythonEnvironmentDiscoverer,
   livePythonRuntimeResolver,
@@ -83,9 +84,11 @@ export interface AppContext {
   notifications: NotificationBrokers
   activityStatus: Pick<ActivityStatusFeed, "subscribe" | "projectsChanged">
   activityMonitor: ActivityMonitorPort
-  notificationService: NotificationService
+  notificationService: NotificationSink
   caffeine: CaffeineControllerPort
   thumbnailImageProcessor: ThumbnailImageProcessor
+  /** Server process services; absent in router tests that do not need them. */
+  server?: ServerControlPort
 }
 
 /**
@@ -212,6 +215,33 @@ export const TEST_MERGE_AGENT: TerminalAgent = {
 }
 
 /**
+ * A test-only routine agent: its one-shot run writes `ROUTINE_RAN.txt` in its
+ * working folder, so a test can see that a routine ran while no client was on.
+ */
+export const TEST_ROUTINE_AGENT: TerminalAgent = {
+  id: "test-routine",
+  label: "Test Routine",
+  command: process.execPath,
+  detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+  defaultArgs: ["-e", "process.stdout.write('ROUTINE-AGENT\\n')"],
+  oneShotArgs: [
+    "-e",
+    "require('fs').writeFileSync('ROUTINE_RAN.txt', 'routine ran\\n');process.stdout.write('done\\n')",
+  ],
+}
+
+/** A test-only agent that prints, stays alive for a few seconds, then exits. */
+export const TEST_EXIT_LATER_AGENT: TerminalAgent = {
+  id: "test-exit-later",
+  label: "Test Exit Later",
+  command: process.execPath,
+  detect: "node",
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+  defaultArgs: ["-e", "process.stdout.write('EXIT-LATER\\n');setTimeout(()=>process.exit(3),6000)"],
+}
+
+/**
  * Build the launchable agent catalog for an app instance. In test mode the
  * deterministic {@link TEST_AGENT} is appended so the E2E has an assertable agent
  * to launch; in normal use it's just the built-ins.
@@ -225,6 +255,8 @@ export function buildAgentCatalog(testMode: boolean): readonly TerminalAgent[] {
         TEST_WAITING_AGENT,
         TEST_PLAN_AGENT,
         TEST_MERGE_AGENT,
+        TEST_ROUTINE_AGENT,
+        TEST_EXIT_LATER_AGENT,
       ]
     : BUILTIN_AGENTS
 }

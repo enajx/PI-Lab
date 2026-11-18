@@ -141,6 +141,12 @@ export const notebooksRouter = router({
     .mutation(async ({ ctx, input }): Promise<void> => {
       await ctx.notebookServers.openInBrowser(input.serverId)
     }),
+  /** The URL {@link openInBrowser} opens (the desktop app opens it). */
+  browserUrl: publicProcedure.input(serverInput).query(({ ctx, input }): string => {
+    const url = ctx.notebookServers.urlOf(input.serverId)
+    if (!url) throw new Error("This notebook's server is not running")
+    return url
+  }),
 
   /**
    * Add marimo (or JupyterLab and ipykernel) to the project as a dev dependency

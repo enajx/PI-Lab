@@ -1,5 +1,4 @@
 export * from "./broker"
-export * from "./electronAdapter"
 export * from "./focusAdapter"
 export * from "./nativeAdapter"
 export * from "./service"

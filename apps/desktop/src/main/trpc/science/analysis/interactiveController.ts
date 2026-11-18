@@ -1,10 +1,10 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
+import { createReadStream } from "node:fs"
 import { realpath, stat } from "node:fs/promises"
-import { basename, dirname } from "node:path"
-import { pathToFileURL } from "node:url"
+import { basename, dirname, extname } from "node:path"
+import { Readable } from "node:stream"
 import { firstFreePortInRange } from "@pi-lab/port-scanner"
-import { net, session } from "electron"
 import { isTestMode } from "../../../runtime/env"
 import {
   type AnalysisInteractivePort,
@@ -17,13 +17,38 @@ import {
   resolveReportAsset,
   type StartMarimoInput,
 } from "./interactive"
-import { REPORT_SCHEME } from "./reportScheme"
+import { parseRange, REPORT_SCHEME } from "./mediaGrants"
 
 const MARIMO_HOST = "127.0.0.1"
 const START_TIMEOUT_MS = 15_000
 const START_POLL_MS = 100
 const STOP_GRACE_MS = 1_500
 const STDERR_LIMIT = 16 * 1024
+
+/** Content types of files a report page loads. Anything else is served as binary. */
+const REPORT_TYPES: Readonly<Record<string, string>> = {
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".wasm": "application/wasm",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+}
 
 interface ReportGrant {
   ownerId: string
@@ -40,9 +65,11 @@ interface ManagedMarimo {
 }
 
 /**
- * Electron implementation of the interactive Analysis boundary. Report grants
+ * Electron-free implementation of the interactive Analysis boundary. Report grants
  * are scoped to the selected report directory; marimo binds to loopback and is
  * launched in its own process group so route/app cleanup can reap descendants.
+ * The `pi-lab-report://` protocol itself is registered by the caller, which
+ * forwards each request to {@link AnalysisInteractiveController.handleReportRequest}.
  */
 export class AnalysisInteractiveController implements AnalysisInteractivePort {
   readonly #reportGrants = new Map<string, ReportGrant>()
@@ -50,15 +77,6 @@ export class AnalysisInteractiveController implements AnalysisInteractivePort {
   readonly #marimoByOwner = new Map<string, ManagedMarimo>()
   readonly #generationByOwner = new Map<string, number>()
   readonly #leaseByOwner = new Map<string, string>()
-  #protocolInstalled = false
-
-  installProtocolHandler(): void {
-    if (this.#protocolInstalled) return
-    this.#protocolInstalled = true
-    session.defaultSession.protocol.handle(REPORT_SCHEME, (request) =>
-      this.#handleReportRequest(request),
-    )
-  }
 
   async begin(ownerId: string, leaseId: string): Promise<number> {
     const generation = this.#nextGeneration(ownerId)
@@ -214,7 +232,11 @@ export class AnalysisInteractiveController implements AnalysisInteractivePort {
     return false
   }
 
-  async #handleReportRequest(request: { url: string }): Promise<Response> {
+  /**
+   * Serve one `pi-lab-report://<token>/<path>` request from the granted report
+   * directory: the whole file, or one byte range of it.
+   */
+  async handleReportRequest(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const grant = this.#reportGrants.get(url.hostname)
     if (!grant) return new Response("Report preview expired", { status: 404 })
@@ -227,12 +249,38 @@ export class AnalysisInteractiveController implements AnalysisInteractivePort {
     if (!requested || requested.includes("\0")) {
       return new Response("Invalid report path", { status: 400 })
     }
+    let canonical: string
+    let size: number
     try {
-      const canonical = await resolveReportAsset(grant.root, requested)
-      return await net.fetch(pathToFileURL(canonical).toString())
+      canonical = await resolveReportAsset(grant.root, requested)
+      const info = await stat(canonical)
+      if (!info.isFile()) return new Response("Report asset not found", { status: 404 })
+      size = info.size
     } catch {
       return new Response("Report asset not found", { status: 404 })
     }
+    const range = parseRange(request.headers.get("range"), size)
+    if (range === "invalid") {
+      return new Response("Range not satisfiable", {
+        status: 416,
+        headers: { "content-range": `bytes */${size}` },
+      })
+    }
+    const { start, end } = range ?? { start: 0, end: size - 1 }
+    const body =
+      size === 0
+        ? null
+        : (Readable.toWeb(
+            createReadStream(canonical, { start, end }),
+          ) as ReadableStream<Uint8Array>)
+    const headers: Record<string, string> = {
+      "content-type": REPORT_TYPES[extname(canonical).toLowerCase()] ?? "application/octet-stream",
+      "accept-ranges": "bytes",
+      "content-length": String(size === 0 ? 0 : end - start + 1),
+    }
+    if (range === null) return new Response(body, { status: 200, headers })
+    headers["content-range"] = `bytes ${start}-${end}/${size}`
+    return new Response(body, { status: 206, headers })
   }
 }
 

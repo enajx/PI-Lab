@@ -8,7 +8,7 @@ import {
 import type { AttachResult, DataEvent, ExitEvent, SessionInfo } from "@pi-lab/pty-daemon"
 import { eq, ne } from "drizzle-orm"
 import { nativeNotificationBody, nativeText } from "../i18n/nativeLanguage"
-import type { NotificationService } from "../notifications"
+import type { NotificationSink } from "../notifications"
 import type { ActivityRegistry } from "./registry"
 import {
   createHeadlessRenderedTerminal,
@@ -65,7 +65,7 @@ export interface ActivityMonitorOptions {
   db: PiLabDatabase
   registry: ActivityRegistry
   getMonitorClient: () => Promise<ActivityDaemonClient>
-  notifications: NotificationService
+  notifications: NotificationSink
   scheduler: ActivityScheduler
   clock?: ActivityClock
   terminalFactory: RenderedTerminalFactory

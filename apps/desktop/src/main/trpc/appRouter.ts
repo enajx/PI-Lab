@@ -1,65 +1,14 @@
-import { agentsRouter } from "./agents"
-import { alphaTestingRouter } from "./alphaTesting/alphaTesting"
-import { automationsRouter } from "./automations"
-import { caffeineRouter } from "./caffeine"
-import { diagnosticsRouter } from "./diagnostics"
-import { diaryRouter } from "./diary/diary"
-import { dictationRouter } from "./dictation/dictation"
-import { documentsRouter } from "./documents/documents"
-import { filesRouter } from "./files"
-import { healthRouter } from "./health/health"
-import { latexRouter } from "./latex/latex"
-import { notebooksRouter } from "./notebooks/notebooks"
-import { notificationsRouter } from "./notifications"
-import { paperRouter } from "./paper/paper"
-import { pdfRouter } from "./pdf/pdf"
-import { projectsRouter } from "./projects"
-import { pythonRouter } from "./python"
-import { scienceRouter } from "./science"
-import { sessionsRouter } from "./sessions"
-import { settingsRouter } from "./settings"
-import { setupRouter } from "./setup"
+import { serverProcedures } from "./serverRouter"
 import { systemRouter } from "./system"
-import { templateRouter } from "./template"
-import { terminalRouter } from "./terminal/terminal"
 import { router } from "./trpc"
-import { workflowsRouter } from "./workflows"
-import { workspacesRouter } from "./workspaces"
 
 /**
- * The single root router exposed to the renderer. Feature routers
- * (git, github, filesystem, automations, science-*) mount here as later phases
- * land — each as a one-line sub-router so its logic stays in plain,
- * `createCaller`-testable functions.
+ * The full client contract: the server's routers plus the Electron-only
+ * `system` router. The renderer's client is typed over it; a split link sends
+ * each call to the server or to Electron (see renderer/trpc/client.ts).
+ * Never served as one router.
  */
-export const appRouter = router({
-  alphaTesting: alphaTestingRouter,
-  health: healthRouter,
-  notifications: notificationsRouter,
-  caffeine: caffeineRouter,
-  terminal: terminalRouter,
-  projects: projectsRouter,
-  python: pythonRouter,
-  workspaces: workspacesRouter,
-  sessions: sessionsRouter,
-  workflows: workflowsRouter,
-  system: systemRouter,
-  files: filesRouter,
-  pdf: pdfRouter,
-  latex: latexRouter,
-  paper: paperRouter,
-  diagnostics: diagnosticsRouter,
-  dictation: dictationRouter,
-  science: scienceRouter,
-  diary: diaryRouter,
-  documents: documentsRouter,
-  notebooks: notebooksRouter,
-  agents: agentsRouter,
-  automations: automationsRouter,
-  settings: settingsRouter,
-  setup: setupRouter,
-  template: templateRouter,
-})
+export const appRouter = router({ ...serverProcedures, system: systemRouter })
 
 /** Renderer-side type for the typed tRPC client. Types only — never imported at runtime. */
 export type AppRouter = typeof appRouter

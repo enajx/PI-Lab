@@ -6,71 +6,46 @@ import {
   automationRuns,
   automations,
   getSettingsOrDefaults,
-  MigrationFailure,
   projects,
   projectWorkflowRuns,
-  resolveDataDir,
   worktrees,
 } from "@pi-lab/local-db"
 import { eq, max, ne, sql } from "drizzle-orm"
-import {
-  app,
-  type BrowserWindow,
-  clipboard,
-  dialog,
-  ipcMain,
-  safeStorage,
-  session,
-  shell,
-} from "electron"
-import { createIPCHandler } from "trpc-electron/main"
-import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
-import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
-import type { QuickEditTarget } from "../shared/quickEdit"
 import {
   type ActivityMonitorPort,
   ActivityRegistry,
   createActivityMonitor,
   systemActivityClock,
   systemActivityScheduler,
-} from "./activity"
-import { ActivityStatusFeed } from "./activity/statusFeed"
-import { agentLaunchLifecycle } from "./agents/launchLifecycle"
-import { prepareAgentQuit, type QuitMode } from "./agents/quitPolicy"
+} from "../main/activity"
+import { ActivityStatusFeed } from "../main/activity/statusFeed"
+import { agentLaunchLifecycle } from "../main/agents/launchLifecycle"
 import {
   dispatchAutomation,
   hasRunningProjectAutomation,
   restoreAutomationProcess,
-} from "./automations/dispatch"
-import { ManagedProcesses } from "./automations/managedProcesses"
-import { AutomationScheduler } from "./automations/scheduler"
-import { trayProjectSnapshot } from "./background/projectSnapshot"
-import { CaffeineController, electronPowerSaveBlockerAdapter } from "./caffeine"
-import { getDb, initDatabase } from "./db/db"
-import { DICTATION_MODELS, type DictationModel, withTestPins } from "./dictation/catalog"
-import { electronMicrophone } from "./dictation/electronMicrophone"
-import { resolveWhisperServer, WhisperServerEngine } from "./dictation/engine"
-import { DictationService } from "./dictation/service"
-import { stopRunningRenders } from "./documents/render"
-import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
-import { channelFromAppName } from "./identity/channel"
-import { tectonicCacheDir } from "./latex/runtime"
-import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
-import { NotebookServers, stopNotebooksWithWindow } from "./notebooks/notebookServers"
-import {
-  createElectronAppFocusAdapter,
-  createElectronNativeNotificationAdapter,
-  createNotificationBrokers,
-  NotificationService,
-} from "./notifications"
-import { livePythonProbe, liveQuickPythonRuntimeResolver } from "./python"
-import { liveStandalonePythonDiscoverer } from "./python/standaloneInterpreters"
-import { QuickPythonRunner } from "./quickEdit/pythonRun"
-import { isTestMode, rendererDevServerUrl, skillsHomeDirOverride } from "./runtime/env"
-import { testSetupProbe } from "./setup/testProbe"
-import { busyTerminals } from "./terminal/busyTerminals"
-import { TerminalSupervisor } from "./terminal/supervisor"
-import { appRouter } from "./trpc/appRouter"
+} from "../main/automations/dispatch"
+import { ManagedProcesses } from "../main/automations/managedProcesses"
+import { AutomationScheduler } from "../main/automations/scheduler"
+import { trayProjectSnapshot } from "../main/background/projectSnapshot"
+import { CaffeineController } from "../main/caffeine"
+import { getDb, initDatabase } from "../main/db/db"
+import { DICTATION_MODELS, type DictationModel, withTestPins } from "../main/dictation/catalog"
+import { resolveWhisperServer, WhisperServerEngine } from "../main/dictation/engine"
+import type { MicrophonePort } from "../main/dictation/service"
+import { DictationService } from "../main/dictation/service"
+import { stopRunningRenders } from "../main/documents/render"
+import { loadNativeLanguage } from "../main/i18n/nativeLanguage"
+import { tectonicCacheDir } from "../main/latex/runtime"
+import { NotebookServers } from "../main/notebooks/notebookServers"
+import { createNotificationBrokers } from "../main/notifications"
+import { livePythonProbe, liveQuickPythonRuntimeResolver } from "../main/python"
+import { liveStandalonePythonDiscoverer } from "../main/python/standaloneInterpreters"
+import { QuickPythonRunner } from "../main/quickEdit/pythonRun"
+import { isTestMode, rendererDevServerUrl, skillsHomeDirOverride } from "../main/runtime/env"
+import { testSetupProbe } from "../main/setup/testProbe"
+import { busyTerminals } from "../main/terminal/busyTerminals"
+import { TerminalSupervisor } from "../main/terminal/supervisor"
 import {
   type AppContext,
   buildAgentCatalog,
@@ -82,170 +57,142 @@ import {
   DEFAULT_PYTHON_RUNTIME_RESOLVER,
   DEFAULT_SETUP_PROBE,
   DEFAULT_SSH_EXEC,
-} from "./trpc/context"
-import { electronThumbnailImageProcessor } from "./trpc/projects/electronThumbnailImage"
+} from "../main/trpc/context"
+import { nodeThumbnailImageProcessor } from "../main/trpc/projects/nodeThumbnailImage"
 import {
   completePlanningProcess,
   listPlanningAgentSessions,
   reconcilePlanningSessions,
-} from "./trpc/projects/planning"
-import { AnalysisInteractiveController } from "./trpc/science/analysis/interactiveController"
-import { analysisMedia, MEDIA_SCHEME } from "./trpc/science/analysis/mediaGrants"
-import { WorkerAnalysisPreview } from "./trpc/science/analysis/previewWorker"
-import { writeGeneralSettings } from "./trpc/settings/settings"
-import { seedWritableTemplate } from "./trpc/template"
-import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "./trpc/workflows/workflows"
-import { publicReleaseFromPackage } from "./updates/release"
-import { initializePublicUpdateChannel } from "./updates/selection"
-import { installAppMenu } from "./window/appMenu"
-import { confirmStopDialog, type QuitWork, type RememberedQuitChoice } from "./window/userQuit"
+} from "../main/trpc/projects/planning"
+import { AnalysisInteractiveController } from "../main/trpc/science/analysis/interactiveController"
+import { analysisMedia } from "../main/trpc/science/analysis/mediaGrants"
+import { WorkerAnalysisPreview } from "../main/trpc/science/analysis/previewWorker"
+import { seedWritableTemplate } from "../main/trpc/template"
+import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "../main/trpc/workflows/workflows"
+import type { QuitWork } from "../main/window/userQuit"
+import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
+import { caffeinateAdapter } from "./caffeinate"
+import type { ServerConfig } from "./config"
+import { NotificationFeed } from "./notificationFeed"
+import { createSecretStore, macKeychain, type SecretStore } from "./secrets"
+import { trashPath } from "./trash"
 
-interface FullRuntimeHost {
-  getAppIconPath: () => string | null
-  ensureMainWindow: () => BrowserWindow
-  initialWindow: () => BrowserWindow | null
+/** Microphone access belongs to the client device; the server never asks for it. */
+const clientOnlyMicrophone: MicrophonePort = {
+  status: () => "not-determined",
+  request: () => Promise.reject(new Error("The microphone is handled by the PI Lab app")),
+  openSettings: () => Promise.reject(new Error("The microphone is handled by the PI Lab app")),
 }
 
-/** Full-app services are imported and constructed after the quick editor has a caret. */
-export class FullRuntime {
-  private ipcHandler: ReturnType<typeof createIPCHandler> | null = null
+/** Opening things on screen is a client action; the server refuses it. */
+function clientOnly(action: string): never {
+  throw new Error(`${action} runs in the PI Lab app, not on the server`)
+}
+
+/**
+ * All PI Lab services that do not need a window: database, agents, routines,
+ * terminals, status and notifications. Runs in the server process with no
+ * Electron, and keeps working while no client is connected.
+ */
+export class ServerRuntime {
   private readonly terminalSupervisor = new TerminalSupervisor(
     isTestMode && process.env.PI_LAB_TEST_RETAIN_DAEMON !== "1"
       ? { reapDaemonOnDispose: true }
       : {},
   )
-  private readonly quickPythonRunner = new QuickPythonRunner({
+  readonly quickPython = new QuickPythonRunner({
     resolveRuntime: liveQuickPythonRuntimeResolver,
     discoverStandalonePython: liveStandalonePythonDiscoverer,
     projectRootForFile: async (filePath) => this.projectRootForFile(filePath),
     probeRuntime: livePythonProbe,
     getDaemonClient: () => this.terminalSupervisor.ensureClient(),
   })
-  private readonly managedProcesses = new ManagedProcesses(
-    join(resolveDataDir(), "agent-processes"),
-    () => this.terminalSupervisor.ensureClient(),
-  )
+  private readonly managedProcesses: ManagedProcesses
   private readonly processFinalizers = new Set<Promise<void>>()
-  private readonly analysisInteractive = new AnalysisInteractiveController()
+  readonly analysisInteractive = new AnalysisInteractiveController()
   private readonly analysisPreview = new WorkerAnalysisPreview(__dirname)
   // A first uvx run downloads marimo or JupyterLab, so a server may take minutes to start.
-  private readonly notebookServers = new NotebookServers(
+  readonly notebookServers = new NotebookServers(
     { start: 42_700, end: 42_799 },
     5 * 60_000,
     rendererDevServerUrl ? new URL(rendererDevServerUrl).origin : null,
-    (url) => shell.openExternal(url),
+    async () => clientOnly("Opening a notebook in the browser"),
   )
   private readonly agentCatalog = buildAgentCatalog(isTestMode)
   private readonly notificationBrokers = createNotificationBrokers()
-  private readonly notificationService: NotificationService
-  private readonly activityRegistry = new ActivityRegistry({
+  readonly notifications: NotificationFeed
+  readonly activityRegistry = new ActivityRegistry({
     clock: systemActivityClock,
     scheduler: systemActivityScheduler,
   })
+  readonly secrets: SecretStore
   private activityStatus: ActivityStatusFeed | null = null
-  private startupReady: Promise<void> = Promise.resolve()
   private agentLaunchReady: Promise<void> | null = null
   private activityMonitor: ActivityMonitorPort | null = null
   private caffeineController: CaffeineController | null = null
   private automationScheduler: AutomationScheduler | null = null
   private dictation: DictationService | null = null
+  private readonly appSettingsListeners = new Set<() => void>()
 
-  constructor(private readonly host: FullRuntimeHost) {
-    this.notificationService = new NotificationService({
-      suppressDelivery: isTestMode,
-      native: createElectronNativeNotificationAdapter(host.getAppIconPath),
-      focus: createElectronAppFocusAdapter(host.ensureMainWindow),
-      getPreferences: () => getSettingsOrDefaults(getDb()).notifications,
-      activations: this.notificationBrokers.activations,
-      sounds: this.notificationBrokers.sounds,
-      errors: this.notificationBrokers.errors,
-      logger: { warn: (message) => console.warn(message) },
-    })
+  constructor(readonly config: ServerConfig) {
+    this.managedProcesses = new ManagedProcesses(join(config.dataDir, "agent-processes"), () =>
+      this.terminalSupervisor.ensureClient(),
+    )
+    this.notifications = new NotificationFeed(
+      config.dataDir,
+      () => getSettingsOrDefaults(getDb()).notifications,
+      isTestMode && process.env.PI_LAB_TEST_NOTIFICATIONS !== "1",
+    )
+    this.secrets = createSecretStore({ dataDir: config.dataDir, keychain: macKeychain })
   }
 
-  /** Attach the single tRPC handler to a newly created or reopened window. */
-  boot(window: BrowserWindow): void {
-    stopNotebooksWithWindow(window, window.webContents, () => this.notebookServers.stopAll())
-    if (this.ipcHandler) {
-      this.ipcHandler.attachWindow(window)
-      return
-    }
-    this.ipcHandler = createIPCHandler({
-      router: appRouter,
-      windows: [window],
-      createContext: async () => {
-        await this.startupReady
-        return this.createAppContext()
-      },
-    })
-  }
-
-  /** Show the window after database setup; hold IPC contexts until reconciliation finishes. */
+  /** Open the database, reconcile agents with the PTY daemon, start routines. */
   async start(): Promise<void> {
     const dbStatus = initDatabase()
-    initializePublicUpdateChannel(
-      getDb(),
-      publicReleaseFromPackage(app.isPackaged, app.getAppPath()),
-    )
-    ipcMain.on(INTERFACE_LANGUAGE_CHANNEL, (_event, language: unknown) => {
-      if (language === getNativeLanguage()) return
-      if (saveNativeLanguage(app.getPath("userData"), language)) installAppMenu()
-    })
-    this.analysisInteractive.installProtocolHandler()
-    // Analysis videos and gifs stream from the one file each grant names.
-    session.defaultSession.protocol.handle(MEDIA_SCHEME, (request) => analysisMedia.handle(request))
-    installNotebookFrameHeaders((port) => this.notebookServers.servesPort(port), isAppPageUrl)
+    loadNativeLanguage(this.config.dataDir)
     console.log(
-      `[pi-lab] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"} recovered=${dbStatus.recovered}`,
+      `[pi-lab server] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"}`,
     )
     this.activityMonitor = createActivityMonitor({
       db: getDb(),
       registry: this.activityRegistry,
       getMonitorClient: () => this.terminalSupervisor.ensureMonitorClient(),
-      notifications: this.notificationService,
+      notifications: this.notifications,
       scheduler: systemActivityScheduler,
       logger: { warn: (message) => console.warn(message) },
     })
+    this.notifications.watch(this.activityRegistry)
     this.caffeineController = new CaffeineController({
-      power: electronPowerSaveBlockerAdapter,
+      power: caffeinateAdapter,
       clock: systemActivityClock,
       scheduler: systemActivityScheduler,
       activity: this.activityRegistry,
       initialSettings: getSettingsOrDefaults(getDb()).caffeine,
     })
     this.activityStatus = new ActivityStatusFeed(getDb(), this.activityRegistry)
-    const whisperServer = resolveWhisperServer(
-      app.isPackaged
-        ? join(process.resourcesPath, "whisper")
-        : join(__dirname, "..", "..", "resources", "whisper"),
-    )
-    const enginePidFile = join(resolveDataDir(), "dictation", "whisper-server.pid")
+    const whisperServer = resolveWhisperServer(join(this.config.resourcesDir, "whisper"))
+    const enginePidFile = join(this.config.dataDir, "dictation", "whisper-server.pid")
     this.dictation = new DictationService({
       db: getDb(),
       catalog: dictationCatalog(),
-      modelsDir: join(resolveDataDir(), "dictation", "models"),
+      modelsDir: join(this.config.dataDir, "dictation", "models"),
       engine: whisperServer ? new WhisperServerEngine(whisperServer, enginePidFile) : null,
       fetch: DEFAULT_HTTP_FETCH,
-      microphone: electronMicrophone,
+      microphone: clientOnlyMicrophone,
       idleMs: 10 * 60_000,
       enginePidFile,
       downloadStallMs: 30_000,
     })
-    // Runs while the window opens; the engine waits for it, and a failure also fails dictation.
     void this.dictation.start().catch((error) => {
-      console.warn(`[pi-lab] dictation cleanup failed: ${String(error)}`)
+      console.warn(`[pi-lab server] dictation cleanup failed: ${String(error)}`)
     })
-    this.startupReady = this.ensureAgentRecovery().catch((error) => {
-      console.warn(`[pi-lab] activity reconciliation skipped: ${String(error)}`)
+    await this.ensureAgentRecovery().catch((error) => {
+      console.warn(`[pi-lab server] activity reconciliation skipped: ${String(error)}`)
     })
-    const window = this.host.initialWindow()
-    if (window) this.boot(window)
-    await this.startupReady
     void seedWritableTemplate().catch((error) => {
-      console.warn("[pi-lab] template seed skipped:", error)
+      console.warn("[pi-lab server] template seed skipped:", error)
     })
     this.startAutomationScheduler()
-    installAppMenu()
   }
 
   /** Share recovery work; a failed connection can be retried by the next launch. */
@@ -284,10 +231,10 @@ export class FullRuntime {
     })
   }
 
-  /** Route a quick file to its longest matching registered project. */
-  routeForFile(target: QuickEditTarget): string {
-    const canonicalPath = realpathSync(target.path)
-    let best: { id: string; rootLength: number; relPath: string } | null = null
+  /** Route a file to its longest matching registered project, or null outside every project. */
+  projectRouteForFile(path: string): { projectId: string; relPath: string } | null {
+    const canonicalPath = realpathSync(path)
+    let best: { projectId: string; rootLength: number; relPath: string } | null = null
     for (const project of getDb()
       .select({ id: projects.id, repoPath: projects.repoPath })
       .from(projects)
@@ -302,11 +249,10 @@ export class FullRuntime {
         continue
       }
       if (!best || project.repoPath.length > best.rootLength) {
-        best = { id: project.id, rootLength: project.repoPath.length, relPath }
+        best = { projectId: project.id, rootLength: project.repoPath.length, relPath }
       }
     }
-    if (!best) return `/quick-edit?target=${encodeURIComponent(target.id)}`
-    return `/projects/${encodeURIComponent(best.id)}?quickFile=${encodeURIComponent(best.relPath)}`
+    return best ? { projectId: best.projectId, relPath: best.relPath } : null
   }
 
   /** Find the registered project containing a quick-opened file, if any. */
@@ -383,52 +329,17 @@ export class FullRuntime {
     )
   }
 
-  /** Publish agent activity changes while the popover is open. */
-  subscribeTray(listener: (snapshot: BackgroundTraySnapshot) => void): () => void {
-    return this.activityRegistry.subscribe(() => listener(this.traySnapshot()))
+  /** Tell desktop apps that a setting they keep a copy of may have changed. */
+  appSettingsChanged(): void {
+    for (const listener of this.appSettingsListeners) listener()
   }
 
-  /** Read the persisted background preference after the local database opens. */
-  keepRunningAfterClose(): boolean {
-    return getSettingsOrDefaults(getDb()).keepRunningAfterClose
+  onAppSettingsChanged(listener: () => void): () => void {
+    this.appSettingsListeners.add(listener)
+    return () => this.appSettingsListeners.delete(listener)
   }
 
-  /** The Quit dialog choice saved with "Remember option" ("ask" when none is). */
-  quitChoice(): RememberedQuitChoice {
-    return getSettingsOrDefaults(getDb()).quitChoice
-  }
-
-  /** Save a ticked Quit dialog choice; Settings resets it to "ask". */
-  rememberQuitChoice(choice: "background"): void {
-    writeGeneralSettings(getDb(), { quitChoice: choice })
-  }
-
-  /** Seed Quick Editor's Vim cache after the full database starts in the background. */
-  editorVim(): boolean {
-    return getSettingsOrDefaults(getDb()).editor.vim
-  }
-
-  /** Resolve picker choices only when the Quick Editor asks for them. */
-  quickPythonOptions(filePath: string) {
-    return this.quickPythonRunner.options(filePath)
-  }
-
-  /** Keep a Quick Editor interpreter choice in memory for this app session. */
-  quickPythonSelect(filePath: string, path: string | null) {
-    return this.quickPythonRunner.select(filePath, path)
-  }
-
-  /** Start a Python file through the full runtime's shared PTY daemon. */
-  quickPythonRun(filePath: string, cols: number, rows: number) {
-    return this.quickPythonRunner.run(filePath, cols, rows)
-  }
-
-  /** Stop a process started by the Quick Editor. */
-  quickPythonKill(sessionId: string) {
-    return this.quickPythonRunner.kill(sessionId)
-  }
-
-  /** Check a tray project selection against the current local project list. */
+  /** Check a project id against the current project list. */
   hasProject(id: string): boolean {
     return getDb()
       .select({ id: projects.id })
@@ -438,8 +349,8 @@ export class FullRuntime {
   }
 
   /**
-   * Work an explicit Quit would stop: all managed agent modes, including result
-   * fetching, and ordinary shells or Python runs that are running a command.
+   * Work "stop server and agents" would stop: all managed agent modes,
+   * including result fetching, and shells or Python runs running a command.
    * Does not start the PTY daemon when none is running.
    */
   async quitWork(): Promise<QuitWork> {
@@ -465,55 +376,23 @@ export class FullRuntime {
   }
 
   /**
-   * Apply one quit mode (see {@link QuitMode}). `end` and `confirm-end` stop agents
-   * and fetching, then ask the PTY daemon to stop every shell, Python run and job
-   * and exit, so no PI Lab process remains; `keep` (Restart to Update) leaves all
-   * of them running for the restarted app to reattach.
+   * Stop every agent, fetch, shell, Python run, notebook and the PTY daemon,
+   * so no PI Lab work remains. Launches stay paused; the server exits next.
    */
-  async prepareQuit(mode: QuitMode): Promise<boolean> {
-    try {
-      await this.ensureAgentRecovery()
-      return await prepareAgentQuit({
-        mode,
-        pause: async () => {
-          await agentLaunchLifecycle.pause()
-          await this.recoverBackgroundAgents()
-        },
-        resume: () => agentLaunchLifecycle.resume(),
-        work: () => this.quitWork(),
-        confirm: async (work) => {
-          const result = await dialog.showMessageBox({
-            type: "warning",
-            title: "Work is still running",
-            ...confirmStopDialog(work),
-            defaultId: 1,
-            cancelId: 1,
-            noLink: true,
-          })
-          return result.response === 0 ? "stop" : "cancel"
-        },
-        stop: async () => {
-          this.automationScheduler?.stop()
-          await Promise.all([
-            this.stopTerminalAgents(),
-            this.managedProcesses.stopAll(),
-            this.notebookServers.stopAll(),
-            stopRunningRenders(),
-          ])
-          await Promise.all([...this.processFinalizers])
-          // Bounded: a missing or late daemon confirmation warns and quit goes on.
-          await this.terminalSupervisor.shutdownDaemon(3_000, (message) => console.warn(message))
-        },
-      })
-    } catch (error) {
-      agentLaunchLifecycle.resume()
-      this.automationScheduler?.start()
-      dialog.showErrorBox(
-        "Could not quit PI Lab",
-        `Agents could not be safely stopped or checked. The app remains open.\n${String(error)}`,
-      )
-      return false
-    }
+  async stopAllWork(): Promise<void> {
+    await this.ensureAgentRecovery()
+    await agentLaunchLifecycle.pause()
+    await this.recoverBackgroundAgents()
+    this.automationScheduler?.stop()
+    await Promise.all([
+      this.stopTerminalAgents(),
+      this.managedProcesses.stopAll(),
+      this.notebookServers.stopAll(),
+      stopRunningRenders(),
+    ])
+    await Promise.all([...this.processFinalizers])
+    // Bounded: a missing or late daemon confirmation warns and the stop goes on.
+    await this.terminalSupervisor.shutdownDaemon(3_000, (message) => console.warn(message))
   }
 
   /** Daemon session ids of PI Lab agents and planning sessions that have not exited. */
@@ -555,7 +434,7 @@ export class FullRuntime {
       }
       await new Promise((resolve) => setTimeout(resolve, 25))
     } while (Date.now() < deadline)
-    throw new Error("Some agents did not stop; quit was cancelled")
+    throw new Error("Some agents did not stop")
   }
 
   private async reconcilePlanningAgents(): Promise<void> {
@@ -571,16 +450,17 @@ export class FullRuntime {
     void completion
       .finally(() => this.processFinalizers.delete(completion))
       .catch((error) => {
-        console.error("[pi-lab] background agent result could not be saved", error)
+        console.error("[pi-lab server] background agent result could not be saved", error)
       })
   }
 
-  /** Close process-owned full-app services on quit. */
+  /** Close process-owned services when the server exits. */
   dispose(): void {
     this.automationScheduler?.stop()
     this.caffeineController?.dispose()
     this.dictation?.dispose()
     this.activityMonitor?.dispose()
+    this.notifications.dispose()
     this.activityRegistry.dispose()
     this.managedProcesses.dispose()
     this.terminalSupervisor.dispose()
@@ -592,36 +472,38 @@ export class FullRuntime {
 
   private startAutomationScheduler(): void {
     if (this.automationScheduler) return
+    const testInterval = isTestMode
+      ? Number(process.env.PI_LAB_TEST_SCHEDULER_INTERVAL_MS ?? "")
+      : Number.NaN
     this.automationScheduler = new AutomationScheduler({
       db: getDb(),
       fire: (args) => dispatchAutomation(this.createAppContext(), args),
+      ...(Number.isFinite(testInterval) && testInterval > 0 ? { intervalMs: testInterval } : {}),
     })
     this.automationScheduler.start()
   }
 
-  private createAppContext(): AppContext {
+  /** The router context for one request: every service, no Electron. */
+  createAppContext(): AppContext {
     if (!this.activityStatus) throw new Error("activity status is not initialized")
     if (!this.activityMonitor) throw new Error("activity monitor is not initialized")
     if (!this.caffeineController) throw new Error("caffeine controller is not initialized")
+    const resources = this.config.resourcesDir
     return {
       db: getDb(),
-      appChannel: channelFromAppName(app.getName()),
+      appChannel: this.config.channel,
       skillsHomeDir: skillsHomeDirOverride ?? homedir(),
-      userDataDir: app.getPath("userData"),
-      latexResourcesDir: app.isPackaged
-        ? join(process.resourcesPath, "latex")
-        : join(__dirname, "..", "..", "resources", "latex"),
+      userDataDir: this.config.dataDir,
+      latexResourcesDir: join(resources, "latex"),
       latexCacheDir: tectonicCacheDir(
         isTestMode,
-        resolveDataDir(),
+        this.config.dataDir,
         process.platform,
         homedir(),
         process.env,
       ),
       dictation: this.dictation ?? undefined,
-      bundledSkillsDir: app.isPackaged
-        ? join(process.resourcesPath, "skills")
-        : join(__dirname, "..", "..", "resources", "skills"),
+      bundledSkillsDir: join(resources, "skills"),
       getDaemonClient: () => this.terminalSupervisor.ensureClient(),
       agentCatalog: this.agentCatalog,
       resolveAgentExecutable: DEFAULT_AGENT_EXECUTABLE_RESOLVER,
@@ -631,31 +513,14 @@ export class FullRuntime {
       },
       runNonInteractiveProcess: this.managedProcesses.run,
       setupProbe: isTestMode ? testSetupProbe : DEFAULT_SETUP_PROBE,
-      credentialCipher: {
-        encrypt: (value) => {
-          if (!safeStorage.isEncryptionAvailable()) {
-            throw new Error(
-              "PI Lab could not use your system keychain to save this key. If you denied keychain access, quit and reopen PI Lab, then allow access when asked.",
-            )
-          }
-          return safeStorage.encryptString(value).toString("base64")
-        },
-        decrypt: (encrypted) => {
-          if (!safeStorage.isEncryptionAvailable()) {
-            throw new Error(
-              "PI Lab could not use your system keychain to read saved keys. If you denied keychain access, quit and reopen PI Lab, then allow access when asked.",
-            )
-          }
-          return safeStorage.decryptString(Buffer.from(encrypted, "base64"))
-        },
-      },
+      credentialCipher: this.secrets,
       sshExec: DEFAULT_SSH_EXEC,
       httpFetch: DEFAULT_HTTP_FETCH,
-      openPath: (path) => shell.openPath(path),
-      revealPath: (path) => shell.showItemInFolder(path),
-      trashPath: (path) => shell.trashItem(path),
-      writeClipboard: (text) => clipboard.writeText(text),
-      thumbnailImageProcessor: electronThumbnailImageProcessor,
+      openPath: async () => clientOnly("Opening a file with its default app"),
+      revealPath: () => clientOnly("Showing a file in Finder"),
+      trashPath,
+      writeClipboard: () => clientOnly("Copying to the clipboard"),
+      thumbnailImageProcessor: nodeThumbnailImageProcessor,
       pyToolsExec: DEFAULT_PY_TOOLS_EXEC,
       discoverPythonEnvironments: DEFAULT_PYTHON_ENVIRONMENT_DISCOVERER,
       resolvePythonRuntime: DEFAULT_PYTHON_RUNTIME_RESOLVER,
@@ -665,22 +530,9 @@ export class FullRuntime {
       notifications: this.notificationBrokers,
       activityStatus: this.activityStatus,
       activityMonitor: this.activityMonitor,
-      notificationService: this.notificationService,
+      notificationService: this.notifications,
       caffeine: this.caffeineController,
     }
-  }
-}
-
-/** PI Lab's own page: the dev server in development, the packaged file:// page otherwise. */
-function isAppPageUrl(url: string): boolean {
-  if (rendererDevServerUrl) return url.startsWith(`${new URL(rendererDevServerUrl).origin}/`)
-  return url.startsWith("file:")
-}
-
-/** Keep the existing native migration error when the deferred boot fails. */
-export function reportFullBootFailure(error: unknown): void {
-  if (error instanceof MigrationFailure) {
-    dialog.showErrorBox(nativeText("PI Lab database could not be opened"), error.message)
   }
 }
 

@@ -1,5 +1,4 @@
 export { CaffeineController, withMeaningfulActivity } from "./controller"
-export { electronPowerSaveBlockerAdapter } from "./electronAdapter"
 export {
   CAFFEINE_AUDIT_MS,
   CAFFEINE_GRACE_MS,
