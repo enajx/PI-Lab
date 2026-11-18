@@ -7,13 +7,16 @@
 // an @xterm/headless emulator instead of the renderer's xterm.js.
 
 import { mkdtempSync, rmSync } from "node:fs"
+import type { Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DaemonServer } from "@pi-lab/pty-daemon"
+import { projects } from "@pi-lab/local-db"
+import { type DaemonClient, DaemonServer } from "@pi-lab/pty-daemon"
 import { createTRPCClient } from "@trpc/client"
 import xtermHeadless from "@xterm/headless"
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest"
 import { WebSocket } from "ws"
+import type { TerminalSupervisor } from "../main/terminal/supervisor"
 import type { ServerRouter } from "../main/trpc/serverRouter"
 import { OUTPUT_QUEUE_LIMIT_BYTES, TYPING_HOLDS_SIZE_MS } from "../main/trpc/terminal/terminal"
 import {
@@ -167,6 +170,8 @@ class Viewer {
   readonly subscribeInputs: (ResumePoint | null)[] = []
   /** Ids (resume points) of every event received, in order. */
   readonly receivedIds: string[] = []
+  /** Server errors that ended the stream. */
+  readonly errors: string[] = []
   #held: (() => void)[] | null = null
   exited = false
 
@@ -200,6 +205,7 @@ class Viewer {
         this.exited = true
       },
       onError: (message) => {
+        this.errors.push(message)
         throw new Error(`terminal stream error: ${message}`)
       },
     })
@@ -417,3 +423,130 @@ test("focusing a view takes the PTY size, unless another client typed in the las
   expect([listed?.cols, listed?.rows]).toEqual([100, 30])
   await control.trpc.terminal.kill.mutate({ sessionId })
 }, 15_000)
+
+/** The socket of one of the server's daemon connections (private; paused to make the server a slow reader). */
+function daemonSocket(client: DaemonClient): Socket {
+  const socket = (client as unknown as { socket: Socket | null }).socket
+  if (!socket) throw new Error("daemon client is not connected")
+  return socket
+}
+
+test("the daemon drops the server's slow connections under a flood: every terminal stream continues with the right screen, no client sees an error, and the activity monitor still sees the sessions", async () => {
+  const context = runtime.createAppContext()
+  const supervisor = (runtime as unknown as { terminalSupervisor: TerminalSupervisor })
+    .terminalSupervisor
+  const control = await newClient()
+  // Writes 48 MiB of output in 64 KiB writes on "g", then FINAL, then stays silent.
+  const { sessionId: flood } = await control.trpc.terminal.spawn.mutate({
+    command: NODE,
+    args: [
+      "-e",
+      [
+        "process.stdin.setRawMode(true)",
+        "const line = 'flood ' + 'y'.repeat(73) + '\\n'",
+        "const chunk = line.repeat(Math.floor(65536 / line.length))",
+        "let left = Math.ceil(48 * 1024 * 1024 / chunk.length)",
+        "const pump = () => { while (left > 0) { left--; if (!process.stdout.write(chunk)) { process.stdout.once('drain', pump); return } } process.stdout.write('FINAL\\n') }",
+        "process.stdin.on('data', (d) => { if (d.toString() === 'g') pump() })",
+        "setInterval(() => {}, 1000)",
+        "process.stdout.write('R')",
+      ].join(";"),
+    ],
+    cols: COLS,
+    rows: ROWS,
+  })
+  // A quiet agent: prints a permission question on "p", then FINAL on "q".
+  const { sessionId: quiet } = await control.trpc.terminal.spawn.mutate({
+    command: NODE,
+    args: [
+      "-e",
+      [
+        "process.stdin.setRawMode(true)",
+        "process.stdin.on('data', (d) => { const k = d.toString(); if (k === 'p') process.stdout.write('Do you want to proceed? (y/n)\\r\\n'); if (k === 'q') process.stdout.write('FINAL\\r\\n') })",
+        "setInterval(() => {}, 1000)",
+        "process.stdout.write('R\\r\\n')",
+      ].join(";"),
+    ],
+    cols: COLS,
+    rows: ROWS,
+  })
+  context.db
+    .insert(projects)
+    .values({ id: "flood-project", repoPath: "/repo", name: "Flood" })
+    .run()
+  await context.activityMonitor.track({
+    sessionId: quiet,
+    projectId: "flood-project",
+    workspaceId: null,
+    agentId: "codex",
+    workflowRunId: null,
+    origin: "project",
+    turnArmed: false,
+    cols: COLS,
+    rows: ROWS,
+  })
+  await context.activityMonitor.trackTerminal({
+    sessionId: flood,
+    projectId: "flood-project",
+    workspaceId: "",
+    label: "Terminal",
+    cols: COLS,
+    rows: ROWS,
+  })
+  const viewerClient = await newClient()
+  const floodViewer = new Viewer(viewerClient, flood, "keep")
+  const quietViewer = new Viewer(viewerClient, quiet, "keep")
+  await waitFor(() => floodViewer.screen().includes("R"), 10_000, "the flood program to start")
+  await waitFor(() => quietViewer.screen().includes("R"), 10_000, "the quiet program to start")
+  expect(runtime.activityRegistry.get(quiet)?.state).toBe("working")
+
+  const consoleWarn = vi.spyOn(console, "warn")
+  const mainSocket = daemonSocket(await context.getDaemonClient())
+  const monitorSocket = daemonSocket(await supervisor.ensureMonitorClient())
+  await control.trpc.terminal.write.mutate({ sessionId: flood, data: "g" })
+  // The server stops reading both daemon connections (an event loop starved by CPU load).
+  mainSocket.pause()
+  monitorSocket.pause()
+  const dropLogs = () =>
+    consoleWarn.mock.calls.filter((call) =>
+      String(call[0]).includes("[pty-daemon] dropped a client connection"),
+    )
+  await waitFor(() => dropLogs().length >= 2, 30_000, "the daemon to drop both connections")
+  mainSocket.resume()
+  monitorSocket.resume()
+
+  // The server logs why the daemon closed each connection.
+  await waitFor(
+    () =>
+      consoleWarn.mock.calls.filter(
+        (call) =>
+          String(call[0]).includes("[pi-lab] lost the pty-daemon connection") &&
+          String(call[0]).includes("pending output"),
+      ).length >= 2,
+    30_000,
+    "the server to log the reason for both connections",
+  )
+  consoleWarn.mockRestore()
+
+  await waitFor(() => floodViewer.screen().includes("FINAL"), 60_000, "the flood to finish")
+  await control.trpc.terminal.write.mutate({ sessionId: quiet, data: "p" })
+  await control.trpc.terminal.write.mutate({ sessionId: quiet, data: "q" })
+  // A fresh viewer gets the daemon's own screen as a snapshot: the truth to compare with.
+  const freshFlood = new Viewer(await newClient(), flood, "keep")
+  const freshQuiet = new Viewer(await newClient(), quiet, "keep")
+  await expectSameEnd(freshFlood, floodViewer)
+  await expectSameEnd(freshQuiet, quietViewer)
+  expect(quietViewer.screen()).toContain("Do you want to proceed?")
+  expect(floodViewer.errors).toEqual([])
+  expect(quietViewer.errors).toEqual([])
+  expect(floodViewer.subscribeInputs.length).toBe(1)
+  expect(quietViewer.subscribeInputs.length).toBe(1)
+  // The activity monitor reattached and saw the question printed after the drop.
+  await waitFor(
+    () => runtime.activityRegistry.get(quiet)?.state === "waiting",
+    10_000,
+    "the activity monitor to see the question",
+  )
+  await control.trpc.terminal.kill.mutate({ sessionId: flood })
+  await control.trpc.terminal.kill.mutate({ sessionId: quiet })
+}, 120_000)

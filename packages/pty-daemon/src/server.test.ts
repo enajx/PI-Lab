@@ -144,7 +144,7 @@ describe("spawn + stream + exit", () => {
     })
   })
 
-  test("disconnects a stalled reader while keeping its session available", async () => {
+  test("drops a stalled reader with a logged reason it reads last, while keeping its session available", async () => {
     const client = await newClient()
     const session = await client.spawn({
       command: NODE,
@@ -163,10 +163,29 @@ describe("spawn + stream + exit", () => {
       })
       slow.write(`${JSON.stringify({ kind: "attach", cid: "slow", sessionId: session.id })}\n`)
       await waitFor(() => connectionSubscriptions().length === 2)
+      const warn = vi.spyOn(console, "warn")
       await client.write(session.id, "start\n")
-      await waitFor(() => connectionSubscriptions().length === 1)
+      // Dropped: no more output is queued for it.
+      await waitFor(() =>
+        connectionSubscriptions().every((subscriptions) => subscriptions.size === 0),
+      )
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/^\[pty-daemon\] dropped a client connection: pending output over/),
+      )
+      warn.mockRestore()
       expect((await client.list()).find(({ id }) => id === session.id)?.alive).toBe(true)
       expect(startText(await client.attach(session.id, null)).length).toBeGreaterThan(0)
+      // Reading again, the slow client gets what was queued, then the reason, then the end.
+      let received = ""
+      slow.setEncoding("utf8")
+      slow.on("data", (chunk: string) => {
+        received += chunk
+      })
+      const ended = new Promise<void>((resolve) => slow.once("end", resolve))
+      slow.resume()
+      await ended
+      const last = JSON.parse(received.trimEnd().split("\n").at(-1) ?? "null")
+      expect(last).toEqual({ kind: "closing", reason: expect.stringContaining("pending output") })
     } finally {
       slow.destroy()
       await client.kill(session.id)

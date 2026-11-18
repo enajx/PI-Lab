@@ -308,7 +308,16 @@ export interface ExitEvent {
   signal: number | null
 }
 
-export type DaemonEvent = DataFrame | ResizeEvent | ExitEvent | ProcessEvent
+/**
+ * The daemon is closing this connection (for example, the reader was too slow).
+ * Sent last, after everything already queued; the sessions keep running.
+ */
+export interface ClosingEvent {
+  kind: "closing"
+  reason: string
+}
+
+export type DaemonEvent = DataFrame | ResizeEvent | ExitEvent | ProcessEvent | ClosingEvent
 
 /** Every frame the daemon can emit. */
 export type DaemonFrame = DaemonReply | DaemonEvent
@@ -508,6 +517,8 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
         : null
     case "exit":
       return typeof value.sessionId === "string" ? (value as unknown as ExitEvent) : null
+    case "closing":
+      return typeof value.reason === "string" ? (value as unknown as ClosingEvent) : null
     default:
       return null
   }

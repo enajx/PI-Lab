@@ -93,14 +93,16 @@ export interface DaemonClientEvents {
   data: (event: DataEvent) => void
   resize: (event: ResizeEvent) => void
   exit: (event: ExitEvent) => void
-  /** Emitted when the underlying socket closes. */
-  close: () => void
+  /** Emitted when the underlying socket closes, with the daemon's reason when it gave one. */
+  close: (reason: string | null) => void
 }
 
 export class DaemonClient extends EventEmitter {
   private socket: Socket | null = null
   private readonly decoder = new FrameDecoder()
   private readonly pending = new Map<string, PendingRequest>()
+  /** Why the daemon closed this connection, from its `closing` frame. */
+  private closingReason: string | null = null
 
   constructor(private readonly socketPath: string) {
     super()
@@ -185,6 +187,10 @@ export class DaemonClient extends EventEmitter {
       this.emit("resize", frame)
       return
     }
+    if (frame.kind === "closing") {
+      this.closingReason = frame.reason
+      return
+    }
     const pending = this.pending.get(frame.cid)
     if (!pending) return
     this.pending.delete(frame.cid)
@@ -201,7 +207,7 @@ export class DaemonClient extends EventEmitter {
     for (const pending of this.pending.values()) pending.reject(closeError)
     this.pending.clear()
     this.socket = null
-    this.emit("close")
+    this.emit("close", this.closingReason)
   }
 
   private request<R extends Exclude<DaemonReply, ErrorReply>>(

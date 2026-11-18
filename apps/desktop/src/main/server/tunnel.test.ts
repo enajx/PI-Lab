@@ -45,7 +45,7 @@ describe.skipIf(!sshAvailable)("SshTunnel (real ssh and sshd)", () => {
   const tunnels: SshTunnel[] = []
 
   beforeAll(async () => {
-    sshd = await startSshTestServer()
+    sshd = await startSshTestServer("127.0.0.1")
     http = createServer((_request, response) => response.end("hello from remote"))
     await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve))
     const address = http.address()

@@ -179,6 +179,13 @@ function processAlive(pid: number): boolean {
   }
 }
 
+/** The daemon's reason for closing a connection, or what is known without one. */
+function closeReason(reason: string | null): string {
+  return reason === null
+    ? "the socket closed without a reason from the daemon"
+    : `the daemon closed it: ${reason}`
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -265,7 +272,7 @@ export class TerminalSupervisor {
       throw new Error("supervisor disposed")
     }
     this.monitorClient = client
-    client.on("close", () => this.handleMonitorClose())
+    client.on("close", (reason) => this.handleMonitorClose(reason))
     return client
   }
 
@@ -308,7 +315,7 @@ export class TerminalSupervisor {
       throw new Error("supervisor disposed")
     }
     this.client = client
-    client.on("close", () => this.handleClose())
+    client.on("close", (reason) => this.handleClose(reason))
     return client
   }
 
@@ -393,9 +400,11 @@ export class TerminalSupervisor {
    * The client's socket closed unexpectedly. Drop it and reconnect with backoff
    * (re-running adopt-or-spawn each attempt) until we succeed or are disposed.
    */
-  private handleClose(): void {
+  private handleClose(reason: string | null): void {
     this.client = null
-    if (this.disposed || this.reconnecting) return
+    if (this.disposed) return
+    console.warn(`[pi-lab] lost the pty-daemon connection (${closeReason(reason)}); reconnecting`)
+    if (this.reconnecting) return
     this.reconnecting = true
     void this.reconnectLoop()
   }
@@ -416,9 +425,13 @@ export class TerminalSupervisor {
     this.reconnecting = false
   }
 
-  private handleMonitorClose(): void {
+  private handleMonitorClose(reason: string | null): void {
     this.monitorClient = null
-    if (this.disposed || this.monitorReconnecting) return
+    if (this.disposed) return
+    console.warn(
+      `[pi-lab] lost the pty-daemon connection for activity monitoring (${closeReason(reason)}); reconnecting`,
+    )
+    if (this.monitorReconnecting) return
     this.monitorReconnecting = true
     void this.reconnectMonitorLoop()
   }

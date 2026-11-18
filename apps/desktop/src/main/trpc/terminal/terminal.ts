@@ -156,7 +156,12 @@ interface SessionAttachment {
 
 /**
  * Attach to a session on the shared daemon connection and forward its events
- * from the attach reply on. Returns the cleanup, which detaches the daemon
+ * from the attach reply on. When that connection closes (the daemon dropped a
+ * slow reader, or the socket broke), attach again on the supervisor's next
+ * connection from the last forwarded point: the daemon answers with a replay
+ * or a snapshot (its resume rules), passed to `onStart` like the first start.
+ * Only a failed attach (for example, the session is gone after a daemon
+ * restart) reaches `onError`. Returns the cleanup, which detaches the daemon
  * connection when the last observer of the session leaves.
  */
 function attachSession(
@@ -165,61 +170,99 @@ function attachSession(
   resume: ResumePoint | null,
   handlers: SessionAttachment,
 ): () => void {
-  let attaching = true
   let cancelled = false
   let cleanup = () => {}
-  const onEvent = (event: SessionEvent) => {
-    // Anything before the attach reply is already included in its start.
-    if (!attaching && !cancelled) handlers.onEvent(event)
-  }
-  const onResize = (event: ResizeEvent) => {
-    if (event.sessionId === sessionId) onEvent(event)
-  }
+  /** The resume point after the last start or event forwarded to the handlers. */
+  let point: ResumePoint | null = resume
 
-  void (async () => {
-    try {
-      const client = await ctx.getDaemonClient()
-      if (cancelled) return
-      const eventName = `session:${sessionId}`
-      client.on(eventName, onEvent)
-      client.on("resize", onResize)
-      let observers = sessionObservers.get(client)
-      if (!observers) {
-        observers = new Map<string, Set<() => void>>()
-        sessionObservers.set(client, observers)
-        const watched = observers
-        client.once("close", () => {
-          sessionObservers.delete(client)
-          for (const listeners of watched.values()) {
-            for (const notify of listeners) notify()
-          }
-          watched.clear()
-        })
+  const attachOnce = async (from: ResumePoint | null): Promise<void> => {
+    let attaching = true
+    let closed = false
+    const client = await ctx.getDaemonClient()
+    if (cancelled) return
+    const onEvent = (event: SessionEvent) => {
+      // Anything before the attach reply is already included in its start.
+      if (attaching || cancelled || closed) return
+      if (point !== null && event.kind === "data") {
+        point = { ...point, offset: event.offset + event.bytes.length }
+      } else if (point !== null && event.kind === "resize") {
+        point = { ...point, revision: event.revision }
       }
-      const listeners = observers.get(sessionId) ?? new Set<() => void>()
-      const onClose = () => handlers.onError(new Error("daemon connection closed"))
-      listeners.add(onClose)
-      observers.set(sessionId, listeners)
-      cleanup = () => {
-        client.off(eventName, onEvent)
-        client.off("resize", onResize)
-        listeners.delete(onClose)
-        if (listeners.size === 0) {
-          observers.delete(sessionId)
-          void client.detach(sessionId).catch(() => {})
+      handlers.onEvent(event)
+    }
+    const onResize = (event: ResizeEvent) => {
+      if (event.sessionId === sessionId) onEvent(event)
+    }
+    const eventName = `session:${sessionId}`
+    client.on(eventName, onEvent)
+    client.on("resize", onResize)
+    let observers = sessionObservers.get(client)
+    if (!observers) {
+      observers = new Map<string, Set<() => void>>()
+      sessionObservers.set(client, observers)
+      const watched = observers
+      client.once("close", () => {
+        sessionObservers.delete(client)
+        for (const listeners of watched.values()) {
+          for (const notify of listeners) notify()
         }
-        cleanup = () => {}
+        watched.clear()
+      })
+    }
+    const listeners = observers.get(sessionId) ?? new Set<() => void>()
+    const onClose = () => {
+      closed = true
+      client.off(eventName, onEvent)
+      client.off("resize", onResize)
+      cleanup = () => {}
+      if (!cancelled) run(point, true)
+    }
+    listeners.add(onClose)
+    observers.set(sessionId, listeners)
+    const watchedObservers = observers
+    cleanup = () => {
+      client.off(eventName, onEvent)
+      client.off("resize", onResize)
+      listeners.delete(onClose)
+      if (listeners.size === 0) {
+        watchedObservers.delete(sessionId)
+        void client.detach(sessionId).catch(() => {})
       }
-      await client.attach(sessionId, resume, (result) => {
+      cleanup = () => {}
+    }
+    try {
+      await client.attach(sessionId, from, (result) => {
         if (cancelled) return
+        point = {
+          generation: result.generation,
+          offset: result.start.offset + result.start.bytes.length,
+          revision: result.revision,
+        }
         handlers.onStart(result)
         attaching = false
       })
     } catch (error) {
-      cleanup()
-      if (!cancelled) handlers.onError(error instanceof Error ? error : new Error(String(error)))
+      // The connection closed during the attach: onClose attaches again.
+      if (closed) return
+      throw error
     }
-  })()
+  }
+
+  const run = (from: ResumePoint | null, afterClose: boolean): void => {
+    attachOnce(from).catch((error: unknown) => {
+      cleanup()
+      if (cancelled) return
+      const message = error instanceof Error ? error.message : String(error)
+      handlers.onError(
+        afterClose
+          ? new Error(`daemon connection closed, and attaching again failed: ${message}`)
+          : error instanceof Error
+            ? error
+            : new Error(message),
+      )
+    })
+  }
+  run(resume, false)
 
   return () => {
     cancelled = true
@@ -375,6 +418,7 @@ export const terminalRouter = router({
         }
         // A slow reader: stop sending to this connection and let it resubscribe.
         if ((ctx.connection?.queuedBytes() ?? 0) > OUTPUT_QUEUE_LIMIT_BYTES) {
+          ctx.connection?.sentBehind()
           send({ type: "behind" })
           end()
           return

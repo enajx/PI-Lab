@@ -166,7 +166,7 @@ async function collect(sessionId: string): Promise<{
 }
 
 describe("terminal router", () => {
-  test("a reset on the real socket rejects pending RPCs and errors the active stream", async () => {
+  test("a reset on the real socket rejects pending RPCs and errors the active stream when it cannot attach again", async () => {
     const session = await client.spawn({ command: "cat", args: [] })
     const errors: Error[] = []
     const stream = await caller.terminal.onData({ sessionId: session.id })
@@ -178,10 +178,12 @@ describe("terminal router", () => {
     socket.destroy(Object.assign(new Error("connection reset"), { code: "ECONNRESET" }))
     await pending
     await waitFor(() => errors.length === 1)
-    expect(errors[0]?.message).toBe("daemon connection closed")
+    expect(errors[0]?.message).toBe(
+      "daemon connection closed, and attaching again failed: client is not connected",
+    )
   })
 
-  test("reports connection closure instead of leaving the terminal stream pending", async () => {
+  test("reports connection closure instead of leaving the terminal stream pending when it cannot attach again", async () => {
     const session = await client.spawn({ command: "cat", args: [] })
     const errors: Error[] = []
     const stream = await caller.terminal.onData({ sessionId: session.id })
@@ -190,7 +192,9 @@ describe("terminal router", () => {
     await client.list()
     client.close()
     await waitFor(() => errors.length === 1)
-    expect(errors[0]?.message).toBe("daemon connection closed")
+    expect(errors[0]?.message).toBe(
+      "daemon connection closed, and attaching again failed: client is not connected",
+    )
   })
 
   test("a subscriber after process exit receives the screen before exit", async () => {

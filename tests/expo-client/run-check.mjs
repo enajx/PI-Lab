@@ -153,6 +153,7 @@ function startServer(dataDir) {
       PI_LAB_TEST_MODE: "1",
       PI_LAB_CHANNEL: "alpha",
       PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_PROFILE_DIR: dataDir,
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
       PI_LAB_PACKAGED: "0",
       PI_LAB_RESOURCES_DIR: join(DESKTOP, "resources"),

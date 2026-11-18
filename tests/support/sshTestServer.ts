@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 /**
- * A throwaway user-level sshd on 127.0.0.1 for tests that need real ssh
+ * A throwaway user-level sshd for tests that need real ssh
  * (tunnel tests, the flood test). It accepts only a generated client key and
  * runs as the current user, so `ssh` reaches this machine as itself.
  */
@@ -35,8 +35,12 @@ export async function freePort(): Promise<number> {
   return address.port
 }
 
-/** Start sshd and resolve once it listens; reject with its log if it exits first. */
-export async function startSshTestServer(): Promise<SshTestServer> {
+/**
+ * Start sshd on `listenAddress` (127.0.0.1 for most tests; the flood test also
+ * uses this Mac's Tailscale address) and resolve once it listens; reject with
+ * its log if it exits first.
+ */
+export async function startSshTestServer(listenAddress: string): Promise<SshTestServer> {
   const dir = mkdtempSync(join(tmpdir(), "sshd-test-"))
   const keygen = (name: string): void => {
     execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(dir, name)])
@@ -54,7 +58,7 @@ export async function startSshTestServer(): Promise<SshTestServer> {
       "KbdInteractiveAuthentication no",
       "StrictModes no",
       `PidFile ${join(dir, "sshd.pid")}`,
-      "ListenAddress 127.0.0.1",
+      `ListenAddress ${listenAddress}`,
       "",
     ].join("\n"),
   )
@@ -87,7 +91,7 @@ export async function startSshTestServer(): Promise<SshTestServer> {
     }
     rmSync(dir, { recursive: true, force: true })
   }
-  return { port, dir, clientArgs, host: "127.0.0.1", stop }
+  return { port, dir, clientArgs, host: listenAddress, stop }
 }
 
 /** Resolve when sshd logs "Server listening"; reject with its log if it exits. */

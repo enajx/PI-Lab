@@ -101,6 +101,8 @@ export interface AppContext {
 export interface ClientConnection {
   /** Bytes queued to send to this client and not yet written to the network. */
   queuedBytes: () => number
+  /** The server stopped terminal output to this client because its queue was over the limit. */
+  sentBehind: () => void
 }
 
 /**

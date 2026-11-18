@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net"
 import { pipeline, Readable } from "node:stream"
 import { applyWSSHandler } from "@trpc/server/adapters/ws"
-import { WebSocketServer } from "ws"
+import { type WebSocket, WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
 import { serverRouter } from "../main/trpc/serverRouter"
 import { IDENTITY_NONCE, IDENTITY_PATH, identityProof, TOKEN_HEADER } from "./access"
@@ -25,7 +25,10 @@ export interface ListenOptions {
   createContext: () => AppContext
   /** Serve one custom-scheme request (`pi-lab-report://…`, `pi-lab-media://…`). */
   handleScheme: (scheme: string, request: Request) => Promise<Response>
-  /** Test mode only: serve `POST /test/drop-connections` (see {@link ListeningServer}). */
+  /**
+   * Test mode only: serve `POST /test/drop-connections` (see {@link ListeningServer})
+   * and `GET /test/connections` (see {@link ConnectionStats}).
+   */
   testRoutes: boolean
 }
 
@@ -43,6 +46,23 @@ export interface ListeningServer {
  */
 export const SERVER_PING_MS = 5_000
 export const SERVER_PONG_WAIT_MS = 3_000
+
+/**
+ * Test mode only (`GET /test/connections`, for the flood test): per WebSocket,
+ * the bytes queued now, the most seen queued when terminal output was checked
+ * against the limit, and when `behind` was sent (epoch ms). The last 200
+ * connections are kept, closed ones included.
+ */
+export interface ConnectionStats {
+  id: number
+  openedAt: number
+  closedAt: number | null
+  queuedBytes: number
+  peakQueuedBytes: number
+  behindAt: number[]
+}
+
+const KEPT_CONNECTION_STATS = 200
 
 /** The token a WebSocket upgrade presents in its `?token=` query. */
 function queryToken(request: IncomingMessage): string | null {
@@ -79,6 +99,7 @@ async function sendResponse(response: Response, out: ServerResponse): Promise<vo
 async function handleHttp(
   options: ListenOptions,
   dropConnections: () => void,
+  connectionStats: () => ConnectionStats[],
   request: IncomingMessage,
   out: ServerResponse,
 ): Promise<void> {
@@ -108,6 +129,12 @@ async function handleHttp(
     dropConnections()
     return
   }
+  if (options.testRoutes && request.method === "GET" && path === "/test/connections") {
+    out
+      .writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify(connectionStats()))
+    return
+  }
   if (!path.startsWith(SCHEME_PATH_PREFIX)) {
     out.writeHead(404).end()
     return
@@ -135,24 +162,65 @@ async function handleHttp(
  */
 export function listen(options: ListenOptions): Promise<ListeningServer> {
   const wss = new WebSocketServer({ noServer: true })
+  const stats = new Map<WebSocket, ConnectionStats>()
+  let nextStatsId = 1
+  /** Stats for this socket, recorded only with test routes on. */
+  const statsFor = (ws: WebSocket): ConnectionStats | null => {
+    if (!options.testRoutes) return null
+    let entry = stats.get(ws)
+    if (!entry) {
+      const opened: ConnectionStats = {
+        id: nextStatsId++,
+        openedAt: Date.now(),
+        closedAt: null,
+        queuedBytes: 0,
+        peakQueuedBytes: 0,
+        behindAt: [],
+      }
+      entry = opened
+      stats.set(ws, opened)
+      ws.once("close", () => {
+        opened.closedAt = Date.now()
+      })
+      if (stats.size > KEPT_CONNECTION_STATS) stats.delete(stats.keys().next().value as WebSocket)
+    }
+    return entry
+  }
   const handler = applyWSSHandler({
     wss,
     router: serverRouter,
-    createContext: ({ res }) => ({
-      ...options.createContext(),
-      connection: { queuedBytes: () => res.bufferedAmount },
-    }),
+    createContext: ({ res }) => {
+      const entry = statsFor(res)
+      return {
+        ...options.createContext(),
+        connection: {
+          queuedBytes: () => {
+            const queued = res.bufferedAmount
+            if (entry) entry.peakQueuedBytes = Math.max(entry.peakQueuedBytes, queued)
+            return queued
+          },
+          sentBehind: () => entry?.behindAt.push(Date.now()),
+        },
+      }
+    },
     keepAlive: { enabled: true, pingMs: SERVER_PING_MS, pongWaitMs: SERVER_PONG_WAIT_MS },
   })
   const dropConnections = (): void => {
     for (const client of wss.clients) client.terminate()
   }
   const http: Server = createServer((request, response) => {
-    handleHttp(options, dropConnections, request, response).catch((error: unknown) => {
-      console.error("[pi-lab server] HTTP request failed:", error)
-      if (!response.headersSent) response.writeHead(500)
-      response.end()
-    })
+    const connectionStats = (): ConnectionStats[] =>
+      [...stats.entries()].map(([ws, entry]) => ({
+        ...entry,
+        queuedBytes: entry.closedAt === null ? ws.bufferedAmount : 0,
+      }))
+    handleHttp(options, dropConnections, connectionStats, request, response).catch(
+      (error: unknown) => {
+        console.error("[pi-lab server] HTTP request failed:", error)
+        if (!response.headersSent) response.writeHead(500)
+        response.end()
+      },
+    )
   })
   http.on("upgrade", (request, socket, head) => {
     const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname
