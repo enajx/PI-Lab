@@ -85,16 +85,20 @@ interface StopServerDependencies {
   work(): Promise<QuitWork>
   /** Confirmation shown only while work runs. */
   confirmStop(work: QuitWork): Promise<"stop" | "cancel">
-  /** Stop every agent, terminal and notebook, the PTY daemon and the server. */
-  stopServer(): Promise<void>
-  quit(): void
+  /**
+   * Quit like the user's Quit (the renderer asks about unsaved drafts first),
+   * then stop every agent, terminal and notebook, the PTY daemon and the
+   * server, only once the quit is approved.
+   */
+  quitAndStop(): void
   error(error: unknown): void
 }
 
 /**
- * "Stop Server and Agents…" (app menu and tray): ends all PI Lab work on this
- * machine, then quits the app, which cannot work without its server. Asks
- * first while work runs.
+ * "Stop Server and Agents…" (app menu and tray): quits the app and ends all
+ * PI Lab work on this machine, since the app cannot work without its server.
+ * Asks first while work runs; the unsaved-drafts decision comes before
+ * anything stops.
  */
 export function createStopServerAction(dependencies: StopServerDependencies): () => Promise<void> {
   let running = false
@@ -104,14 +108,28 @@ export function createStopServerAction(dependencies: StopServerDependencies): ()
     try {
       const work = await dependencies.work()
       if (hasRunningWork(work) && (await dependencies.confirmStop(work)) !== "stop") return
-      await dependencies.stopServer()
-      dependencies.quit()
+      dependencies.quitAndStop()
     } catch (error) {
       dependencies.error(error)
     } finally {
       running = false
     }
   }
+}
+
+/**
+ * Detail of the Quit dialog. Open notebook tabs are named: their servers stop
+ * with the window, so the user can Cancel and save them first.
+ */
+export function quitDialogDetail(notebooks: number): string {
+  const base =
+    "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon."
+  if (notebooks === 0) return base
+  const line =
+    notebooks === 1
+      ? "1 notebook is open. Its server stops when PI Lab quits; save it first."
+      : `${notebooks} notebooks are open. Their servers stop when PI Lab quits; save them first.`
+  return `${base}\n\n${line}`
 }
 
 /** "Quitting also stops …" followed by one "• project: command" line per busy terminal. */

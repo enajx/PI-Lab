@@ -164,7 +164,7 @@ export class ServerRuntime {
   /** Open the database, reconcile agents with the PTY daemon, start routines. */
   async start(): Promise<void> {
     const dbStatus = initDatabase()
-    loadNativeLanguage(this.config.dataDir)
+    loadNativeLanguage(this.config.profileDir)
     console.log(
       `[pi-lab server] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"}`,
     )
@@ -515,7 +515,7 @@ export class ServerRuntime {
       db: getDb(),
       appChannel: this.config.channel,
       skillsHomeDir: skillsHomeDirOverride ?? homedir(),
-      userDataDir: this.config.dataDir,
+      userDataDir: this.config.profileDir,
       latexResourcesDir: join(resources, "latex"),
       latexCacheDir: tectonicCacheDir(
         isTestMode,

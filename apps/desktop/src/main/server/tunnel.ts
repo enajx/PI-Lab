@@ -293,7 +293,7 @@ function shellQuote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`
 }
 
-/** Read the remote server's `server.json` (port, pid, build) through ssh. */
+/** Read the remote server's `server.json` (port, pid, build, server id) through ssh. */
 export async function readRemoteDiscovery(
   options: RemoteDiscoveryOptions,
 ): Promise<ServerDiscovery> {
@@ -337,9 +337,10 @@ export async function readRemoteDiscovery(
     parsed === null ||
     !("port" in parsed && typeof parsed.port === "number") ||
     !("pid" in parsed && typeof parsed.pid === "number") ||
-    !("build" in parsed && typeof parsed.build === "string")
+    !("build" in parsed && typeof parsed.build === "string") ||
+    !("serverId" in parsed && typeof parsed.serverId === "string")
   ) {
     throw new Error(`${host}:${path} is not a server discovery file: ${stdout.trim()}`)
   }
-  return { port: parsed.port, pid: parsed.pid, build: parsed.build }
+  return { port: parsed.port, pid: parsed.pid, build: parsed.build, serverId: parsed.serverId }
 }

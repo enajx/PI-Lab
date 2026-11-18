@@ -187,8 +187,13 @@ describe.skipIf(!sshAvailable)("SshTunnel (real ssh and sshd)", () => {
     )
     writeFileSync(
       join(dataDir, "server.json"),
-      `${JSON.stringify({ port: 4123, pid: 77, build: "abc" })}\n`,
+      `${JSON.stringify({ port: 4123, pid: 77, build: "abc", serverId: "remote-id" })}\n`,
     )
-    expect(await readRemoteDiscovery(base)).toEqual({ port: 4123, pid: 77, build: "abc" })
+    expect(await readRemoteDiscovery(base)).toEqual({
+      port: 4123,
+      pid: 77,
+      build: "abc",
+      serverId: "remote-id",
+    })
   })
 })

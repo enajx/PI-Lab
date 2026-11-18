@@ -23,6 +23,12 @@ interface ShutdownGuardOptions {
 export interface ShutdownGuard {
   attachWindow: (window: BrowserWindow) => void
   requestExplicitQuit: () => void
+  /**
+   * Explicit Quit that runs `stop` (stop the server and agents) after the
+   * renderer approved its unsaved drafts and before the app quits. A
+   * cancelled draft prompt runs nothing.
+   */
+  requestExplicitQuitAndStop: (stop: () => Promise<void>) => void
   isQuitPending: () => boolean
   requestUpdateInstall: (install: () => void) => void
   setInstallOnApprovedQuit: (install: (() => void) | null) => void
@@ -40,9 +46,15 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   let installOnApprovedQuit: (() => void) | null = null
   let preparingQuit = false
   let pendingStopConfirmed = false
+  /** Work the pending explicit Quit runs once approved (Stop Server and Agents). */
+  let pendingStop: (() => Promise<void>) | null = null
 
   /** Run asynchronous agent shutdown once; rejection never grants approval. */
-  function prepareAndQuit(install: (() => void) | null, mode: QuitMode): void {
+  function prepareAndQuit(
+    install: (() => void) | null,
+    mode: QuitMode,
+    stop: (() => Promise<void>) | null,
+  ): void {
     if (preparingQuit) return
     const finish = () => {
       if (install) {
@@ -59,14 +71,20 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
         }
       }
     }
-    if (!options.prepareQuit) {
+    const prepare = options.prepareQuit
+    if (!prepare && !stop) {
       finish()
       return
     }
     preparingQuit = true
-    void options
-      .prepareQuit(mode)
+    void (prepare ? prepare(mode) : Promise.resolve(true))
       .then((allow) => {
+        if (allow && stop) {
+          return stop().then(() => {
+            preparingQuit = false
+            finish()
+          })
+        }
         preparingQuit = false
         if (allow) finish()
       })
@@ -116,7 +134,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     if (!mainWindow || mainWindow.isDestroyed()) {
       if (installOnApprovedQuit || options.prepareQuit) {
         event.preventDefault()
-        prepareAndQuit(installOnApprovedQuit, "confirm-end")
+        prepareAndQuit(installOnApprovedQuit, "confirm-end", null)
       }
       return
     }
@@ -145,6 +163,7 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
     mainWindow = null
     pending = null
     pendingStopConfirmed = false
+    pendingStop = null
     if (!approvedQuit?.update) approvedQuit = null
     approvedClose = null
     pendingUpdateInstall = null
@@ -172,7 +191,9 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
 
     const intent = pending.intent
     const stopConfirmed = pendingStopConfirmed
+    const stop = pendingStop
     pendingStopConfirmed = false
+    pendingStop = null
     pending = null
     if (!value.allow) {
       pendingUpdateInstall = null
@@ -184,11 +205,24 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
       // Explicit Quit ends everything (and installs a ready update); Restart to
       // Update keeps work running; any other quit asks when work is running.
       const mode: QuitMode = stopConfirmed ? "end" : update ? "keep" : "confirm-end"
-      prepareAndQuit(update ?? installOnApprovedQuit, mode)
+      prepareAndQuit(update ?? installOnApprovedQuit, mode, update ? null : stop)
     } else {
       approvedClose = window
       window.close()
     }
+  }
+
+  /** Explicit Quit; `stop` runs after the draft approval, before the app quits. */
+  function explicitQuit(stop: (() => Promise<void>) | null): void {
+    if (pending?.intent === "quit" || preparingQuit) return
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      prepareAndQuit(installOnApprovedQuit, "end", stop)
+      return
+    }
+    if (mainWindow.webContents.isDestroyed()) return
+    pendingStopConfirmed = true
+    pendingStop = stop
+    request("quit")
   }
 
   options.app.on("before-quit", beforeQuit)
@@ -198,22 +232,19 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
   return {
     isQuitPending: () => pending?.intent === "quit" || preparingQuit || approvedQuit !== null,
     requestExplicitQuit(): void {
-      if (pending?.intent === "quit" || preparingQuit) return
-      if (!mainWindow || mainWindow.isDestroyed()) {
-        prepareAndQuit(installOnApprovedQuit, "end")
-        return
-      }
-      if (mainWindow.webContents.isDestroyed()) return
-      pendingStopConfirmed = true
-      request("quit")
+      explicitQuit(null)
+    },
+    requestExplicitQuitAndStop(stop): void {
+      explicitQuit(stop)
     },
     requestUpdateInstall(install): void {
       if (!mainWindow || mainWindow.isDestroyed()) {
-        prepareAndQuit(install, "keep")
+        prepareAndQuit(install, "keep", null)
         return
       }
       if (mainWindow.webContents.isDestroyed()) return
       pendingStopConfirmed = false
+      pendingStop = null
       pendingUpdateInstall = install
       request("quit")
     },

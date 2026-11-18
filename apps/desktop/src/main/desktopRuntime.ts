@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { resolveDataDir } from "@pi-lab/local-db/paths"
 import {
   app,
   BrowserWindow,
@@ -31,9 +32,12 @@ import { isTestMode, rendererDevServerUrl } from "./runtime/env"
 import { createServerClient, type ServerClient, serverSocketUrl } from "./server/client"
 import {
   ensureServer,
+  isPiLabServerProcess,
   type ServerEndpoint,
   ServerStartFailure,
   serverBuildId,
+  serverLaunchConfig,
+  verifiedEndpoint,
 } from "./server/launcher"
 import { MEDIA_SCHEME, REPORT_SCHEME } from "./trpc/science/analysis/mediaGrants"
 import { publicReleaseFromPackage } from "./updates/release"
@@ -103,26 +107,31 @@ export class DesktopRuntime {
   /** The renderer's server address and token (asked over IPC by the preload). */
   async rendererEndpoint(): Promise<{ url: string }> {
     await this.ready
-    return { url: serverSocketUrl(this.currentEndpoint()) }
+    return { url: serverSocketUrl(await this.currentEndpoint()) }
   }
 
   /**
-   * Where the server listens now. A restarted server (launchd after a crash,
-   * a new build) picks a new port, so each connection attempt re-reads
+   * Where the server listens now, checked with its identity before anyone
+   * sends it the token. A restarted server (launchd after a crash, a new
+   * build) picks a new port, so each connection attempt re-reads
    * `server.json`; the token stays the same.
    */
-  private currentEndpoint(): ServerEndpoint {
+  private currentEndpoint(): Promise<ServerEndpoint> {
     const endpoint = this.endpoint
     if (!endpoint) throw new Error("PI Lab server is not connected")
-    const discovery = readDiscovery(app.getPath("userData"))
-    return discovery ? { ...endpoint, port: discovery.port, pid: discovery.pid } : endpoint
+    return verifiedEndpoint(resolveDataDir(), endpoint.token)
   }
 
   /** Attach the desktop tRPC handler to a newly created or reopened window. */
   boot(window: BrowserWindow): void {
-    // The notebook tabs live in this window's page; the servers run in the PI Lab server.
+    // The notebook tabs and Analysis previews live in this window's page; their
+    // processes run in the PI Lab server. Agents and routines keep running.
     stopNotebooksWithWindow(window, window.webContents, async () => {
-      await (await this.server()).server.stopNotebooks.mutate()
+      const client = await this.server()
+      await Promise.all([
+        client.server.stopNotebooks.mutate(),
+        client.server.stopAnalysisPreviews.mutate(),
+      ])
     })
     if (this.ipcHandler) {
       this.ipcHandler.attachWindow(window)
@@ -165,10 +174,8 @@ export class DesktopRuntime {
 
   private async connect(): Promise<void> {
     const serverEntry = join(__dirname, "server.js")
-    const dataDir = app.getPath("userData")
     this.endpoint = await ensureServer({
-      config: {
-        dataDir,
+      config: serverLaunchConfig({
         channel: this.host.channel,
         packaged: app.isPackaged,
         resourcesDir: app.isPackaged
@@ -176,8 +183,8 @@ export class DesktopRuntime {
           : join(__dirname, "..", "..", "resources"),
         build: serverBuildId(serverEntry),
         version: app.getVersion(),
-        port: 0,
-      },
+        profileDir: app.getPath("userData"),
+      }),
       serverEntry,
       launchdLabel:
         app.isPackaged && !isTestMode && process.platform === "darwin"
@@ -295,14 +302,14 @@ export class DesktopRuntime {
     for (const scheme of [REPORT_SCHEME, MEDIA_SCHEME]) {
       session.defaultSession.protocol.handle(scheme, async (request) => {
         await this.ready
-        const endpoint = this.currentEndpoint()
+        const endpoint = await this.currentEndpoint()
         const url = new URL(request.url)
         const headers: Record<string, string> = { [TOKEN_HEADER]: endpoint.token }
         const range = request.headers.get("range")
         if (range) headers.range = range
         return net.fetch(
           `http://127.0.0.1:${endpoint.port}/scheme/${scheme}/${url.host}${url.pathname}`,
-          { headers },
+          { headers, redirect: "error" },
         )
       })
     }
@@ -409,8 +416,8 @@ export class DesktopRuntime {
         3_000,
       )
     }
-    const pid = readDiscovery(app.getPath("userData"))?.pid ?? this.endpoint?.pid
-    if (!pid || !processAlive(pid)) return
+    const pid = readDiscovery(resolveDataDir())?.pid ?? this.endpoint?.pid
+    if (!pid || !processAlive(pid) || !isPiLabServerProcess(pid)) return
     if (!connection) process.kill(pid, "SIGTERM")
     const deadline = Date.now() + 2_000
     while (processAlive(pid) && Date.now() < deadline) {

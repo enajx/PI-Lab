@@ -167,6 +167,17 @@ export class AnalysisInteractiveController implements AnalysisInteractivePort {
     await this.#release(ownerId)
   }
 
+  /**
+   * Release every preview lease: the desktop page that showed them reloaded,
+   * closed or lost its renderer. Agents and routines are not touched.
+   */
+  async closeAll(): Promise<void> {
+    const owners = new Set([...this.#leaseByOwner.keys(), ...this.#marimoByOwner.keys()])
+    this.#leaseByOwner.clear()
+    for (const ownerId of owners) this.#nextGeneration(ownerId)
+    await Promise.all([...owners].map((ownerId) => this.#release(ownerId)))
+  }
+
   async #release(ownerId: string): Promise<void> {
     const token = this.#reportTokenByOwner.get(ownerId)
     if (token) {

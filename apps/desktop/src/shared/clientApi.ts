@@ -159,6 +159,15 @@ export const appSettingsSchema = z.strictObject({
   editorVim: z.boolean(),
 })
 
+/** The public update channel selected in settings. */
+export const publicUpdateChannelSchema = z.enum(["stable", "beta"])
+
+/** The data format of the server's database, for the desktop updater. */
+export const dataCompatibilitySchema = z.strictObject({
+  formatVersion: z.number().int(),
+  migrations: z.array(z.strictObject({ hash: z.string(), createdAt: z.number() })),
+})
+
 /** Where the server keeps the key its secrets are encrypted with. */
 export const secretProtectionSchema = z.enum(["file", "keychain"])
 

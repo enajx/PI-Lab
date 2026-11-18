@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
+import { resolveDataDir } from "@pi-lab/local-db/paths"
 import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron"
 import {
   APP_ICON_GET_CHANNEL,
@@ -86,6 +87,7 @@ import {
   QUIT_DIALOG_BUTTONS,
   QUIT_DIALOG_CANCEL,
   quitChoiceFromButton,
+  quitDialogDetail,
   stopWorkDialog,
 } from "./window/userQuit"
 
@@ -153,7 +155,7 @@ function prepareAlphaBuild(): boolean {
         // The previous build's server outlives its app; stop it before its database moves.
         // Test runs never touch the user's real launchd job.
         stopServerSync(
-          dataDir,
+          resolveDataDir(),
           isTestMode ? null : `${channelIdentity(channel).autostartName}.server`,
         )
       },
@@ -456,12 +458,13 @@ const requestUserQuit = createUserQuitAction({
   pending: () => shutdownGuard.isQuitPending(),
   remembered: () => (fullRuntime ? fullRuntime.quitChoice() : "ask"),
   choose: async () => {
+    // Before the server is connected no notebook can be open.
+    const work = fullRuntime && fullBootComplete ? await fullRuntime.quitWork() : null
     const result = await dialog.showMessageBox({
       type: "question",
       title: `Quit ${app.getName()}?`,
       message: `Quit ${app.getName()}?`,
-      detail:
-        "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon.",
+      detail: quitDialogDetail(work?.notebooks ?? 0),
       buttons: [...QUIT_DIALOG_BUTTONS],
       checkboxLabel: "Remember option",
       checkboxChecked: false,
@@ -504,18 +507,21 @@ const requestStopServer = createStopServerAction({
     })
     return result.response === 0 ? "stop" : "cancel"
   },
-  stopServer: async () => {
-    await fullBootScheduler.startNow()
-    if (!fullRuntime) throw new Error("PI Lab has not started")
-    await fullRuntime.stopServerAndAgents()
-  },
-  quit: () => shutdownGuard.requestExplicitQuit(),
-  error: (error) =>
-    dialog.showErrorBox(
-      "Could not stop the PI Lab server",
-      `The app remains open. ${String(error)}`,
-    ),
+  quitAndStop: () =>
+    shutdownGuard.requestExplicitQuitAndStop(async () => {
+      if (!fullRuntime) throw new Error("PI Lab has not started")
+      await fullRuntime.stopServerAndAgents().catch((error: unknown) => {
+        reportStopFailure(error)
+        throw error
+      })
+    }),
+  error: reportStopFailure,
 })
+/** Stopping the server failed: the app stays open. */
+function reportStopFailure(error: unknown): void {
+  dialog.showErrorBox("Could not stop the PI Lab server", `The app remains open. ${String(error)}`)
+}
+
 setStopServerAction(() => void requestStopServer())
 setUserQuitAction(() => void requestUserQuit())
 
@@ -627,8 +633,8 @@ function startFullBoot(): Promise<void> {
       fullBootComplete = true
       if (publicRelease && !isTestMode && process.platform === "darwin") {
         publicUpdatesStarted = import("./updates/start")
-          .then(({ startPublicUpdates }) =>
-            startPublicUpdates(shutdownGuard, (status, restart) => {
+          .then(async ({ startPublicUpdates }) =>
+            startPublicUpdates(await runtime.server(), shutdownGuard, (status, restart) => {
               readyUpdateVersion = status.kind === "ready" ? status.version : null
               restartToUpdate = status.kind === "ready" ? restart : null
               tray?.publish(traySnapshot())

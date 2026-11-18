@@ -6,6 +6,7 @@ import {
   QUIT_DIALOG_CANCEL,
   type QuitWork,
   quitChoiceFromButton,
+  quitDialogDetail,
   stopWorkDialog,
 } from "./userQuit"
 
@@ -40,8 +41,7 @@ function stopHarness(options: { work: QuitWork; confirm?: "stop" | "cancel"; pen
   const spies = {
     work: vi.fn(async () => options.work),
     confirmStop: vi.fn(async () => options.confirm ?? "stop"),
-    stopServer: vi.fn(async () => {}),
-    quit: vi.fn(),
+    quitAndStop: vi.fn(),
     error: vi.fn(),
   }
   const request = createStopServerAction({ pending: () => options.pending ?? false, ...spies })
@@ -97,27 +97,24 @@ test("Quit quits and never saves", async () => {
   expect(h.remember).not.toHaveBeenCalled()
 })
 
-test("Stop Server and Agents with no running work stops the server and quits without asking", async () => {
+test("Stop Server and Agents with no running work asks for the Quit (drafts first) without a work dialog", async () => {
   const h = stopHarness({ work: idle })
   await h.request()
   expect(h.confirmStop).not.toHaveBeenCalled()
-  expect(h.stopServer).toHaveBeenCalledOnce()
-  expect(h.quit).toHaveBeenCalledOnce()
+  expect(h.quitAndStop).toHaveBeenCalledOnce()
 })
 
 test("Stop Server and Agents with running work asks first, then stops the server and quits", async () => {
   const h = stopHarness({ work: agents(2), confirm: "stop" })
   await h.request()
   expect(h.confirmStop).toHaveBeenCalledExactlyOnceWith(agents(2))
-  expect(h.stopServer).toHaveBeenCalledOnce()
-  expect(h.quit).toHaveBeenCalledOnce()
+  expect(h.quitAndStop).toHaveBeenCalledOnce()
 })
 
 test("cancelling the stop confirmation leaves everything running", async () => {
   const h = stopHarness({ work: agents(2), confirm: "cancel" })
   await h.request()
-  expect(h.stopServer).not.toHaveBeenCalled()
-  expect(h.quit).not.toHaveBeenCalled()
+  expect(h.quitAndStop).not.toHaveBeenCalled()
   expect(h.error).not.toHaveBeenCalled()
 })
 
@@ -138,20 +135,11 @@ test("a busy terminal or an open notebook alone gets the stop confirmation", asy
   expect(notebook.confirmStop).toHaveBeenCalledOnce()
 })
 
-test("when stopping the server fails the error is reported and the app stays open", async () => {
-  const h = stopHarness({ work: idle })
-  const failure = new Error("server did not stop")
-  h.stopServer.mockRejectedValueOnce(failure)
-  await h.request()
-  expect(h.error).toHaveBeenCalledExactlyOnceWith(failure)
-  expect(h.quit).not.toHaveBeenCalled()
-})
-
 test("a quit already pending skips Stop Server and Agents", async () => {
   const h = stopHarness({ work: idle, pending: true })
   await h.request()
   expect(h.work).not.toHaveBeenCalled()
-  expect(h.stopServer).not.toHaveBeenCalled()
+  expect(h.quitAndStop).not.toHaveBeenCalled()
 })
 
 test("concurrent Cmd+Q does not open duplicate dialogs", async () => {
@@ -216,5 +204,17 @@ test("the stop dialog names agents, busy terminals and notebooks", () => {
   const many = stopWorkDialog({ agents: 0, terminals: [], notebooks: 2 })
   expect(many.detail).toContain(
     "Quitting also stops the servers of 2 open notebooks. Save each notebook in its tab first.",
+  )
+})
+
+test("the Quit dialog names open notebooks so the user can cancel and save them", () => {
+  const plain =
+    "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon."
+  expect(quitDialogDetail(0)).toBe(plain)
+  expect(quitDialogDetail(2)).toBe(
+    `${plain}\n\n2 notebooks are open. Their servers stop when PI Lab quits; save them first.`,
+  )
+  expect(quitDialogDetail(1)).toBe(
+    `${plain}\n\n1 notebook is open. Its server stops when PI Lab quits; save it first.`,
   )
 })

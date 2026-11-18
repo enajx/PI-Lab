@@ -8,6 +8,12 @@ import type { PiLabChannel } from "../main/identity/channel"
 export interface ServerConfig {
   /** PI Lab's data folder: database, token, discovery file, daemon socket. */
   dataDir: string
+  /**
+   * The desktop app's Electron profile folder. Files the app kept there before
+   * the server split stay there: the interface language and the Analysis
+   * structure file. Equals `dataDir` for Alpha, Beta and tests.
+   */
+  profileDir: string
   channel: PiLabChannel
   /** True for a packaged app; source and test runs are false. */
   packaged: boolean
@@ -40,6 +46,7 @@ export function readServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
   }
   return {
     dataDir: required(env, "PI_LAB_DATA_DIR"),
+    profileDir: required(env, "PI_LAB_PROFILE_DIR"),
     channel,
     packaged: env.PI_LAB_PACKAGED === "1",
     resourcesDir: required(env, "PI_LAB_RESOURCES_DIR"),
@@ -54,6 +61,7 @@ export function serverConfigEnv(config: ServerConfig): Record<string, string> {
   return {
     PI_LAB_CHANNEL: config.channel,
     PI_LAB_DATA_DIR: config.dataDir,
+    PI_LAB_PROFILE_DIR: config.profileDir,
     PI_LAB_PACKAGED: config.packaged ? "1" : "0",
     PI_LAB_RESOURCES_DIR: config.resourcesDir,
     PI_LAB_BUILD: config.build,

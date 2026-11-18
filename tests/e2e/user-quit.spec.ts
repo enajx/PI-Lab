@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -693,6 +693,82 @@ test("idle explicit Quit always asks, Background preserves a draft, and draft ca
       app.process().kill("SIGKILL")
       await closed
     }
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})
+
+/** Native dialog stubs only; the renderer's draft prompt, file save, server and daemon are real. */
+test("Stop Server and Agents asks about unsaved drafts first: Cancel stops nothing, Save writes the file and then stops the server", async () => {
+  test.skip(process.platform === "win32", "Fixture uses POSIX process checks")
+  test.setTimeout(120_000)
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-stop-drafts-"))
+  const repo = join(dataDir, "repo")
+  await execFileAsync("git", ["init", "-b", "main", repo])
+  await writeFile(join(repo, "draft.txt"), "original\n")
+  let app: ElectronApplication | null = null
+  try {
+    app = await electron.launch({
+      executablePath: packagedBinary ?? electronPath,
+      args: launchArgs,
+      env: {
+        ...process.env,
+        PI_LAB_TEST_MODE: "1",
+        // Keep the server after the app quits, so the test sees whether it was stopped.
+        PI_LAB_TEST_RETAIN_SERVER: "1",
+        PI_LAB_DATA_DIR: dataDir,
+        PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+        PI_LAB_TEST_OPEN_PROJECT: repo,
+      },
+    })
+    app.on("close", () => {
+      app = null
+    })
+    const window = await app.firstWindow()
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    const server = readServerDiscovery(dataDir)
+    if (!server) throw new Error("No server.json")
+    await app.evaluate(({ dialog }) => {
+      // Idle shells: no work dialog is expected; a stray one gets Cancel.
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
+    })
+    // Restore Project Tabs off, so the renderer asks about the edit.
+    await window.getByTestId("nav-settings").click()
+    const restore = window.getByTestId("settings-restore-project-tabs")
+    if ((await restore.getAttribute("aria-checked")) !== "false") await restore.click()
+    await expect(restore).toHaveAttribute("aria-checked", "false")
+    await window.getByTestId("settings-back").click()
+    await window.getByTestId("project-item").filter({ hasText: "repo" }).click()
+    await window.getByTestId("panel-tab-files").click()
+    await window.getByTestId("file-tree-file").filter({ hasText: "draft.txt" }).click()
+    const editor = window.locator('[data-testid="editor-buffer"]:visible')
+    await editor.locator(".cm-content").click()
+    await window.keyboard.press("ControlOrMeta+End")
+    await window.keyboard.insertText("SAVED-BEFORE-STOP")
+    await expect(window.getByTestId("central-tab-dirty").last()).toBeVisible()
+
+    await clickStopServer(app)
+    const prompt = window.getByRole("dialog", { name: "Unsaved changes" })
+    await expect(prompt).toBeVisible()
+    await prompt.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(prompt).toHaveCount(0)
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    expect(processAlive(server.pid)).toBe(true)
+    expect(app).not.toBeNull()
+
+    await clickStopServer(app)
+    await expect(prompt).toBeVisible()
+    const closed = new Promise((resolve) => app?.once("close", resolve))
+    await prompt.getByRole("button", { name: "Save affected", exact: true }).click()
+    await closed
+    expect(await readFile(join(repo, "draft.txt"), "utf8")).toContain("SAVED-BEFORE-STOP")
+    await expect.poll(() => processAlive(server.pid), { timeout: 15_000 }).toBe(false)
+  } finally {
+    if (app) {
+      const closed = (app as ElectronApplication).waitForEvent("close")
+      ;(app as ElectronApplication).process().kill("SIGKILL")
+      await closed
+    }
+    await stopServerIn(dataDir)
     await rm(dataDir, { recursive: true, force: true })
   }
 })

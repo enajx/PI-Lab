@@ -66,6 +66,7 @@ beforeAll(async () => {
   const { ServerRuntime } = await import("./runtime")
   runtime = new ServerRuntime({
     dataDir,
+    profileDir: dataDir,
     channel: "alpha",
     packaged: false,
     resourcesDir: join(dataDir, "resources"),
@@ -77,6 +78,7 @@ beforeAll(async () => {
   server = await listen({
     port: 0,
     access: runtime.devices,
+    serverId: "test-server-id",
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => undefined },
