@@ -17,6 +17,7 @@
 // Usage: node tests/expo-client/run-check.mjs [--runs N] [--skip-desktop-build] [--skip-ios-build]
 
 import { execFileSync, spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import { createHash } from "node:crypto"
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { createServer } from "node:http"
@@ -188,8 +189,12 @@ function connect(port, token) {
  */
 function readStream(client, sessionId, resume) {
   const collected = { start: null, bytes: [], end: null, error: null, lastAt: Date.now() }
+  // Flow control: every subscription has a stream id and acks what it read.
+  const streamId = `reference-${randomUUID()}`
+  const ack = () =>
+    client.terminal.ack.mutate({ streamId, offset: collected.end, holdSkip: false }).catch(() => {})
   const subscription = client.terminal.output.subscribe(
-    { sessionId, resume },
+    { sessionId, resume, streamId, holdSkip: false },
     {
       onData: ({ data }) => {
         collected.lastAt = Date.now()
@@ -205,6 +210,7 @@ function readStream(client, sessionId, resume) {
         const bytes = Buffer.from(data.base64, "base64")
         collected.bytes.push(bytes)
         collected.end = data.offset + bytes.length
+        ack()
       },
       onError: (error) => {
         collected.error = `reference stream: ${error.message}`
