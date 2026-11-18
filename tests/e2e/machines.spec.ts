@@ -106,6 +106,8 @@ async function launch(extraEnv: Record<string, string>): Promise<Page> {
     env: {
       ...process.env,
       PI_LAB_TEST_MODE: "1",
+      // Windows do not take focus on the developer's screen.
+      PI_LAB_TEST_HIDE_WINDOWS: "1",
       PI_LAB_DATA_DIR: localData,
       PI_LAB_SOCKET_PATH: join(localData, "daemon.sock"),
       PI_LAB_TEST_SSH_ARGS: JSON.stringify(sshd.clientArgs),
@@ -119,10 +121,10 @@ async function launch(extraEnv: Record<string, string>): Promise<Page> {
   return page
 }
 
-/** HTTP status of a WebSocket upgrade to the remote server with this token (101 when it opens). */
-async function remoteUpgradeStatus(token: string): Promise<number> {
+/** HTTP status of a WebSocket upgrade to the server of `dataDir` with this token (101 when it opens). */
+async function upgradeStatus(dataDir: string, token: string): Promise<number> {
   const port = (
-    JSON.parse(await readFile(join(remoteData, "server.json"), "utf8")) as { port: number }
+    JSON.parse(await readFile(join(dataDir, "server.json"), "utf8")) as { port: number }
   ).port
   return new Promise<number>((resolve, reject) => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/trpc?token=${encodeURIComponent(token)}`)
@@ -133,6 +135,19 @@ async function remoteUpgradeStatus(token: string): Promise<number> {
     })
     socket.on("error", reject)
   })
+}
+
+function remoteUpgradeStatus(token: string): Promise<number> {
+  return upgradeStatus(remoteData, token)
+}
+
+async function turnOnStatusBar(page: Page): Promise<void> {
+  await page.keyboard.press("ControlOrMeta+Shift+p")
+  await page.getByTestId("command-palette-input").fill("status bar")
+  const command = page.locator('[data-command-id="settings-status-bar"]')
+  await expect(command).toContainText("Turn on Status bar")
+  await command.click()
+  await expect(page.getByTestId("window-status-bar")).toBeVisible()
 }
 
 interface StoredMachine {
@@ -147,67 +162,71 @@ async function storedMachines(): Promise<StoredMachine[]> {
   return JSON.parse(await readFile(join(localData, "machines.json"), "utf8")) as StoredMachine[]
 }
 
+/** Open Settings > Machines. */
+async function openMachinesSettings(page: Page): Promise<void> {
+  await page.getByTestId("nav-settings").click()
+  await page.getByTestId("settings-nav-machines").click()
+  await expect(page.getByTestId("settings-section-machines")).toBeVisible()
+}
+
+/** Add a machine with the Settings > Machines form and wait until it is connected. */
+async function addMachine(page: Page, sshHost: string, name: string): Promise<void> {
+  await openMachinesSettings(page)
+  await page.getByTestId("settings-add-machine-host").fill(sshHost)
+  await page.getByTestId("settings-add-machine-name").fill(name)
+  await page.getByTestId("settings-add-machine-submit").click()
+  const row = page.getByTestId("settings-machine").filter({ hasText: name })
+  await expect(row).toHaveAttribute("data-state", "connected", { timeout: 60_000 })
+}
+
 test("tokens: adding a machine enrolls a device; removing it revokes the token on the remote", async () => {
   test.setTimeout(120_000)
-  await launch({})
-  if (!app || !sshd) throw new Error("not started")
-  const host = sshd.host
-  // Main-process entry the desktop.machines IPC calls use (test seam: no UI yet).
-  const added = await app.evaluate(
-    async (_electron, input) => {
-      const machines = (
-        globalThis as { piLabTestMachines?: { add: (i: unknown) => Promise<unknown> } }
-      ).piLabTestMachines
-      if (!machines) throw new Error("no machines seam")
-      return machines.add(input)
-    },
-    { sshHost: host, name: "Lab server" },
-  )
-  expect(added).toMatchObject({
-    name: "Lab server",
-    sshHost: host,
-    state: "connected",
-    error: null,
-  })
+  const page = await launch({})
+  if (!sshd) throw new Error("not started")
+  await addMachine(page, sshd.host, "Lab server")
+  // The machine shows in the sidebar with its state (Settings hides the sidebar).
+  await page.getByTestId("settings-back").click()
+  await expect(page.getByTestId("sidebar-machine")).toHaveAttribute("data-state", "connected")
+
   const [stored] = await storedMachines()
   if (!stored) throw new Error("machine not stored")
-  const remoteHello = await (async () => {
-    const remote = connectServer(remoteData)
-    const hello = await remote.client.server.hello.query()
-    remote.close()
-    return hello
-  })()
-  expect(stored.machineId).toBe(remoteHello.machineId)
+  const remote = connectServer(remoteData)
+  const remoteHello = await remote.client.server.hello.query()
+  const remoteDevices = await remote.client.server.devices.list.query()
+  remote.close()
+  expect(stored).toMatchObject({
+    machineId: remoteHello.machineId,
+    name: "Lab server",
+    sshHost: sshd.host,
+  })
+  expect(remoteDevices.find((device) => device.id === stored.deviceId)?.name).toMatch(/^PI Lab on /)
   expect(await remoteUpgradeStatus(stored.token)).toBe(101)
 
-  const removed = await app.evaluate(async (_electron, machineId) => {
-    const machines = (
-      globalThis as { piLabTestMachines?: { remove: (id: string) => Promise<unknown> } }
-    ).piLabTestMachines
-    if (!machines) throw new Error("no machines seam")
-    return machines.remove(machineId)
-  }, stored.machineId)
-  expect(removed).toEqual({ revoked: true })
+  // The sidebar's add action opens Settings > Machines.
+  await page.getByTestId("sidebar-add-machine").click()
+  await page.getByTestId("settings-machine-remove").click()
+  await expect(page.getByTestId("settings-machines-empty")).toBeVisible()
+  await expect(page.getByTestId("settings-machine-notice")).toHaveCount(0)
+  await page.getByTestId("settings-back").click()
+  await expect(page.getByTestId("sidebar-machines")).toHaveCount(0)
   expect(await storedMachines()).toEqual([])
+  // The old token is refused on the remote.
   expect(await remoteUpgradeStatus(stored.token)).toBe(401)
 })
 
-/** Add a machine through the main-process entry the desktop.machines IPC calls use (test seam). */
-async function addMachineInMain(sshHost: string, name: string): Promise<{ machineId: string }> {
-  if (!app) throw new Error("not started")
-  return app.evaluate(
-    async (_electron, input) => {
-      const machines = (
-        globalThis as {
-          piLabTestMachines?: { add: (i: unknown) => Promise<{ machineId: string }> }
-        }
-      ).piLabTestMachines
-      if (!machines) throw new Error("no machines seam")
-      return machines.add(input)
-    },
-    { sshHost, name },
-  )
-}
+test("this Mac's devices: a device enrolled on the local server is listed and revoked from Settings", async () => {
+  test.setTimeout(120_000)
+  const page = await launch({})
+  const local = connectServer(localData)
+  const created = await local.client.server.devices.create.mutate({ name: "Phone stand-in" })
+  local.close()
+  await openMachinesSettings(page)
+  const device = page.getByTestId("settings-device").filter({ hasText: "Phone stand-in" })
+  await expect(device).toHaveAttribute("data-revoked", "false")
+  await device.getByTestId("settings-device-revoke").click()
+  await expect(device).toHaveAttribute("data-revoked", "true")
+  expect(await upgradeStatus(localData, created.token)).toBe(401)
+})
 
 /** Close the machine's SSH tunnel and refuse its endpoint (an unreachable machine), or undo that. */
 async function setMachineStopped(machineId: string, stopped: boolean): Promise<void> {
@@ -240,17 +259,22 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   await remote.client.projects.open.mutate({ path: remoteRepo })
   remote.close()
 
-  let page = await launch({ PI_LAB_TEST_OPEN_PROJECT: localRepo })
+  const page = await launch({ PI_LAB_TEST_OPEN_PROJECT: localRepo })
   if (!sshd || !app) throw new Error("not started")
   // Before any machine: no badges, no filter (as today).
   await expect(page.getByTestId("project-card")).toHaveCount(1)
   await expect(page.getByTestId("machine-badge")).toHaveCount(0)
   await expect(page.getByTestId("dashboard-machine-filter")).toHaveCount(0)
 
-  const { machineId } = await addMachineInMain(sshd.host, "Lab server")
-  await page.reload()
-  page = await app.firstWindow()
-  await expect(page.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await addMachine(page, sshd.host, "Lab server")
+  const machineId = (await storedMachines())[0]?.machineId ?? ""
+  await page.getByTestId("settings-back").click()
+  // The status bar hosts item: one machine, connected.
+  await turnOnStatusBar(page)
+  await expect(page.getByTestId("status-bar-machine-dot")).toHaveAttribute(
+    "data-state",
+    "connected",
+  )
 
   const remoteCard = page.getByTestId("remote-project-card")
   await expect(remoteCard).toHaveCount(1, { timeout: 30_000 })
@@ -292,6 +316,10 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   await expect(remoteCard).toHaveAttribute("data-offline", "true", { timeout: 30_000 })
   await expect(remoteCard).toContainText("remote-repo")
   await expect(page.getByTestId("remote-project-item")).toHaveAttribute("data-offline", "true")
+  await expect(page.getByTestId("status-bar-machine-dot")).toHaveAttribute(
+    "data-state",
+    "disconnected",
+  )
 
   // Reconnect: the machine's sockets open again on their own.
   await setMachineStopped(machineId, false)

@@ -12,6 +12,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   Pencil,
+  Plus,
   Settings,
   Trash2,
   Waypoints,
@@ -22,12 +23,19 @@ import { LatexText } from "../../../../components/LatexText"
 import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import {
+  CONNECTION_DOTS,
+  CONNECTION_LABELS,
   effectiveFilter,
   filterShows,
   MachineBadge,
   MachineFilter,
 } from "../../../../machines/MachineControls"
-import { useMachines, useRemoteProjects } from "../../../../machines/machines"
+import {
+  type MachineSummary,
+  useMachineState,
+  useMachines,
+  useRemoteProjects,
+} from "../../../../machines/machines"
 import { RemoteProjectRows } from "../../../../machines/RemoteProjects"
 import {
   dismissNonGitNotice,
@@ -574,6 +582,8 @@ export function Sidebar() {
             onToggle={() => setShowHidden(!showHidden)}
           />
         </nav>
+
+        <MachinesNav machines={machines} collapsed={collapsed} />
 
         {!collapsed && showFeatureHelp ? (
           <FeatureHelpPanel onHide={() => setShowFeatureHelp(false)} />
@@ -1151,6 +1161,75 @@ function SettingsNav({ collapsed }: { collapsed: boolean }) {
         <Settings className="size-4" aria-hidden />
         {collapsed ? null : <span className="flex-1 truncate">{t("Settings")}</span>}
       </Link>
+    </nav>
+  )
+}
+
+/** One machine in the sidebar's Machines group: a dot with its connection state, and its name. */
+function MachineNavRow({ machine, collapsed }: { machine: MachineSummary; collapsed: boolean }) {
+  const t = useTranslate()
+  const state = useMachineState(machine.machineId)
+  const { location } = useRouterState()
+  return (
+    <Link
+      to="/settings"
+      search={{ section: "machines" }}
+      data-testid="sidebar-machine"
+      data-machine-id={machine.machineId}
+      data-state={state}
+      title={`${machine.name} · ${t(CONNECTION_LABELS[state])}`}
+      data-feature-label={machine.name}
+      data-feature-help={`${machine.sshHost} · ${t(CONNECTION_LABELS[state])}`}
+      onClick={() => rememberSettingsReturnRoute(location)}
+      className={cn(navRowClass, collapsed && "justify-center", navStateClass(false))}
+    >
+      <span className={cn("size-2 shrink-0 rounded-full", CONNECTION_DOTS[state])} aria-hidden />
+      {collapsed ? (
+        <span className="sr-only">{machine.name}</span>
+      ) : (
+        <span className="flex-1 truncate">{machine.name}</span>
+      )}
+    </Link>
+  )
+}
+
+/**
+ * The remote machines this app connects to, with an add action (Settings >
+ * Machines). Shown once a machine is added; the first one is added in Settings.
+ */
+function MachinesNav({ machines, collapsed }: { machines: MachineSummary[]; collapsed: boolean }) {
+  const t = useTranslate()
+  const { location } = useRouterState()
+  if (machines.length === 0) return null
+  return (
+    <nav
+      aria-label={t("Machines")}
+      data-testid="sidebar-machines"
+      className="flex shrink-0 flex-col gap-0.5 border-sidebar-border border-t pt-2"
+    >
+      {collapsed ? null : (
+        <div className="flex items-center justify-between px-2 pb-1">
+          <span className="font-medium text-panel-title text-xs uppercase tracking-wide">
+            {t("Machines")}
+          </span>
+          <Link
+            to="/settings"
+            search={{ section: "machines" }}
+            data-testid="sidebar-add-machine"
+            aria-label={t("Add machine")}
+            title={t("Add machine")}
+            data-feature-label={t("Add machine")}
+            data-feature-help={t("Connect to the PI Lab server on another computer over SSH.")}
+            onClick={() => rememberSettingsReturnRoute(location)}
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <Plus className="size-3.5" aria-hidden />
+          </Link>
+        </div>
+      )}
+      {machines.map((machine) => (
+        <MachineNavRow key={machine.machineId} machine={machine} collapsed={collapsed} />
+      ))}
     </nav>
   )
 }
