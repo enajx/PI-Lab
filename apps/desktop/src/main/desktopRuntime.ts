@@ -31,13 +31,14 @@ import {
 import { isTestMode, rendererDevServerUrl } from "./runtime/env"
 import { createServerClient, type ServerClient, serverSocketUrl } from "./server/client"
 import {
+  createEndpointCache,
+  type EndpointCache,
   ensureServer,
   isPiLabServerProcess,
   type ServerEndpoint,
   ServerStartFailure,
   serverBuildId,
   serverLaunchConfig,
-  verifiedEndpoint,
 } from "./server/launcher"
 import { MEDIA_SCHEME, REPORT_SCHEME } from "./trpc/science/analysis/mediaGrants"
 import { publicReleaseFromPackage } from "./updates/release"
@@ -68,6 +69,7 @@ const NOTEBOOK_PORTS = { start: 42_700, end: 42_799 }
 export class DesktopRuntime {
   private ipcHandler: ReturnType<typeof createIPCHandler> | null = null
   private endpoint: ServerEndpoint | null = null
+  private endpoints: EndpointCache | null = null
   private serverClient: ReturnType<typeof createServerClient> | null = null
   private readonly ready: Promise<ServerClient>
   private resolveReady: (client: ServerClient) => void = () => undefined
@@ -111,15 +113,16 @@ export class DesktopRuntime {
   }
 
   /**
-   * Where the server listens now, checked with its identity before anyone
-   * sends it the token. A restarted server (launchd after a crash, a new
-   * build) picks a new port, so each connection attempt re-reads
-   * `server.json`; the token stays the same.
+   * Where the server listens now, checked with its identity proof before
+   * anyone sends it the token. A restarted server (launchd after a crash, a
+   * new build) picks a new port and serverId, which `server.json` names; the
+   * check runs again then, and after a closed connection or a failed
+   * forwarded request. The token stays the same.
    */
   private currentEndpoint(): Promise<ServerEndpoint> {
-    const endpoint = this.endpoint
-    if (!endpoint) throw new Error("PI Lab server is not connected")
-    return verifiedEndpoint(resolveDataDir(), endpoint.token)
+    const endpoints = this.endpoints
+    if (!endpoints) throw new Error("PI Lab server is not connected")
+    return endpoints.get()
   }
 
   /** Attach the desktop tRPC handler to a newly created or reopened window. */
@@ -193,7 +196,12 @@ export class DesktopRuntime {
       log: (message) => console.log(message),
     })
     console.log(`[pi-lab] connected to server pid ${this.endpoint.pid} port ${this.endpoint.port}`)
-    this.serverClient = createServerClient(() => this.currentEndpoint())
+    this.endpoints = createEndpointCache(resolveDataDir(), this.endpoint.token)
+    const endpoints = this.endpoints
+    this.serverClient = createServerClient(
+      () => this.currentEndpoint(),
+      () => endpoints.invalidate(),
+    )
     const client = this.serverClient.client
     const release = publicReleaseFromPackage(app.isPackaged, app.getAppPath())
     await client.server.initPublicUpdateChannel.mutate(
@@ -297,20 +305,31 @@ export class DesktopRuntime {
     }
   }
 
-  /** Analysis reports and media stream from the server through the same token. */
+  /**
+   * Analysis reports and media stream from the server through the same token.
+   * A request that cannot reach the server checks the endpoint again and is
+   * sent once more (the server may have restarted on another port).
+   */
   private installSchemeForwarding(): void {
     for (const scheme of [REPORT_SCHEME, MEDIA_SCHEME]) {
       session.defaultSession.protocol.handle(scheme, async (request) => {
         await this.ready
-        const endpoint = await this.currentEndpoint()
         const url = new URL(request.url)
-        const headers: Record<string, string> = { [TOKEN_HEADER]: endpoint.token }
+        const headers: Record<string, string> = {}
         const range = request.headers.get("range")
         if (range) headers.range = range
-        return net.fetch(
-          `http://127.0.0.1:${endpoint.port}/scheme/${scheme}/${url.host}${url.pathname}`,
-          { headers, redirect: "error" },
-        )
+        const forward = async () => {
+          const endpoint = await this.currentEndpoint()
+          return net.fetch(
+            `http://127.0.0.1:${endpoint.port}/scheme/${scheme}/${url.host}${url.pathname}`,
+            { headers: { ...headers, [TOKEN_HEADER]: endpoint.token }, redirect: "error" },
+          )
+        }
+        return forward().catch((error: unknown) => {
+          console.warn(`[pi-lab] ${scheme} request failed, checking the server again: ${error}`)
+          this.endpoints?.invalidate()
+          return forward()
+        })
       })
     }
   }
@@ -366,6 +385,11 @@ export class DesktopRuntime {
     return (await this.server()).server.quitWork.query()
   }
 
+  /** Open notebook tabs whose servers run (the Quit dialog names them). */
+  async notebookCount(): Promise<number> {
+    return (await this.server()).server.notebookCount.query()
+  }
+
   /** Stop every agent and terminal, then the server itself (Quit dialog's stop choice). */
   async stopServerAndAgents(): Promise<void> {
     const client = await this.server()
@@ -417,7 +441,7 @@ export class DesktopRuntime {
       )
     }
     const pid = readDiscovery(resolveDataDir())?.pid ?? this.endpoint?.pid
-    if (!pid || !processAlive(pid) || !isPiLabServerProcess(pid)) return
+    if (!pid || !processAlive(pid) || !isPiLabServerProcess(pid, resolveDataDir())) return
     if (!connection) process.kill(pid, "SIGTERM")
     const deadline = Date.now() + 2_000
     while (processAlive(pid) && Date.now() < deadline) {

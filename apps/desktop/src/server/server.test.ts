@@ -6,7 +6,7 @@ import superjson from "superjson"
 import { afterAll, beforeAll, expect, test, vi } from "vitest"
 import { WebSocket } from "ws"
 import type { ServerRouter } from "../main/trpc/serverRouter"
-import { ensureLocalToken, TOKEN_FILE, TOKEN_HEADER } from "./access"
+import { ensureLocalToken, proveServerIdentity, TOKEN_FILE, TOKEN_HEADER } from "./access"
 import { type ListeningServer, listen } from "./http"
 import type { ServerRuntime } from "./runtime"
 
@@ -41,7 +41,6 @@ beforeAll(async () => {
   server = await listen({
     port: 0,
     token,
-    serverId: "test-server-id",
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => undefined },
@@ -155,10 +154,21 @@ test("a credential move interrupted halfway finishes on the next start, every ke
   ])
 })
 
-test("GET /identity answers only the server id, without the token", async () => {
-  const response = await fetch(`http://127.0.0.1:${server.port}/identity`)
-  expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({ serverId: "test-server-id" })
+test("GET /identity proves the server holds the token without sending it, new for each nonce", async () => {
+  expect(await proveServerIdentity(server.port, token)).toBe(true)
+  // A client with another token (another data folder) does not accept this server.
+  expect(await proveServerIdentity(server.port, "x".repeat(43))).toBe(false)
+  const answer = async (nonce: string) =>
+    (
+      await fetch(`http://127.0.0.1:${server.port}/identity?nonce=${nonce}`)
+    ).json() as Promise<object>
+  const first = await answer("a".repeat(32))
+  expect(Object.keys(first)).toEqual(["proof"])
+  expect(JSON.stringify(first)).not.toContain(token)
+  expect(await answer("b".repeat(32))).not.toEqual(first)
+  // No nonce, or one that is not hex, gets no proof.
+  expect((await fetch(`http://127.0.0.1:${server.port}/identity`)).status).toBe(400)
+  expect((await fetch(`http://127.0.0.1:${server.port}/identity?nonce=zz`)).status).toBe(400)
 })
 
 /** Real server and WebSocket; the updater's network engine is a recording stand-in (injected). */

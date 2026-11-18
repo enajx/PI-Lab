@@ -106,6 +106,10 @@ export const serverControlRouter = router({
     }),
 
   quitWork: publicProcedure.query(({ ctx }): Promise<QuitWork> => control(ctx).runtime.quitWork()),
+  /** Open notebook tabs whose servers run; cheap, for the Quit dialog. */
+  notebookCount: publicProcedure.query(({ ctx }): number =>
+    control(ctx).runtime.notebookServers.runningCount(),
+  ),
 
   traySnapshot: publicProcedure.query(
     ({ ctx }): BackgroundTraySnapshot => control(ctx).runtime.traySnapshot(),

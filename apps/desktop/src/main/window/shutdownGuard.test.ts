@@ -500,4 +500,25 @@ describe("shutdown guard through mocked Electron events", () => {
     h.respond({ requestId: "request-3", allow: true }, h.webContents, h.mainFrame)
     await vi.waitFor(() => expect(order).toEqual(["quit", "stop", "quit"]))
   })
+
+  test("Restart to Update while Stop Server waits for the drafts answer is ignored; the stop still runs", async () => {
+    const h = harness(async () => true)
+    h.guard.attachWindow(h.electronWindow)
+    const order: string[] = []
+    const stop = vi.fn(async () => {
+      order.push("stop")
+    })
+    h.quit.mockImplementation(() => {
+      order.push("quit")
+    })
+    const install = vi.fn()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    h.guard.requestExplicitQuitAndStop(stop)
+    h.guard.requestUpdateInstall(install)
+    h.respond({ requestId: "request-1", allow: true }, h.webContents, h.mainFrame)
+    await vi.waitFor(() => expect(order).toEqual(["stop", "quit"]))
+    expect(install).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/update.*Stop Server/i))
+    warn.mockRestore()
+  })
 })

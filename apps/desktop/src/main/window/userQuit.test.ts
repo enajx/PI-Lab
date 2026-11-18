@@ -7,6 +7,7 @@ import {
   type QuitWork,
   quitChoiceFromButton,
   quitDialogDetail,
+  quitDialogNotebooks,
   stopWorkDialog,
 } from "./userQuit"
 
@@ -37,14 +38,26 @@ function harness(options: {
 }
 
 /** Stop action with the given work and confirmation answer; every dependency is a spy. */
-function stopHarness(options: { work: QuitWork; confirm?: "stop" | "cancel"; pending?: boolean }) {
+function stopHarness(options: {
+  work: QuitWork | "no answer"
+  confirm?: "stop" | "cancel"
+  pending?: boolean
+}) {
   const spies = {
-    work: vi.fn(async () => options.work),
+    work: vi.fn(() =>
+      options.work === "no answer"
+        ? new Promise<QuitWork>(() => undefined)
+        : Promise.resolve(options.work),
+    ),
     confirmStop: vi.fn(async () => options.confirm ?? "stop"),
     quitAndStop: vi.fn(),
     error: vi.fn(),
   }
-  const request = createStopServerAction({ pending: () => options.pending ?? false, ...spies })
+  const request = createStopServerAction({
+    pending: () => options.pending ?? false,
+    workTimeoutMs: 50,
+    ...spies,
+  })
   return { request, ...spies }
 }
 
@@ -133,6 +146,29 @@ test("a busy terminal or an open notebook alone gets the stop confirmation", asy
   })
   await notebook.request()
   expect(notebook.confirmStop).toHaveBeenCalledOnce()
+})
+
+test("Stop Server with a server that does not answer says it is not reachable, stops nothing, and can be tried again", async () => {
+  const h = stopHarness({ work: "no answer" })
+  await h.request()
+  expect(h.error).toHaveBeenCalledOnce()
+  expect(String(h.error.mock.calls[0]?.[0])).toMatch(/not reachable.*may already be stopped/)
+  expect(h.quitAndStop).not.toHaveBeenCalled()
+  await h.request()
+  expect(h.work).toHaveBeenCalledTimes(2)
+})
+
+test("the Quit dialog gets the open notebook count, or 0 (logged) when the server does not answer in time", async () => {
+  const log = vi.fn()
+  expect(await quitDialogNotebooks(async () => 3, 50, log)).toBe(3)
+  expect(log).not.toHaveBeenCalled()
+  const started = Date.now()
+  expect(await quitDialogNotebooks(() => new Promise<number>(() => undefined), 50, log)).toBe(0)
+  expect(Date.now() - started).toBeLessThan(1_000)
+  expect(await quitDialogNotebooks(async () => Promise.reject(new Error("closed")), 50, log)).toBe(
+    0,
+  )
+  expect(log).toHaveBeenCalledTimes(2)
 })
 
 test("a quit already pending skips Stop Server and Agents", async () => {

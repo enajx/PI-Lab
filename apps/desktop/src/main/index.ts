@@ -88,6 +88,7 @@ import {
   QUIT_DIALOG_CANCEL,
   quitChoiceFromButton,
   quitDialogDetail,
+  quitDialogNotebooks,
   stopWorkDialog,
 } from "./window/userQuit"
 
@@ -458,13 +459,18 @@ const requestUserQuit = createUserQuitAction({
   pending: () => shutdownGuard.isQuitPending(),
   remembered: () => (fullRuntime ? fullRuntime.quitChoice() : "ask"),
   choose: async () => {
-    // Before the server is connected no notebook can be open.
-    const work = fullRuntime && fullBootComplete ? await fullRuntime.quitWork() : null
+    // Before the server is connected no notebook can be open. The count is
+    // bounded so Cmd+Q never waits on a server that does not answer.
+    const runtime = fullRuntime
+    const notebooks =
+      runtime && fullBootComplete
+        ? await quitDialogNotebooks(() => runtime.notebookCount(), 1_500, console.warn)
+        : 0
     const result = await dialog.showMessageBox({
       type: "question",
       title: `Quit ${app.getName()}?`,
       message: `Quit ${app.getName()}?`,
-      detail: quitDialogDetail(work?.notebooks ?? 0),
+      detail: quitDialogDetail(notebooks),
       buttons: [...QUIT_DIALOG_BUTTONS],
       checkboxLabel: "Remember option",
       checkboxChecked: false,
@@ -496,6 +502,7 @@ const requestStopServer = createStopServerAction({
     if (!fullRuntime) throw new Error("PI Lab has not started")
     return fullRuntime.quitWork()
   },
+  workTimeoutMs: 3_000,
   confirmStop: async (work) => {
     const result = await dialog.showMessageBox({
       type: "warning",
@@ -519,7 +526,8 @@ const requestStopServer = createStopServerAction({
 })
 /** Stopping the server failed: the app stays open. */
 function reportStopFailure(error: unknown): void {
-  dialog.showErrorBox("Could not stop the PI Lab server", `The app remains open. ${String(error)}`)
+  const reason = error instanceof Error ? error.message : String(error)
+  dialog.showErrorBox("Could not stop the PI Lab server", `The app remains open. ${reason}`)
 }
 
 setStopServerAction(() => void requestStopServer())

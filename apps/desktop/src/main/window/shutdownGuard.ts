@@ -238,13 +238,18 @@ export function installShutdownGuard(options: ShutdownGuardOptions): ShutdownGua
       explicitQuit(stop)
     },
     requestUpdateInstall(install): void {
+      // Stop Server and Agents waits for the drafts answer; it is not turned
+      // into a Restart to Update. The update stays ready for the next launch.
+      if (pendingStop) {
+        console.warn("[pi-lab] update install ignored: Stop Server and Agents is pending")
+        return
+      }
       if (!mainWindow || mainWindow.isDestroyed()) {
         prepareAndQuit(install, "keep", null)
         return
       }
       if (mainWindow.webContents.isDestroyed()) return
       pendingStopConfirmed = false
-      pendingStop = null
       pendingUpdateInstall = install
       request("quit")
     },

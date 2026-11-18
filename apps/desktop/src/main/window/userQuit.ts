@@ -79,10 +79,40 @@ export function quitChoiceFromButton(index: number): QuitChoice {
   return index === 0 ? "background" : index === 1 ? "quit" : "cancel"
 }
 
+/** Reject with `message` when `work` has not settled after `ms`. */
+function withinTime<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms)
+  })
+  return Promise.race([work, late]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * The open notebook count for the Quit dialog. When the server fails or does
+ * not answer within `ms`, the dialog opens without the notebook line (0) and
+ * the reason is logged, so Cmd+Q never waits on an unreachable server.
+ */
+export function quitDialogNotebooks(
+  count: () => Promise<number>,
+  ms: number,
+  log: (message: string) => void,
+): Promise<number> {
+  return withinTime(count(), ms, `no answer within ${ms} ms`).catch((error: unknown) => {
+    log(`[pi-lab] open notebooks could not be counted for the Quit dialog: ${String(error)}`)
+    return 0
+  })
+}
+
+/** Shown when Stop Server and Agents gets no answer from the server. */
+export const SERVER_UNREACHABLE = "The PI Lab server is not reachable. It may already be stopped."
+
 interface StopServerDependencies {
   pending(): boolean
   /** Work stopping would end (agents, busy terminals, notebooks). */
   work(): Promise<QuitWork>
+  /** How long {@link work} may take before the server counts as not reachable. */
+  workTimeoutMs: number
   /** Confirmation shown only while work runs. */
   confirmStop(work: QuitWork): Promise<"stop" | "cancel">
   /**
@@ -98,22 +128,23 @@ interface StopServerDependencies {
  * "Stop Server and Agents…" (app menu and tray): quits the app and ends all
  * PI Lab work on this machine, since the app cannot work without its server.
  * Asks first while work runs; the unsaved-drafts decision comes before
- * anything stops.
+ * anything stops. A server that does not answer in time gets
+ * {@link SERVER_UNREACHABLE} and the app stays open.
  */
 export function createStopServerAction(dependencies: StopServerDependencies): () => Promise<void> {
   let running = false
   return async () => {
     if (running || dependencies.pending()) return
     running = true
-    try {
-      const work = await dependencies.work()
-      if (hasRunningWork(work) && (await dependencies.confirmStop(work)) !== "stop") return
-      dependencies.quitAndStop()
-    } catch (error) {
-      dependencies.error(error)
-    } finally {
-      running = false
-    }
+    await withinTime(dependencies.work(), dependencies.workTimeoutMs, SERVER_UNREACHABLE)
+      .then(async (work) => {
+        if (hasRunningWork(work) && (await dependencies.confirmStop(work)) !== "stop") return
+        dependencies.quitAndStop()
+      })
+      .catch(dependencies.error)
+      .finally(() => {
+        running = false
+      })
   }
 }
 
@@ -165,8 +196,8 @@ function paragraphs(parts: string[]): string {
 }
 
 /**
- * Text and buttons of the confirmation before "Quit and stop server and
- * agents" ends running work. Buttons are ordered stop, cancel.
+ * Text and buttons of the confirmation before "Stop Server and Agents…" ends
+ * running work. Buttons are ordered stop, cancel.
  */
 export function stopWorkDialog(work: QuitWork): {
   message: string

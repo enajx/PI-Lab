@@ -59,7 +59,6 @@ async function main(): Promise<void> {
   const server = await listen({
     port: config.port,
     token,
-    serverId,
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => setImmediate(() => stop(0)) },
