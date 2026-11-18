@@ -10,6 +10,13 @@ import type { TerminalOutput } from "../../main/trpc/terminal/terminal"
  * resubscription would reuse the last *received* event id, so on a drop this
  * stream ends its subscription and subscribes again with the consumed point,
  * while tRPC reconnects the socket.
+ *
+ * Flow control (server side in main/trpc/terminal/outputFlow.ts): each
+ * subscription has a random stream id; the stream acks the consumed offset
+ * (`terminal.ack`) every {@link ACK_EVERY_BYTES} applied, or when its queue
+ * is empty. A hidden terminal ends its subscription and subscribes again from
+ * its consumed point when shown. While the user has a selection or has
+ * scrolled up, the stream asks the server to hold skips.
  */
 
 /** Where the emulator's state stands; see `terminal.output`. */
@@ -23,7 +30,6 @@ export interface ResumePoint {
 export interface TerminalEmulator {
   /** Queue bytes or text; `applied` runs once the emulator's state includes them. */
   write: (data: string | Uint8Array, applied: () => void) => void
-  reset: () => void
   resize: (cols: number, rows: number) => void
 }
 
@@ -42,9 +48,25 @@ export interface OutputSubscriptionHandlers {
 
 /** `trpc.terminal.output.subscribe`, from any tRPC client of the server. */
 export type SubscribeOutput = (
-  input: { sessionId: string; resume: ResumePoint | null },
+  input: { sessionId: string; resume: ResumePoint | null; streamId: string; holdSkip: boolean },
   handlers: OutputSubscriptionHandlers,
 ) => { unsubscribe: () => void }
+
+/** What a `terminal.ack` carries. */
+export interface OutputAck {
+  streamId: string
+  offset: number
+  holdSkip: boolean
+}
+
+/** `trpc.terminal.ack.mutate`; the stream does not wait for the reply. */
+export type AckOutput = (input: OutputAck) => Promise<unknown>
+
+/** Ack after this many bytes applied since the last ack (or when the queue is empty). */
+export const ACK_EVERY_BYTES = 16 * 1024
+
+/** Full reset (RIS): part of a snapshot's write, so no frame shows an empty screen. */
+const FULL_RESET = "\x1bc"
 
 /**
  * What happens to events received but not yet applied when the connection
@@ -55,6 +77,7 @@ export type DropPolicy = "keep" | "discard"
 
 export interface TerminalStreamOptions {
   subscribe: SubscribeOutput
+  ack: AckOutput
   sessionId: string
   emulator: TerminalEmulator
   dropPolicy: DropPolicy
@@ -91,6 +114,20 @@ export const RESUBSCRIBE_RETRY_MS = 250
 /** How a stream starts (counted for tests and logs). */
 export type StartMode = "replay" | "snapshot"
 
+/** A random id per subscription (no `crypto.randomUUID` in React Native's Hermes). */
+function newStreamId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
+}
+
+/**
+ * Where a terminal shown again resumes: its consumed point, so the daemon
+ * replays when its tail still has the bytes and sends a snapshot otherwise
+ * (user decision, 2026-11-18; the other choice was always a snapshot: null).
+ */
+function resumePointWhenShown(consumed: ResumePoint | null): ResumePoint | null {
+  return consumed
+}
+
 export class TerminalStream {
   readonly #options: TerminalStreamOptions
   /** Events received from the current or an ended subscription, not yet applied. */
@@ -102,6 +139,15 @@ export class TerminalStream {
   #epoch = 0
   #resubscribeWhenIdle = false
   #closed = false
+  #visible = true
+  #holdSkip = false
+  /** The current subscription's stream id; null while none is open. */
+  #streamId: string | null = null
+  /** Applied since the last ack: bytes, and events of any kind. */
+  #bytesSinceAck = 0
+  #eventsSinceAck = 0
+  /** The emulator's size as this stream last set it. */
+  #size: { cols: number; rows: number } | null = null
   /** The start mode of each subscription, oldest first. */
   readonly starts: StartMode[] = []
 
@@ -127,13 +173,40 @@ export class TerminalStream {
   /**
    * End the subscription and subscribe again from the consumed point, as after
    * a lost connection (also used when the server says the stream is behind).
+   * A hidden terminal only ends it.
    */
   resume(): void {
     if (this.#closed) return
     this.#endSubscription()
     if (this.#options.dropPolicy === "discard") this.#queue = []
+    this.#resubscribeWhenIdle = this.#visible
+    this.#pump()
+  }
+
+  /**
+   * Hidden: end the subscription (the server sends nothing), keep the
+   * emulator and the consumed point. Shown: subscribe again from there.
+   */
+  setVisible(visible: boolean): void {
+    if (this.#closed || visible === this.#visible) return
+    this.#visible = visible
+    if (!visible) {
+      this.#endSubscription()
+      this.#resubscribeWhenIdle = false
+      return
+    }
     this.#resubscribeWhenIdle = true
     this.#pump()
+  }
+
+  /**
+   * While true (the user has a selection, or has scrolled up), the server
+   * holds a skip instead of replacing the view; it applies once this is false.
+   */
+  setHoldSkip(hold: boolean): void {
+    if (this.#closed || hold === this.#holdSkip) return
+    this.#holdSkip = hold
+    this.#sendAck()
   }
 
   close(): void {
@@ -146,13 +219,19 @@ export class TerminalStream {
     this.#epoch += 1
     this.#subscription?.unsubscribe()
     this.#subscription = null
+    this.#streamId = null
   }
 
   #subscribe(resume: ResumePoint | null): void {
+    if (!this.#visible) return
     const epoch = ++this.#epoch
     let sawOpen = false
+    const streamId = newStreamId()
+    this.#streamId = streamId
+    this.#bytesSinceAck = 0
+    this.#eventsSinceAck = 0
     this.#subscription = this.#options.subscribe(
-      { sessionId: this.#options.sessionId, resume },
+      { sessionId: this.#options.sessionId, resume, streamId, holdSkip: this.#holdSkip },
       {
         onData: ({ data }) => {
           if (epoch !== this.#epoch) return
@@ -189,9 +268,10 @@ export class TerminalStream {
     if (this.#writing || this.#closed) return
     const event = this.#queue.shift()
     if (event === undefined) {
+      if (this.#eventsSinceAck > 0) this.#sendAck()
       if (this.#resubscribeWhenIdle) {
         this.#resubscribeWhenIdle = false
-        this.#subscribe(this.#consumed)
+        this.#subscribe(resumePointWhenShown(this.#consumed))
       }
       return
     }
@@ -200,10 +280,9 @@ export class TerminalStream {
       case "start": {
         this.starts.push(event.mode)
         if (event.mode === "snapshot") {
-          emulator.reset()
-          emulator.resize(event.cols, event.rows)
-          this.#options.onSize(event.cols, event.rows)
-          emulator.write(event.screen, () => {})
+          // The reset is the first byte of the write, so no frame shows an empty screen.
+          this.#resize(event.cols, event.rows)
+          emulator.write(FULL_RESET + event.screen, () => {})
         } else if (
           this.#consumed === null ||
           event.generation !== this.#consumed.generation ||
@@ -232,10 +311,10 @@ export class TerminalStream {
         return
       }
       case "resize": {
-        emulator.resize(event.cols, event.rows)
-        this.#options.onSize(event.cols, event.rows)
+        this.#resize(event.cols, event.rows)
         if (this.#consumed !== null)
           this.#consumed = { ...this.#consumed, revision: event.revision }
+        this.#eventsSinceAck += 1
         this.#pump()
         return
       }
@@ -250,6 +329,14 @@ export class TerminalStream {
     }
   }
 
+  /** Resize the emulator when the size differs from the last one set. */
+  #resize(cols: number, rows: number): void {
+    if (this.#size?.cols === cols && this.#size.rows === rows) return
+    this.#size = { cols, rows }
+    this.#options.emulator.resize(cols, rows)
+    this.#options.onSize(cols, rows)
+  }
+
   /** Write bytes that start at `offset`; once applied, the consumed point moves past them. */
   #write(bytes: Uint8Array, offset: number, point: ResumePoint): void {
     this.#writing = true
@@ -257,7 +344,27 @@ export class TerminalStream {
       this.#writing = false
       if (this.#closed) return
       this.#consumed = { ...point, offset: offset + bytes.length }
+      this.#bytesSinceAck += bytes.length
+      this.#eventsSinceAck += 1
+      if (this.#bytesSinceAck >= ACK_EVERY_BYTES) this.#sendAck()
       this.#pump()
+    })
+  }
+
+  /**
+   * Tell the server what the emulator applied on the current subscription. A
+   * lost ack (the socket closed) is not an error: the stream resubscribes with
+   * a new id and full credit. A server error is logged.
+   */
+  #sendAck(): void {
+    const streamId = this.#streamId
+    if (streamId === null) return
+    this.#bytesSinceAck = 0
+    this.#eventsSinceAck = 0
+    const input = { streamId, offset: this.#consumed?.offset ?? 0, holdSkip: this.#holdSkip }
+    this.#options.ack(input).catch((error: { message?: string; data?: unknown }) => {
+      if (error.data === undefined || error.data === null) return
+      console.error(`[pi-lab] terminal ${this.#options.sessionId}: ack failed: ${error.message}`)
     })
   }
 

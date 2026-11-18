@@ -116,8 +116,15 @@ async function check(params: CheckParams, say: (line: string) => void): Promise<
       const run = () =>
         setTimeout(() => {
           done()
-          // A snapshot's screen text is not part of the byte stream.
-          if (typeof data === "string" || stream === null) return
+          // A snapshot's write (full reset, then the screen text) is not part of the byte stream.
+          if (typeof data === "string") {
+            if (data.startsWith("\x1bc")) {
+              applied = []
+              appliedStart = null
+            }
+            return
+          }
+          if (stream === null) return
           const end = stream.consumed()?.offset
           if (end === undefined) throw new Error("applied bytes but no consumed offset")
           if (appliedStart === null) appliedStart = end - data.length
@@ -126,10 +133,6 @@ async function check(params: CheckParams, say: (line: string) => void): Promise<
         }, 0)
       if (held) held.push(run)
       else run()
-    },
-    reset: () => {
-      applied = []
-      appliedStart = null
     },
     resize: () => {},
   }
@@ -163,6 +166,7 @@ async function check(params: CheckParams, say: (line: string) => void): Promise<
   let streamError: string | null = null
   stream = new TerminalStream({
     subscribe,
+    ack: (input) => trpc.terminal.ack.mutate(input),
     sessionId: params.sessionId,
     emulator,
     dropPolicy: "discard",

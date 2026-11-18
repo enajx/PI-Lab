@@ -11,6 +11,7 @@ import { observable } from "@trpc/server/observable"
 import { z } from "zod"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
+import type { FlowItem } from "./outputFlow"
 
 /**
  * Terminal router — the renderer's contract to the PTY daemon.
@@ -59,9 +60,10 @@ export type TerminalEvent =
   | { type: "exit"; exitCode: number | null; signal: number | null }
 
 /**
- * Provisional limit (set after the flood test): when more than this many bytes
- * wait in a client connection's send queue, `terminal.output` stops sending to
- * that connection and tells the client its stream is behind.
+ * Fallback only (flow control in `outputFlow.ts` keeps the send queue near the
+ * connection cap): when more than this many bytes wait in a client
+ * connection's send queue, `terminal.output` logs it, stops sending to that
+ * connection and tells the client its stream is behind.
  */
 export const OUTPUT_QUEUE_LIMIT_BYTES = 4 * 1024 * 1024
 
@@ -70,6 +72,9 @@ export const OUTPUT_QUEUE_LIMIT_BYTES = 4 * 1024 * 1024
  * client's focus does not take the size from it (`terminal.resize`).
  */
 export const TYPING_HOLDS_SIZE_MS = 3_000
+
+/** When a client last typed into each session (epoch ms), for typing priority in the output scheduler. */
+const lastTypedAt = new Map<string, number>()
 
 /** The last client that typed into each session, per daemon client. */
 const lastTyping = new WeakMap<DaemonClient, Map<string, { clientId: string; at: number }>>()
@@ -97,6 +102,17 @@ const outputInput = z.object({
   sessionId: z.string(),
   /** Null asks for a screen snapshot (a new or recreated emulator). */
   resume: resumePointInput.nullable(),
+  /** Random per subscription; the client's acks name it. */
+  streamId: z.string().min(1).max(100),
+  /** The client holds skips while the user has a selection or has scrolled up. */
+  holdSkip: z.boolean(),
+})
+
+const ackInput = z.object({
+  streamId: z.string().min(1).max(100),
+  /** The client's emulator applied every byte before this offset. */
+  offset: z.number().int().nonnegative(),
+  holdSkip: z.boolean(),
 })
 
 /**
@@ -104,7 +120,9 @@ const outputInput = z.object({
  * count raw bytes since spawn.
  * - start: first event. `replay` continues from the requested offset; for a
  *   `snapshot`, reset the emulator to `cols`x`rows`, write `screen` (which holds
- *   exactly the bytes before `offset`), then the bytes.
+ *   exactly the bytes before `offset`), then the bytes. A later `start` comes
+ *   after a skip (always a snapshot) or after the server attached to the
+ *   daemon again.
  * - data: the bytes starting at `offset`.
  * - resize: the PTY size changed after every byte before `offset`; the screen
  *   is now at `revision`.
@@ -154,6 +172,16 @@ interface SessionAttachment {
   onError: (error: Error) => void
 }
 
+interface SessionAttachmentHandle {
+  detach: () => void
+  /**
+   * Ask the daemon for the session's latest screen on the same shared
+   * connection (other observers are not affected). `onStart` runs at the
+   * reply boundary: every event after it follows the snapshot.
+   */
+  snapshot: (onStart: (result: AttachResult) => void) => Promise<void>
+}
+
 /**
  * Attach to a session on the shared daemon connection and forward its events
  * from the attach reply on. When that connection closes (the daemon dropped a
@@ -162,15 +190,18 @@ interface SessionAttachment {
  * or a snapshot (its resume rules), passed to `onStart` like the first start.
  * Only a failed attach (for example, the session is gone after a daemon
  * restart) reaches `onError`. Returns the cleanup, which detaches the daemon
- * connection when the last observer of the session leaves.
+ * connection when the last observer of the session leaves, and the snapshot
+ * request.
  */
 function attachSession(
   ctx: AppContext,
   sessionId: string,
   resume: ResumePoint | null,
   handlers: SessionAttachment,
-): () => void {
+): SessionAttachmentHandle {
   let cancelled = false
+  /** The daemon connection of the current attachment, while it is open. */
+  let current: DaemonClient | null = null
   let cleanup = () => {}
   /** The resume point after the last start or event forwarded to the handlers. */
   let point: ResumePoint | null = resume
@@ -180,6 +211,7 @@ function attachSession(
     let closed = false
     const client = await ctx.getDaemonClient()
     if (cancelled) return
+    current = client
     const onEvent = (event: SessionEvent) => {
       // Anything before the attach reply is already included in its start.
       if (attaching || cancelled || closed) return
@@ -212,6 +244,7 @@ function attachSession(
     const listeners = observers.get(sessionId) ?? new Set<() => void>()
     const onClose = () => {
       closed = true
+      if (current === client) current = null
       client.off(eventName, onEvent)
       client.off("resize", onResize)
       cleanup = () => {}
@@ -264,9 +297,18 @@ function attachSession(
   }
   run(resume, false)
 
-  return () => {
-    cancelled = true
-    cleanup()
+  return {
+    detach: () => {
+      cancelled = true
+      cleanup()
+    },
+    snapshot: async (onStart) => {
+      const client = current
+      if (client === null) throw new Error("not attached to the daemon")
+      await client.attach(sessionId, null, (result) => {
+        if (!cancelled) onStart(result)
+      })
+    },
   }
 }
 
@@ -293,6 +335,7 @@ export const terminalRouter = router({
     ctx.activityMonitor.userInput(input.sessionId, input.data)
     if (input.clientId !== undefined) {
       typingMap(client).set(input.sessionId, { clientId: input.clientId, at: Date.now() })
+      lastTypedAt.set(input.sessionId, Date.now())
     }
     await client.write(input.sessionId, input.data)
     ctx.caffeine.markTerminalActivity()
@@ -324,6 +367,7 @@ export const terminalRouter = router({
     const client = await ctx.getDaemonClient()
     await client.kill(input.sessionId)
     typingMap(client).delete(input.sessionId)
+    lastTypedAt.delete(input.sessionId)
     return { ok: true as const }
   }),
 
@@ -343,7 +387,7 @@ export const terminalRouter = router({
     observable<TerminalEvent>((emit) => {
       // Raw PTY bytes can split a UTF-8 character across chunks.
       const decoder = new TextDecoder()
-      return attachSession(ctx, input.sessionId, null, {
+      const attachment = attachSession(ctx, input.sessionId, null, {
         onStart: ({ start }) => {
           const screen = start.mode === "snapshot" ? start.screen : ""
           const chunk = screen + decoder.decode(start.bytes, { stream: true })
@@ -360,19 +404,41 @@ export const terminalRouter = router({
         },
         onError: (error) => emit.error(error),
       })
+      return attachment.detach
     }),
   ),
 
   /**
-   * One session's output for clients, with resume (see {@link TerminalOutput}).
-   * Each event is `tracked()` with the resume point after it. The client owns
-   * its resume point (the bytes its emulator consumed) and subscribes again
-   * with it after a drop; tRPC's own `lastEventId` is ignored, because it is
-   * the last received event, not the last consumed one. An async generator,
-   * because tRPC types `tracked()` events only for generators; clients reach
-   * it over WebSocket only, never over the IPC link.
+   * The client applied every byte before `offset` on stream `streamId` (sent
+   * on the terminal socket, so it reaches the connection that carries the
+   * stream). Frees that much of the stream's window and the connection's cap.
+   * `known` is false for a stream not open on this connection (ended).
+   */
+  ack: publicProcedure.input(ackInput).mutation(({ ctx, input }) => {
+    const known =
+      ctx.connection?.outputFlow.ack(input.streamId, input.offset, input.holdSkip) ?? false
+    return { ok: true as const, known }
+  }),
+
+  /**
+   * One session's output for clients, with resume (see {@link TerminalOutput})
+   * and flow control (`outputFlow.ts`): the client acks what its emulator
+   * applied (`terminal.ack`); the stream sends while its window and the
+   * connection's cap have room, and skips to the latest screen when its
+   * backlog overflows. Each event is `tracked()` with the resume point after
+   * it. The client owns its resume point (the bytes its emulator consumed) and
+   * subscribes again with it after a drop; tRPC's own `lastEventId` is
+   * ignored, because it is the last received event, not the last consumed one.
+   * An async generator, because tRPC types `tracked()` events only for
+   * generators; clients reach it over WebSocket only, never over the IPC link.
    */
   output: publicProcedure.input(outputInput).subscription(async function* ({ ctx, input, signal }) {
+    const connection = ctx.connection
+    if (connection === undefined) {
+      throw new Error(
+        "terminal.output needs a WebSocket client: its flow control runs on client acks",
+      )
+    }
     let generation = ""
     let offset = 0
     let revision = 0
@@ -388,11 +454,13 @@ export const terminalRouter = router({
       ended = true
       wake()
     }
-    const detach = attachSession(ctx, input.sessionId, input.resume, {
-      onStart: (result) => {
+    const deliver = (item: FlowItem): void => {
+      if (ended) return
+      if (item.kind === "start") {
+        const { result } = item
+        const { start } = result
         generation = result.generation
         revision = result.revision
-        const { start } = result
         offset = start.offset + start.bytes.length
         const common = {
           type: "start" as const,
@@ -408,35 +476,66 @@ export const terminalRouter = router({
             ? { ...common, mode: "snapshot", screen: start.screen }
             : { ...common, mode: "replay" },
         )
+      } else if (item.kind === "data") {
+        offset = item.offset + item.bytes.length
+        send({ type: "data", offset: item.offset, base64: item.bytes.toString("base64") })
+      } else if (item.kind === "resize") {
+        revision = item.revision
+        send({
+          type: "resize",
+          offset: item.offset,
+          revision: item.revision,
+          cols: item.cols,
+          rows: item.rows,
+        })
+      } else {
+        send({ type: "exit", exitCode: item.exitCode, signal: item.signal })
+        end()
+      }
+    }
+    /** Fallback: the send queue passed the old 4 MiB limit despite flow control. */
+    const behind = (): void => {
+      console.warn(
+        `[pi-lab] terminal ${input.sessionId}: ${connection.queuedBytes()} bytes queued for a client (over ${OUTPUT_QUEUE_LIMIT_BYTES}); sent behind`,
+      )
+      connection.sentBehind()
+      send({ type: "behind" })
+      end()
+    }
+    const stream = connection.outputFlow.open({
+      streamId: input.streamId,
+      sessionId: input.sessionId,
+      holdSkip: input.holdSkip,
+      typedAt: () => lastTypedAt.get(input.sessionId) ?? null,
+      deliver,
+      requestSnapshot: () => {
+        attachment
+          .snapshot((result) => stream.snapshotReady(result))
+          .catch((error: unknown) => {
+            // The daemon connection closed, or the session went away: start over from the client's point.
+            const message = error instanceof Error ? error.message : String(error)
+            console.warn(
+              `[pi-lab] terminal ${input.sessionId}: skip snapshot failed (${message}); sent behind`,
+            )
+            stream.snapshotFailed()
+            if (!ended) {
+              connection.sentBehind()
+              send({ type: "behind" })
+              end()
+            }
+          })
       },
+    })
+    const attachment = attachSession(ctx, input.sessionId, input.resume, {
+      onStart: (result) => stream.push({ kind: "start", result }),
       onEvent: (event) => {
         if (ended) return
-        if (event.kind === "exit") {
-          send({ type: "exit", exitCode: event.exitCode, signal: event.signal })
-          end()
+        if (event.kind === "data") ctx.caffeine.markTerminalActivity()
+        if (event.kind !== "exit" && connection.queuedBytes() > OUTPUT_QUEUE_LIMIT_BYTES) {
+          behind()
           return
         }
-        // A slow reader: stop sending to this connection and let it resubscribe.
-        if ((ctx.connection?.queuedBytes() ?? 0) > OUTPUT_QUEUE_LIMIT_BYTES) {
-          ctx.connection?.sentBehind()
-          send({ type: "behind" })
-          end()
-          return
-        }
-        if (event.kind === "data") {
-          ctx.caffeine.markTerminalActivity()
-          offset = event.offset + event.bytes.length
-          send({ type: "data", offset: event.offset, base64: event.bytes.toString("base64") })
-        } else {
-          revision = event.revision
-          send({
-            type: "resize",
-            offset: event.offset,
-            revision: event.revision,
-            cols: event.cols,
-            rows: event.rows,
-          })
-        }
+        stream.push(event)
       },
       onError: (error) => {
         failure = error
@@ -461,7 +560,8 @@ export const terminalRouter = router({
       }
     } finally {
       signal?.removeEventListener("abort", onAbort)
-      detach()
+      stream.close()
+      attachment.detach()
     }
   }),
 })

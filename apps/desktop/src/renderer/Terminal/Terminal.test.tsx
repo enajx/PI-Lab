@@ -7,6 +7,11 @@ const xtermHarness = vi.hoisted(() => ({
   customKeyHandler: null as ((event: KeyboardEvent) => boolean) | null,
   dataHandler: null as ((data: string) => void) | null,
   writes: [] as string[],
+  selectionHandler: null as (() => void) | null,
+  scrollHandler: null as (() => void) | null,
+  hasSelection: false,
+  viewportY: 0,
+  baseY: 0,
 }))
 
 vi.mock("@xterm/addon-fit", () => ({
@@ -48,6 +53,24 @@ vi.mock("@xterm/xterm", () => ({
       xtermHarness.dataHandler = handler
       return { dispose: () => {} }
     }
+
+    hasSelection(): boolean {
+      return xtermHarness.hasSelection
+    }
+
+    get buffer() {
+      return { active: { viewportY: xtermHarness.viewportY, baseY: xtermHarness.baseY } }
+    }
+
+    onSelectionChange(handler: () => void): { dispose: () => void } {
+      xtermHarness.selectionHandler = handler
+      return { dispose: () => {} }
+    }
+
+    onScroll(handler: () => void): { dispose: () => void } {
+      xtermHarness.scrollHandler = handler
+      return { dispose: () => {} }
+    }
   },
 }))
 
@@ -73,6 +96,11 @@ describe("Terminal macOS custom key integration", () => {
     xtermHarness.customKeyHandler = null
     xtermHarness.dataHandler = null
     xtermHarness.writes.length = 0
+    xtermHarness.selectionHandler = null
+    xtermHarness.scrollHandler = null
+    xtermHarness.hasSelection = false
+    xtermHarness.viewportY = 0
+    xtermHarness.baseY = 0
   })
 
   test("writes a mapped key once and leaves plain Enter to xterm", async () => {
@@ -87,7 +115,7 @@ describe("Terminal macOS custom key integration", () => {
       },
     } as unknown as PiLabTrpcClient
 
-    render(<Terminal client={client} inputKind="agent" sessionId="agent-session" />)
+    render(<Terminal client={client} inputKind="agent" sessionId="agent-session" visible />)
     await waitFor(() => expect(xtermHarness.customKeyHandler).not.toBeNull())
     await waitFor(() => expect(xtermHarness.dataHandler).not.toBeNull())
 
@@ -126,7 +154,7 @@ describe("Terminal macOS custom key integration", () => {
         resize: { mutate: vi.fn(async () => ({ ok: true as const })) },
       },
     } as unknown as PiLabTrpcClient
-    render(<Terminal client={client} inputKind="terminal" sessionId="input-failure" />)
+    render(<Terminal client={client} inputKind="terminal" sessionId="input-failure" visible />)
     await waitFor(() => expect(xtermHarness.dataHandler).not.toBeNull())
     xtermHarness.dataHandler?.("a")
     xtermHarness.dataHandler?.("b")
@@ -162,7 +190,7 @@ describe("Terminal macOS custom key integration", () => {
       },
     } as unknown as PiLabTrpcClient
 
-    render(<Terminal client={client} inputKind="terminal" sessionId="agent-session" />)
+    render(<Terminal client={client} inputKind="terminal" sessionId="agent-session" visible />)
     await waitFor(() => expect(errorHandler.current).not.toBeNull())
     errorHandler.current?.({
       message: "daemon unavailable",
@@ -188,7 +216,7 @@ describe("Terminal macOS custom key integration", () => {
     } as unknown as PiLabTrpcClient
 
     const { getByTestId } = render(
-      <Terminal client={client} inputKind="terminal" sessionId="folder-session" />,
+      <Terminal client={client} inputKind="terminal" sessionId="folder-session" visible />,
     )
     await waitFor(() => expect(xtermHarness.dataHandler).not.toBeNull())
     fireEvent.drop(getByTestId("terminal"), {
@@ -222,11 +250,12 @@ describe("Terminal macOS custom key integration", () => {
             return { unsubscribe: () => {} }
           },
         },
+        ack: { mutate: vi.fn(async () => ({ ok: true as const, known: true })) },
         write: { mutate: vi.fn(async () => ({ ok: true as const })) },
         resize: { mutate: resize },
       },
     } as unknown as PiLabTrpcClient
-    render(<Terminal client={client} inputKind="terminal" sessionId="resume-session" />)
+    render(<Terminal client={client} inputKind="terminal" sessionId="resume-session" visible />)
     await waitFor(() => expect(handlers).toHaveLength(1))
     const first = handlers[0]
     if (!first) throw new Error("no subscription")
@@ -258,5 +287,92 @@ describe("Terminal macOS custom key integration", () => {
     first.onConnectionStateChange({ state: "connecting", error: new Error("WebSocket closed") })
     await waitFor(() => expect(handlers).toHaveLength(2))
     expect(inputs).toEqual([null, { generation: "g1", offset: 8, revision: 0 }])
+  })
+
+  // Mocked xterm and tRPC client: checks the pane's wiring only. The real
+  // flow control runs through the server in server/terminalConnection.test.ts.
+  test("a hidden pane ends its subscription and resumes from its consumed point when shown; a selection or a scrolled-up view holds skips", async () => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock)
+    const inputs: { resume: unknown; streamId: string; holdSkip: boolean }[] = []
+    const unsubscribed: number[] = []
+    const handlers: {
+      onData: (event: { id: string; data: unknown }) => void
+      onConnectionStateChange: (state: { state: string; error: unknown }) => void
+    }[] = []
+    const ack = vi.fn(async () => ({ ok: true as const, known: true }))
+    const client = {
+      terminal: {
+        output: {
+          subscribe: (input: (typeof inputs)[number], observer: (typeof handlers)[number]) => {
+            const index = inputs.length
+            inputs.push(input)
+            handlers.push(observer)
+            return { unsubscribe: () => unsubscribed.push(index) }
+          },
+        },
+        ack: { mutate: ack },
+        write: { mutate: vi.fn(async () => ({ ok: true as const })) },
+        resize: { mutate: vi.fn(async () => ({ ok: true as const, applied: true })) },
+      },
+    } as unknown as PiLabTrpcClient
+    const view = render(
+      <Terminal client={client} inputKind="terminal" sessionId="hidden-session" visible />,
+    )
+    await waitFor(() => expect(handlers).toHaveLength(1))
+    handlers[0]?.onData({
+      id: "g1:5:0",
+      data: {
+        type: "start",
+        mode: "snapshot",
+        generation: "g1",
+        revision: 0,
+        cols: 80,
+        rows: 24,
+        offset: 0,
+        screen: "",
+        base64: btoa("hello"),
+      },
+    })
+    // The applied start is acked on the terminal's stream.
+    await waitFor(() =>
+      expect(ack).toHaveBeenLastCalledWith({
+        streamId: inputs[0]?.streamId,
+        offset: 5,
+        holdSkip: false,
+      }),
+    )
+
+    // A selection holds skips; clearing it and being at the bottom releases them.
+    xtermHarness.hasSelection = true
+    xtermHarness.selectionHandler?.()
+    expect(ack).toHaveBeenLastCalledWith({
+      streamId: inputs[0]?.streamId,
+      offset: 5,
+      holdSkip: true,
+    })
+    xtermHarness.hasSelection = false
+    xtermHarness.baseY = 40
+    xtermHarness.viewportY = 10
+    xtermHarness.scrollHandler?.()
+    expect(ack).toHaveBeenCalledTimes(2)
+    xtermHarness.viewportY = 40
+    xtermHarness.scrollHandler?.()
+    expect(ack).toHaveBeenLastCalledWith({
+      streamId: inputs[0]?.streamId,
+      offset: 5,
+      holdSkip: false,
+    })
+
+    view.rerender(
+      <Terminal client={client} inputKind="terminal" sessionId="hidden-session" visible={false} />,
+    )
+    expect(unsubscribed).toEqual([0])
+    expect(handlers).toHaveLength(1)
+    view.rerender(
+      <Terminal client={client} inputKind="terminal" sessionId="hidden-session" visible />,
+    )
+    await waitFor(() => expect(handlers).toHaveLength(2))
+    expect(inputs[1]?.resume).toEqual({ generation: "g1", offset: 5, revision: 0 })
+    expect(inputs[1]?.streamId).not.toBe(inputs[0]?.streamId)
   })
 })

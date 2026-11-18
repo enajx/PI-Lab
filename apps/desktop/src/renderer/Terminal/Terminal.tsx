@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { type ITheme, Terminal as XTerm } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { type CSSProperties, useEffect, useRef } from "react"
+import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { registerDictationTarget } from "../dictation/targets"
 import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
@@ -43,6 +43,11 @@ const CLIENT_ID = crypto.randomUUID()
  * reload; killing here would defeat that survival contract.
  *
  * Scrolling is xterm's own viewport, not Radix `ScrollArea`.
+ *
+ * Flow control (terminalStream.ts): a pane that is not shown (`visible` false,
+ * or the window hidden) ends its subscription and resumes when shown. While
+ * the user has a selection or has scrolled up, the server holds a skip to the
+ * latest screen instead of replacing the view.
  */
 
 interface TerminalProps {
@@ -71,10 +76,39 @@ interface TerminalProps {
   command?: string
   /** Extra argv for {@link command} (spawn mode only). */
   args?: string[]
+  /** Whether the pane is on screen (a dock tab in front); hidden panes get no output. */
+  visible: boolean
 }
 
-export function Terminal({ client, inputKind, sessionId, cwd, command, args }: TerminalProps) {
+/** Follows `document.visibilityState` (a minimised or hidden window). */
+function useDocumentVisible(): boolean {
+  const [visible, setVisible] = useState(document.visibilityState !== "hidden")
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState !== "hidden")
+    document.addEventListener("visibilitychange", update)
+    return () => document.removeEventListener("visibilitychange", update)
+  }, [])
+  return visible
+}
+
+export function Terminal({
+  client,
+  inputKind,
+  sessionId,
+  cwd,
+  command,
+  args,
+  visible,
+}: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const streamRef = useRef<TerminalStream | null>(null)
+  const documentVisible = useDocumentVisible()
+  const shown = visible && documentVisible
+  const shownRef = useRef(shown)
+  shownRef.current = shown
+  useEffect(() => {
+    streamRef.current?.setVisible(shown)
+  }, [shown])
 
   // Effect deps are intentionally empty: a terminal pane binds to one session for
   // its lifetime. Options are captured in a ref so changing a prop never
@@ -131,6 +165,7 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     /** The PTY size as the stream last reported it; null until the first start. */
     let ptySize: { cols: number; rows: number } | null = null
     let inputDisposable: { dispose: () => void } | null = null
+    const viewDisposables: { dispose: () => void }[] = []
     let resizeObserver: ResizeObserver | null = null
     let unregisterDictation: (() => void) | null = null
     const failedTransports = new Set<"write" | "resize">()
@@ -236,10 +271,10 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       // Stream daemon output into xterm, resuming after dropped connections.
       stream = new TerminalStream({
         subscribe: (input, handlers) => trpc.terminal.output.subscribe(input, handlers),
+        ack: (input) => trpc.terminal.ack.mutate(input),
         sessionId: id,
         emulator: {
           write: (data, applied) => xterm.write(data, applied),
-          reset: () => xterm.reset(),
           resize: (cols, rows) => xterm.resize(cols, rows),
         },
         dropPolicy: "keep",
@@ -256,7 +291,16 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
           xterm.write(`\r\n[pi-lab] terminal connection failed: ${message}\r\n`)
         },
       })
+      streamRef.current = stream
+      stream.setVisible(shownRef.current)
       stream.open()
+
+      // Hold skips while the user selects text or reads scrolled-up output.
+      const updateHoldSkip = () => {
+        const buffer = xterm.buffer.active
+        stream?.setHoldSkip(xterm.hasSelection() || buffer.viewportY < buffer.baseY)
+      }
+      viewDisposables.push(xterm.onSelectionChange(updateHoldSkip), xterm.onScroll(updateHoldSkip))
 
       // Forward keystrokes (and pasted text) to the PTY's stdin.
       inputDisposable = xterm.onData(forwardInput)
@@ -321,10 +365,12 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       resizeObserver?.disconnect()
       focusTarget?.removeEventListener("focus", takeSize)
       inputDisposable?.dispose()
+      for (const disposable of viewDisposables) disposable.dispose()
       unregisterDictation?.()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
       // session (it is NOT killed), so the PTY persists across reload.
       stream?.close()
+      streamRef.current = null
       xterm.dispose()
       xtermRef.current = null
     }

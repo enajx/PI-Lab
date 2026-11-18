@@ -385,7 +385,7 @@ export function CentralPanel({
             onClose={() => controller.closeSession(session.id)}
           />
         ),
-        content: () => (
+        content: ({ visible }) => (
           <div
             data-testid="central-session"
             data-session-kind={session.kind}
@@ -396,6 +396,7 @@ export function CentralPanel({
               client={client}
               inputKind={session.kind}
               sessionId={session.sessionId}
+              visible={visible}
             />
           </div>
         ),
@@ -497,13 +498,14 @@ export function CentralPanel({
                 onClose={controller.closeBelowEditorRun}
               />
             ),
-            content: () => (
+            content: ({ visible }) => (
               <div data-testid="editor-run-terminal" className="flex min-h-0 flex-1 flex-col">
                 <Terminal
                   key={belowEditorRun.sessionId}
                   client={client}
                   inputKind="terminal"
                   sessionId={belowEditorRun.sessionId}
+                  visible={visible}
                 />
               </div>
             ),

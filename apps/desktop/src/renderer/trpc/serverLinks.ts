@@ -23,6 +23,8 @@ export function reconnectDelayMs(attemptIndex: number): number {
 
 /** The procedure whose subscriptions go over the terminal socket. */
 export const TERMINAL_OUTPUT_PATH = "terminal.output"
+/** Output acks go over the terminal socket too: the server finds the stream on that connection. */
+export const TERMINAL_ACK_PATH = "terminal.ack"
 
 export interface ServerSocketsOptions {
   /** The server endpoint with its token; read again on every connection attempt. */
@@ -53,8 +55,9 @@ function socket(name: string, options: ServerSocketsOptions): TRPCWebSocketClien
 
 /**
  * Two tRPC WebSocket clients to one server, with the same endpoint and token:
- * one for calls and status, opened at once; one for terminal output, opened
- * when the first terminal subscribes and shared by every terminal after it.
+ * one for calls and status, opened at once; one for terminal output and its
+ * acks, opened when the first terminal subscribes and shared by every terminal
+ * after it.
  * tRPC reconnects each socket with {@link reconnectDelayMs}; terminals
  * resubscribe themselves (renderer/Terminal/terminalStream.ts).
  */
@@ -79,7 +82,9 @@ export function createServerSockets<TRouter extends AnyRouter>(
   }
   return {
     link: splitLink<TRouter>({
-      condition: (op) => op.type === "subscription" && op.path === TERMINAL_OUTPUT_PATH,
+      condition: (op) =>
+        (op.type === "subscription" && op.path === TERMINAL_OUTPUT_PATH) ||
+        (op.type === "mutation" && op.path === TERMINAL_ACK_PATH),
       true: terminalLink,
       false: callsLink,
     }),

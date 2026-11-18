@@ -5,6 +5,7 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws"
 import { type WebSocket, WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
 import { serverRouter } from "../main/trpc/serverRouter"
+import { ConnectionFlow, type ConnectionFlowStats } from "../main/trpc/terminal/outputFlow"
 import { IDENTITY_NONCE, IDENTITY_PATH, identityProof, TOKEN_HEADER } from "./access"
 import type { DeviceAccess } from "./devices"
 
@@ -50,8 +51,9 @@ export const SERVER_PONG_WAIT_MS = 3_000
 /**
  * Test mode only (`GET /test/connections`, for the flood test): per WebSocket,
  * the bytes queued now, the most seen queued when terminal output was checked
- * against the limit, and when `behind` was sent (epoch ms). The last 200
- * connections are kept, closed ones included.
+ * against the limit, when `behind` was sent (epoch ms), and the terminal
+ * output flow control (cap, bytes in flight, skips, open streams). The last
+ * 200 connections are kept, closed ones included.
  */
 export interface ConnectionStats {
   id: number
@@ -60,7 +62,11 @@ export interface ConnectionStats {
   queuedBytes: number
   peakQueuedBytes: number
   behindAt: number[]
+  output: ConnectionFlowStats
 }
+
+/** Stats kept per socket; the flow's numbers are read when asked. */
+type ConnectionEntry = Omit<ConnectionStats, "output"> & { flow: ConnectionFlow }
 
 const KEPT_CONNECTION_STATS = 200
 
@@ -162,20 +168,21 @@ async function handleHttp(
  */
 export function listen(options: ListenOptions): Promise<ListeningServer> {
   const wss = new WebSocketServer({ noServer: true })
-  const stats = new Map<WebSocket, ConnectionStats>()
+  const stats = new Map<WebSocket, ConnectionEntry>()
   let nextStatsId = 1
   /** Stats for this socket, recorded only with test routes on. */
-  const statsFor = (ws: WebSocket): ConnectionStats | null => {
+  const statsFor = (ws: WebSocket, flow: ConnectionFlow): ConnectionEntry | null => {
     if (!options.testRoutes) return null
     let entry = stats.get(ws)
     if (!entry) {
-      const opened: ConnectionStats = {
+      const opened: ConnectionEntry = {
         id: nextStatsId++,
         openedAt: Date.now(),
         closedAt: null,
         queuedBytes: 0,
         peakQueuedBytes: 0,
         behindAt: [],
+        flow,
       }
       entry = opened
       stats.set(ws, opened)
@@ -190,7 +197,8 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
     wss,
     router: serverRouter,
     createContext: ({ res }) => {
-      const entry = statsFor(res)
+      const outputFlow = new ConnectionFlow()
+      const entry = statsFor(res, outputFlow)
       return {
         ...options.createContext(),
         connection: {
@@ -200,6 +208,7 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
             return queued
           },
           sentBehind: () => entry?.behindAt.push(Date.now()),
+          outputFlow,
         },
       }
     },
@@ -210,9 +219,10 @@ export function listen(options: ListenOptions): Promise<ListeningServer> {
   }
   const http: Server = createServer((request, response) => {
     const connectionStats = (): ConnectionStats[] =>
-      [...stats.entries()].map(([ws, entry]) => ({
+      [...stats.entries()].map(([ws, { flow, ...entry }]) => ({
         ...entry,
         queuedBytes: entry.closedAt === null ? ws.bufferedAmount : 0,
+        output: flow.stats(),
       }))
     handleHttp(options, dropConnections, connectionStats, request, response).catch(
       (error: unknown) => {

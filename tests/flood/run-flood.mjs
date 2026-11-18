@@ -134,6 +134,12 @@ function provisionalValues() {
       "renderer/trpc/connectionStatus.ts",
       /DISCONNECTED_AFTER_MS = ([^\n]+)/,
     ),
+    outputWindow: sourceNumber("main/trpc/terminal/outputFlow.ts", /OUTPUT_WINDOW_BYTES = ([^\n]+)/),
+    connectionCapMax: sourceNumber("main/trpc/terminal/outputFlow.ts", /CONNECTION_CAP_MAX_BYTES = ([^\n]+)/),
+    connectionCapMin: sourceNumber("main/trpc/terminal/outputFlow.ts", /CONNECTION_CAP_MIN_BYTES = ([^\n]+)/),
+    outputBacklog: sourceNumber("main/trpc/terminal/outputFlow.ts", /OUTPUT_BACKLOG_BYTES = ([^\n]+)/),
+    outputChunk: sourceNumber("main/trpc/terminal/outputFlow.ts", /OUTPUT_CHUNK_BYTES = ([^\n]+)/),
+    drainTargetMs: sourceNumber("main/trpc/terminal/outputFlow.ts", /DRAIN_TARGET_MS = ([^\n]+)/),
     daemonTailBytes: sourceNumber(
       "../../../packages/pty-daemon/src/session.ts",
       /DEFAULT_SCROLLBACK_BYTES = ([^\n]+)/,
@@ -229,6 +235,15 @@ async function connectionStats(server) {
   })
   if (response.status !== 200) throw new Error(`GET /test/connections: HTTP ${response.status}`)
   return response.json()
+}
+
+/** Skips and the lowest output cap over the connections that carried terminal output. */
+function flowSummary(stats) {
+  const carried = stats.filter((entry) => entry.output.skips > 0 || entry.output.lowestCapBytes < entry.output.capBytes || entry.peakQueuedBytes > 0)
+  return {
+    skips: stats.reduce((sum, entry) => sum + entry.output.skips, 0),
+    capLowestKiB: carried.length ? round(Math.min(...carried.map((entry) => entry.output.lowestCapBytes)) / 1024, 0) : null,
+  }
 }
 
 /** Poll the server's connection stats every `ms`; each sample keeps the queued bytes per connection id. */
@@ -339,6 +354,7 @@ class Viewer {
     }
     this.stream = new TerminalStream({
       subscribe,
+      ack: (input) => client.trpc.terminal.ack.mutate(input),
       sessionId,
       emulator: {
         write: (data, applied) =>
@@ -346,7 +362,6 @@ class Viewer {
             applied()
             for (const listener of this.onApplied) listener(data)
           }),
-        reset: () => this.terminal.reset(),
         resize: (cols, rows) => this.terminal.resize(cols, rows),
       },
       dropPolicy,
@@ -728,6 +743,7 @@ async function floodRun({ server, baseUrl, terminals, mode, rate, seconds, extra
     serverQueuedPeakMiB: round(Math.max(0, ...stats.map((entry) => entry.peakQueuedBytes)) / MiB, 2),
     serverQueuedSampledP95MiB: round(percentile(sampledQueued, 95) / MiB, 2),
     behindSent: stats.reduce((sum, entry) => sum + entry.behindAt.length, 0),
+    ...flowSummary(stats),
     clientQueuedPeakMiB: round(Math.max(...clientQueued) / MiB, 2),
     behindReceived: viewers.reduce((sum, viewer) => sum + viewer.behindAt.length, 0),
     resubscribes: viewers.reduce((sum, viewer) => sum + viewer.subscribeAt.length - 1, 0),
@@ -1055,6 +1071,7 @@ function slowReaderRun(terminals, pauseMs) {
         pauseMs,
         serverQueuedPeakMiB: round(Math.max(0, ...stats.map((entry) => entry.peakQueuedBytes)) / MiB, 2),
         behindSent: behindTimes.length,
+        ...flowSummary(stats),
         firstBehindSentAfterPauseMs: behindTimes.length ? behindTimes[0] - pausedAtEpoch : null,
         lastBehindSentAfterPauseMs: behindTimes.length ? behindTimes.at(-1) - pausedAtEpoch : null,
         wireMiBReceivedAfterResume: round((wireBytes - wireAtResume) / MiB, 2),
