@@ -891,7 +891,7 @@ app.on("will-quit", (event) => {
   event.preventDefault()
   // Bounded, so a server that does not answer never keeps the app from quitting.
   // The quit is already approved, so exit directly instead of asking again.
-  void Promise.race([disposeRuntime(), new Promise((resolve) => setTimeout(resolve, 5_000))]).then(
+  void Promise.race([disposeRuntime(), new Promise((resolve) => setTimeout(resolve, 10_000))]).then(
     () => app.exit(0),
   )
 })

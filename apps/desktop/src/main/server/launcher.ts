@@ -148,7 +148,8 @@ function startWithLaunchd(options: LauncherOptions): void {
 /** Source and test runs: a detached child that outlives this app. */
 function startDetached(options: LauncherOptions): void {
   const log = openSync(join(options.config.dataDir, SERVER_LOG_FILE), "a")
-  const child = spawn(process.execPath, [options.serverEntry], {
+  // The data folder on the command line only names the process (for E2E cleanup and `ps`).
+  const child = spawn(process.execPath, [options.serverEntry, options.config.dataDir], {
     detached: true,
     stdio: ["ignore", log, log],
     env: { ...process.env, ...serverConfigEnv(options.config), ELECTRON_RUN_AS_NODE: "1" },

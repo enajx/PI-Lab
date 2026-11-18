@@ -158,6 +158,8 @@ test("⌘T in the project view does what the New agent button does", async () =>
   const window = await app.firstWindow()
   await openProject(window)
   await blurFocus(window)
+  // The shortcut listener comes with the central panel, which renders after the project view.
+  await expect(window.getByTestId("launcher-terminal")).toBeVisible()
   await window.keyboard.press("ControlOrMeta+t")
   // The robot button starts the remembered agent, or opens the chooser when it is not
   // detected; either is the button's own result.

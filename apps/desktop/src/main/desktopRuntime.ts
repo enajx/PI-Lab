@@ -79,6 +79,7 @@ export class DesktopRuntime {
   private tray: BackgroundTraySnapshot = { projects: [] }
   private readonly trayListeners = new Set<(snapshot: BackgroundTraySnapshot) => void>()
   private readonly unsubscribers: Array<() => void> = []
+  private connecting: Promise<void> | null = null
 
   constructor(private readonly host: DesktopRuntimeHost) {
     this.ready = new Promise((resolve, reject) => {
@@ -154,7 +155,8 @@ export class DesktopRuntime {
     const window = this.host.initialWindow()
     if (window) this.boot(window)
     try {
-      await this.connect()
+      this.connecting = this.connect()
+      await this.connecting
     } catch (error) {
       this.rejectReady(error)
       throw error
@@ -385,21 +387,39 @@ export class DesktopRuntime {
    */
   async dispose(): Promise<void> {
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe()
+    if (isTestMode && process.env.PI_LAB_TEST_RETAIN_SERVER !== "1") await this.stopTestServer()
     const connection = this.serverClient
-    if (connection && isTestMode && process.env.PI_LAB_TEST_RETAIN_SERVER !== "1") {
-      await connection.client.server.stop
-        .mutate({ stopAgents: process.env.PI_LAB_TEST_RETAIN_DAEMON !== "1" })
-        .catch((error: unknown) =>
-          console.warn(`[pi-lab] test server stop failed: ${String(error)}`),
-        )
-      // The next test launch must not find this server still shutting down.
-      const pid = this.endpoint?.pid
-      const deadline = Date.now() + 5_000
-      while (pid && processAlive(pid) && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25))
-      }
-    }
     connection?.close()
+  }
+
+  /**
+   * A test run must never leave its server behind (its data folder is deleted
+   * next), also when the app quits while it is still starting the server.
+   */
+  private async stopTestServer(): Promise<void> {
+    const bounded = (work: Promise<unknown>, ms: number) =>
+      Promise.race([work.catch(() => undefined), new Promise((resolve) => setTimeout(resolve, ms))])
+    await bounded(this.connecting ?? Promise.resolve(), 4_000)
+    const connection = this.serverClient
+    if (connection) {
+      await bounded(
+        connection.client.server.stop.mutate({
+          stopAgents: process.env.PI_LAB_TEST_RETAIN_DAEMON !== "1",
+        }),
+        3_000,
+      )
+    }
+    const pid = readDiscovery(app.getPath("userData"))?.pid ?? this.endpoint?.pid
+    if (!pid || !processAlive(pid)) return
+    if (!connection) process.kill(pid, "SIGTERM")
+    const deadline = Date.now() + 2_000
+    while (processAlive(pid) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    if (processAlive(pid)) {
+      console.warn(`[pi-lab] test server ${pid} did not stop; killing it`)
+      process.kill(pid, "SIGKILL")
+    }
   }
 }
 

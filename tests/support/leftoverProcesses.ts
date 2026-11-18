@@ -52,7 +52,11 @@ export function leftoverE2eProcesses(
   const electronPrefix = `${repoRoot}/node_modules/.bun/electron@`
   const daemonEntry = `${repoRoot}/apps/desktop/out/pty-daemon/index.js `
   const byPid = new Map(processes.map((entry) => [entry.pid, entry]))
-  const isDaemon = (entry: ProcessEntry): boolean => entry.command.includes(daemonEntry)
+  // The PI Lab server of a test app (source build or a packaged build in this
+  // repo) names its data folder after its entry, like the daemon names its socket.
+  const isDaemon = (entry: ProcessEntry): boolean =>
+    entry.command.includes(daemonEntry) ||
+    (entry.command.startsWith(`${repoRoot}/`) && entry.command.includes("/out/main/server.js "))
   const isElectron = (entry: ProcessEntry): boolean => entry.command.startsWith(electronPrefix)
   const isMain = (entry: ProcessEntry): boolean =>
     isElectron(entry) &&
