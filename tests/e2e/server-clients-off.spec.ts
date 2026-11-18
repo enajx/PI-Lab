@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -35,6 +35,7 @@ const Database = createRequire(join(DESKTOP_DIR, "package.json"))(
   "better-sqlite3",
 ) as typeof import("better-sqlite3")
 
+let rootDir: string
 let dataDir: string
 let repoDir: string
 let app: ElectronApplication | null = null
@@ -74,8 +75,12 @@ async function quitElectron(running: ElectronApplication): Promise<void> {
 }
 
 test.beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-server-off-"))
-  repoDir = join(await realpath(dataDir), "repo")
+  // The project lives next to the data folder: a packaged Alpha archives its
+  // whole data folder on the first start of a new build.
+  rootDir = await realpath(await mkdtemp(join(tmpdir(), "pi-lab-e2e-server-off-")))
+  dataDir = join(rootDir, "data")
+  await mkdir(dataDir)
+  repoDir = join(rootDir, "repo")
   await initRepo(repoDir)
 })
 
@@ -89,7 +94,7 @@ test.afterEach(async () => {
     close()
     await expect.poll(() => processAlive(discovery.pid), { timeout: 15_000 }).toBe(false)
   }
-  await rm(dataDir, { recursive: true, force: true })
+  await rm(rootDir, { recursive: true, force: true })
 })
 
 test("routine runs and agent exit is recorded while Electron is fully quit", async () => {
