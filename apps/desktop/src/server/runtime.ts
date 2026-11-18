@@ -172,7 +172,7 @@ export class ServerRuntime {
    */
   async start(onStep: (step: ServerStartStep) => void): Promise<void> {
     onStep("migrating")
-    const dbStatus = initDatabase()
+    const dbStatus = initDatabase(this.config.build)
     loadNativeLanguage(this.config.profileDir)
     console.log(
       `[pi-lab server] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"}`,

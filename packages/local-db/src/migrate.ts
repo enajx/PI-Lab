@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync, readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
+import { basename, dirname, join } from "node:path"
 import Database from "better-sqlite3"
 import { drizzle } from "drizzle-orm/better-sqlite3"
 import { migrate } from "drizzle-orm/better-sqlite3/migrator"
@@ -169,6 +169,50 @@ export function runMigrations(
   dbPath: string = resolveDbPath(),
   migrationsFolder: string = resolveMigrationsDir(),
 ): RunMigrationsResult {
+  return migrateDatabase(dbPath, migrationsFolder, null)
+}
+
+/** How many copies made before migrations are kept (newest first). */
+export const PRE_MIGRATION_COPIES_KEPT = 2
+
+/** The copy of `dbPath` made before build `build` applied its migrations. */
+export function preMigrationCopyPath(dbPath: string, build: string): string {
+  return `${dbPath}.pre-${build}`
+}
+
+/**
+ * {@link runMigrations} for the server: when the database exists and has
+ * migrations pending, first copy it (SQLite-consistent, `VACUUM INTO`) to
+ * `<db>.pre-<build>`, so a rollback to the previous version can open it.
+ * Keeps the newest {@link PRE_MIGRATION_COPIES_KEPT} copies.
+ */
+export function runMigrationsWithCopy(
+  dbPath: string,
+  migrationsFolder: string,
+  build: string,
+): RunMigrationsResult {
+  return migrateDatabase(dbPath, migrationsFolder, build)
+}
+
+/** Copy the database before migrations and delete older copies. */
+function copyBeforeMigrations(sqlite: Database.Database, dbPath: string, build: string): void {
+  const destination = preMigrationCopyPath(dbPath, build)
+  rmSync(destination, { force: true })
+  sqlite.prepare("VACUUM main INTO ?").run(destination)
+  const dir = dirname(dbPath)
+  const prefix = `${basename(dbPath)}.pre-`
+  const copies = readdirSync(dir)
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => join(dir, name))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+  for (const old of copies.slice(PRE_MIGRATION_COPIES_KEPT)) rmSync(old, { force: true })
+}
+
+function migrateDatabase(
+  dbPath: string,
+  migrationsFolder: string,
+  copyBuild: string | null,
+): RunMigrationsResult {
   let opened: OpenDatabaseResult
   try {
     opened = openDatabase(dbPath)
@@ -187,6 +231,7 @@ export function runMigrations(
     verifySchema(sqlite, migrations.slice(0, previousCount))
     let appliedCount = previousCount
     if (previousCount < migrations.length) {
+      if (copyBuild !== null && previousCount > 0) copyBeforeMigrations(sqlite, dbPath, copyBuild)
       migrate(db, { migrationsFolder })
       appliedCount = verifyJournal(sqlite, migrations)
       verifySchema(sqlite, migrations)
