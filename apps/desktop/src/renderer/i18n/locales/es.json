@@ -1326,5 +1326,12 @@
   "Reconnecting": "Reconectando",
   "Disconnected": "Desconectado",
   "Server connection": "Conexión con el servidor",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "La conexión entre esta ventana y el servidor de PI Lab. Tras una caída se vuelve a conectar sola."
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "La conexión entre esta ventana y el servidor de PI Lab. Tras una caída se vuelve a conectar sola.",
+  "Terminal input failed": "No se pudo enviar la entrada al terminal",
+  "Terminal resize failed": "No se pudo cambiar el tamaño del terminal",
+  "The terminal is not ready for dropped paths": "El terminal aún no está listo para rutas soltadas",
+  "Could not read a dropped file path": "No se pudo leer la ruta de un archivo soltado",
+  "Session exited": "La sesión terminó",
+  "Terminal connection failed": "Falló la conexión del terminal",
+  "Failed to start terminal": "No se pudo iniciar el terminal"
 }

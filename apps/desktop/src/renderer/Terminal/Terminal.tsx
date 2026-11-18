@@ -3,6 +3,7 @@ import { type ITheme, Terminal as XTerm } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { registerDictationTarget } from "../dictation/targets"
+import { useTranslate } from "../i18n/language"
 import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
 import { TerminalStream } from "./terminalStream"
@@ -80,6 +81,19 @@ interface TerminalProps {
   visible: boolean
 }
 
+/**
+ * Notices about the pane, shown in a banner above xterm. They are never written
+ * into xterm: its screen must hold only the daemon's bytes, or resume and
+ * snapshots would differ from the daemon's emulator.
+ */
+type NoticeKind = "write" | "resize" | "drop" | "exit" | "connection" | "start"
+
+/** One banner line: fixed English wording (translated when shown) and an optional detail. */
+interface Notice {
+  text: string
+  detail: string | null
+}
+
 /** Follows `document.visibilityState` (a minimised or hidden window). */
 function useDocumentVisible(): boolean {
   const [visible, setVisible] = useState(document.visibilityState !== "hidden")
@@ -101,6 +115,8 @@ export function Terminal({
   visible,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const t = useTranslate()
+  const [notices, setNotices] = useState<Partial<Record<NoticeKind, Notice>>>({})
   const streamRef = useRef<TerminalStream | null>(null)
   const documentVisible = useDocumentVisible()
   const shown = visible && documentVisible
@@ -168,19 +184,34 @@ export function Terminal({
     const viewDisposables: { dispose: () => void }[] = []
     let resizeObserver: ResizeObserver | null = null
     let unregisterDictation: (() => void) | null = null
-    const failedTransports = new Set<"write" | "resize">()
+    const showNotice = (kind: NoticeKind, text: string, detail: string | null): void => {
+      if (cancelled) return
+      setNotices((current) => ({ ...current, [kind]: { text, detail } }))
+    }
+    const clearNotice = (kind: NoticeKind): void => {
+      if (cancelled) return
+      setNotices((current) => {
+        if (current[kind] === undefined) return current
+        const next = { ...current }
+        delete next[kind]
+        return next
+      })
+    }
+    const errorText = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error)
     const reportTransportFailure = (operation: "write" | "resize", error: unknown): void => {
-      if (cancelled || failedTransports.has(operation)) return
-      failedTransports.add(operation)
-      const message = error instanceof Error ? error.message : String(error)
-      xterm.write(`\r\n[pi-lab] terminal ${operation} failed: ${message}\r\n`)
+      showNotice(
+        operation,
+        operation === "write" ? "Terminal input failed" : "Terminal resize failed",
+        errorText(error),
+      )
     }
 
     /** Forward one input chunk exactly once, whether xterm generated or custom-mapped. */
     const forwardInput = (data: string): void => {
       if (cancelled || !sessionId) return
       void trpc.terminal.write.mutate({ sessionId, data, clientId: CLIENT_ID }).then(
-        () => failedTransports.delete("write"),
+        () => clearNotice("write"),
         (error: unknown) => reportTransportFailure("write", error),
       )
     }
@@ -192,20 +223,21 @@ export function Terminal({
       event.preventDefault()
       event.stopPropagation()
       if (!sessionId) {
-        xterm.write("\r\n[pi-lab] terminal is not ready for dropped paths\r\n")
+        showNotice("drop", "The terminal is not ready for dropped paths", null)
         return
       }
       let paths: string[]
       try {
         paths = files.map((file) => window.piLab?.getPathForFile?.(file) ?? "")
       } catch {
-        xterm.write("\r\n[pi-lab] could not read a dropped file path\r\n")
+        showNotice("drop", "Could not read a dropped file path", null)
         return
       }
       if (paths.some((path) => path.length === 0)) {
-        xterm.write("\r\n[pi-lab] could not read a dropped file path\r\n")
+        showNotice("drop", "Could not read a dropped file path", null)
         return
       }
+      clearNotice("drop")
       forwardInput(paths.map(quoteShellPath).join(" "))
       xterm.focus()
     }
@@ -254,7 +286,7 @@ export function Terminal({
       void trpc.terminal.resize
         .mutate({ sessionId, cols: proposed.cols, rows: proposed.rows, clientId: CLIENT_ID })
         .then(
-          () => failedTransports.delete("resize"),
+          () => clearNotice("resize"),
           (error: unknown) => reportTransportFailure("resize", error),
         )
     }
@@ -283,12 +315,10 @@ export function Terminal({
           requestAnimationFrame(fitView)
         },
         onExit: (exitCode) => {
-          if (cancelled) return
-          xterm.write(`\r\n[pi-lab] session exited (code ${exitCode ?? "?"})\r\n`)
+          showNotice("exit", "Session exited", `code ${exitCode ?? "?"}`)
         },
         onError: (message) => {
-          if (cancelled) return
-          xterm.write(`\r\n[pi-lab] terminal connection failed: ${message}\r\n`)
+          showNotice("connection", "Terminal connection failed", message)
         },
       })
       streamRef.current = stream
@@ -349,9 +379,7 @@ export function Terminal({
           rows: xterm.rows,
         })
       } catch (error) {
-        if (!cancelled) {
-          xterm.write(`\r\n[pi-lab] failed to start terminal: ${String(error)}\r\n`)
-        }
+        showNotice("start", "Failed to start terminal", errorText(error))
         return
       }
       if (cancelled) return
@@ -376,14 +404,45 @@ export function Terminal({
     }
   }, [])
 
+  const shownNotices = Object.entries(notices) as [NoticeKind, Notice][]
   return (
-    <div
-      ref={containerRef}
-      data-testid="terminal"
-      data-input-kind={inputKind}
-      data-session-id={sessionId}
-      style={{ ...paneStyle, background: "var(--background)" }}
-    />
+    <div style={{ ...paneStyle, display: "flex", flexDirection: "column" }}>
+      {shownNotices.length > 0 ? (
+        <div
+          role="alert"
+          data-testid="terminal-notice"
+          className="flex shrink-0 flex-col gap-1 border-b px-3 py-1.5 text-xs"
+        >
+          {shownNotices.map(([kind, notice]) => (
+            <div key={kind} className="flex items-center gap-2">
+              <span className="flex-1">
+                {notice.detail === null ? t(notice.text) : `${t(notice.text)}: ${notice.detail}`}
+              </span>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() =>
+                  setNotices((current) => {
+                    const next = { ...current }
+                    delete next[kind]
+                    return next
+                  })
+                }
+              >
+                {t("Dismiss")}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div
+        ref={containerRef}
+        data-testid="terminal"
+        data-input-kind={inputKind}
+        data-session-id={sessionId}
+        style={{ ...paneStyle, flex: 1, background: "var(--background)" }}
+      />
+    </div>
   )
 }
 

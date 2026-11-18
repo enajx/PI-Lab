@@ -1326,5 +1326,12 @@
   "Reconnecting": "Kobler til på nytt",
   "Disconnected": "Frakoblet",
   "Server connection": "Servertilkobling",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "Tilkoblingen mellom dette vinduet og PI Lab-serveren. Etter et brudd kobler den seg til igjen av seg selv."
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "Tilkoblingen mellom dette vinduet og PI Lab-serveren. Etter et brudd kobler den seg til igjen av seg selv.",
+  "Terminal input failed": "Inndata til terminalen mislyktes",
+  "Terminal resize failed": "Endring av terminalstørrelse mislyktes",
+  "The terminal is not ready for dropped paths": "Terminalen er ikke klar for slupne stier",
+  "Could not read a dropped file path": "Kunne ikke lese stien til en sluppet fil",
+  "Session exited": "Økten ble avsluttet",
+  "Terminal connection failed": "Terminaltilkoblingen mislyktes",
+  "Failed to start terminal": "Kunne ikke starte terminalen"
 }

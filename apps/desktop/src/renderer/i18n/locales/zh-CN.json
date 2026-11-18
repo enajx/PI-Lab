@@ -1326,5 +1326,12 @@
   "Reconnecting": "正在重新连接",
   "Disconnected": "已断开",
   "Server connection": "服务器连接",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "此窗口与 PI Lab 服务器之间的连接。断开后会自动重新连接。"
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "此窗口与 PI Lab 服务器之间的连接。断开后会自动重新连接。",
+  "Terminal input failed": "终端输入失败",
+  "Terminal resize failed": "终端调整大小失败",
+  "The terminal is not ready for dropped paths": "终端尚未准备好接收拖放的路径",
+  "Could not read a dropped file path": "无法读取拖放文件的路径",
+  "Session exited": "会话已退出",
+  "Terminal connection failed": "终端连接失败",
+  "Failed to start terminal": "无法启动终端"
 }

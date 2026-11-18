@@ -1326,5 +1326,12 @@
   "Reconnecting": "다시 연결 중",
   "Disconnected": "연결 끊김",
   "Server connection": "서버 연결",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "이 창과 PI Lab 서버 사이의 연결입니다. 연결이 끊기면 자동으로 다시 연결합니다."
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "이 창과 PI Lab 서버 사이의 연결입니다. 연결이 끊기면 자동으로 다시 연결합니다.",
+  "Terminal input failed": "터미널 입력 실패",
+  "Terminal resize failed": "터미널 크기 변경 실패",
+  "The terminal is not ready for dropped paths": "터미널이 아직 드롭한 경로를 받을 준비가 되지 않았습니다",
+  "Could not read a dropped file path": "드롭한 파일 경로를 읽을 수 없습니다",
+  "Session exited": "세션이 종료되었습니다",
+  "Terminal connection failed": "터미널 연결 실패",
+  "Failed to start terminal": "터미널을 시작하지 못했습니다"
 }

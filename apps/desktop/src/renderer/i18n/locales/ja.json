@@ -1326,5 +1326,12 @@
   "Reconnecting": "再接続中",
   "Disconnected": "切断",
   "Server connection": "サーバー接続",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "このウィンドウと PI Lab サーバーの接続です。切断されると自動で再接続します。"
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "このウィンドウと PI Lab サーバーの接続です。切断されると自動で再接続します。",
+  "Terminal input failed": "ターミナルへの入力に失敗しました",
+  "Terminal resize failed": "ターミナルのサイズ変更に失敗しました",
+  "The terminal is not ready for dropped paths": "ターミナルはまだドロップされたパスを受け付けられません",
+  "Could not read a dropped file path": "ドロップされたファイルのパスを読み取れませんでした",
+  "Session exited": "セッションが終了しました",
+  "Terminal connection failed": "ターミナルの接続に失敗しました",
+  "Failed to start terminal": "ターミナルを起動できませんでした"
 }

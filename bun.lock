@@ -52,7 +52,7 @@
         "@uiw/codemirror-themes": "^4.25.10",
         "@xterm/addon-fit": "^0.10",
         "@xterm/headless": "5.5.0",
-        "@xterm/xterm": "^5",
+        "@xterm/xterm": "5.5.0",
         "better-sqlite3": "^13.0.1",
         "codemirror": "^6.0.2",
         "dockview": "8.5.1",

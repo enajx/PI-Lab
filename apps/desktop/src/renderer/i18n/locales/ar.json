@@ -1326,5 +1326,12 @@
   "Reconnecting": "جارٍ إعادة الاتصال",
   "Disconnected": "غير متصل",
   "Server connection": "الاتصال بالخادم",
-  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "الاتصال بين هذه النافذة وخادم PI Lab. بعد انقطاعه يعيد الاتصال تلقائيًا."
+  "The connection between this window and the PI Lab server. After a drop it reconnects on its own.": "الاتصال بين هذه النافذة وخادم PI Lab. بعد انقطاعه يعيد الاتصال تلقائيًا.",
+  "Terminal input failed": "فشل إرسال الإدخال إلى الطرفية",
+  "Terminal resize failed": "فشل تغيير حجم الطرفية",
+  "The terminal is not ready for dropped paths": "الطرفية غير جاهزة بعد للمسارات المُفلتة",
+  "Could not read a dropped file path": "تعذرت قراءة مسار ملف مُفلت",
+  "Session exited": "انتهت الجلسة",
+  "Terminal connection failed": "فشل اتصال الطرفية",
+  "Failed to start terminal": "تعذر تشغيل الطرفية"
 }
