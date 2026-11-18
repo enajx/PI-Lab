@@ -1,3 +1,4 @@
+import { hostname } from "node:os"
 import { agentCredentials, getSettingsOrDefaults, serviceCredentials } from "@pi-lab/local-db"
 import { TRPCError } from "@trpc/server"
 import { observable } from "@trpc/server/observable"
@@ -53,6 +54,10 @@ export interface ServerHello {
   version: string
   pid: number
   capabilities: string[]
+  machineId: string
+  hostname: string
+  platform: string
+  arch: string
 }
 
 /** The server-only services the control router reaches through the context. */
@@ -129,6 +134,10 @@ export const serverControlRouter = router({
       version: runtime.config.version,
       pid: process.pid,
       capabilities: [...SERVER_CAPABILITIES],
+      machineId: runtime.machineId,
+      hostname: hostname(),
+      platform: process.platform,
+      arch: process.arch,
     }
   }),
 

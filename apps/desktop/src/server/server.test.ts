@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DaemonServer } from "@pi-lab/pty-daemon"
 import { createTRPCClient, createWSClient, TRPCClientError, wsLink } from "@trpc/client"
@@ -19,7 +19,14 @@ import {
   secretProtectionSchema,
   serverHelloSchema,
 } from "../shared/clientApi"
-import { ensureLocalToken, proveServerIdentity, TOKEN_FILE, TOKEN_HEADER } from "./access"
+import {
+  ensureLocalToken,
+  ensureMachineId,
+  MACHINE_ID_FILE,
+  proveServerIdentity,
+  TOKEN_FILE,
+  TOKEN_HEADER,
+} from "./access"
 import { DEVICES_FILE } from "./devices"
 import { type ListeningServer, listen } from "./http"
 import type { ServerRuntime } from "./runtime"
@@ -94,9 +101,26 @@ test("a client with the local token gets the hello and project data over loopbac
   const { client, close } = connect(token)
   const hello = await client.server.hello.query()
   expect(hello).toMatchObject({ protocol: 1, build: "test-build", version: "0.0.0-test" })
-  expect(hello.capabilities).toEqual(["devices", "launch-ids", "answer-request"])
+  expect(hello.capabilities).toEqual(["devices", "launch-ids", "answer-request", "machines"])
   expect(await client.projects.list.query()).toEqual([])
   close()
+})
+
+test("hello names this machine: a stable id from an owner-only file, host name, platform and arch", async () => {
+  const { client, close } = connect(token)
+  const hello = await client.server.hello.query()
+  close()
+  expect(hello.capabilities).toContain("machines")
+  expect(hello).toMatchObject({
+    hostname: hostname(),
+    platform: process.platform,
+    arch: process.arch,
+  })
+  const path = join(dataDir, MACHINE_ID_FILE)
+  expect(readFileSync(path, "utf8").trim()).toBe(hello.machineId)
+  expect(statSync(path).mode & 0o777).toBe(0o600)
+  // The next server start reads the same id.
+  expect(ensureMachineId(dataDir)).toBe(hello.machineId)
 })
 
 test("the local token file is readable by its owner only", () => {

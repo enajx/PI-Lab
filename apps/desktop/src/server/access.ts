@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -9,6 +9,9 @@ import { join } from "node:path"
  */
 export const TOKEN_FILE = "server-token"
 export const DISCOVERY_FILE = "server.json"
+
+/** Stable id of this server's machine, created once, owner-only. */
+export const MACHINE_ID_FILE = "machine-id"
 
 /** Header carrying the device token on plain HTTP requests. */
 export const TOKEN_HEADER = "x-pi-lab-token"
@@ -48,6 +51,16 @@ export function assertOwnerOnly(path: string): void {
   if ((mode & 0o077) !== 0) {
     throw new Error(`${path} is readable by other users (mode ${mode.toString(8)}); expected 600`)
   }
+}
+
+/** Read this server's machine id, creating it on first start. */
+export function ensureMachineId(dataDir: string): string {
+  const path = join(dataDir, MACHINE_ID_FILE)
+  if (!existsSync(path)) writeOwnerOnly(path, `${randomUUID()}\n`)
+  assertOwnerOnly(path)
+  const id = readFileSync(path, "utf8").trim()
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error(`${path} does not hold a valid machine id`)
+  return id
 }
 
 /** Read the local device token, creating it on first start. */
