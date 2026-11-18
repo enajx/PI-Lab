@@ -3,11 +3,17 @@ import { TRPCError } from "@trpc/server"
 import { observable } from "@trpc/server/observable"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
+import { getDbStatus } from "../main/db/db"
 import { loadNativeLanguage } from "../main/i18n/nativeLanguage"
 import type { AppContext } from "../main/trpc/context"
 import { writeGeneralSettings } from "../main/trpc/settings/settings"
 import { publicProcedure, router } from "../main/trpc/trpc"
-import { initializePublicUpdateChannel } from "../main/updates/selection"
+import type { DataCompatibility } from "../main/updates/compatibility"
+import type { PublicUpdateChannel } from "../main/updates/release"
+import {
+  initializePublicUpdateChannel,
+  onPublicUpdateChannelChanged,
+} from "../main/updates/selection"
 import type { QuitWork } from "../main/window/userQuit"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import type { NotificationEvent, NotificationStreamMessage } from "./notificationFeed"
@@ -130,7 +136,7 @@ export const serverControlRouter = router({
   }),
   /** Re-read the interface language the desktop app saved, for notification text. */
   reloadLanguage: publicProcedure.mutation(({ ctx }) => {
-    loadNativeLanguage(control(ctx).runtime.config.dataDir)
+    loadNativeLanguage(control(ctx).runtime.config.profileDir)
   }),
   rememberQuitChoice: publicProcedure
     .input(z.object({ choice: z.literal("background") }))
@@ -143,6 +149,16 @@ export const serverControlRouter = router({
     .mutation(({ ctx, input }) => {
       initializePublicUpdateChannel(ctx.db, input)
     }),
+
+  /** The data format of this server's database, for the desktop updater. */
+  updateCompatibility: publicProcedure.query((): DataCompatibility => getDbStatus().compatibility),
+  /** The selected public update channel now, then again after each change. */
+  onPublicUpdateChannel: publicProcedure.subscription(({ ctx }) =>
+    observable<PublicUpdateChannel>((emit) => {
+      emit.next(getSettingsOrDefaults(ctx.db).publicUpdateChannel)
+      return onPublicUpdateChannelChanged((channel) => emit.next(channel))
+    }),
+  ),
 
   /** Alerts for this client: pending requests first, then live events and clears. */
   onNotification: publicProcedure.subscription(({ ctx }) => {
@@ -222,6 +238,11 @@ export const serverControlRouter = router({
   /** Stop every notebook server: the desktop page that showed them reloaded or closed. */
   stopNotebooks: publicProcedure.mutation(({ ctx }) =>
     control(ctx).runtime.notebookServers.stopAll(),
+  ),
+
+  /** Stop every Analysis preview (marimo, report grants): the desktop page that showed them went away. */
+  stopAnalysisPreviews: publicProcedure.mutation(({ ctx }) =>
+    control(ctx).runtime.analysisInteractive.closeAll(),
   ),
 
   /** Quick Editor's Python run, through the server's PTY daemon. */

@@ -13,11 +13,16 @@ export const DISCOVERY_FILE = "server.json"
 /** Header carrying the device token on plain HTTP requests. */
 export const TOKEN_HEADER = "x-pi-lab-token"
 
+/** Unauthenticated path that answers only the server's random id. */
+export const IDENTITY_PATH = "/identity"
+
 /** What the server writes to `server.json` once it listens. */
 export interface ServerDiscovery {
   port: number
   pid: number
   build: string
+  /** Random id, new on every server start; `GET /identity` answers it. */
+  serverId: string
 }
 
 /** Write a file with owner-only permissions, atomically (temp file and rename). */
@@ -71,4 +76,39 @@ export function readDiscovery(dataDir: string): ServerDiscovery | null {
   const path = join(dataDir, DISCOVERY_FILE)
   if (!existsSync(path)) return null
   return JSON.parse(readFileSync(path, "utf8")) as ServerDiscovery
+}
+
+/** A new random server id for one server start. */
+export function newServerId(): string {
+  return randomBytes(16).toString("base64url")
+}
+
+/**
+ * True when the process listening on `port` answers `GET /identity` with
+ * `serverId` (from the owner-only `server.json`). Clients call this before
+ * they send the token, so a stale port taken by another process never gets it.
+ * Redirects are refused.
+ */
+export async function isServerIdentity(port: number, serverId: string): Promise<boolean> {
+  const response = await fetch(`http://127.0.0.1:${port}${IDENTITY_PATH}`, {
+    redirect: "error",
+    signal: AbortSignal.timeout(2_000),
+  }).catch(() => null)
+  if (!response?.ok) return false
+  const body = (await response.json().catch(() => null)) as { serverId?: unknown } | null
+  return body?.serverId === serverId
+}
+
+/**
+ * True when the PI Lab server named by `discovery` is the process on its port
+ * and accepts `token`. The token is sent only after the identity check.
+ */
+export async function serverAnswers(discovery: ServerDiscovery, token: string): Promise<boolean> {
+  if (!(await isServerIdentity(discovery.port, discovery.serverId))) return false
+  const response = await fetch(`http://127.0.0.1:${discovery.port}/health`, {
+    headers: { [TOKEN_HEADER]: token },
+    redirect: "error",
+    signal: AbortSignal.timeout(2_000),
+  }).catch(() => null)
+  return response?.ok === true
 }

@@ -1,15 +1,12 @@
-import { execFileSync, spawn } from "node:child_process"
+import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
-import {
-  readDiscovery,
-  readLocalToken,
-  type ServerDiscovery,
-  TOKEN_HEADER,
-} from "../../server/access"
+import { resolveDataDir } from "@pi-lab/local-db/paths"
+import { isServerIdentity, readDiscovery, readLocalToken, serverAnswers } from "../../server/access"
 import { type ServerConfig, serverConfigEnv } from "../../server/config"
+import type { PiLabChannel } from "../identity/channel"
 
 /** Where the desktop app finds its server and how it authenticates. */
 export interface ServerEndpoint {
@@ -17,6 +14,38 @@ export interface ServerEndpoint {
   pid: number
   token: string
   build: string
+  serverId: string
+}
+
+/** What the desktop app knows about its install when it starts the server. */
+export interface LaunchInput {
+  channel: PiLabChannel
+  packaged: boolean
+  resourcesDir: string
+  build: string
+  version: string
+  /** Electron's profile folder (`app.getPath("userData")`). */
+  profileDir: string
+}
+
+/**
+ * The server's configuration. The data folder is the one the app used before
+ * the server split, `resolveDataDir()`: `PI_LAB_DATA_DIR` when set (Alpha,
+ * Beta and tests set it), else `~/.pi-lab`. It holds the database, daemon
+ * socket, `server.json` and the token. Electron's profile folder (Application
+ * Support for Stable) keeps only files the old app kept there.
+ */
+export function serverLaunchConfig(input: LaunchInput): ServerConfig {
+  return {
+    dataDir: resolveDataDir(),
+    profileDir: input.profileDir,
+    channel: input.channel,
+    packaged: input.packaged,
+    resourcesDir: input.resourcesDir,
+    build: input.build,
+    version: input.version,
+    port: 0,
+  }
 }
 
 /** How this app instance runs its server. */
@@ -53,22 +82,37 @@ function processAlive(pid: number): boolean {
   }
 }
 
-/** True when the server at `discovery` answers its health check with our token. */
-async function healthy(discovery: ServerDiscovery, token: string): Promise<boolean> {
-  const response = await fetch(`http://127.0.0.1:${discovery.port}/health`, {
-    headers: { [TOKEN_HEADER]: token },
-    signal: AbortSignal.timeout(2_000),
-  }).catch(() => null)
-  return response?.ok === true
-}
-
-/** The running server for this data folder, if it answers. */
-async function runningServer(dataDir: string): Promise<ServerEndpoint | null> {
+/**
+ * The running server for this data folder, if it answers. The token is sent
+ * only after the process on the port proved it is this server (identity check).
+ */
+export async function runningServer(dataDir: string): Promise<ServerEndpoint | null> {
   const discovery = readDiscovery(dataDir)
   const token = readLocalToken(dataDir)
-  if (!discovery || !token || !processAlive(discovery.pid)) return null
-  if (!(await healthy(discovery, token))) return null
-  return { port: discovery.port, pid: discovery.pid, token, build: discovery.build }
+  if (!discovery?.serverId || !token || !processAlive(discovery.pid)) return null
+  if (!(await serverAnswers(discovery, token))) return null
+  return { ...discovery, token }
+}
+
+/**
+ * Where this data folder's server listens now, checked before any client
+ * sends it the token. Read on every connection attempt: a restarted server has
+ * a new port and id. Throws when the port does not answer with the id in
+ * `server.json`.
+ */
+export async function verifiedEndpoint(dataDir: string, token: string): Promise<ServerEndpoint> {
+  const discovery = readDiscovery(dataDir)
+  if (!discovery?.serverId) throw new Error("The PI Lab server is not running")
+  if (!(await isServerIdentity(discovery.port, discovery.serverId))) {
+    throw new Error(`The process on port ${discovery.port} is not this PI Lab server`)
+  }
+  return { ...discovery, token }
+}
+
+/** True when `pid` runs a PI Lab server bundle (`…/out/main/server.js`). */
+export function isPiLabServerProcess(pid: number): boolean {
+  const result = spawnSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" })
+  return result.status === 0 && result.stdout.includes("/out/main/server.js")
 }
 
 /** The launchd agent definition: the app binary in Node mode running server.js. */
@@ -238,6 +282,11 @@ export function stopServerSync(dataDir: string, launchdLabel: string | null): vo
   const discovery = readDiscovery(dataDir)
   if (launchdLabel) launchctl(["bootout", `gui/${userInfo().uid}/${launchdLabel}`])
   if (!discovery || !processAlive(discovery.pid)) return
+  // A crash can leave a pid that now belongs to another process.
+  if (!isPiLabServerProcess(discovery.pid)) {
+    console.warn(`[pi-lab] pid ${discovery.pid} in server.json is not a PI Lab server; not stopped`)
+    return
+  }
   process.kill(discovery.pid, "SIGTERM")
   const pause = new Int32Array(new SharedArrayBuffer(4))
   const deadline = Date.now() + 10_000

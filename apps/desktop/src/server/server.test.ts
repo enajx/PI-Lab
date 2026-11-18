@@ -28,6 +28,7 @@ beforeAll(async () => {
   const { ServerRuntime } = await import("./runtime")
   runtime = new ServerRuntime({
     dataDir,
+    profileDir: dataDir,
     channel: "alpha",
     packaged: false,
     resourcesDir: join(dataDir, "resources"),
@@ -40,6 +41,7 @@ beforeAll(async () => {
   server = await listen({
     port: 0,
     token,
+    serverId: "test-server-id",
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => undefined },
@@ -151,4 +153,54 @@ test("a credential move interrupted halfway finishes on the next start, every ke
     "key-a",
     "key-b",
   ])
+})
+
+test("GET /identity answers only the server id, without the token", async () => {
+  const response = await fetch(`http://127.0.0.1:${server.port}/identity`)
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ serverId: "test-server-id" })
+})
+
+/** Real server and WebSocket; the updater's network engine is a recording stand-in (injected). */
+test("public updates start with the server's data format and channel, and follow channel changes", async () => {
+  const { PublicUpdateController } = await import("../main/updates/controller")
+  const { startServerUpdates } = await import("../main/updates/serverUpdates")
+  const { getDbStatus } = await import("../main/db/db")
+  const configured: string[] = []
+  const engine = {
+    configure: (channel: string) => configured.push(channel),
+    onAvailable: () => undefined,
+    onDownloaded: () => undefined,
+    onUnavailable: () => undefined,
+    onError: () => undefined,
+    check: async () => undefined,
+    install: () => undefined,
+  }
+  const { client, close } = connect(token)
+  await client.settings.updateGeneral.mutate({ publicUpdateChannel: "beta" })
+  let compatibility: unknown = null
+  let changes = 0
+  const updates = await startServerUpdates(
+    client,
+    (current) => {
+      compatibility = current
+      return new PublicUpdateController(
+        engine,
+        current,
+        () => undefined,
+        () => undefined,
+        () => undefined,
+      )
+    },
+    () => {
+      changes++
+    },
+  )
+  expect(compatibility).toEqual(getDbStatus().compatibility)
+  expect(configured).toEqual(["beta"])
+  await client.settings.updateGeneral.mutate({ publicUpdateChannel: "stable" })
+  await vi.waitFor(() => expect(updates.controller.current()).toEqual({ kind: "restart-required" }))
+  expect(changes).toBe(1)
+  updates.stop()
+  close()
 })

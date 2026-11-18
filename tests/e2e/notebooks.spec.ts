@@ -126,6 +126,31 @@ test("quitting PI Lab stops a notebook tab's server, even when the notebook page
   expect(await readFile(markerPath, "utf8")).toContain(`stop:${pid}`)
 })
 
+/** The native dialog is a stub that records its text; the notebook tab and server are real. */
+test("with a notebook tab open, the Quit dialog names it so the user can cancel and save (stand-in uvx)", async () => {
+  const pid = await openNotebookTab()
+  await app.evaluate(({ dialog }) => {
+    const state = globalThis as unknown as { details: string[] }
+    state.details = []
+    dialog.showMessageBox = async (options) => {
+      state.details.push(options.detail ?? "")
+      // Cancel on the Quit dialog; any later dialog (the cleanup quit's) gets its first button.
+      return { response: state.details.length === 1 ? 2 : 0, checkboxChecked: false }
+    }
+  })
+  await app.evaluate(({ Menu }) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
+    if (!item) throw new Error("Missing Quit menu item")
+    setImmediate(() => item.click())
+  })
+  await expect
+    .poll(() => app.evaluate(() => (globalThis as unknown as { details: string[] }).details))
+    .toEqual([expect.stringContaining("1 notebook is open. Its server stops when PI Lab quits")])
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
+  // Cancel keeps the notebook server.
+  expect(alive(pid)).toBe(true)
+})
+
 test("reloading the window stops its notebook servers (stand-in uvx)", async () => {
   const pid = await openNotebookTab()
   const window = await app.firstWindow()

@@ -5,7 +5,7 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws"
 import { WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
 import { serverRouter } from "../main/trpc/serverRouter"
-import { TOKEN_HEADER, tokenMatches } from "./access"
+import { IDENTITY_PATH, TOKEN_HEADER, tokenMatches } from "./access"
 
 export { TOKEN_HEADER }
 
@@ -15,6 +15,8 @@ export const SCHEME_PATH_PREFIX = "/scheme/"
 export interface ListenOptions {
   port: number
   token: string
+  /** Random id of this start, answered without the token at `GET /identity`. */
+  serverId: string
   createContext: () => AppContext
   /** Serve one custom-scheme request (`pi-lab-report://…`, `pi-lab-media://…`). */
   handleScheme: (scheme: string, request: Request) => Promise<Response>
@@ -49,13 +51,21 @@ async function sendResponse(response: Response, out: ServerResponse): Promise<vo
 
 /**
  * `GET /scheme/<scheme>/<host>/<path>` serves what Electron's protocol handler
- * forwards. Everything needs the device token.
+ * forwards. Everything needs the device token, except `GET /identity`, which
+ * answers only the server id so clients can check the port before sending it.
  */
 async function handleHttp(
   options: ListenOptions,
   request: IncomingMessage,
   out: ServerResponse,
 ): Promise<void> {
+  const requested = new URL(request.url ?? "/", "http://127.0.0.1").pathname
+  if (request.method === "GET" && requested === IDENTITY_PATH) {
+    out
+      .writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify({ serverId: options.serverId }))
+    return
+  }
   if (!tokenMatches(options.token, request.headers[TOKEN_HEADER]?.toString() ?? null)) {
     out.writeHead(401).end()
     return

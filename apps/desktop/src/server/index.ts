@@ -9,8 +9,9 @@ import {
 import {
   DISCOVERY_FILE,
   ensureLocalToken,
+  newServerId,
   readDiscovery,
-  TOKEN_HEADER,
+  serverAnswers,
   writeDiscovery,
 } from "./access"
 import { readServerConfig } from "./config"
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
   // A server.json left by a crash can name a pid that now belongs to another
   // process, so only a server that answers with our token counts as running.
   const existing = readDiscovery(config.dataDir)
-  if (existing && existing.pid !== process.pid && (await answers(existing.port, token))) {
+  if (existing && existing.pid !== process.pid && (await serverAnswers(existing, token))) {
     console.error(`[pi-lab server] another server (pid ${existing.pid}) serves ${config.dataDir}`)
     process.exit(0)
   }
@@ -54,9 +55,11 @@ async function main(): Promise<void> {
       })
   }
 
+  const serverId = newServerId()
   const server = await listen({
     port: config.port,
     token,
+    serverId,
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => setImmediate(() => stop(0)) },
@@ -67,20 +70,16 @@ async function main(): Promise<void> {
       return Promise.resolve(new Response(null, { status: 404 }))
     },
   })
-  writeDiscovery(config.dataDir, { port: server.port, pid: process.pid, build: config.build })
+  writeDiscovery(config.dataDir, {
+    port: server.port,
+    pid: process.pid,
+    build: config.build,
+    serverId,
+  })
   console.log(`[pi-lab server] listening on 127.0.0.1:${server.port} (pid ${process.pid})`)
 
   process.on("SIGTERM", () => stop(0))
   process.on("SIGINT", () => stop(0))
-}
-
-/** True when a PI Lab server on this port accepts our token. */
-async function answers(port: number, token: string): Promise<boolean> {
-  const response = await fetch(`http://127.0.0.1:${port}/health`, {
-    headers: { [TOKEN_HEADER]: token },
-    signal: AbortSignal.timeout(2_000),
-  }).catch(() => null)
-  return response?.ok === true
 }
 
 main().catch((error: unknown) => {

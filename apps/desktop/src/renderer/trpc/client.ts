@@ -6,16 +6,20 @@ import type { DesktopRouter } from "../../main/desktop/desktopRouter"
 import type { AppRouter } from "../../main/trpc/appRouter"
 import { isDesktopPath } from "../../shared/desktopPaths"
 
-let lastIpcRequestId = 0
+let lastRequestId = 0
 
-/** Give every IPC operation in this document a distinct ID. */
-function uniqueIpcIds<TRouter extends AnyRouter>(): TRPCLink<TRouter> {
+/**
+ * Give every operation in this document a distinct ID, over IPC and over the
+ * shared server socket. Each tRPC client counts from 1, and the socket and the
+ * preload match replies by ID, so clients in one document share this sequence.
+ */
+function uniqueRequestIds<TRouter extends AnyRouter>(): TRPCLink<TRouter> {
   return () =>
     ({ op, next }) => {
-      if (lastIpcRequestId === Number.MAX_SAFE_INTEGER)
-        throw new Error("IPC request IDs exhausted; reload PI Lab")
-      lastIpcRequestId += 1
-      return next({ ...op, id: lastIpcRequestId })
+      if (lastRequestId === Number.MAX_SAFE_INTEGER)
+        throw new Error("Request IDs exhausted; reload PI Lab")
+      lastRequestId += 1
+      return next({ ...op, id: lastRequestId })
     }
 }
 
@@ -25,20 +29,27 @@ function uniqueIpcIds<TRouter extends AnyRouter>(): TRPCLink<TRouter> {
  */
 export function createIpcClient<TRouter extends AnyRouter>() {
   return createTRPCClient<TRouter>({
-    links: [uniqueIpcIds<TRouter>(), ipcLink({ transformer: superjson })],
+    links: [uniqueRequestIds<TRouter>(), ipcLink({ transformer: superjson })],
   })
 }
 
-/** The Electron-only router, used here only to ask where the server listens. */
-function desktopClient() {
-  return createIpcClient<DesktopRouter>()
+/**
+ * The Electron-only router, used here only to ask where the server listens.
+ * Created once per document: each IPC client adds a preload listener.
+ */
+let desktopClient: ReturnType<typeof createIpcClient<DesktopRouter>> | null = null
+
+/** The server's WebSocket URL now, asked again on every connection attempt. */
+export async function serverSocketUrl(): Promise<string> {
+  desktopClient ??= createIpcClient<DesktopRouter>()
+  return (await desktopClient.desktop.serverEndpoint.query()).url
 }
 
 /** One WebSocket to the PI Lab server per document, shared by every client. */
 let serverSocket: ReturnType<typeof createWSClient> | null = null
 function sharedServerSocket(): ReturnType<typeof createWSClient> {
   serverSocket ??= createWSClient({
-    url: async () => (await desktopClient().desktop.serverEndpoint.query()).url,
+    url: serverSocketUrl,
   })
   return serverSocket
 }
@@ -53,9 +64,10 @@ function sharedServerSocket(): ReturnType<typeof createWSClient> {
 export function createPiLabTrpcClient() {
   return createTRPCClient<AppRouter>({
     links: [
+      uniqueRequestIds<AppRouter>(),
       splitLink({
         condition: (op) => isDesktopPath(op.path),
-        true: [uniqueIpcIds<AppRouter>(), ipcLink({ transformer: superjson })],
+        true: ipcLink({ transformer: superjson }),
         false: wsLink({ client: sharedServerSocket(), transformer: superjson }),
       }),
     ],
