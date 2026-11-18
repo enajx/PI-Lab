@@ -1,5 +1,6 @@
-import { execFile } from "node:child_process"
-import { existsSync } from "node:fs"
+import { execFile, spawn } from "node:child_process"
+import { createHash } from "node:crypto"
+import { existsSync, readFileSync } from "node:fs"
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
@@ -160,4 +161,88 @@ test("routine runs and agent exit is recorded while Electron is fully quit", asy
   db.close()
   expect(session?.state).toBe("exited")
   expect(session?.exitedAt ?? 0).toBeGreaterThan(quitAt)
+})
+
+test("an open app reconnects after the server restarts on a new port", async () => {
+  test.setTimeout(120_000)
+  app = await launch()
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  const before = readServerDiscovery(dataDir)
+  if (!before) throw new Error("no server.json")
+
+  // A crash, then a restart as launchd would do it (same environment, new port).
+  process.kill(before.pid, "SIGKILL")
+  await expect.poll(() => processAlive(before.pid), { timeout: 10_000 }).toBe(false)
+  const serverEntry = join(DESKTOP_DIR, "out", "main", "server.js")
+  const restarted = spawn(ELECTRON_PATH, [serverEntry], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      PI_LAB_TEST_MODE: "1",
+      PI_LAB_CHANNEL: "alpha",
+      PI_LAB_DATA_DIR: dataDir,
+      PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
+      PI_LAB_PACKAGED: "0",
+      PI_LAB_RESOURCES_DIR: join(DESKTOP_DIR, "resources"),
+      PI_LAB_BUILD: createHash("sha256")
+        .update(readFileSync(serverEntry))
+        .digest("hex")
+        .slice(0, 16),
+      PI_LAB_VERSION: "0.0.0",
+      PI_LAB_SERVER_PORT: "0",
+    },
+  })
+  restarted.unref()
+  await expect
+    .poll(
+      () => {
+        const now = readServerDiscovery(dataDir)
+        return now !== null && now.pid !== before.pid && processAlive(now.pid)
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true)
+
+  const after = readServerDiscovery(dataDir)
+  expect(after?.port).not.toBe(before.port)
+
+  // A routine created on the new server shows in the same window, without a reload.
+  const fresh = connectServer(dataDir)
+  const project = (await fresh.client.projects.list.query()).find((p) => p.repoPath === repoDir)
+  await fresh.client.automations.create.mutate({
+    projectId: project?.id ?? "",
+    agentId: "test-routine",
+    executionMode: "noninteractive",
+    name: "After restart",
+    prompt: "x",
+    recurrenceRule: "FREQ=DAILY",
+    timezone: "UTC",
+    enabled: false,
+  })
+  fresh.close()
+  await window.getByTestId("nav-automations").click()
+  await expect(window.getByTestId("automation-name")).toContainText("After restart", {
+    timeout: 30_000,
+  })
+})
+
+test("the built server bundle loads no Electron module", () => {
+  // Under ELECTRON_RUN_AS_NODE, require("electron") returns a path string and
+  // fails later without an error, so check the built files themselves.
+  const outDir = join(DESKTOP_DIR, "out", "main")
+  const seen = new Set<string>()
+  const visit = (file: string): void => {
+    if (seen.has(file)) return
+    seen.add(file)
+    const code = readFileSync(join(outDir, file), "utf8")
+    expect(code, `${file} loads electron`).not.toMatch(
+      /require\(["']electron["']\)|from ["']electron["']/,
+    )
+    for (const match of code.matchAll(/require\(["']\.\/([^"']+\.js)["']\)/g)) visit(match[1] ?? "")
+  }
+  visit("server.js")
+  expect(seen.size).toBeGreaterThan(1)
 })

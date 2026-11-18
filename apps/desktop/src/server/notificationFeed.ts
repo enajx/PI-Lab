@@ -98,10 +98,6 @@ export class NotificationFeed implements NotificationSink {
     return () => this.#listeners.delete(listener)
   }
 
-  pending(): NotificationEvent[] {
-    return [...this.#pending.values()]
-  }
-
   /** Information events, newest first. */
   history(): NotificationEvent[] {
     if (!existsSync(this.#historyPath)) return []

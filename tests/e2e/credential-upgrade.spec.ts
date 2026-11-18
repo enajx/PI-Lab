@@ -93,6 +93,10 @@ test("a key saved by the old app is moved at start and used by the server with E
   db.prepare(
     "insert into agent_credentials (agent_id, encrypted_value, updated_at) values (?, ?, ?)",
   ).run("codex", legacy, Date.now())
+  // A value the old app's key cannot read (Keychain reset, data from another Mac).
+  db.prepare(
+    "insert into agent_credentials (agent_id, encrypted_value, updated_at) values (?, ?, ?)",
+  ).run("claude-code", "bm90IGEgc2FmZVN0b3JhZ2UgdmFsdWU=", Date.now())
   db.close()
   await quit(app)
 
@@ -100,7 +104,12 @@ test("a key saved by the old app is moved at start and used by the server with E
   app = await launch()
   await expect((await app.firstWindow()).getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
   const { client, close } = connectServer(dataDir)
-  await expect.poll(() => client.server.legacyCredentials.query(), { timeout: 15_000 }).toEqual([])
+  // The readable key is moved; the unreadable one stays and does not block startup.
+  await expect
+    .poll(async () => (await client.server.legacyCredentials.query()).map((row) => row.key), {
+      timeout: 15_000,
+    })
+    .toEqual(["claude-code"])
   await quit(app)
   app = null
 

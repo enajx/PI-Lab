@@ -2,12 +2,14 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join, relative, sep } from "node:path"
 import {
+  agentCredentials,
   agentSessions,
   automationRuns,
   automations,
   getSettingsOrDefaults,
   projects,
   projectWorkflowRuns,
+  serviceCredentials,
   worktrees,
 } from "@pi-lab/local-db"
 import { eq, max, ne, sql } from "drizzle-orm"
@@ -74,7 +76,13 @@ import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { caffeinateAdapter } from "./caffeinate"
 import type { ServerConfig } from "./config"
 import { NotificationFeed } from "./notificationFeed"
-import { createSecretStore, type KeychainPort, macKeychain, type SecretStore } from "./secrets"
+import {
+  createSecretStore,
+  isCurrentSecretFormat,
+  type KeychainPort,
+  macKeychain,
+  type SecretStore,
+} from "./secrets"
 import { trashPath } from "./trash"
 
 /** Microphone access belongs to the client device; the server never asks for it. */
@@ -146,6 +154,7 @@ export class ServerRuntime {
     this.secrets = createSecretStore({
       dataDir: config.dataDir,
       keychain: isTestMode ? testKeychain(config.dataDir) : macKeychain,
+      hasSavedValues: () => hasCurrentFormatCredentials(),
     })
   }
 
@@ -385,15 +394,22 @@ export class ServerRuntime {
   async stopAllWork(): Promise<void> {
     await this.ensureAgentRecovery()
     await agentLaunchLifecycle.pause()
-    await this.recoverBackgroundAgents()
     this.automationScheduler?.stop()
-    await Promise.all([
-      this.stopTerminalAgents(),
-      this.managedProcesses.stopAll(),
-      this.notebookServers.stopAll(),
-      stopRunningRenders(),
-    ])
-    await Promise.all([...this.processFinalizers])
+    try {
+      await this.recoverBackgroundAgents()
+      await Promise.all([
+        this.stopTerminalAgents(),
+        this.managedProcesses.stopAll(),
+        this.notebookServers.stopAll(),
+        stopRunningRenders(),
+      ])
+      await Promise.all([...this.processFinalizers])
+    } catch (error) {
+      // The server keeps running, so it must keep launching agents and routines.
+      agentLaunchLifecycle.resume()
+      this.automationScheduler?.start()
+      throw error
+    }
     // Bounded: a missing or late daemon confirmation warns and the stop goes on.
     await this.terminalSupervisor.shutdownDaemon(3_000, (message) => console.warn(message))
   }
@@ -537,6 +553,15 @@ export class ServerRuntime {
       caffeine: this.caffeineController,
     }
   }
+}
+
+/** True when any saved credential uses the server's own format (`pl1:`). */
+function hasCurrentFormatCredentials(): boolean {
+  const db = getDb()
+  return [
+    ...db.select({ value: agentCredentials.encryptedValue }).from(agentCredentials).all(),
+    ...db.select({ value: serviceCredentials.encryptedValue }).from(serviceCredentials).all(),
+  ].some((row) => isCurrentSecretFormat(row.value))
 }
 
 /**

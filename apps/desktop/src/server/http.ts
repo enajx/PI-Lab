@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
-import { Readable } from "node:stream"
+import { pipeline, Readable } from "node:stream"
 import { applyWSSHandler } from "@trpc/server/adapters/ws"
 import { WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
@@ -37,7 +37,14 @@ async function sendResponse(response: Response, out: ServerResponse): Promise<vo
     out.end()
     return
   }
-  Readable.fromWeb(response.body as import("node:stream/web").ReadableStream).pipe(out)
+  // A file that goes away mid-read ends this response only, never the server.
+  pipeline(
+    Readable.fromWeb(response.body as import("node:stream/web").ReadableStream),
+    out,
+    (error) => {
+      if (error) console.warn(`[pi-lab server] stream ended early: ${error.message}`)
+    },
+  )
 }
 
 /**

@@ -6,7 +6,13 @@ import {
   MEDIA_SCHEME,
   REPORT_SCHEME,
 } from "../main/trpc/science/analysis/mediaGrants"
-import { DISCOVERY_FILE, ensureLocalToken, readDiscovery, writeDiscovery } from "./access"
+import {
+  DISCOVERY_FILE,
+  ensureLocalToken,
+  readDiscovery,
+  TOKEN_HEADER,
+  writeDiscovery,
+} from "./access"
 import { readServerConfig } from "./config"
 import { listen } from "./http"
 import { ServerRuntime } from "./runtime"
@@ -22,13 +28,15 @@ async function main(): Promise<void> {
   // Shared modules read the data folder from the environment.
   process.env.PI_LAB_DATA_DIR = config.dataDir
 
+  const token = ensureLocalToken(config.dataDir)
+  // A server.json left by a crash can name a pid that now belongs to another
+  // process, so only a server that answers with our token counts as running.
   const existing = readDiscovery(config.dataDir)
-  if (existing && existing.pid !== process.pid && processAlive(existing.pid)) {
+  if (existing && existing.pid !== process.pid && (await answers(existing.port, token))) {
     console.error(`[pi-lab server] another server (pid ${existing.pid}) serves ${config.dataDir}`)
-    process.exit(2)
+    process.exit(0)
   }
 
-  const token = ensureLocalToken(config.dataDir)
   const runtime = new ServerRuntime(config)
   await runtime.start()
 
@@ -66,13 +74,13 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => stop(0))
 }
 
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
+/** True when a PI Lab server on this port accepts our token. */
+async function answers(port: number, token: string): Promise<boolean> {
+  const response = await fetch(`http://127.0.0.1:${port}/health`, {
+    headers: { [TOKEN_HEADER]: token },
+    signal: AbortSignal.timeout(2_000),
+  }).catch(() => null)
+  return response?.ok === true
 }
 
 main().catch((error: unknown) => {
@@ -88,5 +96,7 @@ main().catch((error: unknown) => {
       }),
     )
   }
-  process.exit(1)
+  // Exit cleanly so launchd does not restart a server that cannot start; the
+  // app shows the error and starts the server again on its next launch.
+  process.exit(0)
 })

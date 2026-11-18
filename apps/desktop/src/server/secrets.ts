@@ -23,6 +23,11 @@ export interface SecretStore extends CredentialCipher {
 
 export const KEYCHAIN_SERVICE = "PI Lab secrets"
 const PREFIX = "pl1:"
+
+/** True for a value encrypted by this store's current format. */
+export function isCurrentSecretFormat(encrypted: string): boolean {
+  return encrypted.startsWith(PREFIX)
+}
 const KEY_FILE = "secrets.key"
 
 /** Run `/usr/bin/security`; returns stdout. Throws on a non-zero exit. */
@@ -51,7 +56,17 @@ export const macKeychain: KeychainPort = {
     }
   },
   write(service, account, secret) {
-    security(["add-generic-password", "-U", "-s", service, "-a", account, "-w", secret])
+    // Sent as a command on stdin (`security -i`), so the key is never in the
+    // process arguments that other local users can see with `ps`.
+    const quote = (value: string) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
+    execFileSync("/usr/bin/security", ["-i"], {
+      input: `add-generic-password -U -s ${quote(service)} -a ${quote(account)} -w ${quote(secret)}\n`,
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+    // `security -i` can exit 0 when its command failed, so check the item.
+    if (macKeychain.read(service, account) !== secret) {
+      throw new Error("The key could not be saved in the macOS Keychain.")
+    }
   },
   remove(service, account) {
     try {
@@ -67,8 +82,10 @@ export const macKeychain: KeychainPort = {
 export function createSecretStore(options: {
   dataDir: string
   keychain: KeychainPort
+  /** True when values encrypted with the current format are saved, so a lost key must not be replaced. */
+  hasSavedValues: () => boolean
 }): SecretStore {
-  const { dataDir, keychain } = options
+  const { dataDir, keychain, hasSavedValues } = options
   const keyPath = join(dataDir, KEY_FILE)
   // The account depends on the data dir, so channels with separate data dirs do not collide.
   const account = createHash("sha256").update(dataDir).digest("hex").slice(0, 32)
@@ -102,6 +119,11 @@ export function createSecretStore(options: {
       cached = Buffer.from(stored, "base64")
       if (cached.length !== 32) throw new Error("The Keychain item holds a bad key.")
       return cached
+    }
+    if (hasSavedValues()) {
+      throw new Error(
+        "The key that protects your saved API keys is missing (secrets.key and the Keychain item are gone). Enter the API keys again in Settings, or restore secrets.key in the PI Lab data folder.",
+      )
     }
     const key = randomBytes(32)
     writeKeyFile(key)

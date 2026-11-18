@@ -407,7 +407,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
     }
   })
 
-  test("a quit PI Lab did not start (like macOS logout) with a busy terminal quits the app without a dialog and leaves the terminal running", async () => {
+  test("a quit PI Lab did not start (like macOS logout) with a busy terminal warns first, then quits the app and leaves the terminal running", async () => {
     test.setTimeout(120_000)
     let fixture: Fixture | null = null
     let closed = false
@@ -419,10 +419,21 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
       })
       const serverPid = readServerDiscovery(fixture.dataDir)?.pid ?? 0
       // macOS logout, restart and shutdown reach the app as this same app.quit().
+      // They also end the user's server, so a native warning asks first.
+      await app.evaluate(({ app }) => {
+        setImmediate(() => app.quit())
+      })
+      const warning = await waitForDialog(pid, "Quit")
+      expect(warning.buttons).toEqual(expect.arrayContaining(["Quit", "Cancel"]))
+      await click(pid, "Cancel")
+      await waitForDialogGone(pid, "Cancel")
+      expect(alive(pid)).toBe(true)
       const exited = app.waitForEvent("close")
       await app.evaluate(({ app }) => {
         setImmediate(() => app.quit())
       })
+      await waitForDialog(pid, "Quit")
+      await click(pid, "Quit")
       await exited
       expect(alive(pid)).toBe(false)
       expect(processAlive(serverPid)).toBe(true)

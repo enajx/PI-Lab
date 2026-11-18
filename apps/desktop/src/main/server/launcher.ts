@@ -76,8 +76,11 @@ export function launchdPlist(options: LauncherOptions): string {
   const env = {
     ...serverConfigEnv(options.config),
     ELECTRON_RUN_AS_NODE: "1",
-    PATH: process.env.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+    // Fixed values, so the plist does not change with how the app was opened.
+    // Agents get the user's full environment from the login shell (SHELL).
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
     HOME: homedir(),
+    SHELL: userInfo().shell ?? "/bin/zsh",
   }
   const escapeXml = (value: string) =>
     value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -153,13 +156,6 @@ function startDetached(options: LauncherOptions): void {
   child.unref()
 }
 
-/** Read the start error a failed server left, if any. */
-export function readServerStartError(dataDir: string): ServerStartError | null {
-  const path = join(dataDir, SERVER_ERROR_FILE)
-  if (!existsSync(path)) return null
-  return JSON.parse(readFileSync(path, "utf8")) as ServerStartError
-}
-
 /** The last lines of the server log, for an error message. */
 export function serverLogTail(dataDir: string): string {
   const path = join(dataDir, SERVER_LOG_FILE)
@@ -229,5 +225,23 @@ export class ServerStartFailure extends Error {
   constructor(readonly detail: ServerStartError) {
     super(detail.message)
     this.name = "ServerStartFailure"
+  }
+}
+
+/**
+ * Stop this data folder's server and wait for it to exit, before anything
+ * moves its files (the Alpha new-build reset). Synchronous, because it runs
+ * before Electron is ready.
+ */
+export function stopServerSync(dataDir: string, launchdLabel: string | null): void {
+  const discovery = readDiscovery(dataDir)
+  if (launchdLabel) launchctl(["bootout", `gui/${userInfo().uid}/${launchdLabel}`])
+  if (!discovery || !processAlive(discovery.pid)) return
+  process.kill(discovery.pid, "SIGTERM")
+  const pause = new Int32Array(new SharedArrayBuffer(4))
+  const deadline = Date.now() + 10_000
+  while (processAlive(discovery.pid) && Date.now() < deadline) Atomics.wait(pause, 0, 0, 50)
+  if (processAlive(discovery.pid)) {
+    throw new Error(`The PI Lab server (pid ${discovery.pid}) did not stop`)
   }
 }

@@ -10,7 +10,7 @@ import {
   session,
 } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
-import { TOKEN_HEADER } from "../server/access"
+import { readDiscovery, TOKEN_HEADER } from "../server/access"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
 import type { QuickEditTarget } from "../shared/quickEdit"
@@ -28,7 +28,7 @@ import {
   type NotificationSoundId,
 } from "./notifications"
 import { isTestMode, rendererDevServerUrl } from "./runtime/env"
-import { createServerClient, type ServerClient } from "./server/client"
+import { createServerClient, type ServerClient, serverSocketUrl } from "./server/client"
 import {
   ensureServer,
   type ServerEndpoint,
@@ -102,11 +102,19 @@ export class DesktopRuntime {
   /** The renderer's server address and token (asked over IPC by the preload). */
   async rendererEndpoint(): Promise<{ url: string }> {
     await this.ready
+    return { url: serverSocketUrl(this.currentEndpoint()) }
+  }
+
+  /**
+   * Where the server listens now. A restarted server (launchd after a crash,
+   * a new build) picks a new port, so each connection attempt re-reads
+   * `server.json`; the token stays the same.
+   */
+  private currentEndpoint(): ServerEndpoint {
     const endpoint = this.endpoint
     if (!endpoint) throw new Error("PI Lab server is not connected")
-    return {
-      url: `ws://127.0.0.1:${endpoint.port}/trpc?token=${encodeURIComponent(endpoint.token)}`,
-    }
+    const discovery = readDiscovery(app.getPath("userData"))
+    return discovery ? { ...endpoint, port: discovery.port, pid: discovery.pid } : endpoint
   }
 
   /** Attach the desktop tRPC handler to a newly created or reopened window. */
@@ -176,7 +184,7 @@ export class DesktopRuntime {
       log: (message) => console.log(message),
     })
     console.log(`[pi-lab] connected to server pid ${this.endpoint.pid} port ${this.endpoint.port}`)
-    this.serverClient = createServerClient(this.endpoint)
+    this.serverClient = createServerClient(() => this.currentEndpoint())
     const client = this.serverClient.client
     const release = publicReleaseFromPackage(app.isPackaged, app.getAppPath())
     await client.server.initPublicUpdateChannel.mutate(
@@ -254,20 +262,30 @@ export class DesktopRuntime {
   /**
    * Move credentials saved by an older PI Lab (Electron safeStorage) into the
    * server's secret store, one row at a time, so an interrupted move finishes
-   * at the next start. A value that cannot be decrypted stays and is reported.
+   * at the next start. A value that cannot be decrypted stays unmoved, the
+   * user is told once, and startup goes on.
    */
   private async moveLegacyCredentials(client: ServerClient): Promise<void> {
     const legacy = await client.server.legacyCredentials.query()
     if (legacy.length === 0) return
-    if (!safeStorage.isEncryptionAvailable()) {
-      console.warn("[pi-lab] saved keys could not be moved: the system keychain is unavailable")
-      return
-    }
+    const failed: string[] = []
     for (const row of legacy) {
-      const plaintext = safeStorage.decryptString(Buffer.from(row.encryptedValue, "base64"))
+      const plaintext = safeStorage.isEncryptionAvailable()
+        ? decryptLegacy(row.encryptedValue)
+        : null
+      if (plaintext === null) {
+        failed.push(row.key)
+        continue
+      }
       await client.server.moveLegacyCredential.mutate({ ...row, plaintext })
     }
-    console.log(`[pi-lab] moved ${legacy.length} saved key(s) to the server's secret store`)
+    console.log(`[pi-lab] moved ${legacy.length - failed.length} saved key(s) to the server`)
+    if (failed.length > 0) {
+      dialog.showErrorBox(
+        "Some saved keys could not be moved",
+        `PI Lab could not read ${failed.length} key(s) saved by an older version (${failed.join(", ")}). Allow Keychain access when macOS asks, or enter these keys again in Settings.`,
+      )
+    }
   }
 
   /** Analysis reports and media stream from the server through the same token. */
@@ -275,8 +293,7 @@ export class DesktopRuntime {
     for (const scheme of [REPORT_SCHEME, MEDIA_SCHEME]) {
       session.defaultSession.protocol.handle(scheme, async (request) => {
         await this.ready
-        const endpoint = this.endpoint
-        if (!endpoint) return new Response(null, { status: 503 })
+        const endpoint = this.currentEndpoint()
         const url = new URL(request.url)
         const headers: Record<string, string> = { [TOKEN_HEADER]: endpoint.token }
         const range = request.headers.get("range")
@@ -383,6 +400,16 @@ export class DesktopRuntime {
       }
     }
     connection?.close()
+  }
+}
+
+/** Decrypt a value the old app saved with safeStorage, or null when it cannot be read. */
+function decryptLegacy(encrypted: string): string | null {
+  try {
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64"))
+  } catch (error) {
+    console.warn(`[pi-lab] an old saved key could not be decrypted: ${String(error)}`)
+    return null
   }
 }
 

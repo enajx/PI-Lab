@@ -14,9 +14,10 @@ export function serverSocketUrl(endpoint: ServerEndpoint): string {
  * outside the renderer: tray data, Quit, notifications, quick edit, the
  * Electron-side halves of Finder and clipboard actions.
  */
-export function createServerClient(endpoint: ServerEndpoint) {
+export function createServerClient(endpoint: () => ServerEndpoint) {
   const socket = createWSClient({
-    url: serverSocketUrl(endpoint),
+    // Read on every connection attempt, so a restarted server's new port is used.
+    url: () => serverSocketUrl(endpoint()),
     WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
   })
   const client = createTRPCClient<ServerRouter>({

@@ -24,7 +24,11 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe("secret store", () => {
   it("round trips and writes a 0600 key file", () => {
-    const store = createSecretStore({ dataDir: dir, keychain: fakeKeychain() })
+    const store = createSecretStore({
+      dataDir: dir,
+      keychain: fakeKeychain(),
+      hasSavedValues: () => false,
+    })
     const enc = store.encrypt("sk-test")
     expect(enc.startsWith("pl1:")).toBe(true)
     expect(enc).not.toContain("sk-test")
@@ -35,22 +39,34 @@ describe("secret store", () => {
   })
 
   it("refuses a key file that others can read", () => {
-    const first = createSecretStore({ dataDir: dir, keychain: fakeKeychain() })
+    const first = createSecretStore({
+      dataDir: dir,
+      keychain: fakeKeychain(),
+      hasSavedValues: () => false,
+    })
     first.encrypt("x")
     chmodSync(join(dir, "secrets.key"), 0o644)
-    const second = createSecretStore({ dataDir: dir, keychain: fakeKeychain() })
+    const second = createSecretStore({
+      dataDir: dir,
+      keychain: fakeKeychain(),
+      hasSavedValues: () => false,
+    })
     expect(() => second.encrypt("x")).toThrow(/permissions/)
   })
 
   it("throws a clear error for legacy values without the prefix", () => {
-    const store = createSecretStore({ dataDir: dir, keychain: fakeKeychain() })
+    const store = createSecretStore({
+      dataDir: dir,
+      keychain: fakeKeychain(),
+      hasSavedValues: () => false,
+    })
     expect(store.isCurrentFormat("AAAA")).toBe(false)
     expect(() => store.decrypt("AAAA")).toThrow(/older PI Lab.*Open the PI Lab app once/)
   })
 
   it("switches file -> keychain -> file and keeps old values readable (fake keychain)", () => {
     const keychain = fakeKeychain()
-    const store = createSecretStore({ dataDir: dir, keychain })
+    const store = createSecretStore({ dataDir: dir, keychain, hasSavedValues: () => false })
     const before = store.encrypt("secret-1")
 
     store.setProtection("keychain")
@@ -61,7 +77,7 @@ describe("secret store", () => {
     const mid = store.encrypt("secret-2")
 
     // A new store instance reads the key from the keychain.
-    const reopened = createSecretStore({ dataDir: dir, keychain })
+    const reopened = createSecretStore({ dataDir: dir, keychain, hasSavedValues: () => false })
     expect(reopened.protection()).toBe("keychain")
     expect(reopened.decrypt(before)).toBe("secret-1")
 
@@ -85,5 +101,19 @@ describe.skipIf(process.env.PI_LAB_TEST_REAL_KEYCHAIN !== "1")("real macOS keych
       macKeychain.remove(KEYCHAIN_SERVICE, account)
     }
     expect(macKeychain.read(KEYCHAIN_SERVICE, account)).toBeNull()
+  })
+})
+
+describe("lost key", () => {
+  it("with saved values and no key anywhere, the store refuses to make a new key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-lab-secrets-lost-"))
+    // Fake keychain (labelled): the item was deleted or reset.
+    const store = createSecretStore({
+      dataDir: dir,
+      keychain: fakeKeychain(),
+      hasSavedValues: () => true,
+    })
+    expect(() => store.encrypt("x")).toThrow(/key that protects your saved API keys is missing/)
+    expect(existsSync(join(dir, "secrets.key"))).toBe(false)
   })
 })

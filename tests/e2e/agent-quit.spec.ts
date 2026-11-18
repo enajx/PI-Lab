@@ -41,7 +41,7 @@ function alive(pid: number): boolean {
 }
 
 /** Native dialog choices are injected; the app and managed agent process are real. */
-test("a quit PI Lab did not start (like macOS logout) just quits the app; the server keeps the agent and terminal running", async () => {
+test("a quit PI Lab did not start (like macOS logout) warns while work runs, then quits the app; the server keeps the work running", async () => {
   test.skip(process.platform === "win32", "Fixture uses POSIX shell and process listing")
   test.setTimeout(90_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-quit-"))
@@ -94,19 +94,34 @@ test("a quit PI Lab did not start (like macOS logout) just quits the app; the se
     if (!agent) throw new Error("Managed agent not running")
     const shell = await client.spawn({ command: "/bin/cat", args: [] })
     await app.evaluate(({ dialog }) => {
-      // Any dialog would keep the app open (button 0 is Cancel or Stop), so a closed app means none.
-      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
+      const state = globalThis as typeof globalThis & { e2eDialogs?: string[]; e2eAnswer?: number }
+      state.e2eDialogs = []
+      state.e2eAnswer = 1
+      dialog.showMessageBox = async (...args: unknown[]) => {
+        const options = args.at(-1) as { message: string; buttons: string[] }
+        state.e2eDialogs?.push(`${options.message} | ${options.buttons.join(", ")}`)
+        return { response: state.e2eAnswer ?? 1, checkboxChecked: false }
+      }
     })
     const serverPid = readServerDiscovery(dataDir)?.pid ?? 0
     expect(processAlive(serverPid)).toBe(true)
     // macOS logout, restart and shutdown reach the app as this same app.quit().
+    // They also end the user's server, so the app warns while work runs; Cancel keeps it open.
+    await app.evaluate(({ app }) => {
+      setImmediate(() => app.quit())
+    })
+    await expect
+      .poll(() => app?.evaluate(() => (globalThis as { e2eDialogs?: string[] }).e2eDialogs ?? []))
+      .toEqual([expect.stringMatching(/still running.*\| Quit, Cancel$/)])
+    expect(app.process().exitCode).toBeNull()
     const closed = app.waitForEvent("close")
     await app.evaluate(({ app }) => {
+      ;(globalThis as { e2eAnswer?: number }).e2eAnswer = 0
       setImmediate(() => app.quit())
     })
     await closed
     app = null
-    // No dialog was shown (the spy would have answered), and the work runs on.
+    // Without a real logout the server keeps the work running.
     expect(processAlive(serverPid)).toBe(true)
     expect((await client.list()).find((session) => session.id === agent.id)?.alive).toBe(true)
     expect(alive(shell.pid as number)).toBe(true)

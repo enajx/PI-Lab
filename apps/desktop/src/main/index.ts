@@ -63,6 +63,7 @@ import { firstFileArgument } from "./quickEdit/launchArgs"
 import { QuickEditFiles } from "./quickEdit/service"
 import { isTestMode, testNativeDialogs } from "./runtime/env"
 import { installTestDialogResponder } from "./runtime/testDialogs"
+import { stopServerSync } from "./server/launcher"
 import { assertAlphaResetDaemonIdleSync } from "./terminal/alphaResetProbe"
 import { resolveDaemonEntry, resolveDaemonSocketPath } from "./terminal/socketPath"
 import { registerAnalysisReportScheme } from "./trpc/science/analysis/reportScheme"
@@ -74,6 +75,8 @@ import { createMainWindow, loadWindowPage } from "./window/mainWindow"
 import { installShutdownGuard } from "./window/shutdownGuard"
 import {
   createUserQuitAction,
+  hasRunningWork,
+  logoutWorkDialog,
   QUIT_DIALOG_BUTTONS,
   quitChoiceFromButton,
   stopWorkDialog,
@@ -138,7 +141,15 @@ function prepareAlphaBuild(): boolean {
         "SingletonCookie",
         ...(dirname(socketPath) === dataDir ? [basename(socketPath)] : []),
       ],
-      beforeReset: () => assertAlphaResetDaemonIdleSync(resolveDaemonEntry(), socketPath),
+      beforeReset: () => {
+        assertAlphaResetDaemonIdleSync(resolveDaemonEntry(), socketPath)
+        // The previous build's server outlives its app; stop it before its database moves.
+        // Test runs never touch the user's real launchd job.
+        stopServerSync(
+          dataDir,
+          isTestMode ? null : `${channelIdentity(channel).autostartName}.server`,
+        )
+      },
     })
     return true
   } catch (error) {
@@ -394,6 +405,27 @@ const shutdownGuard = installShutdownGuard({
   app,
   ipcMain,
   createRequestId: randomUUID,
+  // A quit PI Lab did not start (macOS logout, restart, shutdown) also ends the
+  // user's launchd server and its agents, so ask first while work is running.
+  prepareQuit: async (mode) => {
+    if (mode !== "confirm-end" || !fullRuntime) return true
+    try {
+      const work = await fullRuntime.quitWork()
+      if (!hasRunningWork(work)) return true
+      const result = await dialog.showMessageBox({
+        type: "warning",
+        title: "Work is still running",
+        ...logoutWorkDialog(work),
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      })
+      return result.response === 0
+    } catch (error) {
+      console.error("[pi-lab] running work could not be checked:", error)
+      return true
+    }
+  },
   // With "Keep running after window closes" off, closing the window is a Quit:
   // run the Cmd+Q flow; Cancel leaves the window open. Before full boot the
   // window closes and the later automatic quit asks only if work is running.

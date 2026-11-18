@@ -146,3 +146,23 @@ export function stopWorkDialog(work: QuitWork): {
     buttons: ["Stop server and agents", "Cancel"],
   }
 }
+
+/**
+ * Text and buttons for a quit PI Lab did not start (macOS logout, restart or
+ * shutdown), which also ends the server and its work. Buttons: quit, cancel.
+ */
+export function logoutWorkDialog(work: QuitWork): {
+  message: string
+  detail: string
+  buttons: [string, string]
+} {
+  return {
+    message: workMessage(work),
+    detail: paragraphs([
+      "Logging out, restarting or shutting down stops this work.",
+      terminalList(work),
+      notebookLine(work),
+    ]),
+    buttons: ["Quit", "Cancel"],
+  }
+}
