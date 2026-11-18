@@ -316,16 +316,25 @@ function folderSize(dir) {
   return total
 }
 
-function main() {
-  const version = process.argv[2]
-  if (!version || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error("usage: package-server-bundle.cjs <version>")
+/**
+ * Build the bundle for `version` into `release/server/`, replacing bundles of
+ * earlier runs there (the packaged app ships every bundle in that folder).
+ * @param {string} version
+ * @returns {string} The tarball path.
+ */
+function buildServerBundle(version) {
+  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`server bundle: invalid version ${version}`)
   }
   if (process.platform !== "darwin") {
     throw new Error("server bundle: macOS only for now (Linux comes in step 3)")
   }
   const arch = process.arch
   if (arch !== "arm64" && arch !== "x64") throw new Error(`server bundle: unsupported arch ${arch}`)
+  mkdirSync(RELEASE_DIR, { recursive: true })
+  for (const old of readdirSync(RELEASE_DIR)) {
+    if (old.startsWith("pi-lab-server-")) rmSync(join(RELEASE_DIR, old), { force: true })
+  }
 
   const name = `pi-lab-server-${version}-darwin-${arch}`
   const stage = join(RELEASE_DIR, ".stage")
@@ -384,7 +393,29 @@ function main() {
   const packedMb = (statSync(tarball).size / 1024 / 1024).toFixed(1)
   rmSync(stage, { recursive: true, force: true })
   console.error(`server bundle: ${packedMb} MB packed, ${unpackedMb} MB unpacked`)
-  console.log(tarball)
+  return tarball
 }
 
-main()
+/**
+ * electron-builder `beforePack`: build the bundle the macOS app carries in
+ * `Resources/server-bundle/` ("Add machine" installs it), for the app's version.
+ * @param {{ electronPlatformName: string, arch: number, packager: { appInfo: { version: string } } }} context
+ */
+async function prepareForPack(context) {
+  if (context.electronPlatformName !== "darwin") return
+  const arch = ["ia32", "x64", "armv7l", "arm64", "universal"][context.arch]
+  if (arch !== process.arch) {
+    throw new Error(
+      `server bundle: packaging for ${arch} on a ${process.arch} Mac is not supported`,
+    )
+  }
+  buildServerBundle(context.packager.appInfo.version)
+}
+
+module.exports = { buildServerBundle, prepareForPack, RELEASE_DIR }
+
+if (require.main === module) {
+  const version = process.argv[2]
+  if (!version) throw new Error("usage: package-server-bundle.cjs <version>")
+  console.log(buildServerBundle(version))
+}

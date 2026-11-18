@@ -102,7 +102,11 @@ it("refuses a bundle whose SHA-256 does not match", async () => {
   mkdirSync(t.dir, { recursive: true })
   writeFileSync(copy, "not the bundle")
   writeFileSync(`${copy}.sha256`, `${"0".repeat(64)}  copy.tar.gz\n`)
-  const result = await runInstall(INSTALLER, [...t.args(bundle).slice(2), "--from-file", copy], t.env)
+  const result = await runInstall(
+    INSTALLER,
+    [...t.args(bundle).slice(2), "--from-file", copy],
+    t.env,
+  )
   expect(result.code).toBe(1)
   expect(result.stderr).toContain("SHA-256")
   expect(existsSync(join(t.prefix, "current"))).toBe(false)

@@ -228,12 +228,23 @@ const config = {
     await require("./scripts/electron-builder-before-pack.cjs").default(context)
     await require("./scripts/prepare-latex-runtime.cjs").prepareForPack(context)
     await require("./scripts/prepare-whisper-runtime.cjs").prepareForPack(context)
+    await require("./scripts/package-server-bundle.cjs").prepareForPack(context)
   },
   afterPack: "./scripts/electron-builder-after-pack.cjs",
   mac: {
     // Modern macOS uses the flat catalog; older systems retain icon.icns.
     extraResources: [
       { from: "build/Assets.car", to: "Assets.car" },
+      // The server bundle "Add machine" installs on Macs without the app (built in beforePack).
+      {
+        from: "release/server",
+        to: "server-bundle",
+        filter: [
+          "pi-lab-server-*-darwin-*.tar.gz",
+          "pi-lab-server-*-darwin-*.tar.gz.sha256",
+          "install.sh",
+        ],
+      },
       { from: "resources/latex/darwin-${arch}", to: "latex/darwin-${arch}" },
       {
         from: "resources/whisper/darwin-${arch}",

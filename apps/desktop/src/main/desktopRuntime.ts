@@ -20,11 +20,14 @@ import { createDesktopRouter, desktopContext } from "./desktop/desktopRouter"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelIdentity, type PiLabChannel } from "./identity/channel"
 import {
+  DEFAULT_REMOTE_APP_PATH,
   DEFAULT_REMOTE_DATA_DIR,
   DEFAULT_REMOTE_ENROLL_COMMAND,
+  DEFAULT_REMOTE_SERVER_PREFIX,
   MachineConnections,
   type RemoteAccess,
 } from "./machines/machineConnections"
+import { findServerBundle, type ServerBundleFiles } from "./machines/serverBundle"
 import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
 import { stopNotebooksWithWindow } from "./notebooks/notebookServers"
 import {
@@ -188,6 +191,7 @@ export class DesktopRuntime {
       access: remoteAccess(),
       deviceName: `PI Lab on ${hostname()}`,
       localMachineId: async () => (await (await this.server()).server.hello.query()).machineId,
+      bundle: carriedServerBundle,
       log: (message) => console.log(message),
     })
     if (isTestMode) {
@@ -504,8 +508,29 @@ function remoteAccess(): RemoteAccess {
       ? (JSON.parse(env.PI_LAB_TEST_SSH_ARGS) as string[])
       : [],
     dataDir: env.PI_LAB_TEST_REMOTE_DATA_DIR ?? DEFAULT_REMOTE_DATA_DIR,
+    serverPrefix: env.PI_LAB_TEST_REMOTE_PREFIX ?? DEFAULT_REMOTE_SERVER_PREFIX,
+    appPath: env.PI_LAB_TEST_REMOTE_APP_PATH ?? DEFAULT_REMOTE_APP_PATH,
     enrollCommand: env.PI_LAB_TEST_REMOTE_ENROLL ?? DEFAULT_REMOTE_ENROLL_COMMAND,
+    // Tests: no launchd agent, and the installed server runs in test mode.
+    installArgs: isTestMode ? ["--no-launchd"] : [],
+    installEnv: isTestMode ? { PI_LAB_TEST_MODE: "1" } : {},
   }
+}
+
+/**
+ * The server bundle this app carries: `Resources/server-bundle/` in a
+ * packaged app, `release/server/` (from package-server-bundle.cjs) in source runs.
+ */
+function carriedServerBundle(): ServerBundleFiles | null {
+  if (app.isPackaged) {
+    const dir = join(process.resourcesPath, "server-bundle")
+    return findServerBundle(dir, join(dir, "install.sh"))
+  }
+  const desktopDir = join(__dirname, "..", "..")
+  return findServerBundle(
+    join(desktopDir, "release", "server"),
+    join(desktopDir, "scripts", "server-install", "install.sh"),
+  )
 }
 
 /** Decrypt a value the old app saved with safeStorage, or null when it cannot be read. */

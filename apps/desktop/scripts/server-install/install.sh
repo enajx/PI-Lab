@@ -87,6 +87,15 @@ case "$(uname -m)" in
   *) die "unsupported processor $(uname -m)" ;;
 esac
 
+absolute() {
+  case "$1" in
+    /*) printf '%s' "${1%/}" ;;
+    *) printf '%s/%s' "$PWD" "${1%/}" ;;
+  esac
+}
+prefix=$(absolute "$prefix")
+data_dir=$(absolute "$data_dir")
+
 # Tests must never touch the real install, data folder or launchd agent.
 if [ "${PI_LAB_TEST_MODE:-}" = "1" ]; then
   [ "$use_launchd" = 0 ] || [ "$label" != "$DEFAULT_LABEL" ] ||

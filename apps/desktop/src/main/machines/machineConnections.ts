@@ -1,7 +1,18 @@
-import { spawn } from "node:child_process"
 import { DEVICE_REVOKE_PATH, proveDeviceIdentity, TOKEN_HEADER } from "../../server/access"
 import { readRemoteDiscovery, SshTunnel, type TunnelState } from "../server/tunnel"
 import { readMachines, type StoredMachine, writeMachines } from "./machineStore"
+import {
+  bundleEnrollCommand,
+  installServerBundle,
+  probeRemote,
+  type RemoteAccess,
+  runRemote,
+  SSH_TIMEOUT_MS,
+  shellQuote,
+} from "./remoteShell"
+import type { ServerBundleFiles } from "./serverBundle"
+
+export type { RemoteAccess }
 
 /**
  * Connections from this app to remote PI Lab servers ("machines"). For each
@@ -11,25 +22,16 @@ import { readMachines, type StoredMachine, writeMachines } from "./machineStore"
  * The local server is not here: it stays with DesktopRuntime.
  */
 
-/** How the app reaches remote servers. Production: the user's ssh, defaults below; tests point at a test sshd. */
-export interface RemoteAccess {
-  sshPath: string
-  /** Extra ssh options placed before the host (tests only). */
-  extraSshArgs: string[]
-  /** The server's data folder on the remote machine; relative paths start at the remote home. */
-  dataDir: string
-  /** Shell command on the remote that runs `enroll` (without `--name`). */
-  enrollCommand: string
-}
-
 /** The Stable app's data folder on the remote, relative to the remote home. */
 export const DEFAULT_REMOTE_DATA_DIR = ".pi-lab"
 
-/**
- * `enroll` of the Stable desktop app installed on the remote Mac, run by its
- * own binary in Node mode. Changes when the installer (PR 3) puts the server
- * bundle in place.
- */
+/** Where "Add machine" installs the server bundle on the remote (install.sh `--prefix`). */
+export const DEFAULT_REMOTE_SERVER_PREFIX = ".pi-lab/server"
+
+/** The Stable desktop app on a remote Mac. */
+export const DEFAULT_REMOTE_APP_PATH = "/Applications/PI Lab.app"
+
+/** `enroll` of the Stable desktop app installed on the remote Mac, run by its own binary in Node mode. */
 export const DEFAULT_REMOTE_ENROLL_COMMAND =
   "ELECTRON_RUN_AS_NODE=1 '/Applications/PI Lab.app/Contents/MacOS/PI Lab' '/Applications/PI Lab.app/Contents/Resources/app.asar/out/main/enroll.js'"
 
@@ -47,7 +49,6 @@ export interface MachineSummary {
   error: string | null
 }
 
-const SSH_TIMEOUT_MS = 30_000
 const REVOKE_TIMEOUT_MS = 5_000
 /** An offline machine is tried again on an endpoint request at most this often. */
 const RETRY_AFTER_MS = 10_000
@@ -61,41 +62,6 @@ interface LiveMachine {
   failedAt: number
   /** Test seam: stopped by {@link MachineConnections.stopForTest}, no new attempt until started. */
   stopped: boolean
-}
-
-/** Quote one word for the remote POSIX shell. */
-function shellQuote(word: string): string {
-  return `'${word.replaceAll("'", `'\\''`)}'`
-}
-
-/** Run `command` on `host` over ssh; resolve with stdout, reject with stderr. */
-async function runRemote(access: RemoteAccess, host: string, command: string): Promise<string> {
-  const child = spawn(
-    access.sshPath,
-    ["-o", "BatchMode=yes", ...access.extraSshArgs, host, command],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  )
-  let stdout = ""
-  let stderr = ""
-  child.stdout.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString()
-  })
-  child.stderr.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString()
-  })
-  const timer = setTimeout(() => child.kill("SIGKILL"), SSH_TIMEOUT_MS)
-  const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-    (resolve, reject) => {
-      child.once("error", reject)
-      child.once("close", (code, signal) => resolve({ code, signal }))
-    },
-  )
-  clearTimeout(timer)
-  const detail = stderr.trim()
-  if (result.signal !== null) throw new Error(`ssh to ${host} timed out: ${detail}`)
-  if (result.code === 255) throw new Error(`ssh to ${host} failed: ${detail}`)
-  if (result.code !== 0) throw new Error(`${detail || `exit code ${result.code}`}`)
-  return stdout
 }
 
 function parseEnroll(stdout: string): { machineId: string; deviceId: string; token: string } {
@@ -120,6 +86,8 @@ export interface MachineConnectionsOptions {
   deviceName: string
   /** The local server's machine id, so the local server is not added as a machine. */
   localMachineId: () => Promise<string>
+  /** The server bundle this app carries ("Add machine" installs it); null when it has none. */
+  bundle: () => ServerBundleFiles | null
   log: (message: string) => void
 }
 
@@ -181,20 +149,45 @@ export class MachineConnections {
   }
 
   /**
-   * Add a machine: run `enroll` on `sshHost` over ssh, store the device token,
-   * connect. Refuses a Linux remote, the local server and a machine already added.
+   * Add a machine: probe `sshHost` over ssh. A running server (the desktop
+   * app's or an installed bundle) is used; with none and no desktop app there,
+   * this app's server bundle is copied over and installed (install.sh). Then
+   * run `enroll`, store the device token and connect. Refuses a Linux remote,
+   * the local server and a machine already added.
    */
   async add(input: { sshHost: string; name: string }): Promise<MachineSummary> {
     const { access, deviceName } = this.#options
-    const system = (await runRemote(access, input.sshHost, "uname -s")).trim()
-    if (system === "Linux") throw new Error("Linux machines come in step 3 of multi-machine PI Lab")
-    if (system !== "Darwin")
-      throw new Error(`${input.sshHost} runs ${system}; only macOS is supported`)
+    const probe = await probeRemote(access, input.sshHost)
+    if (probe.system === "Linux") {
+      throw new Error("Linux machines come in step 3 of multi-machine PI Lab")
+    }
+    if (probe.system !== "Darwin") {
+      throw new Error(`${input.sshHost} runs ${probe.system}; only macOS is supported`)
+    }
+    let enrollCommand = access.enrollCommand
+    if (probe.server === "bundle") enrollCommand = bundleEnrollCommand(access)
+    if (probe.server === "none") {
+      if (probe.appInstalled) {
+        throw new Error(
+          `PI Lab is installed on ${input.sshHost}, but its server is not running. Open PI Lab there once, then add the machine again.`,
+        )
+      }
+      const bundle = this.#options.bundle()
+      if (bundle === null) {
+        throw new Error(
+          `No PI Lab server runs on ${input.sshHost}, and this app has no server bundle to install there`,
+        )
+      }
+      await installServerBundle(access, input.sshHost, bundle)
+      enrollCommand = bundleEnrollCommand(access)
+    }
     const enrolled = parseEnroll(
       await runRemote(
         access,
         input.sshHost,
-        `${access.enrollCommand} --name ${shellQuote(deviceName)}`,
+        `${enrollCommand} --name ${shellQuote(deviceName)}`,
+        null,
+        SSH_TIMEOUT_MS,
       ).catch((error: Error) => {
         throw new Error(`enroll on ${input.sshHost} failed: ${error.message}`)
       }),
