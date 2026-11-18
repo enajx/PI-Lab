@@ -248,6 +248,12 @@ class Session {
     }
   }
 
+  /** Write a compose-line message and Enter; see `WriteRequest.message`. */
+  writeMessage(text: string): void {
+    const wrapped = this.screen.bracketedPaste() ? `\x1b[200~${text}\x1b[201~` : text
+    this.write(`${wrapped}\r`, null)
+  }
+
   /** Write to the PTY; a typed key (`key` set) gets an echo ack. */
   write(data: string, key: KeyInput | null): void {
     if (!this.alive) return
@@ -316,6 +322,7 @@ export interface SessionHandle {
   startFrom(resume: ResumePoint | null): SessionStart
   subscribe(listener: SessionListener): () => void
   write(data: string, key: KeyInput | null): void
+  writeMessage(text: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
 }

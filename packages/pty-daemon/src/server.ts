@@ -389,7 +389,8 @@ export class DaemonServer {
       this.fail(connection, request.cid, "unknown-session", `no session ${request.sessionId}`)
       return
     }
-    session.write(request.data, request.key ?? null)
+    if (request.message === true) session.writeMessage(request.data)
+    else session.write(request.data, request.key ?? null)
     this.reply(connection, { kind: "write-ok", cid: request.cid, sessionId: request.sessionId })
   }
 

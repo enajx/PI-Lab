@@ -31,6 +31,7 @@ import {
   TerminalStream,
 } from "../renderer/Terminal/terminalStream"
 import { type ConnectionState, ConnectionStatus } from "../renderer/trpc/connectionStatus"
+import { startOnce } from "../renderer/trpc/launch"
 import { createServerSockets } from "../renderer/trpc/serverLinks"
 import { ensureLocalToken, TOKEN_HEADER } from "./access"
 import { type ConnectionStats, type ListeningServer, listen } from "./http"
@@ -50,6 +51,8 @@ const PROGRAM = join(
   "testPrograms",
   "screenProgram.cjs",
 )
+/** Logs every stdin chunk to a file (packages/pty-daemon/src/testPrograms/stdinLogger.cjs). */
+const STDIN_LOGGER = join(PROGRAM, "..", "stdinLogger.cjs")
 /** The flood harness's program: steady output at a set rate on "g", FINAL on "q", or a key echo. */
 const FLOOD_PROGRAM = join(__dirname, "..", "..", "..", "..", "tests", "flood", "floodProgram.cjs")
 const COLS = 80
@@ -1031,3 +1034,89 @@ test("acks for an ended stream are ignored", async () => {
   await expectSameBuffer(live, flood.sessionId)
   await control.trpc.terminal.kill.mutate({ sessionId: flood.sessionId })
 }, 30_000)
+
+/** Spawn the stdin logger; `input()` is everything it read so far, in order. */
+async function spawnLogger(
+  client: Client,
+  mode: "plain" | "paste" | "echo",
+): Promise<{ sessionId: string; viewer: Viewer; input: () => string }> {
+  const logFile = join(dataDir, `stdin-${Math.random().toString(36).slice(2)}.log`)
+  const { sessionId } = await client.trpc.terminal.spawn.mutate({
+    command: NODE,
+    args: [STDIN_LOGGER, logFile, mode],
+    cols: COLS,
+    rows: ROWS,
+  })
+  const viewer = new Viewer(await newClient(), sessionId, "keep")
+  await waitFor(() => viewer.screen().includes("R"), 15_000, "the logger to start")
+  const input = (): string =>
+    existsSync(logFile)
+      ? readFileSync(logFile, "utf8")
+          .split("\n")
+          .filter((line) => line.length > 0)
+          .map((line) => JSON.parse(line) as string)
+          .join("")
+      : ""
+  return { sessionId, viewer, input }
+}
+
+test("compose line: a message is written with Enter, in bracketed paste when the program turned it on; a resend with the same ID is a duplicate and writes nothing", async () => {
+  const control = await newClient()
+  const plain = await spawnLogger(control, "plain")
+  const pasted = await spawnLogger(control, "paste")
+  const text = "two\nlines"
+  for (const target of [plain, pasted]) {
+    const first = await control.trpc.terminal.sendMessage.mutate({
+      sessionId: target.sessionId,
+      messageId: `message-${target.sessionId}`,
+      text,
+      clientId: "compose-test",
+    })
+    expect(first).toEqual({ status: "sent" })
+    const again = await control.trpc.terminal.sendMessage.mutate({
+      sessionId: target.sessionId,
+      messageId: `message-${target.sessionId}`,
+      text,
+      clientId: "compose-test",
+    })
+    expect(again).toEqual({ status: "duplicate" })
+  }
+  await waitFor(() => plain.input().length > 0 && pasted.input().length > 0, 5_000, "the messages")
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(plain.input()).toBe("two\nlines\r")
+  expect(pasted.input()).toBe("\x1b[200~two\nlines\x1b[201~\r")
+  for (const target of [plain, pasted])
+    await control.trpc.terminal.kill.mutate({ sessionId: target.sessionId })
+}, 30_000)
+
+test("input after a drop: a compose message whose reply is lost to a dropped connection arrives exactly once", async () => {
+  const control = await newClient()
+  const logger = await spawnLogger(control, "plain")
+  const sender = await newClient()
+  const messages = ["first", "second", "third", "fourth", "fifth"]
+  let resends = 0
+  const statuses: string[] = []
+  for (const text of messages) {
+    let attempts = 0
+    const sent = startOnce((messageId) => {
+      attempts += 1
+      return sender.trpc.terminal.sendMessage.mutate({
+        sessionId: logger.sessionId,
+        messageId,
+        text,
+        clientId: "drop-test",
+      })
+    })
+    // Drop every connection while the message is in flight (a killed tunnel).
+    setImmediate(() => server.dropConnections())
+    const result = await sent
+    statuses.push(result.status)
+    resends += attempts - 1
+  }
+  // The drop hit messages in flight: at least one was sent again with its ID.
+  expect(resends).toBeGreaterThan(0)
+  console.log(`[compose drop] resends ${resends}, statuses ${statuses.join(",")}`)
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  expect(logger.input()).toBe(messages.map((text) => `${text}\r`).join(""))
+  await control.trpc.terminal.kill.mutate({ sessionId: logger.sessionId })
+}, 60_000)

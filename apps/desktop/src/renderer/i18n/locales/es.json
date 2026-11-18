@@ -1333,5 +1333,17 @@
   "Could not read a dropped file path": "No se pudo leer la ruta de un archivo soltado",
   "Session exited": "La sesión terminó",
   "Terminal connection failed": "Falló la conexión del terminal",
-  "Failed to start terminal": "No se pudo iniciar el terminal"
+  "Failed to start terminal": "No se pudo iniciar el terminal",
+  "Typing in terminals.": "Escritura en terminales.",
+  "Choose how typed characters show on slow connections.": "Elige cómo se muestran los caracteres escritos en conexiones lentas.",
+  "Local echo": "Eco local",
+  "Show typed characters before the program echoes them. Adaptive shows them only when the connection is slow (round trip over 30 ms) and underlines them over 80 ms.": "Muestra los caracteres escritos antes de que el programa los repita. Adaptable los muestra solo cuando la conexión es lenta (ida y vuelta de más de 30 ms) y los subraya por encima de 80 ms.",
+  "Adaptive": "Adaptable",
+  "Always": "Siempre",
+  "Sending": "Enviando",
+  "Message not sent": "Mensaje no enviado",
+  "Message to the terminal": "Mensaje al terminal",
+  "Message (Enter sends, Shift+Enter adds a line)": "Mensaje (Intro envía, Mayús+Intro añade una línea)",
+  "Compose line: type a message and send it with Enter": "Línea de redacción: escribe un mensaje y envíalo con Intro",
+  "Compose": "Redactar"
 }

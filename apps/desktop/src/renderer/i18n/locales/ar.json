@@ -1333,5 +1333,17 @@
   "Could not read a dropped file path": "تعذرت قراءة مسار ملف مُفلت",
   "Session exited": "انتهت الجلسة",
   "Terminal connection failed": "فشل اتصال الطرفية",
-  "Failed to start terminal": "تعذر تشغيل الطرفية"
+  "Failed to start terminal": "تعذر تشغيل الطرفية",
+  "Typing in terminals.": "الكتابة في الطرفيات.",
+  "Choose how typed characters show on slow connections.": "اختر كيفية ظهور الأحرف المكتوبة على الاتصالات البطيئة.",
+  "Local echo": "الصدى المحلي",
+  "Show typed characters before the program echoes them. Adaptive shows them only when the connection is slow (round trip over 30 ms) and underlines them over 80 ms.": "يعرض الأحرف المكتوبة قبل أن يعيدها البرنامج. الوضع التكيفي يعرضها فقط عندما يكون الاتصال بطيئًا (ذهاب وإياب أكثر من 30 مللي ثانية) ويضع تحتها خطًا فوق 80 مللي ثانية.",
+  "Adaptive": "تكيفي",
+  "Always": "دائمًا",
+  "Sending": "جارٍ الإرسال",
+  "Message not sent": "لم تُرسل الرسالة",
+  "Message to the terminal": "رسالة إلى الطرفية",
+  "Message (Enter sends, Shift+Enter adds a line)": "رسالة (Enter للإرسال، Shift+Enter لإضافة سطر)",
+  "Compose line: type a message and send it with Enter": "سطر الكتابة: اكتب رسالة وأرسلها بالضغط على Enter",
+  "Compose": "كتابة"
 }

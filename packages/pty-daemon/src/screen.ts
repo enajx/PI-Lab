@@ -266,6 +266,11 @@ export class ScreenState {
     this.emulator.resize(cols, rows)
   }
 
+  /** The program turned on bracketed paste (mode 2004). */
+  bracketedPaste(): boolean {
+    return this.emulator.terminal.modes.bracketedPasteMode
+  }
+
   snapshot(): ScreenSnapshot {
     return { offset: this.safeOffset, screen: this.emulator.serialize("all"), bytes: this.held }
   }

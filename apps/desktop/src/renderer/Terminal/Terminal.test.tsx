@@ -59,7 +59,20 @@ vi.mock("@xterm/xterm", () => ({
     }
 
     get buffer() {
-      return { active: { viewportY: xtermHarness.viewportY, baseY: xtermHarness.baseY } }
+      return {
+        active: {
+          viewportY: xtermHarness.viewportY,
+          baseY: xtermHarness.baseY,
+          cursorX: 0,
+          cursorY: 0,
+          type: "normal",
+          getLine: () => undefined,
+        },
+      }
+    }
+
+    onWriteParsed(): { dispose: () => void } {
+      return { dispose: () => {} }
     }
 
     onSelectionChange(handler: () => void): { dispose: () => void } {
@@ -129,6 +142,7 @@ describe("Terminal macOS custom key integration", () => {
       sessionId: "agent-session",
       data: "\u001b[13;2u",
       clientId: expect.any(String),
+      seq: expect.any(Number),
     })
 
     const plainEnter = macKeyEvent("Enter", {})
@@ -141,6 +155,7 @@ describe("Terminal macOS custom key integration", () => {
       sessionId: "agent-session",
       data: "\r",
       clientId: expect.any(String),
+      seq: expect.any(Number),
     })
   })
 
@@ -239,6 +254,7 @@ describe("Terminal macOS custom key integration", () => {
       sessionId: "folder-session",
       data: "'/tmp/research folder'",
       clientId: expect.any(String),
+      seq: expect.any(Number),
     })
   })
 

@@ -4,7 +4,13 @@ import "@xterm/xterm/css/xterm.css"
 import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { registerDictationTarget } from "../dictation/targets"
 import { useTranslate } from "../i18n/language"
+import { readComposeChoice, useLocalEcho, writeComposeChoice } from "../preferences/preferences"
 import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
+import { connectionStatus } from "../trpc/connectionStatus"
+import { startOnce } from "../trpc/launch"
+import { ComposeLine } from "./ComposeLine"
+import { PredictionEngine } from "./localEcho"
+import { LocalEchoOverlay } from "./localEchoOverlay"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
 import { TerminalStream } from "./terminalStream"
 
@@ -13,6 +19,18 @@ import { TerminalStream } from "./terminalStream"
  * that typed last keep its PTY size for a few seconds (`terminal.resize`).
  */
 const CLIENT_ID = crypto.randomUUID()
+
+/**
+ * The next key's number in this document's sequence (shared by every pane,
+ * since the daemon counts keys per client id). The daemon's echo ack names it.
+ */
+let nextKeySeq = 0
+
+/** The daemon sends a key's echo ack this long after writing it (ECHO_ACK_DELAY_MS). */
+const ECHO_ACK_DELAY_MS = 50
+
+/** Agent terminals show the compose line on their own over this round trip, unless the user chose. */
+const COMPOSE_DEFAULT_ROUND_TRIP_MS = 80
 
 /**
  * Live terminal pane wired end-to-end to the `terminal` tRPC
@@ -116,7 +134,22 @@ export function Terminal({
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const t = useTranslate()
+  const [localEcho] = useLocalEcho()
+  const engineRef = useRef<PredictionEngine | null>(null)
+  const localEchoRef = useRef(localEcho)
+  localEchoRef.current = localEcho
+  useEffect(() => {
+    engineRef.current?.setMode(localEcho)
+  }, [localEcho])
   const [notices, setNotices] = useState<Partial<Record<NoticeKind, Notice>>>({})
+  /** The pane's session, once spawned or attached. */
+  const [boundSession, setBoundSession] = useState<string | null>(null)
+  /** The user's compose-line choice for this session (remembered), or null before one. */
+  const [composeChoice, setComposeChoice] = useState<boolean | null>(null)
+  /** The round trip measured from the stream's acks is over the compose default threshold. */
+  const [slowLink, setSlowLink] = useState(false)
+  const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null)
+  const composeOn = composeChoice ?? (inputKind === "agent" && slowLink)
   const streamRef = useRef<TerminalStream | null>(null)
   const documentVisible = useDocumentVisible()
   const shown = visible && documentVisible
@@ -124,6 +157,11 @@ export function Terminal({
   shownRef.current = shown
   useEffect(() => {
     streamRef.current?.setVisible(shown)
+    // Predictions are cleared when the pane is hidden (the stream starts again when shown).
+    if (!shown) {
+      engineRef.current?.reset()
+      overlayRef.current?.draw()
+    }
   }, [shown])
 
   // Effect deps are intentionally empty: a terminal pane binds to one session for
@@ -135,10 +173,12 @@ export function Terminal({
   // Track the app's resolved mode and CSS-token palette so the terminal follows
   // Appearance changes without re-attaching the session.
   const xtermRef = useRef<XTerm | null>(null)
+  const overlayRef = useRef<LocalEchoOverlay | null>(null)
   useEffect(() => {
     const root = document.documentElement
     const observer = new MutationObserver(() => {
-      if (xtermRef.current) xtermRef.current.options.theme = currentTerminalTheme()
+      if (xtermRef.current)
+        xtermRef.current.options.theme = overlayRef.current?.theme() ?? currentTerminalTheme()
     })
     observer.observe(root, { attributes: true, attributeFilter: ["class", "style"] })
     return () => observer.disconnect()
@@ -167,6 +207,19 @@ export function Terminal({
       theme: currentTerminalTheme(),
     })
     xtermRef.current = xterm
+    const engine = new PredictionEngine(localEchoRef.current)
+    engineRef.current = engine
+    const overlay = new LocalEchoOverlay(xterm, engine, currentTerminalTheme)
+    overlayRef.current = overlay
+    /** When each of this pane's keys was sent (performance clock), by sequence number. */
+    const keySentAt = new Map<number, number>()
+    const redraw = (): void => overlay.draw()
+    const writeParsed = xterm.onWriteParsed(redraw)
+    const updateDisconnected = (): void => {
+      engine.setDisconnected(connectionStatus.state() !== "connected")
+      redraw()
+    }
+    const unsubscribeStatus = connectionStatus.subscribe(updateDisconnected)
     const fitAddon = new FitAddon()
     xterm.loadAddon(fitAddon)
     xterm.open(container)
@@ -180,6 +233,8 @@ export function Terminal({
     let focusTarget: HTMLTextAreaElement | null = null
     /** The PTY size as the stream last reported it; null until the first start. */
     let ptySize: { cols: number; rows: number } | null = null
+    /** Smoothed round trip of the stream's acks (ms), or null before the first. */
+    let ackRoundTrip: number | null = null
     let inputDisposable: { dispose: () => void } | null = null
     const viewDisposables: { dispose: () => void }[] = []
     let resizeObserver: ResizeObserver | null = null
@@ -210,7 +265,11 @@ export function Terminal({
     /** Forward one input chunk exactly once, whether xterm generated or custom-mapped. */
     const forwardInput = (data: string): void => {
       if (cancelled || !sessionId) return
-      void trpc.terminal.write.mutate({ sessionId, data, clientId: CLIENT_ID }).then(
+      const seq = nextKeySeq++
+      keySentAt.set(seq, performance.now())
+      engine.key(data, seq, overlay.screen())
+      redraw()
+      void trpc.terminal.write.mutate({ sessionId, data, clientId: CLIENT_ID, seq }).then(
         () => clearNotice("write"),
         (error: unknown) => reportTransportFailure("write", error),
       )
@@ -299,11 +358,28 @@ export function Terminal({
     /** Wire the streaming subscription + stdin forwarding for a session id. */
     const bind = (id: string) => {
       sessionId = id
+      setBoundSession(id)
+      setComposeChoice(readComposeChoice(id))
+      sendMessageRef.current = async (text) => {
+        await startOnce((messageId) =>
+          trpc.terminal.sendMessage.mutate({ sessionId: id, messageId, text, clientId: CLIENT_ID }),
+        )
+      }
 
       // Stream daemon output into xterm, resuming after dropped connections.
       stream = new TerminalStream({
         subscribe: (input, handlers) => trpc.terminal.output.subscribe(input, handlers),
-        ack: (input) => trpc.terminal.ack.mutate(input),
+        ack: (input) => {
+          // The acks' round trips give the link's round trip (for the compose-line default).
+          const sentAt = performance.now()
+          return trpc.terminal.ack.mutate(input).then((reply) => {
+            const sample = performance.now() - sentAt
+            ackRoundTrip =
+              ackRoundTrip === null ? sample : ackRoundTrip + (sample - ackRoundTrip) / 8
+            if (!cancelled) setSlowLink(ackRoundTrip > COMPOSE_DEFAULT_ROUND_TRIP_MS)
+            return reply
+          })
+        },
         sessionId: id,
         emulator: {
           write: (data, applied) => xterm.write(data, applied),
@@ -312,7 +388,28 @@ export function Terminal({
         dropPolicy: "keep",
         onSize: (cols, rows) => {
           ptySize = { cols, rows }
+          engine.reset()
+          redraw()
           requestAnimationFrame(fitView)
+        },
+        onStart: (echo) => {
+          // A replay, refresh or snapshot (also a flow-control skip) clears every prediction.
+          engine.reset()
+          engine.setEcho(echo)
+          redraw()
+        },
+        onEcho: (echo) => {
+          engine.setEcho(echo)
+          redraw()
+        },
+        onEchoAck: (ack) => {
+          if (ack.clientId !== CLIENT_ID) return
+          const sentAt = keySentAt.get(ack.seq)
+          if (sentAt !== undefined) engine.roundTrip(performance.now() - sentAt - ECHO_ACK_DELAY_MS)
+          for (const seq of keySentAt.keys()) if (seq <= ack.seq) keySentAt.delete(seq)
+          engine.setEcho(ack.echo)
+          engine.ack(ack.seq, overlay.screen())
+          redraw()
         },
         onExit: (exitCode) => {
           showNotice("exit", "Session exited", `code ${exitCode ?? "?"}`)
@@ -399,6 +496,12 @@ export function Terminal({
       // session (it is NOT killed), so the PTY persists across reload.
       stream?.close()
       streamRef.current = null
+      writeParsed.dispose()
+      unsubscribeStatus()
+      overlay.dispose()
+      overlayRef.current = null
+      engineRef.current = null
+      sendMessageRef.current = null
       xterm.dispose()
       xtermRef.current = null
     }
@@ -435,13 +538,40 @@ export function Terminal({
           ))}
         </div>
       ) : null}
-      <div
-        ref={containerRef}
-        data-testid="terminal"
-        data-input-kind={inputKind}
-        data-session-id={sessionId}
-        style={{ ...paneStyle, flex: 1, background: "var(--background)" }}
-      />
+      <div style={{ ...paneStyle, flex: 1, position: "relative" }}>
+        <div
+          ref={containerRef}
+          data-testid="terminal"
+          data-input-kind={inputKind}
+          data-session-id={sessionId}
+          style={{ ...paneStyle, background: "var(--background)" }}
+        />
+        {boundSession !== null ? (
+          <button
+            type="button"
+            data-testid="terminal-compose-toggle"
+            aria-pressed={composeOn}
+            title={t("Compose line: type a message and send it with Enter")}
+            className="absolute right-2 bottom-2 rounded-md border border-border bg-background px-1.5 py-0.5 text-muted-foreground text-xs hover:text-foreground"
+            onClick={() => {
+              writeComposeChoice(boundSession, !composeOn)
+              setComposeChoice(!composeOn)
+            }}
+          >
+            {t("Compose")}
+          </button>
+        ) : null}
+      </div>
+      {composeOn && boundSession !== null ? (
+        <ComposeLine
+          send={(text) => {
+            const send = sendMessageRef.current
+            if (send === null) return Promise.reject(new Error("the terminal is not ready"))
+            return send(text)
+          }}
+          focusTerminal={() => xtermRef.current?.focus()}
+        />
+      ) : null}
     </div>
   )
 }

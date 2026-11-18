@@ -352,6 +352,17 @@ export class DaemonClient extends EventEmitter {
     }))
   }
 
+  /** Send a compose-line message: the text and Enter, in bracketed paste when the program enabled it. */
+  async writeMessage(sessionId: string, text: string): Promise<void> {
+    await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({
+      kind: "write",
+      cid,
+      sessionId,
+      data: text,
+      message: true,
+    }))
+  }
+
   /** Write a key the user typed; the daemon sends an echo ack for it. */
   async writeKey(sessionId: string, data: string, key: KeyInput): Promise<void> {
     await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({

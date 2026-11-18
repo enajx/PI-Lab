@@ -130,6 +130,12 @@ export interface WriteRequest {
   data: string
   /** Set for typed keys: the daemon sends an {@link EchoAckEvent} for each one. */
   key?: KeyInput
+  /**
+   * A message from the compose line: the daemon writes `data` and Enter
+   * (`\r`), wrapped in bracketed paste (`ESC[200~ ... ESC[201~`) when the
+   * program turned that mode on, so a newline inside it does not submit early.
+   */
+  message?: true
 }
 
 export interface ResizeRequest {
@@ -510,6 +516,8 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
       return { kind: "detach", cid, sessionId: value.sessionId }
     case "write": {
       if (typeof value.sessionId !== "string" || typeof value.data !== "string") return null
+      if (value.message === true)
+        return { kind: "write", cid, sessionId: value.sessionId, data: value.data, message: true }
       const key = value.key
       if (key === undefined)
         return { kind: "write", cid, sessionId: value.sessionId, data: value.data }

@@ -48,6 +48,24 @@ const writeInput = z.object({
   seq: z.number().int().nonnegative().optional(),
 })
 
+const sendMessageInput = z.object({
+  sessionId: z.string(),
+  /** One per message; a resend after a lost reply uses the same ID. */
+  messageId: z.string().min(1).max(200),
+  text: z.string(),
+  clientId: z.string().min(1),
+})
+
+/** How many compose-line message IDs the server keeps; older ones are forgotten first. */
+const MESSAGE_ID_LIMIT = 500
+
+/**
+ * Message ID → the write of that message, for the server's lifetime (in
+ * memory, last {@link MESSAGE_ID_LIMIT}). A failed write is forgotten, so a
+ * resend writes it again.
+ */
+const sentMessages = new Map<string, Promise<void>>()
+
 const resizeInput = z.object({
   sessionId: z.string(),
   cols: z.number().int().positive(),
@@ -385,6 +403,39 @@ export const terminalRouter = router({
     else await client.write(input.sessionId, input.data)
     ctx.caffeine.markTerminalActivity()
     return { ok: true as const }
+  }),
+
+  /**
+   * Send a compose-line message (the text and Enter; the daemon wraps it in
+   * bracketed paste when the program turned that mode on). Accepted once per
+   * `messageId`: a resend after a lost reply gets `duplicate` and writes nothing.
+   */
+  sendMessage: publicProcedure.input(sendMessageInput).mutation(async ({ ctx, input }) => {
+    const existing = sentMessages.get(input.messageId)
+    if (existing !== undefined) {
+      await existing
+      return { status: "duplicate" as const }
+    }
+    // Registered before any await, so a resend that arrives meanwhile finds it.
+    const written = (async () => {
+      const client = await ctx.getDaemonClient()
+      ctx.activityMonitor.userInput(input.sessionId, `${input.text}\r`)
+      typingMap(client).set(input.sessionId, { clientId: input.clientId, at: Date.now() })
+      lastTypedAt.set(input.sessionId, Date.now())
+      await client.writeMessage(input.sessionId, input.text)
+    })()
+    sentMessages.set(input.messageId, written)
+    written.catch(() => {
+      if (sentMessages.get(input.messageId) === written) sentMessages.delete(input.messageId)
+    })
+    while (sentMessages.size > MESSAGE_ID_LIMIT) {
+      const oldest = sentMessages.keys().next().value
+      if (oldest === undefined) break
+      sentMessages.delete(oldest)
+    }
+    await written
+    ctx.caffeine.markTerminalActivity()
+    return { status: "sent" as const }
   }),
 
   /**

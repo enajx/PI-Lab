@@ -1333,5 +1333,17 @@
   "Could not read a dropped file path": "ドロップされたファイルのパスを読み取れませんでした",
   "Session exited": "セッションが終了しました",
   "Terminal connection failed": "ターミナルの接続に失敗しました",
-  "Failed to start terminal": "ターミナルを起動できませんでした"
+  "Failed to start terminal": "ターミナルを起動できませんでした",
+  "Typing in terminals.": "ターミナルでの入力。",
+  "Choose how typed characters show on slow connections.": "遅い接続で入力した文字をどう表示するかを選びます。",
+  "Local echo": "ローカルエコー",
+  "Show typed characters before the program echoes them. Adaptive shows them only when the connection is slow (round trip over 30 ms) and underlines them over 80 ms.": "プログラムがエコーする前に入力した文字を表示します。アダプティブでは接続が遅いとき（往復 30 ms 超）だけ表示し、80 ms を超えると下線を引きます。",
+  "Adaptive": "アダプティブ",
+  "Always": "常に",
+  "Sending": "送信中",
+  "Message not sent": "メッセージは送信されませんでした",
+  "Message to the terminal": "ターミナルへのメッセージ",
+  "Message (Enter sends, Shift+Enter adds a line)": "メッセージ（Enter で送信、Shift+Enter で改行）",
+  "Compose line: type a message and send it with Enter": "作成行：メッセージを入力して Enter で送信",
+  "Compose": "作成"
 }

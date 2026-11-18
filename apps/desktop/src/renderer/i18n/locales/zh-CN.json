@@ -1333,5 +1333,17 @@
   "Could not read a dropped file path": "无法读取拖放文件的路径",
   "Session exited": "会话已退出",
   "Terminal connection failed": "终端连接失败",
-  "Failed to start terminal": "无法启动终端"
+  "Failed to start terminal": "无法启动终端",
+  "Typing in terminals.": "在终端中输入。",
+  "Choose how typed characters show on slow connections.": "选择在慢速连接上如何显示输入的字符。",
+  "Local echo": "本地回显",
+  "Show typed characters before the program echoes them. Adaptive shows them only when the connection is slow (round trip over 30 ms) and underlines them over 80 ms.": "在程序回显之前显示输入的字符。自适应模式仅在连接较慢（往返超过 30 毫秒）时显示，超过 80 毫秒时加下划线。",
+  "Adaptive": "自适应",
+  "Always": "始终",
+  "Sending": "正在发送",
+  "Message not sent": "消息未发送",
+  "Message to the terminal": "发送到终端的消息",
+  "Message (Enter sends, Shift+Enter adds a line)": "消息（Enter 发送，Shift+Enter 换行）",
+  "Compose line: type a message and send it with Enter": "撰写行：输入消息并按 Enter 发送",
+  "Compose": "撰写"
 }
