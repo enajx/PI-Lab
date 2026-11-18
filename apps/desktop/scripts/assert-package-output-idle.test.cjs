@@ -13,6 +13,7 @@ test("finds the running packaged app without mistaking helpers or other bundles 
     `125 /repo/release/quick-editor-python/PI Lab.app/Contents/MacOS/PI Lab`,
     `126 /repo/release/mac-arm64/PI Lab.app.old/Contents/MacOS/PI Lab`,
     `127 /repo/release/mac-arm64/PI Lab.app/Contents/MacOS/PI Lab /repo/release/mac-arm64/PI Lab.app/Contents/Resources/app.asar/out/pty-daemon/index.js /tmp/daemon.sock`,
+    `128 /repo/release/mac-arm64/PI Lab.app/Contents/MacOS/PI Lab /repo/release/mac-arm64/PI Lab.app/Contents/Resources/app.asar/out/main/server.js`,
   ].join("\n")
   assert.deepEqual(runningBundlePids(processes, bundle), [123])
 })
