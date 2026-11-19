@@ -1,11 +1,9 @@
-/** The URLs the phone needs for one server. */
+/** The two URLs the phone needs for one server. */
 export interface Endpoint {
   /** The tRPC WebSocket URL with the device token in its `?token=` query. */
   trpcUrl: string
   /** `GET` with the `x-pi-lab-token` header: 200 when the token is accepted, 401 when refused. */
   healthUrl: string
-  /** `http(s)://host[:port]`, for the plain HTTP routes (with the `x-pi-lab-token` header). */
-  httpUrl: string
 }
 
 /** What the connect screen stores. */
@@ -33,7 +31,6 @@ export function endpointFor(address: string, token: string): Endpoint {
   return {
     trpcUrl: `${ws}://${host}/trpc?token=${encodeURIComponent(token)}`,
     healthUrl: `${scheme}://${host}/health`,
-    httpUrl: `${scheme}://${host}`,
   }
 }
 

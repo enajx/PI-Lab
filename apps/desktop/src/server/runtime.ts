@@ -33,7 +33,6 @@ import { trayProjectSnapshot } from "../main/background/projectSnapshot"
 import { CaffeineController } from "../main/caffeine"
 import { getDb, initDatabase } from "../main/db/db"
 import { DICTATION_MODELS, type DictationModel, withTestPins } from "../main/dictation/catalog"
-import { afconvertDecoder } from "../main/dictation/decode"
 import { resolveWhisperServer, WhisperServerEngine } from "../main/dictation/engine"
 import type { MicrophonePort } from "../main/dictation/service"
 import { DictationService } from "../main/dictation/service"
@@ -207,7 +206,6 @@ export class ServerRuntime {
       idleMs: 10 * 60_000,
       enginePidFile,
       downloadStallMs: 30_000,
-      decodeAudio: afconvertDecoder(),
     })
     void this.dictation.start().catch((error) => {
       console.warn(`[pi-lab server] dictation cleanup failed: ${String(error)}`)

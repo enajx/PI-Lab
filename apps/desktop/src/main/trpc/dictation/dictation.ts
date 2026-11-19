@@ -1,18 +1,13 @@
 import { z } from "zod"
-import { type DictationService, MAX_WAV_BYTES } from "../../dictation/service"
+import type { DictationService } from "../../dictation/service"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 
 const keyInput = z.object({ key: z.string().min(1) })
 const outputAction = z.enum(["insert", "review", "insert-copy", "copy"])
 const waveformStyle = z.enum(["dots", "ascii-art", "lines"])
-export const dictationAudioFormat = z.enum(["wav", "m4a", "ogg"])
-/** A transcription with the server's decode and engine time (milliseconds). */
-export const timedTranscription = z.strictObject({
-  text: z.string(),
-  modelKey: z.string(),
-  timings: z.strictObject({ decodeMs: z.number(), transcribeMs: z.number() }),
-})
+/** A transcription and the model that made it. */
+const transcription = z.strictObject({ text: z.string(), modelKey: z.string() })
 const streamId = z.string().min(1)
 /** One chunk of 16 kHz mono 16-bit PCM; `seq` counts from 0. */
 const streamChunk = z.object({
@@ -55,22 +50,6 @@ export const dictationRouter = router({
   transcribe: publicProcedure
     .input(z.object({ wavBase64: z.string().min(1) }))
     .mutation(({ ctx, input }) => service(ctx).transcribe(input.wavBase64)),
-  /** A phone recording: WAV as is, m4a (AAC) or Ogg Opus decoded on the server. */
-  transcribeAudio: publicProcedure
-    .input(
-      z.object({
-        // Base64 of at most MAX_WAV_BYTES, checked before the bytes are decoded.
-        audioBase64: z
-          .string()
-          .min(1)
-          .max(Math.ceil(MAX_WAV_BYTES / 3) * 4),
-        format: dictationAudioFormat,
-      }),
-    )
-    .output(timedTranscription)
-    .mutation(({ ctx, input }) =>
-      service(ctx).transcribeAudio(Buffer.from(input.audioBase64, "base64"), input.format),
-    ),
   /** PCM sent while the user speaks; finish transcribes it. */
   stream: router({
     start: publicProcedure
@@ -88,7 +67,7 @@ export const dictationRouter = router({
       ),
     finish: publicProcedure
       .input(streamChunk)
-      .output(timedTranscription)
+      .output(transcription)
       .mutation(({ ctx, input }) =>
         service(ctx).finishStream(
           input.streamId,

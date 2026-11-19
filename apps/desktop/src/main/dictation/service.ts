@@ -12,7 +12,6 @@ import {
 } from "@pi-lab/local-db"
 import { desc, eq, sql } from "drizzle-orm"
 import { type DictationModel, sizeLabel } from "./catalog"
-import { pcm16kToWav } from "./decode"
 import {
   type DictationEngine,
   EngineHttpError,
@@ -63,24 +62,10 @@ export interface DictationStatus {
   microphone: MicrophoneStatus
 }
 
-/** Recording formats a client may send: WAV goes to the engine as is, the others are decoded first. */
-export type DictationAudioFormat = "wav" | "m4a" | "ogg"
-
-/**
- * Turn a compressed recording into a 16 kHz mono 16-bit WAV. A recording
- * longer than `maxSeconds` is refused without decoding it.
- */
-export type AudioDecoder = (
-  audio: Buffer,
-  format: Exclude<DictationAudioFormat, "wav">,
-  maxSeconds: number,
-) => Promise<Buffer>
-
-/** A transcription with the server's time spent on it, so a client can measure the rest. */
-export interface TimedTranscription {
+/** A transcription and the model that made it. */
+export interface Transcription {
   text: string
   modelKey: string
-  timings: { decodeMs: number; transcribeMs: number }
 }
 
 /** PCM a client is sending while the user speaks (see {@link DictationService.startStream}). */
@@ -108,8 +93,6 @@ export interface DictationServiceOptions {
   enginePidFile: string
   /** Fail a download that receives no data for this long. */
   downloadStallMs: number
-  /** Decodes m4a and Ogg recordings; null when this machine has no decoder. */
-  decodeAudio: AudioDecoder | null
 }
 
 /** The one row of `dictation_settings`, with defaults for a fresh database. */
@@ -120,9 +103,9 @@ interface DictationSettings {
 }
 
 const HISTORY_LIMIT = 100
-/** The largest WAV the engine is given, and the largest recording a client may send. */
-export const MAX_WAV_BYTES = 64 * 1024 * 1024
-/** The longest streamed or compressed recording the server takes: 10 minutes. */
+/** The largest WAV the engine is given. */
+const MAX_WAV_BYTES = 64 * 1024 * 1024
+/** The longest streamed recording the server takes: 10 minutes. */
 const MAX_RECORDING_SECONDS = 600
 /** 16 kHz mono 16-bit PCM. */
 const PCM_BYTES_PER_SECOND = 32_000
@@ -300,25 +283,8 @@ export class DictationService {
    * renderer saves the text with {@link addHistory} once it uses it, so a cancelled
    * transcription leaves no history.
    */
-  async transcribe(wavBase64: string): Promise<{ text: string; modelKey: string }> {
-    const { text, modelKey } = await this.transcribeWav(Buffer.from(wavBase64, "base64"))
-    return { text, modelKey }
-  }
-
-  /** Transcribe a recording in any {@link DictationAudioFormat}; compressed ones are decoded first. */
-  async transcribeAudio(audio: Buffer, format: DictationAudioFormat): Promise<TimedTranscription> {
-    if (audio.length === 0) throw new Error("The recording is empty")
-    if (audio.length > MAX_WAV_BYTES)
-      throw new Error("The recording is larger than 64 MiB, the most the server takes")
-    if (format === "wav") return this.transcribeWav(audio)
-    const decode = this.options.decodeAudio
-    if (!decode) throw new Error(`This server cannot decode ${format} recordings; send a WAV`)
-    this.requireReady()
-    const started = performance.now()
-    const wav = await decode(audio, format, MAX_RECORDING_SECONDS)
-    const decodeMs = Math.round(performance.now() - started)
-    const result = await this.transcribeWav(wav)
-    return { ...result, timings: { ...result.timings, decodeMs } }
+  async transcribe(wavBase64: string): Promise<Transcription> {
+    return this.transcribeWav(Buffer.from(wavBase64, "base64"))
   }
 
   /**
@@ -372,7 +338,7 @@ export class DictationService {
   }
 
   /** Add the last chunk (may be empty) and transcribe the whole stream; the stream is then gone. */
-  async finishStream(streamId: string, seq: number, pcm: Buffer): Promise<TimedTranscription> {
+  async finishStream(streamId: string, seq: number, pcm: Buffer): Promise<Transcription> {
     this.appendStream(streamId, seq, pcm)
     const stream = this.streams.get(streamId)
     if (!stream) throw new Error(STREAM_GONE)
@@ -390,14 +356,13 @@ export class DictationService {
     return setTimeout(() => this.cancelStream(streamId), STREAM_IDLE_MS).unref()
   }
 
-  /** Transcribe a WAV; `transcribeMs` includes loading the model when it was not loaded. */
-  private async transcribeWav(wav: Buffer): Promise<TimedTranscription> {
+  /** Transcribe a WAV, loading the model first when it is not loaded. */
+  private async transcribeWav(wav: Buffer): Promise<Transcription> {
     const { engine, model } = this.requireReady()
     if (wav.length === 0) throw new Error("The recording is empty")
     if (wav.length > MAX_WAV_BYTES) throw new Error("The recording is too long to transcribe")
     this.touch()
     await this.cleanup
-    const started = performance.now()
     await engine.prepare(this.modelPath(model))
     // whisper-server rejects a recording with no samples with HTTP 400; that is no speech.
     const raw = await engine
@@ -406,11 +371,10 @@ export class DictationService {
         if (error instanceof EngineHttpError && error.status === 400) return ""
         throw error
       })
-    const transcribeMs = Math.round(performance.now() - started)
     this.touch()
     const text = speechText(raw)
     if (!text) throw new Error("No speech was detected")
-    return { text, modelKey: model.key, timings: { decodeMs: 0, transcribeMs } }
+    return { text, modelKey: model.key }
   }
 
   /** Save a transcription to history, keeping the newest {@link HISTORY_LIMIT}. */
@@ -604,4 +568,22 @@ function escapeLike(value: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Wrap 16 kHz mono 16-bit little-endian PCM in a WAV header. */
+function pcm16kToWav(pcm: Buffer): Buffer {
+  const header = Buffer.alloc(44)
+  header.write("RIFF", 0)
+  header.writeUInt32LE(36 + pcm.length, 4)
+  header.write("WAVEfmt ", 8)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(16_000, 24)
+  header.writeUInt32LE(32_000, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write("data", 36)
+  header.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([header, pcm])
 }

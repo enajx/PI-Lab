@@ -6,7 +6,6 @@ describe("server address", () => {
     expect(endpointFor("http://10.0.2.2:4567", "tok/en")).toEqual({
       trpcUrl: "ws://10.0.2.2:4567/trpc?token=tok%2Fen",
       healthUrl: "http://10.0.2.2:4567/health",
-      httpUrl: "http://10.0.2.2:4567",
     })
   })
 

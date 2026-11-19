@@ -4,12 +4,10 @@ import { join } from "node:path"
 import { afterEach, expect, test, vi } from "vitest"
 import type { DictationModel } from "../../dictation/catalog"
 import type { DictationEngine, EngineStatus } from "../../dictation/engine"
-import type { AudioDecoder } from "../../dictation/service"
 import { createHarness, type Harness } from "../testHarness"
 
-// Phone dictation: compressed recordings (decoded on the server) and PCM sent
-// in chunks while the user speaks. The engine and the decoder are stubbed here
-// (labelled per test); the real whisper-server and afconvert run in
+// Phone dictation: PCM sent in chunks while the user speaks. The engine is
+// stubbed here (labelled per test); the real whisper-server runs in
 // dictation.engine.test.ts.
 
 let h: Harness | undefined
@@ -50,16 +48,12 @@ function recordingEngine(text: string): DictationEngine & { wavs: Buffer[] } {
 }
 
 /** A harness with the test model installed and selected. */
-async function readyHarness(
-  engine: DictationEngine,
-  decodeAudio: AudioDecoder | null,
-): Promise<Harness> {
+async function readyHarness(engine: DictationEngine): Promise<Harness> {
   const harness = await createHarness([], {
     git: false,
     daemon: "lazy",
     dictationCatalog: [MODEL],
     dictationEngine: engine,
-    dictationDecodeAudio: decodeAudio,
   })
   const modelsDir = join(harness.dataDir, "dictation", "models")
   await mkdir(modelsDir, { recursive: true })
@@ -86,48 +80,10 @@ function wavOf(pcm: Buffer): Buffer {
   return Buffer.concat([header, pcm])
 }
 
-/** Stubbed engine and decoder: an m4a is decoded to WAV first; a WAV goes to the engine as is. */
-test("transcribes an m4a through the decoder and a WAV without it, with timings", async () => {
-  const engine = recordingEngine(" Refactor the tRPC router. ")
-  const decoded = wavOf(Buffer.alloc(320, 1))
-  const decoderCalls: Array<{ bytes: string; format: string }> = []
-  h = await readyHarness(engine, async (audio, format) => {
-    decoderCalls.push({ bytes: audio.toString(), format })
-    return decoded
-  })
-
-  const fromM4a = await h.caller.dictation.transcribeAudio({
-    audioBase64: Buffer.from("m4a bytes").toString("base64"),
-    format: "m4a",
-  })
-  expect(fromM4a).toMatchObject({ text: "Refactor the tRPC router.", modelKey: "test.en" })
-  expect(fromM4a.timings.decodeMs).toBeGreaterThanOrEqual(0)
-  expect(fromM4a.timings.transcribeMs).toBeGreaterThanOrEqual(0)
-  expect(decoderCalls).toEqual([{ bytes: "m4a bytes", format: "m4a" }])
-  expect(engine.wavs[0]?.equals(decoded)).toBe(true)
-
-  const wav = wavOf(Buffer.alloc(320, 2))
-  const fromWav = await h.caller.dictation.transcribeAudio({
-    audioBase64: wav.toString("base64"),
-    format: "wav",
-  })
-  expect(fromWav.timings.decodeMs).toBe(0)
-  expect(decoderCalls).toHaveLength(1)
-  expect(engine.wavs[1]?.equals(wav)).toBe(true)
-})
-
-/** Stubbed engine, no decoder: a compressed recording fails with a clear message. */
-test("refuses a compressed recording when the server has no decoder", async () => {
-  h = await readyHarness(recordingEngine("text"), null)
-  await expect(
-    h.caller.dictation.transcribeAudio({ audioBase64: "AAAA", format: "ogg" }),
-  ).rejects.toThrow("This server cannot decode ogg recordings; send a WAV")
-})
-
 /** Stubbed engine: PCM chunks sent in order become one WAV at finish; the stream is then gone. */
 test("joins PCM chunks into one WAV and transcribes it at finish", async () => {
   const engine = recordingEngine("hello from the phone")
-  h = await readyHarness(engine, null)
+  h = await readyHarness(engine)
   const caller = h.caller
   const { streamId } = await caller.dictation.stream.start()
   const first = Buffer.alloc(3200, 3)
@@ -135,7 +91,7 @@ test("joins PCM chunks into one WAV and transcribes it at finish", async () => {
   await caller.dictation.stream.append({ streamId, seq: 0, pcmBase64: first.toString("base64") })
   await caller.dictation.stream.append({ streamId, seq: 1, pcmBase64: second.toString("base64") })
   const result = await caller.dictation.stream.finish({ streamId, seq: 2, pcmBase64: "" })
-  expect(result).toMatchObject({ text: "hello from the phone", modelKey: "test.en" })
+  expect(result).toEqual({ text: "hello from the phone", modelKey: "test.en" })
   expect(engine.wavs[0]?.equals(wavOf(Buffer.concat([first, second])))).toBe(true)
   await expect(caller.dictation.stream.finish({ streamId, seq: 3, pcmBase64: "" })).rejects.toThrow(
     "This recording is no longer on the server",
@@ -144,7 +100,7 @@ test("joins PCM chunks into one WAV and transcribes it at finish", async () => {
 
 /** Stubbed engine: a missing chunk fails the stream instead of transcribing a gap; cancel drops it. */
 test("fails a stream with a missing chunk and drops a cancelled one", async () => {
-  h = await readyHarness(recordingEngine("text"), null)
+  h = await readyHarness(recordingEngine("text"))
   const caller = h.caller
   const gap = await caller.dictation.stream.start()
   await caller.dictation.stream.append({ streamId: gap.streamId, seq: 0, pcmBase64: "AAAA" })
@@ -164,7 +120,7 @@ test("fails a stream with a missing chunk and drops a cancelled one", async () =
 
 /** Stubbed engine: at most four streams are open at once; cancelling one frees its place. */
 test("refuses a fifth open stream with a clear error", async () => {
-  h = await readyHarness(recordingEngine("text"), null)
+  h = await readyHarness(recordingEngine("text"))
   const caller = h.caller
   const open = []
   for (let index = 0; index < 4; index += 1) open.push(await caller.dictation.stream.start())
@@ -179,7 +135,7 @@ test("refuses a fifth open stream with a clear error", async () => {
 
 /** Stubbed engine: a stream holds at most 10 minutes of 16 kHz 16-bit mono PCM (19,200,000 bytes). */
 test("refuses a stream longer than 10 minutes and drops it", async () => {
-  h = await readyHarness(recordingEngine("text"), null)
+  h = await readyHarness(recordingEngine("text"))
   const caller = h.caller
   const { streamId } = await caller.dictation.stream.start()
   const minute = Buffer.alloc(16_000 * 2 * 60, 5).toString("base64")
@@ -195,7 +151,7 @@ test("refuses a stream longer than 10 minutes and drops it", async () => {
 
 /** Stubbed engine: pieces sent slowly cannot keep a stream open past 10 minutes and the idle time. */
 test("refuses a piece for a stream started 12 minutes ago", async () => {
-  h = await readyHarness(recordingEngine("text"), null)
+  h = await readyHarness(recordingEngine("text"))
   const caller = h.caller
   const started = Date.now()
   const { streamId } = await caller.dictation.stream.start()
@@ -205,22 +161,4 @@ test("refuses a piece for a stream started 12 minutes ago", async () => {
     caller.dictation.stream.append({ streamId, seq: 1, pcmBase64: "AAAA" }),
   ).rejects.toThrow("The recording is longer than 10 minutes, the most dictation takes")
   vi.restoreAllMocks()
-})
-
-/** Stubbed engine and decoder: a compressed input over 64 MiB is refused before decoding. */
-test("refuses a recording over 64 MiB before decoding it, and asks the decoder for at most 10 minutes", async () => {
-  const limits: number[] = []
-  h = await readyHarness(recordingEngine("text"), async (_audio, _format, maxSeconds) => {
-    limits.push(maxSeconds)
-    return wavOf(Buffer.alloc(320, 1))
-  })
-  await expect(
-    h.caller.dictation.transcribeAudio({
-      audioBase64: "A".repeat(Math.ceil((64 * 1024 * 1024) / 3) * 4 + 4),
-      format: "m4a",
-    }),
-  ).rejects.toThrow()
-  expect(limits).toEqual([])
-  await h.caller.dictation.transcribeAudio({ audioBase64: "AAAA", format: "ogg" })
-  expect(limits).toEqual([600])
 })

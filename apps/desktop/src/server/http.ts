@@ -14,7 +14,6 @@ import {
   TOKEN_HEADER,
 } from "./access"
 import { type DeviceAccess, LOCAL_DEVICE_ID } from "./devices"
-import { DICTATION_UPLOAD_PATH, handleDictationUpload } from "./dictationUpload"
 import { DOWNLOAD_PATH, handleDownload, handleUpload, UPLOAD_PATH } from "./transfers"
 
 export { TOKEN_HEADER }
@@ -174,10 +173,6 @@ async function handleHttp(
   }
   if (request.method === "PUT" && path === UPLOAD_PATH) {
     await handleUpload(options.createContext(), requested, request, out)
-    return
-  }
-  if (request.method === "POST" && path === DICTATION_UPLOAD_PATH) {
-    await handleDictationUpload(options.createContext(), requested, request, out)
     return
   }
   if (!path.startsWith(SCHEME_PATH_PREFIX)) {

@@ -838,20 +838,3 @@ test("an interrupted upload leaves the old file intact; calls stay responsive du
   expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("old notes\n")
   close()
 })
-
-test("POST /dictation/transcribe needs the token and a known format, and reports the service's error", async () => {
-  const post = (format: string, headers: Record<string, string>) =>
-    fetch(`http://127.0.0.1:${server.port}/dictation/transcribe?format=${format}`, {
-      method: "POST",
-      headers,
-      body: new Uint8Array([1, 2, 3, 4]),
-    })
-  expect((await post("wav", {})).status).toBe(401)
-  const unknown = await post("mp3", { [TOKEN_HEADER]: token })
-  expect(unknown.status).toBe(400)
-  expect(await unknown.text()).toBe("format must be wav, m4a or ogg")
-  // This runtime has no bundled engine (no whisper-server in its resources).
-  const noEngine = await post("wav", { [TOKEN_HEADER]: token })
-  expect(noEngine.status).toBe(400)
-  expect(await noEngine.text()).toBe("The dictation engine is not part of this build")
-})

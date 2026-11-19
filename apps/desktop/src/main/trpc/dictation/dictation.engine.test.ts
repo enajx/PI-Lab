@@ -1,11 +1,7 @@
-import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test, vi } from "vitest"
 import { DICTATION_MODELS } from "../../dictation/catalog"
-import { afconvertDecoder } from "../../dictation/decode"
 import { resolveWhisperServer, WhisperServerEngine } from "../../dictation/engine"
 import { createHarness, type Harness } from "../testHarness"
 
@@ -132,7 +128,7 @@ function silentWav(samples: number): Buffer {
 }
 
 const phoneTitle = binary
-  ? "transcribes a phone m4a (decoded by afconvert) and PCM sent in chunks, with the real engine"
+  ? "transcribes PCM sent in chunks from the phone, with the real engine"
   : skipReason
 
 test.skipIf(!binary)(
@@ -148,7 +144,6 @@ test.skipIf(!binary)(
         binary ?? "",
         join(modelsDir, "..", "whisper-server.pid"),
       ),
-      dictationDecodeAudio: afconvertDecoder(),
     })
     const caller = h.caller
     const tiny = (await caller.dictation.status()).models.find((model) => model.key === "tiny.en")
@@ -156,17 +151,6 @@ test.skipIf(!binary)(
       throw new Error(`tiny.en is not cached in ${modelsDir}; run the first test first`)
     await caller.dictation.selectModel({ key: "tiny.en" })
     const wavPath = join(import.meta.dirname, "../../dictation/__fixtures__/hello-world.wav")
-    const dir = await mkdtemp(join(tmpdir(), "pi-lab-phone-audio-"))
-    const m4aPath = join(dir, "hello.m4a")
-    execFileSync("/usr/bin/afconvert", ["-f", "m4af", "-d", "aac", "-b", "32000", wavPath, m4aPath])
-
-    const fromM4a = await caller.dictation.transcribeAudio({
-      audioBase64: readFileSync(m4aPath).toString("base64"),
-      format: "m4a",
-    })
-    expect(fromM4a.text.toLowerCase()).toMatch(/hello,? world/)
-    expect(fromM4a.timings.decodeMs).toBeGreaterThan(0)
-
     const pcm = readFileSync(wavPath).subarray(44)
     const { streamId } = await caller.dictation.stream.start()
     const half = Math.floor(pcm.length / 4) * 2
@@ -181,7 +165,6 @@ test.skipIf(!binary)(
       pcmBase64: pcm.subarray(half).toString("base64"),
     })
     expect(streamed.text.toLowerCase()).toMatch(/hello,? world/)
-    await rm(dir, { recursive: true, force: true })
   },
   120_000,
 )
