@@ -14,6 +14,7 @@ import {
 } from "./machineStore"
 import {
   bundleEnrollCommand,
+  type InstallProgress,
   installServerBundle,
   openLocalNetworkAccess,
   probeRemote,
@@ -24,7 +25,7 @@ import {
 } from "./remoteShell"
 import type { ServerBundleFiles } from "./serverBundle"
 
-export type { RemoteAccess }
+export type { InstallProgress, RemoteAccess }
 
 /**
  * Connections from this app to remote PI Lab servers ("machines"). For each
@@ -67,6 +68,8 @@ export interface MachineSummary {
   updating: boolean
   /** Why the last update over SSH failed, or null. */
   updateError: string | null
+  /** Where the running update is (copying, installing), or null. */
+  updateProgress: InstallProgress | null
 }
 
 /** This device's machine settings (see {@link LocalServerMode}). */
@@ -95,6 +98,7 @@ interface LiveMachine {
   canUpdate: boolean
   update: Promise<void> | null
   updateError: string | null
+  updateProgress: InstallProgress | null
   /** The bundle version an automatic update was last started for, so it runs once per bundle version. */
   autoUpdatedTo: string | null
 }
@@ -232,6 +236,7 @@ export class MachineConnections {
       updateAvailable: live.update === null && this.#behindPolicy !== "never" && this.#behind(live),
       updating: live.update !== null,
       updateError: live.updateError,
+      updateProgress: live.updateProgress,
     }))
   }
 
@@ -244,6 +249,7 @@ export class MachineConnections {
     const live = this.#get(machineId)
     live.update ??= this.#install(live).finally(() => {
       live.update = null
+      live.updateProgress = null
     })
     return live.update
   }
@@ -256,7 +262,14 @@ export class MachineConnections {
     this.#options.log(
       `[pi-lab] updating machine ${live.stored.name} from ${live.version} to ${bundle.version}`,
     )
-    const installed = await installServerBundle(this.#options.access, live.stored.sshHost, bundle)
+    const installed = await installServerBundle(
+      this.#options.access,
+      live.stored.sshHost,
+      bundle,
+      (progress) => {
+        live.updateProgress = progress
+      },
+    )
       .then(() => null)
       .catch((error: Error) => error)
     // Connect again either way: the new version, or the old one after the rollback.
@@ -343,10 +356,15 @@ export class MachineConnections {
    * app's or an installed bundle) is used; with none and no desktop app there,
    * this app's server bundle is copied over and installed (install.sh). Then
    * run `enroll`, store the device token and connect. Refuses a Linux remote,
-   * the local server and a machine already added.
+   * the local server and a machine already added. Reports each step (and the
+   * bytes of the copy) to `onProgress`.
    */
-  async add(input: { sshHost: string; name: string }): Promise<MachineSummary> {
+  async add(
+    input: { sshHost: string; name: string },
+    onProgress: (progress: InstallProgress) => void,
+  ): Promise<MachineSummary> {
     const { access, deviceName } = this.#options
+    onProgress({ step: "connecting", sentBytes: 0, totalBytes: 0 })
     await openLocalNetworkAccess(access, input.sshHost)
     const probe = await probeRemote(access, input.sshHost)
     if (probe.system === "Linux") {
@@ -369,9 +387,10 @@ export class MachineConnections {
           `No PI Lab server runs on ${input.sshHost}, and this app has no server bundle to install there`,
         )
       }
-      await installServerBundle(access, input.sshHost, bundle)
+      await installServerBundle(access, input.sshHost, bundle, onProgress)
       enrollCommand = bundleEnrollCommand(access)
     }
+    onProgress({ step: "enrolling", sentBytes: 0, totalBytes: 0 })
     const enrolled = parseEnroll(
       await runRemote(
         access,
@@ -484,6 +503,7 @@ export class MachineConnections {
       canUpdate: false,
       update: null,
       updateError: null,
+      updateProgress: null,
       autoUpdatedTo: null,
     }
   }

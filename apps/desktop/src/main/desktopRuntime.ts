@@ -1,4 +1,4 @@
-import { hostname } from "node:os"
+import { homedir, hostname } from "node:os"
 import { join } from "node:path"
 import { resolveDataDir } from "@pi-lab/local-db/paths"
 import {
@@ -187,6 +187,10 @@ export class DesktopRuntime {
         rendererEndpoint: () => this.rendererEndpoint(),
         machines: () => this.machines(),
         forwards: () => this.forwards(),
+        sshConfigPath:
+          isTestMode && process.env.PI_LAB_TEST_SSH_CONFIG
+            ? process.env.PI_LAB_TEST_SSH_CONFIG
+            : join(homedir(), ".ssh", "config"),
       }),
       windows: [window],
       createContext: async () => desktopContext(this.brokers),

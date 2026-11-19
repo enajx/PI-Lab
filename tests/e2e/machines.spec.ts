@@ -258,6 +258,41 @@ test("multi-machine toggle: off on a fresh app with no machine UI; on shows Add 
   await expect(page.getByTestId("sidebar-machine-filter")).toHaveCount(0)
 })
 
+test("add form: offers the Hosts of the ssh config, fills the Name, and shows the step while adding", async () => {
+  test.setTimeout(120_000)
+  if (!sshd) throw new Error("not started")
+  const sshConfig = join(rootDir, "ssh-config")
+  await writeFile(
+    sshConfig,
+    `Host *\n  ServerAliveInterval 30\nHost lab-box *.example.org\n  User me\nHost ${sshd.host}\n`,
+  )
+  // A slow enroll keeps the "Starting and enrolling" step on screen.
+  const page = await launch({
+    PI_LAB_TEST_SSH_CONFIG: sshConfig,
+    PI_LAB_TEST_REMOTE_ENROLL: `sleep 3; PI_LAB_DATA_DIR=${quote(remoteData)} ${quote(process.execPath)} ${quote(ENROLL_ENTRY)}`,
+  })
+  await openMachinesSettings(page)
+  const options = page.getByTestId("settings-add-machine-host-suggestions").locator("option")
+  await expect
+    .poll(() =>
+      options.evaluateAll((all) => all.map((option) => (option as HTMLOptionElement).value)),
+    )
+    .toEqual(["lab-box", sshd.host])
+  const host = page.getByTestId("settings-add-machine-host")
+  const name = page.getByTestId("settings-add-machine-name")
+  await host.fill("lab-box")
+  await expect(name).toHaveValue("lab-box")
+  await host.fill(sshd.host)
+  await expect(name).toHaveValue(sshd.host)
+  await page.getByTestId("settings-add-machine-submit").click()
+  const progress = page.getByTestId("settings-install-progress")
+  await expect(progress).toHaveAttribute("data-step", "enrolling")
+  await expect(progress).toContainText("Starting and enrolling…")
+  const row = page.getByTestId("settings-machine").filter({ hasText: sshd.host })
+  await expect(row).toHaveAttribute("data-state", "connected", { timeout: 60_000 })
+  await expect(progress).toHaveCount(0)
+})
+
 test("tokens: adding a machine enrolls a device; removing it revokes the token on the remote", async () => {
   test.setTimeout(120_000)
   const page = await launch({})

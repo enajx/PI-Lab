@@ -55,9 +55,9 @@ test("ssh ending during a copy rejects instead of throwing EPIPE", async () => {
   writeFileSync(big, Buffer.alloc(8 * 1024 * 1024))
   const ssh = fakeSsh("echo 'connection closed' >&2\nexit 255")
   const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
-  await expect(runRemote(access, "me@host", "cat > x", big, 5_000)).rejects.toThrow(
-    /connection closed/,
-  )
+  await expect(
+    runRemote(access, "me@host", "cat > x", { file: big, onSent: () => undefined }, 5_000),
+  ).rejects.toThrow(/connection closed/)
 })
 
 /** The time limit counts time without progress: a slow command that keeps answering finishes. */

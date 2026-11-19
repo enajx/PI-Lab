@@ -83,7 +83,7 @@ it("updates a machine that is behind the bundle this app carries", async () => {
   // The machine gets v1 from an app that carries v1.
   const first = connections(v1)
   expect(first.behindPolicy()).toBe<BehindPolicy>("auto")
-  const added = await first.add({ sshHost: sshd.host, name: "Test Mac" })
+  const added = await first.add({ sshHost: sshd.host, name: "Test Mac" }, () => undefined)
   expect(added.state, added.error ?? "").toBe("connected")
   expect(added).toMatchObject({ version: v1.version, updateAvailable: false })
   await first.close()
@@ -118,9 +118,22 @@ it("updates a machine that is behind the bundle this app carries", async () => {
   const auto = connections(v2)
   auto.setBehindPolicy("auto")
   auto.start()
+  // The update shows its step in the machine's summary while it runs.
+  const steps = new Set<string>()
+  const sample = setInterval(() => {
+    const step = auto.list()[0]?.updateProgress?.step
+    if (step) steps.add(step)
+  }, 20)
   await expect
     .poll(() => auto.list()[0], { timeout: 240_000, interval: 500 })
-    .toMatchObject({ version: v2.version, updating: false, updateError: null })
+    .toMatchObject({
+      version: v2.version,
+      updating: false,
+      updateError: null,
+      updateProgress: null,
+    })
+  clearInterval(sample)
+  expect(steps).toContain("installing")
   expect(auto.list()[0]?.updateAvailable).toBe(false)
   expect(await helloVersion(auto, added.machineId)).toBe(v2.version)
   await auto.close()

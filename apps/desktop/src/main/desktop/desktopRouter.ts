@@ -4,9 +4,10 @@ import { app, BrowserWindow, clipboard, dialog, shell } from "electron"
 import { z } from "zod"
 import { electronMicrophone } from "../dictation/electronMicrophone"
 import { nativeText } from "../i18n/nativeLanguage"
-import type { MachineConnections } from "../machines/machineConnections"
+import type { InstallProgress, MachineConnections } from "../machines/machineConnections"
 import { behindPolicySchema, localServerModeSchema } from "../machines/machineStore"
 import type { PortForwards } from "../machines/portForwards"
+import { readSshConfigHosts } from "../machines/sshConfig"
 import { downloadEntry, uploadEntries } from "../machines/transfers"
 import type { NotificationBrokers } from "../notifications"
 import type { ServerClient } from "../server/client"
@@ -25,6 +26,8 @@ export interface DesktopRouterDependencies {
   machines: () => MachineConnections
   /** Local forwards to notebook servers on remote machines. */
   forwards: () => PortForwards
+  /** The user's ssh config (`~/.ssh/config`; tests: a temp file), whose Host names Add machine offers. */
+  sshConfigPath: string
 }
 
 /**
@@ -47,6 +50,8 @@ const workspaceEntry = z.object({ workspaceId: z.string().min(1), relPath: z.str
  * type covers both.
  */
 export function createDesktopRouter(deps: DesktopRouterDependencies) {
+  // Where the running "Add machine" is (the form allows one add at a time), or null.
+  let addProgress: InstallProgress | null = null
   return router({
     desktop: router({
       /** Where the renderer's server WebSocket connects; waits while the server starts. */
@@ -57,7 +62,20 @@ export function createDesktopRouter(deps: DesktopRouterDependencies) {
         /** Enroll this app on `sshHost` over ssh, store the token, connect. */
         add: publicProcedure
           .input(z.object({ sshHost: z.string().trim().min(1), name: z.string().trim().min(1) }))
-          .mutation(({ input }) => deps.machines().add(input)),
+          .mutation(({ input }) =>
+            deps
+              .machines()
+              .add(input, (progress) => {
+                addProgress = progress
+              })
+              .finally(() => {
+                addProgress = null
+              }),
+          ),
+        /** The step (and bytes copied) of the running add, polled by the Add machine form. */
+        addProgress: publicProcedure.query(() => addProgress),
+        /** The Host names of the user's ssh config, offered by the Add machine form (none when it is missing). */
+        sshHosts: publicProcedure.query(() => readSshConfigHosts(deps.sshConfigPath)),
         /** Revoke this app's device on the machine when reachable, then forget it. */
         remove: publicProcedure
           .input(z.object({ machineId: z.string().min(1) }))
