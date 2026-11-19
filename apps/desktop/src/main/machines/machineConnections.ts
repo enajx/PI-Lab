@@ -21,6 +21,7 @@ import {
   runRemote,
   SSH_TIMEOUT_MS,
   shellQuote,
+  sshAddress,
 } from "./remoteShell"
 import type { ServerBundleFiles } from "./serverBundle"
 
@@ -266,6 +267,23 @@ export class MachineConnections {
       this.#options.log(`[pi-lab] machine ${live.stored.name}: ${installed.message}`)
       throw installed
     }
+  }
+
+  /**
+   * Connect to a machine again now: a new tunnel, without waiting for the
+   * retry pause of an offline machine. Rejects with the reason when it fails.
+   */
+  reconnect(machineId: string): Promise<void> {
+    const live = this.#get(machineId)
+    if (live.stopped) throw new Error(`${live.stored.name} is stopped`)
+    live.failedAt = 0
+    return this.#attempt(live)
+  }
+
+  /** The address and port ssh connects to for the machine ("host:port"), or null when ssh names none. */
+  async address(machineId: string): Promise<string | null> {
+    const target = await sshAddress(this.#options.access, this.#get(machineId).stored.sshHost)
+    return target === null ? null : `${target.address}:${target.port}`
   }
 
   /** The machine sends `server-update` and is older than the bundle this app carries. */

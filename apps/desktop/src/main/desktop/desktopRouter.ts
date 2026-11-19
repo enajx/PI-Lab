@@ -70,6 +70,14 @@ export function createDesktopRouter(deps: DesktopRouterDependencies) {
         update: publicProcedure
           .input(z.object({ machineId: z.string().min(1) }))
           .mutation(({ input }) => deps.machines().update(input.machineId)),
+        /** Connect to the machine again now (the Machines group's Reconnect). */
+        reconnect: publicProcedure
+          .input(z.object({ machineId: z.string().min(1) }))
+          .mutation(({ input }) => deps.machines().reconnect(input.machineId)),
+        /** The address and port ssh connects to for the machine (the machine card). */
+        address: publicProcedure
+          .input(z.object({ machineId: z.string().min(1) }))
+          .query(({ input }) => deps.machines().address(input.machineId)),
         /** "When a machine is behind this app". */
         behindPolicy: publicProcedure.query(() => deps.machines().behindPolicy()),
         setBehindPolicy: publicProcedure

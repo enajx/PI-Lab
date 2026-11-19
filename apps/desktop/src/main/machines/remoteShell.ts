@@ -41,13 +41,13 @@ export function shellQuote(word: string): string {
 const LOCAL_NETWORK_TOUCH_MS = 3_000
 
 /**
- * Open and close one TCP connection from this app to the address `ssh` would
- * use for `host` (`ssh -G` reads the config, no network). macOS asks for Local
- * Network access only when the app itself connects; until then the ssh it
- * starts fails with "No route to host". The result of the connection does not
- * matter, so it always resolves.
+ * The address and port `ssh` would connect to for `host` (`ssh -G` reads the
+ * config, no network), or null when ssh names none.
  */
-export async function openLocalNetworkAccess(access: RemoteAccess, host: string): Promise<void> {
+export async function sshAddress(
+  access: RemoteAccess,
+  host: string,
+): Promise<{ address: string; port: number } | null> {
   const config = await new Promise<string>((resolve, reject) => {
     const child = spawn(access.sshPath, [...access.extraSshArgs, "-G", host], {
       stdio: ["ignore", "pipe", "ignore"],
@@ -63,7 +63,21 @@ export async function openLocalNetworkAccess(access: RemoteAccess, host: string)
     config.match(new RegExp(`^${key} (.+)$`, "m"))?.[1]?.trim() ?? null
   const address = value("hostname")
   const port = Number(value("port") ?? "22")
-  if (address === null || !Number.isInteger(port)) return
+  if (address === null || !Number.isInteger(port)) return null
+  return { address, port }
+}
+
+/**
+ * Open and close one TCP connection from this app to the address `ssh` would
+ * use for `host` ({@link sshAddress}). macOS asks for Local
+ * Network access only when the app itself connects; until then the ssh it
+ * starts fails with "No route to host". The result of the connection does not
+ * matter, so it always resolves.
+ */
+export async function openLocalNetworkAccess(access: RemoteAccess, host: string): Promise<void> {
+  const target = await sshAddress(access, host)
+  if (target === null) return
+  const { address, port } = target
   await new Promise<void>((resolve) => {
     const socket = connect({ host: address, port })
     const done = () => {
