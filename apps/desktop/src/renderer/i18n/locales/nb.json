@@ -1402,5 +1402,17 @@
   "Upload files from this Mac into ": "Last opp filer fra denne Mac-en til ",
   "Multi-machine": "Flere maskiner",
   "On while a machine is added. Remove all machines to turn it off.": "På så lenge en maskin er lagt til. Fjern alle maskiner for å slå det av.",
-  "Run persistent projects on remote machines over SSH": "Kjør varige prosjekter på eksterne maskiner over SSH"
+  "Run persistent projects on remote machines over SSH": "Kjør varige prosjekter på eksterne maskiner over SSH",
+  "Machine settings": "Maskininnstillinger",
+  "Show its projects": "Vis prosjektene",
+  "Reconnect": "Koble til på nytt",
+  "Machine card": "Maskinkort",
+  "Remove machine": "Fjern maskin",
+  "Remove machine?": "Fjerne maskinen?",
+  "PI Lab forgets this machine and revokes its token there when it can be reached. The projects and files on the machine stay.": "PI Lab glemmer denne maskinen og trekker tilbake tokenet der når den kan nås. Prosjektene og filene på maskinen blir værende.",
+  "Address": "Adresse",
+  "Unknown": "Ukjent",
+  "Connection": "Tilkobling",
+  "Server version": "Serverversjon",
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "Klikk for å vise prosjektene på prosjektoversikten; høyreklikk for mer."
 }

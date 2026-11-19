@@ -1402,5 +1402,17 @@
   "Upload files from this Mac into ": "이 Mac의 파일을 다음 위치에 업로드: ",
   "Multi-machine": "여러 머신",
   "On while a machine is added. Remove all machines to turn it off.": "머신이 추가되어 있는 동안 켜져 있습니다. 끄려면 모든 머신을 제거하세요.",
-  "Run persistent projects on remote machines over SSH": "SSH로 원격 머신에서 지속되는 프로젝트를 실행합니다"
+  "Run persistent projects on remote machines over SSH": "SSH로 원격 머신에서 지속되는 프로젝트를 실행합니다",
+  "Machine settings": "머신 설정",
+  "Show its projects": "이 머신의 프로젝트 보기",
+  "Reconnect": "다시 연결",
+  "Machine card": "머신 카드",
+  "Remove machine": "머신 제거",
+  "Remove machine?": "머신을 제거할까요?",
+  "PI Lab forgets this machine and revokes its token there when it can be reached. The projects and files on the machine stay.": "PI Lab이 이 머신을 잊고, 연결할 수 있으면 그 머신에서 토큰을 취소합니다. 머신의 프로젝트와 파일은 그대로 남습니다.",
+  "Address": "주소",
+  "Unknown": "알 수 없음",
+  "Connection": "연결",
+  "Server version": "서버 버전",
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "클릭하면 프로젝트 대시보드에 이 머신의 프로젝트를 보여 줍니다. 오른쪽 클릭으로 더 많은 옵션을 엽니다."
 }

@@ -386,21 +386,26 @@ async function setMachineStopped(machineId: string, stopped: boolean): Promise<v
   )
 }
 
-test("two servers: remote projects show with a badge, run a terminal there, grey out while disconnected", async () => {
+/** This Mac's own project cards (a remote card carries its machine id). */
+function localCards(page: Page) {
+  return page.locator('[data-testid="project-card"]:not([data-machine-id])')
+}
+
+test("two servers: remote projects show as full cards with a machine label, run a terminal there, grey out while disconnected", async () => {
   test.setTimeout(180_000)
   const localRepo = join(rootDir, "local-repo")
   const remoteRepo = join(rootDir, "remote-repo")
   await gitRepo(localRepo, "local.md")
   await gitRepo(remoteRepo, "remote.md")
   const remote = connectServer(remoteData)
-  await remote.client.projects.open.mutate({ path: remoteRepo })
+  const remoteProject = await remote.client.projects.open.mutate({ path: remoteRepo })
   remote.close()
 
   const page = await launch({ PI_LAB_TEST_OPEN_PROJECT: localRepo })
   if (!sshd || !app) throw new Error("not started")
-  // Before any machine: no badges, no filter (as today).
-  await expect(page.getByTestId("project-card")).toHaveCount(1)
-  await expect(page.getByTestId("machine-badge")).toHaveCount(0)
+  // Before any machine: no labels, no filter (as today).
+  await expect(localCards(page)).toHaveCount(1)
+  await expect(page.getByTestId("machine-label")).toHaveCount(0)
   await expect(page.getByTestId("dashboard-machine-filter")).toHaveCount(0)
 
   await addMachine(page, sshd.host, "Lab server")
@@ -413,25 +418,75 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
     "connected",
   )
 
+  // The remote card is the same card as a local one: cover, agents line, buttons, milestone dots.
   const remoteCard = page.getByTestId("remote-project-card")
   await expect(remoteCard).toHaveCount(1, { timeout: 30_000 })
-  await expect(remoteCard).toContainText("remote-repo")
-  await expect(remoteCard.getByTestId("machine-badge")).toHaveText("Lab server")
-  await expect(page.getByTestId("project-card").getByTestId("machine-badge")).toHaveText("This Mac")
-  await expect(page.getByTestId("remote-project-item")).toContainText("remote-repo")
+  await expect(remoteCard.getByTestId("project-card-title")).toHaveText("remote-repo")
+  await expect(remoteCard.getByTestId("project-card-image")).toBeVisible()
+  await expect(remoteCard.getByTestId("project-card-status")).toHaveText("No active agents")
+  for (const button of [
+    "project-card-status-button",
+    "project-card-tasks",
+    "project-card-analysis",
+    "project-card-latex",
+    "project-card-auto-research",
+  ]) {
+    await expect(remoteCard.getByTestId(button)).toBeVisible()
+  }
+  await expect(remoteCard.getByTestId("project-card-auto-research")).toBeEnabled()
+  // The label: monitor-cloud icon and the machine name at the end of the title line.
+  const remoteLabel = remoteCard.getByTestId("machine-label")
+  await expect(remoteLabel).toHaveText("Lab server")
+  await expect(remoteLabel).toHaveAttribute("data-icon", "monitor-cloud")
+  // This Mac's projects carry no label.
+  await expect(localCards(page).getByTestId("machine-label")).toHaveCount(0)
+  await expect(page.getByTestId("project-row").getByTestId("machine-label")).toHaveCount(0)
+  const remoteRow = page.getByTestId("remote-project-item")
+  await expect(remoteRow).toContainText("remote-repo")
+  await expect(remoteRow.getByTestId("machine-label")).toHaveAttribute("data-icon", "monitor-cloud")
+  // No machine dropdown in the sidebar.
+  await expect(page.getByTestId("sidebar-machine-filter")).toHaveCount(0)
+
+  // The milestone dots set the stage on the machine's server.
+  await remoteCard.getByTestId("project-card-stage-step-experiments").click()
+  await expect
+    .poll(async () => {
+      const check = connectServer(remoteData)
+      const listed = await check.client.projects.list.query()
+      check.close()
+      return listed.find((project) => project.id === remoteProject.id)?.metadata?.stage ?? null
+    })
+    .toBe("experiments")
+  await expect(remoteCard.getByTestId("project-card-stage-step-experiments")).toHaveAttribute(
+    "aria-current",
+    "step",
+  )
+  // Activity opens the project status card of the remote project.
+  await remoteCard.getByTestId("project-card-status-button").click()
+  await expect(page.getByTestId("project-status-dialog")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByTestId("project-status-dialog")).toHaveCount(0)
+  // Auto-research reads the machine's settings: no skill linked there.
+  await remoteCard.getByTestId("project-card-auto-research").click()
+  await expect(page.getByTestId("skill-not-linked-dialog")).toBeVisible()
+  await page.keyboard.press("Escape")
+  // Tasks follows the machine.
+  await remoteCard.getByTestId("project-card-tasks").click()
+  await expect(page).toHaveURL(new RegExp(`machineId=${machineId}`))
+  await page.getByTestId("nav-project-dashboard").first().click()
 
   // The filter by machine.
   const filter = page.getByTestId("dashboard-machine-filter")
   await filter.selectOption(machineId)
-  await expect(page.getByTestId("project-card")).toHaveCount(0)
+  await expect(localCards(page)).toHaveCount(0)
   await expect(remoteCard).toHaveCount(1)
   await filter.selectOption("local")
-  await expect(page.getByTestId("project-card")).toHaveCount(1)
+  await expect(localCards(page)).toHaveCount(1)
   await expect(remoteCard).toHaveCount(0)
   await filter.selectOption("")
 
   // Open the remote project and run a terminal on that machine's server.
-  await remoteCard.getByTestId("remote-project-open").click()
+  await remoteCard.getByTestId("project-card-open").click()
   await expect(page).toHaveURL(new RegExp(`#/m/${machineId}/projects/`))
   await page.getByTestId("central-add-menu").click()
   await page.getByTestId("central-add-terminal").click()
@@ -446,13 +501,16 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   check.close()
   expect(sessions.length).toBeGreaterThan(0)
 
-  // Disconnect the machine: its projects stay, greyed, with their last data.
+  // Disconnect the machine: its projects stay, greyed, with their last data and monitor-off.
   await page.keyboard.press("Escape")
   await page.getByTestId("nav-project-dashboard").first().click()
   await setMachineStopped(machineId, true)
   await expect(remoteCard).toHaveAttribute("data-offline", "true", { timeout: 30_000 })
   await expect(remoteCard).toContainText("remote-repo")
-  await expect(page.getByTestId("remote-project-item")).toHaveAttribute("data-offline", "true")
+  await expect(remoteLabel).toHaveAttribute("data-icon", "monitor-off")
+  await expect(remoteRow).toHaveAttribute("data-offline", "true")
+  await expect(remoteRow.getByTestId("machine-label")).toHaveAttribute("data-icon", "monitor-off")
+  await expect(page.getByTestId("sidebar-machine")).toHaveAttribute("data-icon", "monitor-off")
   await expect(page.getByTestId("status-bar-machine-dot")).toHaveAttribute(
     "data-state",
     "disconnected",
@@ -461,6 +519,106 @@ test("two servers: remote projects show with a badge, run a terminal there, grey
   // Reconnect: the machine's sockets open again on their own.
   await setMachineStopped(machineId, false)
   await expect(remoteCard).toHaveAttribute("data-offline", "false", { timeout: 30_000 })
+  await expect(remoteLabel).toHaveAttribute("data-icon", "monitor-cloud")
+})
+
+test("Machines group: a click shows the machine's projects on the Dashboard; the right-click menu has settings, projects, reconnect, the machine card and remove", async () => {
+  test.setTimeout(180_000)
+  const localRepo = join(rootDir, "local-repo")
+  const remoteRepo = join(rootDir, "remote-repo")
+  await gitRepo(localRepo, "local.md")
+  await gitRepo(remoteRepo, "remote.md")
+  const remote = connectServer(remoteData)
+  await remote.client.projects.open.mutate({ path: remoteRepo })
+  const remoteHello = await remote.client.server.hello.query()
+  remote.close()
+
+  const page = await launch({ PI_LAB_TEST_OPEN_PROJECT: localRepo })
+  if (!sshd) throw new Error("not started")
+  await addMachine(page, sshd.host, "Lab server")
+  const machineId = (await storedMachines())[0]?.machineId ?? ""
+  await page.getByTestId("settings-back").click()
+  const machineRow = page.getByTestId("sidebar-machine")
+  await expect(machineRow).toHaveAttribute("data-state", "connected")
+  await expect(machineRow).toHaveAttribute("data-icon", "monitor-cloud")
+  const remoteCard = page.getByTestId("remote-project-card")
+  await expect(remoteCard).toHaveCount(1, { timeout: 30_000 })
+
+  // Left click: the Dashboard with only that machine's projects; the filter shows it and clears.
+  await page.getByTestId("project-item").first().click()
+  await expect(page.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+  await machineRow.click()
+  await expect(page.getByTestId("dashboard")).toBeVisible()
+  const filter = page.getByTestId("dashboard-machine-filter")
+  await expect(filter).toHaveValue(machineId)
+  await expect(localCards(page)).toHaveCount(0)
+  await expect(remoteCard).toHaveCount(1)
+  // The sidebar still lists every project.
+  await expect(page.getByTestId("project-item")).toHaveCount(1)
+  await filter.selectOption("")
+  await expect(localCards(page)).toHaveCount(1)
+
+  // Right click: the menu.
+  const menu = page.getByTestId("machine-menu")
+  await machineRow.click({ button: "right" })
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "Machine settings",
+    "Show its projects",
+    "Reconnect",
+    "Machine card",
+    "Remove machine",
+  ])
+  await expect(menu.getByTestId("machine-menu-update")).toHaveCount(0)
+
+  // Show its projects: same as a left click.
+  await menu.getByTestId("machine-menu-projects").click()
+  await expect(menu).toHaveCount(0)
+  await expect(filter).toHaveValue(machineId)
+  await expect(localCards(page)).toHaveCount(0)
+  await filter.selectOption("")
+
+  // Machine settings: Settings > Machines.
+  await machineRow.click({ button: "right" })
+  await menu.getByTestId("machine-menu-settings").click()
+  await expect(page.getByTestId("settings-section-machines")).toBeVisible()
+  await page.getByTestId("settings-back").click()
+
+  // Reconnect: a new connection; the machine is connected again.
+  await machineRow.click({ button: "right" })
+  await menu.getByTestId("machine-menu-reconnect").click()
+  await expect(menu).toHaveCount(0)
+  await expect(machineRow).toHaveAttribute("data-state", "connected", { timeout: 30_000 })
+
+  // Machine card: the summary.
+  await machineRow.click({ button: "right" })
+  await menu.getByTestId("machine-menu-card").click()
+  const card = page.getByTestId("machine-card")
+  await expect(card).toBeVisible()
+  await expect(card.getByTestId("machine-card-name")).toHaveText("Lab server")
+  await expect(card.getByTestId("machine-card-ssh-host")).toHaveText(sshd.host)
+  await expect(card.getByTestId("machine-card-address")).toHaveText(/^127\.0\.0\.1:\d+$/)
+  await expect(card.getByTestId("machine-card-state")).toHaveText("Connected")
+  await expect(card.getByTestId("machine-card-version")).toHaveText(remoteHello.version)
+  await expect(card.getByTestId("machine-card-added")).not.toBeEmpty()
+  await expect(card.getByTestId("machine-card-projects")).toHaveText("1")
+  await expect(card.getByTestId("machine-card-local-server")).toHaveText("Always")
+  await page.keyboard.press("Escape")
+  await expect(card).toHaveCount(0)
+
+  // Remove machine: asks first; Cancel keeps it, Remove forgets it.
+  await machineRow.click({ button: "right" })
+  await menu.getByTestId("machine-menu-remove").click()
+  const confirm = page.getByTestId("machine-remove-dialog")
+  await expect(confirm).toContainText("Lab server")
+  await confirm.getByTestId("machine-remove-cancel").click()
+  await expect(confirm).toHaveCount(0)
+  expect(await storedMachines()).toHaveLength(1)
+  await machineRow.click({ button: "right" })
+  await menu.getByTestId("machine-menu-remove").click()
+  await confirm.getByTestId("machine-remove-confirm").click()
+  await expect(page.getByTestId("sidebar-machines")).toHaveCount(0)
+  await expect(remoteCard).toHaveCount(0)
+  expect(await storedMachines()).toEqual([])
 })
 
 test("remote files: browse, search, edit, Download and Upload on another machine; no Finder actions", async () => {
@@ -482,7 +640,7 @@ test("remote files: browse, search, edit, Download and Upload on another machine
   if (!sshd || !app) throw new Error("not started")
   await addMachine(page, sshd.host, "Lab server")
   await page.getByTestId("settings-back").click()
-  await page.getByTestId("remote-project-open").click()
+  await page.getByTestId("remote-project-card").getByTestId("project-card-open").click()
   await expect(page.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
 
   // Search: quick open lists the remote project's files.
@@ -571,7 +729,7 @@ test("a notebook of a project on another machine shows in its tab through a forw
   if (!sshd) throw new Error("not started")
   await addMachine(page, sshd.host, "Lab server")
   await page.getByTestId("settings-back").click()
-  await page.getByTestId("remote-project-open").click()
+  await page.getByTestId("remote-project-card").getByTestId("project-card-open").click()
   await expect(page.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
   await page.getByTestId("panel-tab-files").click()
   await page.getByTestId("file-tree-file").filter({ hasText: "analysis.ipynb" }).click()
@@ -613,14 +771,14 @@ test("Tasks, Analysis and LaTeX follow a project on another machine; its HTML re
   await expect(card).toHaveCount(1, { timeout: 30_000 })
 
   // Tasks: the remote project's TODO.md.
-  await card.getByTestId("remote-project-tasks").click()
+  await card.getByTestId("project-card-tasks").click()
   await expect(page).toHaveURL(new RegExp(`machineId=${machineId}`))
   await expect(page.getByTestId("science-tasks")).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText("Remote only task")).toBeVisible({ timeout: 30_000 })
 
   // Analysis: the remote project's files; its HTML report streams through the machine.
   await page.getByTestId("nav-project-dashboard").first().click()
-  await card.getByTestId("remote-project-analysis").click()
+  await card.getByTestId("project-card-analysis").click()
   await openAnalysisExperiment(page, "run")
   await page
     .locator('[data-testid="analysis-file"][data-rel-path="results/run/report.html"]')
@@ -633,7 +791,7 @@ test("Tasks, Analysis and LaTeX follow a project on another machine; its HTML re
 
   // LaTeX Editor: shows the remote project.
   await page.getByTestId("nav-project-dashboard").first().click()
-  await card.getByTestId("remote-project-latex").click()
+  await card.getByTestId("project-card-latex").click()
   await expect(page.getByTestId("science-latex")).toBeVisible({ timeout: 30_000 })
   await expect(page.getByTestId("latex-project-select")).toHaveText("remote-repo")
 })
@@ -711,7 +869,7 @@ test("local server and default machine: New project is preset to the default mac
   await expect(
     page.getByTestId("remote-project-card").filter({ hasText: "remote-new" }),
   ).toHaveAttribute("data-offline", "false", { timeout: 30_000 })
-  await expect(page.getByTestId("project-card")).toHaveCount(0)
+  await expect(localCards(page)).toHaveCount(0)
   await expect(page.getByTestId("app-error")).toHaveCount(0)
   expect(await localServerRunning()).toBe(false)
   await page.getByTestId("dashboard-add-project").click()
@@ -723,7 +881,7 @@ test("local server and default machine: New project is preset to the default mac
   await page
     .getByTestId("remote-project-card")
     .filter({ hasText: "remote-new" })
-    .getByTestId("remote-project-analysis")
+    .getByTestId("project-card-analysis")
     .click()
   await openAnalysisExperiment(page, "run")
   await page

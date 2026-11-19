@@ -1402,5 +1402,17 @@
   "Upload files from this Mac into ": "Subir archivos desde este Mac a ",
   "Multi-machine": "Varias máquinas",
   "On while a machine is added. Remove all machines to turn it off.": "Activado mientras haya una máquina añadida. Quita todas las máquinas para desactivarlo.",
-  "Run persistent projects on remote machines over SSH": "Ejecuta proyectos persistentes en máquinas remotas por SSH"
+  "Run persistent projects on remote machines over SSH": "Ejecuta proyectos persistentes en máquinas remotas por SSH",
+  "Machine settings": "Ajustes de la máquina",
+  "Show its projects": "Mostrar sus proyectos",
+  "Reconnect": "Reconectar",
+  "Machine card": "Ficha de la máquina",
+  "Remove machine": "Quitar máquina",
+  "Remove machine?": "¿Quitar la máquina?",
+  "PI Lab forgets this machine and revokes its token there when it can be reached. The projects and files on the machine stay.": "PI Lab olvida esta máquina y revoca su token en ella si se puede alcanzar. Los proyectos y archivos de la máquina se conservan.",
+  "Address": "Dirección",
+  "Unknown": "Desconocido",
+  "Connection": "Conexión",
+  "Server version": "Versión del servidor",
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "Haz clic para ver sus proyectos en el Panel de proyectos; clic derecho para más opciones."
 }

@@ -1,5 +1,5 @@
 import { cn } from "@pi-lab/ui"
-import { Server } from "lucide-react"
+import { type LucideIcon, MonitorCloud, MonitorDown, MonitorOff, MonitorPause } from "lucide-react"
 import { useTranslate } from "../i18n/language"
 import type { ConnectionState } from "../trpc/connectionStatus"
 import { localServerOff } from "./localServer"
@@ -18,21 +18,35 @@ export const CONNECTION_LABELS: Record<ConnectionState, string> = {
   disconnected: "Disconnected",
 }
 
-/** The machine a project lives on ("This Mac" for the local server). */
-export function MachineBadge({ name, className }: { name: string; className: string }) {
+/**
+ * The machine a project on another machine lives on: the monitor-cloud icon
+ * and the machine's name in grey, no box; monitor-off once the machine is
+ * disconnected. Projects on this Mac show none.
+ */
+export function MachineLabel({ name, offline }: { name: string; offline: boolean }) {
+  const Icon = offline ? MonitorOff : MonitorCloud
   return (
     <span
-      data-testid="machine-badge"
+      data-testid="machine-label"
+      data-icon={offline ? "monitor-off" : "monitor-cloud"}
       title={name}
-      className={cn(
-        "inline-flex max-w-32 shrink-0 items-center gap-1 rounded-sm bg-muted px-1 py-px text-[10px] text-muted-foreground",
-        className,
-      )}
+      className="inline-flex min-w-0 max-w-32 shrink-0 items-center gap-1 text-muted-foreground text-xs"
     >
-      <Server className="size-2.5 shrink-0" aria-hidden />
+      <Icon className="size-3.5 shrink-0" aria-hidden />
       <span className="truncate">{name}</span>
     </span>
   )
+}
+
+/** The icon of a machine in the Machines group: its connection state, or an update running. */
+export function machineIcon(
+  state: ConnectionState,
+  updating: boolean,
+): { Icon: LucideIcon; name: string } {
+  if (updating) return { Icon: MonitorDown, name: "monitor-down" }
+  if (state === "disconnected") return { Icon: MonitorOff, name: "monitor-off" }
+  if (state === "reconnecting") return { Icon: MonitorPause, name: "monitor-pause" }
+  return { Icon: MonitorCloud, name: "monitor-cloud" }
 }
 
 /**
