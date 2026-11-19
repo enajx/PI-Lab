@@ -3,6 +3,10 @@
 // 250 ms chunks (dictation.stream.append), so at "stop" only the last chunk
 // is left to send before the server's whisper.cpp transcribes it
 // (dictation.stream.finish). The state machine is logic/dictation.ts.
+// The bar above the box animates like the desktop dictation pill: a wave in
+// the accent colour that follows the microphone level while recording, and
+// bars that sweep from left to right while transcribing. All animations run
+// on the native driver.
 
 import {
   getRecordingPermissionsAsync,
@@ -13,7 +17,16 @@ import {
 import Mic from "lucide-react-native/icons/mic"
 import Square from "lucide-react-native/icons/square"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native"
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Easing,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native"
 import { type Client, useConnection } from "../connection"
 import {
   type DictationEvent,
@@ -21,7 +34,7 @@ import {
   dictationAvailability,
   dictationStep,
 } from "../logic/dictation"
-import { bytesToBase64, PcmChunker } from "../logic/pcm"
+import { bytesToBase64, PcmChunker, pcmLevel } from "../logic/pcm"
 import { colors } from "../theme"
 import { useServerQuery } from "../useServerQuery"
 
@@ -49,6 +62,8 @@ export interface Dictation {
   /** False when the mic should not show (old server, no engine, status not read). */
   visible: boolean
   notice: string | null
+  /** Microphone loudness while recording, 0 to 1 (see pcmLevel). */
+  level: Animated.Value
   press: () => void
   cancel: () => void
 }
@@ -85,6 +100,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
   const onTextRef = useRef(onText)
   onTextRef.current = onText
   const recording = useRef<Recording | null>(null)
+  const level = useRef(new Animated.Value(0)).current
 
   const dispatch = useCallback((event: DictationEvent): DictationState => {
     const { state: next, insert } = dictationStep(stateRef.current, event)
@@ -108,7 +124,14 @@ export function useDictation(onText: (text: string) => void): Dictation {
         )
         return
       }
-      for (const chunk of current.chunker.push(new Uint8Array(buffer.data))) {
+      const bytes = new Uint8Array(buffer.data)
+      Animated.timing(level, {
+        toValue: pcmLevel(bytes),
+        duration: 120,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start()
+      for (const chunk of current.chunker.push(bytes)) {
         current.queue = current.queue
           .then(() =>
             current.error
@@ -168,6 +191,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
       return
     }
     recording.current = current
+    level.setValue(0)
     await stream.start()
     dispatch({ type: "started", attempt })
   }
@@ -236,7 +260,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
   cancelRef.current = cancel
   useEffect(() => () => cancelRef.current(), [])
 
-  return { state, visible: availability !== "hidden", notice, press, cancel }
+  return { state, visible: availability !== "hidden", notice, level, press, cancel }
 }
 
 /** The round mic button: `mic`, a red stop square while recording, a spinner while transcribing. */
@@ -291,16 +315,131 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
   if (label === null) return null
   return (
     <View style={styles.bar} testID="dictation-bar">
-      {state.kind === "recording" ? <View style={styles.dot} /> : null}
-      <Text style={[styles.barText, state.kind === "error" && { color: colors.danger }]}>
-        {label}
-      </Text>
+      {state.kind === "recording" ? <RecordingWave level={dictation.level} /> : null}
+      {state.kind === "transcribing" ? <TranscribingBars /> : null}
+      {state.kind === "transcribing" ? (
+        <TranscribingText label={label} />
+      ) : (
+        <Text style={[styles.barText, state.kind === "error" && { color: colors.danger }]}>
+          {label}
+        </Text>
+      )}
       <Pressable onPress={dictation.cancel} hitSlop={8} testID="dictation-cancel">
         <Text style={styles.cancel}>
           {state.kind === "error" || state.kind === "idle" ? "Dismiss" : "Cancel"}
         </Text>
       </Pressable>
     </View>
+  )
+}
+
+/** A value that runs from 0 to 1 in `durationMs`, again and again, while the caller is shown. */
+function useLoop(durationMs: number): Animated.Value {
+  const value = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(value, {
+        toValue: 1,
+        duration: durationMs,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [value, durationMs])
+  return value
+}
+
+const LOOP_STEPS = 24
+
+/** `shape` of the loop position, started `delay` (0 to 1) later, as a native interpolation. */
+function delayed(
+  loop: Animated.Value,
+  delay: number,
+  shape: (position: number) => number,
+): Animated.AnimatedInterpolation<number> {
+  const inputRange = Array.from({ length: LOOP_STEPS + 1 }, (_, i) => i / LOOP_STEPS)
+  const outputRange = inputRange.map((x) => shape((((x - delay) % 1) + 1) % 1))
+  return loop.interpolate({ inputRange, outputRange })
+}
+
+/** Smooth step from 0 to 1. */
+function ease(x: number): number {
+  return 0.5 - 0.5 * Math.cos(Math.PI * x)
+}
+
+/** The desktop sweep keyframes: up to full height at 40% of the cycle, then back down. */
+function sweep(position: number): number {
+  return position < 0.4 ? ease(position / 0.4) : ease(1 - (position - 0.4) / 0.6)
+}
+
+const WAVE_BARS = 16
+
+/**
+ * Recording: bars in the accent colour with a ripple that travels from right to left,
+ * scaled by the microphone level, so the wave stays small in silence and grows with speech.
+ */
+function RecordingWave({ level }: { level: Animated.Value }) {
+  const loop = useLoop(1400)
+  const gain = level.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] })
+  return (
+    <View style={styles.wave} testID="dictation-recording-wave">
+      {Array.from({ length: WAVE_BARS }, (_, index) => {
+        const ripple = delayed(
+          loop,
+          1 - index / WAVE_BARS,
+          (position) => 0.25 + 0.75 * ease(Math.abs(1 - 2 * position)),
+        )
+        return (
+          <Animated.View
+            // biome-ignore lint/suspicious/noArrayIndexKey: a fixed row of bars.
+            key={index}
+            style={[styles.waveBar, { transform: [{ scaleY: Animated.multiply(ripple, gain) }] }]}
+          />
+        )
+      })}
+    </View>
+  )
+}
+
+const SWEEP_BARS = 5
+
+/** Transcribing: five accent bars that rise in turn from left to right, as on the desktop. */
+function TranscribingBars() {
+  const loop = useLoop(1100)
+  return (
+    <View style={styles.sweep} testID="dictation-transcribing-bars">
+      {Array.from({ length: SWEEP_BARS }, (_, index) => {
+        const delay = (index * 0.1) / 1.1
+        return (
+          <Animated.View
+            // biome-ignore lint/suspicious/noArrayIndexKey: a fixed row of bars.
+            key={index}
+            style={[
+              styles.sweepBar,
+              {
+                opacity: delayed(loop, delay, (position) => 0.5 + 0.5 * sweep(position)),
+                transform: [
+                  { scaleY: delayed(loop, delay, (position) => 0.25 + 0.75 * sweep(position)) },
+                ],
+              },
+            ]}
+          />
+        )
+      })}
+    </View>
+  )
+}
+
+/** "Transcribing" text that brightens and dims, in place of the desktop's shimmer. */
+function TranscribingText({ label }: { label: string | null }) {
+  const loop = useLoop(1800)
+  const opacity = loop.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.55, 1, 0.55] })
+  return (
+    <Animated.Text style={[styles.barText, styles.transcribingText, { opacity }]}>
+      {label}
+    </Animated.Text>
   )
 }
 
@@ -315,7 +454,11 @@ const styles = StyleSheet.create({
   },
   micRecording: { backgroundColor: colors.danger },
   bar: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
+  wave: { flexDirection: "row", alignItems: "center", gap: 2, height: 18 },
+  waveBar: { width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent },
+  sweep: { flexDirection: "row", alignItems: "center", gap: 2, height: 16 },
+  sweepBar: { width: 3, height: 16, borderRadius: 1.5, backgroundColor: colors.accent },
+  transcribingText: { color: colors.text, fontWeight: "500" },
   barText: { flex: 1, color: colors.muted, fontSize: 13, lineHeight: 18 },
   cancel: { color: colors.accent, fontSize: 14, fontWeight: "600" },
 })

@@ -65,3 +65,20 @@ export class PcmChunker {
     return last
   }
 }
+
+/**
+ * The loudness of 16-bit little-endian PCM for the recording animation, 0 to 1: the square
+ * root of the RMS (full scale 1), times 2.4, capped at 1, as the desktop waveform shows it,
+ * so quiet speech is still visible.
+ */
+export function pcmLevel(bytes: Uint8Array): number {
+  const samples = Math.floor(bytes.length / 2)
+  if (samples === 0) return 0
+  const view = new DataView(bytes.buffer, bytes.byteOffset, samples * 2)
+  let sum = 0
+  for (let i = 0; i < samples; i += 1) {
+    const value = view.getInt16(i * 2, true) / 32768
+    sum += value * value
+  }
+  return Math.min(1, Math.sqrt(Math.sqrt(sum / samples)) * 2.4)
+}

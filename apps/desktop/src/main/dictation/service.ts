@@ -380,7 +380,7 @@ export class DictationService {
       })
     const transcribeMs = Math.round(performance.now() - started)
     this.touch()
-    const text = raw.replaceAll("[BLANK_AUDIO]", "").trim()
+    const text = speechText(raw)
     if (!text) throw new Error("No speech was detected")
     return { text, modelKey: model.key, timings: { decodeMs: 0, transcribeMs } }
   }
@@ -542,6 +542,23 @@ export class DictationService {
       .onConflictDoUpdate({ target: dictationSettings.id, set: next })
       .run()
   }
+}
+
+/** A line made only of bracketed or parenthesised markers, e.g. "[ Silence ]" or "[MUSIC] (wind)". */
+const MARKER_LINE = /^\s*(?:(?:\[[^[\]]*\]|\([^()]*\))\s*)+$/
+
+/**
+ * The spoken text of a Whisper result, without its non-speech markers ("[ Silence ]",
+ * "[BLANK_AUDIO]", "[MUSIC]", "(silence)"). Rule: whisper-server puts each segment on its own
+ * line, and a line that holds nothing but such markers is dropped. Brackets in a line that also
+ * has words are kept, since a person can dictate them.
+ */
+function speechText(raw: string): string {
+  return raw
+    .split("\n")
+    .filter((line) => !MARKER_LINE.test(line))
+    .join("\n")
+    .trim()
 }
 
 /** The stored style if it is still one of the three styles, else "dots" (old rows may hold removed styles). */

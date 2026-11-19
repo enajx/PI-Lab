@@ -13,6 +13,8 @@ import {
   Alert,
   Keyboard,
   KeyboardAvoidingView,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -86,6 +88,22 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
   }, [])
 
   const [screen, setScreen] = useState<string | null>(null)
+  // The screen text stays scrolled to its end (the agent's newest lines) when the view
+  // shrinks for the keyboard or the text changes, unless the user scrolled up.
+  const terminal = useRef<ComponentRef<typeof ScrollView>>(null)
+  const atEnd = useRef(true)
+  const keepAtEnd = () => {
+    // On the next frame: Android applies the new height after onLayout runs.
+    requestAnimationFrame(() => {
+      if (atEnd.current) terminal.current?.scrollToEnd({ animated: false })
+    })
+  }
+  // Only the user's own scrolling changes `atEnd`: a scroll event from the view shrinking
+  // must not count as scrolling up.
+  const userScrolled = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = nativeEvent
+    atEnd.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 24
+  }
   const [menu, setMenu] = useState<TerminalMenu | null>(null)
   // Changed to read the screen again at once (after a menu choice).
   const [readAgain, setReadAgain] = useState(0)
@@ -216,7 +234,15 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
       keyboardVerticalOffset={headerHeight}
       style={styles.screen}
     >
-      <ScrollView style={styles.terminal} contentContainerStyle={{ padding: 12 }}>
+      <ScrollView
+        ref={terminal}
+        style={styles.terminal}
+        contentContainerStyle={{ padding: 12 }}
+        onLayout={keepAtEnd}
+        onContentSizeChange={keepAtEnd}
+        onScrollEndDrag={userScrolled}
+        onMomentumScrollEnd={userScrolled}
+      >
         {supported === false ? (
           <Text style={styles.notice}>
             This server cannot show a session's screen as text yet (it does not have the

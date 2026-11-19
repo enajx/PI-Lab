@@ -311,6 +311,38 @@ test("reports no speech instead of saving an empty transcription", async () => {
   expect(await caller.dictation.history.list({ query: null })).toHaveLength(0)
 })
 
+/** Mocked engine: Whisper's non-speech markers are dropped only when they fill a whole segment. */
+test("drops non-speech markers that fill the text or a segment, keeps dictated brackets", async () => {
+  const model = testModel("test.en", MODEL_BYTES)
+  const engine = fakeEngine("unused")
+  let raw = ""
+  engine.transcribe = async () => raw
+  h = await dictationHarness(
+    [model],
+    (async () => new Response(MODEL_BYTES)) as typeof fetch,
+    engine,
+  )
+  const caller = h.caller
+  await install(caller, "test.en")
+  for (const silence of [
+    " [ Silence ]",
+    "(silence)",
+    "[MUSIC]\n [BLANK_AUDIO]\n",
+    "[ Silence ] (wind)",
+  ]) {
+    raw = silence
+    await expect(caller.dictation.transcribe({ wavBase64: "AAAA" })).rejects.toThrow(
+      /^No speech was detected$/,
+    )
+  }
+  raw = " Run it again.\n [ Silence ]\n"
+  expect((await caller.dictation.transcribe({ wavBase64: "AAAA" })).text).toBe("Run it again.")
+  raw = " Use the list [1, 2] (twice)."
+  expect((await caller.dictation.transcribe({ wavBase64: "AAAA" })).text).toBe(
+    "Use the list [1, 2] (twice).",
+  )
+})
+
 /** Mocked engine: HTTP 400 (no samples) is no speech; other engine errors pass through. */
 test("maps an engine HTTP 400 to no speech and keeps other engine errors", async () => {
   const model = testModel("test.en", MODEL_BYTES)
