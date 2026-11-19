@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process"
+import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import {
   chmodSync,
   existsSync,
@@ -192,6 +192,8 @@ it("a failed version rolls back without an older database copy, and is not insta
 it("refuses while another install holds the prefix's lock", async () => {
   const t = setup("locked")
   mkdirSync(join(t.prefix, "install.lock"), { recursive: true })
+  // The other install is a live process (this test runner).
+  writeFileSync(join(t.prefix, "install.lock", "pid"), `${process.pid}\n`)
   const result = await runInstall(INSTALLER, t.args(bundles[0] as BuiltBundle), t.env)
   expect(result.code, result.stderr).toBe(5)
   expect(result.stderr).toContain(join(t.prefix, "install.lock"))
@@ -200,5 +202,15 @@ it("refuses while another install holds the prefix's lock", async () => {
   expect(existsSync(join(t.prefix, "install.lock"))).toBe(true)
   rmSync(join(t.prefix, "install.lock"), { recursive: true })
   expect((await runInstall(INSTALLER, t.args(bundles[0] as BuiltBundle), t.env)).code).toBe(0)
+  expect(existsSync(join(t.prefix, "install.lock"))).toBe(false)
+})
+
+it("takes over a lock left by an install that no longer runs (killed, or a reboot)", async () => {
+  const t = setup("stale-lock")
+  mkdirSync(join(t.prefix, "install.lock"), { recursive: true })
+  const gone = spawnSync("/bin/sh", ["-c", "echo $$"], { encoding: "utf8" }).stdout.trim()
+  writeFileSync(join(t.prefix, "install.lock", "pid"), `${gone}\n`)
+  const result = await runInstall(INSTALLER, t.args(bundles[0] as BuiltBundle), t.env)
+  expect(result.code, result.stderr).toBe(0)
   expect(existsSync(join(t.prefix, "install.lock"))).toBe(false)
 })

@@ -33,6 +33,8 @@ export function useMachinePageUrl(url: string | null): {
   })
   if (machineId === null || url === null) return { url, error: null }
   if (port === null) return { url: machineGrantUrl(url, machineId), error: null }
+  // A failed later check keeps the last working port; the next check corrects it.
+  if (forward.data) return { url: withPort(url, forward.data.localPort), error: null }
   if (forward.error) return { url: null, error: forward.error.message }
-  return { url: forward.data ? withPort(url, forward.data.localPort) : null, error: null }
+  return { url: null, error: null }
 }

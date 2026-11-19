@@ -113,13 +113,22 @@ prefix=$(cd "$prefix" && pwd -P)
 data_dir=$(cd "$data_dir" && pwd -P)
 
 # One install at a time: the server's daily self-update and the app's update can overlap.
+# The lock holds the pid of its install; a lock whose install no longer runs
+# (killed, or the Mac restarted) is taken over.
 lock="$prefix/install.lock"
 if ! mkdir "$lock" 2>/dev/null; then
-  say "another install runs on $prefix; if none does (an install was killed), delete $lock and try again"
-  exit 5
+  holder=$(cat "$lock/pid" 2>/dev/null || true)
+  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+    say "another install (pid $holder) runs on $prefix; wait for it, or delete $lock if it is not an install"
+    exit 5
+  fi
+  say "taking over the lock of an install that no longer runs ($lock)"
+  rm -rf "$lock"
+  mkdir "$lock" || { say "another install took $lock first"; exit 5; }
 fi
+echo "$$" > "$lock/pid"
 work=""
-trap 'rm -rf "$work"; rmdir "$lock"' EXIT
+trap 'rm -rf "$work" "$lock"' EXIT
 work=$(mktemp -d "$prefix/.install.XXXXXX")
 
 # 1. The bundle and its SHA-256.
