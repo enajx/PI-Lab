@@ -19,7 +19,11 @@
         "backgroundColor": "#FFFFFF"
       },
       "softwareKeyboardLayoutMode": "resize",
-      "blockedPermissions": ["android.permission.SYSTEM_ALERT_WINDOW"]
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "ios": {
       "bundleIdentifier": "dev.pilab.mobile",
@@ -35,7 +39,14 @@
           }
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "PI Lab uses the microphone to dictate replies to your agents. The audio goes only to your PI Lab computer.",
+          "enableBackgroundPlayback": false
+        }
+      ]
     ]
   }
 }

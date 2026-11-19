@@ -21,10 +21,12 @@ import {
   View,
 } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import { DictationBar, MicButton, useDictation } from "../components/Dictation"
 import { MenuPanel } from "../components/MenuPanel"
 import { useConnection } from "../connection"
 import { useData } from "../data"
 import { answerInboxItem } from "../logic/answer"
+import { insertDictated } from "../logic/dictation"
 import {
   type ChooseOptionResult,
   choiceNotice,
@@ -132,6 +134,8 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
   const input = useRef<ComponentRef<typeof TextInput>>(null)
   const target = ended ? ({ kind: "message" } as const) : replyTarget(menu)
   const boxOff = ended || target.kind === "off"
+  // Dictated text is added to the draft for the user to check and send.
+  const dictation = useDictation((text) => setDraft((current) => insertDictated(current, text)))
 
   /** Send a menu choice; true when the server wrote it (or had already). */
   const choose = async (action: MenuAction): Promise<boolean> => {
@@ -239,6 +243,7 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
         style={[styles.composer, { paddingBottom: keyboard ? 10 : Math.max(insets.bottom, 10) }]}
       >
         {sendError ? <Text style={styles.error}>{sendError}</Text> : null}
+        <DictationBar dictation={dictation} />
         <View style={styles.row}>
           <TextInput
             ref={input}
@@ -261,6 +266,7 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
             editable={!boxOff}
             testID="reply-input"
           />
+          <MicButton dictation={dictation} disabled={boxOff} />
           <Pressable
             style={[
               styles.send,

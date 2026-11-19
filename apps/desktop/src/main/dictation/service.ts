@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { existsSync, statSync } from "node:fs"
 import { mkdir, open, readdir, rename, rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -12,6 +12,7 @@ import {
 } from "@pi-lab/local-db"
 import { desc, eq, sql } from "drizzle-orm"
 import { type DictationModel, sizeLabel } from "./catalog"
+import { pcm16kToWav } from "./decode"
 import {
   type DictationEngine,
   EngineHttpError,
@@ -62,6 +63,30 @@ export interface DictationStatus {
   microphone: MicrophoneStatus
 }
 
+/** Recording formats a client may send: WAV goes to the engine as is, the others are decoded first. */
+export type DictationAudioFormat = "wav" | "m4a" | "ogg"
+
+/** Turn a compressed recording into a 16 kHz mono 16-bit WAV. */
+export type AudioDecoder = (
+  audio: Buffer,
+  format: Exclude<DictationAudioFormat, "wav">,
+) => Promise<Buffer>
+
+/** A transcription with the server's time spent on it, so a client can measure the rest. */
+export interface TimedTranscription {
+  text: string
+  modelKey: string
+  timings: { decodeMs: number; transcribeMs: number }
+}
+
+/** PCM a client is sending while the user speaks (see {@link DictationService.startStream}). */
+interface AudioStream {
+  chunks: Buffer[]
+  bytes: number
+  nextSeq: number
+  timer: NodeJS.Timeout
+}
+
 export interface DictationServiceOptions {
   db: PiLabDatabase
   catalog: readonly DictationModel[]
@@ -77,6 +102,8 @@ export interface DictationServiceOptions {
   enginePidFile: string
   /** Fail a download that receives no data for this long. */
   downloadStallMs: number
+  /** Decodes m4a and Ogg recordings; null when this machine has no decoder. */
+  decodeAudio: AudioDecoder | null
 }
 
 /** The one row of `dictation_settings`, with defaults for a fresh database. */
@@ -89,6 +116,9 @@ interface DictationSettings {
 const HISTORY_LIMIT = 100
 const MAX_WAV_BYTES = 64 * 1024 * 1024
 const SETTINGS_ID = 1
+/** A stream with no new chunk for this long is dropped (the client went away). */
+const STREAM_IDLE_MS = 60_000
+const STREAM_GONE = "This recording is no longer on the server"
 
 /**
  * Model downloads, engine lifecycle, settings and history for local dictation.
@@ -103,6 +133,7 @@ export class DictationService {
     error: null,
   }
   private downloadAbort: AbortController | null = null
+  private streams = new Map<string, AudioStream>()
   private idleTimer: NodeJS.Timeout | null = null
   /** The startup cleanup; the engine waits for it so it never starts before the old one is killed. */
   private cleanup: Promise<void> = Promise.resolve()
@@ -254,12 +285,91 @@ export class DictationService {
    * transcription leaves no history.
    */
   async transcribe(wavBase64: string): Promise<{ text: string; modelKey: string }> {
+    const { text, modelKey } = await this.transcribeWav(Buffer.from(wavBase64, "base64"))
+    return { text, modelKey }
+  }
+
+  /** Transcribe a recording in any {@link DictationAudioFormat}; compressed ones are decoded first. */
+  async transcribeAudio(audio: Buffer, format: DictationAudioFormat): Promise<TimedTranscription> {
+    if (audio.length === 0) throw new Error("The recording is empty")
+    if (format === "wav") return this.transcribeWav(audio)
+    const decode = this.options.decodeAudio
+    if (!decode) throw new Error(`This server cannot decode ${format} recordings; send a WAV`)
+    this.requireReady()
+    const started = performance.now()
+    const wav = await decode(audio, format)
+    const decodeMs = Math.round(performance.now() - started)
+    const result = await this.transcribeWav(wav)
+    return { ...result, timings: { ...result.timings, decodeMs } }
+  }
+
+  /**
+   * Start receiving 16 kHz mono 16-bit PCM while the user speaks, so the audio is on the
+   * server when they stop. Also starts loading the model. Chunks come with
+   * {@link appendStream}; {@link finishStream} transcribes them.
+   */
+  startStream(): { streamId: string } {
+    this.requireReady()
+    // A load failure is kept in the engine status and raised again by finish.
+    void this.prepare().catch(() => undefined)
+    const streamId = randomUUID()
+    this.streams.set(streamId, {
+      chunks: [],
+      bytes: 0,
+      nextSeq: 0,
+      timer: this.streamTimer(streamId),
+    })
+    return { streamId }
+  }
+
+  /** Add chunk `seq` (0, 1, 2, ...); a chunk out of order fails and drops the stream. */
+  appendStream(streamId: string, seq: number, pcm: Buffer): void {
+    const stream = this.streams.get(streamId)
+    if (!stream) throw new Error(STREAM_GONE)
+    if (seq !== stream.nextSeq) {
+      this.cancelStream(streamId)
+      throw new Error(
+        `Part of the recording was lost (expected part ${stream.nextSeq}, got ${seq})`,
+      )
+    }
+    if (stream.bytes + pcm.length > MAX_WAV_BYTES) {
+      this.cancelStream(streamId)
+      throw new Error("The recording is too long to transcribe")
+    }
+    stream.chunks.push(pcm)
+    stream.bytes += pcm.length
+    stream.nextSeq += 1
+    clearTimeout(stream.timer)
+    stream.timer = this.streamTimer(streamId)
+  }
+
+  /** Add the last chunk (may be empty) and transcribe the whole stream; the stream is then gone. */
+  async finishStream(streamId: string, seq: number, pcm: Buffer): Promise<TimedTranscription> {
+    this.appendStream(streamId, seq, pcm)
+    const stream = this.streams.get(streamId)
+    if (!stream) throw new Error(STREAM_GONE)
+    this.cancelStream(streamId)
+    return this.transcribeWav(pcm16kToWav(Buffer.concat(stream.chunks)))
+  }
+
+  cancelStream(streamId: string): void {
+    const stream = this.streams.get(streamId)
+    if (stream) clearTimeout(stream.timer)
+    this.streams.delete(streamId)
+  }
+
+  private streamTimer(streamId: string): NodeJS.Timeout {
+    return setTimeout(() => this.cancelStream(streamId), STREAM_IDLE_MS).unref()
+  }
+
+  /** Transcribe a WAV; `transcribeMs` includes loading the model when it was not loaded. */
+  private async transcribeWav(wav: Buffer): Promise<TimedTranscription> {
     const { engine, model } = this.requireReady()
-    const wav = Buffer.from(wavBase64, "base64")
     if (wav.length === 0) throw new Error("The recording is empty")
     if (wav.length > MAX_WAV_BYTES) throw new Error("The recording is too long to transcribe")
     this.touch()
     await this.cleanup
+    const started = performance.now()
     await engine.prepare(this.modelPath(model))
     // whisper-server rejects a recording with no samples with HTTP 400; that is no speech.
     const raw = await engine
@@ -268,10 +378,11 @@ export class DictationService {
         if (error instanceof EngineHttpError && error.status === 400) return ""
         throw error
       })
+    const transcribeMs = Math.round(performance.now() - started)
     this.touch()
     const text = raw.replaceAll("[BLANK_AUDIO]", "").trim()
     if (!text) throw new Error("No speech was detected")
-    return { text, modelKey: model.key }
+    return { text, modelKey: model.key, timings: { decodeMs: 0, transcribeMs } }
   }
 
   /** Save a transcription to history, keeping the newest {@link HISTORY_LIMIT}. */
@@ -307,6 +418,7 @@ export class DictationService {
   /** Stop the engine and any download; called on app quit. */
   dispose(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer)
+    for (const streamId of [...this.streams.keys()]) this.cancelStream(streamId)
     this.downloadAbort?.abort()
     this.options.engine?.stop()
   }

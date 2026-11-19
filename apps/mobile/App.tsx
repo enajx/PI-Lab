@@ -1,12 +1,18 @@
 import { DarkTheme, NavigationContainer } from "@react-navigation/native"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { StatusBar } from "expo-status-bar"
-import { ActivityIndicator, View } from "react-native"
+import { useEffect, useState } from "react"
+import { ActivityIndicator, Linking, View } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { ConnectionProvider, useConnection } from "./src/connection"
 import { DataProvider } from "./src/data"
 import type { RootStack } from "./src/navigation"
 import { ConnectScreen } from "./src/screens/ConnectScreen"
+import {
+  type BenchParams,
+  DictationBenchScreen,
+  parseBenchLink,
+} from "./src/screens/DictationBenchScreen"
 import { HomeScreen } from "./src/screens/HomeScreen"
 import { LabManagerScreen } from "./src/screens/LabManagerScreen"
 import { ProjectScreen } from "./src/screens/ProjectScreen"
@@ -27,8 +33,23 @@ const theme = {
   },
 }
 
+/** The dictation benchmark's parameters when the app was opened with its link (debug only). */
+function useBenchLink(): BenchParams | null {
+  const [bench, setBench] = useState<BenchParams | null>(null)
+  useEffect(() => {
+    void Linking.getInitialURL().then((url) => setBench(parseBenchLink(url ?? null)))
+    const listener = Linking.addEventListener("url", ({ url }) => {
+      const params = parseBenchLink(url)
+      if (params) setBench(params)
+    })
+    return () => listener.remove()
+  }, [])
+  return bench
+}
+
 function Root() {
   const { phase } = useConnection()
+  const bench = useBenchLink()
   if (phase.kind === "starting") {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: "center" }}>
@@ -37,6 +58,7 @@ function Root() {
     )
   }
   if (phase.kind === "login") return <ConnectScreen />
+  if (bench) return <DictationBenchScreen params={bench} />
   return (
     <DataProvider>
       <NavigationContainer theme={theme}>

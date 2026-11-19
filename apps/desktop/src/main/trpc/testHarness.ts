@@ -31,7 +31,7 @@ import type { CaffeineControllerPort, CaffeineSettings, CaffeineStatus } from ".
 import type { PyToolsExec } from "../diagnostics"
 import { DICTATION_MODELS, type DictationModel } from "../dictation/catalog"
 import type { DictationEngine } from "../dictation/engine"
-import { DictationService } from "../dictation/service"
+import { type AudioDecoder, DictationService } from "../dictation/service"
 import type { PiLabChannel } from "../identity/channel"
 import type { SshExec } from "../lib/ssh-config"
 import { NotebookServers } from "../notebooks/notebookServers"
@@ -285,6 +285,8 @@ export interface HarnessOptions {
   dictationEnginePidFile?: string
   /** Time without data before a model download fails as stalled (defaults to 30 s). */
   dictationDownloadStallMs?: number
+  /** Decoder for compressed recordings (defaults to none). */
+  dictationDecodeAudio?: AudioDecoder | null
 }
 
 /** Initialize a repo with one commit on `main`, deterministic identity. */
@@ -334,6 +336,7 @@ export async function createHarness(
     | "dictationIdleMs"
     | "dictationEnginePidFile"
     | "dictationDownloadStallMs"
+    | "dictationDecodeAudio"
   > = {},
 ): Promise<Harness> {
   // Canonicalize: on macOS `mkdtemp` hands back `/var/...` but git reports the
@@ -417,6 +420,7 @@ export async function createHarness(
     enginePidFile:
       options.dictationEnginePidFile ?? join(dataDir, "dictation", "whisper-server.pid"),
     downloadStallMs: options.dictationDownloadStallMs ?? 30_000,
+    decodeAudio: options.dictationDecodeAudio ?? null,
   })
   await dictation.start()
   const context: AppContext = {

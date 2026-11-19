@@ -9,10 +9,12 @@ import {
   TextInput,
   View,
 } from "react-native"
+import { DictationBar, MicButton, useDictation } from "../components/Dictation"
 import { AgentIcon } from "../components/Icons"
 import { useConnection } from "../connection"
 import { useData } from "../data"
 import { type AgentTone, agentStatus } from "../logic/agentStatus"
+import { insertDictated } from "../logic/dictation"
 import type { ScreenProps } from "../navigation"
 import { newId } from "../storage"
 import { colors } from "../theme"
@@ -53,6 +55,8 @@ export function ProjectScreen({ route, navigation }: ScreenProps<"Project">) {
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const launch = useRef<{ id: string; prompt: string } | null>(null)
+  // Dictated text is added to the prompt for the user to check and start.
+  const dictation = useDictation((text) => setPrompt((current) => insertDictated(current, text)))
   const start = () => {
     if (!connection || !agentId || starting) return
     if (launch.current?.prompt !== prompt) launch.current = { id: newId(), prompt }
@@ -138,14 +142,20 @@ export function ProjectScreen({ route, navigation }: ScreenProps<"Project">) {
             testID="start-prompt"
           />
           {startError ? <Text style={styles.error}>{startError}</Text> : null}
-          <Pressable
-            style={[styles.button, (!agentId || starting) && { opacity: 0.5 }]}
-            onPress={start}
-            disabled={!agentId || starting}
-            testID="start-agent"
-          >
-            <Text style={styles.buttonText}>{starting ? "Starting..." : "Start"}</Text>
-          </Pressable>
+          <View style={styles.dictationBar}>
+            <DictationBar dictation={dictation} />
+          </View>
+          <View style={styles.startRow}>
+            <MicButton dictation={dictation} disabled={false} />
+            <Pressable
+              style={[styles.button, (!agentId || starting) && { opacity: 0.5 }]}
+              onPress={start}
+              disabled={!agentId || starting}
+              testID="start-agent"
+            >
+              <Text style={styles.buttonText}>{starting ? "Starting..." : "Start"}</Text>
+            </Pressable>
+          </View>
         </View>
 
         <Text style={styles.section}>TODO</Text>
@@ -225,12 +235,14 @@ const styles = StyleSheet.create({
   },
   error: { color: colors.danger, fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
   button: {
+    flex: 1,
     backgroundColor: colors.accent,
     borderRadius: 10,
-    margin: 16,
     paddingVertical: 12,
     alignItems: "center",
   },
+  startRow: { flexDirection: "row", alignItems: "center", gap: 10, margin: 16 },
+  dictationBar: { marginHorizontal: 16, marginTop: 10, marginBottom: -10 },
   buttonText: { color: "#fff", fontSize: 15, fontWeight: "600" },
   todo: { padding: 16 },
   todoLine: { color: colors.text, fontSize: 16, fontWeight: "500" },

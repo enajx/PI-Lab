@@ -6,6 +6,20 @@ import { publicProcedure, router } from "../trpc"
 const keyInput = z.object({ key: z.string().min(1) })
 const outputAction = z.enum(["insert", "review", "insert-copy", "copy"])
 const waveformStyle = z.enum(["dots", "ascii-art", "lines"])
+export const dictationAudioFormat = z.enum(["wav", "m4a", "ogg"])
+/** A transcription with the server's decode and engine time (milliseconds). */
+export const timedTranscription = z.strictObject({
+  text: z.string(),
+  modelKey: z.string(),
+  timings: z.strictObject({ decodeMs: z.number(), transcribeMs: z.number() }),
+})
+const streamId = z.string().min(1)
+/** One chunk of 16 kHz mono 16-bit PCM; `seq` counts from 0. */
+const streamChunk = z.object({
+  streamId,
+  seq: z.number().int().min(0),
+  pcmBase64: z.string(),
+})
 
 function service(ctx: AppContext): DictationService {
   if (!ctx.dictation) throw new Error("Dictation is unavailable in this app context")
@@ -41,6 +55,43 @@ export const dictationRouter = router({
   transcribe: publicProcedure
     .input(z.object({ wavBase64: z.string().min(1) }))
     .mutation(({ ctx, input }) => service(ctx).transcribe(input.wavBase64)),
+  /** A phone recording: WAV as is, m4a (AAC) or Ogg Opus decoded on the server. */
+  transcribeAudio: publicProcedure
+    .input(z.object({ audioBase64: z.string().min(1), format: dictationAudioFormat }))
+    .output(timedTranscription)
+    .mutation(({ ctx, input }) =>
+      service(ctx).transcribeAudio(Buffer.from(input.audioBase64, "base64"), input.format),
+    ),
+  /** PCM sent while the user speaks; finish transcribes it. */
+  stream: router({
+    start: publicProcedure
+      .output(z.strictObject({ streamId }))
+      .mutation(({ ctx }) => service(ctx).startStream()),
+    append: publicProcedure
+      .input(streamChunk)
+      .output(z.void())
+      .mutation(({ ctx, input }) =>
+        service(ctx).appendStream(
+          input.streamId,
+          input.seq,
+          Buffer.from(input.pcmBase64, "base64"),
+        ),
+      ),
+    finish: publicProcedure
+      .input(streamChunk)
+      .output(timedTranscription)
+      .mutation(({ ctx, input }) =>
+        service(ctx).finishStream(
+          input.streamId,
+          input.seq,
+          Buffer.from(input.pcmBase64, "base64"),
+        ),
+      ),
+    cancel: publicProcedure
+      .input(z.object({ streamId }))
+      .output(z.void())
+      .mutation(({ ctx, input }) => service(ctx).cancelStream(input.streamId)),
+  }),
   history: router({
     list: publicProcedure
       .input(z.object({ query: z.string().nullable() }))

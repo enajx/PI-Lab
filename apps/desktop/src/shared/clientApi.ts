@@ -174,6 +174,8 @@ export const screenTextSchema = z.strictObject({
  * - `answer-request`: `server.answerRequest` (one answer per pending request).
  * - `machines`: the hello names the machine (id, host name, platform, arch).
  * - `screen-text`: `terminal.screenText` (a session's visible screen as plain text).
+ * - `dictation-stream`: `dictation.stream.*` (PCM sent while the user speaks) and
+ *   `dictation.transcribeAudio`; `dictation.status` says if a model is ready.
  */
 export const SERVER_CAPABILITIES = [
   "devices",
@@ -181,6 +183,7 @@ export const SERVER_CAPABILITIES = [
   "answer-request",
   "machines",
   "screen-text",
+  "dictation-stream",
 ] as const
 
 /**
