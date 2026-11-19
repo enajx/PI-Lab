@@ -107,6 +107,7 @@ test("builder metadata and direct output stay channel-specific", () => {
       assert.equal(Boolean(config.mac.extendInfo.CFBundleDocumentTypes), channel === "stable")
       assert.equal(config.mac.extendInfo.CFBundleIconName, "AppIcon")
       assert.match(config.mac.extendInfo.NSMicrophoneUsageDescription, /stays on this Mac/)
+      assert.match(config.mac.extendInfo.NSLocalNetworkUsageDescription, /over SSH/)
       assert.ok(
         config.mac.extraResources.some(
           (entry) =>

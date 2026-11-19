@@ -256,6 +256,9 @@ const config = {
       CFBundleIconName: "AppIcon",
       NSMicrophoneUsageDescription:
         "PI Lab uses the microphone for dictation. Audio stays on this Mac and is transcribed by a local model.",
+      // ssh to an added machine on the local network needs this permission.
+      NSLocalNetworkUsageDescription:
+        "PI Lab connects over SSH to the other computers you add in Settings > Machines.",
       ...(channel === "stable"
         ? {
             CFBundleDocumentTypes: [

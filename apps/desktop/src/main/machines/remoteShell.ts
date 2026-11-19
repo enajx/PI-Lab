@@ -71,7 +71,13 @@ export async function runRemote(
   clearTimeout(timer)
   const detail = stderr.trim()
   if (result.signal !== null) throw new Error(`ssh to ${host} timed out: ${detail}`)
-  if (result.code === 255) throw new Error(`ssh to ${host} failed: ${detail}`)
+  if (result.code === 255) {
+    // macOS answers this when PI Lab may not use the local network (ssh in Terminal still works).
+    const hint = detail.includes("No route to host")
+      ? " If ssh works in Terminal, allow PI Lab in System Settings > Privacy & Security > Local Network, then restart PI Lab."
+      : ""
+    throw new Error(`ssh to ${host} failed: ${detail}${hint}`)
+  }
   if (result.code !== 0) throw new Error(`${detail || `exit code ${result.code}`}`)
   return stdout
 }
