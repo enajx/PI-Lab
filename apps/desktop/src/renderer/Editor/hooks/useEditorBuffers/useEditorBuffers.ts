@@ -672,8 +672,11 @@ export function useEditorBuffers({
   )
 
   // Poll every open text file's fingerprint to spot agent/git edits: splits can show
-  // several files at once, not only the active one.
+  // several files at once, not only the active one. Restored tabs exist before the
+  // project's workspace id arrives (slow for a project on another machine); the poll
+  // starts once it is set, since `reload` changes with `workspaceId`.
   useEffect(() => {
+    if (!workspaceId) return
     const id = window.setInterval(() => {
       if (externalCheckRef.current) return
       const buffers = buffersRef.current.filter((b) => b.kind !== "pdf")
@@ -686,7 +689,7 @@ export function useEditorBuffers({
       })
     }, STAT_POLL_MS)
     return () => window.clearInterval(id)
-  }, [reload])
+  }, [reload, workspaceId])
 
   // Autosave: persist a dirty active buffer after a short keystroke debounce.
   const autosave = settings.autosave
