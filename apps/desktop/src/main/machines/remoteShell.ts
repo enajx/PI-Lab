@@ -78,7 +78,8 @@ export async function openLocalNetworkAccess(access: RemoteAccess, host: string)
 
 /**
  * Run `command` on `host` over ssh; resolve with stdout, reject with stderr.
- * `stdinFile` is streamed to the command's stdin (null: no stdin).
+ * `stdinFile` is streamed to the command's stdin (null: no stdin). ssh is
+ * stopped after `timeoutMs` without progress (no input sent, no output read).
  */
 export async function runRemote(
   access: RemoteAccess,
@@ -94,14 +95,29 @@ export async function runRemote(
   )
   let stdout = ""
   let stderr = ""
+  // The time limit counts time without progress (input sent or output read),
+  // so a large copy over a slow link is not killed while it moves.
+  let timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs)
+  const progress = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs)
+  }
   child.stdout?.on("data", (chunk: Buffer) => {
     stdout += chunk.toString()
+    progress()
   })
   child.stderr?.on("data", (chunk: Buffer) => {
     stderr += chunk.toString()
+    progress()
   })
-  if (stdinFile !== null && child.stdin) createReadStream(stdinFile).pipe(child.stdin)
-  const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs)
+  if (stdinFile !== null && child.stdin) {
+    const input = createReadStream(stdinFile)
+    input.on("data", progress)
+    // ssh can end before all input is sent (link dropped, timed out); its exit
+    // below reports that, so the broken pipe is not an error of its own.
+    child.stdin.on("error", () => input.destroy())
+    input.pipe(child.stdin)
+  }
   const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
     (resolve, reject) => {
       child.once("error", reject)
@@ -110,7 +126,9 @@ export async function runRemote(
   )
   clearTimeout(timer)
   const detail = stderr.trim()
-  if (result.signal !== null) throw new Error(`ssh to ${host} timed out: ${detail}`)
+  if (result.signal !== null) {
+    throw new Error(`ssh to ${host} stopped: no progress for ${timeoutMs / 1000} s. ${detail}`)
+  }
   if (result.code === 255) {
     // macOS answers this when PI Lab may not use the local network (ssh in Terminal still works).
     const hint = detail.includes("No route to host")

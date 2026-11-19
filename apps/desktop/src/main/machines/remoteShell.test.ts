@@ -40,3 +40,29 @@ test("the app opens its own connection to the machine's ssh address", async () =
   await connected
   server.close()
 })
+
+/** Write a stand-in ssh script into a new temp folder; returns its path. */
+function fakeSsh(script: string): string {
+  const ssh = join(mkdtempSync(join(tmpdir(), "pi-lab-ssh-")), "ssh")
+  writeFileSync(ssh, `#!/bin/sh\n${script}\n`)
+  chmodSync(ssh, 0o755)
+  return ssh
+}
+
+/** ssh ends while its input is still being sent: an error, not a crash of the app (EPIPE). */
+test("ssh ending during a copy rejects instead of throwing EPIPE", async () => {
+  const big = join(mkdtempSync(join(tmpdir(), "pi-lab-copy-")), "big.bin")
+  writeFileSync(big, Buffer.alloc(8 * 1024 * 1024))
+  const ssh = fakeSsh("echo 'connection closed' >&2\nexit 255")
+  const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
+  await expect(runRemote(access, "me@host", "cat > x", big, 5_000)).rejects.toThrow(
+    /connection closed/,
+  )
+})
+
+/** The time limit counts time without progress: a slow command that keeps answering finishes. */
+test("a slow ssh command that keeps making progress is not killed by the time limit", async () => {
+  const ssh = fakeSsh("for i in 1 2 3 4 5 6; do echo tick; sleep 0.3; done")
+  const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
+  await expect(runRemote(access, "me@host", "true", null, 1_000)).resolves.toContain("tick")
+})
