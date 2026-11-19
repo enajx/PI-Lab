@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import { createReadStream } from "node:fs"
+import { connect } from "node:net"
 import { basename } from "node:path"
 import type { ServerBundleFiles } from "./serverBundle"
 
@@ -34,6 +35,45 @@ export const INSTALL_TIMEOUT_MS = 240_000
 /** Quote one word for the remote POSIX shell. */
 export function shellQuote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`
+}
+
+/** How long the app's own connection to a machine may take before it is dropped. */
+const LOCAL_NETWORK_TOUCH_MS = 3_000
+
+/**
+ * Open and close one TCP connection from this app to the address `ssh` would
+ * use for `host` (`ssh -G` reads the config, no network). macOS asks for Local
+ * Network access only when the app itself connects; until then the ssh it
+ * starts fails with "No route to host". The result of the connection does not
+ * matter, so it always resolves.
+ */
+export async function openLocalNetworkAccess(access: RemoteAccess, host: string): Promise<void> {
+  const config = await new Promise<string>((resolve, reject) => {
+    const child = spawn(access.sshPath, [...access.extraSshArgs, "-G", host], {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    let out = ""
+    child.stdout?.on("data", (chunk: Buffer) => {
+      out += chunk.toString()
+    })
+    child.once("error", reject)
+    child.once("close", () => resolve(out))
+  })
+  const value = (key: string): string | null =>
+    config.match(new RegExp(`^${key} (.+)$`, "m"))?.[1]?.trim() ?? null
+  const address = value("hostname")
+  const port = Number(value("port") ?? "22")
+  if (address === null || !Number.isInteger(port)) return
+  await new Promise<void>((resolve) => {
+    const socket = connect({ host: address, port })
+    const done = () => {
+      socket.destroy()
+      resolve()
+    }
+    socket.setTimeout(LOCAL_NETWORK_TOUCH_MS, done)
+    socket.once("connect", done)
+    socket.once("error", done)
+  })
 }
 
 /**

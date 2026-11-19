@@ -15,6 +15,7 @@ import {
 import {
   bundleEnrollCommand,
   installServerBundle,
+  openLocalNetworkAccess,
   probeRemote,
   type RemoteAccess,
   runRemote,
@@ -346,6 +347,7 @@ export class MachineConnections {
    */
   async add(input: { sshHost: string; name: string }): Promise<MachineSummary> {
     const { access, deviceName } = this.#options
+    await openLocalNetworkAccess(access, input.sshHost)
     const probe = await probeRemote(access, input.sshHost)
     if (probe.system === "Linux") {
       throw new Error("Linux machines come in step 3 of multi-machine PI Lab")
