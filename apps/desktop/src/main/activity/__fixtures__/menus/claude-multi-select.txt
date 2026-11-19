@@ -1,0 +1,24 @@
+
+✻ Churned for 2s · done 1:59 PM
+
+❯ Ask me one multi-select question (I can tick several answers) about which
+  colours I like.
+────────────────────────────────────────────────────────────────────────────────
+←  ☐ Colours  ✔ Submit  →
+
+Which colours do you like? Tick all that apply.
+
+❯ 1. [ ] Red
+         Bold, warm red
+  2. [ ] Blue
+         Cool, calm blue
+  3. [ ] Green
+         Fresh, natural green
+  4. [ ] Yellow
+         Bright, sunny yellow
+  5. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

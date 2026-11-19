@@ -1,4 +1,5 @@
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native"
+import { AgentIcon } from "../components/Icons"
 import { useData } from "../data"
 import type { InboxItem } from "../logic/inbox"
 import type { ScreenProps } from "../navigation"
@@ -46,12 +47,18 @@ export function InboxPage({ navigation }: { navigation: ScreenProps<"Home">["nav
           style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.cardPressed }]}
           testID={`inbox-${item.id}`}
         >
-          <View
-            style={[
-              styles.dot,
-              { backgroundColor: item.canAnswer ? colors.waiting : colors.faint },
-            ]}
-          />
+          <View style={styles.icon}>
+            {item.sessionId ? (
+              <AgentIcon color={item.canAnswer ? colors.waiting : colors.muted} size={18} />
+            ) : (
+              <View
+                style={[
+                  styles.dot,
+                  { backgroundColor: item.canAnswer ? colors.waiting : colors.faint },
+                ]}
+              />
+            )}
+          </View>
           <View style={styles.rowText}>
             <View style={styles.rowTop}>
               <Text style={styles.rowTitle} numberOfLines={1}>
@@ -63,7 +70,11 @@ export function InboxPage({ navigation }: { navigation: ScreenProps<"Home">["nav
             <Text style={styles.body} numberOfLines={2}>
               {item.body}
             </Text>
-            {item.canAnswer ? <Text style={styles.action}>Answer</Text> : null}
+            {item.canAnswer ? (
+              <View style={styles.tag}>
+                <Text style={styles.tagText}>Needs input</Text>
+              </View>
+            ) : null}
           </View>
         </Pressable>
       )}
@@ -79,14 +90,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  dot: { width: 8, height: 8, borderRadius: 4, marginTop: 7, marginRight: 12 },
+  icon: { width: 18, alignItems: "center", marginTop: 1, marginRight: 12 },
+  dot: { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
   rowText: { flex: 1 },
   rowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   rowTitle: { color: colors.text, fontSize: 16, fontWeight: "500", flex: 1, marginRight: 8 },
   time: { color: colors.faint, fontSize: 13 },
   project: { color: colors.text, fontSize: 14, marginTop: 3 },
   body: { color: colors.muted, fontSize: 14, marginTop: 3, lineHeight: 19 },
-  action: { color: colors.accent, fontSize: 14, fontWeight: "600", marginTop: 8 },
+  tag: {
+    alignSelf: "flex-start",
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: "rgba(226, 160, 63, 0.15)",
+  },
+  tagText: { color: colors.waiting, fontSize: 12, fontWeight: "600" },
   empty: { color: colors.muted, fontSize: 15, textAlign: "center", marginTop: 60 },
   error: { color: colors.danger, fontSize: 14, marginHorizontal: 20, marginVertical: 8 },
 })

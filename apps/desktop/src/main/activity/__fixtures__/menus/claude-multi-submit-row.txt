@@ -1,0 +1,24 @@
+ ▝▝   ▝▝   /…/worktrees/00000000-0000-4000-8000-000000000000/agent-mwnkeh9r
+
+
+❯ Before doing anything, ask me one multi-select question (I can tick several
+  answers) about which colours I like.
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ Colours  ✔ Submit  →
+
+Which colours do you like? Tick as many as you want.
+
+  1. [ ] Red
+         Warm, bold reds
+  2. [✔] Blue
+         Calm blues, from sky to navy
+  3. [ ] Green
+         Natural greens
+  4. [ ] Yellow/Orange
+         Bright, sunny warm tones
+  5. [✔] Pink
+❯    Submit
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · ctrl+g to edit in nano · Esc to cancel

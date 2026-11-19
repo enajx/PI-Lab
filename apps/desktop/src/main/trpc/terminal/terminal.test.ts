@@ -5,7 +5,8 @@
 // only the *transport* (caller vs IPC) and the daemon's *home* (in-process vs
 // detached child) are substituted, both of which the app/verify harness covers.
 
-import { mkdtemp, rm } from "node:fs/promises"
+import { readFileSync } from "node:fs"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import type { Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -31,6 +32,8 @@ let client: DaemonClient
 let caller: ReturnType<typeof createCaller>
 let callerContext: AppContext
 let terminalActivityCount: number
+/** What the router told the activity monitor the user typed (sessionId, data). */
+let userInputs: Array<[string, string]>
 const subscriptions: Unsubscribable[] = []
 
 beforeEach(async () => {
@@ -42,6 +45,7 @@ beforeEach(async () => {
   await client.connect()
   const notifications = createNotificationBrokers()
   terminalActivityCount = 0
+  userInputs = []
   // The terminal router never reads `db`, `sshExec`, or `httpFetch`; stubs keep
   // the context typed without standing up SQLite (or ssh / network) for a
   // pure-PTY test.
@@ -96,7 +100,9 @@ beforeEach(async () => {
       reconcile: async () => {},
       liveAgentCount: () => 0,
       liveAgents: () => [],
-      userInput: () => {},
+      userInput: (sessionId, data) => {
+        userInputs.push([sessionId, data])
+      },
       resize: () => {},
       dispose: () => {},
     },
@@ -372,6 +378,123 @@ describe("terminal router", () => {
     await waitFor(() => /SIZE 120x40/.test(chunks.join("")))
     expect(chunks.join("")).toMatch(/SIZE 120x40/)
 
+    await caller.terminal.kill({ sessionId })
+  })
+})
+
+/**
+ * Stand-in for an agent's menu (not a real agent): a program that draws a
+ * screen captured from a real Claude Code menu and logs every key it reads,
+ * one JSON string per line, to `keysFile`. The screen stays as drawn.
+ */
+async function menuStandIn(fixture: string): Promise<{ sessionId: string; keys: () => string[] }> {
+  const screen = readFileSync(
+    new URL(`../../activity/__fixtures__/menus/${fixture}.txt`, import.meta.url),
+    "utf8",
+  )
+  const keysFile = join(socketDir, `keys-${fixture}.log`)
+  await writeFile(keysFile, "")
+  const script = [
+    "const fs = require('node:fs')",
+    "process.stdin.setRawMode(true)",
+    `process.stdin.on('data', (data) => fs.appendFileSync(${JSON.stringify(keysFile)}, JSON.stringify(data.toString()) + '\\n'))`,
+    `process.stdout.write(${JSON.stringify(screen.trimEnd().replaceAll("\n", "\r\n"))})`,
+  ].join(";")
+  const { sessionId } = await caller.terminal.spawn({
+    command: NODE,
+    args: ["-e", script],
+    cols: 80,
+    rows: 30,
+  })
+  const { chunks } = await collect(sessionId)
+  const lastLine = screen.trimEnd().split("\n").at(-1) ?? ""
+  await waitFor(() => chunks.join("").includes(lastLine))
+  return {
+    sessionId,
+    keys: () =>
+      readFileSync(keysFile, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as string),
+  }
+}
+
+describe("terminal menus (stand-in agent drawing captured Claude Code screens)", () => {
+  test("screenText returns the menu on the screen; a choice sends its key once and ends the menu", async () => {
+    const { sessionId, keys } = await menuStandIn("claude-single-choice")
+    const screen = await caller.terminal.screenText({ sessionId })
+    expect(screen.menu?.question).toBe("Which colour do you prefer?")
+    expect(screen.menu?.options.map((option) => option.key)).toEqual(["1", "2", "3", "4", "5", "6"])
+    const menuId = screen.menu?.id ?? ""
+
+    const choose = () =>
+      caller.terminal.chooseOption({
+        sessionId,
+        messageId: "choice-1",
+        clientId: "phone",
+        menuId,
+        action: { kind: "choose", option: "3" },
+      })
+    expect(await choose()).toEqual({ status: "sent", finished: true })
+    // A resend after a lost reply writes nothing.
+    expect(await choose()).toEqual({ status: "duplicate" })
+    await waitFor(() => keys().length > 0)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(keys()).toEqual(["3"])
+    // The agent moves on, as after an answer sent with Enter: the waiting request clears.
+    expect(userInputs).toEqual([[sessionId, "\r"]])
+    await caller.terminal.kill({ sessionId })
+  })
+
+  test("a choice for a menu that is no longer on screen writes nothing", async () => {
+    const { sessionId, keys } = await menuStandIn("claude-single-choice")
+    expect(
+      await caller.terminal.chooseOption({
+        sessionId,
+        messageId: "choice-stale",
+        clientId: "phone",
+        menuId: "a-menu-seen-earlier",
+        action: { kind: "choose", option: "1" },
+      }),
+    ).toEqual({ status: "menu-changed" })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(keys()).toEqual([])
+    expect(userInputs).toEqual([])
+    await caller.terminal.kill({ sessionId })
+  })
+
+  test("the trust prompt gets arrow keys, then Enter, one write each", async () => {
+    const { sessionId, keys } = await menuStandIn("claude-trust")
+    const menuId = (await caller.terminal.screenText({ sessionId })).menu?.id ?? ""
+    expect(
+      await caller.terminal.chooseOption({
+        sessionId,
+        messageId: "trust-yes",
+        clientId: "phone",
+        menuId,
+        action: { kind: "choose", option: "2" },
+      }),
+    ).toEqual({ status: "sent", finished: true })
+    await waitFor(() => keys().length === 2)
+    expect(keys()).toEqual(["\u001b[B", "\r"])
+    await caller.terminal.kill({ sessionId })
+  })
+
+  test("ticking a multi-select option does not end the menu", async () => {
+    const { sessionId, keys } = await menuStandIn("claude-multi-select")
+    const menuId = (await caller.terminal.screenText({ sessionId })).menu?.id ?? ""
+    expect(
+      await caller.terminal.chooseOption({
+        sessionId,
+        messageId: "tick-2",
+        clientId: "phone",
+        menuId,
+        action: { kind: "choose", option: "2" },
+      }),
+    ).toEqual({ status: "sent", finished: false })
+    await waitFor(() => keys().length === 1)
+    expect(keys()).toEqual(["2"])
+    expect(userInputs).toEqual([])
     await caller.terminal.kill({ sessionId })
   })
 })

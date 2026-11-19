@@ -1,0 +1,24 @@
+
+  ⎿  /plan to preview
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Ready to code?
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   Plan: Vue + Tailwind dashboard for digit-training metrics
+
+   Context
+
+   The repo is a small Python study (train.py) that trains a 64-16-10 network
+   on 8x8 digits and writes per-epoch
+   epoch, train_loss, train_accuracy, test_loss, test_accuracy to
+   results/metrics.csv (git-ignored). There is no
+   frontend yet. You chose a Vue dashboard styled with Tailwind, with dark     ↓
+  ────────────────────────────────────────────────────────────────────────────
+   Claude has written up a plan and is ready to execute. Would you like to
+   proceed?
+   ❯ 1. Yes, and switch to BYPASS PERMISSIONS (no further prompts) for this
+        session
+     2. Yes, manually approve edits
+     3. Tell Claude what to change
+        shift+tab to approve with this feedback
+
+   ctrl+g to edit in nano · ~/.claude/plans/example-plan-name-abcd.md

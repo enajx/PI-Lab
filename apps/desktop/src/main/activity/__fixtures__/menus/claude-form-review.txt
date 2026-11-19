@@ -1,0 +1,20 @@
+⏺ Session was started with bypass permissions, so plan mode won't ask
+  before most edits or commands. Start a new session without bypass
+  permissions for prompts in plan mode.
+
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ Framework  ☒ App type  ☒ Styling  ☒ Extras  ✔ Submit  →
+
+Review your answers
+
+ ● Which frontend framework do you want to use?
+   → Vue
+ ● What kind of app is this frontend for?
+   → Dashboard
+ ● How should it be styled?
+   → Tailwind CSS
+ ● Which extras should the plan cover?
+   → Dark mode, Routing
+
+❯ 1. Submit answers
+  2. Cancel

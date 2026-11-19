@@ -1,0 +1,24 @@
+
+⏺ Session was started with bypass permissions, so plan mode won't ask
+  before most edits or commands. Start a new session without bypass
+  permissions for prompts in plan mode.
+────────────────────────────────────────────────────────────────────────────────
+Planning: /Users/demo/.claude/plans/example-plan-name-abcd.md
+────────────────────────────────────────────────────────────────────────────────
+←  ☐ Framework  ☐ App type  ☐ Styling  ☐ Extras  ✔ Submit  →
+
+Which frontend framework do you want to use?
+
+❯ 1. React
+     Most popular, huge ecosystem
+  2. Vue
+     Gentle learning curve, approachable
+  3. Svelte
+     Minimal boilerplate, compiled
+  4. Plain HTML/JS
+     No framework, no build step
+  5. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

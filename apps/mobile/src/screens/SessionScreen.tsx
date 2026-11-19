@@ -2,10 +2,13 @@
 // scroll back), read again every second with `terminal.screenText` while the
 // screen is open, and a reply box. Opened from a waiting Inbox item, the reply
 // answers that request (`server.answerRequest`); otherwise it is sent as a
-// whole message with `terminal.sendMessage`.
+// whole message with `terminal.sendMessage`. When the agent shows a menu (the
+// server reads it: `menu` on terminal.screenText), its options show as
+// buttons above the reply box (terminal.chooseOption), and the reply box
+// sends only to the menu's free-text option, or is off.
 
 import { useHeaderHeight } from "@react-navigation/elements"
-import { useEffect, useState } from "react"
+import { type ComponentRef, useEffect, useRef, useState } from "react"
 import {
   Alert,
   Keyboard,
@@ -18,9 +21,18 @@ import {
   View,
 } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import { MenuPanel } from "../components/MenuPanel"
 import { useConnection } from "../connection"
 import { useData } from "../data"
 import { answerInboxItem } from "../logic/answer"
+import {
+  type ChooseOptionResult,
+  choiceNotice,
+  type MenuAction,
+  MenuOutbox,
+  replyTarget,
+  type TerminalMenu,
+} from "../logic/menu"
 import { MessageOutbox } from "../logic/outbox"
 import { sessionEnded } from "../logic/sessionEnded"
 import type { ScreenProps } from "../navigation"
@@ -30,6 +42,17 @@ import { colors, mono } from "../theme"
 /** The server capability that announces `terminal.screenText`. */
 const SCREEN_TEXT_CAPABILITY = "screen-text"
 const REFRESH_MS = 1000
+
+/** One menu outbox per session for the app's lifetime, like the message outboxes. */
+const menuOutboxes = new Map<string, MenuOutbox>()
+function menuOutboxFor(sessionId: string): MenuOutbox {
+  let outbox = menuOutboxes.get(sessionId)
+  if (!outbox) {
+    outbox = new MenuOutbox(newId)
+    menuOutboxes.set(sessionId, outbox)
+  }
+  return outbox
+}
 
 /** One outbox per session for the app's lifetime, so a resend after reopening the screen keeps its message ID. */
 const outboxes = new Map<string, MessageOutbox>()
@@ -61,11 +84,15 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
   }, [])
 
   const [screen, setScreen] = useState<string | null>(null)
+  const [menu, setMenu] = useState<TerminalMenu | null>(null)
+  // Changed to read the screen again at once (after a menu choice).
+  const [readAgain, setReadAgain] = useState(0)
   const [screenError, setScreenError] = useState<string | null>(null)
   // The agent exited: the last text stays, the reply box is off, reading stops.
   const [ended, setEnded] = useState(false)
   const supported = capabilities === null ? null : capabilities.includes(SCREEN_TEXT_CAPABILITY)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new readAgain starts the reading again at once.
   useEffect(() => {
     if (!connection || supported !== true || ended) return
     let current = true
@@ -74,6 +101,7 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
         (result) => {
           if (!current) return
           setScreen(result.text)
+          setMenu(result.menu ?? null)
           setScreenError(null)
         },
         (reason: unknown) => {
@@ -89,7 +117,7 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
       current = false
       clearInterval(timer)
     }
-  }, [connection, sessionId, supported, ended])
+  }, [connection, sessionId, supported, ended, readAgain])
 
   // Opened from a waiting item, the reply answers that request until the server
   // settles it (accepted or already answered), even when the item has left the
@@ -101,34 +129,71 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const input = useRef<ComponentRef<typeof TextInput>>(null)
+  const target = ended ? ({ kind: "message" } as const) : replyTarget(menu)
+  const boxOff = ended || target.kind === "off"
+
+  /** Send a menu choice; true when the server wrote it (or had already). */
+  const choose = async (action: MenuAction): Promise<boolean> => {
+    if (!connection || menu === null) return false
+    const clientId = await readClientId()
+    const result: ChooseOptionResult = await menuOutboxFor(sessionId).send(
+      menu.id,
+      action,
+      (choice) =>
+        connection.client.terminal.chooseOption.mutate({ sessionId, clientId, ...choice }),
+    )
+    // The menu ended: the answer is given, later replies are plain messages.
+    if (result.status === "sent" && result.finished) setSettled(true)
+    setReadAgain((count) => count + 1)
+    const notice = choiceNotice(result)
+    if (notice) setSendError(notice)
+    return result.status !== "menu-changed"
+  }
+
+  const tapOption = async (action: MenuAction) => {
+    if (sending || ended) return
+    setSending(true)
+    setSendError(null)
+    await choose(action).then(
+      () => undefined,
+      (reason: unknown) =>
+        setSendError(
+          `Not sent: ${reason instanceof Error ? reason.message : String(reason)}. Tap again to send it.`,
+        ),
+    )
+    setSending(false)
+  }
 
   const send = async () => {
     const text = draft
-    if (!connection || sending || ended || text.trim().length === 0) return
+    if (!connection || sending || boxOff || text.trim().length === 0) return
     setSending(true)
     setSendError(null)
     const sent =
-      pending && requestId !== null
-        ? answerInboxItem(
-            { answerRequest: (input) => connection.client.server.answerRequest.mutate(input) },
-            inbox,
-            requestId,
-            text,
-          ).then((result) => {
-            setSettled(true)
-            if (result.notice) Alert.alert("Already answered", result.notice)
-            // Cleared either way, so the answer text is never sent again as a plain message.
-            return true
-          })
-        : readClientId().then((clientId) =>
-            outbox
-              .send(text, (message) =>
-                connection.client.terminal.sendMessage
-                  .mutate({ sessionId, clientId, ...message })
-                  .then(() => undefined),
-              )
-              .then(() => true),
-          )
+      target.kind === "menu-text"
+        ? choose({ kind: "text", option: target.option, text })
+        : pending && requestId !== null
+          ? answerInboxItem(
+              { answerRequest: (input) => connection.client.server.answerRequest.mutate(input) },
+              inbox,
+              requestId,
+              text,
+            ).then((result) => {
+              setSettled(true)
+              if (result.notice) Alert.alert("Already answered", result.notice)
+              // Cleared either way, so the answer text is never sent again as a plain message.
+              return true
+            })
+          : readClientId().then((clientId) =>
+              outbox
+                .send(text, (message) =>
+                  connection.client.terminal.sendMessage
+                    .mutate({ sessionId, clientId, ...message })
+                    .then(() => undefined),
+                )
+                .then(() => true),
+            )
     await sent.then(
       (written) => {
         if (written) setDraft("")
@@ -162,33 +227,52 @@ export function SessionScreen({ route, navigation }: ScreenProps<"Session">) {
           </Text>
         </ScrollView>
       </ScrollView>
+      {menu && !ended ? (
+        <MenuPanel
+          menu={menu}
+          busy={sending}
+          onAction={tapOption}
+          onFreeText={() => input.current?.focus()}
+        />
+      ) : null}
       <View
         style={[styles.composer, { paddingBottom: keyboard ? 10 : Math.max(insets.bottom, 10) }]}
       >
         {sendError ? <Text style={styles.error}>{sendError}</Text> : null}
         <View style={styles.row}>
           <TextInput
-            style={styles.input}
+            ref={input}
+            style={[styles.input, boxOff && { opacity: 0.6 }]}
             value={draft}
             onChangeText={setDraft}
             placeholder={
-              ended ? "The session has ended" : pending ? "Answer the agent" : "Message the agent"
+              ended
+                ? "The session has ended"
+                : target.kind === "off"
+                  ? target.hint
+                  : target.kind === "menu-text"
+                    ? "Type your own answer"
+                    : pending
+                      ? "Answer the agent"
+                      : "Message the agent"
             }
             placeholderTextColor={colors.faint}
             multiline
-            editable={!ended}
+            editable={!boxOff}
             testID="reply-input"
           />
           <Pressable
             style={[
               styles.send,
-              (sending || ended || draft.trim().length === 0) && { opacity: 0.5 },
+              (sending || boxOff || draft.trim().length === 0) && { opacity: 0.5 },
             ]}
             onPress={send}
-            disabled={sending || ended || draft.trim().length === 0}
+            disabled={sending || boxOff || draft.trim().length === 0}
             testID="reply-send"
           >
-            <Text style={styles.sendText}>{pending ? "Answer" : "Send"}</Text>
+            <Text style={styles.sendText}>
+              {pending || target.kind === "menu-text" ? "Answer" : "Send"}
+            </Text>
           </Pressable>
         </View>
       </View>

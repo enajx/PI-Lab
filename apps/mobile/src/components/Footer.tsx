@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { colors } from "../theme"
+import { LabManagerIcon } from "./Icons"
 
 /** The floating footer: a rounded bar with the two tabs, and the round lab manager button. */
 export function Footer({
@@ -35,7 +36,7 @@ export function Footer({
         onPress={onLabManager}
         testID="lab-manager"
       >
-        <Text style={styles.roundText}>✦</Text>
+        <LabManagerIcon needsAttention={false} size={22} />
       </Pressable>
     </View>
   )
@@ -92,5 +93,4 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow,
   },
-  roundText: { color: colors.text, fontSize: 20 },
 })

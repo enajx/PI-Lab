@@ -1,0 +1,24 @@
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  Sonnet 5.5 · Plan Abcde
+ ▝▝   ▝▝   /…/worktrees/00000000-0000-4000-8000-000000000000/agent-mwnk2zu3
+
+
+❯ Before doing anything, ask me one question about which colour I prefer.
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Colour
+
+Which colour do you prefer?
+
+❯ 1. Blue
+     Cool, calm blue
+  2. Green
+     Fresh, natural green
+  3. Red
+     Bold, warm red
+  4. Purple
+     Rich, creative purple
+  5. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

@@ -1,0 +1,24 @@
+⏺ Session was started with bypass permissions, so plan mode won't ask
+  before most edits or commands. Start a new session without bypass
+  permissions for prompts in plan mode.
+────────────────────────────────────────────────────────────────────────────────
+Planning: /Users/demo/.claude/plans/example-plan-name-abcd.md
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ Framework  ☒ App type  ☒ Styling  ☒ Extras  ✔ Submit  →
+
+Which extras should the plan cover?
+
+❯ 1. [✔] Dark mode
+         Light and dark themes
+  2. [✔] Routing
+         Multiple pages or views
+  3. [ ] State management
+         Shared client-side state
+  4. [ ] Tests
+         Unit and end-to-end tests
+  5. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

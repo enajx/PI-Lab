@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native"
+import { AgentIcon } from "../components/Icons"
 import { useConnection } from "../connection"
 import { useData } from "../data"
 import { type AgentTone, agentStatus } from "../logic/agentStatus"
@@ -17,7 +18,7 @@ import { newId } from "../storage"
 import { colors } from "../theme"
 import { useServerQuery } from "../useServerQuery"
 
-/** The dot colour of each agent status. */
+/** The icon colour of each agent status. */
 const TONE_COLORS: Record<AgentTone, string> = {
   working: colors.working,
   "needs-input": colors.waiting,
@@ -107,9 +108,7 @@ export function ProjectScreen({ route, navigation }: ScreenProps<"Project">) {
               style={[styles.agentRow, index > 0 && styles.divider]}
               testID={`agent-${agent.sessionId}`}
             >
-              <View
-                style={[styles.dot, { backgroundColor: TONE_COLORS[agentStatus(agent).tone] }]}
-              />
+              <AgentIcon color={TONE_COLORS[agentStatus(agent).tone]} size={18} />
               <Text style={styles.agentName} numberOfLines={1}>
                 {label(agent.agentId)}
               </Text>
@@ -206,9 +205,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 14,
+    gap: 12,
   },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
   agentName: { color: colors.text, fontSize: 16, flex: 1 },
   agentState: { color: colors.muted, fontSize: 14 },
   agentHint: { color: colors.muted, fontSize: 14, paddingHorizontal: 16, paddingTop: 14 },

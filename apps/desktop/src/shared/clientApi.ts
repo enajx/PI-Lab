@@ -93,6 +93,64 @@ export const notificationStreamMessageSchema = z.discriminatedUnion("type", [
 ])
 
 /**
+ * One option of a terminal menu. `key` names it in `terminal.chooseOption`.
+ * `cursor`: the agent's cursor is on it. `checked`: its tick in a multi-select
+ * question (null when it has no tick box). `freeText`: choosing it takes
+ * typed text ("Type something.").
+ */
+export const terminalMenuOptionSchema = z.strictObject({
+  key: z.string(),
+  label: z.string(),
+  detail: z.string().nullable(),
+  cursor: z.boolean(),
+  checked: z.boolean().nullable(),
+  freeText: z.boolean(),
+})
+
+/**
+ * A menu an agent shows in its terminal (read by the server from the screen
+ * text). `id` identifies the question and its options, not the cursor or the
+ * ticks; `terminal.chooseOption` writes nothing when the menu on screen has
+ * another id. `tabs`: the questions of a tabbed form (without its Submit
+ * step), null for a menu with no tabs.
+ */
+export const terminalMenuSchema = z.strictObject({
+  id: z.string(),
+  question: z.string().nullable(),
+  multiSelect: z.boolean(),
+  options: z.array(terminalMenuOptionSchema),
+  tabs: z.array(z.strictObject({ label: z.string(), answered: z.boolean() })).nullable(),
+})
+
+export type TerminalMenu = z.infer<typeof terminalMenuSchema>
+
+/**
+ * What the phone asks for on a menu: `choose` picks an option (in a
+ * multi-select question it ticks or unticks it), `text` sends typed text to
+ * a free-text option, `submit` confirms a multi-select question.
+ */
+export const menuActionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("choose"), option: z.string().min(1) }),
+  z.strictObject({ kind: z.literal("text"), option: z.string().min(1), text: z.string() }),
+  z.strictObject({ kind: z.literal("submit") }),
+])
+
+export type MenuAction = z.infer<typeof menuActionSchema>
+
+/**
+ * `terminal.chooseOption`'s result. `menu-changed`: the menu on screen is not
+ * the one the phone saw, nothing was written. `finished`: the keys sent end
+ * the menu (the agent moves on).
+ */
+export const chooseOptionResultSchema = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("sent"), finished: z.boolean() }),
+  z.strictObject({ status: z.literal("duplicate") }),
+  z.strictObject({ status: z.literal("menu-changed") }),
+])
+
+export type ChooseOptionResult = z.infer<typeof chooseOptionResultSchema>
+
+/**
  * A terminal's visible screen as plain text: one line per row, trailing
  * spaces and trailing empty lines removed; `cols` and `rows` are the PTY size.
  */
@@ -100,6 +158,8 @@ export const screenTextSchema = z.strictObject({
   text: z.string(),
   cols: z.number().int(),
   rows: z.number().int(),
+  /** The menu the agent shows at the bottom of the screen, when the server can read it. */
+  menu: terminalMenuSchema.optional(),
 })
 
 // ---------------------------------------------------------------------------

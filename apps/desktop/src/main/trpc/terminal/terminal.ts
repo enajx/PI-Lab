@@ -9,10 +9,16 @@ import type {
   ResizeEvent,
   ResumePoint,
 } from "@pi-lab/pty-daemon"
-import { type TrackedEnvelope, tracked } from "@trpc/server"
+import { TRPCError, type TrackedEnvelope, tracked } from "@trpc/server"
 import { observable } from "@trpc/server/observable"
 import { z } from "zod"
-import { screenTextSchema } from "../../../shared/clientApi"
+import {
+  type ChooseOptionResult,
+  chooseOptionResultSchema,
+  menuActionSchema,
+  screenTextSchema,
+} from "../../../shared/clientApi"
+import { menuKeys, parseTerminalMenu } from "../../activity/terminalMenu"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 import type { FlowItem } from "./outputFlow"
@@ -77,6 +83,34 @@ const MESSAGE_ID_LIMIT = 500
  * resend writes it again.
  */
 const sentMessages = new Map<string, Promise<void>>()
+
+const chooseOptionInput = z.object({
+  sessionId: z.string(),
+  /** One per choice; a resend after a lost reply uses the same ID. */
+  messageId: z.string().min(1).max(200),
+  clientId: z.string().min(1),
+  /** The `id` of the menu the client showed (from `terminal.screenText`). */
+  menuId: z.string().min(1),
+  action: menuActionSchema,
+})
+
+/** Message ID → the result of that menu choice, like {@link sentMessages}. */
+const chosenOptions = new Map<string, Promise<ChooseOptionResult>>()
+
+/**
+ * Time between the keys of one menu choice: Claude Code reads keys one at a
+ * time and redraws in between (a number key moves the cursor before text).
+ */
+const MENU_KEY_GAP_MS = 150
+
+/** Forget the oldest IDs beyond {@link MESSAGE_ID_LIMIT}. */
+function trimIds(map: Map<string, unknown>): void {
+  while (map.size > MESSAGE_ID_LIMIT) {
+    const oldest = map.keys().next().value
+    if (oldest === undefined) break
+    map.delete(oldest)
+  }
+}
 
 const resizeInput = z.object({
   sessionId: z.string(),
@@ -442,15 +476,60 @@ export const terminalRouter = router({
     written.catch(() => {
       if (sentMessages.get(input.messageId) === written) sentMessages.delete(input.messageId)
     })
-    while (sentMessages.size > MESSAGE_ID_LIMIT) {
-      const oldest = sentMessages.keys().next().value
-      if (oldest === undefined) break
-      sentMessages.delete(oldest)
-    }
+    trimIds(sentMessages)
     await written
     ctx.caffeine.markTerminalActivity()
     return { status: "sent" as const }
   }),
+
+  /**
+   * Carry out a choice on the menu the agent shows (see `activity/terminalMenu.ts`
+   * for the keys): the server reads the menu from the screen and writes the
+   * keys, one at a time. When the menu on screen is not `menuId` it writes
+   * nothing and returns `menu-changed`. Accepted once per `messageId`: a resend
+   * gets `duplicate` (or the first result when that wrote nothing). A choice
+   * that ends the menu counts as the user's answer, as Enter after a message
+   * does, so the session's waiting request clears.
+   */
+  chooseOption: publicProcedure
+    .input(chooseOptionInput)
+    .output(chooseOptionResultSchema)
+    .mutation(async ({ ctx, input }): Promise<ChooseOptionResult> => {
+      const existing = chosenOptions.get(input.messageId)
+      if (existing !== undefined) {
+        const first = await existing
+        return first.status === "sent" ? { status: "duplicate" } : first
+      }
+      // Registered before any await, so a resend that arrives meanwhile finds it.
+      const result = (async (): Promise<ChooseOptionResult> => {
+        const client = await ctx.getDaemonClient()
+        const screen = await client.screenText(input.sessionId)
+        const parsed = parseTerminalMenu(screen.text, screen.cols)
+        if (parsed === null || parsed.menu.id !== input.menuId) return { status: "menu-changed" }
+        const keys = menuKeys(parsed, input.action)
+        if (keys === null) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `The menu has no such choice: ${JSON.stringify(input.action)}`,
+          })
+        }
+        typingMap(client).set(input.sessionId, { clientId: input.clientId, at: Date.now() })
+        lastTypedAt.set(input.sessionId, Date.now())
+        if (keys.finishes) ctx.activityMonitor.userInput(input.sessionId, "\r")
+        for (const [index, data] of keys.writes.entries()) {
+          if (index > 0) await new Promise((resolve) => setTimeout(resolve, MENU_KEY_GAP_MS))
+          await client.write(input.sessionId, data)
+        }
+        ctx.caffeine.markTerminalActivity()
+        return { status: "sent", finished: keys.finishes }
+      })()
+      chosenOptions.set(input.messageId, result)
+      result.catch(() => {
+        if (chosenOptions.get(input.messageId) === result) chosenOptions.delete(input.messageId)
+      })
+      trimIds(chosenOptions)
+      return result
+    }),
 
   /**
    * Give the PTY this client's size. Refused (`applied: false`) while another
@@ -484,14 +563,17 @@ export const terminalRouter = router({
   /**
    * The session's visible screen as plain text (no scroll back, no escape
    * codes), one line per row, read from the daemon's emulator; for a client
-   * with no terminal emulator of its own.
+   * with no terminal emulator of its own. `menu`: the menu the agent shows,
+   * when its shape is known (`activity/terminalMenu.ts`).
    */
   screenText: publicProcedure
     .input(sessionIdInput)
     .output(screenTextSchema)
     .query(async ({ ctx, input }) => {
       const client = await ctx.getDaemonClient()
-      return client.screenText(input.sessionId)
+      const screen = await client.screenText(input.sessionId)
+      const parsed = parseTerminalMenu(screen.text, screen.cols)
+      return parsed === null ? screen : { ...screen, menu: parsed.menu }
     }),
 
   /** Live sessions known to the daemon. */

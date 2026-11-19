@@ -1,0 +1,16 @@
+
+✻ Churned for 2s · done 1:59 PM
+
+❯ Ask me one multi-select question (I can tick several answers) about which
+  colours I like.
+
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ Colours  ✔ Submit  →
+
+Review your answers
+
+ ● Which colours do you like? Tick all that apply.
+   → Yellow, Green
+
+❯ 1. Submit answers
+  2. Cancel
