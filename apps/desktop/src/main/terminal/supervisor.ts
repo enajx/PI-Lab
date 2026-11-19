@@ -44,7 +44,11 @@ export interface SupervisorOptions {
    * `out/pty-daemon/index.js` next to the compiled main bundle.
    */
   daemonEntry?: string
-  /** Milliseconds to wait for a freshly-spawned daemon's socket to appear. */
+  /**
+   * Milliseconds to wait for a freshly-spawned daemon's socket to appear while
+   * the child is alive. Long, so a slow start on a loaded machine is waited
+   * for; a child that exits fails at once.
+   */
   spawnTimeoutMs?: number
   /** Base backoff between reconnect attempts after an unexpected disconnect. */
   reconnectBaseMs?: number
@@ -61,7 +65,7 @@ export interface SupervisorOptions {
   reapDaemonOnDispose?: boolean
 }
 
-const DEFAULT_SPAWN_TIMEOUT_MS = 5_000
+const DEFAULT_SPAWN_TIMEOUT_MS = 60_000
 const DEFAULT_RECONNECT_BASE_MS = 200
 const DEFAULT_RECONNECT_MAX_MS = 3_000
 

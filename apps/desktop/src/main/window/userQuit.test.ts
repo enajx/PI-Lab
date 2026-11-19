@@ -1,121 +1,188 @@
 import { expect, test, vi } from "vitest"
 import {
-  confirmStopDialog,
+  createStopServerAction,
   createUserQuitAction,
+  QUIT_DIALOG_BUTTONS,
+  QUIT_DIALOG_CANCEL,
   type QuitWork,
-  runningWorkDialog,
+  quitChoiceFromButton,
+  quitDialogDetail,
+  quitDialogNotebooks,
+  stopWorkDialog,
 } from "./userQuit"
+
+type Choice = "quit" | "background" | "cancel"
 
 const idle: QuitWork = { agents: 0, terminals: [], notebooks: 0 }
 const agents = (count: number): QuitWork => ({ agents: count, terminals: [], notebooks: 0 })
-/** A first-dialog answer without "Remember option" ticked. */
-const pick = <C extends "quit" | "background" | "cancel">(choice: C) => ({
-  choice,
-  remember: false,
-})
 
-/** Quit action with a remembered choice; every other dependency is a spy. */
-function rememberHarness(
-  remembered: "ask" | "background",
-  answer: { choice: "quit" | "background" | "cancel"; remember: boolean },
-  running: "quit" | "background" | "cancel",
-  work: QuitWork,
-) {
+/** Quit action with the given answers; every dependency is a spy. */
+function harness(options: {
+  remembered?: "ask" | "background"
+  choice: Choice
+  remember?: boolean
+}) {
   const spies = {
-    choose: vi.fn(async () => answer),
-    confirmRunning: vi.fn(async () => running),
+    choose: vi.fn(async () => ({ choice: options.choice, remember: options.remember ?? false })),
     remember: vi.fn(),
     quit: vi.fn(),
     background: vi.fn(),
+    error: vi.fn(),
   }
   const request = createUserQuitAction({
     pending: () => false,
-    remembered: () => remembered,
-    work: async () => work,
-    error: vi.fn(),
+    remembered: () => options.remembered ?? "ask",
     ...spies,
   })
   return { request, ...spies }
 }
 
-test("a remembered Move to background skips the dialog and moves to the background", async () => {
-  const h = rememberHarness("background", pick("cancel"), "cancel", agents(1))
+/** Stop action with the given work and confirmation answer; every dependency is a spy. */
+function stopHarness(options: {
+  work: QuitWork | "no answer"
+  confirm?: "stop" | "cancel"
+  pending?: boolean
+}) {
+  const spies = {
+    work: vi.fn(() =>
+      options.work === "no answer"
+        ? new Promise<QuitWork>(() => undefined)
+        : Promise.resolve(options.work),
+    ),
+    confirmStop: vi.fn(async () => options.confirm ?? "stop"),
+    quitAndStop: vi.fn(),
+    error: vi.fn(),
+  }
+  const request = createStopServerAction({
+    pending: () => options.pending ?? false,
+    workTimeoutMs: 50,
+    ...spies,
+  })
+  return { request, ...spies }
+}
+
+test("the dialog buttons are Move to background, Quit, Cancel and map to their choices", () => {
+  expect([...QUIT_DIALOG_BUTTONS]).toEqual(["Move to background", "Quit", "Cancel"])
+  expect(QUIT_DIALOG_BUTTONS.map((_, index) => quitChoiceFromButton(index))).toEqual([
+    "background",
+    "quit",
+    "cancel",
+  ])
+  expect(QUIT_DIALOG_BUTTONS[QUIT_DIALOG_CANCEL]).toBe("Cancel")
+})
+
+test("Cancel does nothing and never saves", async () => {
+  const h = harness({ choice: "cancel", remember: true })
   await h.request()
-  expect(h.choose).not.toHaveBeenCalled()
-  expect(h.confirmRunning).not.toHaveBeenCalled()
+  expect(h.quit).not.toHaveBeenCalled()
+  expect(h.background).not.toHaveBeenCalled()
+  expect(h.remember).not.toHaveBeenCalled()
+})
+
+test("Move to background moves to the background", async () => {
+  const h = harness({ choice: "background" })
+  await h.request()
   expect(h.background).toHaveBeenCalledOnce()
   expect(h.quit).not.toHaveBeenCalled()
+  expect(h.remember).not.toHaveBeenCalled()
 })
 
 test("ticking Remember option with Move to background saves it", async () => {
-  const h = rememberHarness("ask", { choice: "background", remember: true }, "cancel", agents(1))
+  const h = harness({ choice: "background", remember: true })
   await h.request()
   expect(h.remember).toHaveBeenCalledExactlyOnceWith("background")
   expect(h.background).toHaveBeenCalledOnce()
 })
 
-test("Quit with the box ticked quits but saves nothing", async () => {
-  const running = rememberHarness("ask", { choice: "quit", remember: true }, "quit", agents(1))
-  await running.request()
-  expect(running.quit).toHaveBeenCalledOnce()
-  expect(running.remember).not.toHaveBeenCalled()
-  const idleQuit = rememberHarness("ask", { choice: "quit", remember: true }, "quit", idle)
-  await idleQuit.request()
-  expect(idleQuit.quit).toHaveBeenCalledOnce()
-  expect(idleQuit.remember).not.toHaveBeenCalled()
-})
-
-test("Cancel never saves, in the first dialog or the running-work dialog", async () => {
-  const first = rememberHarness("ask", { choice: "cancel", remember: true }, "quit", idle)
-  await first.request()
-  expect(first.remember).not.toHaveBeenCalled()
-  const second = rememberHarness("ask", { choice: "quit", remember: true }, "cancel", agents(1))
-  await second.request()
-  expect(second.remember).not.toHaveBeenCalled()
-  expect(second.quit).not.toHaveBeenCalled()
-})
-
-test("an unticked choice is not saved", async () => {
-  const h = rememberHarness("ask", pick("background"), "cancel", idle)
+test("a remembered Move to background skips the dialog", async () => {
+  const h = harness({ remembered: "background", choice: "cancel" })
   await h.request()
+  expect(h.choose).not.toHaveBeenCalled()
+  expect(h.background).toHaveBeenCalledOnce()
+  expect(h.quit).not.toHaveBeenCalled()
+})
+
+test("Quit quits and never saves", async () => {
+  const h = harness({ choice: "quit", remember: true })
+  await h.request()
+  expect(h.quit).toHaveBeenCalledOnce()
+  expect(h.background).not.toHaveBeenCalled()
   expect(h.remember).not.toHaveBeenCalled()
 })
 
-test("each explicit quit offers all choices, background and cancel leave work running", async () => {
-  const choose = vi
-    .fn()
-    .mockResolvedValueOnce(pick("cancel"))
-    .mockResolvedValueOnce(pick("background"))
-    .mockResolvedValueOnce(pick("quit"))
-  const quit = vi.fn()
-  const background = vi.fn()
-  const request = createUserQuitAction({
-    pending: () => false,
-    remembered: () => "ask",
-    remember: vi.fn(),
-    work: async () => agents(2),
-    choose,
-    confirmRunning: async () => "quit",
-    quit,
-    background,
-    error: vi.fn(),
+test("Stop Server and Agents with no running work asks for the Quit (drafts first) without a work dialog", async () => {
+  const h = stopHarness({ work: idle })
+  await h.request()
+  expect(h.confirmStop).not.toHaveBeenCalled()
+  expect(h.quitAndStop).toHaveBeenCalledOnce()
+})
+
+test("Stop Server and Agents with running work asks first, then stops the server and quits", async () => {
+  const h = stopHarness({ work: agents(2), confirm: "stop" })
+  await h.request()
+  expect(h.confirmStop).toHaveBeenCalledExactlyOnceWith(agents(2))
+  expect(h.quitAndStop).toHaveBeenCalledOnce()
+})
+
+test("cancelling the stop confirmation leaves everything running", async () => {
+  const h = stopHarness({ work: agents(2), confirm: "cancel" })
+  await h.request()
+  expect(h.quitAndStop).not.toHaveBeenCalled()
+  expect(h.error).not.toHaveBeenCalled()
+})
+
+test("a busy terminal or an open notebook alone gets the stop confirmation", async () => {
+  const busy: QuitWork = {
+    agents: 0,
+    terminals: [{ project: "Alpha", command: "sleep" }],
+    notebooks: 0,
+  }
+  const terminal = stopHarness({ work: busy, confirm: "cancel" })
+  await terminal.request()
+  expect(terminal.confirmStop).toHaveBeenCalledWith(busy)
+  const notebook = stopHarness({
+    work: { agents: 0, terminals: [], notebooks: 1 },
+    confirm: "cancel",
   })
-  await request()
-  expect(quit).not.toHaveBeenCalled()
-  await request()
-  expect(background).toHaveBeenCalledOnce()
-  expect(quit).not.toHaveBeenCalled()
-  await request()
-  expect(quit).toHaveBeenCalledOnce()
-  expect(choose).toHaveBeenCalledTimes(3)
-  expect(choose).toHaveBeenCalledWith(agents(2))
+  await notebook.request()
+  expect(notebook.confirmStop).toHaveBeenCalledOnce()
+})
+
+test("Stop Server with a server that does not answer says it is not reachable, stops nothing, and can be tried again", async () => {
+  const h = stopHarness({ work: "no answer" })
+  await h.request()
+  expect(h.error).toHaveBeenCalledOnce()
+  expect(String(h.error.mock.calls[0]?.[0])).toMatch(/not reachable.*may already be stopped/)
+  expect(h.quitAndStop).not.toHaveBeenCalled()
+  await h.request()
+  expect(h.work).toHaveBeenCalledTimes(2)
+})
+
+test("the Quit dialog gets the open notebook count, or 0 (logged) when the server does not answer in time", async () => {
+  const log = vi.fn()
+  expect(await quitDialogNotebooks(async () => 3, 50, log)).toBe(3)
+  expect(log).not.toHaveBeenCalled()
+  const started = Date.now()
+  expect(await quitDialogNotebooks(() => new Promise<number>(() => undefined), 50, log)).toBe(0)
+  expect(Date.now() - started).toBeLessThan(1_000)
+  expect(await quitDialogNotebooks(async () => Promise.reject(new Error("closed")), 50, log)).toBe(
+    0,
+  )
+  expect(log).toHaveBeenCalledTimes(2)
+})
+
+test("a quit already pending skips Stop Server and Agents", async () => {
+  const h = stopHarness({ work: idle, pending: true })
+  await h.request()
+  expect(h.work).not.toHaveBeenCalled()
+  expect(h.quitAndStop).not.toHaveBeenCalled()
 })
 
 test("concurrent Cmd+Q does not open duplicate dialogs", async () => {
-  let finish!: (value: { choice: "cancel"; remember: boolean }) => void
+  let finish!: (value: { choice: Choice; remember: boolean }) => void
   const choose = vi.fn(
     () =>
-      new Promise<{ choice: "cancel"; remember: boolean }>((resolve) => {
+      new Promise<{ choice: Choice; remember: boolean }>((resolve) => {
         finish = resolve
       }),
   )
@@ -123,9 +190,7 @@ test("concurrent Cmd+Q does not open duplicate dialogs", async () => {
     pending: () => false,
     remembered: () => "ask",
     remember: vi.fn(),
-    work: async () => idle,
     choose,
-    confirmRunning: async () => "quit",
     quit: vi.fn(),
     background: vi.fn(),
     error: vi.fn(),
@@ -134,191 +199,58 @@ test("concurrent Cmd+Q does not open duplicate dialogs", async () => {
   await vi.waitFor(() => expect(choose).toHaveBeenCalledOnce())
   await request()
   expect(choose).toHaveBeenCalledOnce()
-  finish(pick("cancel"))
+  finish({ choice: "cancel", remember: false })
   await first
 })
 
-test("choosing Quit rechecks running work and offers a separate background or cancel choice", async () => {
-  const quit = vi.fn()
-  const background = vi.fn()
-  const work = vi.fn().mockResolvedValue(agents(2))
-  const confirmRunning = vi
-    .fn()
-    .mockResolvedValueOnce("background")
-    .mockResolvedValueOnce("cancel")
-    .mockResolvedValueOnce("quit")
+test("a quit already pending skips the dialog", async () => {
+  const choose = vi.fn()
   const request = createUserQuitAction({
-    pending: () => false,
+    pending: () => true,
     remembered: () => "ask",
     remember: vi.fn(),
-    work,
-    choose: async () => pick("quit"),
-    confirmRunning,
-    quit,
-    background,
-    error: vi.fn(),
-  })
-  await request()
-  expect(confirmRunning).toHaveBeenCalledWith(agents(2))
-  expect(background).toHaveBeenCalledOnce()
-  expect(quit).not.toHaveBeenCalled()
-  await request()
-  expect(quit).not.toHaveBeenCalled()
-  await request()
-  expect(quit).toHaveBeenCalledOnce()
-})
-
-test("no running work requires only the initial choice", async () => {
-  const confirmRunning = vi.fn()
-  const quit = vi.fn()
-  const request = createUserQuitAction({
-    pending: () => false,
-    remembered: () => "ask",
-    remember: vi.fn(),
-    work: async () => idle,
-    choose: async () => pick("quit"),
-    confirmRunning,
-    quit,
-    background: vi.fn(),
-    error: vi.fn(),
-  })
-  await request()
-  expect(confirmRunning).not.toHaveBeenCalled()
-  expect(quit).toHaveBeenCalledOnce()
-})
-
-test("Quit label uses the initial count but newly started work still gets its second confirmation", async () => {
-  const choose = vi.fn(async () => pick("quit"))
-  const confirmRunning = vi.fn(async () => "cancel" as const)
-  const quit = vi.fn()
-  const request = createUserQuitAction({
-    pending: () => false,
-    remembered: () => "ask",
-    remember: vi.fn(),
-    work: vi.fn().mockResolvedValueOnce(idle).mockResolvedValueOnce(agents(1)),
     choose,
-    confirmRunning,
-    quit,
+    quit: vi.fn(),
     background: vi.fn(),
     error: vi.fn(),
   })
   await request()
-  expect(choose).toHaveBeenCalledWith(idle)
-  expect(confirmRunning).toHaveBeenCalledWith(agents(1))
-  expect(quit).not.toHaveBeenCalled()
+  expect(choose).not.toHaveBeenCalled()
 })
 
-test("a busy terminal alone gets the running-work confirmation; idle shells do not", async () => {
-  const busy: QuitWork = {
-    agents: 0,
-    terminals: [{ project: "Alpha", command: "sleep" }],
-    notebooks: 0,
-  }
-  const confirmRunning = vi.fn(async () => "cancel" as const)
-  const quit = vi.fn()
-  const request = createUserQuitAction({
-    pending: () => false,
-    remembered: () => "ask",
-    remember: vi.fn(),
-    work: async () => busy,
-    choose: async () => pick("quit"),
-    confirmRunning,
-    quit,
-    background: vi.fn(),
-    error: vi.fn(),
-  })
-  await request()
-  expect(confirmRunning).toHaveBeenCalledWith(busy)
-  expect(quit).not.toHaveBeenCalled()
-})
-
-test("the running-work dialog names busy terminals and keeps the agent wording", () => {
+test("the stop dialog names agents, busy terminals and notebooks", () => {
   const terminals = [
     { project: "Alpha", command: "sleep" },
     { project: "Beta", command: "python" },
   ]
-  const onlyTerminals = runningWorkDialog({ agents: 0, terminals, notebooks: 0 })
+  const onlyTerminals = stopWorkDialog({ agents: 0, terminals, notebooks: 0 })
   expect(onlyTerminals.message).toBe("2 terminals are still running a command.")
   expect(onlyTerminals.detail).toContain("Alpha: sleep")
   expect(onlyTerminals.detail).toContain("Beta: python")
-  expect(onlyTerminals.buttons).toEqual([
-    "Quit and stop terminals",
-    "Keep running in background",
-    "Cancel",
-  ])
-  const withAgent = runningWorkDialog({ agents: 1, terminals: terminals.slice(0, 1), notebooks: 0 })
+  expect(onlyTerminals.buttons).toEqual(["Stop server and agents", "Cancel"])
+  const withAgent = stopWorkDialog({ agents: 1, terminals: terminals.slice(0, 1), notebooks: 0 })
   expect(withAgent.message).toBe("1 agent is still running.")
-  expect(withAgent.detail).toContain("Agents or results fetching are currently running.")
   expect(withAgent.detail).toContain("Alpha: sleep")
-  expect(withAgent.buttons).toEqual([
-    "Quit and stop agents",
-    "Keep agents running in background",
-    "Cancel",
-  ])
-  expect(runningWorkDialog(agents(2)).detail).toBe(
-    "Agents or results fetching are currently running. Quit and stop agents ends that work. Keep agents running in background leaves PI Lab and the work running.",
-  )
-})
-
-test("a logout or other quit asks with the same wording but only Quit and stop or Cancel", () => {
-  const terminals = [{ project: "Alpha", command: "sleep" }]
-  const onlyTerminals = confirmStopDialog({ agents: 0, terminals, notebooks: 0 })
-  expect(onlyTerminals.message).toBe("1 terminal is still running a command.")
-  expect(onlyTerminals.detail).toContain("Alpha: sleep")
-  expect(onlyTerminals.buttons).toEqual(["Quit and stop terminals", "Cancel"])
-  const withAgents = confirmStopDialog({ agents: 2, terminals, notebooks: 0 })
-  expect(withAgents.message).toBe("2 agents are still running.")
-  expect(withAgents.detail).toContain("Agents or results fetching are currently running.")
-  expect(withAgents.detail).not.toContain("background")
-  expect(withAgents.detail).toContain("Alpha: sleep")
-  expect(withAgents.buttons).toEqual(["Quit and stop agents", "Cancel"])
-})
-
-test("open notebooks alone get the running-work confirmation", async () => {
-  const notebooks: QuitWork = { agents: 0, terminals: [], notebooks: 2 }
-  const confirmRunning = vi.fn(async () => "cancel" as const)
-  const quit = vi.fn()
-  const request = createUserQuitAction({
-    pending: () => false,
-    remembered: () => "ask",
-    remember: vi.fn(),
-    work: async () => notebooks,
-    choose: async () => pick("quit"),
-    confirmRunning,
-    quit,
-    background: vi.fn(),
-    error: vi.fn(),
-  })
-  await request()
-  expect(confirmRunning).toHaveBeenCalledWith(notebooks)
-  expect(quit).not.toHaveBeenCalled()
-})
-
-test("the quit dialogs name open notebooks and say to save them first", () => {
-  const onlyNotebooks = runningWorkDialog({ agents: 0, terminals: [], notebooks: 1 })
+  expect(stopWorkDialog(agents(2)).message).toBe("2 agents are still running.")
+  const onlyNotebooks = stopWorkDialog({ agents: 0, terminals: [], notebooks: 1 })
   expect(onlyNotebooks.message).toBe("1 notebook is still open.")
   expect(onlyNotebooks.detail).toContain(
     "Quitting also stops the server of 1 open notebook. Save the notebook in its tab first.",
   )
-  expect(onlyNotebooks.buttons).toEqual([
-    "Quit and stop notebooks",
-    "Keep running in background",
-    "Cancel",
-  ])
-  const withTerminal = runningWorkDialog({
-    agents: 0,
-    terminals: [{ project: "Alpha", command: "sleep" }],
-    notebooks: 2,
-  })
-  expect(withTerminal.message).toBe("1 terminal is still running a command.")
-  expect(withTerminal.detail).toContain("Alpha: sleep")
-  expect(withTerminal.detail).toContain(
+  const many = stopWorkDialog({ agents: 0, terminals: [], notebooks: 2 })
+  expect(many.detail).toContain(
     "Quitting also stops the servers of 2 open notebooks. Save each notebook in its tab first.",
   )
-  const logout = confirmStopDialog({ agents: 1, terminals: [], notebooks: 1 })
-  expect(logout.detail).toContain("Save the notebook in its tab first.")
-  expect(confirmStopDialog({ agents: 0, terminals: [], notebooks: 3 }).buttons).toEqual([
-    "Quit and stop notebooks",
-    "Cancel",
-  ])
+})
+
+test("the Quit dialog names open notebooks so the user can cancel and save them", () => {
+  const plain =
+    "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon."
+  expect(quitDialogDetail(0)).toBe(plain)
+  expect(quitDialogDetail(2)).toBe(
+    `${plain}\n\n2 notebooks are open. Their servers stop when PI Lab quits; save them first.`,
+  )
+  expect(quitDialogDetail(1)).toBe(
+    `${plain}\n\n1 notebook is open. Its server stops when PI Lab quits; save it first.`,
+  )
 })

@@ -1316,5 +1316,11 @@
   "Start of the file only": "仅文件开头",
   "First {rows} × {columns}": "前 {rows} × {columns}",
   "{count} paths could not be read": "{count} 个路径无法读取",
-  "More files than listed": "文件多于列出的"
+  "More files than listed": "文件多于列出的",
+  "Protect saved keys with Keychain": "使用钥匙串保护已保存的密钥",
+  "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "已保存的 API 密钥由只有你能读取的文件保护。开启钥匙串后，由 macOS 钥匙串保存保护它们的密钥。",
+  "Could not change key protection": "无法更改密钥保护方式",
+  "Recent notifications": "最近的通知",
+  "No notifications yet": "还没有通知",
+  "Starting the PI Lab server…": "正在启动 PI Lab 服务器…"
 }

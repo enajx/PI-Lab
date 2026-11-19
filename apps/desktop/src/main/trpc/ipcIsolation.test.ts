@@ -7,7 +7,7 @@ import superjson from "superjson"
 import { afterEach, expect, test, vi } from "vitest"
 import { z } from "zod"
 import { createDocumentTrpcBridge } from "../../preload/trpcBridge"
-import { createPiLabTrpcClient } from "../../renderer/trpc/client"
+import { createIpcClient } from "../../renderer/trpc/client"
 
 type IpcListener = (event: unknown, message: unknown) => void
 const electron = { listener: undefined as IpcListener | undefined }
@@ -39,6 +39,7 @@ function installedHandler(): typeof import("trpc-electron/main") {
 }
 const { createIPCHandler } = installedHandler()
 
+type FixtureRouter = ReturnType<typeof harness>["router"]
 type Port = Parameters<typeof createDocumentTrpcBridge>[1]
 type WireRequest = Parameters<Port["send"]>[0]
 type ResponseListener = (response: TRPCResponseMessage) => void
@@ -66,7 +67,13 @@ function harness() {
     }),
     terminal: t.router({
       spawn: t.procedure
-        .input(z.object({ command: z.string().optional() }))
+        .input(
+          z.object({
+            command: z.string().optional(),
+            cols: z.number().optional(),
+            rows: z.number().optional(),
+          }),
+        )
         .mutation(async ({ input }) => {
           await gates.get("spawn")
           if (input.command === "reject")
@@ -105,6 +112,7 @@ function harness() {
     },
   }
   return {
+    router,
     port,
     replies,
     stopped,
@@ -133,8 +141,8 @@ test("independent clients keep simultaneous query and terminal spawn replies sep
   const releaseHealth = ipc.pause("health")
   const releaseSpawn = ipc.pause("spawn")
   global.electronTRPC = createDocumentTrpcBridge("document-a", ipc.port)
-  const first = createPiLabTrpcClient()
-  const second = createPiLabTrpcClient()
+  const first = createIpcClient<FixtureRouter>()
+  const second = createIpcClient<FixtureRouter>()
   const health = first.health.ping.query({ message: "health" })
   const spawn = second.terminal.spawn.mutate({ cols: 80, rows: 24 })
   releaseHealth()
@@ -148,7 +156,7 @@ test("subscription results and unsubscribe use the same isolated request identit
   const ipc = harness()
   global.electronTRPC = createDocumentTrpcBridge("document-subscription", ipc.port)
   const events: unknown[] = []
-  const subscription = createPiLabTrpcClient().terminal.onData.subscribe(
+  const subscription = createIpcClient<FixtureRouter>().terminal.onData.subscribe(
     { sessionId: "scoped-terminal" },
     {
       onData: (event) => events.push(event),
@@ -164,9 +172,13 @@ test("a server error reaches only its owning client", async () => {
   const ipc = harness()
   const releaseHealth = ipc.pause("health")
   global.electronTRPC = createDocumentTrpcBridge("document-error", ipc.port)
-  const health = createPiLabTrpcClient().health.ping.query({ message: "health" })
+  const health = createIpcClient<FixtureRouter>().health.ping.query({ message: "health" })
   await expect(
-    createPiLabTrpcClient().terminal.spawn.mutate({ command: "reject", cols: 80, rows: 24 }),
+    createIpcClient<FixtureRouter>().terminal.spawn.mutate({
+      command: "reject",
+      cols: 80,
+      rows: 24,
+    }),
   ).rejects.toMatchObject({
     name: "TRPCClientError",
     message: "Fixture spawn rejected",

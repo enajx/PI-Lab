@@ -40,6 +40,22 @@ export const skillsHomeDirOverride = isTestMode
   ? process.env.PI_LAB_TEST_SKILLS_HOME?.trim() || undefined
   : undefined
 
+/**
+ * Test-only: while this file exists the dictation engine's model counts as still
+ * loading, so an end-to-end test can hold the loading state and release it.
+ */
+export const testDictationHoldHealthFile = isTestMode
+  ? process.env.PI_LAB_TEST_DICTATION_HOLD_HEALTH?.trim() || undefined
+  : undefined
+
+/**
+ * Test-only: while this file exists a transcription waits before it asks the
+ * engine, so an end-to-end test can hold the transcribing state.
+ */
+export const testDictationHoldTranscribeFile = isTestMode
+  ? process.env.PI_LAB_TEST_DICTATION_HOLD_TRANSCRIBE?.trim() || undefined
+  : undefined
+
 /** Test-only deterministic replacement for the native directory picker. */
 export const pickDirectoryOverride = isTestMode
   ? process.env.PI_LAB_TEST_PICK_DIRECTORY?.trim() || undefined

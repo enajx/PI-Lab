@@ -22,7 +22,7 @@ import { workspaceWorkingDir } from "../workspaces/workspaces"
 
 /**
  * marimo and Jupyter notebooks on their own local server, shown in a PI Lab tab.
- * The server processes live in Electron main (`ctx.notebookServers`); the renderer
+ * The server processes live in the PI Lab server (`ctx.notebookServers`); the renderer
  * gets the URL and stops the server by the id it chose for its tab.
  */
 
@@ -141,6 +141,12 @@ export const notebooksRouter = router({
     .mutation(async ({ ctx, input }): Promise<void> => {
       await ctx.notebookServers.openInBrowser(input.serverId)
     }),
+  /** The URL {@link openInBrowser} opens (the desktop app opens it). */
+  browserUrl: publicProcedure.input(serverInput).query(({ ctx, input }): string => {
+    const url = ctx.notebookServers.urlOf(input.serverId)
+    if (!url) throw new Error("This notebook's server is not running")
+    return url
+  }),
 
   /**
    * Add marimo (or JupyterLab and ipykernel) to the project as a dev dependency

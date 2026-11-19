@@ -1,7 +1,7 @@
 import { protocol } from "electron"
-import { MEDIA_SCHEME } from "./mediaGrants"
+import { MEDIA_SCHEME, REPORT_SCHEME } from "./mediaGrants"
 
-export const REPORT_SCHEME = "pi-lab-report"
+export { REPORT_SCHEME }
 
 /**
  * Register the report URL scheme and the media scheme of video and gif

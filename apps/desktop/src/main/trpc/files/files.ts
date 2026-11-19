@@ -15,6 +15,7 @@ import {
 import { TRPCError } from "@trpc/server"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 import { workspaceWorkingDir } from "../workspaces/workspaces"
 
@@ -190,19 +191,17 @@ export const filesRouter = router({
       },
     ),
 
-  /** Reveal only existing files whose real path stays inside this workspace. */
+  /**
+   * Reveal only existing files whose real path stays inside this workspace.
+   * Served by the desktop app, which asks {@link revealTarget} for the path.
+   */
   reveal: publicProcedure.input(readInput).mutation(async ({ ctx, input }): Promise<void> => {
-    const workspace = requireWorkspace(ctx.db, input.workspaceId)
-    const base = await realpath(workspaceWorkingDir(ctx.db, workspace))
-    const target = await realpath(resolveInsideDir(base, input.relPath))
-    const rel = relative(base, target)
-    if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Cannot reveal a path outside the workspace",
-      })
-    await ctx.revealPath(target)
+    await ctx.revealPath(await revealTarget(ctx, input))
   }),
+  /** The checked absolute path {@link reveal} shows in Finder. */
+  revealTarget: publicProcedure
+    .input(readInput)
+    .query(({ ctx, input }): Promise<string> => revealTarget(ctx, input)),
 
   /**
    * Fingerprint a file (mtime + size) without reading its bytes. The editor
@@ -304,13 +303,14 @@ export const filesRouter = router({
       }
     }),
 
-  /** Write an entry's absolute or working-dir-relative path to the OS clipboard. */
+  /** Write an entry's absolute or working-dir-relative path to the clipboard (desktop app). */
   copyPath: publicProcedure.input(copyPathInput).mutation(async ({ ctx, input }): Promise<void> => {
-    const workspace = requireWorkspace(ctx.db, input.workspaceId)
-    const base = resolve(workspaceWorkingDir(ctx.db, workspace))
-    const target = resolveInsideDir(base, input.relPath)
-    ctx.writeClipboard(input.form === "absolute" ? target : toRelPosix(base, target))
+    ctx.writeClipboard(copyPathText(ctx, input))
   }),
+  /** The text {@link copyPath} puts on the clipboard. */
+  copyPathText: publicProcedure
+    .input(copyPathInput)
+    .query(({ ctx, input }): string => copyPathText(ctx, input)),
 
   /**
    * List one directory's immediate children for a lazy file tree. The root is
@@ -482,4 +482,26 @@ function nodeErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined
   const code = (error as { code?: unknown }).code
   return typeof code === "string" ? code : undefined
+}
+
+/** Resolve a workspace entry for Reveal in Finder; refuses paths outside the workspace. */
+async function revealTarget(ctx: AppContext, input: z.infer<typeof readInput>): Promise<string> {
+  const workspace = requireWorkspace(ctx.db, input.workspaceId)
+  const base = await realpath(workspaceWorkingDir(ctx.db, workspace))
+  const target = await realpath(resolveInsideDir(base, input.relPath))
+  const rel = relative(base, target)
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Cannot reveal a path outside the workspace",
+    })
+  return target
+}
+
+/** An entry's absolute or working-dir-relative path, for Copy Path. */
+function copyPathText(ctx: AppContext, input: z.infer<typeof copyPathInput>): string {
+  const workspace = requireWorkspace(ctx.db, input.workspaceId)
+  const base = resolve(workspaceWorkingDir(ctx.db, workspace))
+  const target = resolveInsideDir(base, input.relPath)
+  return input.form === "absolute" ? target : toRelPosix(base, target)
 }

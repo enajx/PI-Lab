@@ -194,6 +194,8 @@ export default defineConfig({
       lib: {
         entry: {
           index: resolve(__dirname, "src/main/index.ts"),
+          // The PI Lab server process (`src/server/index.ts`); it never loads Electron.
+          server: resolve(__dirname, "src/server/index.ts"),
           // The Analysis preview worker thread (`previewWorker.ts` starts it).
           analysisPreviewWorker: resolve(
             __dirname,

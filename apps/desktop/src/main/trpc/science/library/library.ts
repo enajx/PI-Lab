@@ -15,7 +15,7 @@ import {
 import { statFile } from "@pi-lab/workspace-fs"
 import { z } from "zod"
 import { withMeaningfulActivity } from "../../../caffeine"
-import type { HttpFetch } from "../../context"
+import type { AppContext, HttpFetch } from "../../context"
 import { MAX_PDF_BYTES, readPdfSnapshot } from "../../pdf/pdf"
 import { publicProcedure, router } from "../../trpc"
 import { attachViaBridge, attachViaWebApi } from "./attach"
@@ -540,22 +540,14 @@ export const libraryRouter = router({
    */
   openItem: publicProcedure
     .input(openItemInput)
-    .mutation(async ({ ctx, input }): Promise<OpenItemResult> => {
-      const source = readSource(ctx.db)
-      if (!source) return { ok: false, reason: "not-connected" }
-      if (source.kind !== "folder") {
-        return {
-          ok: false,
-          reason: "not-supported",
-          message: "Opening files is only available for a local folder source.",
-        }
-      }
-      const abs = resolveWithin(source.folderPath, input.path)
-      if (abs == null) return { ok: false, reason: "error", message: "Path is outside the folder." }
-      const error = await ctx.openPath(abs)
-      if (error) return { ok: false, reason: "error", message: error }
-      return { ok: true }
-    }),
+    .mutation(
+      async ({ ctx, input }): Promise<OpenItemResult> =>
+        openTargetPath(ctx, await openItemTarget(ctx, input)),
+    ),
+  /** The checked file {@link openItem} opens (the desktop app opens it). */
+  openItemTarget: publicProcedure
+    .input(openItemInput)
+    .query(({ ctx, input }): Promise<OpenTarget> => openItemTarget(ctx, input)),
 
   /**
    * Open a Zotero item's **local copy** (its best file attachment — a PDF if present) with
@@ -564,29 +556,20 @@ export const libraryRouter = router({
    * sends the key header), pick the best file attachment, resolve it to an on-disk path by
    * link mode (`linked_file` → `data.path`; `imported_file`/`imported_url` →
    * `{zoteroDataDir}/storage/{key}/{filename}`), and verify the file exists before opening
-   * it via the injected `ctx.openPath`. When nothing resolves on disk (web copy not
-   * downloaded, no file attachment, or the file is missing) we return a typed
-   * `no-local-file` result with a clear message rather than failing silently.
+   * it. When nothing resolves on disk (web copy not downloaded, no file attachment, or the
+   * file is missing) we return a typed `no-local-file` result with a clear message rather
+   * than failing silently.
    */
   openZoteroItem: publicProcedure
     .input(openZoteroItemInput)
-    .mutation(async ({ ctx, input }): Promise<OpenItemResult> => {
-      const source = readSource(ctx.db)
-      if (!source) return { ok: false, reason: "not-connected" }
-      if (source.kind !== "zotero") {
-        return {
-          ok: false,
-          reason: "not-supported",
-          message: "Opening a Zotero local copy needs a Zotero connection.",
-        }
-      }
-      const found = await resolveZoteroLocalFile(ctx.httpFetch, source, input.itemKey)
-      if (!found.ok) return { ok: false, reason: "error", message: found.message }
-      if (!found.path) return { ok: false, reason: "no-local-file", message: NO_LOCAL_FILE_MESSAGE }
-      const error = await ctx.openPath(found.path)
-      if (error) return { ok: false, reason: "error", message: error }
-      return { ok: true }
-    }),
+    .mutation(
+      async ({ ctx, input }): Promise<OpenItemResult> =>
+        openTargetPath(ctx, await openZoteroItemTarget(ctx, input)),
+    ),
+  /** The local file {@link openZoteroItem} opens (the desktop app opens it). */
+  openZoteroItemTarget: publicProcedure
+    .input(openZoteroItemInput)
+    .query(({ ctx, input }): Promise<OpenTarget> => openZoteroItemTarget(ctx, input)),
 
   /**
    * Find a library item's local file for the Library viewer tabs: the folder item's file
@@ -632,3 +615,56 @@ export const libraryRouter = router({
     .input(viewerReadInput)
     .query(({ input }) => readViewerText(requireGranted(input.path), input.allowLarge)),
 })
+
+/** A file to open with the default app, or the reason there is none. */
+export type OpenTarget = { ok: true; path: string } | Exclude<OpenItemResult, { ok: true }>
+
+/** Open a resolved target with the injected opener. */
+export async function openTargetPath(
+  ctx: Pick<AppContext, "openPath">,
+  target: OpenTarget,
+): Promise<OpenItemResult> {
+  if (!target.ok) return target
+  const error = await ctx.openPath(target.path)
+  if (error) return { ok: false, reason: "error", message: error }
+  return { ok: true }
+}
+
+/** Resolve a folder item under the stored root, with a traversal guard. */
+async function openItemTarget(
+  ctx: AppContext,
+  input: z.infer<typeof openItemInput>,
+): Promise<OpenTarget> {
+  const source = readSource(ctx.db)
+  if (!source) return { ok: false, reason: "not-connected" }
+  if (source.kind !== "folder") {
+    return {
+      ok: false,
+      reason: "not-supported",
+      message: "Opening files is only available for a local folder source.",
+    }
+  }
+  const abs = resolveWithin(source.folderPath, input.path)
+  if (abs == null) return { ok: false, reason: "error", message: "Path is outside the folder." }
+  return { ok: true, path: abs }
+}
+
+/** Resolve a Zotero item's best local attachment on disk. */
+async function openZoteroItemTarget(
+  ctx: AppContext,
+  input: z.infer<typeof openZoteroItemInput>,
+): Promise<OpenTarget> {
+  const source = readSource(ctx.db)
+  if (!source) return { ok: false, reason: "not-connected" }
+  if (source.kind !== "zotero") {
+    return {
+      ok: false,
+      reason: "not-supported",
+      message: "Opening a Zotero local copy needs a Zotero connection.",
+    }
+  }
+  const found = await resolveZoteroLocalFile(ctx.httpFetch, source, input.itemKey)
+  if (!found.ok) return { ok: false, reason: "error", message: found.message }
+  if (!found.path) return { ok: false, reason: "no-local-file", message: NO_LOCAL_FILE_MESSAGE }
+  return { ok: true, path: found.path }
+}

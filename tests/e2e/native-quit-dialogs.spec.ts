@@ -14,6 +14,8 @@ import {
   type Page,
   test,
 } from "./fixtures/playwright"
+import { processAlive, readServerDiscovery } from "./fixtures/serverClient"
+import { stopServerIn } from "./fixtures/stopServer"
 
 /**
  * The real native Quit dialogs, read and clicked through macOS Accessibility
@@ -197,6 +199,7 @@ async function launchWithBusyTerminal(prefix: string): Promise<Fixture> {
     PI_LAB_TEST_MODE: "1",
     PI_LAB_TEST_NATIVE_DIALOGS: "1",
     PI_LAB_TEST_FIRST_RUN: "1",
+    PI_LAB_TEST_RETAIN_SERVER: "1",
     PI_LAB_TEST_RETAIN_DAEMON: "1",
     PI_LAB_DATA_DIR: dataDir,
     PI_LAB_SOCKET_PATH: socketPath,
@@ -244,6 +247,7 @@ async function cleanUp(fixture: Fixture | null, closed: boolean): Promise<void> 
     await exited
   }
   fixture.client.close()
+  await stopServerIn(fixture.dataDir)
   const daemonPid = await daemonPidFor(fixture.socketPath)
   if (daemonPid) process.kill(daemonPid, "SIGTERM")
   await rm(fixture.dataDir, { recursive: true, force: true })
@@ -264,7 +268,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
     )
   })
 
-  test("Quit with a busy terminal: Cancel keeps it running, Quit and stop terminals ends the app and daemon", async () => {
+  test("Quit dialog Cancel keeps everything; Stop Server and Agents asks, Cancel keeps it, Stop ends it", async () => {
     test.setTimeout(120_000)
     let fixture: Fixture | null = null
     let closed = false
@@ -274,43 +278,72 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
       app.once("close", () => {
         closed = true
       })
-      const requestQuit = () =>
-        app.evaluate(({ Menu }) => {
-          const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
-          if (!item) throw new Error("Missing Quit menu item")
+      const clickMenu = (id: string) =>
+        app.evaluate(({ Menu }, menuId) => {
+          const item = Menu.getApplicationMenu()?.getMenuItemById(menuId)
+          if (!item) throw new Error(`Missing menu item ${menuId}`)
           setImmediate(() => item.click())
-        })
+        }, id)
 
-      await requestQuit()
+      await clickMenu("user-quit")
       const first = await waitForDialog(pid, "Quit")
-      expect(first.buttons).toEqual(
-        expect.arrayContaining(["Cancel", "Move to background", "Quit"]),
-      )
-      await click(pid, "Quit")
-      const busy = await waitForDialog(pid, "Quit and stop terminals")
+      expect([...first.buttons].sort()).toEqual(["Cancel", "Move to background", "Quit"].sort())
+      await click(pid, "Cancel")
+      await waitForDialogGone(pid, "Move to background")
+      expect(closed).toBe(false)
+      expect(await fixture.foreground()).toBe("sleep")
+
+      await clickMenu("stop-server")
+      const busy = await waitForDialog(pid, "Stop server and agents")
       expect(busy.texts).toContain("1 terminal is still running a command.")
       expect(busy.texts.join("\n")).toContain("repo: sleep")
-      expect([...busy.buttons].sort()).toEqual(
-        ["Cancel", "Keep running in background", "Quit and stop terminals"].sort(),
-      )
+      expect([...busy.buttons].sort()).toEqual(["Cancel", "Stop server and agents"])
       await click(pid, "Cancel")
-      await waitForDialogGone(pid, "Quit and stop terminals")
+      await waitForDialogGone(pid, "Stop server and agents")
       expect(closed).toBe(false)
       expect(alive(pid)).toBe(true)
       expect(await fixture.foreground()).toBe("sleep")
 
       const daemonPid = await daemonPidFor(fixture.socketPath)
       expect(daemonPid).toBeGreaterThan(0)
+      const serverPid = readServerDiscovery(fixture.dataDir)?.pid ?? 0
       const exited = app.waitForEvent("close")
-      await requestQuit()
-      await waitForDialog(pid, "Quit")
-      await click(pid, "Quit")
-      await waitForDialog(pid, "Quit and stop terminals")
-      await click(pid, "Quit and stop terminals")
+      await clickMenu("stop-server")
+      await waitForDialog(pid, "Stop server and agents")
+      await click(pid, "Stop server and agents")
       await exited
+      await expect.poll(() => processAlive(serverPid)).toBe(false)
       await expect.poll(() => daemonPidFor(fixture?.socketPath ?? "")).toBeUndefined()
       expect(alive(daemonPid as number)).toBe(false)
       expect(alive(fixture.shellPid)).toBe(false)
+    } finally {
+      await cleanUp(fixture, closed)
+    }
+  })
+
+  test("Quit with a busy terminal asks only the Quit dialog and leaves the server and terminal running", async () => {
+    test.setTimeout(120_000)
+    let fixture: Fixture | null = null
+    let closed = false
+    try {
+      fixture = await launchWithBusyTerminal("pi-lab-e2e-native-quit-keeps-")
+      const { app, pid } = fixture
+      app.once("close", () => {
+        closed = true
+      })
+      const serverPid = readServerDiscovery(fixture.dataDir)?.pid ?? 0
+      const exited = app.waitForEvent("close")
+      await app.evaluate(({ Menu }) => {
+        const item = Menu.getApplicationMenu()?.getMenuItemById("user-quit")
+        if (!item) throw new Error("Missing Quit menu item")
+        setImmediate(() => item.click())
+      })
+      await waitForDialog(pid, "Quit")
+      await click(pid, "Quit")
+      await exited
+      expect(processAlive(serverPid)).toBe(true)
+      expect(await fixture.foreground()).toBe("sleep")
+      expect(alive(fixture.shellPid)).toBe(true)
     } finally {
       await cleanUp(fixture, closed)
     }
@@ -375,7 +408,7 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
     }
   })
 
-  test("a quit PI Lab did not start (like macOS logout) with a busy terminal: Cancel keeps it, Quit and stop ends it", async () => {
+  test("a quit PI Lab did not start (like macOS logout) with a busy terminal warns first, then quits the app and leaves the terminal running", async () => {
     test.setTimeout(120_000)
     let fixture: Fixture | null = null
     let closed = false
@@ -385,33 +418,28 @@ test.describe("native Quit dialogs (macOS Accessibility)", () => {
       app.once("close", () => {
         closed = true
       })
+      const serverPid = readServerDiscovery(fixture.dataDir)?.pid ?? 0
       // macOS logout, restart and shutdown reach the app as this same app.quit().
-      const requestQuit = () =>
-        app.evaluate(({ app }) => {
-          setImmediate(() => app.quit())
-        })
-
-      await requestQuit()
-      const dialog = await waitForDialog(pid, "Quit and stop terminals")
-      expect(dialog.texts).toContain("1 terminal is still running a command.")
-      expect(dialog.texts.join("\n")).toContain("repo: sleep")
-      expect([...dialog.buttons].sort()).toEqual(["Cancel", "Quit and stop terminals"])
+      // They also end the user's server, so a native warning asks first.
+      await app.evaluate(({ app }) => {
+        setImmediate(() => app.quit())
+      })
+      const warning = await waitForDialog(pid, "Quit")
+      expect(warning.buttons).toEqual(expect.arrayContaining(["Quit", "Cancel"]))
       await click(pid, "Cancel")
-      await waitForDialogGone(pid, "Quit and stop terminals")
-      expect(closed).toBe(false)
+      await waitForDialogGone(pid, "Cancel")
       expect(alive(pid)).toBe(true)
-      expect(await fixture.foreground()).toBe("sleep")
-
-      const daemonPid = await daemonPidFor(fixture.socketPath)
-      expect(daemonPid).toBeGreaterThan(0)
       const exited = app.waitForEvent("close")
-      await requestQuit()
-      await waitForDialog(pid, "Quit and stop terminals")
-      await click(pid, "Quit and stop terminals")
+      await app.evaluate(({ app }) => {
+        setImmediate(() => app.quit())
+      })
+      await waitForDialog(pid, "Quit")
+      await click(pid, "Quit")
       await exited
-      await expect.poll(() => daemonPidFor(fixture?.socketPath ?? "")).toBeUndefined()
-      expect(alive(daemonPid as number)).toBe(false)
-      expect(alive(fixture.shellPid)).toBe(false)
+      expect(alive(pid)).toBe(false)
+      expect(processAlive(serverPid)).toBe(true)
+      expect(await fixture.foreground()).toBe("sleep")
+      expect(alive(fixture.shellPid)).toBe(true)
     } finally {
       await cleanUp(fixture, closed)
     }

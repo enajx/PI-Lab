@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AppProviders } from "../../../../providers/AppProviders"
 import { createFakeTrpcClient, type FakeHandlers } from "../../../../test/fakeTrpcClient"
@@ -558,6 +558,58 @@ describe("Settings sections", () => {
     expect((await screen.findByTestId("settings-agents-error")).textContent).toContain(
       "Could not save agent settings",
     )
+  })
+
+  test("Agents section turns Keychain protection on and shows a failure", async () => {
+    let mode = "file"
+    const sets: unknown[] = []
+    renderSection(<AgentsSection />, {
+      "agents.list": () => [],
+      "settings.get": () => ({
+        agents: { projectConfigStorage: "app", executableOverrides: {}, launchDefaults: {} },
+      }),
+      "server.secretProtection": () => mode,
+      "server.setSecretProtection": (input) => {
+        sets.push(input)
+        if (sets.length > 1) throw new Error("Keychain is locked")
+        mode = (input as { mode: string }).mode
+        return mode
+      },
+    })
+    const toggle = await screen.findByRole("switch", { name: "Protect saved keys with Keychain" })
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false))
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(toggle)
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"))
+    expect(sets).toEqual([{ mode: "keychain" }])
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(toggle)
+    expect((await screen.findByTestId("settings-secret-protection-error")).textContent).toContain(
+      "Keychain is locked",
+    )
+  })
+
+  test("Notifications section lists recent notifications and an empty state", async () => {
+    renderSection(<NotificationsSection />, {
+      "settings.get": () => ({}),
+      "server.notificationHistory": () => [
+        {
+          id: "n1",
+          at: Date.now(),
+          kind: "information",
+          request: { eventType: "agent", title: "Agent done", body: "Run finished", target: null },
+          sound: "chime",
+        },
+      ],
+    })
+    expect(await screen.findByText("Agent done")).toBeTruthy()
+    expect(screen.getByText("Run finished")).toBeTruthy()
+    cleanup()
+    renderSection(<NotificationsSection />, {
+      "settings.get": () => ({}),
+      "server.notificationHistory": () => [],
+    })
+    expect(await screen.findByText("No notifications yet")).toBeTruthy()
   })
 
   test("Notifications section shows the persisted defaults with accessible controls", async () => {

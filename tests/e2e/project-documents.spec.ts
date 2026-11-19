@@ -110,6 +110,8 @@ test("creates an empty TODO.md when the project template has no task file", asyn
     .click()
 
   await expect(window.getByTestId("panel-todos")).toContainText("TODO", { timeout: 30_000 })
+  // The panel text above shows before the server has written the file.
+  await expect.poll(() => existsSync(join(repoDir, "TODO.md"))).toBe(true)
   expect(await readFile(join(repoDir, "TODO.md"), "utf8")).toBe("")
 })
 

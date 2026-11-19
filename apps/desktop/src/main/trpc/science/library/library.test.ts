@@ -562,7 +562,10 @@ describe("science.library.detectLocal", () => {
     h = await createHarness([FAKE_AGENT], {
       httpFetch: stubFetch({ "localhost:23119/api": () => jsonResponse([]) }),
     })
-    expect(await h.caller.science.library.detectLocal()).toEqual({ reachable: true, installed: true })
+    expect(await h.caller.science.library.detectLocal()).toEqual({
+      reachable: true,
+      installed: true,
+    })
   })
 
   test("not reachable (no throw) when the local server is down", async () => {

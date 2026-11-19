@@ -11,6 +11,7 @@ export default defineConfig({
           include: [
             "packages/*/src/**/*.test.ts",
             "apps/desktop/src/main/**/*.test.ts",
+            "apps/desktop/src/server/**/*.test.ts",
             "apps/desktop/scripts/**/*.test.ts",
             "tests/support/**/*.test.ts",
           ],

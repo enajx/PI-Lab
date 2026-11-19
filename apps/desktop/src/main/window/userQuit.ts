@@ -13,6 +13,7 @@ export function hasRunningWork(work: QuitWork): boolean {
   return work.agents > 0 || work.terminals.length > 0 || work.notebooks > 0
 }
 
+/** Quit dialog choice. Quit leaves the server and all work running. */
 type QuitChoice = "quit" | "background" | "cancel"
 
 /**
@@ -23,13 +24,10 @@ export type RememberedQuitChoice = "ask" | "background"
 
 interface UserQuitDependencies {
   pending(): boolean
-  work(): Promise<QuitWork>
-  /** Read after `work()`, which starts the full runtime that holds the setting. */
   remembered(): RememberedQuitChoice
-  /** The first Quit dialog: the chosen button and whether "Remember option" is ticked. */
-  choose(work: QuitWork): Promise<{ choice: QuitChoice; remember: boolean }>
-  confirmRunning(work: QuitWork): Promise<QuitChoice>
-  /** Save a ticked Move to background so later quits skip the dialogs. */
+  /** The Quit dialog: the chosen button and whether "Remember option" is ticked. */
+  choose(): Promise<{ choice: QuitChoice; remember: boolean }>
+  /** Save a ticked Move to background so later quits skip the dialog. */
   remember(choice: "background"): void
   quit(): void
   background(): void
@@ -37,30 +35,23 @@ interface UserQuitDependencies {
 }
 
 /**
- * Confirm explicit user quit actions and separately confirm stopping running work
- * (agents, fetching, or terminals running a command); idle shells are stopped
- * without a second prompt. Programmatic shutdown uses its existing guard.
+ * Explicit user Quit. The PI Lab server keeps projects, agents and routines
+ * running after the app quits; stopping them is the separate
+ * {@link createStopServerAction} (app menu and tray).
  *
- * A remembered "background" skips both dialogs and moves PI Lab to the
+ * A remembered "background" skips the dialog and moves PI Lab to the
  * background. Only Move to background can be remembered: a ticked box is
- * saved only when the user picks Move to background in the first dialog;
- * Quit and Cancel never save.
+ * saved only when the user picks Move to background.
  */
 export function createUserQuitAction(dependencies: UserQuitDependencies): () => Promise<void> {
   let choosing = false
 
   async function decide(): Promise<QuitChoice> {
-    const work = await dependencies.work()
     const remembered = dependencies.remembered()
     if (remembered !== "ask") return remembered
-    const { choice, remember } = await dependencies.choose(work)
-    if (choice === "cancel") return choice
-    if (choice === "background") {
-      if (remember) dependencies.remember("background")
-      return choice
-    }
-    const latest = await dependencies.work()
-    return hasRunningWork(latest) ? await dependencies.confirmRunning(latest) : "quit"
+    const { choice, remember } = await dependencies.choose()
+    if (choice === "background" && remember) dependencies.remember("background")
+    return choice
   }
 
   return async () => {
@@ -76,6 +67,100 @@ export function createUserQuitAction(dependencies: UserQuitDependencies): () => 
         choosing = false
       })
   }
+}
+
+/** The Quit dialog's buttons, in the order {@link quitChoiceFromButton} reads them. */
+export const QUIT_DIALOG_BUTTONS = ["Move to background", "Quit", "Cancel"] as const
+
+/** Index of Cancel in {@link QUIT_DIALOG_BUTTONS} (the dialog's default and Esc choice). */
+export const QUIT_DIALOG_CANCEL = 2
+
+export function quitChoiceFromButton(index: number): QuitChoice {
+  return index === 0 ? "background" : index === 1 ? "quit" : "cancel"
+}
+
+/** Reject with `message` when `work` has not settled after `ms`. */
+function withinTime<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms)
+  })
+  return Promise.race([work, late]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * The open notebook count for the Quit dialog. When the server fails or does
+ * not answer within `ms`, the dialog opens without the notebook line (0) and
+ * the reason is logged, so Cmd+Q never waits on an unreachable server.
+ */
+export function quitDialogNotebooks(
+  count: () => Promise<number>,
+  ms: number,
+  log: (message: string) => void,
+): Promise<number> {
+  return withinTime(count(), ms, `no answer within ${ms} ms`).catch((error: unknown) => {
+    log(`[pi-lab] open notebooks could not be counted for the Quit dialog: ${String(error)}`)
+    return 0
+  })
+}
+
+/** Shown when Stop Server and Agents gets no answer from the server. */
+export const SERVER_UNREACHABLE = "The PI Lab server is not reachable. It may already be stopped."
+
+interface StopServerDependencies {
+  pending(): boolean
+  /** Work stopping would end (agents, busy terminals, notebooks). */
+  work(): Promise<QuitWork>
+  /** How long {@link work} may take before the server counts as not reachable. */
+  workTimeoutMs: number
+  /** Confirmation shown only while work runs. */
+  confirmStop(work: QuitWork): Promise<"stop" | "cancel">
+  /**
+   * Quit like the user's Quit (the renderer asks about unsaved drafts first),
+   * then stop every agent, terminal and notebook, the PTY daemon and the
+   * server, only once the quit is approved.
+   */
+  quitAndStop(): void
+  error(error: unknown): void
+}
+
+/**
+ * "Stop Server and Agents…" (app menu and tray): quits the app and ends all
+ * PI Lab work on this machine, since the app cannot work without its server.
+ * Asks first while work runs; the unsaved-drafts decision comes before
+ * anything stops. A server that does not answer in time gets
+ * {@link SERVER_UNREACHABLE} and the app stays open.
+ */
+export function createStopServerAction(dependencies: StopServerDependencies): () => Promise<void> {
+  let running = false
+  return async () => {
+    if (running || dependencies.pending()) return
+    running = true
+    await withinTime(dependencies.work(), dependencies.workTimeoutMs, SERVER_UNREACHABLE)
+      .then(async (work) => {
+        if (hasRunningWork(work) && (await dependencies.confirmStop(work)) !== "stop") return
+        dependencies.quitAndStop()
+      })
+      .catch(dependencies.error)
+      .finally(() => {
+        running = false
+      })
+  }
+}
+
+/**
+ * Detail of the Quit dialog. Open notebook tabs are named: their servers stop
+ * with the window, so the user can Cancel and save them first.
+ */
+export function quitDialogDetail(notebooks: number): string {
+  const base =
+    "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon."
+  if (notebooks === 0) return base
+  const line =
+    notebooks === 1
+      ? "1 notebook is open. Its server stops when PI Lab quits; save it first."
+      : `${notebooks} notebooks are open. Their servers stop when PI Lab quits; save them first.`
+  return `${base}\n\n${line}`
 }
 
 /** "Quitting also stops …" followed by one "• project: command" line per busy terminal. */
@@ -111,75 +196,41 @@ function paragraphs(parts: string[]): string {
 }
 
 /**
- * Text and buttons of the second Quit confirmation. Buttons are ordered
- * quit, background, cancel. Agent wording is unchanged; busy terminals are
- * listed as "project: command".
+ * Text and buttons of the confirmation before "Stop Server and Agents…" ends
+ * running work. Buttons are ordered stop, cancel.
  */
-export function runningWorkDialog(work: QuitWork): {
-  message: string
-  detail: string
-  buttons: [string, string, string]
-} {
-  const list = terminalList(work)
-  const notebooks = notebookLine(work)
-  if (work.agents > 0)
-    return {
-      message: workMessage(work),
-      detail: paragraphs([
-        "Agents or results fetching are currently running. Quit and stop agents ends that work. Keep agents running in background leaves PI Lab and the work running.",
-        list,
-        notebooks,
-      ]),
-      buttons: ["Quit and stop agents", "Keep agents running in background", "Cancel"],
-    }
-  if (work.terminals.length === 0)
-    return {
-      message: workMessage(work),
-      detail: paragraphs([
-        notebooks,
-        "Keep running in background leaves PI Lab and the notebooks running.",
-      ]),
-      buttons: ["Quit and stop notebooks", "Keep running in background", "Cancel"],
-    }
-  return {
-    message: workMessage(work),
-    detail: paragraphs([
-      list,
-      notebooks,
-      "Keep running in background leaves PI Lab and the terminals running.",
-    ]),
-    buttons: ["Quit and stop terminals", "Keep running in background", "Cancel"],
-  }
-}
-
-/**
- * Text and buttons for a quit PI Lab did not start, such as macOS logout,
- * restart or shutdown: same wording as {@link runningWorkDialog}, but only
- * quit and cancel, since the app cannot stay in the background.
- */
-export function confirmStopDialog(work: QuitWork): {
+export function stopWorkDialog(work: QuitWork): {
   message: string
   detail: string
   buttons: [string, string]
 } {
-  const list = terminalList(work)
-  const notebooks = notebookLine(work)
-  if (work.agents > 0)
-    return {
-      message: workMessage(work),
-      detail: paragraphs([
-        "Agents or results fetching are currently running. Quit and stop agents ends that work.",
-        list,
-        notebooks,
-      ]),
-      buttons: ["Quit and stop agents", "Cancel"],
-    }
   return {
     message: workMessage(work),
-    detail: paragraphs([list, notebooks]),
-    buttons: [
-      work.terminals.length === 0 ? "Quit and stop notebooks" : "Quit and stop terminals",
-      "Cancel",
-    ],
+    detail: paragraphs([
+      "Stopping the server ends this work and quits PI Lab.",
+      terminalList(work),
+      notebookLine(work),
+    ]),
+    buttons: ["Stop server and agents", "Cancel"],
+  }
+}
+
+/**
+ * Text and buttons for a quit PI Lab did not start (macOS logout, restart or
+ * shutdown), which also ends the server and its work. Buttons: quit, cancel.
+ */
+export function logoutWorkDialog(work: QuitWork): {
+  message: string
+  detail: string
+  buttons: [string, string]
+} {
+  return {
+    message: workMessage(work),
+    detail: paragraphs([
+      "Logging out, restarting or shutting down stops this work.",
+      terminalList(work),
+      notebookLine(work),
+    ]),
+    buttons: ["Quit", "Cancel"],
   }
 }

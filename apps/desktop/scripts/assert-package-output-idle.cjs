@@ -26,7 +26,10 @@ function runningBundlePids(processList, bundlePath) {
     if (!match) continue
     const command = match[2]
     if (!binaries.some((binary) => command === binary || command.startsWith(`${binary} `))) continue
+    // The PTY daemon and the PI Lab server outlive the app by design; each
+    // build has its own folder, and a new app restarts the server on its build.
     if (command.includes("/out/pty-daemon/index.js")) continue
+    if (command.includes("/out/main/server.js")) continue
     pids.push(Number(match[1]))
   }
   return pids

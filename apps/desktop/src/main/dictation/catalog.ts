@@ -108,16 +108,22 @@ export function sizeLabel(bytes: number): string {
 
 /**
  * Test mode only (`PI_LAB_TEST_DICTATION_PINS`): replace the pinned byte size and SHA-256
- * of some models, given as JSON `{ "<key>": { "sizeBytes": n, "sha256": "..." } }`, so an
- * end-to-end test can serve a small real model in place of a large one.
+ * of some models, given as JSON `{ "<key>": { "sizeBytes": n, "sha256": "...", "url"?: "..." } }`,
+ * so an end-to-end test can serve a small real model in place of a large one, from a
+ * local server when `url` is given.
  */
 export function withTestPins(
   catalog: readonly DictationModel[],
   json: string,
 ): readonly DictationModel[] {
-  const pins = JSON.parse(json) as Record<string, { sizeBytes: number; sha256: string }>
+  const pins = JSON.parse(json) as Record<
+    string,
+    { sizeBytes: number; sha256: string; url?: string }
+  >
   return catalog.map((entry) => {
     const pin = pins[entry.key]
-    return pin ? { ...entry, sizeBytes: pin.sizeBytes, sha256: pin.sha256 } : entry
+    return pin
+      ? { ...entry, sizeBytes: pin.sizeBytes, sha256: pin.sha256, url: pin.url ?? entry.url }
+      : entry
   })
 }

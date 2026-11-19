@@ -425,20 +425,14 @@ test("copy and insert-copy output actions, then search, copy, delete and clear t
 })
 
 test("shows the loading model pill while the engine loads (mocked slow engine health check)", async () => {
-  const window = await launch(TERMINAL_PROBE, [])
+  // Mocked: while this file exists the server counts the engine's model as still loading.
+  const holdHealth = join(await mkdtemp(join(tmpdir(), "pi-lab-e2e-dictation-hold-")), "hold")
+  const window = await launch(
+    { ...TERMINAL_PROBE, PI_LAB_TEST_DICTATION_HOLD_HEALTH: holdHealth },
+    [],
+  )
   await window.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" })
-  // Mocked: the engine's /health check answers 503 until released, so the model stays loading.
-  await app.evaluate(() => {
-    const real = globalThis.fetch
-    const state = globalThis as typeof globalThis & { e2eHoldHealth?: boolean }
-    state.e2eHoldHealth = true
-    globalThis.fetch = (input, init) => {
-      const url = input instanceof Request ? input.url : String(input)
-      if (state.e2eHoldHealth && /^http:\/\/127\.0\.0\.1:\d+\/health$/.test(url))
-        return Promise.resolve(new Response("loading", { status: 503 }))
-      return real(input, init)
-    }
-  })
+  await writeFile(holdHealth, "")
   const terminal = await focusTerminal(window)
 
   await pressDictationShortcut(window)
@@ -456,9 +450,7 @@ test("shows the loading model pill while the engine loads (mocked slow engine he
     clip: { x: box.x - 160, y: box.y - 70, width: box.width + 320, height: box.height + 100 },
   })
 
-  await app.evaluate(() => {
-    ;(globalThis as typeof globalThis & { e2eHoldHealth?: boolean }).e2eHoldHealth = false
-  })
+  await rm(dirname(holdHealth), { recursive: true, force: true })
   await expect(pill).toHaveCount(0, { timeout: 60_000 })
   await expect
     .poll(async () => latestTerminalInput((await terminal.textContent()) ?? ""), {
@@ -486,20 +478,13 @@ test("Esc while listening cancels: the microphone is released and nothing is ins
 })
 
 test("Esc while transcribing drops the text: nothing is inserted or saved (mocked slow transcription)", async () => {
-  const window = await launch(TERMINAL_PROBE, [])
-  // Mocked: the engine's /inference request waits until released.
-  await app.evaluate(() => {
-    const real = globalThis.fetch
-    const state = globalThis as typeof globalThis & { e2eHoldInference?: boolean }
-    state.e2eHoldInference = true
-    globalThis.fetch = async (input, init) => {
-      const url = input instanceof Request ? input.url : String(input)
-      if (/^http:\/\/127\.0\.0\.1:\d+\/inference$/.test(url)) {
-        while (state.e2eHoldInference) await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      return real(input, init)
-    }
-  })
+  // Mocked: while this file exists the server holds the transcription before the engine.
+  const holdTranscribe = join(await mkdtemp(join(tmpdir(), "pi-lab-e2e-dictation-hold-")), "hold")
+  await writeFile(holdTranscribe, "")
+  const window = await launch(
+    { ...TERMINAL_PROBE, PI_LAB_TEST_DICTATION_HOLD_TRANSCRIBE: holdTranscribe },
+    [],
+  )
   const terminal = await focusTerminal(window)
 
   await record(window)
@@ -507,9 +492,7 @@ test("Esc while transcribing drops the text: nothing is inserted or saved (mocke
   await expect(pill).toHaveAttribute("data-phase", "transcribing", { timeout: 60_000 })
   await window.keyboard.press("Escape")
   await expect(pill).toHaveCount(0)
-  await app.evaluate(() => {
-    ;(globalThis as typeof globalThis & { e2eHoldInference?: boolean }).e2eHoldInference = false
-  })
+  await rm(holdTranscribe)
   await window.waitForTimeout(5_000)
   expect(await terminal.textContent()).not.toContain("E2E-INPUT-")
   await expectNoHistory(window)
@@ -532,9 +515,9 @@ test("the shortcut in the review pill discards the text and starts a new dictati
 })
 
 test("first use without a model: Download Small English, then listening starts and the text arrives (mocked model download)", async () => {
-  const window = await startApp({ ...TERMINAL_PROBE, ...(await smallEnglishPins()) }, [], [])
+  const { origin } = await serveModelsLocally(false)
+  const window = await startApp({ ...TERMINAL_PROBE, ...(await smallEnglishPins(origin)) }, [], [])
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-  await serveModelsLocally(false)
   const terminal = await focusTerminal(window)
 
   await pressDictationShortcut(window)
@@ -555,9 +538,9 @@ test("first use without a model: Download Small English, then listening starts a
 })
 
 test("first use follows a Small English download already started in Settings (mocked model download)", async () => {
-  const window = await startApp({ ...TERMINAL_PROBE, ...(await smallEnglishPins()) }, [], [])
+  const { origin, release } = await serveModelsLocally(true)
+  const window = await startApp({ ...TERMINAL_PROBE, ...(await smallEnglishPins(origin)) }, [], [])
   await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
-  const release = await serveModelsLocally(true)
   await openDictationSettings(window)
   const small = window.locator('[data-testid="dictation-model"][data-model-key="small.en"]')
   await small.getByRole("button", { name: "Download" }).click()
@@ -585,7 +568,7 @@ test("first use follows a Small English download already started in Settings (mo
 test("with no model selected, an installed Small English is selected and dictation starts", async () => {
   // Small English is pinned to the tiny.en file (test mode) and installed as that file.
   const window = await startApp(
-    { ...TERMINAL_PROBE, ...(await smallEnglishPins()) },
+    { ...TERMINAL_PROBE, ...(await smallEnglishPins(null)) },
     ["ggml-small.en.bin", "ggml-tiny.en.bin"],
     [],
   )
@@ -664,20 +647,23 @@ test("denied microphone access shows Open System Settings, which opens the micro
 })
 
 /** Test-mode catalog pins that make Small English match the cached tiny.en file. */
-async function smallEnglishPins(): Promise<Record<string, string>> {
+async function smallEnglishPins(origin: string | null): Promise<Record<string, string>> {
   const sizeBytes = (await stat(TINY_MODEL)).size
   const sha256 = createHash("sha256")
     .update(await readFile(TINY_MODEL))
     .digest("hex")
-  return { PI_LAB_TEST_DICTATION_PINS: JSON.stringify({ "small.en": { sizeBytes, sha256 } }) }
+  const url = origin ? `${origin}/ggml-small.en.bin` : undefined
+  return {
+    PI_LAB_TEST_DICTATION_PINS: JSON.stringify({ "small.en": { sizeBytes, sha256, url } }),
+  }
 }
 
 /**
  * Mocked model download: serve the cached tiny.en file from a local server for every
- * model and point the main process's Hugging Face requests at it. With `hold`, the
- * response sends its first 1 MB and waits for the returned release call.
+ * model; {@link smallEnglishPins} points Small English at the returned origin. With
+ * `hold`, the response sends its first 1 MB and waits for the returned release call.
  */
-async function serveModelsLocally(hold: boolean): Promise<() => void> {
+async function serveModelsLocally(hold: boolean): Promise<{ origin: string; release: () => void }> {
   let release = (): void => {}
   const released = hold ? new Promise<void>((resolve) => (release = resolve)) : Promise.resolve()
   const { size } = await stat(TINY_MODEL)
@@ -692,15 +678,7 @@ async function serveModelsLocally(hold: boolean): Promise<() => void> {
   modelServer = server
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const { port } = server.address() as AddressInfo
-  await app.evaluate((_electron, origin) => {
-    const real = globalThis.fetch
-    globalThis.fetch = (input, init) => {
-      const url = input instanceof Request ? input.url : String(input)
-      if (!url.startsWith("https://huggingface.co/")) return real(input, init)
-      return real(`${origin}${new URL(url).pathname}`, init)
-    }
-  }, `http://127.0.0.1:${port}`)
-  return release
+  return { origin: `http://127.0.0.1:${port}`, release: () => release() }
 }
 
 /** Keep every microphone stream the page opens, to check later that it was released. */

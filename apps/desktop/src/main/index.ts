@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
+import { resolveDataDir } from "@pi-lab/local-db/paths"
 import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron"
 import {
   APP_ICON_GET_CHANNEL,
@@ -37,6 +38,7 @@ import {
   QUICK_EDIT_SHOW_FULL_CHANNEL,
   QUICK_EDIT_SHOW_SETTINGS_CHANNEL,
   QUICK_EDIT_STAT_CHANNEL,
+  type QuickEditTarget,
 } from "../shared/quickEdit"
 import { UPDATE_CHECK_CHANNEL, UPDATE_SNAPSHOT_CHANNEL } from "../shared/updates"
 import type { BackgroundTray } from "./background/tray"
@@ -45,7 +47,7 @@ import {
   prepareAlphaBuildData,
   readAlphaBuildId,
 } from "./db/alphaBuildReset"
-import type { FullRuntime } from "./fullRuntime"
+import type { DesktopRuntime } from "./desktopRuntime"
 import { loadNativeLanguage, nativeText } from "./i18n/nativeLanguage"
 import { applyMacDockIcon, applyOptionalIcon } from "./identity/appIcon"
 import {
@@ -62,18 +64,33 @@ import { firstFileArgument } from "./quickEdit/launchArgs"
 import { QuickEditFiles } from "./quickEdit/service"
 import { isTestMode, testNativeDialogs } from "./runtime/env"
 import { installTestDialogResponder } from "./runtime/testDialogs"
+import { stopServerSync } from "./server/launcher"
 import { assertAlphaResetDaemonIdleSync } from "./terminal/alphaResetProbe"
 import { resolveDaemonEntry, resolveDaemonSocketPath } from "./terminal/socketPath"
 import { registerAnalysisReportScheme } from "./trpc/science/analysis/reportScheme"
 import { checkForUpdates, updateSnapshot } from "./updates/feedback"
 import { publicReleaseFromPackage } from "./updates/release"
-import { installAppMenu, setCloseTabAction, setUserQuitAction } from "./window/appMenu"
+import {
+  installAppMenu,
+  setCloseTabAction,
+  setStopServerAction,
+  setUserQuitAction,
+} from "./window/appMenu"
 import { installCloseTabAction } from "./window/closeTabAction"
 import { createMainWindow, loadWindowPage } from "./window/mainWindow"
 import { installShutdownGuard } from "./window/shutdownGuard"
-import { createUserQuitAction, runningWorkDialog } from "./window/userQuit"
-
-export type { AppRouter } from "./trpc/appRouter"
+import {
+  createStopServerAction,
+  createUserQuitAction,
+  hasRunningWork,
+  logoutWorkDialog,
+  QUIT_DIALOG_BUTTONS,
+  QUIT_DIALOG_CANCEL,
+  quitChoiceFromButton,
+  quitDialogDetail,
+  quitDialogNotebooks,
+  stopWorkDialog,
+} from "./window/userQuit"
 
 /**
  * The small entry starts a file in quick edit before importing fullRuntime.
@@ -134,7 +151,15 @@ function prepareAlphaBuild(): boolean {
         "SingletonCookie",
         ...(dirname(socketPath) === dataDir ? [basename(socketPath)] : []),
       ],
-      beforeReset: () => assertAlphaResetDaemonIdleSync(resolveDaemonEntry(), socketPath),
+      beforeReset: () => {
+        assertAlphaResetDaemonIdleSync(resolveDaemonEntry(), socketPath)
+        // The previous build's server outlives its app; stop it before its database moves.
+        // Test runs never touch the user's real launchd job.
+        stopServerSync(
+          resolveDataDir(),
+          isTestMode ? null : `${channelIdentity(channel).autostartName}.server`,
+        )
+      },
     })
     return true
   } catch (error) {
@@ -290,8 +315,16 @@ async function ensureTray(): Promise<void> {
       newProject: () => openFull("/?newProject=1"),
       restartToUpdate: () => restartToUpdate?.(),
       quit: () => void requestUserQuit(),
+      stopServer: () => void requestStopServer(),
     },
-    traySnapshot,
+    // The tray reads this when it opens and every second while open: ask the server for
+    // fresh data (it arrives through subscribeTray) and show the last data meanwhile.
+    () => {
+      void runtime.refreshTray().catch((error: unknown) => {
+        console.warn(`[pi-lab] tray refresh failed: ${String(error)}`)
+      })
+      return traySnapshot()
+    },
   )
   tray = created
   unsubscribeTray = runtime.subscribeTray((snapshot) =>
@@ -312,7 +345,23 @@ function acceptFile(path: string): void {
     createQuickWindow(target.id)
     return
   }
-  const route = !quickWindow && fullRuntime ? fullRuntime.routeForFile(target) : null
+  const runtime = fullRuntime
+  if (!quickWindow && runtime) {
+    void runtime
+      .routeForFile(target)
+      .then((route) => openAcceptedFile(window, target, route))
+      .catch((error: unknown) => console.error("[pi-lab] could not route the file:", error))
+    return
+  }
+  openAcceptedFile(window, target, null)
+}
+
+/** Show an accepted file in its project editor, or in the quick-file view. */
+function openAcceptedFile(
+  window: BrowserWindow,
+  target: QuickEditTarget,
+  route: string | null,
+): void {
   if (route?.startsWith("/projects/")) {
     if (fullRendererReady) window.webContents.send(QUICK_EDIT_ROUTE_CHANNEL, route)
     else pendingFullRoute = route
@@ -363,22 +412,40 @@ if (ownsInstance) {
 // In test mode there is no auto-update or telemetry to disable yet; the seam is
 // reserved here so future wiring stays gated behind one flag.
 
+/** How long a logout or shutdown waits for the server to report running work. */
+const LOGOUT_WORK_TIMEOUT_MS = 3_000
+
 const shutdownGuard = installShutdownGuard({
   app,
   ipcMain,
   createRequestId: randomUUID,
+  // A quit PI Lab did not start (macOS logout, restart, shutdown) also ends the
+  // user's launchd server and its agents, so ask first while work is running.
   prepareQuit: async (mode) => {
-    // Full boot may still be reconciling retained agents when Quit is requested.
-    try {
-      await fullBootScheduler.startNow()
-      return fullRuntime ? fullRuntime.prepareQuit(mode) : true
-    } catch (error) {
-      dialog.showErrorBox(
-        "Could not quit PI Lab",
-        `Agent state could not be checked. The app remains open.\n${String(error)}`,
-      )
-      return false
+    const runtime = fullRuntime
+    if (mode !== "confirm-end" || !runtime) return true
+    // Bounded: a server that does not answer must never hold a logout or shutdown.
+    const work = await Promise.race([
+      runtime.quitWork(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), LOGOUT_WORK_TIMEOUT_MS)),
+    ]).catch((error: unknown) => {
+      console.error("[pi-lab] running work could not be checked:", error)
+      return null
+    })
+    if (work === null) {
+      console.warn("[pi-lab] running work could not be checked in time; quitting without asking")
+      return true
     }
+    if (!hasRunningWork(work)) return true
+    const result = await dialog.showMessageBox({
+      type: "warning",
+      title: "Work is still running",
+      ...logoutWorkDialog(work),
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0
   },
   // With "Keep running after window closes" off, closing the window is a Quit:
   // run the Cmd+Q flow; Cancel leaves the window open. Before full boot the
@@ -389,7 +456,7 @@ const shutdownGuard = installShutdownGuard({
     return true
   },
 })
-let fullRuntime: FullRuntime | null = null
+let fullRuntime: DesktopRuntime | null = null
 
 if (isTestMode) {
   // E2E seam: public updates are off in test mode, so tests run Restart to
@@ -400,42 +467,34 @@ if (isTestMode) {
 
 const requestUserQuit = createUserQuitAction({
   pending: () => shutdownGuard.isQuitPending(),
-  work: async () => {
-    await fullBootScheduler.startNow()
-    return fullRuntime ? fullRuntime.quitWork() : { agents: 0, terminals: [], notebooks: 0 }
-  },
-  // `work()` has started the full runtime; without it there is no saved choice.
   remembered: () => (fullRuntime ? fullRuntime.quitChoice() : "ask"),
-  choose: async ({ agents: count }) => {
+  choose: async () => {
+    // Before the server is connected no notebook can be open. The count is
+    // bounded so Cmd+Q never waits on a server that does not answer.
+    const runtime = fullRuntime
+    const notebooks =
+      runtime && fullBootComplete
+        ? await quitDialogNotebooks(() => runtime.notebookCount(), 1_500, console.warn)
+        : 0
     const result = await dialog.showMessageBox({
       type: "question",
       title: `Quit ${app.getName()}?`,
       message: `Quit ${app.getName()}?`,
-      detail: "Move to background keeps PI Lab and its work running.",
-      buttons: ["Cancel", "Move to background", count > 0 ? "Quit and stop all agents" : "Quit"],
+      detail: quitDialogDetail(notebooks),
+      buttons: [...QUIT_DIALOG_BUTTONS],
       checkboxLabel: "Remember option",
       checkboxChecked: false,
-      defaultId: 0,
-      cancelId: 0,
+      defaultId: QUIT_DIALOG_CANCEL,
+      cancelId: QUIT_DIALOG_CANCEL,
       noLink: true,
     })
-    const choice = result.response === 2 ? "quit" : result.response === 1 ? "background" : "cancel"
-    return { choice, remember: result.checkboxChecked }
+    return { choice: quitChoiceFromButton(result.response), remember: result.checkboxChecked }
   },
   remember: (choice) => {
     if (!fullRuntime) throw new Error("Cannot remember the quit choice before PI Lab has started")
-    fullRuntime.rememberQuitChoice(choice)
-  },
-  confirmRunning: async (work) => {
-    const result = await dialog.showMessageBox({
-      type: "warning",
-      title: "Work is still running",
-      ...runningWorkDialog(work),
-      defaultId: 2,
-      cancelId: 2,
-      noLink: true,
+    void fullRuntime.rememberQuitChoice(choice).catch((error: unknown) => {
+      console.error("[pi-lab] could not save the quit choice:", error)
     })
-    return result.response === 0 ? "quit" : result.response === 1 ? "background" : "cancel"
   },
   quit: () => shutdownGuard.requestExplicitQuit(),
   background: () => {
@@ -445,6 +504,43 @@ const requestUserQuit = createUserQuitAction({
   error: (error) =>
     dialog.showErrorBox("Could not quit PI Lab", `The app remains open. ${String(error)}`),
 })
+
+const requestStopServer = createStopServerAction({
+  pending: () => shutdownGuard.isQuitPending(),
+  work: async () => {
+    await fullBootScheduler.startNow()
+    if (!fullRuntime) throw new Error("PI Lab has not started")
+    return fullRuntime.quitWork()
+  },
+  workTimeoutMs: 3_000,
+  confirmStop: async (work) => {
+    const result = await dialog.showMessageBox({
+      type: "warning",
+      title: "Work is still running",
+      ...stopWorkDialog(work),
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0 ? "stop" : "cancel"
+  },
+  quitAndStop: () =>
+    shutdownGuard.requestExplicitQuitAndStop(async () => {
+      if (!fullRuntime) throw new Error("PI Lab has not started")
+      await fullRuntime.stopServerAndAgents().catch((error: unknown) => {
+        reportStopFailure(error)
+        throw error
+      })
+    }),
+  error: reportStopFailure,
+})
+/** Stopping the server failed: the app stays open. */
+function reportStopFailure(error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error)
+  dialog.showErrorBox("Could not stop the PI Lab server", `The app remains open. ${reason}`)
+}
+
+setStopServerAction(() => void requestStopServer())
 setUserQuitAction(() => void requestUserQuit())
 
 // Cmd+W closes the active tab of the focused panel in the user window. It never
@@ -535,9 +631,10 @@ let publicUpdatesStarted: Promise<void> | null = null
 
 /** Import full-app code only after the quick editor reports a focused caret. */
 function startFullBoot(): Promise<void> {
-  return import("./fullRuntime")
-    .then(async ({ FullRuntime, reportFullBootFailure }) => {
-      const runtime = new FullRuntime({
+  return import("./desktopRuntime")
+    .then(async ({ DesktopRuntime, reportServerStartFailure }) => {
+      const runtime = new DesktopRuntime({
+        channel,
         getAppIconPath: () => appIconPath,
         ensureMainWindow,
         initialWindow: () => {
@@ -548,14 +645,14 @@ function startFullBoot(): Promise<void> {
       })
       fullRuntime = runtime
       await runtime.start().catch((error: unknown) => {
-        reportFullBootFailure(error)
+        reportServerStartFailure(error)
         throw error
       })
       fullBootComplete = true
       if (publicRelease && !isTestMode && process.platform === "darwin") {
         publicUpdatesStarted = import("./updates/start")
-          .then(({ startPublicUpdates }) =>
-            startPublicUpdates(shutdownGuard, (status, restart) => {
+          .then(async ({ startPublicUpdates }) =>
+            startPublicUpdates(await runtime.server(), shutdownGuard, (status, restart) => {
               readyUpdateVersion = status.kind === "ready" ? status.version : null
               restartToUpdate = status.kind === "ready" ? restart : null
               tray?.publish(traySnapshot())
@@ -594,7 +691,8 @@ async function openFull(route: string | null): Promise<void> {
   await fullBootScheduler.startNow()
   if (!fullRuntime) throw new Error("Full app did not start")
   const current = quickFiles.current()
-  const destination = route ?? (quickWindow && current ? fullRuntime.routeForFile(current) : null)
+  const destination =
+    route ?? (quickWindow && current ? await fullRuntime.routeForFile(current) : null)
   const window = ensureMainWindow()
   tray?.hide()
   if (quickWindow || destination) await loadWindowPage(window, "full", destination ?? undefined)
@@ -602,10 +700,14 @@ async function openFull(route: string | null): Promise<void> {
   showUserWindow(window)
 }
 
-ipcMain.handle(BACKGROUND_TRAY_SNAPSHOT_CHANNEL, () => traySnapshot())
+ipcMain.handle(BACKGROUND_TRAY_SNAPSHOT_CHANNEL, async () => {
+  await fullRuntime?.refreshTray()
+  return traySnapshot()
+})
 ipcMain.handle(BACKGROUND_TRAY_OPEN_DASHBOARD_CHANNEL, () => openFull("/"))
 ipcMain.handle(BACKGROUND_TRAY_OPEN_PROJECT_CHANNEL, async (_event, id: unknown) => {
-  if (typeof id !== "string" || !fullRuntime?.hasProject(id)) throw new Error("Unknown project")
+  if (typeof id !== "string" || !(await fullRuntime?.hasProject(id)))
+    throw new Error("Unknown project")
   await openFull(`/projects/${encodeURIComponent(id)}`)
 })
 async function openFileFromTray(): Promise<void> {
@@ -664,7 +766,7 @@ ipcMain.handle(QUICK_EDIT_ROUTES_READY_CHANNEL, () => {
   pendingFullRoute = null
   return route
 })
-ipcMain.handle(QUICK_EDIT_RESOLVE_ROUTE_CHANNEL, (_event, id: unknown) => {
+ipcMain.handle(QUICK_EDIT_RESOLVE_ROUTE_CHANNEL, async (_event, id: unknown) => {
   if (typeof id !== "string") throw new Error("Invalid quick-edit file ID")
   if (!fullRuntime) throw new Error("Full app has not started")
   return fullRuntime.routeForFile(quickFiles.require(id))
@@ -717,7 +819,7 @@ ipcMain.handle(QUICK_EDIT_SAVE_UNTITLED_CHANNEL, async (_event, content: unknown
   if (result.canceled || !result.filePath) return null
   const path = await quickFiles.saveUntitled(result.filePath, content)
   const target = quickFiles.register(path)
-  return { path, route: fullRuntime.routeForFile(target) }
+  return { path, route: await fullRuntime.routeForFile(target) }
 })
 ipcMain.on(QUICK_EDIT_READY_CHANNEL, () => {
   if (quickWindow) {
@@ -731,7 +833,7 @@ ipcMain.handle(QUICK_EDIT_SHOW_FULL_CHANNEL, async (_event, id: unknown) => {
   await fullBootScheduler.startNow()
   const window = ensureMainWindow()
   if (!fullRuntime) throw new Error("Full app did not start")
-  await loadWindowPage(window, "full", fullRuntime.routeForFile(target))
+  await loadWindowPage(window, "full", await fullRuntime.routeForFile(target))
   quickWindow = false
 })
 ipcMain.handle(QUICK_EDIT_SHOW_SETTINGS_CHANNEL, async (_event, id: unknown) => {
@@ -795,8 +897,7 @@ app
     console.error("[pi-lab] fatal during startup:", error)
     // Startup failed before the app could become usable. The normal quit guard
     // cannot recover that failed boot promise or ask an absent renderer to approve.
-    disposeRuntime()
-    app.exit(1)
+    void disposeRuntime().finally(() => app.exit(1))
   })
 
 app.on("window-all-closed", () => {
@@ -807,14 +908,33 @@ app.on("before-quit", (event) => {
   if (!event.defaultPrevented) quitting = true
 })
 
-/** Release initialized services on normal quit and on fatal startup failure. */
-function disposeRuntime(): void {
+/**
+ * Release initialized services on normal quit and on fatal startup failure.
+ * The server keeps running; the returned promise settles once this app has
+ * disconnected (and, in test runs, stopped the server it started).
+ */
+function disposeRuntime(): Promise<void> {
   quitting = true
   closeTray()
   fullBootScheduler.cancel()
   shutdownGuard.dispose()
   closeTabAction.dispose()
-  fullRuntime?.dispose()
+  const runtime = fullRuntime
+  fullRuntime = null
+  if (!runtime) return Promise.resolve()
+  return runtime.dispose().catch((error: unknown) => {
+    console.error("[pi-lab] disconnect failed:", error)
+  })
 }
 
-app.on("will-quit", disposeRuntime)
+let disposed = false
+app.on("will-quit", (event) => {
+  if (disposed) return
+  disposed = true
+  event.preventDefault()
+  // Bounded, so a server that does not answer never keeps the app from quitting.
+  // The quit is already approved, so exit directly instead of asking again.
+  void Promise.race([disposeRuntime(), new Promise((resolve) => setTimeout(resolve, 10_000))]).then(
+    () => app.exit(0),
+  )
+})

@@ -1316,5 +1316,11 @@
   "Start of the file only": "بداية الملف فقط",
   "First {rows} × {columns}": "أول {rows} × {columns}",
   "{count} paths could not be read": "تعذرت قراءة {count} مسار",
-  "More files than listed": "ملفات أكثر مما هو مدرج"
+  "More files than listed": "ملفات أكثر مما هو مدرج",
+  "Protect saved keys with Keychain": "حماية المفاتيح المحفوظة بسلسلة المفاتيح",
+  "Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them.": "تُحمى مفاتيح API المحفوظة بملف لا يقرأه غيرك. عند تشغيل سلسلة المفاتيح، تحتفظ سلسلة مفاتيح macOS بالمفتاح الذي يحميها.",
+  "Could not change key protection": "تعذر تغيير حماية المفاتيح",
+  "Recent notifications": "الإشعارات الأخيرة",
+  "No notifications yet": "لا توجد إشعارات بعد",
+  "Starting the PI Lab server…": "جارٍ تشغيل خادم PI Lab…"
 }

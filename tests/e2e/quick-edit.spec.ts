@@ -917,7 +917,7 @@ test("Untitled saves inside a project and opens there", async () => {
     await projectSave.getByLabel("File name").fill("notes/saved.py")
     await projectSave.getByRole("button", { name: "Create and open" }).click()
     await expect
-      .poll(() => readFile(join(projectDir, "notes", "saved.py"), "utf8"))
+      .poll(() => readFile(join(projectDir, "notes", "saved.py"), "utf8").catch(() => null))
       .toBe("value = 7\n")
     await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
     await expect(window.getByTestId("central-tab").filter({ hasText: "saved.py" })).toBeVisible()

@@ -166,11 +166,10 @@ test("saving the diary removes empty day headings already in the file", async ()
 
 /**
  * Real app and IPC: in Analysis the diary is the lower part of the one right
- * panel, below Sessions. The panel starts open on the Sessions tab. The top
+ * panel, below Sessions. The panel starts collapsed and opens on the Sessions tab. The top
  * bar diary button shows and hides the diary; the divider resizes the diary and
- * its share is saved; collapsing the panel hides both parts. After the diary was
- * hidden with the button, the next visit starts with the panel collapsed, and the
- * button opens it with the diary.
+ * its share is saved; collapsing the panel hides both parts. Every visit starts
+ * with the panel collapsed, and the button opens it with the diary.
  */
 test("Analysis shows the diary below Sessions in one collapsible right panel", async () => {
   const window = await app.firstWindow()
@@ -201,7 +200,9 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   const panel = window.getByTestId("science-sessions")
   const diary = panel.getByTestId("research-diary-panel")
   const diaryButton = topBar.getByTestId("analysis-research-diary")
-  // Open by default, on the Sessions tab.
+  // Analysis opens with the panel collapsed; the expand button opens it on the Sessions tab.
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await window.getByTestId("science-sessions-expand").click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await expect(panel.getByTestId("panel-tab-sessions")).toHaveAttribute("aria-selected", "true")
   await expect(diaryButton).toHaveAttribute("aria-pressed", "false")
@@ -229,7 +230,7 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   await expect(window.getByTestId("analysis-collapsed-bar")).toBeVisible()
   await expect(diaryButton).toHaveAttribute("aria-pressed", "false")
 
-  // A collapsed panel does not turn the diary off: the next visit opens with it.
+  // Every visit to Analysis starts with the panel collapsed; the button opens it on the diary.
   const tasksNav = window.locator('[data-testid="science-nav-item"][data-science-tab="tasks"]')
   const analysisNav = window.locator(
     '[data-testid="science-nav-item"][data-science-tab="analysis"]',
@@ -237,6 +238,8 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   await tasksNav.click()
   await expect(window.getByTestId("science-tasks")).toBeVisible()
   await analysisNav.click()
+  await expect(panel).toHaveAttribute("data-collapsed", "true")
+  await diaryButton.click()
   await expect(panel).toHaveAttribute("data-collapsed", "false")
   await expect(diary).toBeVisible()
 
@@ -246,7 +249,7 @@ test("Analysis shows the diary below Sessions in one collapsible right panel", a
   await diaryButton.click()
   await expect(diary).toBeVisible()
 
-  // Hiding the diary with the button is saved: the next visit starts collapsed.
+  // After hiding the diary with the button, the next visit also starts collapsed.
   await diaryButton.click()
   await expect(window.getByTestId("research-diary-panel")).toHaveCount(0)
   await tasksNav.click()

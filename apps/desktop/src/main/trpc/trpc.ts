@@ -19,6 +19,14 @@ export const publicProcedure = t.procedure.use(async ({ ctx, path, type, next })
   if (result.ok && type === "mutation" && path.startsWith("projects.")) {
     ctx.activityStatus.projectsChanged()
   }
+  // Electron main keeps a copy of a few settings (Quit, window close, Vim).
+  if (
+    result.ok &&
+    type === "mutation" &&
+    (path.startsWith("settings.") || path.startsWith("server."))
+  ) {
+    ctx.server?.runtime.appSettingsChanged()
+  }
   return result
 })
 

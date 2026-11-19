@@ -41,6 +41,7 @@ test("project Auto research leads the header and launches the existing worktree 
       PI_LAB_SOCKET_PATH: join(dir, "daemon.sock"),
       PI_LAB_TEST_OPEN_PROJECT: repo,
       PI_LAB_TEST_AGENT_ID: "test-echo",
+      PI_LAB_TEST_SKILLS_HOME: join(dir, "home"),
     },
   })
   try {
@@ -51,6 +52,16 @@ test("project Auto research leads the header and launches the existing worktree 
       join(dir, "data", "local.db"),
       `UPDATE projects SET agent_config='{"agentId":"test-echo"}'`,
     ])
+    // Auto-research starts the agent with the skill linked in Settings (empty by default).
+    const skillDir = join(dir, "home", ".agents", "skills", "auto-research")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Auto research\nRun the experiments.\n")
+    await page.getByTestId("nav-settings").click()
+    await page.getByTestId("settings-nav-agents").click()
+    await page.getByTestId("settings-auto-research-skill").fill("auto-research")
+    await page.getByTestId("settings-auto-research-skill-save").click()
+    await expect(page.getByTestId("settings-auto-research-skill-save")).toBeDisabled()
+    await page.getByTestId("settings-back").click()
     await page.getByTestId("project-item").click()
     const button = page.getByTestId("project-view-auto-research")
     await expect(button).toBeEnabled()

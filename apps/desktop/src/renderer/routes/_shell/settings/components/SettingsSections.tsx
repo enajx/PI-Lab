@@ -890,6 +890,7 @@ export function AgentsSection() {
             onSaveKey={(apiKey) => saveApiKey.mutateAsync({ agentId: agent.id, apiKey })}
           />
         ))}
+      <SecretProtectionField />
       <ToggleField
         testId="settings-worktree-per-agent"
         label="New worktree per agent"
@@ -946,6 +947,38 @@ export function AgentsSection() {
         saved={settingsQuery.data?.editor?.autoResearchSkill ?? ""}
       />
     </SettingsSection>
+  )
+}
+
+/** Switch that moves the key protecting saved API keys into the macOS Keychain. */
+function SecretProtectionField() {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const protectionQuery = useQuery(trpc.server.secretProtection.queryOptions())
+  const setProtection = useMutation(
+    trpc.server.setSecretProtection.mutationOptions({
+      onSuccess: () =>
+        void queryClient.invalidateQueries({ queryKey: trpc.server.secretProtection.queryKey() }),
+    }),
+  )
+  const error = setProtection.error ?? protectionQuery.error
+  return (
+    <>
+      <ToggleField
+        testId="settings-secret-protection"
+        label="Protect saved keys with Keychain"
+        description="Saved API keys are protected by a file only you can read. With Keychain on, macOS Keychain holds the key that protects them."
+        checked={protectionQuery.data === "keychain"}
+        disabled={protectionQuery.data === undefined || setProtection.isPending}
+        onChange={(on) => setProtection.mutate({ mode: on ? "keychain" : "file" })}
+      />
+      {error ? (
+        <p data-testid="settings-secret-protection-error" className="px-4 text-destructive text-xs">
+          {t("Could not change key protection")}: {error.message}
+        </p>
+      ) : null}
+    </>
   )
 }
 
@@ -1276,7 +1309,57 @@ export function NotificationsSection() {
       >
         {previewMessage}
       </p>
+      <RecentNotifications />
     </SettingsSection>
+  )
+}
+
+/** Recent information notifications kept by the server, newest first. */
+function RecentNotifications() {
+  const t = useTranslate()
+  const trpc = useTRPC()
+  const historyQuery = useQuery({
+    ...trpc.server.notificationHistory.queryOptions(),
+    refetchOnMount: "always",
+  })
+  const events = historyQuery.data ?? []
+  return (
+    <div data-testid="settings-recent-notifications" className="flex flex-col gap-2 px-4 py-3">
+      <span className="text-foreground text-sm">{t("Recent notifications")}</span>
+      {historyQuery.error ? (
+        <p data-testid="settings-recent-notifications-error" className="text-destructive text-xs">
+          {historyQuery.error.message}
+        </p>
+      ) : events.length === 0 && historyQuery.data ? (
+        <p
+          data-testid="settings-recent-notifications-empty"
+          className="text-muted-foreground text-xs"
+        >
+          {t("No notifications yet")}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {events.map((event) => (
+            <li
+              key={event.id}
+              data-testid="settings-recent-notification"
+              className="flex items-start justify-between gap-4"
+            >
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate text-foreground text-sm">{event.request.title}</span>
+                <span className="truncate text-muted-foreground text-xs">{event.request.body}</span>
+              </div>
+              <time
+                dateTime={new Date(event.at).toISOString()}
+                className="shrink-0 text-muted-foreground text-xs"
+              >
+                {new Date(event.at).toLocaleString()}
+              </time>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

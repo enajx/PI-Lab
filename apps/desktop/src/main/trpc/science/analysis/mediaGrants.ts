@@ -7,6 +7,9 @@ import { Readable } from "node:stream"
 /** URL scheme of Analysis video and gif previews (registered in `reportScheme.ts`). */
 export const MEDIA_SCHEME = "pi-lab-media"
 
+/** URL scheme of interactive HTML reports (registered in `reportScheme.ts`). */
+export const REPORT_SCHEME = "pi-lab-report"
+
 /**
  * Content types by extension. Chromium plays H.264 `.mov` files when they are
  * served as MP4, and Matroska as WebM; it cannot play AVI, which then shows the
@@ -84,7 +87,7 @@ export class MediaGrants {
  * Parse a single `bytes=a-b`, `bytes=a-` or `bytes=-n` range. Null when there
  * is no header (the whole file); "invalid" when it cannot be served.
  */
-function parseRange(
+export function parseRange(
   header: string | null,
   size: number,
 ): { start: number; end: number } | null | "invalid" {

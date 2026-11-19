@@ -63,6 +63,30 @@ describe("leftoverE2eProcesses", () => {
     ).toEqual([20])
   })
 
+  it("matches a leaked test server (source and packaged builds) when no other run is live", () => {
+    const packaged = `${repo}/apps/desktop/release/alpha/builds/1/mac-arm64/PI Lab Alpha.app/Contents/MacOS/PI Lab Alpha`
+    expect(
+      pids([
+        {
+          pid: 21,
+          ppid: 1,
+          command: `${electron} ${repo}/apps/desktop/out/main/server.js ${tmp}/pi-lab-e2e-quit-a1`,
+        },
+        {
+          pid: 22,
+          ppid: 1,
+          command: `${packaged} ${packaged.replace("MacOS/PI Lab Alpha", "Resources/app.asar")}/out/main/server.js ${tmp}/pi-lab-pkg-smoke-b2/data`,
+        },
+        // The user's own Alpha server names no test temp dir.
+        {
+          pid: 23,
+          ppid: 1,
+          command: `${packaged} ${packaged.replace("MacOS/PI Lab Alpha", "Resources/app.asar")}/out/main/server.js /Users/me/.pi-lab-alpha`,
+        },
+      ]),
+    ).toEqual([21, 22])
+  })
+
   it("does not stop a live run's app, helpers, or daemon", () => {
     expect(
       pids([

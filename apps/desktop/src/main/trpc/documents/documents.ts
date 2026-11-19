@@ -250,15 +250,27 @@ export const documentsRouter = router({
    * browser): only an .html file inside a `_render` folder (where renders write).
    */
   openInBrowser: publicProcedure.input(fileInput).mutation(async ({ ctx, input }) => {
-    const { folder, abs } = await realFileInProject(ctx.db, input.projectId, input.relPath)
-    const parts = relative(folder, abs).split(sep)
-    if (!abs.toLowerCase().endsWith(".html") || !parts.slice(0, -1).includes(RENDER_FOLDER)) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `Only rendered .html pages in a ${RENDER_FOLDER} folder can be opened: ${input.relPath}`,
-      })
-    }
-    const error = await ctx.openPath(abs)
+    const error = await ctx.openPath(await renderedPageTarget(ctx, input))
     if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error })
   }),
+  /** The checked page {@link openInBrowser} opens (the desktop app opens it). */
+  openInBrowserTarget: publicProcedure
+    .input(fileInput)
+    .query(({ ctx, input }): Promise<string> => renderedPageTarget(ctx, input)),
 })
+
+/** A rendered .html page inside a render folder of the project, or a BAD_REQUEST. */
+async function renderedPageTarget(
+  ctx: AppContext,
+  input: z.infer<typeof fileInput>,
+): Promise<string> {
+  const { folder, abs } = await realFileInProject(ctx.db, input.projectId, input.relPath)
+  const parts = relative(folder, abs).split(sep)
+  if (!abs.toLowerCase().endsWith(".html") || !parts.slice(0, -1).includes(RENDER_FOLDER)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Only rendered .html pages in a ${RENDER_FOLDER} folder can be opened: ${input.relPath}`,
+    })
+  }
+  return abs
+}

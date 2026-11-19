@@ -843,6 +843,26 @@ test("marimo starts interactively, stops on artifact switch, and is reaped on ap
   await expect.poll(() => pidIsAlive(finalPid)).toBe(false)
 })
 
+/** The marimo stand-in (test seam) runs as a real process; the server keeps running. */
+test("a marimo preview stops when its window reloads", async () => {
+  const window = await app.firstWindow()
+  await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByTestId("project-item")).toBeVisible({ timeout: 30_000 })
+  await window.locator('[data-testid="science-nav-item"][data-science-tab="analysis"]').click()
+  await openAnalysisExperiment(window, "reports")
+  await window
+    .locator('[data-testid="analysis-file"][data-rel-path="results/reports/live.py"]')
+    .click()
+  await expect(
+    window.frameLocator('[data-testid="analysis-preview-marimo"]').locator("#marimo-counter"),
+  ).toHaveText("0", { timeout: 30_000 })
+  await expect.poll(lifecycleLog).toMatch(/start:\d+/)
+  const pid = Number(/start:(\d+)/.exec(await lifecycleLog())?.[1])
+  expect(pidIsAlive(pid)).toBe(true)
+  await window.reload()
+  await expect.poll(() => pidIsAlive(pid), { timeout: 10_000 }).toBe(false)
+})
+
 /**
  * Fetch experiments runs the project's agent (Claude Code by default). A local fixture
  * executable stands in for it, so the test never starts the real Claude Code CLI,

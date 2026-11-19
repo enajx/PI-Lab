@@ -46,6 +46,11 @@ export interface NotificationServiceOptions {
 
 export type NotificationOutcome = "delivered" | "focused" | "muted" | "disabled"
 
+/** What notifying code needs: the server feed and the desktop service both implement it. */
+export interface NotificationSink {
+  notify(request: NotificationRequest): NotificationOutcome
+}
+
 /**
  * Main-process notification policy. Native banners are deliberately silent;
  * renderer sound playback gives every platform the selected bundled sound.

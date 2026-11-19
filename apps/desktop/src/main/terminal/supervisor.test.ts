@@ -297,3 +297,20 @@ describe("daemonPidsFromProcessList", () => {
     expect(daemonPidsFromProcessList(list, socket, 7)).toEqual([])
   })
 })
+
+describe("slow daemon start", () => {
+  test("a daemon child that is alive but slow to listen is waited for past 5 s", async () => {
+    // Listens after 6 s, as on a fully loaded machine.
+    const entry = join(socketDir, "slow-start-daemon.js")
+    await writeFile(
+      entry,
+      `setTimeout(() => require('node:net').createServer((s) => s.resume()).listen(process.argv[2]), 6_000)`,
+    )
+    supervisor = new TerminalSupervisor({
+      socketPath,
+      daemonEntry: entry,
+      reapDaemonOnDispose: true,
+    })
+    await expect(supervisor.ensureClient()).resolves.toBeTruthy()
+  }, 20_000)
+})
