@@ -3,12 +3,10 @@
   PI lab
 </h3>
 
-<p align="center">An open-source workspace for computational research.</p>
-
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform" height="16">
-    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release" height="16"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license" height="16"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey" alt="platform" height="18">
+    <a href="https://github.com/enajx/PI-Lab/releases"><img src="https://img.shields.io/github/v/release/enajx/PI-Lab?include_prereleases&label=release" alt="release" height="18"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/enajx/PI-Lab" alt="license" height="18"></a>
 </p>
 
 <p align="center">
@@ -22,22 +20,26 @@
   </picture>
 </p>
 
-PI lab is a workspace and editor for working with coding agents designed specifically for computational science and research. Design philosophy: open-source and no proprietary formats: everything that can be markdown, should be markdown.
+PI lab is a workspace and editor designed for computational science and research. Besides running agents in parallel, it provides Zotero integration, a LaTeX editor, and built-in data visualization. See below for the full feature list.
 
-## Features
+Design philosophy: open-source, no lock-in, and no proprietary formats. Everything that can be markdown, should be markdown. 
+
+##   Features
 
 - Project-centric dashboard.
+- Agents parallelization via git worktrees. 
+- Visualization tool supporting media and data formats natively.
+- Built-in LaTeX editor with Overleaf support.
+- Markdown editor.
 - Integrated Library with Zotero support.
 - Single agent and worktree support for parallel agents.
-- Built-in LaTeX editor with Overleaf support.
-- Analysis view to visualise experiments.
 - Skills and routines.
-- Dictation based on whisper.cpp running purely locally.
-- Markdown-based task tracking.
+- Local dictation using whisper.cpp
+- Markdown-based task tracking with GitHub issues integration.
 - Caffeinated mode.
 - Interface in [English](README.md), [Español](docs/readme-int/README.es.md), [Norsk](docs/readme-int/README.nb.md), [简体中文](docs/readme-int/README.zh-CN.md), [한국어](docs/readme-int/README.ko.md), [日本語](docs/readme-int/README.ja.md) and [العربية](docs/readme-int/README.ar.md).
 
-## Install
+## How to Install
 
 A. Download the latest `.dmg` from [releases](https://github.com/enajx/PI-Lab/releases).
 
