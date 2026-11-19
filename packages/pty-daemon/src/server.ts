@@ -249,6 +249,9 @@ export class DaemonServer {
       case "list":
         this.handleList(request, connection)
         break
+      case "screen-text":
+        this.handleScreenText(request, connection)
+        break
       case "shutdown":
         this.handleShutdown(request, connection)
         break
@@ -434,6 +437,23 @@ export class DaemonServer {
     }
     session.kill(request.signal)
     this.reply(connection, { kind: "kill-ok", cid: request.cid, sessionId: request.sessionId })
+  }
+
+  private handleScreenText(
+    request: Extract<ClientRequest, { kind: "screen-text" }>,
+    connection: Connection,
+  ): void {
+    const session = this.store.get(request.sessionId)
+    if (!session) {
+      this.fail(connection, request.cid, "unknown-session", `no session ${request.sessionId}`)
+      return
+    }
+    this.reply(connection, {
+      kind: "screen-text-ok",
+      cid: request.cid,
+      sessionId: request.sessionId,
+      ...session.screenText(),
+    })
   }
 
   private handleList(

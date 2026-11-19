@@ -309,6 +309,52 @@ describe("terminal router", () => {
     await caller.terminal.kill({ sessionId })
   })
 
+  /** Spawn a program that prints `output` and stays alive, and wait until its output ends in END. */
+  async function printAndWait(output: string, cols: number, rows: number): Promise<string> {
+    const { sessionId } = await caller.terminal.spawn({
+      command: NODE,
+      args: ["-e", `process.stdout.write(${JSON.stringify(output)}); setInterval(() => {}, 1000)`],
+      cols,
+      rows,
+    })
+    const { chunks } = await collect(sessionId)
+    await waitFor(() => chunks.join("").endsWith("END"))
+    return sessionId
+  }
+
+  test("screenText returns the visible screen as plain text, without colours or trailing spaces", async () => {
+    const sessionId = await printAndWait(
+      "\x1b[31mred\x1b[0m text   \r\n\x1b[4;3H\x1b[1;42mmoved\x1b[0m END",
+      40,
+      8,
+    )
+    expect(await caller.terminal.screenText({ sessionId })).toEqual({
+      text: "red text\n\n\n  moved END",
+      cols: 40,
+      rows: 8,
+    })
+    await caller.terminal.kill({ sessionId })
+  })
+
+  test("screenText leaves out the scroll back and shows an alternate screen app as it is", async () => {
+    const lines = Array.from({ length: 8 }, (_, index) => `line ${index + 1}\r\n`).join("")
+    const scrolled = await printAndWait(`${lines}END`, 20, 5)
+    expect((await caller.terminal.screenText({ sessionId: scrolled })).text).toBe(
+      "line 5\nline 6\nline 7\nline 8\nEND",
+    )
+    await caller.terminal.kill({ sessionId: scrolled })
+
+    const app = await printAndWait(
+      "shell prompt\r\n\x1b[?1049h\x1b[H\x1b[2J\x1b[7mtop bar\x1b[0m\x1b[3;5Hstatus END",
+      30,
+      6,
+    )
+    expect((await caller.terminal.screenText({ sessionId: app })).text).toBe(
+      "top bar\n\n    status END",
+    )
+    await caller.terminal.kill({ sessionId: app })
+  })
+
   test("resize updates the reported pty size", async () => {
     const { sessionId } = await caller.terminal.spawn({
       command: NODE,

@@ -372,6 +372,11 @@ class Session {
     }, ECHO_ACK_DELAY_MS).unref()
   }
 
+  /** The visible screen as plain text and the PTY size. */
+  screenText(): { text: string; cols: number; rows: number } {
+    return { text: this.screen.screenText(), cols: this.cols, rows: this.rows }
+  }
+
   resize(cols: number, rows: number): void {
     const changed = cols !== this.cols || rows !== this.rows
     this.cols = cols
@@ -426,6 +431,7 @@ export interface SessionHandle {
   write(data: string, key: KeyInput | null): void
   writeKey(data: string, key: KeyInput): KeyStatus
   writeMessage(text: string): void
+  screenText(): { text: string; cols: number; rows: number }
   resize(cols: number, rows: number): void
   kill(signal?: string): void
 }

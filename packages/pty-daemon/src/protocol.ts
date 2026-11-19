@@ -2,7 +2,7 @@
 // unsolicited events have none.
 
 /** Bump when a backward-incompatible change is made to the frame shapes. */
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 
 export interface SessionInfo {
   /** Daemon-assigned opaque identifier, stable for the session's lifetime. */
@@ -192,6 +192,13 @@ export interface ListRequest {
   cid: string
 }
 
+/** The session's visible screen as plain text (no scroll back, no escape codes). */
+export interface ScreenTextRequest {
+  kind: "screen-text"
+  cid: string
+  sessionId: string
+}
+
 /** Stop every session and job, close the socket, and end the daemon process. */
 export interface ShutdownRequest {
   kind: "shutdown"
@@ -207,6 +214,7 @@ export type ClientRequest =
   | ResizeRequest
   | KillRequest
   | ListRequest
+  | ScreenTextRequest
   | ShutdownRequest
 
 // ---------------------------------------------------------------------------
@@ -289,6 +297,16 @@ export interface ListReply {
   protocol: number
 }
 
+export interface ScreenTextReply {
+  kind: "screen-text-ok"
+  cid: string
+  sessionId: string
+  /** One line per visible row; trailing spaces and trailing empty lines removed. */
+  text: string
+  cols: number
+  rows: number
+}
+
 /** Sent before the daemon stops its sessions and closes. */
 export interface ShutdownReply {
   kind: "shutdown-ok"
@@ -315,6 +333,7 @@ export type DaemonReply =
   | ResizeReply
   | KillReply
   | ListReply
+  | ScreenTextReply
   | ShutdownReply
   | ErrorReply
 
@@ -596,6 +615,9 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
       return { kind: "kill", cid, sessionId: value.sessionId, signal: value.signal }
     case "list":
       return { kind: "list", cid }
+    case "screen-text":
+      if (typeof value.sessionId !== "string") return null
+      return { kind: "screen-text", cid, sessionId: value.sessionId }
     case "shutdown":
       return { kind: "shutdown", cid }
     default:
@@ -631,6 +653,7 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
     case "resize-ok":
     case "kill-ok":
     case "list-ok":
+    case "screen-text-ok":
     case "shutdown-ok":
     case "error":
       return typeof value.cid === "string" ? (value as unknown as DaemonReply) : null

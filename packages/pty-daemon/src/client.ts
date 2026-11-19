@@ -409,6 +409,16 @@ export class DaemonClient extends EventEmitter {
     }))
   }
 
+  /** The session's visible screen as plain text, and the PTY size. */
+  async screenText(sessionId: string): Promise<{ text: string; cols: number; rows: number }> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "screen-text-ok" }>>((cid) => ({
+      kind: "screen-text",
+      cid,
+      sessionId,
+    }))
+    return { text: reply.text, cols: reply.cols, rows: reply.rows }
+  }
+
   async list(): Promise<SessionInfo[]> {
     return (await this.listReply()).sessions
   }

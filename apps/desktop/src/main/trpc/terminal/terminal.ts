@@ -12,6 +12,7 @@ import type {
 import { type TrackedEnvelope, tracked } from "@trpc/server"
 import { observable } from "@trpc/server/observable"
 import { z } from "zod"
+import { screenTextSchema } from "../../../shared/clientApi"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 import type { FlowItem } from "./outputFlow"
@@ -479,6 +480,19 @@ export const terminalRouter = router({
     lastTypedAt.delete(input.sessionId)
     return { ok: true as const }
   }),
+
+  /**
+   * The session's visible screen as plain text (no scroll back, no escape
+   * codes), one line per row, read from the daemon's emulator; for a client
+   * with no terminal emulator of its own.
+   */
+  screenText: publicProcedure
+    .input(sessionIdInput)
+    .output(screenTextSchema)
+    .query(async ({ ctx, input }) => {
+      const client = await ctx.getDaemonClient()
+      return client.screenText(input.sessionId)
+    }),
 
   /** Live sessions known to the daemon. */
   list: publicProcedure.query(async ({ ctx }) => {

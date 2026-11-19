@@ -103,7 +103,13 @@ test("a client with the local token gets the hello and project data over loopbac
   const { client, close } = connect(token)
   const hello = await client.server.hello.query()
   expect(hello).toMatchObject({ protocol: 1, build: "test-build", version: "0.0.0-test" })
-  expect(hello.capabilities).toEqual(["devices", "launch-ids", "answer-request", "machines"])
+  expect(hello.capabilities).toEqual([
+    "devices",
+    "launch-ids",
+    "answer-request",
+    "machines",
+    "screen-text",
+  ])
   expect(await client.projects.list.query()).toEqual([])
   close()
 })
@@ -532,6 +538,67 @@ test("two devices answer the same request: the first is accepted, the other's te
   await daemon.kill(session.id)
   first.close()
   second.close()
+})
+
+test("with alerts muted, a waiting agent reaches a device that connects later with no banner, and its answer clears it everywhere", async () => {
+  const received = join(dataDir, "muted-answers.txt")
+  const daemon = await runtime.createAppContext().getDaemonClient()
+  const session = await daemon.spawn({
+    command: process.execPath,
+    args: [
+      "-e",
+      `process.stdout.write("Continue? [y/N] ");process.stdin.on("data",(d)=>require("node:fs").appendFileSync(${JSON.stringify(received)},d))`,
+    ],
+    env: { ...(process.env as Record<string, string>), ELECTRON_RUN_AS_NODE: "1" },
+  })
+  const desktop = connect(token)
+  await desktop.client.settings.updateNotifications.mutate({ muted: true })
+  const desktopMessages: unknown[] = []
+  await new Promise<void>((resolve) => {
+    desktop.client.server.onNotification.subscribe(undefined, {
+      onStarted: () => resolve(),
+      onData: (message) => desktopMessages.push(message),
+    })
+  })
+  runtime.notifications.notify({
+    eventType: "agentInput",
+    title: "Agent needs input",
+    body: "Continue?",
+    target: {
+      type: "agent",
+      projectId: "project",
+      workspaceId: "workspace",
+      sessionId: session.id,
+      agentId: "test-agent",
+      origin: "project",
+    },
+  })
+  await vi.waitFor(() =>
+    expect(desktopMessages).toEqual([expect.objectContaining({ type: "alert", banner: false })]),
+  )
+
+  // The phone connects after the agent started waiting.
+  const phone = connect(token)
+  const phoneMessages: Array<{ type: string; banner?: boolean; event?: { id: string } }> = []
+  phone.client.server.onNotification.subscribe(undefined, {
+    onData: (message) => phoneMessages.push(message),
+  })
+  await vi.waitFor(() => expect(phoneMessages).toHaveLength(1))
+  expect(phoneMessages[0]).toMatchObject({ type: "alert", banner: false })
+  const requestId = phoneMessages[0]?.event?.id
+  if (!requestId) throw new Error("no pending request")
+
+  expect(await phone.client.server.answerRequest.mutate({ requestId, text: "yes" })).toEqual({
+    status: "accepted",
+  })
+  await vi.waitFor(() => expect(desktopMessages).toContainEqual({ type: "cleared", id: requestId }))
+  await vi.waitFor(() => expect(phoneMessages).toContainEqual({ type: "cleared", id: requestId }))
+  await vi.waitFor(() => expect(readFileSync(received, "utf8")).toContain("yes"))
+
+  await desktop.client.settings.updateNotifications.mutate({ muted: false })
+  await daemon.kill(session.id)
+  desktop.close()
+  phone.close()
 })
 
 test("GET /identity proves the server holds the token without sending it, new for each nonce", async () => {

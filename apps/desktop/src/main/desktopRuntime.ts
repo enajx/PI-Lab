@@ -321,7 +321,7 @@ export class DesktopRuntime {
     })
     const alerts = client.server.onNotification.subscribe(undefined, {
       onData: (message) => {
-        if (message.type === "cleared") return
+        if (message.type === "cleared" || !message.banner) return
         if (this.alerted.has(message.event.id)) return
         this.alerted.add(message.event.id)
         this.alert(message.event.request, message.event.sound)

@@ -183,6 +183,26 @@ export class Emulator {
     return text
   }
 
+  /**
+   * The visible rows as plain text, one line per row, no scroll back and no
+   * escape codes. Trailing spaces on each line and trailing empty lines are
+   * removed.
+   */
+  screenText(): string {
+    const buffer = this.terminal.buffer.active
+    const lines: string[] = []
+    for (let row = 0; row < this.terminal.rows; row += 1) {
+      lines.push(
+        buffer
+          .getLine(buffer.baseY + row)
+          ?.translateToString(true)
+          .trimEnd() ?? "",
+      )
+    }
+    while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
+    return lines.join("\n")
+  }
+
   dispose(): void {
     this.terminal.dispose()
   }
@@ -283,6 +303,11 @@ export class ScreenState {
   firstRowContinuesHistory(): boolean {
     const normal = this.emulator.terminal.buffer.normal
     return normal.baseY > 0 && normal.getLine(normal.baseY)?.isWrapped === true
+  }
+
+  /** The visible screen at the safe offset as plain text: see {@link Emulator.screenText}. */
+  screenText(): string {
+    return this.emulator.screenText()
   }
 
   /** The current screen for a client that holds the same history: see {@link REFRESH_PREFIX}. */

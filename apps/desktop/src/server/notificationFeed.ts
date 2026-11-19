@@ -14,6 +14,8 @@ import type {
  * go into the history and are alerted only when they happen. `request` events
  * (an agent needs the user's input) stay pending until the agent stops waiting
  * or exits, and are alerted again to a client that connects while pending.
+ * A request is recorded and sent even when alerts are muted or its event is
+ * off, so every device can show and answer it; then it is sent with no banner.
  */
 export interface NotificationEvent {
   id: string
@@ -23,9 +25,13 @@ export interface NotificationEvent {
   sound: NotificationSoundId
 }
 
-/** What a connected client receives on its notification stream. */
+/**
+ * What a connected client receives on its notification stream. `banner` is
+ * false when the user's preferences say not to show a banner or play a sound
+ * for this event; the client still lists a request so it can be answered.
+ */
 export type NotificationStreamMessage =
-  | { type: "alert"; event: NotificationEvent }
+  | { type: "alert"; event: NotificationEvent; banner: boolean }
   | { type: "cleared"; id: string }
 
 const HISTORY_FILE = "notification-history.jsonl"
@@ -38,7 +44,7 @@ const HISTORY_LIMIT = 500
  */
 export class NotificationFeed implements NotificationSink {
   readonly #listeners = new Set<(message: NotificationStreamMessage) => void>()
-  readonly #pending = new Map<string, NotificationEvent>()
+  readonly #pending = new Map<string, { event: NotificationEvent; banner: boolean }>()
   readonly #historyPath: string
   #sequence = 0
   #unsubscribe: (() => void) | null = null
@@ -59,7 +65,7 @@ export class NotificationFeed implements NotificationSink {
           .filter((session) => session.state === "waiting")
           .map((session) => session.sessionId),
       )
-      for (const [id, event] of this.#pending) {
+      for (const [id, { event }] of this.#pending) {
         const target = event.request.target
         if (target.type === "agent" && waiting.has(target.sessionId)) continue
         this.#pending.delete(id)
@@ -70,26 +76,29 @@ export class NotificationFeed implements NotificationSink {
 
   notify(request: NotificationRequest): NotificationOutcome {
     const preferences = this.getPreferences()
-    if (this.suppress || preferences.muted) return "muted"
     const setting = preferences[request.eventType]
-    if (!setting.enabled) return "disabled"
+    const outcome: NotificationOutcome =
+      this.suppress || preferences.muted ? "muted" : setting.enabled ? "delivered" : "disabled"
+    const banner = outcome === "delivered"
+    const kind = request.eventType === "agentInput" ? "request" : "info"
+    if (kind === "info" && !banner) return outcome
     this.#sequence += 1
     const event: NotificationEvent = {
       id: `${Date.now()}-${this.#sequence}`,
       at: Date.now(),
-      kind: request.eventType === "agentInput" ? "request" : "info",
+      kind,
       request,
       sound: setting.sound,
     }
-    if (event.kind === "request") this.#pending.set(event.id, event)
+    if (kind === "request") this.#pending.set(event.id, { event, banner })
     else this.#remember(event)
-    this.#publish({ type: "alert", event })
-    return "delivered"
+    this.#publish({ type: "alert", event, banner })
+    return outcome
   }
 
   /** A request while it is still pending, or null. */
   pending(id: string): NotificationEvent | null {
-    return this.#pending.get(id) ?? null
+    return this.#pending.get(id)?.event ?? null
   }
 
   /**
@@ -98,11 +107,11 @@ export class NotificationFeed implements NotificationSink {
    * withdrawn or its agent exited), so only the first answer gets it.
    */
   take(id: string): NotificationEvent | null {
-    const event = this.#pending.get(id)
-    if (!event) return null
+    const entry = this.#pending.get(id)
+    if (!entry) return null
     this.#pending.delete(id)
     this.#publish({ type: "cleared", id })
-    return event
+    return entry.event
   }
 
   /**
@@ -111,7 +120,9 @@ export class NotificationFeed implements NotificationSink {
    * the client was off are not re-sent; they are in {@link history}.
    */
   subscribe(listener: (message: NotificationStreamMessage) => void): () => void {
-    for (const event of this.#pending.values()) listener({ type: "alert", event })
+    for (const { event, banner } of this.#pending.values()) {
+      listener({ type: "alert", event, banner })
+    }
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
   }

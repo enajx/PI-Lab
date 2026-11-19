@@ -79,11 +79,28 @@ export const notificationEventSchema = z.strictObject({
   sound: notificationSoundSchema,
 })
 
-/** A message on a client's notification stream. */
+/**
+ * A message on a client's notification stream. An alert with `banner: false`
+ * is listed (a request can still be answered) but shows no banner or sound.
+ */
 export const notificationStreamMessageSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("alert"), event: notificationEventSchema }),
+  z.strictObject({
+    type: z.literal("alert"),
+    event: notificationEventSchema,
+    banner: z.boolean(),
+  }),
   z.strictObject({ type: z.literal("cleared"), id: z.string() }),
 ])
+
+/**
+ * A terminal's visible screen as plain text: one line per row, trailing
+ * spaces and trailing empty lines removed; `cols` and `rows` are the PTY size.
+ */
+export const screenTextSchema = z.strictObject({
+  text: z.string(),
+  cols: z.number().int(),
+  rows: z.number().int(),
+})
 
 // ---------------------------------------------------------------------------
 // Server
@@ -95,8 +112,16 @@ export const notificationStreamMessageSchema = z.discriminatedUnion("type", [
  * - `devices`: `server.devices.*` (device tokens and revoking them).
  * - `launch-ids`: agent starts accept a `launchId` and never run twice for one.
  * - `answer-request`: `server.answerRequest` (one answer per pending request).
+ * - `machines`: the hello names the machine (id, host name, platform, arch).
+ * - `screen-text`: `terminal.screenText` (a session's visible screen as plain text).
  */
-export const SERVER_CAPABILITIES = ["devices", "launch-ids", "answer-request", "machines"] as const
+export const SERVER_CAPABILITIES = [
+  "devices",
+  "launch-ids",
+  "answer-request",
+  "machines",
+  "screen-text",
+] as const
 
 /**
  * Sent only by a server installed by install.sh (the server bundle): it
