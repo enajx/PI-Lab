@@ -699,6 +699,13 @@ test("PUT /files/upload writes a file (folders made as needed), refuses to repla
   expect((await put("notes.txt", "new notes\n", "1")).status).toBe(204)
   expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("new notes\n")
   expect((await put("../escape.txt", "x", "1")).status).toBe(403)
+  // A symlink inside the workspace to a folder outside: the refused upload makes no folders there.
+  const { existsSync, symlinkSync } = await import("node:fs")
+  const outside = mkdtempSync(join(tmpdir(), "pi-lab-transfer-outside-"))
+  symlinkSync(outside, join(dir, "link"))
+  expect((await put("link/made/x.txt", "x", "1")).status).toBe(403)
+  expect(existsSync(join(outside, "made"))).toBe(false)
+  rmSync(outside, { recursive: true, force: true })
 })
 
 test("an interrupted upload leaves the old file intact; calls stay responsive during large transfers", async () => {

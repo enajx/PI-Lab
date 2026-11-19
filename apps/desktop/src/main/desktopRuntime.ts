@@ -401,9 +401,10 @@ export class DesktopRuntime {
   private installSchemeForwarding(): void {
     for (const scheme of [REPORT_SCHEME, MEDIA_SCHEME]) {
       session.defaultSession.protocol.handle(scheme, async (request) => {
-        await this.ready
         const url = new URL(request.url)
         const { token: grant, machineId } = splitGrantHost(url.host)
+        // Only this Mac's grants need the local server; with Local server Off `ready` rejects.
+        if (machineId === null) await this.ready
         const headers: Record<string, string> = {}
         const range = request.headers.get("range")
         if (range) headers.range = range

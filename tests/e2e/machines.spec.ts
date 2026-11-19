@@ -615,6 +615,11 @@ test("local server and default machine: New project is preset to the default mac
   test.setTimeout(240_000)
   const remoteRepo = join(rootDir, "remote-new")
   await gitRepo(remoteRepo, "new.md")
+  await mkdir(join(remoteRepo, "results", "run"), { recursive: true })
+  await writeFile(
+    join(remoteRepo, "results", "run", "report.html"),
+    '<!doctype html><p id="ready">Remote report</p>',
+  )
   let page = await launch({})
   if (!sshd) throw new Error("not started")
   await openMachinesSettings(page)
@@ -678,7 +683,28 @@ test("local server and default machine: New project is preset to the default mac
   await expect(page.getByTestId("add-project-machine").locator("option")).toHaveText(["Lab server"])
   await page.keyboard.press("Escape")
   await expect(page.getByTestId("default-agent-error")).toHaveCount(0)
+
+  // A report of the machine streams without a local server.
+  await page
+    .getByTestId("remote-project-card")
+    .filter({ hasText: "remote-new" })
+    .getByTestId("remote-project-analysis")
+    .click()
+  await openAnalysisExperiment(page, "run")
+  await page
+    .locator('[data-testid="analysis-file"][data-rel-path="results/run/report.html"]')
+    .click()
+  await expect(
+    page.frameLocator('[data-testid="analysis-preview-html"]').locator("#ready"),
+  ).toHaveText("Remote report", { timeout: 30_000 })
+
   await openMachinesSettings(page)
   await expect(page.getByTestId("settings-local-server")).toHaveValue("off")
   await expect(page.getByTestId("settings-section-devices")).toHaveCount(0)
+  // The last machine cannot be removed while the local server is off.
+  await page.getByTestId("settings-machine-remove").click()
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Turn the local server on" }),
+  ).toBeVisible()
+  expect((await storedMachines()).map((machine) => machine.machineId)).toEqual([machineId])
 })

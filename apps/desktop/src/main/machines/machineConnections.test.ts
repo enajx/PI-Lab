@@ -117,6 +117,11 @@ test("removing the default machine makes this Mac the default, or another machin
   await off.remove(lab.machineId)
   expect(off.deviceSettings().defaultMachine).toBe(gpu.machineId)
   expect(readMachineFile(profileDir).defaultMachine).toBe(gpu.machineId)
+
+  // The last machine cannot be removed while the local server is off.
+  await expect(off.remove(gpu.machineId)).rejects.toThrow("Turn the local server on")
+  expect(off.list().map((machine) => machine.machineId)).toEqual([gpu.machineId])
+  expect(readMachineFile(profileDir).defaultMachine).toBe(gpu.machineId)
 })
 
 test("multi-machine is off for a new device, can be turned on and off, and cannot be turned off while a machine is added", async () => {

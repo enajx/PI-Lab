@@ -154,11 +154,21 @@ async function uploadTarget(
   const workspace = requireWorkspace(ctx.db, input.workspaceId)
   const base = await realpath(workspaceWorkingDir(ctx.db, workspace))
   const target = resolveInsideDir(base, input.relPath)
+  // Check the nearest existing folder before making any, so a symlink to a
+  // folder outside the workspace cannot get folders made there.
+  let existing = dirname(target)
+  while (!(await lstat(existing).catch(() => null))) existing = dirname(existing)
+  requireInside(base, await realpath(existing))
   await mkdir(dirname(target), { recursive: true })
   const folder = await realpath(dirname(target))
+  requireInside(base, folder)
+  return join(folder, basename(target))
+}
+
+/** Throws FORBIDDEN unless `folder` (a real path) is `base` or inside it. */
+function requireInside(base: string, folder: string): void {
   const rel = relative(base, folder)
   if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Cannot upload outside the workspace" })
   }
-  return join(folder, basename(target))
 }

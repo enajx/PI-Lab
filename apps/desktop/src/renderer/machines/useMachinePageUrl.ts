@@ -3,6 +3,9 @@ import { loopbackPort, machineGrantUrl, withPort } from "../../shared/machineUrl
 import { desktopIpc } from "../trpc/client"
 import { useMachineScope } from "./machines"
 
+/** How often the forwarded local port is asked again. */
+const FORWARD_CHECK_MS = 5_000
+
 /**
  * The URL to show in this page for a URL the server gave: unchanged for this
  * Mac's server. Inside a remote {@link MachineScope}, a report or media grant
@@ -23,7 +26,9 @@ export function useMachinePageUrl(url: string | null): {
       return desktopIpc().desktop.machines.forwardPort.mutate({ machineId, port })
     },
     enabled: port !== null,
-    staleTime: Number.POSITIVE_INFINITY,
+    // The forward can come back on another local port after it reconnects
+    // (main/server/tunnel.ts); asking again moves the page to that port.
+    refetchInterval: FORWARD_CHECK_MS,
     retry: false,
   })
   if (machineId === null || url === null) return { url, error: null }

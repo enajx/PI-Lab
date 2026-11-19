@@ -409,9 +409,13 @@ export class MachineConnections {
   /**
    * Remove a machine: revoke this app's device on the remote when it can be
    * reached (after the identity check), close the tunnel, forget the token.
+   * The last machine is refused while the local server is off.
    */
   async remove(machineId: string): Promise<{ revoked: boolean }> {
     const live = this.#get(machineId)
+    if (this.#localServer === "off" && this.#machines.size === 1) {
+      throw new Error("Turn the local server on before removing the last machine")
+    }
     let revoked = false
     const tunnel = live.tunnel
     const { deviceId, token } = live.stored
