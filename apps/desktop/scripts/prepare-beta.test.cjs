@@ -29,6 +29,10 @@ function fixture() {
   writeFileSync(join(directory, `${stem}.dmg`), dmg)
   writeFileSync(join(directory, `${stem}.zip.blockmap`), "ZIP blockmap fixture")
   writeFileSync(join(directory, `${stem}.dmg.blockmap`), "not an updater asset")
+  const server = `pi-lab-server-${VERSION}-darwin-arm64.tar.gz`
+  writeFileSync(join(directory, server), "server bundle fixture")
+  writeFileSync(join(directory, `${server}.sha256`), `${"0".repeat(64)}  ${server}\n`)
+  writeFileSync(join(directory, "install.sh"), "#!/bin/sh\n")
   writeFileSync(
     join(directory, "beta-mac.yml"),
     `version: ${VERSION}\nfiles:\n  - url: ${stem}.zip\n    sha512: ${createHash("sha512").update(zip).digest("base64")}\n    size: ${zip.length}\n  - url: ${stem}.dmg\n    sha512: ${createHash("sha512").update(dmg).digest("base64")}\n    size: ${dmg.length}\n`,
@@ -42,7 +46,7 @@ function fixture() {
   }
 }
 
-test("a real candidate produces exactly four checked release assets and pinned source notes", () => {
+test("a real candidate produces exactly seven checked release assets and pinned source notes", () => {
   const input = fixture()
   try {
     createBetaManifest(input)
@@ -52,7 +56,15 @@ test("a real candidate produces exactly four checked release assets and pinned s
     assert.equal(manifest.previousTag, "v0.1.0-beta.3")
     assert.deepEqual(
       manifest.assets.map(({ name }) => name).sort(),
-      [`PI-Lab-arm64.dmg`, `PI-Lab-arm64.zip`, `PI-Lab-arm64.zip.blockmap`, "beta-mac.yml"].sort(),
+      [
+        `PI-Lab-arm64.dmg`,
+        `PI-Lab-arm64.zip`,
+        `PI-Lab-arm64.zip.blockmap`,
+        "beta-mac.yml",
+        `pi-lab-server-${VERSION}-darwin-arm64.tar.gz`,
+        `pi-lab-server-${VERSION}-darwin-arm64.tar.gz.sha256`,
+        "install.sh",
+      ].sort(),
     )
     assert.match(
       readFileSync(join(input.artifactDir, "release-notes.md"), "utf8"),
@@ -163,7 +175,7 @@ test("publish CLI runs from an isolated directory with Node built-ins only", () 
 })
 
 /** Mocked GitHub boundary; real artifacts and argument validation still run. */
-test("publishes only a draft prerelease at the exact source commit with the four checked assets", () => {
+test("publishes only a draft prerelease at the exact source commit with the seven checked assets", () => {
   const input = fixture()
   try {
     createBetaManifest(input)
@@ -188,7 +200,7 @@ test("publishes only a draft prerelease at the exact source commit with the four
     assert.equal(
       create.filter((arg) => arg.startsWith(input.artifactDir) && !arg.endsWith("release-notes.md"))
         .length,
-      4,
+      7,
     )
     assert.ok(!create.some((arg) => arg.endsWith(".dmg.blockmap")))
   } finally {

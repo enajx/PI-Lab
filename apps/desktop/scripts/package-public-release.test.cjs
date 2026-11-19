@@ -7,6 +7,7 @@ const { readMigrationFiles } = require("drizzle-orm/migrator")
 const { parseUpdateInfo } = require("electron-updater/out/providers/Provider")
 const {
   assertReadmeDownloadLinks,
+  copyServerBundleAssets,
   fanOutUpdateMetadata,
   publicReleaseDestination,
   writeCompatibilityMetadata,
@@ -19,6 +20,36 @@ test("public build destinations are isolated by channel and version", () => {
     publicReleaseDestination(root, "beta", "1.1.0-beta.1"),
     join(root, "beta", "1.1.0-beta.1"),
   )
+})
+
+test("a release carries the server bundle of its version, its SHA-256 and install.sh", () => {
+  const { createHash } = require("node:crypto")
+  const root = mkdtempSync(join(tmpdir(), "pi-lab-server-assets-"))
+  const server = join(root, "server")
+  const release = join(root, "release")
+  const tarball = "pi-lab-server-1.0.0-darwin-arm64.tar.gz"
+  const bytes = "server bundle fixture"
+  try {
+    mkdirSync(server)
+    mkdirSync(release)
+    writeFileSync(join(server, tarball), bytes)
+    writeFileSync(join(server, "install.sh"), "#!/bin/sh\n")
+    assert.throws(
+      () => copyServerBundleAssets(server, release, "1.0.0", "arm64"),
+      /tar\.gz\.sha256/,
+    )
+    writeFileSync(join(server, `${tarball}.sha256`), `${"0".repeat(64)}  ${tarball}\n`)
+    assert.throws(() => copyServerBundleAssets(server, release, "1.0.0", "arm64"), /SHA-256/)
+    const sum = createHash("sha256").update(bytes).digest("hex")
+    writeFileSync(join(server, `${tarball}.sha256`), `${sum}  ${tarball}\n`)
+    assert.throws(() => copyServerBundleAssets(server, release, "1.0.1", "arm64"), /missing/)
+    copyServerBundleAssets(server, release, "1.0.0", "arm64")
+    assert.equal(readFileSync(join(release, tarball), "utf8"), bytes)
+    assert.equal(readFileSync(join(release, `${tarball}.sha256`), "utf8"), `${sum}  ${tarball}\n`)
+    assert.equal(readFileSync(join(release, "install.sh"), "utf8"), "#!/bin/sh\n")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("a Stable release needs every README to link the latest DMG directly", () => {

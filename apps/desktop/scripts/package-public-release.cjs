@@ -1,5 +1,5 @@
 // @ts-check
-const { randomUUID } = require("node:crypto")
+const { createHash, randomUUID } = require("node:crypto")
 const {
   copyFileSync,
   lstatSync,
@@ -13,6 +13,7 @@ const {
 const { join } = require("node:path")
 const { readMigrationFiles } = require("drizzle-orm/migrator")
 const { acquireBuildLock, runBuildSteps } = require("./package-channel.cjs")
+const { RELEASE_DIR: SERVER_RELEASE_DIR } = require("./package-server-bundle.cjs")
 const {
   assertPublicReleaseCredentials,
   publicReleaseDefinition,
@@ -85,6 +86,30 @@ function fanOutUpdateMetadata(root, channel) {
   for (const target of targets) copyFileSync(source, join(root, `${target}-mac.yml`))
 }
 
+/**
+ * Copy the server bundle of `version` (built by electron-builder's beforePack,
+ * package-server-bundle.cjs), its `.sha256` and install.sh into the release
+ * folder: install.sh and the server's self-update download them from the
+ * GitHub release `v<version>`.
+ */
+function copyServerBundleAssets(serverDir, destination, version, arch) {
+  const tarball = `pi-lab-server-${version}-darwin-${arch}.tar.gz`
+  const names = [tarball, `${tarball}.sha256`, "install.sh"]
+  for (const name of names) {
+    if (!lstatSync(join(serverDir, name), { throwIfNoEntry: false })) {
+      throw new Error(`Server release file is missing: ${join(serverDir, name)}`)
+    }
+  }
+  const expected = readFileSync(join(serverDir, `${tarball}.sha256`), "utf8").split(/\s+/)[0]
+  const actual = createHash("sha256")
+    .update(readFileSync(join(serverDir, tarball)))
+    .digest("hex")
+  if (actual !== expected) {
+    throw new Error(`SHA-256 of ${tarball} is ${actual}, its .sha256 file says ${expected}`)
+  }
+  for (const name of names) copyFileSync(join(serverDir, name), join(destination, name))
+}
+
 /** Generate signed release artifacts and feed files locally, without uploading. */
 function packagePublicRelease(channel, version) {
   if (process.platform !== "darwin") throw new Error("Public releases currently support macOS only")
@@ -116,6 +141,7 @@ function packagePublicRelease(channel, version) {
     )
     writeCompatibilityMetadata(stage, release.updaterChannel)
     fanOutUpdateMetadata(stage, release.updaterChannel)
+    copyServerBundleAssets(SERVER_RELEASE_DIR, stage, release.version, process.arch)
     if (lstatSync(destination, { throwIfNoEntry: false })) {
       throw new Error(`Public release already exists: ${destination}`)
     }
@@ -142,6 +168,7 @@ if (require.main === module) {
 module.exports = {
   PUBLIC_RELEASE_PUBLISH_MODE,
   assertReadmeDownloadLinks,
+  copyServerBundleAssets,
   fanOutUpdateMetadata,
   packagePublicRelease,
   publicReleaseDestination,

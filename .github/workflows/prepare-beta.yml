@@ -235,6 +235,9 @@ jobs:
             source/apps/desktop/release/public/beta/${{ inputs.version }}/PI-Lab-*.dmg
             source/apps/desktop/release/public/beta/${{ inputs.version }}/PI-Lab-*.zip.blockmap
             source/apps/desktop/release/public/beta/${{ inputs.version }}/beta-mac.yml
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/pi-lab-server-*.tar.gz
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/pi-lab-server-*.tar.gz.sha256
+            source/apps/desktop/release/public/beta/${{ inputs.version }}/install.sh
             source/apps/desktop/release/public/beta/${{ inputs.version }}/prepare-beta.json
             source/apps/desktop/release/public/beta/${{ inputs.version }}/release-notes.md
 
